@@ -1,0 +1,26 @@
+# Secrets and credentials
+.env
+.env.*
+!.env.example
+secrets.yaml
+secrets*.yaml
+*.token
+*.pem
+*.key
+credentials/
+
+# Home Assistant and Node-RED runtime data
+.storage/
+node-red/
+node-red-data/
+flow-backups/
+*flow*.json
+*flows*.json
+
+# Local development files
+.DS_Store
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
