@@ -7,7 +7,8 @@ Last updated: 2026-07-13.
 - Repository: `shumkiiv/hausmanhub_hasc` (private, MIT, `main`).
 - Local checkout: `/home/ivsh/projects/hausmanhub_hasc`.
 - Home Assistant baseline: Core 2026.7.0 or newer.
-- HACS metadata and `custom_components/` are intentionally absent.
+- A private `custom_components/hausman_hub/` read-only skeleton is approved
+  and present. HACS metadata remains intentionally absent.
 - No runtime, device, Node-RED, Home Assistant service, or live API work has
   been performed.
 - Synthetic Common-contract fixtures, static validators, synthetic shadow
@@ -29,6 +30,10 @@ Last updated: 2026-07-13.
 - Kimi baseline/review-fix pass found no blocking safety or correctness issue
   in the static harness. The follow-up tightened mismatch validation, made
   negative tests assert their intended reason, and covered the CLI failure path.
+- Kimi reviewed the approved read-only skeleton. It identified no blocking
+  safety issue; a type-hint compatibility question was checked against the
+  official Home Assistant 2026.7.0 source and is compatible. See the detailed
+  [skeleton review note](LLM_WIKI/Manual/2026-07-13-kimi-read-only-skeleton-review.md).
 
 ## Verification
 
@@ -37,12 +42,14 @@ schema data; it does not prove shadow parity or grant any authority.
 
 ## Next decision gate
 
-Only after a separate approval decide whether to create a private read-only
-`custom_components/hausman_hub/` skeleton. HACS metadata, proxy, and direct
-execution remain out of scope.
+The read-only skeleton is limited to the two approved modes and local,
+synthetic verification. HACS metadata, proxy, and direct execution remain out
+of scope.
 
 The required explicit choice is documented in
 [the read-only skeleton decision record](docs/read-only-skeleton-decision.md).
+Its implementation boundary is documented in
+[the read-only skeleton guide](docs/read-only-skeleton.md).
 
 See [repository basics](docs/repository-basics.md) and
 [static validation](docs/static-validation.md),

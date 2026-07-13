@@ -116,9 +116,9 @@ class StaticContractValidationTest(unittest.TestCase):
         self.assertEqual(1, result.returncode)
         self.assertIn("forbidden execution or sensitive field", result.stderr)
 
-    def test_hacs_runtime_skeleton_is_still_absent(self) -> None:
+    def test_private_read_only_skeleton_exists_without_hacs_metadata(self) -> None:
         self.assertFalse((ROOT / "hacs.json").exists())
-        self.assertFalse((ROOT / "custom_components").exists())
+        self.assertTrue((ROOT / "custom_components" / "hausman_hub" / "manifest.json").is_file())
 
 
 if __name__ == "__main__":

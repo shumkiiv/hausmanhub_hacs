@@ -1,0 +1,44 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Безопасный режим HausMan Hub HASC",
+        "description": "Этот private-каркас только наблюдает конфигурацию и не управляет устройствами.",
+        "data": {
+          "mode": "Режим работы"
+        },
+        "data_description": {
+          "mode": "Выберите только чтение или shadow-сравнение."
+        }
+      }
+    },
+    "error": {
+      "unsafe_mode": "Разрешены только режимы чтения и shadow."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Безопасный режим HausMan Hub HASC",
+        "description": "Здесь меняется только безопасный режим наблюдения.",
+        "data": {
+          "mode": "Режим работы"
+        },
+        "data_description": {
+          "mode": "Выберите только чтение или shadow-сравнение."
+        }
+      }
+    },
+    "error": {
+      "unsafe_mode": "Разрешены только режимы чтения и shadow."
+    }
+  },
+  "selector": {
+    "mode": {
+      "options": {
+        "read-only": "Только чтение",
+        "shadow": "Shadow-проверка"
+      }
+    }
+  }
+}

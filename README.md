@@ -5,8 +5,9 @@ HausMan Hub.
 
 ## Current status
 
-This repository intentionally contains no Home Assistant runtime integration,
-`custom_components/`, or `hacs.json`.
+This repository contains a private, read-only Home Assistant skeleton under
+`custom_components/hausman_hub/`. It contains no device-control runtime,
+entity platform, service definition, or `hacs.json`.
 
 - Visibility: private.
 - License: MIT.
@@ -26,12 +27,12 @@ Proxy requires a separate owner approval and rollback notes. Direct execution
 is blocked until proven shadow parity, a separate canary/rollback/authority
 decision, and owner signoff.
 
-## Next safe work
+## Current safe scope
 
 1. Add synthetic read-only fixtures and a static Common-contract validator.
 2. Add a shadow-evidence model and redacted diagnostics contract.
-3. Separately decide whether a private read-only
-   `custom_components/hausman_hub/` skeleton is needed.
+3. Develop the private read-only skeleton only with synthetic data and local
+   validation.
 
 See [repository basics](docs/repository-basics.md) and
 [AI context](AI_CONTEXT.md) before changing the repository.
@@ -44,3 +45,6 @@ and its safety boundary.
 
 All future code follows the [engineering standards](docs/engineering-standards.md),
 including mandatory Kimi review before completion or push.
+
+See [the read-only skeleton](docs/read-only-skeleton.md) for its exact safety
+boundary.

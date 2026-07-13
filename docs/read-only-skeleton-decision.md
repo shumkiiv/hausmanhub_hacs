@@ -2,9 +2,9 @@
 
 ## Status
 
-Pending explicit owner approval. This document creates no integration code,
-`custom_components/`, manifest, config flow, HACS metadata, runtime access, or
-Home Assistant service call.
+Approved for option 2 on 2026-07-13: a private read-only skeleton may exist.
+The approval does not cover HACS metadata, runtime authority, Home Assistant
+service calls, proxy, or direct execution.
 
 ## Decision to make
 

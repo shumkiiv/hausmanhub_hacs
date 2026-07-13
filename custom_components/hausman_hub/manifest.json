@@ -1,0 +1,11 @@
+{
+  "domain": "hausman_hub",
+  "name": "HausMan Hub HASC",
+  "codeowners": ["@shumkiiv"],
+  "config_flow": true,
+  "documentation": "https://github.com/shumkiiv/hausmanhub_hasc",
+  "issue_tracker": "https://github.com/shumkiiv/hausmanhub_hasc/issues",
+  "integration_type": "hub",
+  "single_config_entry": true,
+  "version": "0.1.0"
+}
