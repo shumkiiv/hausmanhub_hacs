@@ -26,6 +26,9 @@ Last updated: 2026-07-13.
   command payloads, or deployment scripts.
 - Every future code change follows Clean Code and Clean Architecture and must
   receive Kimi review before it is considered complete or pushed.
+- Kimi baseline/review-fix pass found no blocking safety or correctness issue
+  in the static harness. The follow-up tightened mismatch validation, made
+  negative tests assert their intended reason, and covered the CLI failure path.
 
 ## Verification
 

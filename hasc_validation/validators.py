@@ -483,7 +483,11 @@ def validate_shadow_evidence(data: Any) -> list[str]:
         for key in ("required_scenarios", "freshness_window", "minimum_confidence", "mismatch_budget", "mandatory_zero_categories", "review_signoff"):
             _string(_required(thresholds, key, "$.acceptance_thresholds", errors), f"$.acceptance_thresholds.{key}", errors)
 
-    _list(_required(root, "unresolved_gaps", "$", errors), "$.unresolved_gaps", errors)
+    unresolved_gaps = _list(
+        _required(root, "unresolved_gaps", "$", errors), "$.unresolved_gaps", errors
+    ) or []
+    for index, gap in enumerate(unresolved_gaps):
+        _identifier(gap, f"$.unresolved_gaps[{index}]", errors)
     for index, raw in enumerate(_list(_required(root, "audit_summary", "$", errors), "$.audit_summary", errors) or []):
         path = f"$.audit_summary[{index}]"
         item = _mapping(raw, path, errors)
@@ -556,7 +560,19 @@ def validate_diagnostics_contract(data: Any) -> list[str]:
             _error(errors, "$.shadow_parity.status", "must remain unresolved")
         _string(_required(parity, "freshness", "$.shadow_parity", errors), "$.shadow_parity.freshness", errors)
         _string(_required(parity, "confidence", "$.shadow_parity", errors), "$.shadow_parity.confidence", errors)
-        _list(_required(parity, "mismatch_categories", "$.shadow_parity", errors), "$.shadow_parity.mismatch_categories", errors)
+        mismatch_categories = _list(
+            _required(parity, "mismatch_categories", "$.shadow_parity", errors),
+            "$.shadow_parity.mismatch_categories",
+            errors,
+        ) or []
+        for index, category in enumerate(mismatch_categories):
+            category = _string(category, f"$.shadow_parity.mismatch_categories[{index}]", errors)
+            if category not in MISMATCH_CATEGORIES:
+                _error(
+                    errors,
+                    f"$.shadow_parity.mismatch_categories[{index}]",
+                    "must use a documented mismatch category",
+                )
 
     redaction = _mapping(_required(root, "redaction_report", "$", errors), "$.redaction_report", errors)
     redaction_status = None
