@@ -44,6 +44,8 @@ Last updated: 2026-07-13.
 - Kimi reviewed the persisted-config exact-key boundary tests and confirmed the
   final version with no remaining findings. See the [persisted-config review
   note](LLM_WIKI/Manual/2026-07-13-kimi-persisted-config-boundary-review.md).
+- Kimi reviewed the diagnostics allow-list structure test with no findings. See
+  the [diagnostics review note](LLM_WIKI/Manual/2026-07-13-kimi-diagnostics-allow-list-review.md).
 
 ## Verification
 

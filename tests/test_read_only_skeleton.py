@@ -144,6 +144,33 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         for forbidden_value in ("token", "entity_id", "device_id", "command", "payload"):
             self.assertNotIn(forbidden_value, serialized)
 
+    def test_diagnostics_shape_is_a_fixed_allow_list(self) -> None:
+        """Guard the redacted export against accidental future data expansion."""
+
+        snapshot = diagnostics_snapshot(create_initial_entry("read-only"), {})
+
+        self.assertEqual(
+            {
+                "entry_summary",
+                "safety_model",
+                "shadow_parity",
+                "repairs_summary",
+                "redaction_report",
+            },
+            set(snapshot),
+        )
+        self.assertEqual({"mode", "single_config_entry"}, set(snapshot["entry_summary"]))
+        self.assertEqual(
+            {"device_authority", "direct_execution_status", "proxy_status"},
+            set(snapshot["safety_model"]),
+        )
+        self.assertEqual({"parity_status", "evidence_status"}, set(snapshot["shadow_parity"]))
+        self.assertEqual(
+            {"automatic_repairs", "manual_guidance_only"},
+            set(snapshot["repairs_summary"]),
+        )
+        self.assertEqual({"status", "strategy"}, set(snapshot["redaction_report"]))
+
     def test_manual_repair_guidance_never_performs_a_repair(self) -> None:
         guidance = manual_guidance_for("redaction_failure")
         self.assertEqual("critical", guidance.severity)
