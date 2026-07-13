@@ -1,0 +1,22 @@
+{
+  "inventory_version": "synthetic-v1",
+  "generated_from": "synthetic_fixture",
+  "rooms": [],
+  "devices": [],
+  "capabilities": [],
+  "safety_classes": [],
+  "contour_membership": [],
+  "action_descriptors": [],
+  "audit_events": [
+    {
+      "event_id": "event_gamma",
+      "occurred_at": "synthetic-time-bucket",
+      "actor": "system",
+      "contour_id": "climate",
+      "event_type": "invalid_execution_claim",
+      "subject_refs": [],
+      "result": "executed",
+      "reason": "This must never be treated as a physical result."
+    }
+  ]
+}

@@ -35,3 +35,9 @@ decision, and owner signoff.
 
 See [repository basics](docs/repository-basics.md) and
 [AI context](AI_CONTEXT.md) before changing the repository.
+
+## Local validation
+
+The repository uses standard-library Python checks over synthetic fixtures
+only. See [static validation](docs/static-validation.md) for the local command
+and its safety boundary.

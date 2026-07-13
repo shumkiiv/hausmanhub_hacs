@@ -1,0 +1,94 @@
+{
+  "inventory_version": "synthetic-v1",
+  "generated_from": "synthetic_fixture",
+  "rooms": [
+    {
+      "room_id": "room_beta",
+      "name": "Room Beta",
+      "ha_area_ref": "area_ref_beta",
+      "contour_membership": ["common", "automation", "smart_home_center", "ha_custom_integration"],
+      "inventory_notes": "Synthetic routing boundary room."
+    }
+  ],
+  "devices": [
+    {
+      "device_id": "device_beta",
+      "name": "Device Beta",
+      "room_id": "room_beta",
+      "ha_device_ref": "device_ref_beta",
+      "ha_entity_refs": ["entity_ref_beta"],
+      "capability_ids": ["capability_beta"],
+      "owner_contour_id": "automation",
+      "safety_class_id": "operator_intent"
+    }
+  ],
+  "capabilities": [
+    {
+      "capability_id": "capability_beta",
+      "kind": "state",
+      "value_shape": "enum",
+      "readable_by": ["automation", "smart_home_center", "ha_custom_integration"],
+      "owned_by": "automation"
+    }
+  ],
+  "safety_classes": [
+    {
+      "safety_class_id": "read_only",
+      "label": "Read only"
+    },
+    {
+      "safety_class_id": "operator_intent",
+      "label": "Operator intent"
+    },
+    {
+      "safety_class_id": "shadow_only",
+      "label": "Shadow only"
+    },
+    {
+      "safety_class_id": "direct_execution_blocked",
+      "label": "Direct execution blocked"
+    }
+  ],
+  "contour_membership": [
+    {
+      "subject_ref": "room:room_beta",
+      "contour_ids": ["common", "automation", "smart_home_center", "ha_custom_integration"]
+    },
+    {
+      "subject_ref": "device:device_beta",
+      "contour_ids": ["common", "automation"]
+    },
+    {
+      "subject_ref": "capability:capability_beta",
+      "contour_ids": ["automation", "smart_home_center", "ha_custom_integration"]
+    },
+    {
+      "subject_ref": "action_descriptor:review_beta",
+      "contour_ids": ["automation", "smart_home_center", "ha_custom_integration"]
+    }
+  ],
+  "action_descriptors": [
+    {
+      "action_descriptor_id": "review_beta",
+      "label": "Review synthetic automation state",
+      "owner_contour_id": "automation",
+      "target_refs": ["room:room_beta", "device:device_beta", "capability:capability_beta"],
+      "safety_class_id": "operator_intent",
+      "allowed_callers": ["smart_home_center", "ha_custom_integration"],
+      "requires_authority": true,
+      "notes": "Synthetic intent is routed to Automation for owner review."
+    }
+  ],
+  "audit_events": [
+    {
+      "event_id": "event_beta",
+      "occurred_at": "synthetic-time-bucket",
+      "actor": "smart_home_center",
+      "contour_id": "automation",
+      "event_type": "descriptor_routed",
+      "subject_refs": ["action_descriptor:review_beta", "room:room_beta"],
+      "result": "routed",
+      "reason": "Synthetic owner-routing fact only."
+    }
+  ]
+}

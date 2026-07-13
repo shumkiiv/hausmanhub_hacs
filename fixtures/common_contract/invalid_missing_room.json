@@ -1,0 +1,27 @@
+{
+  "inventory_version": "synthetic-v1",
+  "generated_from": "synthetic_fixture",
+  "rooms": [],
+  "devices": [
+    {
+      "device_id": "device_gamma",
+      "name": "Device Gamma",
+      "room_id": "room_missing",
+      "ha_device_ref": "device_ref_gamma",
+      "ha_entity_refs": [],
+      "capability_ids": [],
+      "owner_contour_id": "climate",
+      "safety_class_id": "read_only"
+    }
+  ],
+  "capabilities": [],
+  "safety_classes": [
+    {
+      "safety_class_id": "read_only",
+      "label": "Read only"
+    }
+  ],
+  "contour_membership": [],
+  "action_descriptors": [],
+  "audit_events": []
+}

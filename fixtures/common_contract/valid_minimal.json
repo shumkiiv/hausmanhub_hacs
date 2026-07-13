@@ -1,0 +1,56 @@
+{
+  "inventory_version": "synthetic-v1",
+  "generated_from": "synthetic_fixture",
+  "rooms": [
+    {
+      "room_id": "room_alpha",
+      "name": "Room Alpha",
+      "ha_area_ref": "area_ref_alpha",
+      "contour_membership": ["common", "climate", "ha_custom_integration"],
+      "inventory_notes": "Synthetic read-only room."
+    }
+  ],
+  "devices": [
+    {
+      "device_id": "device_alpha",
+      "name": "Device Alpha",
+      "room_id": "room_alpha",
+      "ha_device_ref": "device_ref_alpha",
+      "ha_entity_refs": ["entity_ref_alpha"],
+      "capability_ids": ["capability_alpha"],
+      "owner_contour_id": "climate",
+      "safety_class_id": "read_only"
+    }
+  ],
+  "capabilities": [
+    {
+      "capability_id": "capability_alpha",
+      "kind": "telemetry",
+      "value_shape": "number",
+      "readable_by": ["climate", "ha_custom_integration"],
+      "owned_by": "climate"
+    }
+  ],
+  "safety_classes": [
+    {
+      "safety_class_id": "read_only",
+      "label": "Read only"
+    }
+  ],
+  "contour_membership": [
+    {
+      "subject_ref": "room:room_alpha",
+      "contour_ids": ["common", "climate", "ha_custom_integration"]
+    },
+    {
+      "subject_ref": "device:device_alpha",
+      "contour_ids": ["common", "climate"]
+    },
+    {
+      "subject_ref": "capability:capability_alpha",
+      "contour_ids": ["climate", "ha_custom_integration"]
+    }
+  ],
+  "action_descriptors": [],
+  "audit_events": []
+}

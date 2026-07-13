@@ -1,0 +1,27 @@
+{
+  "contract_version": "synthetic-diagnostics-v1",
+  "mode": "shadow",
+  "direct_execution_status": "direct_execution_blocked",
+  "entry_summary": {
+    "integration_label": "hausman_hasc_synthetic",
+    "single_config_entry_status": "not_decided"
+  },
+  "selected_references": [],
+  "common_mapping": [],
+  "owner_contours": [],
+  "safety_model": {
+    "safety_classes": ["read_only", "direct_execution_blocked"],
+    "direct_execution_status": "direct_execution_blocked"
+  },
+  "shadow_parity": {
+    "status": "unresolved",
+    "freshness": "unassessed",
+    "confidence": "unassessed",
+    "mismatch_categories": []
+  },
+  "repairs_summary": [],
+  "redaction_report": {
+    "status": "blocked",
+    "removed_categories": ["sensitive_identifier"]
+  }
+}

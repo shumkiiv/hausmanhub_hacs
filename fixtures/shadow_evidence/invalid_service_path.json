@@ -1,0 +1,42 @@
+{
+  "evidence_version": "synthetic-shadow-v1",
+  "evidence_id": "evidence_gamma",
+  "mode": "shadow",
+  "direct_execution_status": "direct_execution_blocked",
+  "parity_status": "unresolved",
+  "snapshot": {
+    "snapshot_id": "snapshot_gamma",
+    "timestamp_bucket": "synthetic_time_bucket",
+    "source_label": "synthetic_fixture",
+    "service_path": "forbidden"
+  },
+  "references": [],
+  "owner_review": {
+    "status": "pending",
+    "scope": "synthetic_owner_review"
+  },
+  "comparisons": [],
+  "mismatches": [],
+  "freshness": {
+    "threshold": "TBD_BY_OWNER_CONTOUR",
+    "status": "unassessed"
+  },
+  "confidence": {
+    "minimum": "TBD_BY_OWNER_CONTOUR",
+    "status": "unassessed"
+  },
+  "redaction": {
+    "status": "redacted",
+    "removed_categories": []
+  },
+  "acceptance_thresholds": {
+    "required_scenarios": "TBD_BY_OWNER_CONTOUR",
+    "freshness_window": "TBD_BY_OWNER_CONTOUR",
+    "minimum_confidence": "TBD_BY_OWNER_CONTOUR",
+    "mismatch_budget": "TBD_BY_OWNER_CONTOUR",
+    "mandatory_zero_categories": "TBD_ZERO_OR_OWNER_ACCEPTED",
+    "review_signoff": "TBD_BY_DOMAIN"
+  },
+  "unresolved_gaps": [],
+  "audit_summary": []
+}

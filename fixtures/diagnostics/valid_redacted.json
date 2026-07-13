@@ -1,0 +1,56 @@
+{
+  "contract_version": "synthetic-diagnostics-v1",
+  "mode": "shadow",
+  "direct_execution_status": "direct_execution_blocked",
+  "entry_summary": {
+    "integration_label": "hausman_hasc_synthetic",
+    "single_config_entry_status": "not_decided"
+  },
+  "selected_references": [
+    {
+      "reference_label": "reference_alpha",
+      "kind": "entity",
+      "redaction_label": "stable_placeholder"
+    }
+  ],
+  "common_mapping": [
+    {
+      "reference_label": "reference_alpha",
+      "room_id": "room_alpha",
+      "device_id": "device_alpha",
+      "capability_id": "capability_alpha",
+      "descriptor_id": "review_alpha",
+      "status": "unresolved"
+    }
+  ],
+  "owner_contours": [
+    {
+      "descriptor_id": "review_alpha",
+      "owner_contour_id": "automation",
+      "status": "unresolved"
+    }
+  ],
+  "safety_model": {
+    "safety_classes": ["read_only", "shadow_only", "direct_execution_blocked"],
+    "direct_execution_status": "direct_execution_blocked"
+  },
+  "shadow_parity": {
+    "status": "unresolved",
+    "freshness": "unassessed",
+    "confidence": "unassessed",
+    "mismatch_categories": ["unresolved_gap"]
+  },
+  "repairs_summary": [
+    {
+      "issue_id": "issue_stale_alpha",
+      "category": "stale_parity",
+      "severity": "warning",
+      "status": "visible",
+      "manual_guidance_state": "available"
+    }
+  ],
+  "redaction_report": {
+    "status": "redacted",
+    "removed_categories": ["raw_identifier"]
+  }
+}

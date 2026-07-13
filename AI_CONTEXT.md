@@ -10,6 +10,9 @@ Last updated: 2026-07-13.
 - HACS metadata and `custom_components/` are intentionally absent.
 - No runtime, device, Node-RED, Home Assistant service, or live API work has
   been performed.
+- Synthetic Common-contract fixtures, static validators, synthetic shadow
+  evidence, and redacted diagnostics/repairs fixtures are present. They use
+  Python's standard library and local JSON only.
 
 ## Durable decisions
 
@@ -22,10 +25,19 @@ Last updated: 2026-07-13.
 - Do not commit secrets, live identifiers, flow snapshots, service paths,
   command payloads, or deployment scripts.
 
-## Next safe step
+## Verification
 
-On explicit request, create synthetic read-only fixtures and a static
-Common-contract validator. Run local read-only tests only.
+Run `python3 -m unittest discover -s tests -v`. This validates only synthetic
+schema data; it does not prove shadow parity or grant any authority.
+
+## Next decision gate
+
+Only after a separate approval decide whether to create a private read-only
+`custom_components/hausman_hub/` skeleton. HACS metadata, proxy, and direct
+execution remain out of scope.
 
 See [repository basics](docs/repository-basics.md) and
+[static validation](docs/static-validation.md),
+[shadow evidence](docs/shadow-evidence-contract.md),
+[diagnostics/repairs](docs/diagnostics-repairs-contract.md), and the
 [foundation handoff](LLM_WIKI/Manual/2026-07-13-hasc-repository-foundation.md).

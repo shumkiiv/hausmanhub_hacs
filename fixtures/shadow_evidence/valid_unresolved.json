@@ -1,0 +1,69 @@
+{
+  "evidence_version": "synthetic-shadow-v1",
+  "evidence_id": "evidence_alpha",
+  "mode": "shadow",
+  "direct_execution_status": "direct_execution_blocked",
+  "parity_status": "unresolved",
+  "snapshot": {
+    "snapshot_id": "snapshot_alpha",
+    "timestamp_bucket": "synthetic_time_bucket",
+    "source_label": "synthetic_fixture"
+  },
+  "references": [
+    {
+      "reference_label": "reference_alpha",
+      "room_id": "room_alpha",
+      "device_id": "device_alpha",
+      "capability_id": "capability_alpha",
+      "descriptor_id": "review_alpha"
+    }
+  ],
+  "owner_review": {
+    "status": "pending",
+    "scope": "synthetic_owner_review"
+  },
+  "comparisons": [
+    {
+      "descriptor_id": "review_alpha",
+      "owner_contour_id": "automation",
+      "safety_class_id": "shadow_only",
+      "owner_projection_summary": "Synthetic routing summary is available.",
+      "future_projection_summary": "Synthetic projection summary is available.",
+      "status": "unresolved"
+    }
+  ],
+  "mismatches": [
+    {
+      "category": "unresolved_gap",
+      "descriptor_id": "review_alpha",
+      "summary": "Owner review is pending."
+    }
+  ],
+  "freshness": {
+    "threshold": "TBD_BY_OWNER_CONTOUR",
+    "status": "unassessed"
+  },
+  "confidence": {
+    "minimum": "TBD_BY_OWNER_CONTOUR",
+    "status": "unassessed"
+  },
+  "redaction": {
+    "status": "redacted",
+    "removed_categories": ["live_identifier"]
+  },
+  "acceptance_thresholds": {
+    "required_scenarios": "TBD_BY_OWNER_CONTOUR",
+    "freshness_window": "TBD_BY_OWNER_CONTOUR",
+    "minimum_confidence": "TBD_BY_OWNER_CONTOUR",
+    "mismatch_budget": "TBD_BY_OWNER_CONTOUR",
+    "mandatory_zero_categories": "TBD_ZERO_OR_OWNER_ACCEPTED",
+    "review_signoff": "TBD_BY_DOMAIN"
+  },
+  "unresolved_gaps": ["owner_review_pending"],
+  "audit_summary": [
+    {
+      "event_kind": "comparison",
+      "result": "unresolved"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "inventory_version": "synthetic-v1",
+  "generated_from": "synthetic_fixture",
+  "rooms": [
+    {
+      "room_id": "room_alpha",
+      "name": "Room Alpha",
+      "contour_membership": ["unknown_contour"],
+      "inventory_notes": "Synthetic invalid contour."
+    }
+  ],
+  "devices": [],
+  "capabilities": [],
+  "safety_classes": [],
+  "contour_membership": [],
+  "action_descriptors": [],
+  "audit_events": []
+}

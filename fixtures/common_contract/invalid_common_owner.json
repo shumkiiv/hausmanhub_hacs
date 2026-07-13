@@ -1,0 +1,27 @@
+{
+  "inventory_version": "synthetic-v1",
+  "generated_from": "synthetic_fixture",
+  "rooms": [],
+  "devices": [],
+  "capabilities": [],
+  "safety_classes": [
+    {
+      "safety_class_id": "operator_intent",
+      "label": "Operator intent"
+    }
+  ],
+  "contour_membership": [],
+  "action_descriptors": [
+    {
+      "action_descriptor_id": "review_delta",
+      "label": "Invalid Common decision owner",
+      "owner_contour_id": "common",
+      "target_refs": [],
+      "safety_class_id": "operator_intent",
+      "allowed_callers": ["smart_home_center"],
+      "requires_authority": true,
+      "notes": "Common cannot own domain decisions."
+    }
+  ],
+  "audit_events": []
+}
