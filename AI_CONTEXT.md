@@ -46,6 +46,8 @@ Last updated: 2026-07-13.
   note](LLM_WIKI/Manual/2026-07-13-kimi-persisted-config-boundary-review.md).
 - Kimi reviewed the diagnostics allow-list structure test with no findings. See
   the [diagnostics review note](LLM_WIKI/Manual/2026-07-13-kimi-diagnostics-allow-list-review.md).
+- Kimi reviewed the fixed manual-repair category contract with no findings. See
+  the [repairs review note](LLM_WIKI/Manual/2026-07-13-kimi-manual-repairs-contract-review.md).
 
 ## Verification
 

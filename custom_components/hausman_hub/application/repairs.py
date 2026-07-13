@@ -42,6 +42,8 @@ _GUIDANCE = {
     ),
 }
 
+MANUAL_REPAIR_CATEGORIES = frozenset(_GUIDANCE)
+
 
 def manual_guidance_for(category: str) -> ManualRepairGuidance:
     """Return a fixed explanation; unknown categories are never auto-repaired."""

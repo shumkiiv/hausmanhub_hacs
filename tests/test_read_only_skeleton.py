@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import fields
 import json
 from pathlib import Path
 import sys
@@ -20,7 +21,10 @@ from custom_components.hausman_hub.application.configuration import (  # noqa: E
     effective_configuration,
 )
 from custom_components.hausman_hub.application.diagnostics import diagnostics_snapshot  # noqa: E402
-from custom_components.hausman_hub.application.repairs import manual_guidance_for  # noqa: E402
+from custom_components.hausman_hub.application.repairs import (  # noqa: E402
+    MANUAL_REPAIR_CATEGORIES,
+    manual_guidance_for,
+)
 from custom_components.hausman_hub.domain.configuration import (  # noqa: E402
     DIRECT_EXECUTION_BLOCKED,
 )
@@ -177,6 +181,29 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         self.assertIn("вручную", guidance.message)
         with self.assertRaisesRegex(ValueError, "unknown manual repair category"):
             manual_guidance_for("automatic_fix")
+
+    def test_manual_repair_guidance_has_only_the_approved_fixed_shape(self) -> None:
+        """Keep every repair result as static human guidance, never an action."""
+
+        expected_severities = {
+            "missing_references": "warning",
+            "unsafe_mode": "error",
+            "unresolved_owner_contour": "error",
+            "stale_parity": "warning",
+            "redaction_failure": "critical",
+        }
+        self.assertEqual(set(expected_severities), MANUAL_REPAIR_CATEGORIES)
+        for category, severity in expected_severities.items():
+            with self.subTest(category=category):
+                guidance = manual_guidance_for(category)
+                self.assertEqual(category, guidance.category)
+                self.assertEqual(severity, guidance.severity)
+                self.assertIsInstance(guidance.message, str)
+                self.assertTrue(guidance.message)
+                self.assertEqual(
+                    {"category", "severity", "message"},
+                    {field.name for field in fields(guidance)},
+                )
 
     def test_outer_adapter_contains_no_runtime_execution_surface(self) -> None:
         forbidden_fragments = (
