@@ -76,6 +76,50 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         with self.assertRaises(ConfigurationViolation):
             effective_configuration(create_initial_entry("read-only"), {"token": "blocked"})
 
+    def test_persisted_configuration_rejects_representative_extra_top_level_fields(
+        self,
+    ) -> None:
+        """Reject representative unmodelled top-level fields, regardless of value."""
+
+        unexpected_entry_fields = {
+            "service_path": "outside_contract",
+            "entity_reference": "outside_contract",
+            "command_payload": {"synthetic": "outside_contract"},
+            "token": "outside_contract",
+            "unmodelled": {"nested": "value"},
+        }
+        unexpected_option_fields = {
+            "service_path": "outside_contract",
+            "entity_reference": "outside_contract",
+            "command_payload": {"synthetic": "outside_contract"},
+            DIRECT_EXECUTION_STATUS_FIELD: DIRECT_EXECUTION_BLOCKED,
+            "unmodelled": {"nested": "value"},
+        }
+
+        for field, value in unexpected_entry_fields.items():
+            with self.subTest(container="entry_data", field=field):
+                entry_data = create_initial_entry("read-only")
+                entry_data[field] = value
+                with self.assertRaises(ConfigurationViolation):
+                    effective_configuration(entry_data, {})
+
+        for field, value in unexpected_option_fields.items():
+            with self.subTest(container="options", field=field):
+                with self.assertRaises(ConfigurationViolation):
+                    effective_configuration(
+                        create_initial_entry("read-only"),
+                        {field: value},
+                    )
+
+        with self.assertRaises(ConfigurationViolation):
+            effective_configuration(
+                create_initial_entry("read-only"),
+                {
+                    "entity_reference": "outside_contract",
+                    DIRECT_EXECUTION_STATUS_FIELD: DIRECT_EXECUTION_BLOCKED,
+                },
+            )
+
     def test_setup_refuses_an_entry_outside_the_safe_contract(self) -> None:
         safe_entry = FakeEntry(create_initial_entry("shadow"), {})
         self.assertTrue(asyncio.run(async_setup_entry(None, safe_entry)))

@@ -41,6 +41,9 @@ Last updated: 2026-07-13.
 - Kimi reviewed the isolated real-Core smoke check, then confirmed its
   remediations with no remaining findings. See the [Core smoke-check review
   note](LLM_WIKI/Manual/2026-07-13-kimi-home-assistant-core-smoke-check-review.md).
+- Kimi reviewed the persisted-config exact-key boundary tests and confirmed the
+  final version with no remaining findings. See the [persisted-config review
+  note](LLM_WIKI/Manual/2026-07-13-kimi-persisted-config-boundary-review.md).
 
 ## Verification
 
