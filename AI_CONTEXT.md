@@ -41,6 +41,9 @@ Only after a separate approval decide whether to create a private read-only
 `custom_components/hausman_hub/` skeleton. HACS metadata, proxy, and direct
 execution remain out of scope.
 
+The required explicit choice is documented in
+[the read-only skeleton decision record](docs/read-only-skeleton-decision.md).
+
 See [repository basics](docs/repository-basics.md) and
 [static validation](docs/static-validation.md),
 [shadow evidence](docs/shadow-evidence-contract.md),
