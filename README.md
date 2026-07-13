@@ -41,3 +41,6 @@ See [repository basics](docs/repository-basics.md) and
 The repository uses standard-library Python checks over synthetic fixtures
 only. See [static validation](docs/static-validation.md) for the local command
 and its safety boundary.
+
+All future code follows the [engineering standards](docs/engineering-standards.md),
+including mandatory Kimi review before completion or push.

@@ -24,6 +24,8 @@ Last updated: 2026-07-13.
   canary/rollback/authority decision, and owner signoff.
 - Do not commit secrets, live identifiers, flow snapshots, service paths,
   command payloads, or deployment scripts.
+- Every future code change follows Clean Code and Clean Architecture and must
+  receive Kimi review before it is considered complete or pushed.
 
 ## Verification
 
@@ -41,3 +43,5 @@ See [repository basics](docs/repository-basics.md) and
 [shadow evidence](docs/shadow-evidence-contract.md),
 [diagnostics/repairs](docs/diagnostics-repairs-contract.md), and the
 [foundation handoff](LLM_WIKI/Manual/2026-07-13-hasc-repository-foundation.md).
+Engineering and review rules are in
+[engineering standards](docs/engineering-standards.md).

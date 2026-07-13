@@ -48,3 +48,11 @@ read-only contract tests, config/options flow, diagnostics and repairs, shadow
 parity, and direct-execution authority guardrails.
 
 Do not copy runtime configuration or sensitive examples from that repository.
+
+## Engineering quality gate
+
+All future code follows Clean Code and Clean Architecture: dependencies point
+inward to framework-independent domain contracts, and external adapters do not
+own domain policy. Every code change requires Kimi review before completion or
+push; review findings must be addressed or explicitly documented. This quality
+gate does not relax any runtime, authority, or execution boundary.
