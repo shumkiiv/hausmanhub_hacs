@@ -22,12 +22,17 @@ from custom_components.hausman_hub.application.configuration import (  # noqa: E
     effective_configuration,
 )
 from custom_components.hausman_hub.application.diagnostics import diagnostics_snapshot  # noqa: E402
+from custom_components.hausman_hub.application.observation import create_home_summary  # noqa: E402
 from custom_components.hausman_hub.application.repairs import (  # noqa: E402
     MANUAL_REPAIR_CATEGORIES,
     manual_guidance_for,
 )
 from custom_components.hausman_hub.domain.configuration import (  # noqa: E402
     DIRECT_EXECUTION_BLOCKED,
+)
+from custom_components.hausman_hub.domain.observation import (  # noqa: E402
+    HomeSummary,
+    RegisteredEntity,
 )
 
 
@@ -46,7 +51,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         self.assertEqual("hausman_hub", manifest["domain"])
         self.assertTrue(manifest["config_flow"])
         self.assertTrue(manifest["single_config_entry"])
-        self.assertEqual("0.1.0", manifest["version"])
+        self.assertEqual("0.1.1", manifest["version"])
 
     def test_brand_icon_is_a_square_transparent_png(self) -> None:
         """Keep the local Home Assistant brand image present and usable."""
@@ -150,7 +155,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
 
     def test_diagnostics_are_allow_listed_and_do_not_copy_sensitive_data(self) -> None:
         data = create_initial_entry("shadow")
-        snapshot = diagnostics_snapshot(data, {})
+        snapshot = diagnostics_snapshot(data, {}, self.home_summary())
         serialized = json.dumps(snapshot, ensure_ascii=False).lower()
 
         self.assertEqual("shadow", snapshot["entry_summary"]["mode"])
@@ -162,7 +167,11 @@ class ReadOnlySkeletonTest(unittest.TestCase):
     def test_diagnostics_shape_is_a_fixed_allow_list(self) -> None:
         """Guard the redacted export against accidental future data expansion."""
 
-        snapshot = diagnostics_snapshot(create_initial_entry("read-only"), {})
+        snapshot = diagnostics_snapshot(
+            create_initial_entry("read-only"),
+            {},
+            self.home_summary(),
+        )
 
         self.assertEqual(
             {
@@ -170,6 +179,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
                 "safety_model",
                 "shadow_parity",
                 "repairs_summary",
+                "home_summary",
                 "redaction_report",
             },
             set(snapshot),
@@ -184,7 +194,86 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             {"automatic_repairs", "manual_guidance_only"},
             set(snapshot["repairs_summary"]),
         )
+        self.assertEqual(
+            {
+                "areas_count",
+                "devices_count",
+                "entities_count",
+                "sensors_count",
+                "available_entities_count",
+                "unavailable_entities_count",
+                "unknown_entities_count",
+                "not_reported_entities_count",
+            },
+            set(snapshot["home_summary"]),
+        )
         self.assertEqual({"status", "strategy"}, set(snapshot["redaction_report"]))
+
+    def test_home_summary_contains_totals_but_no_names_or_identifiers(self) -> None:
+        """The application layer must receive and export counts only."""
+
+        summary = create_home_summary(
+            areas_count=2,
+            devices_count=3,
+            entities=(
+                RegisteredEntity(domain="sensor", availability="available"),
+                RegisteredEntity(domain="switch", availability="unavailable"),
+                RegisteredEntity(domain="sensor", availability="unknown"),
+                RegisteredEntity(domain="light", availability="not_reported"),
+            ),
+        )
+        snapshot = diagnostics_snapshot(create_initial_entry("read-only"), {}, summary)
+        serialized = json.dumps(snapshot, ensure_ascii=False)
+
+        self.assertEqual(2, snapshot["home_summary"]["areas_count"])
+        self.assertEqual(3, snapshot["home_summary"]["devices_count"])
+        self.assertEqual(4, snapshot["home_summary"]["entities_count"])
+        self.assertEqual(2, snapshot["home_summary"]["sensors_count"])
+        self.assertEqual(1, snapshot["home_summary"]["available_entities_count"])
+        self.assertEqual(1, snapshot["home_summary"]["unavailable_entities_count"])
+        self.assertEqual(1, snapshot["home_summary"]["unknown_entities_count"])
+        self.assertEqual(1, snapshot["home_summary"]["not_reported_entities_count"])
+        for forbidden_value in ("living_room", "sensor.temperature", "192.168.1.20", "21.5"):
+            self.assertNotIn(forbidden_value, serialized)
+
+    def test_home_summary_rejects_impossible_totals(self) -> None:
+        """Bad aggregate data cannot reach diagnostics silently."""
+
+        with self.assertRaisesRegex(ValueError, "sensor count"):
+            HomeSummary(
+                areas_count=0,
+                devices_count=0,
+                entities_count=1,
+                sensors_count=2,
+                available_entities_count=1,
+                unavailable_entities_count=0,
+                unknown_entities_count=0,
+                not_reported_entities_count=0,
+            )
+        with self.assertRaisesRegex(ValueError, "availability counts"):
+            HomeSummary(
+                areas_count=0,
+                devices_count=0,
+                entities_count=1,
+                sensors_count=1,
+                available_entities_count=0,
+                unavailable_entities_count=0,
+                unknown_entities_count=0,
+                not_reported_entities_count=0,
+            )
+        with self.assertRaisesRegex(ValueError, "non-negative integers"):
+            HomeSummary(
+                areas_count=True,
+                devices_count=0,
+                entities_count=0,
+                sensors_count=0,
+                available_entities_count=0,
+                unavailable_entities_count=0,
+                unknown_entities_count=0,
+                not_reported_entities_count=0,
+            )
+        with self.assertRaisesRegex(ValueError, "approved category"):
+            RegisteredEntity(domain="sensor", availability="unexpected")  # type: ignore[arg-type]
 
     def test_manual_repair_guidance_never_performs_a_repair(self) -> None:
         guidance = manual_guidance_for("redaction_failure")
@@ -220,9 +309,14 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         forbidden_fragments = (
             "hass.services",
             "async_call(",
+            "async_set(",
+            "async_fire(",
             "async_create_issue",
             "services.yaml",
             "node-red",
+            "aiohttp",
+            "requests",
+            "websocket",
         )
         source = "\n".join(
             path.read_text(encoding="utf-8").lower()
@@ -288,6 +382,21 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         self.assertIn("without home control", english["options"]["step"]["init"]["description"])
         self.assertIn("не меняет", russian["config"]["step"]["user"]["description"])
         self.assertIn("без управления домом", russian["options"]["step"]["init"]["description"])
+
+    @staticmethod
+    def home_summary() -> HomeSummary:
+        """Return one synthetic aggregate used by diagnostics-only tests."""
+
+        return HomeSummary(
+            areas_count=0,
+            devices_count=0,
+            entities_count=0,
+            sensors_count=0,
+            available_entities_count=0,
+            unavailable_entities_count=0,
+            unknown_entities_count=0,
+            not_reported_entities_count=0,
+        )
 
 
 if __name__ == "__main__":

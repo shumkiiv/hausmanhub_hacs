@@ -126,6 +126,15 @@ def _identifier(value: Any, path: str, errors: list[str]) -> str | None:
     return value
 
 
+def _non_negative_integer(value: Any, path: str, errors: list[str]) -> int | None:
+    """Require a count that cannot be confused with a boolean flag."""
+
+    if type(value) is not int or value < 0:
+        _error(errors, path, "must be a non-negative integer")
+        return None
+    return value
+
+
 def _known_contour(value: Any, path: str, errors: list[str]) -> str | None:
     value = _identifier(value, path, errors)
     if value is not None and value not in CONTOUR_IDS:
@@ -520,6 +529,40 @@ def validate_diagnostics_contract(data: Any) -> list[str]:
     if entry is not None:
         _string(_required(entry, "integration_label", "$.entry_summary", errors), "$.entry_summary.integration_label", errors)
         _string(_required(entry, "single_config_entry_status", "$.entry_summary", errors), "$.entry_summary.single_config_entry_status", errors)
+
+    home_summary = _mapping(_required(root, "home_summary", "$", errors), "$.home_summary", errors)
+    if home_summary is not None:
+        expected_keys = {
+            "areas_count",
+            "devices_count",
+            "entities_count",
+            "sensors_count",
+            "available_entities_count",
+            "unavailable_entities_count",
+            "unknown_entities_count",
+            "not_reported_entities_count",
+        }
+        if set(home_summary) != expected_keys:
+            _error(errors, "$.home_summary", "must contain only the fixed aggregate count fields")
+        counts = {
+            key: _non_negative_integer(
+                _required(home_summary, key, "$.home_summary", errors),
+                f"$.home_summary.{key}",
+                errors,
+            )
+            for key in expected_keys
+        }
+        if all(value is not None for value in counts.values()):
+            if counts["sensors_count"] > counts["entities_count"]:
+                _error(errors, "$.home_summary.sensors_count", "must not exceed entity count")
+            if (
+                counts["available_entities_count"]
+                + counts["unavailable_entities_count"]
+                + counts["unknown_entities_count"]
+                + counts["not_reported_entities_count"]
+                != counts["entities_count"]
+            ):
+                _error(errors, "$.home_summary", "availability counts must equal entity count")
 
     for section in ("selected_references", "common_mapping", "owner_contours", "repairs_summary"):
         _list(_required(root, section, "$", errors), f"$.{section}", errors)

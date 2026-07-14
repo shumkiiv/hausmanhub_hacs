@@ -5,18 +5,22 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from ..domain.observation import HomeSummary
 from ..domain.configuration import DIRECT_EXECUTION_BLOCKED
 from .configuration import effective_configuration
 
 
 def diagnostics_snapshot(
-    entry_data: Mapping[str, Any], options: Mapping[str, Any]
+    entry_data: Mapping[str, Any],
+    options: Mapping[str, Any],
+    home_summary: HomeSummary,
 ) -> dict[str, object]:
-    """Return a redacted snapshot without copying entry data or options.
+    """Return a redacted snapshot without copying detailed home data.
 
-    The function derives every value from the validated two-field safety model.
-    This is stricter than removing known secret keys: arbitrary config data is
-    never included in the first place.
+    Safety values come from the validated two-field configuration model. The
+    only home data it accepts is a count-only domain object. This is stricter
+    than removing known sensitive keys: names, identifiers, readings, history,
+    and arbitrary config data never enter the export in the first place.
     """
 
     configuration = effective_configuration(entry_data, options)
@@ -38,8 +42,18 @@ def diagnostics_snapshot(
             "automatic_repairs": "disabled",
             "manual_guidance_only": True,
         },
+        "home_summary": {
+            "areas_count": home_summary.areas_count,
+            "devices_count": home_summary.devices_count,
+            "entities_count": home_summary.entities_count,
+            "sensors_count": home_summary.sensors_count,
+            "available_entities_count": home_summary.available_entities_count,
+            "unavailable_entities_count": home_summary.unavailable_entities_count,
+            "unknown_entities_count": home_summary.unknown_entities_count,
+            "not_reported_entities_count": home_summary.not_reported_entities_count,
+        },
         "redaction_report": {
             "status": "passed",
-            "strategy": "allow_list_only",
+            "strategy": "allow_list_only_with_aggregate_home_summary",
         },
     }

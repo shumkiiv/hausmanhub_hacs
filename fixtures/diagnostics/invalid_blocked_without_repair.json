@@ -2,10 +2,20 @@
   "contract_version": "synthetic-diagnostics-v1",
   "mode": "shadow",
   "direct_execution_status": "direct_execution_blocked",
-  "entry_summary": {
-    "integration_label": "hausman_hasc_synthetic",
-    "single_config_entry_status": "not_decided"
-  },
+    "entry_summary": {
+        "integration_label": "hausman_hasc_synthetic",
+        "single_config_entry_status": "not_decided"
+    },
+    "home_summary": {
+        "areas_count": 0,
+        "devices_count": 0,
+        "entities_count": 0,
+        "sensors_count": 0,
+        "available_entities_count": 0,
+        "unavailable_entities_count": 0,
+        "unknown_entities_count": 0,
+        "not_reported_entities_count": 0
+    },
   "selected_references": [],
   "common_mapping": [],
   "owner_contours": [],

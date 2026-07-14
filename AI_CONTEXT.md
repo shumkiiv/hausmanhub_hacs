@@ -13,9 +13,10 @@ Last updated: 2026-07-14.
 - The skeleton contains a local square `brand/icon.png`, so Home Assistant can
   show its original icon without relying on an external brand asset.
 - A Russian safe-check guide is available at
-  `docs/home-assistant-safe-check.md`. It guides only HACS refresh,
-  installation, and visual confirmation; it explicitly excludes diagnostics
-  archives, configuration files, home addresses, credentials, and device data.
+  `docs/home-assistant-safe-check.md`. It guides HACS refresh, installation,
+  visual confirmation, and the local aggregate diagnostic summary; it still
+  explicitly excludes sharing diagnostics archives, configuration files, home
+  addresses, credentials, names, identifiers, and device data.
 - The Home Assistant setup screen uses plain labels: `Только чтение` and
   `Проверка без изменений` in Russian, with matching English labels. Its text
   no longer describes this public repository as private, and a local test
@@ -29,6 +30,13 @@ Last updated: 2026-07-14.
 - Synthetic Common-contract fixtures, static validators, synthetic shadow
   evidence, and redacted diagnostics/repairs fixtures are present. They use
   Python's standard library and local JSON only.
+- Version 0.1.1 adds one explicitly approved local read-only observation:
+  `home_summary` in diagnostics. It contains exactly eight aggregate counts:
+  areas, devices, entities, sensors, and available/unavailable/unknown/not
+  reported entities. The adapter reads one local state at a time and reduces
+  it immediately to a category; it exports no name, identifier, reading,
+  history, address, secret, or raw state. It creates no entities or services
+  and does not call Home Assistant services.
 
 ## Durable decisions
 
@@ -47,6 +55,11 @@ Last updated: 2026-07-14.
   `hacs.json` and manual HACS custom-repository installation. It does not
   approve inclusion in the public HACS catalog, live testing, proxy, or direct
   execution.
+- The owner also explicitly approved local, read-only HASC access to home
+  data on 2026-07-14. That approval is limited to the v0.1.1 aggregate
+  `home_summary`; it does not grant remote assistant access, proxy, direct
+  execution, Common/Climate/Automation ownership, or permission to save live
+  home data in this repository.
 - The supported baseline was lowered to Core 2026.6.4 after the isolated
   lifecycle check passed on that exact version. See the [2026.6.4 compatibility
   note](LLM_WIKI/Manual/2026-07-14-core-2026-6-4-compatibility.md).
@@ -93,22 +106,28 @@ Last updated: 2026-07-14.
   the [diagnostics review note](LLM_WIKI/Manual/2026-07-13-kimi-diagnostics-allow-list-review.md).
 - Kimi reviewed the fixed manual-repair category contract with no findings. See
   the [repairs review note](LLM_WIKI/Manual/2026-07-13-kimi-manual-repairs-contract-review.md).
+- Kimi-backed review of the v0.1.1 aggregate home summary first found an
+  in-memory full-state map; that map was removed. The final independent review
+  found no blocking or non-blocking issues. See the [aggregate-summary review
+  note](LLM_WIKI/Manual/2026-07-14-kimi-read-only-home-summary-review.md).
 
 ## Verification
 
-Run `python3 -m unittest discover -s tests -v`. This validates only synthetic
-schema data and the in-memory config/options adapter boundary; it does not
-prove shadow parity, grant any authority, or load Home Assistant. Core 2026.6.4
-requires Python 3.14.2 or newer. The isolated Core lifecycle check is
-documented in `docs/read-only-skeleton.md`; it proves only that both safe
-modes can load, reload, and unload in an empty local Core without service or
-entity surfaces. It never proves shadow parity or grants authority.
+Run `python3 -m unittest discover -s tests -v`. The suite validates synthetic
+schema data, in-memory form/observation adapters, and strict count-only
+diagnostics boundaries; it does not prove shadow parity or grant authority.
+The isolated Core lifecycle check is documented in `docs/read-only-skeleton.md`;
+on 2026-07-14 it passed with the aggregate summary on Core 2026.6.4 and
+2026.7.0 using disposable configurations only. It proves neither live-home
+behaviour nor execution authority.
 
 ## Next decision gate
 
-The read-only skeleton is limited to the two approved modes and local,
-synthetic verification. Public HACS distribution, proxy, and direct execution
-remain out of scope.
+The read-only skeleton is limited to the two approved modes, local synthetic
+verification, and the narrowly approved aggregate diagnostics summary. The
+next safe live step is for the owner to update HASC through HACS and inspect
+the local `home_summary`; it must not be committed or sent whole to chat.
+Public HACS catalog listing, proxy, and direct execution remain out of scope.
 
 The public custom-HACS decision and its narrow implementation boundary are
 recorded in the [HACS packaging decision record](docs/hacs-packaging-decision.md).

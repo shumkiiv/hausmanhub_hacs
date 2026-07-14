@@ -180,12 +180,13 @@ async def async_assert_safe_diagnostics(
     entry: ConfigEntry,
     expected_mode: str,
 ) -> None:
-    """Load the installed diagnostics adapter and verify its fixed safe report."""
+    """Load diagnostics and verify its fixed safe shape with aggregate counts."""
 
     integration = await loader.async_get_integration(hass, domain)
     diagnostics_platform = await integration.async_get_platform("diagnostics")
     snapshot = await diagnostics_platform.async_get_config_entry_diagnostics(hass, entry)
 
+    home_summary = snapshot.pop("home_summary", None)
     assert_result(
         snapshot,
         {
@@ -208,11 +209,48 @@ async def async_assert_safe_diagnostics(
             },
             "redaction_report": {
                 "status": "passed",
-                "strategy": "allow_list_only",
+                "strategy": "allow_list_only_with_aggregate_home_summary",
             },
         },
         "diagnostics must contain only the fixed safe report",
     )
+    assert_safe_home_summary(home_summary)
+
+
+def assert_safe_home_summary(home_summary: Any) -> None:
+    """Validate the only permitted dynamic diagnostics section.
+
+    A blank Home Assistant still has its own built-in registry entries, so this
+    check proves the count-only contract rather than assuming every total is
+    zero. It does not create or modify any Home Assistant object.
+    """
+
+    if not isinstance(home_summary, dict):
+        raise RuntimeError("home summary must be a dictionary")
+
+    expected_keys = {
+        "areas_count",
+        "devices_count",
+        "entities_count",
+        "sensors_count",
+        "available_entities_count",
+        "unavailable_entities_count",
+        "unknown_entities_count",
+        "not_reported_entities_count",
+    }
+    assert_result(set(home_summary), expected_keys, "home summary keys must be fixed")
+    if any(type(value) is not int or value < 0 for value in home_summary.values()):
+        raise RuntimeError("home summary values must be non-negative integers")
+    if home_summary["sensors_count"] > home_summary["entities_count"]:
+        raise RuntimeError("home summary sensor count must not exceed entity count")
+    if (
+        home_summary["available_entities_count"]
+        + home_summary["unavailable_entities_count"]
+        + home_summary["unknown_entities_count"]
+        + home_summary["not_reported_entities_count"]
+        != home_summary["entities_count"]
+    ):
+        raise RuntimeError("home summary availability counts must equal entity count")
 
 
 def assert_entry_is_inert(hass: HomeAssistant, domain: str, entry_id: str) -> None:

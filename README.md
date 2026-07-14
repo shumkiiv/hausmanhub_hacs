@@ -30,10 +30,11 @@ decision, and owner signoff.
 
 ## Current safe scope
 
-1. Add synthetic read-only fixtures and a static Common-contract validator.
-2. Add a shadow-evidence model and redacted diagnostics contract.
-3. Develop the read-only skeleton only with synthetic data and local
-   validation.
+1. Keep synthetic Common-contract and shadow-evidence checks local.
+2. Keep diagnostics redacted and limited to an explicit allow-list.
+3. Provide an approved local-only home summary: aggregate counts for areas,
+   devices, entities, sensors, and availability. It contains no names,
+   identifiers, readings, history, addresses, or secrets.
 
 See [repository basics](docs/repository-basics.md) and
 [AI context](AI_CONTEXT.md) before changing the repository.
@@ -47,7 +48,8 @@ and its safety boundary.
 All future code follows the [engineering standards](docs/engineering-standards.md),
 including mandatory Kimi review before completion or push.
 
-See [the read-only skeleton](docs/read-only-skeleton.md) for its exact safety
+See [the read-only skeleton](docs/read-only-skeleton.md) and the Russian
+[safe home summary](docs/read-only-home-summary.md) for the exact safety
 boundary.
 
 ## Installation through HACS

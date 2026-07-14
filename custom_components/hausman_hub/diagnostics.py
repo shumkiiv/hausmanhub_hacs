@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .application.diagnostics import diagnostics_snapshot
+from .home_observation import collect_home_summary
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -12,8 +13,12 @@ if TYPE_CHECKING:
 
 
 async def async_get_config_entry_diagnostics(
-    _hass: HomeAssistant, entry: ConfigEntry
+    hass: HomeAssistant, entry: ConfigEntry
 ) -> dict[str, object]:
-    """Return safety facts only; no entry value is copied to the export."""
+    """Return safety facts and count-only local inventory information."""
 
-    return diagnostics_snapshot(entry.data, entry.options)
+    return diagnostics_snapshot(
+        entry.data,
+        entry.options,
+        collect_home_summary(hass),
+    )

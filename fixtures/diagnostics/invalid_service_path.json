@@ -7,6 +7,16 @@
     "single_config_entry_status": "not_decided",
     "service_path": "forbidden"
   },
+  "home_summary": {
+    "areas_count": 0,
+    "devices_count": 0,
+    "entities_count": 0,
+    "sensors_count": 0,
+    "available_entities_count": 0,
+    "unavailable_entities_count": 0,
+    "unknown_entities_count": 0,
+    "not_reported_entities_count": 0
+  },
   "selected_references": [],
   "common_mapping": [],
   "owner_contours": [],

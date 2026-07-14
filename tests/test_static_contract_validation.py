@@ -85,6 +85,23 @@ class StaticContractValidationTest(unittest.TestCase):
             any("must use a documented mismatch category" in error for error in errors), errors
         )
 
+    def test_diagnostics_rejects_an_unsafe_or_inconsistent_home_summary(self) -> None:
+        wrong_type = load("fixtures/diagnostics/valid_redacted.json")
+        wrong_type["home_summary"]["areas_count"] = True
+        wrong_type_errors = validate_diagnostics_contract(wrong_type)
+        self.assertTrue(
+            any("non-negative integer" in error for error in wrong_type_errors),
+            wrong_type_errors,
+        )
+
+        inconsistent_totals = load("fixtures/diagnostics/valid_redacted.json")
+        inconsistent_totals["home_summary"]["available_entities_count"] = 2
+        inconsistent_total_errors = validate_diagnostics_contract(inconsistent_totals)
+        self.assertTrue(
+            any("availability counts" in error for error in inconsistent_total_errors),
+            inconsistent_total_errors,
+        )
+
     def test_cli_accepts_a_valid_fixture(self) -> None:
         result = subprocess.run(
             [

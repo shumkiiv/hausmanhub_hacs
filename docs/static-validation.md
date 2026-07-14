@@ -10,8 +10,9 @@ runtime adapter, proxy, or deployment tool.
   descriptors, contour membership, and read-only audit facts.
 - Shadow fixtures model only redacted comparison evidence, policy placeholders,
   unresolved parity, and owner-review state.
-- Diagnostics fixtures model only redacted snapshot sections and manual-only
-  repair issue summaries.
+- Diagnostics fixtures model only redacted snapshot sections, manual-only
+  repair issue summaries, and the fixed eight-number aggregate home summary.
+  They never model names, identifiers, readings, or history.
 
 All fixture identifiers are opaque synthetic labels. Fixtures must not contain
 secrets, live identifiers, service paths, Node-RED flows, payloads, commands,
