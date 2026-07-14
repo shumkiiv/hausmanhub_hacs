@@ -77,6 +77,10 @@ test account, and rejects POST. An attempt to submit `proxy` through options
 is required to be rejected before it can persist anything. It does not read any
 real Home Assistant configuration, credentials, entities, or devices.
 
+The same empty test removes one safe HASC setup completely and then creates a
+new one in the other safe mode. This confirms that removing and installing
+HASC again does not leave an old HASC object, service, or setting behind.
+
 For a manual check of an installed copy, see the Russian
 [safe-check guide](home-assistant-safe-check.md). It asks only for Home
 Assistant screens and explicitly excludes diagnostics archives and home data.
