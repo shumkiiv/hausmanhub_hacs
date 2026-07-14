@@ -159,6 +159,11 @@ Last updated: 2026-07-14.
   test copy, then requires the safe choice, the execution block, and the
   absence of HASC objects to survive. See the [safe-update review
   note](LLM_WIKI/Manual/2026-07-14-kimi-safe-update-persistence-review.md).
+- Kimi reviewed the one-command local publication check with no findings. It
+  confirmed the command runs only local tests, synthetic fixtures, and the
+  existing Git-file safety checks, stopping at the first failed check. See the
+  [local publication-check review
+  note](LLM_WIKI/Manual/2026-07-14-kimi-local-release-check-review.md).
 
 ## Verification
 
@@ -178,9 +183,10 @@ check, a version-only check, and a count-only current-state check on
 2026-07-14. It used no command or mutating request, retained no raw home data,
 and does not validate or expand HASC runtime authority.
 
-Before publishing, run `python3 tools/check_repository_boundary.py --staged`.
-It is a local Git-only check for accidental credentials and runtime files; it
-does not inspect a live home or grant any authority.
+Before publishing, run `python3 tools/check_local_release.py` after staging
+the intended files. It runs the local tests, synthetic fixture checks, and the
+Git-file safety checks as one fixed list. It does not inspect a live home or
+grant any authority.
 
 ## Next decision gate
 

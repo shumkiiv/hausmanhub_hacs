@@ -46,8 +46,9 @@ See [repository basics](docs/repository-basics.md) and
 ## Local validation
 
 The repository uses standard-library Python checks over synthetic fixtures
-only. See [static validation](docs/static-validation.md) for the local command
-and its safety boundary.
+only. After preparing a commit, run `python3 tools/check_local_release.py` for
+the one-command local check. See [static validation](docs/static-validation.md)
+for its safety boundary and the individual commands.
 
 Before publishing, run the local [repository safety check](docs/repository-safety-check.md).
 It looks only for accidentally added credentials and runtime files; it does

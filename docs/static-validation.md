@@ -24,6 +24,19 @@ The schema-specific boundaries are in the
 
 ## Run locally
 
+After preparing files for the next commit, the shortest complete local check
+is:
+
+```sh
+python3 tools/check_local_release.py
+```
+
+It runs the same fixed local checks below: tests, the three synthetic fixture
+checks, and the safety checks for published and prepared files. It does not
+start Home Assistant or contact a home.
+
+The individual commands remain available when one result needs closer review:
+
 ```sh
 python3 -m unittest discover -s tests -v
 python3 tools/validate_fixture.py common fixtures/common_contract/valid_minimal.json
