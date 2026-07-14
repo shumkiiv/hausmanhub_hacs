@@ -11,9 +11,15 @@ from dataclasses import dataclass
 from typing import Literal
 
 
-Availability = Literal["available", "unavailable", "unknown", "not_reported"]
+Availability = Literal[
+    "available",
+    "unavailable",
+    "unknown",
+    "not_reported",
+    "disabled",
+]
 VALID_AVAILABILITY = frozenset(
-    {"available", "unavailable", "unknown", "not_reported"}
+    {"available", "unavailable", "unknown", "not_reported", "disabled"}
 )
 
 
@@ -43,6 +49,7 @@ class HomeSummary:
     unavailable_entities_count: int
     unknown_entities_count: int
     not_reported_entities_count: int
+    disabled_entities_count: int
 
     def __post_init__(self) -> None:
         """Reject impossible aggregate values before they can be exported."""
@@ -56,6 +63,7 @@ class HomeSummary:
             self.unavailable_entities_count,
             self.unknown_entities_count,
             self.not_reported_entities_count,
+            self.disabled_entities_count,
         )
         if any(type(value) is not int or value < 0 for value in values):
             raise ValueError("home summary counts must be non-negative integers")
@@ -66,6 +74,7 @@ class HomeSummary:
             + self.unavailable_entities_count
             + self.unknown_entities_count
             + self.not_reported_entities_count
+            + self.disabled_entities_count
             != self.entities_count
         ):
             raise ValueError("availability counts must equal entity count")

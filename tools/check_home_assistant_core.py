@@ -237,6 +237,7 @@ def assert_safe_home_summary(home_summary: Any) -> None:
         "unavailable_entities_count",
         "unknown_entities_count",
         "not_reported_entities_count",
+        "disabled_entities_count",
     }
     assert_result(set(home_summary), expected_keys, "home summary keys must be fixed")
     if any(type(value) is not int or value < 0 for value in home_summary.values()):
@@ -248,6 +249,7 @@ def assert_safe_home_summary(home_summary: Any) -> None:
         + home_summary["unavailable_entities_count"]
         + home_summary["unknown_entities_count"]
         + home_summary["not_reported_entities_count"]
+        + home_summary["disabled_entities_count"]
         != home_summary["entities_count"]
     ):
         raise RuntimeError("home summary availability counts must equal entity count")

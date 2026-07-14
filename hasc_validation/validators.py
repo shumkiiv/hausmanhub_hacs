@@ -541,6 +541,7 @@ def validate_diagnostics_contract(data: Any) -> list[str]:
             "unavailable_entities_count",
             "unknown_entities_count",
             "not_reported_entities_count",
+            "disabled_entities_count",
         }
         if set(home_summary) != expected_keys:
             _error(errors, "$.home_summary", "must contain only the fixed aggregate count fields")
@@ -560,6 +561,7 @@ def validate_diagnostics_contract(data: Any) -> list[str]:
                 + counts["unavailable_entities_count"]
                 + counts["unknown_entities_count"]
                 + counts["not_reported_entities_count"]
+                + counts["disabled_entities_count"]
                 != counts["entities_count"]
             ):
                 _error(errors, "$.home_summary", "availability counts must equal entity count")

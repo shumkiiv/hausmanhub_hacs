@@ -51,6 +51,7 @@ def diagnostics_snapshot(
             "unavailable_entities_count": home_summary.unavailable_entities_count,
             "unknown_entities_count": home_summary.unknown_entities_count,
             "not_reported_entities_count": home_summary.not_reported_entities_count,
+            "disabled_entities_count": home_summary.disabled_entities_count,
         },
         "redaction_report": {
             "status": "passed",

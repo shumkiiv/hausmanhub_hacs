@@ -27,16 +27,36 @@ def collect_home_summary(hass: HomeAssistant) -> HomeSummary:
         areas_count=len(areas.areas),
         devices_count=len(devices.devices),
         entities=(
-            RegisteredEntity(
-                domain=entry.domain,
-                availability=_availability_for(hass.states.get(entry.entity_id)),
-            )
+            _registered_entity(entry, hass)
             for entry in entities.entities.values()
         ),
     )
 
 
-def _availability_for(state: object | None) -> Availability:
+def _registered_entity(
+    entry: entity_registry.RegistryEntry,
+    hass: HomeAssistant,
+) -> RegisteredEntity:
+    """Reduce one registry entry without retaining its identifier or state."""
+
+    return RegisteredEntity(
+        domain=entry.domain,
+        availability=_availability_for(entry, hass),
+    )
+
+
+def _availability_for(
+    entry: entity_registry.RegistryEntry,
+    hass: HomeAssistant,
+) -> Availability:
+    """Classify one entry and avoid reading a state for a disabled object."""
+
+    if entry.disabled_by is not None:
+        return "disabled"
+    return _availability_from_state(hass.states.get(entry.entity_id))
+
+
+def _availability_from_state(state: object | None) -> Availability:
     """Classify one local state immediately without retaining its details."""
 
     if state is None:

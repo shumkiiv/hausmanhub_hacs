@@ -51,7 +51,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         self.assertEqual("hausman_hub", manifest["domain"])
         self.assertTrue(manifest["config_flow"])
         self.assertTrue(manifest["single_config_entry"])
-        self.assertEqual("0.1.1", manifest["version"])
+        self.assertEqual("0.1.2", manifest["version"])
 
     def test_brand_icon_is_a_square_transparent_png(self) -> None:
         """Keep the local Home Assistant brand image present and usable."""
@@ -204,6 +204,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
                 "unavailable_entities_count",
                 "unknown_entities_count",
                 "not_reported_entities_count",
+                "disabled_entities_count",
             },
             set(snapshot["home_summary"]),
         )
@@ -220,6 +221,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
                 RegisteredEntity(domain="switch", availability="unavailable"),
                 RegisteredEntity(domain="sensor", availability="unknown"),
                 RegisteredEntity(domain="light", availability="not_reported"),
+                RegisteredEntity(domain="switch", availability="disabled"),
             ),
         )
         snapshot = diagnostics_snapshot(create_initial_entry("read-only"), {}, summary)
@@ -227,12 +229,13 @@ class ReadOnlySkeletonTest(unittest.TestCase):
 
         self.assertEqual(2, snapshot["home_summary"]["areas_count"])
         self.assertEqual(3, snapshot["home_summary"]["devices_count"])
-        self.assertEqual(4, snapshot["home_summary"]["entities_count"])
+        self.assertEqual(5, snapshot["home_summary"]["entities_count"])
         self.assertEqual(2, snapshot["home_summary"]["sensors_count"])
         self.assertEqual(1, snapshot["home_summary"]["available_entities_count"])
         self.assertEqual(1, snapshot["home_summary"]["unavailable_entities_count"])
         self.assertEqual(1, snapshot["home_summary"]["unknown_entities_count"])
         self.assertEqual(1, snapshot["home_summary"]["not_reported_entities_count"])
+        self.assertEqual(1, snapshot["home_summary"]["disabled_entities_count"])
         for forbidden_value in ("living_room", "sensor.temperature", "192.168.1.20", "21.5"):
             self.assertNotIn(forbidden_value, serialized)
 
@@ -249,6 +252,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
                 unavailable_entities_count=0,
                 unknown_entities_count=0,
                 not_reported_entities_count=0,
+                disabled_entities_count=0,
             )
         with self.assertRaisesRegex(ValueError, "availability counts"):
             HomeSummary(
@@ -260,6 +264,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
                 unavailable_entities_count=0,
                 unknown_entities_count=0,
                 not_reported_entities_count=0,
+                disabled_entities_count=0,
             )
         with self.assertRaisesRegex(ValueError, "non-negative integers"):
             HomeSummary(
@@ -271,6 +276,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
                 unavailable_entities_count=0,
                 unknown_entities_count=0,
                 not_reported_entities_count=0,
+                disabled_entities_count=0,
             )
         with self.assertRaisesRegex(ValueError, "approved category"):
             RegisteredEntity(domain="sensor", availability="unexpected")  # type: ignore[arg-type]
@@ -396,6 +402,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             unavailable_entities_count=0,
             unknown_entities_count=0,
             not_reported_entities_count=0,
+            disabled_entities_count=0,
         )
 
 

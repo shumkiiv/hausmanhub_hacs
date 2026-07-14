@@ -102,6 +102,25 @@ class StaticContractValidationTest(unittest.TestCase):
             inconsistent_total_errors,
         )
 
+    def test_diagnostics_rejects_extra_or_missing_home_summary_fields(self) -> None:
+        """The diagnostics summary must retain its fixed, redacted shape."""
+
+        extra_field = load("fixtures/diagnostics/valid_redacted.json")
+        extra_field["home_summary"]["unexpected_count"] = 0
+        extra_errors = validate_diagnostics_contract(extra_field)
+        self.assertTrue(
+            any("fixed aggregate count fields" in error for error in extra_errors),
+            extra_errors,
+        )
+
+        missing_field = load("fixtures/diagnostics/valid_redacted.json")
+        del missing_field["home_summary"]["disabled_entities_count"]
+        missing_errors = validate_diagnostics_contract(missing_field)
+        self.assertTrue(
+            any("fixed aggregate count fields" in error for error in missing_errors),
+            missing_errors,
+        )
+
     def test_cli_accepts_a_valid_fixture(self) -> None:
         result = subprocess.run(
             [

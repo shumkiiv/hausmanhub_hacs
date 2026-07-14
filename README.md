@@ -33,8 +33,9 @@ decision, and owner signoff.
 1. Keep synthetic Common-contract and shadow-evidence checks local.
 2. Keep diagnostics redacted and limited to an explicit allow-list.
 3. Provide an approved local-only home summary: aggregate counts for areas,
-   devices, entities, sensors, and availability. It contains no names,
-   identifiers, readings, history, addresses, or secrets.
+   devices, entities, sensors, and availability, including a separate count
+   for disabled entities. It contains no names, identifiers, readings,
+   history, addresses, or secrets.
 
 See [repository basics](docs/repository-basics.md) and
 [AI context](AI_CONTEXT.md) before changing the repository.

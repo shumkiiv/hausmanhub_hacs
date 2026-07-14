@@ -30,13 +30,15 @@ Last updated: 2026-07-14.
 - Synthetic Common-contract fixtures, static validators, synthetic shadow
   evidence, and redacted diagnostics/repairs fixtures are present. They use
   Python's standard library and local JSON only.
-- Version 0.1.1 adds one explicitly approved local read-only observation:
-  `home_summary` in diagnostics. It contains exactly eight aggregate counts:
+- Version 0.1.2 adds one explicitly approved local read-only observation:
+  `home_summary` in diagnostics. It contains exactly nine aggregate counts:
   areas, devices, entities, sensors, and available/unavailable/unknown/not
-  reported entities. The adapter reads one local state at a time and reduces
-  it immediately to a category; it exports no name, identifier, reading,
-  history, address, secret, or raw state. It creates no entities or services
-  and does not call Home Assistant services.
+  reported/disabled entities. Disabled entries are counted separately before
+  the adapter reads a state; `not_reported` therefore means an enabled entry
+  has no current state. The adapter reduces each permitted local fact
+  immediately to a category; it exports no name, identifier, reading, history,
+  address, secret, or raw state. It creates no entities or services and does
+  not call Home Assistant services.
 
 ## Durable decisions
 
@@ -56,10 +58,11 @@ Last updated: 2026-07-14.
   approve inclusion in the public HACS catalog, live testing, proxy, or direct
   execution.
 - The owner also explicitly approved local, read-only HASC access to home
-  data on 2026-07-14. That approval is limited to the v0.1.1 aggregate
-  `home_summary`; it does not grant remote assistant access, proxy, direct
-  execution, Common/Climate/Automation ownership, or permission to save live
-  home data in this repository.
+  data on 2026-07-14. That approval is limited to the v0.1.2 aggregate
+  `home_summary`, including a separate disabled-entry count; it does not grant
+  remote assistant access, proxy, direct execution,
+  Common/Climate/Automation ownership, or permission to save live home data
+  in this repository.
 - The supported baseline was lowered to Core 2026.6.4 after the isolated
   lifecycle check passed on that exact version. See the [2026.6.4 compatibility
   note](LLM_WIKI/Manual/2026-07-14-core-2026-6-4-compatibility.md).
@@ -109,6 +112,11 @@ Last updated: 2026-07-14.
 - Kimi-backed review of the v0.1.1 aggregate home summary first found an
   in-memory full-state map; that map was removed. The final independent review
   found no blocking or non-blocking issues. See the [aggregate-summary review
+  note](LLM_WIKI/Manual/2026-07-14-kimi-read-only-home-summary-review.md).
+- Kimi-backed final review of v0.1.2 found no blockers, important issues, or
+  minor issues. It confirmed the separate disabled-entry count, the
+  state-read order, the strict nine-count boundary, and the updated context.
+  See the same [aggregate-summary review
   note](LLM_WIKI/Manual/2026-07-14-kimi-read-only-home-summary-review.md).
 
 ## Verification

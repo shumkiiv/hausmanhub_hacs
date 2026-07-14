@@ -4,11 +4,13 @@ Date: 2026-07-14.
 
 ## Scope
 
-HASC 0.1.1 adds a diagnostics-only `home_summary`. It may expose only eight
-aggregate counts: areas, devices, entities, sensors, and four availability
-categories. It must not expose names, identifiers, readings, history, network
-details, credentials, Home Assistant services, Node-RED, proxy, or direct
-execution.
+HASC 0.1.1 introduced a diagnostics-only `home_summary`. Version 0.1.2
+extends the same approved boundary to nine aggregate counts: areas, devices,
+entities, sensors, and five availability categories. A disabled registry entry
+is counted separately before its state is read; `not_reported` now means an
+enabled entry has no current state. The summary must not expose names,
+identifiers, readings, history, network details, credentials, Home Assistant
+services, Node-RED, proxy, or direct execution.
 
 ## Review sequence
 
@@ -28,18 +30,27 @@ execution.
    used as evidence. A fresh independent read-only review session
    `ses_0a00125a5ffe7RQGT5dXnRHTJC` checked the final diff and reported no
    blocking or non-blocking issues.
+5. Version 0.1.2 added the separate disabled-entry aggregate. An independent
+   read-only review found no code or safety defect; it identified only stale
+   v0.1.1/eight-count wording in `AI_CONTEXT.md`. The wording was corrected
+   before the final Kimi review and commit.
+6. Final Kimi-backed review session `ses_09fd18e74ffeNgFi3adtWU6l3I` checked
+   the complete v0.1.2 diff after the context correction. It reported no
+   blockers, important issues, or minor issues.
 
 ## Final verdict
 
-The final reviewer found no identity or data-leak path and no execution
-surface. Domain and application layers remain independent of Home Assistant;
-the outer adapter only reads local registry/state information and passes
-already-reduced categories inward.
+The reviewers found no identity or data-leak path and no execution surface.
+Domain and application layers remain independent of Home Assistant; the outer
+adapter only reads local registry/state information and passes already-reduced
+categories inward. For a disabled entry it does not read the current state.
+The final Kimi-backed review also confirmed the fixed nine-count diagnostics
+shape and the updated project context.
 
 ## Checks before commit
 
 - `python3 -m compileall -q custom_components hasc_validation tools tests`
-- `python3 -m unittest discover -s tests -v` — 32 tests passed.
+- `python3 -m unittest discover -s tests -v` — 33 tests passed.
 - JSON validation for `manifest.json` and `hacs.json`.
 - `python3 tools/validate_fixture.py diagnostics fixtures/diagnostics/valid_redacted.json`.
 - `tools/check_home_assistant_core.py` with isolated Core 2026.6.4 and

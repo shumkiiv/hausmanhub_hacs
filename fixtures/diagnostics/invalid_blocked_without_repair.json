@@ -14,7 +14,8 @@
         "available_entities_count": 0,
         "unavailable_entities_count": 0,
         "unknown_entities_count": 0,
-        "not_reported_entities_count": 0
+        "not_reported_entities_count": 0,
+        "disabled_entities_count": 0
     },
   "selected_references": [],
   "common_mapping": [],

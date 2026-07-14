@@ -19,6 +19,7 @@ def create_home_summary(
         "unavailable": 0,
         "unknown": 0,
         "not_reported": 0,
+        "disabled": 0,
     }
     entities_count = 0
     sensors_count = 0
@@ -37,4 +38,5 @@ def create_home_summary(
         unavailable_entities_count=availability_counts["unavailable"],
         unknown_entities_count=availability_counts["unknown"],
         not_reported_entities_count=availability_counts["not_reported"],
+        disabled_entities_count=availability_counts["disabled"],
     )

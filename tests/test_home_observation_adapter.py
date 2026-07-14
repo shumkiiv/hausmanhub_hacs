@@ -29,8 +29,10 @@ class FakeStates:
 
     def __init__(self, values: dict[str, SimpleNamespace]) -> None:
         self.values = values
+        self.requested_entity_ids: list[str] = []
 
     def get(self, entity_id: str) -> SimpleNamespace | None:
+        self.requested_entity_ids.append(entity_id)
         return self.values.get(entity_id)
 
 
@@ -47,18 +49,27 @@ class FakeHomeAssistant:
                 "synthetic-one": SimpleNamespace(
                     domain="sensor",
                     entity_id="sensor.synthetic_private_temperature",
+                    disabled_by=None,
                 ),
                 "synthetic-two": SimpleNamespace(
                     domain="switch",
                     entity_id="switch.synthetic_private_light",
+                    disabled_by=None,
                 ),
                 "synthetic-three": SimpleNamespace(
                     domain="sensor",
                     entity_id="sensor.synthetic_private_air",
+                    disabled_by=None,
                 ),
                 "synthetic-four": SimpleNamespace(
                     domain="light",
                     entity_id="light.synthetic_private_lamp",
+                    disabled_by=None,
+                ),
+                "synthetic-five": SimpleNamespace(
+                    domain="switch",
+                    entity_id="switch.synthetic_private_disabled",
+                    disabled_by="synthetic_configuration",
                 ),
             }
         )
@@ -67,6 +78,7 @@ class FakeHomeAssistant:
                 "sensor.synthetic_private_temperature": SimpleNamespace(state="21.5"),
                 "switch.synthetic_private_light": SimpleNamespace(state="unavailable"),
                 "sensor.synthetic_private_air": SimpleNamespace(state="unknown"),
+                "switch.synthetic_private_disabled": SimpleNamespace(state="synthetic_active"),
             }
         )
 
@@ -135,22 +147,26 @@ class HomeObservationAdapterTest(unittest.TestCase):
     def test_adapter_reduces_synthetic_identifiers_and_readings_to_counts(self) -> None:
         """The adapter immediately discards source identifiers and state values."""
 
-        summary = self.adapter.collect_home_summary(FakeHomeAssistant())
+        hass = FakeHomeAssistant()
+        summary = self.adapter.collect_home_summary(hass)
         serialized = json.dumps(asdict(summary))
 
         self.assertEqual(1, summary.areas_count)
         self.assertEqual(2, summary.devices_count)
-        self.assertEqual(4, summary.entities_count)
+        self.assertEqual(5, summary.entities_count)
         self.assertEqual(2, summary.sensors_count)
         self.assertEqual(1, summary.available_entities_count)
         self.assertEqual(1, summary.unavailable_entities_count)
         self.assertEqual(1, summary.unknown_entities_count)
         self.assertEqual(1, summary.not_reported_entities_count)
+        self.assertEqual(1, summary.disabled_entities_count)
+        self.assertNotIn("switch.synthetic_private_disabled", hass.states.requested_entity_ids)
         for forbidden_value in (
             "synthetic_private_temperature",
             "synthetic_private_light",
             "synthetic_private_air",
             "synthetic_private_lamp",
+            "synthetic_private_disabled",
             "21.5",
         ):
             self.assertNotIn(forbidden_value, serialized)
@@ -165,6 +181,7 @@ class HomeObservationAdapterTest(unittest.TestCase):
 
         self.assertEqual(2, summary.unknown_entities_count)
         self.assertEqual(0, summary.not_reported_entities_count)
+        self.assertEqual(1, summary.disabled_entities_count)
 
     def test_adapter_handles_empty_registries(self) -> None:
         """An empty Home Assistant inventory is a valid all-zero summary."""
@@ -187,6 +204,7 @@ class HomeObservationAdapterTest(unittest.TestCase):
                 "unavailable_entities_count": 0,
                 "unknown_entities_count": 0,
                 "not_reported_entities_count": 0,
+                "disabled_entities_count": 0,
             },
             asdict(summary),
         )

@@ -9,12 +9,13 @@
     "home_summary": {
         "areas_count": 2,
         "devices_count": 3,
-        "entities_count": 4,
+        "entities_count": 5,
         "sensors_count": 2,
         "available_entities_count": 1,
         "unavailable_entities_count": 1,
         "unknown_entities_count": 1,
-        "not_reported_entities_count": 1
+        "not_reported_entities_count": 1,
+        "disabled_entities_count": 1
     },
   "selected_references": [
     {
