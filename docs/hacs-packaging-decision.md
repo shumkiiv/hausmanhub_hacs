@@ -10,7 +10,7 @@ the public HACS catalog.
 ## Facts already fixed
 
 - The repository is public: `shumkiiv/hausmanhub_hasc`.
-- The license is MIT and the supported baseline is Home Assistant Core 2026.7.0
+- The license is MIT and the supported baseline is Home Assistant Core 2026.6.4
   or newer.
 - The `custom_components/hausman_hub/` read-only skeleton is limited to
   `read-only` and `shadow`.
@@ -38,7 +38,7 @@ root-level metadata:
 ```json
 {
   "name": "HausMan Hub HASC",
-  "homeassistant": "2026.7.0"
+  "homeassistant": "2026.6.4"
 }
 ```
 

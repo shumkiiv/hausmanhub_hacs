@@ -11,7 +11,7 @@ entity platform, or service definition.
 
 - Visibility: public.
 - License: MIT.
-- Supported Home Assistant baseline: Core 2026.7.0 or newer.
+- Supported Home Assistant baseline: Core 2026.6.4 or newer.
 - HACS: available as a manually added custom repository; it is not in the
   public HACS catalog.
 - Allowed initial modes: read-only and shadow only.

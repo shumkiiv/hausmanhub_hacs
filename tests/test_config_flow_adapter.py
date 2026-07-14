@@ -3,7 +3,7 @@
 These tests use a deliberately tiny in-memory stand-in for the Home Assistant
 form API. They test only the adapter behavior authored in this repository; they
 do not start Home Assistant, load integrations, discover devices, or contact a
-home. A real Core 2026.7 runtime check remains a separate Python 3.14 task.
+home. A real Core 2026.6 runtime check remains a separate Python 3.14 task.
 """
 
 from __future__ import annotations

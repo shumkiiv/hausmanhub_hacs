@@ -6,13 +6,14 @@ Last updated: 2026-07-14.
 
 - Repository: `shumkiiv/hausmanhub_hasc` (public, MIT, `main`).
 - Local checkout: `/home/ivsh/projects/hausmanhub_hasc`.
-- Home Assistant baseline: Core 2026.7.0 or newer.
+- Home Assistant baseline: Core 2026.6.4 or newer.
 - A public `custom_components/hausman_hub/` read-only skeleton is approved
   and present. It may be added manually as an HACS custom repository; it is
   not in the public HACS catalog.
-- The skeleton passed an isolated runtime smoke check in Home Assistant Core
-  2026.7.0 on Python 3.14.3. It used a disposable empty configuration only;
-  no device, Node-RED, Home Assistant service, or live API work was performed.
+- The skeleton passed isolated runtime smoke checks in Home Assistant Core
+  2026.6.4 and 2026.7.0 on Python 3.14.3. They used disposable empty
+  configurations only; no device, Node-RED, Home Assistant service, or live
+  API work was performed.
 - Synthetic Common-contract fixtures, static validators, synthetic shadow
   evidence, and redacted diagnostics/repairs fixtures are present. They use
   Python's standard library and local JSON only.
@@ -34,6 +35,13 @@ Last updated: 2026-07-14.
   `hacs.json` and manual HACS custom-repository installation. It does not
   approve inclusion in the public HACS catalog, live testing, proxy, or direct
   execution.
+- The supported baseline was lowered to Core 2026.6.4 after the isolated
+  lifecycle check passed on that exact version. See the [2026.6.4 compatibility
+  note](LLM_WIKI/Manual/2026-07-14-core-2026-6-4-compatibility.md).
+- Kimi reviewed the 2026.6.4 baseline change. Its only non-blocking note was
+  a prompt wording mismatch about a test rename; the final code has no related
+  defect. See the [2026.6.4 baseline review
+  note](LLM_WIKI/Manual/2026-07-14-kimi-core-2026-6-baseline-review.md).
 - Kimi reviewed the initial HACS metadata change with no findings before the
   private-HACS limitation was discovered. Its historical review note is
   [here](LLM_WIKI/Manual/2026-07-14-kimi-private-hacs-metadata-review.md).
@@ -70,7 +78,7 @@ Last updated: 2026-07-14.
 
 Run `python3 -m unittest discover -s tests -v`. This validates only synthetic
 schema data and the in-memory config/options adapter boundary; it does not
-prove shadow parity, grant any authority, or load Home Assistant. Core 2026.7.0
+prove shadow parity, grant any authority, or load Home Assistant. Core 2026.6.4
 requires Python 3.14.2 or newer. The isolated Core lifecycle check is
 documented in `docs/read-only-skeleton.md`; it proves only that both safe
 modes can load, reload, and unload in an empty local Core without service or

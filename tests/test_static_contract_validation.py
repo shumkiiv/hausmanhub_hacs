@@ -121,7 +121,7 @@ class StaticContractValidationTest(unittest.TestCase):
         self.assertEqual(
             {
                 "name": "HausMan Hub HASC",
-                "homeassistant": "2026.7.0",
+                "homeassistant": "2026.6.4",
             },
             hacs_metadata,
         )

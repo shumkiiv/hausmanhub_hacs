@@ -48,7 +48,7 @@ It supplies only the small Home Assistant form API surface used by this package
 and checks the safe paths and the rejected `proxy` path. It is not a Home
 Assistant runtime test and does not claim runtime compatibility.
 
-Home Assistant Core 2026.7.0 requires Python 3.14.2 or newer, while this local
+Home Assistant Core 2026.6.4 requires Python 3.14.2 or newer, while this local
 project environment uses Python 3.12. A real Core compatibility run therefore
 remains a separate task in an isolated Python 3.14 environment, still without
 a live home or device access.
@@ -57,7 +57,7 @@ Use the explicit smoke check only from such an isolated environment:
 
 ```sh
 uv venv --python 3.14 /tmp/hasc-core
-uv pip install --python /tmp/hasc-core/bin/python homeassistant==2026.7.0
+uv pip install --python /tmp/hasc-core/bin/python homeassistant==2026.6.4
 /tmp/hasc-core/bin/python tools/check_home_assistant_core.py
 ```
 

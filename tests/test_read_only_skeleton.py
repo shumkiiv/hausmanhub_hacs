@@ -40,7 +40,7 @@ class FakeEntry:
 
 
 class ReadOnlySkeletonTest(unittest.TestCase):
-    def test_manifest_declares_one_private_config_entry(self) -> None:
+    def test_manifest_declares_one_config_entry(self) -> None:
         manifest = json.loads((INTEGRATION / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual("hausman_hub", manifest["domain"])
         self.assertTrue(manifest["config_flow"])

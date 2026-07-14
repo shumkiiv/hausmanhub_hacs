@@ -9,7 +9,7 @@ Established on 2026-07-13 for the separate HausMan Hub HASC workstream.
   can read the repository. It is not listed in the public HACS catalog.
 - License: MIT.
 - Default branch: `main`.
-- Home Assistant baseline: Core 2026.7.0 or newer.
+- Home Assistant baseline: Core 2026.6.4 or newer.
 - HACS metadata: approved for manual custom-repository installation on
   2026-07-14. It does not approve inclusion in the public HACS catalog.
 
