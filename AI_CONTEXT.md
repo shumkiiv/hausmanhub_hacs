@@ -208,6 +208,9 @@ The repository also runs that same fixed command in GitHub after a change to
 `main` or a proposed change. Its workflow has only `contents: read`, disables
 stored checkout credentials, and has no Home Assistant target, home data, or
 deployment step.
+Its first GitHub run completed successfully on 2026-07-14 for commit
+`a75f78b`; the recorded run is
+https://github.com/shumkiiv/hausmanhub_hasc/actions/runs/29352007883.
 
 ## Next decision gate
 
