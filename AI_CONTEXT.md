@@ -211,6 +211,9 @@ deployment step.
 Its first GitHub run completed successfully on 2026-07-14 for commit
 `a75f78b`; the recorded run is
 https://github.com/shumkiiv/hausmanhub_hasc/actions/runs/29352007883.
+Public contribution guidance and a pull-request safety checklist are present.
+They require the local check, Kimi review for code, and an explicit statement
+that no home data or control capability is being introduced.
 
 ## Next decision gate
 

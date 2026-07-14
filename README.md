@@ -69,6 +69,8 @@ check on a temporary GitHub computer. It can only read this repository's
 files. It has no Home Assistant address, no home data, no saved credentials,
 and no deployment or device-control step.
 
+For safe public contributions, see the Russian [contribution guide](CONTRIBUTING.md).
+
 ## Installation through HACS
 
 This is not a public HACS listing. Add this GitHub repository manually as a
