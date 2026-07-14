@@ -1,0 +1,28 @@
+name: Local quality check
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  local-check:
+    name: Check project files
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get project files
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Run local HASC checks
+        run: python3 tools/check_local_release.py

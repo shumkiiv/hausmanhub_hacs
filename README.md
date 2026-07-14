@@ -62,6 +62,13 @@ See [the read-only skeleton](docs/read-only-skeleton.md) and the Russian
 boundary. The separate [local-access guide](docs/read-only-local-access.md)
 explains the additional nine-count-only access boundary.
 
+## Automatic GitHub check
+
+Every change to `main`, and every proposed change, runs the same fixed local
+check on a temporary GitHub computer. It can only read this repository's
+files. It has no Home Assistant address, no home data, no saved credentials,
+and no deployment or device-control step.
+
 ## Installation through HACS
 
 This is not a public HACS listing. Add this GitHub repository manually as a

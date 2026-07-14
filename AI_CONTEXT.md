@@ -84,6 +84,10 @@ Last updated: 2026-07-14.
   the Home Assistant UI did not offer the exact `system-read-only` role. It
   does not relax HASC's own strict route guard or grant HASC any device
   authority; see the direct local observation decision above.
+- Version `0.2.0` has a public GitHub release at
+  https://github.com/shumkiiv/hausmanhub_hasc/releases/tag/v0.2.0. The owner
+  confirmed the corresponding HACS update and Home Assistant restart on
+  2026-07-14. This is not an independent live-home verification by Codex.
 - A local repository safety check now scans Git-tracked files or exactly the
   staged files before publication. It reads file blobs only from Git's index,
   so it never follows a working-tree symbolic link outside the repository. It
@@ -169,6 +173,13 @@ Last updated: 2026-07-14.
   address, Home Assistant, `curl`, or `wget` without making the local test
   fail. See the [no-home-target review
   note](LLM_WIKI/Manual/2026-07-14-kimi-local-release-no-home-target-review.md).
+- Kimi re-reviewed the manifest/version-history test after its first review
+  session did not return a final report. The final review found no issues; see
+  the [version-history review
+  note](LLM_WIKI/Manual/2026-07-14-kimi-version-history-review.md).
+- Kimi reviewed the GitHub local-quality workflow before publication and found
+  no safety or boundary issues. See the [GitHub local-quality review
+  note](LLM_WIKI/Manual/2026-07-14-kimi-github-local-quality-review.md).
 
 ## Verification
 
@@ -192,6 +203,11 @@ Before publishing, run `python3 tools/check_local_release.py` after staging
 the intended files. It runs the local tests, synthetic fixture checks, and the
 Git-file safety checks as one fixed list. It does not inspect a live home or
 grant any authority.
+
+The repository also runs that same fixed command in GitHub after a change to
+`main` or a proposed change. Its workflow has only `contents: read`, disables
+stored checkout credentials, and has no Home Assistant target, home data, or
+deployment step.
 
 ## Next decision gate
 
