@@ -80,3 +80,13 @@ services, send commands, or enable `proxy` or direct execution.
 
 For the short, safe Home Assistant check after installation, see the Russian
 [safe-check guide](docs/home-assistant-safe-check.md).
+
+## Updates through HACS
+
+Published versions make it easier for HACS to show what can be updated. After
+HACS refreshes the repository information, choose the latest published version
+in its update screen, then restart Home Assistant. An update does not grant
+HASC device control; the only available modes remain `read-only` and `shadow`.
+
+See the short Russian [version history](CHANGELOG.md) for the changes in each
+published version.
