@@ -3,41 +3,41 @@
     "step": {
       "user": {
         "title": "HausMan Hub HASC safety mode",
-        "description": "This private skeleton only observes configuration. It cannot control devices.",
+        "description": "This integration does not change the home or control devices.",
         "data": {
           "mode": "Operating mode"
         },
         "data_description": {
-          "mode": "Choose read-only observation or shadow comparison."
+          "mode": "Choose read-only observation or a comparison without changes."
         }
       }
     },
     "error": {
-      "unsafe_mode": "Only read-only and shadow modes are allowed."
+      "unsafe_mode": "Only read-only and comparison-without-changes modes are allowed."
     }
   },
   "options": {
     "step": {
       "init": {
         "title": "HausMan Hub HASC safety mode",
-        "description": "This changes only the non-executing observation mode.",
+        "description": "This changes only a safe mode without home control.",
         "data": {
           "mode": "Operating mode"
         },
         "data_description": {
-          "mode": "Choose read-only observation or shadow comparison."
+          "mode": "Choose read-only observation or a comparison without changes."
         }
       }
     },
     "error": {
-      "unsafe_mode": "Only read-only and shadow modes are allowed."
+      "unsafe_mode": "Only read-only and comparison-without-changes modes are allowed."
     }
   },
   "selector": {
     "mode": {
       "options": {
-        "read-only": "Read only",
-        "shadow": "Shadow"
+        "read-only": "Read-only",
+        "shadow": "Comparison without changes"
       }
     }
   }

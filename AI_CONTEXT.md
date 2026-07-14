@@ -16,6 +16,10 @@ Last updated: 2026-07-14.
   `docs/home-assistant-safe-check.md`. It guides only HACS refresh,
   installation, and visual confirmation; it explicitly excludes diagnostics
   archives, configuration files, home addresses, credentials, and device data.
+- The Home Assistant setup screen uses plain labels: `Только чтение` and
+  `Проверка без изменений` in Russian, with matching English labels. Its text
+  no longer describes this public repository as private, and a local test
+  guards all setup, options, error, and selector text.
 - The skeleton passed isolated runtime smoke checks in Home Assistant Core
   2026.6.4 and 2026.7.0 on Python 3.14.3. They used disposable empty
   configurations only; no device, Node-RED, Home Assistant service, or live
@@ -55,6 +59,9 @@ Last updated: 2026-07-14.
 - Kimi reviewed the isolated diagnostics smoke-check extension and the manual
   safe-check guide with no findings. See the [safe Home Assistant check review
   note](LLM_WIKI/Manual/2026-07-14-kimi-safe-home-assistant-check-review.md).
+- Kimi reviewed the safe-mode language change after one review-fix pass and
+  found no final issues. See the [safe-mode language review
+  note](LLM_WIKI/Manual/2026-07-14-kimi-safe-mode-language-review.md).
 - Kimi reviewed the initial HACS metadata change with no findings before the
   private-HACS limitation was discovered. Its historical review note is
   [here](LLM_WIKI/Manual/2026-07-14-kimi-private-hacs-metadata-review.md).

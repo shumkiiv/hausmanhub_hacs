@@ -241,6 +241,54 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             self.assertIn("mode", content["selector"])
             self.assertIn("unsafe_mode", content["config"]["error"])
 
+    def test_translations_describe_the_public_non_controlling_shell(self) -> None:
+        """Keep installation language honest about the integration's safety."""
+
+        english = json.loads(
+            (INTEGRATION / "translations" / "en.json").read_text(encoding="utf-8")
+        )
+        russian = json.loads(
+            (INTEGRATION / "translations" / "ru.json").read_text(encoding="utf-8")
+        )
+
+        expected_labels = {
+            "en": {
+                "read-only": "Read-only",
+                "shadow": "Comparison without changes",
+            },
+            "ru": {
+                "read-only": "Только чтение",
+                "shadow": "Проверка без изменений",
+            },
+        }
+
+        for language, content in (("en", english), ("ru", russian)):
+            with self.subTest(language=language):
+                user_step = content["config"]["step"]["user"]
+                options_step = content["options"]["step"]["init"]
+                rendered_text = "\n".join(
+                    (
+                        user_step["description"],
+                        user_step["data_description"]["mode"],
+                        content["config"]["error"]["unsafe_mode"],
+                        options_step["description"],
+                        options_step["data_description"]["mode"],
+                        content["options"]["error"]["unsafe_mode"],
+                        *content["selector"]["mode"]["options"].values(),
+                    )
+                ).lower()
+                self.assertNotIn("private", rendered_text)
+                self.assertNotIn("shadow", rendered_text)
+                self.assertEqual(
+                    expected_labels[language],
+                    content["selector"]["mode"]["options"],
+                )
+
+        self.assertIn("does not change the home", english["config"]["step"]["user"]["description"])
+        self.assertIn("without home control", english["options"]["step"]["init"]["description"])
+        self.assertIn("не меняет", russian["config"]["step"]["user"]["description"])
+        self.assertIn("без управления домом", russian["options"]["step"]["init"]["description"])
+
 
 if __name__ == "__main__":
     unittest.main()
