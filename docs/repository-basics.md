@@ -5,13 +5,13 @@ Established on 2026-07-13 for the separate HausMan Hub HASC workstream.
 ## Repository identity
 
 - GitHub repository: `shumkiiv/hausmanhub_hasc`.
-- Visibility: private, following the private-first spike guardrail.
+- Visibility: public, explicitly approved by the owner on 2026-07-14 so HACS
+  can read the repository. It is not listed in the public HACS catalog.
 - License: MIT.
 - Default branch: `main`.
 - Home Assistant baseline: Core 2026.7.0 or newer.
-- HACS metadata: approved on 2026-07-14 only for the repository owner's
-  private testing. The repository remains private and is not a public HACS
-  listing.
+- HACS metadata: approved for manual custom-repository installation on
+  2026-07-14. It does not approve inclusion in the public HACS catalog.
 
 ## Allowed scope
 

@@ -2,37 +2,38 @@
 
 ## Status
 
-Approved for option 2 on 2026-07-14. The owner approved private HACS testing
-only. The repository stays private and is not submitted to the public HACS
-catalog.
+The first private-HACS decision proved infeasible: HACS cannot use private
+GitHub repositories. On 2026-07-14 the owner explicitly approved a public
+repository for manual HACS installation. The repository is not submitted to
+the public HACS catalog.
 
 ## Facts already fixed
 
-- The repository is private: `shumkiiv/hausmanhub_hasc`.
+- The repository is public: `shumkiiv/hausmanhub_hasc`.
 - The license is MIT and the supported baseline is Home Assistant Core 2026.7.0
   or newer.
-- The private `custom_components/hausman_hub/` skeleton is limited to
+- The `custom_components/hausman_hub/` read-only skeleton is limited to
   `read-only` and `shadow`.
 - It has no service, entity, device, Node-RED, or execution surface.
 - Proxy and direct execution remain unapproved and blocked.
 
-## Decision required
+## Previous options
 
-Choose one path:
+These were the original choices:
 
 1. **Keep HACS metadata absent.** Continue private development and local
    verification without HACS distribution.
-2. **Approve private HACS testing metadata.** Add only the minimal metadata
-   needed for the owner-approved private testing path, with a separate review
-   of its exact fields and installation instructions.
+2. **Approve private HACS testing metadata.** This option is not available:
+   HACS cannot use private GitHub repositories.
 3. **Prepare a public distribution decision.** Do not publish anything yet;
    first define release, support, disclosure, and maintenance requirements in
    a separate owner decision.
 
 ## Chosen path
 
-Option 2 is approved for the repository owner. The implementation may add
-only this root-level metadata:
+The owner approved a public repository that may be added manually in HACS as
+an **Integration** custom repository. The implementation contains only this
+root-level metadata:
 
 ```json
 {
@@ -41,25 +42,20 @@ only this root-level metadata:
 }
 ```
 
-The owner installs the private repository manually in HACS as an
-**Integration** custom repository. This decision does not install it into a
-live Home Assistant instance and does not add a public listing.
+This decision does not install it into a live Home Assistant instance and does
+not add it to the public HACS catalog.
 
-## Required approval wording for option 2
+## Requirements met for the chosen path
 
-An approval for private HACS testing must explicitly confirm all of the
-following:
-
-- `hacs.json` may be added to this private repository for the stated testing
-  audience only;
-- the exact installation method and who may use it;
-- the metadata does not add credentials, live identifiers, service paths,
-  command payloads, deployment scripts, or runtime configuration;
-- it does not expand the approved modes, add proxy, or lift
-  `direct_execution_blocked`;
-- all verification remains local and read-only, with no live Home Assistant,
-  Node-RED, device, or external API calls; and
-- the final metadata diff receives Kimi review before commit and push.
+- The owner explicitly approved changing the GitHub repository to public.
+- The public repository is added manually in HACS, not to its public catalog.
+- The metadata contains no credentials, live identifiers, service paths,
+  command payloads, deployment scripts, or runtime configuration.
+- It does not expand the approved modes, add proxy, or lift
+  `direct_execution_blocked`.
+- Repository verification remains local and read-only, with no live Home
+  Assistant, Node-RED, device, or external API calls.
+- The metadata change received Kimi review before commit and push.
 
 ## Implementation boundary after approval
 

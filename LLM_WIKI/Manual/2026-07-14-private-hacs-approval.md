@@ -1,19 +1,25 @@
-# Private HACS approval
+# Superseded private HACS approval
 
 Date: 2026-07-14.
 
 ## Owner decision
 
-The owner chose option 2 from `docs/hacs-packaging-decision.md`: allow HACS
-installation only for the owner through the private GitHub repository.
+The owner initially chose option 2 from `docs/hacs-packaging-decision.md`:
+allow HACS installation only for the owner through the private GitHub
+repository.
+
+This decision was superseded on the same day. HACS does not support private
+GitHub repositories, so the owner explicitly approved making the repository
+public for manual HACS custom-repository installation. The public change is
+recorded in `docs/hacs-packaging-decision.md`.
 
 ## Allowed implementation
 
 - Add the minimal root `hacs.json` with the display name and the Home
   Assistant Core 2026.7.0 baseline.
-- Add private-installation instructions and a local test that fixes the exact
+- Add installation instructions and a local test that fixes the exact
   metadata shape.
-- Keep the repository private and use the HACS custom-repository path only.
+- Keep the HACS change small and do not add a public HACS catalog listing.
 
 ## Still prohibited
 

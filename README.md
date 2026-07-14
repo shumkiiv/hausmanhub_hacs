@@ -1,18 +1,19 @@
 # HausMan Hub HASC
 
-Private-first foundation for a future Home Assistant custom integration for
+Read-only foundation for a future Home Assistant custom integration for
 HausMan Hub.
 
 ## Current status
 
-This repository contains a private, read-only Home Assistant skeleton under
+This repository contains a public, read-only Home Assistant skeleton under
 `custom_components/hausman_hub/`. It contains no device-control runtime,
 entity platform, or service definition.
 
-- Visibility: private.
+- Visibility: public.
 - License: MIT.
 - Supported Home Assistant baseline: Core 2026.7.0 or newer.
-- HACS: approved only for the repository owner's private testing.
+- HACS: available as a manually added custom repository; it is not in the
+  public HACS catalog.
 - Allowed initial modes: read-only and shadow only.
 
 ## Hard boundaries
@@ -31,7 +32,7 @@ decision, and owner signoff.
 
 1. Add synthetic read-only fixtures and a static Common-contract validator.
 2. Add a shadow-evidence model and redacted diagnostics contract.
-3. Develop the private read-only skeleton only with synthetic data and local
+3. Develop the read-only skeleton only with synthetic data and local
    validation.
 
 See [repository basics](docs/repository-basics.md) and
@@ -49,10 +50,10 @@ including mandatory Kimi review before completion or push.
 See [the read-only skeleton](docs/read-only-skeleton.md) for its exact safety
 boundary.
 
-## Private installation through HACS
+## Installation through HACS
 
-This is not a public listing. Only a person with access to this private GitHub
-repository may add it as a custom HACS repository.
+This is not a public HACS listing. Add this GitHub repository manually as a
+custom HACS repository.
 
 1. In HACS, open the menu in the top-right corner and choose **Custom
    repositories**.

@@ -4,12 +4,12 @@ Last updated: 2026-07-14.
 
 ## Project state
 
-- Repository: `shumkiiv/hausmanhub_hasc` (private, MIT, `main`).
+- Repository: `shumkiiv/hausmanhub_hasc` (public, MIT, `main`).
 - Local checkout: `/home/ivsh/projects/hausmanhub_hasc`.
 - Home Assistant baseline: Core 2026.7.0 or newer.
-- A private `custom_components/hausman_hub/` read-only skeleton is approved
-  and present. Private HACS testing metadata is approved and present; public
-  distribution remains unapproved.
+- A public `custom_components/hausman_hub/` read-only skeleton is approved
+  and present. It may be added manually as an HACS custom repository; it is
+  not in the public HACS catalog.
 - The skeleton passed an isolated runtime smoke check in Home Assistant Core
   2026.7.0 on Python 3.14.3. It used a disposable empty configuration only;
   no device, Node-RED, Home Assistant service, or live API work was performed.
@@ -29,13 +29,18 @@ Last updated: 2026-07-14.
   command payloads, or deployment scripts.
 - Every future code change follows Clean Code and Clean Architecture and must
   receive Kimi review before it is considered complete or pushed.
-- The owner approved private HACS testing on 2026-07-14. This permits only the
-  minimal root `hacs.json` and manual installation by a person with access to
-  the private repository. It does not approve a public listing, live testing,
-  proxy, or direct execution.
-- Kimi reviewed the final private-HACS metadata change with no findings. See
-  the [private HACS review
-  note](LLM_WIKI/Manual/2026-07-14-kimi-private-hacs-metadata-review.md).
+- The owner approved a public GitHub repository on 2026-07-14 because HACS
+  cannot use a private GitHub repository. This permits only the minimal root
+  `hacs.json` and manual HACS custom-repository installation. It does not
+  approve inclusion in the public HACS catalog, live testing, proxy, or direct
+  execution.
+- Kimi reviewed the initial HACS metadata change with no findings before the
+  private-HACS limitation was discovered. Its historical review note is
+  [here](LLM_WIKI/Manual/2026-07-14-kimi-private-hacs-metadata-review.md).
+- Kimi reviewed the correction for the public HACS custom-repository path. It
+  found three outdated phrases, which were corrected; the final review had no
+  findings. See the [public HACS correction review
+  note](LLM_WIKI/Manual/2026-07-14-kimi-public-hacs-correction-review.md).
 - Kimi baseline/review-fix pass found no blocking safety or correctness issue
   in the static harness. The follow-up tightened mismatch validation, made
   negative tests assert their intended reason, and covered the CLI failure path.
@@ -77,8 +82,8 @@ The read-only skeleton is limited to the two approved modes and local,
 synthetic verification. Public HACS distribution, proxy, and direct execution
 remain out of scope.
 
-The private HACS decision and its narrow implementation boundary are recorded
-in the [HACS packaging decision record](docs/hacs-packaging-decision.md).
+The public custom-HACS decision and its narrow implementation boundary are
+recorded in the [HACS packaging decision record](docs/hacs-packaging-decision.md).
 
 The required explicit choice is documented in
 [the read-only skeleton decision record](docs/read-only-skeleton-decision.md).

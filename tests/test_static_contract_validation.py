@@ -116,7 +116,7 @@ class StaticContractValidationTest(unittest.TestCase):
         self.assertEqual(1, result.returncode)
         self.assertIn("forbidden execution or sensitive field", result.stderr)
 
-    def test_private_read_only_skeleton_has_only_approved_hacs_metadata(self) -> None:
+    def test_read_only_skeleton_has_only_approved_hacs_metadata(self) -> None:
         hacs_metadata = load("hacs.json")
         self.assertEqual(
             {

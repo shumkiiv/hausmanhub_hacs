@@ -1,4 +1,4 @@
-# Private read-only skeleton
+# Read-only integration skeleton
 
 Created on 2026-07-13 after explicit owner approval for the safe skeleton
 described in [the decision record](read-only-skeleton-decision.md).
@@ -25,8 +25,9 @@ Home Assistant modules are thin adapters at the outer boundary.
   commands.
 - It does not create entities, platforms, `services.yaml`, repairs issues, or
   automatic fixes.
-- Its small `hacs.json` permits only the owner's private HACS installation; it
-  does not make the integration public or change its runtime behavior.
+- Its small `hacs.json` supports manual HACS installation from this public
+  repository. It does not add the integration to the public HACS catalog or
+  change its runtime behavior.
 - `proxy` is absent and direct execution is always
   `direct_execution_blocked`.
 
