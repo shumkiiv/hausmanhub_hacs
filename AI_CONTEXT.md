@@ -39,6 +39,10 @@ Last updated: 2026-07-14.
   immediately to a category; it exports no name, identifier, reading, history,
   address, secret, or raw state. It creates no entities or services and does
   not call Home Assistant services.
+- On 2026-07-14, an owner-performed local v0.1.2 diagnostics check confirmed
+  the exact nine-count shape and all required safe-mode markers. Its aggregate
+  values and the diagnostics file were inspected only and were not copied into
+  this repository or this context.
 
 ## Durable decisions
 
