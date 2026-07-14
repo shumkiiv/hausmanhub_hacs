@@ -1,0 +1,48 @@
+name: Сообщить о проблеме
+description: Безопасное сообщение об ошибке в HASC без данных дома
+title: "[Проблема]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Спасибо за сообщение. Не добавляйте сюда ключи доступа, адрес дома,
+        названия или идентификаторы устройств, архив диагностики, журналы с
+        домашними данными, команды или снимки Node-RED.
+  - type: input
+    id: hasc_version
+    attributes:
+      label: Версия HASC
+      description: Например, 0.2.0.
+    validations:
+      required: true
+  - type: input
+    id: home_assistant_version
+    attributes:
+      label: Версия Home Assistant
+      description: Укажите только номер версии, без адреса и снимков настроек.
+    validations:
+      required: true
+  - type: dropdown
+    id: safe_mode
+    attributes:
+      label: Выбранный безопасный режим
+      options:
+        - Только чтение
+        - Проверка без изменений
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Что произошло
+      description: Опишите результат своими словами, не вставляя домашние данные.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Какой результат ожидался
+    validations:
+      required: true
