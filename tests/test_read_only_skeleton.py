@@ -48,6 +48,12 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         self.assertTrue(manifest["single_config_entry"])
         self.assertEqual("0.2.0", manifest["version"])
 
+    def test_current_manifest_version_has_a_plain_change_note(self) -> None:
+        manifest = json.loads((INTEGRATION / "manifest.json").read_text(encoding="utf-8"))
+        change_history = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+
+        self.assertIn(f"## {manifest['version']} —", change_history)
+
     def test_brand_icon_is_a_square_transparent_png(self) -> None:
         """Keep the local Home Assistant brand image present and usable."""
 
