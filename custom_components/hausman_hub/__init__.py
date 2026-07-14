@@ -1,8 +1,8 @@
 """Home Assistant boundary for the read-only HausMan Hub skeleton.
 
 This module deliberately creates no entities, services, device connections, or
-runtime routes. It only refuses a config entry whose stored safety posture is
-not the one defined by the framework-independent application layer.
+execution routes. It only exposes one authenticated local GET view with the
+approved nine aggregate counts after validating the stored safety posture.
 """
 
 from __future__ import annotations
@@ -16,17 +16,27 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
 
-async def async_setup_entry(_hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Load a safe configuration without acquiring runtime authority."""
 
     try:
         effective_configuration(entry.data, entry.options)
     except ConfigurationViolation:
         return False
+
+    # This outer adapter needs Home Assistant's HTTP API. Keeping this import
+    # here lets the framework-independent safety tests run without HA itself.
+    from .local_summary import register_local_summary_access
+
+    register_local_summary_access(hass, entry)
     return True
 
 
-async def async_unload_entry(_hass: HomeAssistant, _entry: ConfigEntry) -> bool:
-    """Unload the inert read-only skeleton."""
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Unload the safe entry and make its local summary unavailable."""
 
+    # See the setup import: the application layer remains Home Assistant-free.
+    from .local_summary import clear_local_summary_access
+
+    clear_local_summary_access(hass, entry)
     return True

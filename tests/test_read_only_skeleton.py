@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from dataclasses import fields
 import json
 from pathlib import Path
@@ -12,7 +11,6 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from custom_components.hausman_hub import async_setup_entry  # noqa: E402
 from custom_components.hausman_hub.application.configuration import (  # noqa: E402
     ConfigurationViolation,
     DIRECT_EXECUTION_STATUS_FIELD,
@@ -23,6 +21,9 @@ from custom_components.hausman_hub.application.configuration import (  # noqa: E
 )
 from custom_components.hausman_hub.application.diagnostics import diagnostics_snapshot  # noqa: E402
 from custom_components.hausman_hub.application.observation import create_home_summary  # noqa: E402
+from custom_components.hausman_hub.application.local_summary import (  # noqa: E402
+    local_summary_snapshot,
+)
 from custom_components.hausman_hub.application.repairs import (  # noqa: E402
     MANUAL_REPAIR_CATEGORIES,
     manual_guidance_for,
@@ -39,19 +40,13 @@ from custom_components.hausman_hub.domain.observation import (  # noqa: E402
 INTEGRATION = ROOT / "custom_components" / "hausman_hub"
 
 
-class FakeEntry:
-    def __init__(self, data: dict[str, object], options: dict[str, object]) -> None:
-        self.data = data
-        self.options = options
-
-
 class ReadOnlySkeletonTest(unittest.TestCase):
     def test_manifest_declares_one_config_entry(self) -> None:
         manifest = json.loads((INTEGRATION / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual("hausman_hub", manifest["domain"])
         self.assertTrue(manifest["config_flow"])
         self.assertTrue(manifest["single_config_entry"])
-        self.assertEqual("0.1.2", manifest["version"])
+        self.assertEqual("0.2.0", manifest["version"])
 
     def test_brand_icon_is_a_square_transparent_png(self) -> None:
         """Keep the local Home Assistant brand image present and usable."""
@@ -140,19 +135,6 @@ class ReadOnlySkeletonTest(unittest.TestCase):
                 },
             )
 
-    def test_setup_refuses_an_entry_outside_the_safe_contract(self) -> None:
-        safe_entry = FakeEntry(create_initial_entry("shadow"), {})
-        self.assertTrue(asyncio.run(async_setup_entry(None, safe_entry)))
-
-        unsafe_entry = FakeEntry(
-            {
-                MODE_FIELD: "shadow",
-                DIRECT_EXECUTION_STATUS_FIELD: "not_blocked",
-            },
-            {},
-        )
-        self.assertFalse(asyncio.run(async_setup_entry(None, unsafe_entry)))
-
     def test_diagnostics_are_allow_listed_and_do_not_copy_sensitive_data(self) -> None:
         data = create_initial_entry("shadow")
         snapshot = diagnostics_snapshot(data, {}, self.home_summary())
@@ -239,6 +221,36 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         for forbidden_value in ("living_room", "sensor.temperature", "192.168.1.20", "21.5"):
             self.assertNotIn(forbidden_value, serialized)
 
+    def test_local_summary_reuses_the_same_nine_count_boundary(self) -> None:
+        """The local view use case must not expand the diagnostics shape."""
+
+        summary = self.home_summary()
+        payload = local_summary_snapshot(create_initial_entry("read-only"), {}, summary)
+
+        self.assertEqual(
+            {
+                "areas_count",
+                "devices_count",
+                "entities_count",
+                "sensors_count",
+                "available_entities_count",
+                "unavailable_entities_count",
+                "unknown_entities_count",
+                "not_reported_entities_count",
+                "disabled_entities_count",
+            },
+            set(payload),
+        )
+        with self.assertRaises(ConfigurationViolation):
+            local_summary_snapshot(
+                {
+                    MODE_FIELD: "read-only",
+                    DIRECT_EXECUTION_STATUS_FIELD: "not_blocked",
+                },
+                {},
+                summary,
+            )
+
     def test_home_summary_rejects_impossible_totals(self) -> None:
         """Bad aggregate data cannot reach diagnostics silently."""
 
@@ -311,7 +323,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
                     {field.name for field in fields(guidance)},
                 )
 
-    def test_outer_adapter_contains_no_runtime_execution_surface(self) -> None:
+    def test_outer_adapter_has_no_execution_surface_and_one_get_only_view(self) -> None:
         forbidden_fragments = (
             "hass.services",
             "async_call(",
@@ -332,6 +344,13 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             self.assertNotIn(fragment, source)
         for absent_module in ("services.yaml", "sensor.py", "switch.py", "climate.py"):
             self.assertFalse((INTEGRATION / absent_module).exists())
+
+        local_view_source = (INTEGRATION / "local_summary.py").read_text(encoding="utf-8")
+        self.assertIn("requires_auth = True", local_view_source)
+        self.assertIn("cors_allowed = False", local_view_source)
+        self.assertIn("async def get", local_view_source)
+        for blocked_method in ("async def post", "async def put", "async def patch", "async def delete"):
+            self.assertNotIn(blocked_method, local_view_source)
 
     def test_translations_are_present_for_the_only_selector(self) -> None:
         for language in ("en", "ru"):

@@ -8,6 +8,7 @@ from typing import Any
 from ..domain.observation import HomeSummary
 from ..domain.configuration import DIRECT_EXECUTION_BLOCKED
 from .configuration import effective_configuration
+from .local_summary import home_summary_payload
 
 
 def diagnostics_snapshot(
@@ -42,17 +43,7 @@ def diagnostics_snapshot(
             "automatic_repairs": "disabled",
             "manual_guidance_only": True,
         },
-        "home_summary": {
-            "areas_count": home_summary.areas_count,
-            "devices_count": home_summary.devices_count,
-            "entities_count": home_summary.entities_count,
-            "sensors_count": home_summary.sensors_count,
-            "available_entities_count": home_summary.available_entities_count,
-            "unavailable_entities_count": home_summary.unavailable_entities_count,
-            "unknown_entities_count": home_summary.unknown_entities_count,
-            "not_reported_entities_count": home_summary.not_reported_entities_count,
-            "disabled_entities_count": home_summary.disabled_entities_count,
-        },
+        "home_summary": home_summary_payload(home_summary),
         "redaction_report": {
             "status": "passed",
             "strategy": "allow_list_only_with_aggregate_home_summary",

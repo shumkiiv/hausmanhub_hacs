@@ -3,8 +3,10 @@
 This is an explicit compatibility smoke check, not a live-home test. It copies
 the integration into a new temporary Home Assistant configuration directory,
 exercises safe ``read-only`` and ``shadow`` config entries, and removes all
-temporary files when finished. It never receives credentials, opens a network
-connection, or calls Home Assistant services or devices.
+temporary files when finished. It never receives a real credential, connects
+to a real or remote network, or calls Home Assistant services or devices. Its
+only HTTP check starts a temporary loopback server to test the authenticated
+local nine-count route.
 """
 
 from __future__ import annotations
@@ -16,7 +18,9 @@ import shutil
 import tempfile
 from typing import Any
 
+from aiohttp.test_utils import TestClient, TestServer
 from homeassistant import config_entries
+from homeassistant.auth.const import GROUP_ID_ADMIN, GROUP_ID_READ_ONLY
 from homeassistant import loader
 from homeassistant.bootstrap import async_from_config_dict
 from homeassistant.config_entries import ConfigEntry
@@ -273,6 +277,117 @@ def assert_entry_is_inert(hass: HomeAssistant, domain: str, entry_id: str) -> No
     )
 
 
+def assert_local_summary_view(hass: HomeAssistant, domain: str) -> None:
+    """Require one authenticated GET-only route for the approved nine counts."""
+
+    runtime = hass.data.get(domain)
+    if not isinstance(runtime, dict):
+        raise RuntimeError("local summary runtime data must be present")
+
+    view = runtime.get("local_summary_view")
+    if view is None:
+        raise RuntimeError("local summary view must be registered")
+    assert_result(
+        getattr(view, "requires_auth", None),
+        True,
+        "local summary view must require Home Assistant authentication",
+    )
+    assert_result(
+        getattr(view, "cors_allowed", None),
+        False,
+        "local summary view must not allow cross-origin access",
+    )
+
+    path = "/api/hausman_hub/local-summary"
+    resource = next(
+        (
+            candidate
+            for candidate in hass.http.app.router.resources()
+            if getattr(candidate, "canonical", None) == path
+        ),
+        None,
+    )
+    if resource is None:
+        raise RuntimeError("local summary GET route must be registered")
+    methods = {route.method for route in resource}
+    if not methods or not methods <= {"GET", "HEAD", "OPTIONS"}:
+        raise RuntimeError(f"local summary route must be GET-only, got {methods!r}")
+
+
+async def async_create_test_access_token(
+    hass: HomeAssistant,
+    user: Any,
+) -> str:
+    """Create a short-lived synthetic token only inside the temporary Core."""
+
+    refresh_token = await hass.auth.async_create_refresh_token(
+        user,
+        client_id="https://hasc-local-check.invalid",
+    )
+    return hass.auth.async_create_access_token(refresh_token, "127.0.0.1")
+
+
+async def async_assert_authenticated_local_summary_http_access(
+    hass: HomeAssistant,
+) -> None:
+    """Exercise the actual auth middleware against one disposable loopback app."""
+
+    # The first synthetic user is an owner so the next one can stay read-only.
+    owner = await hass.auth.async_create_user(
+        "HASC temporary test owner",
+        group_ids=[GROUP_ID_ADMIN],
+    )
+    assert_result(owner.is_admin, True, "temporary owner must be an administrator")
+    reader = await hass.auth.async_create_user(
+        "HASC temporary read-only test user",
+        group_ids=[GROUP_ID_READ_ONLY],
+        local_only=True,
+    )
+    assert_result(reader.is_admin, False, "temporary reader must not be an administrator")
+
+    reader_token = await async_create_test_access_token(hass, reader)
+    owner_token = await async_create_test_access_token(hass, owner)
+    server = TestServer(hass.http.app, host="127.0.0.1")
+    client = TestClient(server)
+    try:
+        await client.start_server()
+        unauthenticated = await client.get("/api/hausman_hub/local-summary")
+        assert_result(
+            unauthenticated.status,
+            401,
+            "local summary must reject an unauthenticated request",
+        )
+
+        rejected_owner = await client.get(
+            "/api/hausman_hub/local-summary",
+            headers={"Authorization": f"Bearer {owner_token}"},
+        )
+        assert_result(
+            rejected_owner.status,
+            403,
+            "local summary must reject an administrator",
+        )
+
+        accepted_reader = await client.get(
+            "/api/hausman_hub/local-summary",
+            headers={"Authorization": f"Bearer {reader_token}"},
+        )
+        assert_result(
+            accepted_reader.status,
+            200,
+            "local summary must accept the exact local read-only user",
+        )
+        assert_safe_home_summary(await accepted_reader.json())
+
+        mutation = await client.post(
+            "/api/hausman_hub/local-summary",
+            headers={"Authorization": f"Bearer {reader_token}"},
+        )
+        assert_result(mutation.status, 405, "local summary must not accept POST")
+    finally:
+        await client.close()
+
+
 async def async_run_check() -> None:
     """Exercise setup, config flow, options flow, and unload in a blank Core."""
 
@@ -322,6 +437,8 @@ async def async_run_check() -> None:
                 read_only_entry,
                 "shadow",
             )
+            assert_local_summary_view(hass, domain)
+            await async_assert_authenticated_local_summary_http_access(hass)
             assert_entry_is_inert(hass, domain, read_only_entry.entry_id)
             await async_remove_safe_entry(hass, read_only_entry.entry_id)
 
@@ -338,6 +455,7 @@ async def async_run_check() -> None:
                 shadow_entry,
                 "read-only",
             )
+            assert_local_summary_view(hass, domain)
             assert_entry_is_inert(hass, domain, shadow_entry.entry_id)
             await async_remove_safe_entry(hass, shadow_entry.entry_id)
         finally:

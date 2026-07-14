@@ -7,7 +7,7 @@ HausMan Hub.
 
 This repository contains a public, read-only Home Assistant skeleton under
 `custom_components/hausman_hub/`. It contains no device-control runtime,
-entity platform, or service definition.
+entity platform, service definition, or outgoing connection.
 
 - Visibility: public.
 - License: MIT.
@@ -36,6 +36,9 @@ decision, and owner signoff.
    devices, entities, sensors, and availability, including a separate count
    for disabled entities. It contains no names, identifiers, readings,
    history, addresses, or secrets.
+4. In version 0.2.0, provide that same fixed summary through one authenticated
+   local GET-only view for a dedicated Home Assistant read-only user. It has
+   no command method, external access, or token storage.
 
 See [repository basics](docs/repository-basics.md) and
 [AI context](AI_CONTEXT.md) before changing the repository.
@@ -51,7 +54,8 @@ including mandatory Kimi review before completion or push.
 
 See [the read-only skeleton](docs/read-only-skeleton.md) and the Russian
 [safe home summary](docs/read-only-home-summary.md) for the exact safety
-boundary.
+boundary. The separate [local-access guide](docs/read-only-local-access.md)
+explains the additional nine-count-only access boundary.
 
 ## Installation through HACS
 

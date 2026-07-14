@@ -30,7 +30,7 @@ Last updated: 2026-07-14.
 - Synthetic Common-contract fixtures, static validators, synthetic shadow
   evidence, and redacted diagnostics/repairs fixtures are present. They use
   Python's standard library and local JSON only.
-- Version 0.1.2 adds one explicitly approved local read-only observation:
+- Version 0.2.0 retains one explicitly approved local read-only observation:
   `home_summary` in diagnostics. It contains exactly nine aggregate counts:
   areas, devices, entities, sensors, and available/unavailable/unknown/not
   reported/disabled entities. Disabled entries are counted separately before
@@ -39,6 +39,12 @@ Last updated: 2026-07-14.
   immediately to a category; it exports no name, identifier, reading, history,
   address, secret, or raw state. It creates no entities or services and does
   not call Home Assistant services.
+- The owner explicitly approved a local count-only access path on 2026-07-14.
+  It may expose the same fixed nine counts only after Home Assistant
+  authentication, an exact built-in read-only user group, and a local-network
+  origin check. It must have GET only, no outgoing connection, no token
+  storage, no raw data, and no external or device-control capability. See the
+  [local-access decision](LLM_WIKI/Manual/2026-07-14-local-read-only-access-decision.md).
 - On 2026-07-14, an owner-performed local v0.1.2 diagnostics check confirmed
   the exact nine-count shape and all required safe-mode markers. Its aggregate
   values and the diagnostics file were inspected only and were not copied into
@@ -62,9 +68,10 @@ Last updated: 2026-07-14.
   approve inclusion in the public HACS catalog, live testing, proxy, or direct
   execution.
 - The owner also explicitly approved local, read-only HASC access to home
-  data on 2026-07-14. That approval is limited to the v0.1.2 aggregate
-  `home_summary`, including a separate disabled-entry count; it does not grant
-  remote assistant access, proxy, direct execution,
+  data on 2026-07-14. That approval is limited to the v0.2.0 aggregate
+  `home_summary`, including a separate disabled-entry count and the guarded
+  local count-only path; it does not grant remote assistant access, proxy,
+  direct execution,
   Common/Climate/Automation ownership, or permission to save live home data
   in this repository.
 - The supported baseline was lowered to Core 2026.6.4 after the isolated
@@ -122,6 +129,10 @@ Last updated: 2026-07-14.
   state-read order, the strict nine-count boundary, and the updated context.
   See the same [aggregate-summary review
   note](LLM_WIKI/Manual/2026-07-14-kimi-read-only-home-summary-review.md).
+- Kimi reviewed the guarded local nine-count access path with no findings. It
+  confirmed the fixed response shape, exact read-only role, local-source and
+  GET-only guards, fail-closed behaviour, and clean architecture boundary. See
+  the [local access review note](LLM_WIKI/Manual/2026-07-14-kimi-local-summary-access-review.md).
 
 ## Verification
 
@@ -129,17 +140,18 @@ Run `python3 -m unittest discover -s tests -v`. The suite validates synthetic
 schema data, in-memory form/observation adapters, and strict count-only
 diagnostics boundaries; it does not prove shadow parity or grant authority.
 The isolated Core lifecycle check is documented in `docs/read-only-skeleton.md`;
-on 2026-07-14 it passed with the aggregate summary on Core 2026.6.4 and
-2026.7.0 using disposable configurations only. It proves neither live-home
-behaviour nor execution authority.
+on 2026-07-14 it passed with the aggregate summary and guarded authenticated
+loopback route on Core 2026.6.4 and 2026.7.0 using disposable configurations
+only. It proves neither live-home behaviour nor execution authority.
 
 ## Next decision gate
 
 The read-only skeleton is limited to the two approved modes, local synthetic
-verification, and the narrowly approved aggregate diagnostics summary. The
-next safe live step is for the owner to update HASC through HACS and inspect
-the local `home_summary`; it must not be committed or sent whole to chat.
-Public HACS catalog listing, proxy, and direct execution remain out of scope.
+verification, the narrowly approved aggregate diagnostics summary, and the
+guarded local count-only path. Before a live local check, the owner must update
+HASC through HACS and create the exact Home Assistant read-only account. Its
+secret stays outside the repository and chat. Public HACS catalog listing,
+proxy, and direct execution remain out of scope.
 
 The public custom-HACS decision and its narrow implementation boundary are
 recorded in the [HACS packaging decision record](docs/hacs-packaging-decision.md).

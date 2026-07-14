@@ -16,6 +16,9 @@ Assistant-facing shell around framework-independent safety rules:
   changes.
 - an original local brand icon for Home Assistant's interface; it is only an
   image and does not add a runtime capability.
+- one authenticated, local-network, GET-only view for the already-approved
+  nine-count summary. It requires Home Assistant's exact built-in read-only
+  group and has no command method or outgoing connection.
 
 The inner `domain/` and `application/` layers use standard Python only. The
 Home Assistant modules are thin adapters at the outer boundary.
@@ -67,9 +70,12 @@ The script creates a temporary empty Home Assistant configuration, copies the
 local integration into it, and removes the temporary configuration afterwards.
 It checks both approved initial modes, a safe change between those modes, a
 real reload, the fixed redacted diagnostics report, clean removal, and the
-absence of HASC services and entities. An attempt to submit `proxy` through
-options is required to be rejected before it can persist anything. It does not
-read any real Home Assistant configuration, credentials, entities, or devices.
+absence of HASC services and entities. It also starts a temporary loopback-only
+Home Assistant server to prove that the local nine-count page rejects an
+unsigned request and an administrator, accepts only the temporary read-only
+test account, and rejects POST. An attempt to submit `proxy` through options
+is required to be rejected before it can persist anything. It does not read any
+real Home Assistant configuration, credentials, entities, or devices.
 
 For a manual check of an installed copy, see the Russian
 [safe-check guide](home-assistant-safe-check.md). It asks only for Home
