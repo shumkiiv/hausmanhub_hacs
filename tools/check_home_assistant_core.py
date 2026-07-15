@@ -465,6 +465,48 @@ async def async_update_safe_options(
     )
 
 
+async def async_assert_broken_options_form_defaults_to_read_only(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    scenario_name: str,
+) -> None:
+    """Keep a damaged saved setup from displaying shadow as its choice."""
+
+    saved_data = dict(entry.data)
+    saved_options = dict(entry.options)
+    options_form = await hass.config_entries.options.async_init(entry.entry_id)
+    assert_result(
+        options_form["type"],
+        "form",
+        f"{scenario_name} options form must still open for manual repair",
+    )
+    schema = options_form.get("data_schema")
+    schema_fields = getattr(schema, "schema", None)
+    if not isinstance(schema_fields, dict) or len(schema_fields) != 1:
+        raise RuntimeError(f"{scenario_name} options form must expose only one selector")
+    mode_field = next(iter(schema_fields))
+    default_factory = getattr(mode_field, "default", None)
+    if not callable(default_factory):
+        raise RuntimeError(f"{scenario_name} options form must provide a mode default")
+    assert_result(
+        default_factory(),
+        "read-only",
+        f"{scenario_name} options form must default to read-only",
+    )
+    hass.config_entries.options.async_abort(options_form["flow_id"])
+    await hass.async_block_till_done()
+    assert_result(
+        dict(entry.data),
+        saved_data,
+        f"opening {scenario_name} options must not repair saved data",
+    )
+    assert_result(
+        dict(entry.options),
+        saved_options,
+        f"opening {scenario_name} options must not repair saved options",
+    )
+
+
 async def async_assert_safe_diagnostics(
     hass: HomeAssistant,
     domain: str,
@@ -1834,6 +1876,11 @@ async def async_assert_invalid_saved_data_lifecycle(
             config_entries.ConfigEntryState.LOADED,
             "saving unsafe HASC data must not unload before an explicit reload",
         )
+        await async_assert_broken_options_form_defaults_to_read_only(
+            invalid_data_hass,
+            invalid_entry,
+            f"{scenario_name} saved main settings",
+        )
         await async_assert_closed_diagnostics(
             invalid_data_hass,
             domain,
@@ -2075,6 +2122,11 @@ async def async_assert_invalid_saved_options_lifecycle(
             invalid_options_entry.state,
             config_entries.ConfigEntryState.LOADED,
             "saving unsafe HASC options must not unload before an explicit reload",
+        )
+        await async_assert_broken_options_form_defaults_to_read_only(
+            invalid_options_hass,
+            invalid_options_entry,
+            f"{scenario_name} saved options",
         )
         await async_assert_closed_diagnostics(
             invalid_options_hass,

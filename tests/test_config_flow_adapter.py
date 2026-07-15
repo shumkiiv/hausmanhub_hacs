@@ -291,8 +291,8 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("form", proxy_result["type"])
         self.assertEqual({"mode": "unsafe_mode"}, proxy_result["errors"])
 
-    async def test_options_form_hides_an_unsafe_saved_default(self) -> None:
-        """A broken saved mode cannot be displayed as a selectable safe mode."""
+    async def test_options_form_hides_a_broken_saved_configuration(self) -> None:
+        """A damaged saved configuration cannot make shadow look selected."""
 
         blocked = {"direct_execution_status": "direct_execution_blocked"}
         for label, data, options in (
@@ -310,6 +310,30 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
                 "missing initial mode",
                 blocked,
                 {},
+            ),
+            (
+                "direct execution no longer blocked",
+                {"mode": "read-only", "direct_execution_status": "allowed"},
+                {"mode": "shadow"},
+            ),
+            (
+                "missing direct execution block",
+                {"mode": "read-only"},
+                {"mode": "shadow"},
+            ),
+            (
+                "extra saved setting",
+                {
+                    "mode": "read-only",
+                    **blocked,
+                    "unmodelled": "outside_contract",
+                },
+                {"mode": "shadow"},
+            ),
+            (
+                "extra saved option",
+                {"mode": "read-only", **blocked},
+                {"mode": "shadow", "unmodelled": "outside_contract"},
             ),
         ):
             with self.subTest(label=label):

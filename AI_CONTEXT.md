@@ -98,6 +98,12 @@ Last updated: 2026-07-15.
   check deliberately restores that stale pointer only after the ordinary stop,
   replaces the reader with a failing function, and requires 503 with no count
   keys.
+- Version 0.3.11 applies the same complete saved-setting check before the
+  options screen chooses its visible default. A damaged main setting or mode
+  option therefore shows neutral `read-only`, even if an isolated mode field
+  says `shadow`. Opening that screen leaves both saved mappings unchanged;
+  the disposable Core check covers every damaged main-setting and option
+  variant before it closes the entry for manual repair.
 - Kimi independently reviewed the closed diagnostics change with no findings.
   See the [closed diagnostics review
   note](LLM_WIKI/Manual/2026-07-15-kimi-closed-diagnostics-review.md).
@@ -110,6 +116,12 @@ Last updated: 2026-07-15.
 - Kimi independently reviewed the stale local-summary pointer closure with no
   findings. See the [stale local-summary pointer review
   note](LLM_WIKI/Manual/2026-07-15-kimi-stale-local-summary-pointer-review.md).
+- Kimi independently reviewed the options-screen closure for damaged saved
+  settings with no findings. It confirmed that the selected default now uses
+  the complete saved configuration, keeps manual repair possible, and neither
+  writes nor expands HASC's read-only/shadow boundary. See the [damaged
+  options-screen review
+  note](LLM_WIKI/Manual/2026-07-15-kimi-damaged-options-screen-review.md).
 - Kimi independently reviewed the final live and restart duplicate-entry
   closure with no findings. See the [live duplicate fail-closed review
   note](LLM_WIKI/Manual/2026-07-15-kimi-live-duplicate-fail-closed-review.md).
