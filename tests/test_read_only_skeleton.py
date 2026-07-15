@@ -834,6 +834,14 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             "an unsafe saved HASC data entry must reject reload",
             core_check_source,
         )
+        self.assertIn(
+            'f"{scenario_name} saved main settings",',
+            core_check_source,
+        )
+        self.assertIn(
+            'f"{scenario_name} saved options",',
+            core_check_source,
+        )
         self.assertIn("corrected HASC data removal", core_check_source)
         self.assertIn("(*previous_removed_entries, removed_entry)", core_check_source)
         self.assertLess(

@@ -80,9 +80,17 @@ Last updated: 2026-07-15.
   deactivation before and after restart, removal through a stale object, and
   both malformed duplicate pairs. It patches the temporary diagnostics reader
   to fail if a closed report attempts to observe the home.
+- The isolated Core check also closes diagnostics immediately after its own
+  saved main settings or saved mode choice become invalid, before an explicit
+  reload. At that point the entry is still loaded but unsafe, so all five main
+  variants and both mode-choice variants must return only unavailable without
+  reading the local home summary.
 - Kimi independently reviewed the closed diagnostics change with no findings.
   See the [closed diagnostics review
   note](LLM_WIKI/Manual/2026-07-15-kimi-closed-diagnostics-review.md).
+- Kimi independently reviewed this before-reload diagnostics closure with no
+  findings. See the [invalid saved-settings diagnostics review
+  note](LLM_WIKI/Manual/2026-07-15-kimi-invalid-settings-diagnostics-review.md).
 - Kimi independently reviewed the final live and restart duplicate-entry
   closure with no findings. See the [live duplicate fail-closed review
   note](LLM_WIKI/Manual/2026-07-15-kimi-live-duplicate-fail-closed-review.md).

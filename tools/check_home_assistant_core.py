@@ -1660,6 +1660,12 @@ async def async_assert_invalid_saved_data_lifecycle(
             saved_unsafe_data,
             "the temporary unsafe HASC data must persist",
         )
+        await async_assert_closed_diagnostics(
+            invalid_data_hass,
+            domain,
+            invalid_entry,
+            f"{scenario_name} saved main settings",
+        )
         reloaded_invalid_entry = await invalid_data_hass.config_entries.async_reload(
             invalid_entry.entry_id
         )
@@ -1883,6 +1889,12 @@ async def async_assert_invalid_saved_options_lifecycle(
             dict(invalid_options_entry.options),
             saved_unsafe_options,
             "the temporary unsafe HASC options must persist",
+        )
+        await async_assert_closed_diagnostics(
+            invalid_options_hass,
+            domain,
+            invalid_options_entry,
+            f"{scenario_name} saved options",
         )
         reloaded_invalid_options_entry = await invalid_options_hass.config_entries.async_reload(
             invalid_options_entry.entry_id
