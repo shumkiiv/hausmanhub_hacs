@@ -116,6 +116,60 @@ async def async_create_safe_entry(
     return entry
 
 
+async def async_assert_second_entry_is_rejected(
+    hass: HomeAssistant,
+    domain: str,
+    entry: ConfigEntry,
+) -> None:
+    """Reject a second safe setup without changing the first one."""
+
+    entry_data_before = dict(entry.data)
+    entry_options_before = dict(entry.options)
+    duplicate = await hass.config_entries.flow.async_init(
+        domain,
+        context={"source": config_entries.SOURCE_USER},
+        data={"mode": "shadow"},
+    )
+    assert_result(
+        duplicate["type"],
+        "abort",
+        "a second HASC setup must be rejected",
+    )
+    assert_result(
+        duplicate["reason"],
+        "single_instance_allowed",
+        "a second HASC setup must report that only one setup is allowed",
+    )
+    await hass.async_block_till_done()
+
+    entries = hass.config_entries.async_entries(domain)
+    assert_result(
+        len(entries),
+        1,
+        "the integration must retain exactly one setup",
+    )
+    assert_result(
+        entries[0].entry_id,
+        entry.entry_id,
+        "the existing HASC setup must remain the only setup",
+    )
+    assert_result(
+        entry.data,
+        entry_data_before,
+        "a rejected second setup must not change the first setup data",
+    )
+    assert_result(
+        entry.options,
+        entry_options_before,
+        "a rejected second setup must not change the first setup options",
+    )
+    assert_result(
+        entry.state,
+        config_entries.ConfigEntryState.LOADED,
+        "a rejected second setup must keep the first setup loaded",
+    )
+
+
 async def async_remove_safe_entry(hass: HomeAssistant, entry_id: str) -> None:
     """Remove a safe entry and require the inert unload path to succeed."""
 
@@ -605,6 +659,13 @@ async def async_run_check() -> None:
             )
 
             read_only_entry = await async_create_safe_entry(hass, domain, "read-only")
+            await async_assert_second_entry_is_rejected(hass, domain, read_only_entry)
+            assert_entry_has_only_summary_sensors(
+                hass,
+                domain,
+                read_only_entry.entry_id,
+                LEGACY_SUMMARY_SENSOR_ENTITY_IDS,
+            )
             await async_update_safe_options(hass, read_only_entry, "shadow")
             assert_result(
                 read_only_entry.data["mode"],

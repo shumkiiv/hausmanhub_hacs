@@ -85,6 +85,9 @@ real Home Assistant configuration, credentials, entities, or devices.
 The same empty test removes one safe HASC setup completely and then creates a
 new one in the other safe mode. This confirms that removing and installing
 HASC again does not leave an old HASC object, service, or setting behind.
+Before changing the first safe setup, the test also tries to create a second
+one. Home Assistant must refuse it, keep the first setup unchanged, and retain
+exactly its nine count sensors.
 
 Before that removal, the test saves one safe HASC setup, stops the empty test
 system, replaces its local HASC copy, and starts the empty system again. The

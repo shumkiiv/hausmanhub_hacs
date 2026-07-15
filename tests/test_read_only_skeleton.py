@@ -304,6 +304,17 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         self.assertIn("the integration must not create devices", core_check_source)
         self.assertIn("entry.device_id", core_check_source)
 
+    def test_core_smoke_check_rejects_a_second_hasc_setup(self) -> None:
+        """Keep the one-setup promise covered by the real-Core check."""
+
+        core_check_source = (ROOT / "tools" / "check_home_assistant_core.py").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("async_assert_second_entry_is_rejected", core_check_source)
+        self.assertIn('"single_instance_allowed"', core_check_source)
+        self.assertIn("the integration must retain exactly one setup", core_check_source)
+
     def test_home_summary_rejects_impossible_totals(self) -> None:
         """Bad aggregate data cannot reach diagnostics silently."""
 
