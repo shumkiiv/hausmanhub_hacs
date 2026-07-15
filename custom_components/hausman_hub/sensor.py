@@ -25,6 +25,7 @@ from .home_observation import collect_home_summary
 
 _LOGGER: Final = logging.getLogger(__name__)
 SUMMARY_UPDATE_INTERVAL: Final = timedelta(minutes=5)
+SENSOR_ENTITY_ID_PREFIX: Final = f"sensor.{DOMAIN}_hasc"
 
 
 class HomeSummaryCoordinator(DataUpdateCoordinator[dict[str, int]]):
@@ -85,6 +86,9 @@ class HomeSummaryCountSensor(CoordinatorEntity[HomeSummaryCoordinator], SensorEn
         self._summary_key = summary_key
         self._attr_translation_key = summary_key
         self._attr_unique_id = f"{entry_id}_{summary_key}"
+        # Keep new installations away from generic names such as ``sensor.areas``.
+        # Home Assistant preserves the existing registry name for current users.
+        self.entity_id = f"{SENSOR_ENTITY_ID_PREFIX}_{summary_key}"
 
     @property
     def native_value(self) -> int:

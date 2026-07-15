@@ -13,9 +13,11 @@ and no other HASC entity or service.
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
 from pathlib import Path
 import shutil
+import sys
 import tempfile
 from typing import Any
 
@@ -42,6 +44,25 @@ SUMMARY_SENSOR_KEYS = (
     "unknown_entities_count",
     "not_reported_entities_count",
     "disabled_entities_count",
+)
+PROTECTED_SUMMARY_SENSOR_ENTITY_IDS = frozenset(
+    f"sensor.hausman_hub_hasc_{key}" for key in SUMMARY_SENSOR_KEYS
+)
+# These are the generic names Home Assistant produced for version 0.3.0.
+# They are fixed here only to prove that an existing registry keeps them on
+# update; no live Home Assistant names are read or stored by this check.
+LEGACY_SUMMARY_SENSOR_ENTITY_IDS = frozenset(
+    {
+        "sensor.areas",
+        "sensor.available_entities",
+        "sensor.devices",
+        "sensor.disabled_entities",
+        "sensor.entities_with_unknown_state",
+        "sensor.entities_without_a_state",
+        "sensor.home_assistant_entities",
+        "sensor.sensors",
+        "sensor.unavailable_entities",
+    }
 )
 
 
@@ -275,6 +296,7 @@ def assert_entry_has_only_summary_sensors(
     hass: HomeAssistant,
     domain: str,
     entry_id: str,
+    expected_entity_ids: frozenset[str] = PROTECTED_SUMMARY_SENSOR_ENTITY_IDS,
 ) -> None:
     """Allow only the nine approved diagnostic count sensors and no service."""
 
@@ -292,8 +314,11 @@ def assert_entry_has_only_summary_sensors(
         {f"{entry_id}_{key}" for key in SUMMARY_SENSOR_KEYS},
         "the integration must create exactly the approved summary sensors",
     )
-    if any(not entry.entity_id.startswith("sensor.") for entry in entries):
-        raise RuntimeError("every HASC display entity must be a sensor")
+    assert_result(
+        {entry.entity_id for entry in entries},
+        expected_entity_ids,
+        "HASC display entities must keep their expected safe names",
+    )
     for entry in entries:
         state = hass.states.get(entry.entity_id)
         if state is None:
@@ -435,11 +460,36 @@ async def async_start_empty_home_assistant(config_directory: Path) -> HomeAssist
 
 
 def refresh_test_integration(config_directory: Path, domain: str) -> None:
-    """Replace the temporary integration copy before a disposable restart."""
+    """Replace and reload the temporary integration copy before a restart."""
 
     integration_target = config_directory / "custom_components" / domain
     shutil.rmtree(integration_target)
     shutil.copytree(INTEGRATION_SOURCE, integration_target)
+    importlib.invalidate_caches()
+    module_prefix = f"custom_components.{domain}"
+    for module_name in tuple(sys.modules):
+        if module_name == module_prefix or module_name.startswith(f"{module_prefix}."):
+            del sys.modules[module_name]
+    custom_components = sys.modules.get("custom_components")
+    if custom_components is not None:
+        vars(custom_components).pop(domain, None)
+
+
+def install_legacy_sensor_names_for_test(integration_target: Path) -> None:
+    """Make only the temporary copy emulate the generic names from 0.3.0."""
+
+    sensor_path = integration_target / "sensor.py"
+    source = sensor_path.read_text(encoding="utf-8")
+    # Exact single-line replacements fail loudly if the source changes, rather
+    # than silently claiming to emulate the legacy version incorrectly.
+    for current_line in (
+        'SENSOR_ENTITY_ID_PREFIX: Final = f"sensor.{DOMAIN}_hasc"\n',
+        '        self.entity_id = f"{SENSOR_ENTITY_ID_PREFIX}_{summary_key}"\n',
+    ):
+        if source.count(current_line) != 1:
+            raise RuntimeError("temporary legacy sensor setup no longer matches the source")
+        source = source.replace(current_line, "")
+    sensor_path.write_text(source, encoding="utf-8")
 
 
 async def async_run_check() -> None:
@@ -452,6 +502,7 @@ async def async_run_check() -> None:
         integration_target = config_directory / "custom_components" / domain
         integration_target.parent.mkdir(parents=True)
         shutil.copytree(INTEGRATION_SOURCE, integration_target)
+        install_legacy_sensor_names_for_test(integration_target)
 
         hass = await async_start_empty_home_assistant(config_directory)
         try:
@@ -477,7 +528,12 @@ async def async_run_check() -> None:
             await async_assert_safe_diagnostics(hass, domain, read_only_entry, "shadow")
             assert_local_summary_view(hass, domain)
             await async_assert_authenticated_local_summary_http_access(hass)
-            assert_entry_has_only_summary_sensors(hass, domain, read_only_entry.entry_id)
+            assert_entry_has_only_summary_sensors(
+                hass,
+                domain,
+                read_only_entry.entry_id,
+                LEGACY_SUMMARY_SENSOR_ENTITY_IDS,
+            )
 
             entry_id = read_only_entry.entry_id
             expected_data = dict(read_only_entry.data)
@@ -522,6 +578,7 @@ async def async_run_check() -> None:
                 restarted_hass,
                 domain,
                 restored_entry.entry_id,
+                LEGACY_SUMMARY_SENSOR_ENTITY_IDS,
             )
             await async_remove_safe_entry(restarted_hass, restored_entry.entry_id)
 

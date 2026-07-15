@@ -48,7 +48,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         self.assertEqual("hausman_hub", manifest["domain"])
         self.assertTrue(manifest["config_flow"])
         self.assertTrue(manifest["single_config_entry"])
-        self.assertEqual("0.3.0", manifest["version"])
+        self.assertEqual("0.3.1", manifest["version"])
 
     def test_current_manifest_version_has_a_plain_change_note(self) -> None:
         manifest = json.loads((INTEGRATION / "manifest.json").read_text(encoding="utf-8"))
@@ -278,6 +278,20 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         self.assertEqual(expected_keys, HOME_SUMMARY_COUNT_KEYS)
         self.assertEqual(expected_keys, tuple(payload))
         self.assertEqual({key: 0 for key in expected_keys}, payload)
+
+    def test_new_summary_sensors_use_the_hasc_name_prefix(self) -> None:
+        """New installations must not receive generic sensor names."""
+
+        sensor_source = (INTEGRATION / "sensor.py").read_text(encoding="utf-8")
+
+        self.assertIn(
+            'SENSOR_ENTITY_ID_PREFIX: Final = f"sensor.{DOMAIN}_hasc"',
+            sensor_source,
+        )
+        self.assertIn(
+            'self.entity_id = f"{SENSOR_ENTITY_ID_PREFIX}_{summary_key}"',
+            sensor_source,
+        )
 
     def test_home_summary_rejects_impossible_totals(self) -> None:
         """Bad aggregate data cannot reach diagnostics silently."""

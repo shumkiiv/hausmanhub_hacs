@@ -37,7 +37,7 @@ decision, and owner signoff.
    devices, entities, sensors, and availability, including a separate count
    for disabled entities. It contains no names, identifiers, readings,
    history, addresses, or secrets.
-4. In version 0.3.0, show that same fixed summary as exactly nine diagnostic
+4. In version 0.3.1, show that same fixed summary as exactly nine diagnostic
    number sensors in Home Assistant. They do not create a device, accept an
    action, or add any new home data.
 5. In version 0.2.0, provide that same fixed summary through one authenticated
