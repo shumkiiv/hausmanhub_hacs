@@ -629,16 +629,13 @@ def assert_reserved_collision_entry_is_unchanged(
     )
 
 
-def find_local_summary_route(hass: HomeAssistant) -> Any | None:
-    """Find the fixed local route without making an HTTP request."""
+def find_local_summary_routes(hass: HomeAssistant) -> tuple[Any, ...]:
+    """Return every fixed local route without making an HTTP request."""
 
-    return next(
-        (
-            candidate
-            for candidate in hass.http.app.router.resources()
-            if getattr(candidate, "canonical", None) == LOCAL_SUMMARY_PATH
-        ),
-        None,
+    return tuple(
+        candidate
+        for candidate in hass.http.app.router.resources()
+        if getattr(candidate, "canonical", None) == LOCAL_SUMMARY_PATH
     )
 
 
@@ -663,9 +660,13 @@ def assert_local_summary_view(hass: HomeAssistant, domain: str) -> None:
         "local summary view must not allow cross-origin access",
     )
 
-    resource = find_local_summary_route(hass)
-    if resource is None:
-        raise RuntimeError("local summary GET route must be registered")
+    resources = find_local_summary_routes(hass)
+    if len(resources) != 1:
+        raise RuntimeError(
+            "local summary must register exactly one GET route, "
+            f"got {len(resources)}"
+        )
+    resource = resources[0]
     methods = {route.method for route in resource}
     if not methods or not methods <= {"GET", "HEAD", "OPTIONS"}:
         raise RuntimeError(f"local summary route must be GET-only, got {methods!r}")
@@ -691,7 +692,7 @@ def assert_deactivated_entry_stays_inactive_after_restart(
     )
     if hass.data.get(domain) is not None:
         raise RuntimeError("a deactivated HASC must not restore runtime data after restart")
-    if find_local_summary_route(hass) is not None:
+    if find_local_summary_routes(hass):
         raise RuntimeError("a deactivated HASC must not restore its local page after restart")
     assert_entry_has_disabled_summary_sensors(
         hass,
@@ -725,7 +726,7 @@ def assert_hasc_stays_removed_after_restart(
         raise RuntimeError("removed HASC must not restore services after restart")
     if hass.data.get(domain) is not None:
         raise RuntimeError("removed HASC must not restore runtime data after restart")
-    if find_local_summary_route(hass) is not None:
+    if find_local_summary_routes(hass):
         raise RuntimeError("removed HASC must not restore local summary route after restart")
 
     entities = entity_registry.async_get(hass)
@@ -840,6 +841,8 @@ async def async_assert_local_summary_is_unavailable(
     runtime = hass.data.get(domain)
     if not isinstance(runtime, dict):
         raise RuntimeError("the retained local summary route must keep its runtime data")
+    if len(find_local_summary_routes(hass)) != 1:
+        raise RuntimeError("the retained local summary route must remain unique")
     assert_result(
         runtime.get(LOCAL_SUMMARY_ACTIVE_ENTRY),
         None,

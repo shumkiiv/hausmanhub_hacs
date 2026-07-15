@@ -129,6 +129,9 @@ The local nine-count page remains registered so a later safe setup can reuse
 it without creating a duplicate. After each removal, however, an authenticated
 temporary read-only user must receive only an unavailable response, never any
 of the nine counts. The nine temporary count states must also be absent.
+Whenever a safe setup is active, the empty check also requires exactly one
+such page. This covers the repeated activation, deactivation, removal, and
+reinstallation cycle, so the page cannot quietly accumulate copies.
 After the final removal, the empty test system starts once more. HASC must stay
 absent there: no setup, sensor, device, service, count state, runtime data, or
 local page may return, while the unrelated temporary external record remains

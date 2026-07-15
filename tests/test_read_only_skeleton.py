@@ -488,6 +488,27 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             lifecycle_source.index("await async_enable_safe_entry(restarted_hass, restored_entry)"),
         )
 
+    def test_core_smoke_check_keeps_one_local_summary_route(self) -> None:
+        """The temporary lifecycle must never accumulate duplicate local pages."""
+
+        core_check_source = (ROOT / "tools" / "check_home_assistant_core.py").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("def find_local_summary_routes", core_check_source)
+        self.assertIn(
+            "local summary must register exactly one GET route",
+            core_check_source,
+        )
+        self.assertIn(
+            "the retained local summary route must remain unique",
+            core_check_source,
+        )
+        self.assertIn(
+            "if find_local_summary_routes(hass):",
+            core_check_source,
+        )
+
     def test_core_smoke_check_removes_state_values_after_removal(self) -> None:
         """A removed HASC entry must not leave count values in the state machine."""
 

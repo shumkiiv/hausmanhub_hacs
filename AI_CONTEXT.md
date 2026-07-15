@@ -65,6 +65,11 @@ Last updated: 2026-07-15.
   not restore runtime data, count states, or the guarded page on its own.
   Explicit reactivation must restore only its existing nine safe count sensors,
   diagnostics, and authenticated GET-only page.
+- The same disposable lifecycle now counts every local HASC page instead of
+  merely finding the first one. An active safe setup must have exactly one
+  guarded page; after an in-process deactivation or removal that one retained
+  page must fail closed without counts; after a full temporary restart while
+  disabled or removed, no such page may exist.
 - Synthetic Common-contract fixtures, static validators, synthetic shadow
   evidence, and redacted diagnostics/repairs fixtures are present. They use
   Python's standard library and local JSON only.
@@ -310,6 +315,11 @@ Last updated: 2026-07-15.
   its page or state values, while explicit reactivation remains limited to the
   same nine safe counts. See the [deactivation-persistence review
   note](LLM_WIKI/Manual/2026-07-15-kimi-deactivation-persistence-review.md).
+- Kimi reviewed the local-page uniqueness check with no findings. It confirmed
+  that an active HASC requires exactly one page, while the retained in-process
+  page remains safely unavailable after deactivation or removal and no page
+  returns after a full empty restart. See the [local-page uniqueness review
+  note](LLM_WIKI/Manual/2026-07-15-kimi-local-summary-route-uniqueness-review.md).
 - The old private-first skeleton decision is now clearly marked historical and
   points to the current public manual-HACS decision. Kimi first asked for a
   less brittle document guard; after that correction, its final review found no
@@ -370,6 +380,12 @@ deactivated. The restarted empty Home Assistant must keep it disabled, with no
 HASC runtime data, count state, or guarded page. Only explicit reactivation
 may restore the existing nine safe count sensors, diagnostics, and GET-only
 page.
+
+Throughout that temporary lifecycle, the check counts every local HASC page.
+An active setup must have exactly one. After a deactivation or removal in the
+same temporary process, that one retained page must fail closed without counts;
+after a full temporary restart while HASC is disabled or removed, no page may
+return.
 
 Separately, direct local Codex observation passed a harmless availability
 check, a version-only check, and a count-only current-state check on
