@@ -396,7 +396,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         self.assertIn('"read-only",', core_check_source)
         self.assertIn("reinstalled_entry.entry_id", core_check_source)
         self.assertIn(
-            "await async_remove_safe_entry(restarted_hass, reinstalled_entry.entry_id)",
+            "ordinary_unload_restarted_hass,\n                    reinstalled_entry.entry_id,",
             core_check_source,
         )
 
@@ -488,6 +488,37 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         )
         self.assertLess(lifecycle_source.index(setup_call), lifecycle_source.index(disable_call))
 
+    def test_core_smoke_check_recovers_ordinary_unloaded_hasc_after_restart(
+        self,
+    ) -> None:
+        """An enabled HASC setup must return by itself after an ordinary stop."""
+
+        core_check_source = (ROOT / "tools" / "check_home_assistant_core.py").read_text(
+            encoding="utf-8"
+        )
+        lifecycle_source = core_check_source.split("async def async_run_check()", 1)[1]
+
+        for requirement in (
+            "async_assert_ordinary_unloaded_entry_recovers_after_restart",
+            "ordinary unload restart must keep HASC user-enabled",
+            "ordinary unload restart must auto-load HASC",
+            "ordinary unload restart must preserve safe entry data",
+            "ordinary unload restart must preserve safe entry options",
+            '"HASC ordinary unload before restart",',
+            '"HASC ordinary-unload restart temporary",',
+        ):
+            self.assertIn(requirement, core_check_source)
+
+        unload_call = "await async_unload_safe_entry(restarted_hass, restored_entry)"
+        stop_call = "await restarted_hass.async_stop()"
+        restart_call = (
+            "ordinary_unload_restarted_hass = await async_start_empty_home_assistant("
+        )
+        recovery_call = "await async_assert_ordinary_unloaded_entry_recovers_after_restart("
+        self.assertLess(lifecycle_source.index(unload_call), lifecycle_source.index(stop_call))
+        self.assertLess(lifecycle_source.index(stop_call), lifecycle_source.index(restart_call))
+        self.assertLess(lifecycle_source.index(restart_call), lifecycle_source.index(recovery_call))
+
     def test_core_smoke_check_removes_a_deactivated_hasc_setup(self) -> None:
         """Deleting a disabled HASC setup must still clear its own records."""
 
@@ -496,8 +527,17 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         )
         lifecycle_source = core_check_source.split("async def async_run_check()", 1)[1]
 
+        deactivation_call = (
+            "await async_disable_safe_entry(\n"
+            "                ordinary_unload_restarted_hass,\n"
+            "                reinstalled_entry,"
+        )
+        removal_call = (
+            "ordinary_unload_restarted_hass,\n"
+            "                    reinstalled_entry.entry_id,"
+        )
         self.assertIn(
-            "await async_disable_safe_entry(restarted_hass, reinstalled_entry)",
+            deactivation_call,
             lifecycle_source,
         )
         self.assertIn(
@@ -505,12 +545,8 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             lifecycle_source,
         )
         self.assertLess(
-            lifecycle_source.index(
-                "await async_disable_safe_entry(restarted_hass, reinstalled_entry)"
-            ),
-            lifecycle_source.index(
-                "await async_remove_safe_entry(restarted_hass, reinstalled_entry.entry_id)"
-            ),
+            lifecycle_source.index(deactivation_call),
+            lifecycle_source.index(removal_call),
         )
         self.assertGreaterEqual(
             lifecycle_source.count('"HASC deactivation",'),

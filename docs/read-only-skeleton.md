@@ -109,6 +109,13 @@ GET-only page. This is separate from user deactivation: it does not mark the
 saved setup or its sensor records as disabled, and it does not touch a real
 home.
 
+The empty test also repeats that ordinary stop and then fully stops its
+temporary Home Assistant. A new empty Home Assistant must automatically load
+the same still-enabled HASC setup. It must restore only the same nine count
+sensors, fixed safe diagnostics, and authenticated GET-only page, while still
+having no device, service, proxy, or home-control capability. This is separate
+from user deactivation, which must remain inactive after a restart.
+
 Before that first empty system is stopped, the check also uses Home Assistant's
 normal user deactivation control. The saved HASC setup remains, but all nine
 count sensors are marked disabled, their temporary values disappear, and the

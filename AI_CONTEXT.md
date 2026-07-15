@@ -66,6 +66,13 @@ Last updated: 2026-07-15.
   records remain but all count states and the guarded page fail closed; starting
   the same setup restores only the same nine safe counts, diagnostics, and
   GET-only page. This runs in a temporary empty configuration only.
+- The same disposable lifecycle also ordinary-unloads that still-user-enabled
+  setup, fully stops the temporary Home Assistant, then starts a new empty
+  instance. The setup must auto-load with the same data, safe mode, nine count
+  sensors, fixed diagnostics, and authenticated GET-only page. It remains
+  user-enabled, direct execution stays blocked, and it creates no device or
+  service. This is separate from a user's deliberate deactivation, which must
+  remain inactive across a restart.
 - Both HASC setup forms now have an isolated input-boundary check: even if a
   form receives invented extra fields beside a safe mode, it persists only the
   fixed approved data shape. This is local test coverage only and adds no
@@ -415,6 +422,12 @@ Last updated: 2026-07-15.
   deactivation, preserves the fixed safety boundary, and uses a temporary
   empty Home Assistant only. See the [ordinary unload/setup review
   note](LLM_WIKI/Manual/2026-07-15-kimi-ordinary-unload-setup-review.md).
+- Kimi reviewed the ordinary-unload full-restart recovery check with no
+  findings. It confirmed that an enabled HASC setup auto-loads after the next
+  empty Home Assistant starts, while preserving exactly the same nine counts,
+  fixed diagnostics, GET-only local page, and all control prohibitions. See the
+  [ordinary unload/restart review
+  note](LLM_WIKI/Manual/2026-07-15-kimi-ordinary-unload-restart-review.md).
 - Kimi reviewed the isolated extra-input boundary check for both HASC setup
   forms with no findings. It confirmed that the test preserves the fixed safe
   saved shape and adds no runtime, device, service, network, or home-data
