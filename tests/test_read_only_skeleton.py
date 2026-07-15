@@ -440,6 +440,31 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             core_check_source,
         )
 
+    def test_core_smoke_check_can_reinstall_after_a_clean_restart(self) -> None:
+        """A fresh safe setup must follow, rather than replace, the absence check."""
+
+        core_check_source = (ROOT / "tools" / "check_home_assistant_core.py").read_text(
+            encoding="utf-8"
+        )
+        lifecycle_source = core_check_source.split("async def async_run_check()", 1)[1]
+
+        self.assertLess(
+            lifecycle_source.index("assert_hasc_stays_removed_after_restart("),
+            lifecycle_source.index("fresh_entry = await async_create_safe_entry("),
+        )
+        self.assertIn(
+            "fresh HASC setup must use a new entry identifier",
+            lifecycle_source,
+        )
+        self.assertIn(
+            '"HASC post-restart temporary",',
+            lifecycle_source,
+        )
+        self.assertIn(
+            "assert_reserved_name_does_not_block_hasc(",
+            lifecycle_source,
+        )
+
     def test_home_summary_rejects_impossible_totals(self) -> None:
         """Bad aggregate data cannot reach diagnostics silently."""
 

@@ -650,18 +650,19 @@ async def async_create_test_read_only_access_token(
 
 async def async_assert_authenticated_local_summary_http_access(
     hass: HomeAssistant,
+    test_user_prefix: str = "HASC temporary",
 ) -> None:
     """Exercise the actual auth middleware against one disposable loopback app."""
 
     # The first synthetic user is an owner so the next one can stay read-only.
     owner = await hass.auth.async_create_user(
-        "HASC temporary test owner",
+        f"{test_user_prefix} test owner",
         group_ids=[GROUP_ID_ADMIN],
     )
     assert_result(owner.is_admin, True, "temporary owner must be an administrator")
     reader_token = await async_create_test_read_only_access_token(
         hass,
-        "HASC temporary read-only test user",
+        f"{test_user_prefix} read-only test user",
     )
 
     owner_token = await async_create_test_access_token(hass, owner)
@@ -978,6 +979,41 @@ async def async_run_check() -> None:
                 domain,
                 tuple(removed_entries),
                 reserved_entry,
+            )
+            fresh_entry = await async_create_safe_entry(
+                post_removal_hass,
+                domain,
+                "read-only",
+            )
+            if fresh_entry.entry_id in {
+                removed_entry.entry_id for removed_entry in removed_entries
+            }:
+                raise RuntimeError("fresh HASC setup must use a new entry identifier")
+            assert_entry_has_only_summary_sensors(
+                post_removal_hass,
+                domain,
+                fresh_entry.entry_id,
+                expected_entity_ids=None,
+            )
+            assert_reserved_name_does_not_block_hasc(
+                post_removal_hass,
+                fresh_entry.entry_id,
+                reserved_entry,
+            )
+            assert_reserved_collision_entry_is_unchanged(
+                post_removal_hass,
+                reserved_entry,
+            )
+            await async_assert_safe_diagnostics(
+                post_removal_hass,
+                domain,
+                fresh_entry,
+                "read-only",
+            )
+            assert_local_summary_view(post_removal_hass, domain)
+            await async_assert_authenticated_local_summary_http_access(
+                post_removal_hass,
+                "HASC post-restart temporary",
             )
         finally:
             await post_removal_hass.async_stop()

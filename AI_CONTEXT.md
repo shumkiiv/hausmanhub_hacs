@@ -42,7 +42,10 @@ Last updated: 2026-07-15.
   temporary state machine. After the final removal, a third empty Home
   Assistant instance uses the same temporary configuration and must not restore
   any HASC setup, object, state, runtime data, or local route; the unrelated
-  temporary external record must still be unchanged.
+  temporary external record must still be unchanged. Only after that absence
+  proof, the third instance creates a fresh `read-only` HASC setup with a new
+  entry identifier, exactly nine count sensors, unchanged safe diagnostics,
+  unchanged external record, and a newly authenticated local route.
 - Synthetic Common-contract fixtures, static validators, synthetic shadow
   evidence, and redacted diagnostics/repairs fixtures are present. They use
   Python's standard library and local JSON only.
@@ -262,6 +265,12 @@ Last updated: 2026-07-15.
   removal while preserving the unrelated external record, without HTTP or home
   access. See the [final-restart cleanup review
   note](LLM_WIKI/Manual/2026-07-15-kimi-final-restart-cleanup-review.md).
+- Kimi reviewed the isolated fresh-reinstall check with no findings. It
+  confirmed that the third instance proves absence before creating a new
+  read-only setup, keeps the external record unchanged, and reuses only a
+  distinct temporary user name for the guarded local route. See the
+  [fresh-reinstall review
+  note](LLM_WIKI/Manual/2026-07-15-kimi-fresh-reinstall-after-cleanup-review.md).
 - The old private-first skeleton decision is now clearly marked historical and
   points to the current public manual-HACS decision. Kimi first asked for a
   less brittle document guard; after that correction, its final review found no
@@ -296,6 +305,10 @@ original nine-sensor setup. After the final removal it starts a third empty
 Home Assistant instance with the same temporary configuration and requires no
 HASC entry, entity, device, service, state, runtime data, or local route to
 return, while the unrelated temporary external record remains unchanged.
+Only after that absence proof, it creates a fresh `read-only` HASC setup in the
+same third instance. The new setup must have a new entry identifier, exactly
+nine count sensors, the fixed safe diagnostics report, the unchanged external
+record, and the guarded authenticated local route.
 
 Separately, direct local Codex observation passed a harmless availability
 check, a version-only check, and a count-only current-state check on
