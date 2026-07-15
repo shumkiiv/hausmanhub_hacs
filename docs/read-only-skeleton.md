@@ -135,6 +135,12 @@ disabled: it cannot restore runtime data, count states, or the local page by
 itself. Only an explicit activation after that restart may restore the same
 nine count sensors, safe diagnostics, and authenticated GET-only page.
 
+While that saved setup stays turned off after the temporary restart, the empty
+check also tries to add HASC again. Home Assistant must refuse the second
+setup, keep the single saved setup turned off, and leave its nine records,
+values, and local page unavailable. Only the normal explicit activation may
+restore the same nine safe counts.
+
 The empty check also reserves one HASC-like internal sensor name before a new
 safe setup. HASC must still create all nine count sensors under distinct,
 HASC-prefixed names. This protects a new installation from being blocked by a

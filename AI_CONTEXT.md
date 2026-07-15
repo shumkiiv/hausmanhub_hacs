@@ -99,6 +99,11 @@ Last updated: 2026-07-15.
   not restore runtime data, count states, or the guarded page on its own.
   Explicit reactivation must restore only its existing nine safe count sensors,
   diagnostics, and authenticated GET-only page.
+- While that saved setup remains user-deactivated after the temporary restart,
+  the lifecycle tries to add HASC again. Home Assistant must refuse the
+  duplicate, retain exactly one disabled saved setup and its nine disabled
+  records, and keep runtime data, count values, and the guarded page closed
+  until the owner explicitly activates the same setup.
 - The same disposable lifecycle now counts every local HASC page instead of
   merely finding the first one. An active safe setup must have exactly one
   guarded page; after an in-process deactivation or removal that one retained
@@ -438,6 +443,12 @@ Last updated: 2026-07-15.
   check now uses semantic markers and order instead. The final direct Kimi
   review found no issues. See the [stopped duplicate-setup review
   note](LLM_WIKI/Manual/2026-07-15-kimi-stopped-duplicate-setup-review.md).
+- Kimi reviewed the duplicate-setup guard while a saved HASC setup stays
+  user-deactivated after restart, with no findings. It confirmed that the
+  rejected second setup preserves the disabled state and that explicit
+  activation restores only the same nine safe counts. See the [disabled
+  duplicate-setup review
+  note](LLM_WIKI/Manual/2026-07-15-kimi-disabled-duplicate-setup-review.md).
 - Kimi reviewed the isolated extra-input boundary check for both HASC setup
   forms with no findings. It confirmed that the test preserves the fixed safe
   saved shape and adds no runtime, device, service, network, or home-data

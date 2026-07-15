@@ -167,6 +167,7 @@ async def async_assert_second_entry_is_rejected(
     domain: str,
     entry: ConfigEntry,
     expected_entry_state: config_entries.ConfigEntryState = config_entries.ConfigEntryState.LOADED,
+    expected_disabled_by: ConfigEntryDisabler | None = None,
 ) -> None:
     """Reject a second safe setup without changing the existing one."""
 
@@ -212,8 +213,8 @@ async def async_assert_second_entry_is_rejected(
     )
     assert_result(
         entry.disabled_by,
-        None,
-        "a rejected second setup must not user-deactivate HASC",
+        expected_disabled_by,
+        "a rejected second setup must preserve HASC deactivation state",
     )
     assert_result(
         entry.state,
@@ -1811,6 +1812,19 @@ async def async_run_check() -> None:
                 restored_entry.options,
                 expected_options,
                 "restart must preserve the selected safe options",
+            )
+            assert_deactivated_entry_stays_inactive_after_restart(
+                restarted_hass,
+                domain,
+                restored_entry,
+                LEGACY_SUMMARY_SENSOR_ENTITY_IDS,
+            )
+            await async_assert_second_entry_is_rejected(
+                restarted_hass,
+                domain,
+                restored_entry,
+                expected_entry_state=config_entries.ConfigEntryState.NOT_LOADED,
+                expected_disabled_by=ConfigEntryDisabler.USER,
             )
             assert_deactivated_entry_stays_inactive_after_restart(
                 restarted_hass,

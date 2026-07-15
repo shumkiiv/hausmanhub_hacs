@@ -531,7 +531,8 @@ class ReadOnlySkeletonTest(unittest.TestCase):
 
         for requirement in (
             "expected_entry_state: config_entries.ConfigEntryState",
-            "a rejected second setup must not user-deactivate HASC",
+            "expected_disabled_by: ConfigEntryDisabler | None",
+            "a rejected second setup must preserve HASC deactivation state",
             "a rejected second setup must keep the existing HASC state",
             "ConfigEntryState.NOT_LOADED",
         ):
@@ -554,6 +555,50 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             lifecycle_source.index(stopped_state_marker, rejection_start),
             lifecycle_source.index(unavailable_marker),
         )
+
+    def test_core_smoke_check_rejects_second_setup_while_hasc_is_disabled_after_restart(
+        self,
+    ) -> None:
+        """A disabled saved HASC setup must still prevent a second setup."""
+
+        core_check_source = (ROOT / "tools" / "check_home_assistant_core.py").read_text(
+            encoding="utf-8"
+        )
+        lifecycle_source = core_check_source.split("async def async_run_check()", 1)[1]
+
+        for requirement in (
+            "expected_disabled_by: ConfigEntryDisabler | None",
+            "a rejected second setup must preserve HASC deactivation state",
+        ):
+            self.assertIn(requirement, core_check_source)
+
+        restart_call = "restarted_hass = await async_start_empty_home_assistant"
+        inactive_call = "assert_deactivated_entry_stays_inactive_after_restart("
+        rejection_call = "await async_assert_second_entry_is_rejected("
+        disabled_marker = "ConfigEntryDisabler.USER"
+        enable_call = "await async_enable_safe_entry(restarted_hass, restored_entry)"
+
+        restart_position = lifecycle_source.index(restart_call)
+        first_inactive_position = lifecycle_source.index(inactive_call, restart_position)
+        rejection_position = lifecycle_source.index(
+            rejection_call,
+            first_inactive_position,
+        )
+        disabled_marker_position = lifecycle_source.index(
+            disabled_marker,
+            rejection_position,
+        )
+        second_inactive_position = lifecycle_source.index(
+            inactive_call,
+            rejection_position,
+        )
+        enable_position = lifecycle_source.index(enable_call, second_inactive_position)
+
+        self.assertLess(restart_position, first_inactive_position)
+        self.assertLess(first_inactive_position, rejection_position)
+        self.assertLess(rejection_position, disabled_marker_position)
+        self.assertLess(disabled_marker_position, second_inactive_position)
+        self.assertLess(second_inactive_position, enable_position)
 
     def test_core_smoke_check_removes_a_deactivated_hasc_setup(self) -> None:
         """Deleting a disabled HASC setup must still clear its own records."""
