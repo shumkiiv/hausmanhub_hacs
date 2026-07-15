@@ -134,6 +134,13 @@ Last updated: 2026-07-16.
   closed. Only an explicit start restores the same nine sensors and safe
   `shadow` diagnostics. Kimi found no issue; see the [stopped safe-options
   review note](LLM_WIKI/Manual/2026-07-16-kimi-stopped-safe-options-review.md).
+- The same disposable lifecycle also saves `read-only` while HASC is
+  deliberately disabled by its user. It remains disabled and not loaded: no
+  home summary is read, no reload occurs, and its nine values, diagnostics,
+  and local page stay closed. Only the user's explicit activation restores the
+  same nine sensors with the saved `read-only` mode. Kimi found no issue; see
+  the [user-deactivated safe-options review
+  note](LLM_WIKI/Manual/2026-07-16-kimi-user-deactivated-safe-options-review.md).
 - Kimi independently reviewed the automatic saved-setting reload and closure.
   Its first review requested an explicit no-read check during the closing
   interval; the follow-up review found no remaining issues. See the

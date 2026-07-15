@@ -475,18 +475,24 @@ async def async_update_safe_options(
     )
 
 
-async def async_update_stopped_safe_options_without_reading_home(
+async def async_update_inactive_safe_options_without_reading_home(
     hass: HomeAssistant,
     domain: str,
     entry: ConfigEntry,
     target_mode: str,
+    expected_disabled_by: ConfigEntryDisabler | None,
 ) -> None:
-    """Save an allowed mode while stopped without restarting or reading the home."""
+    """Save an allowed mode while inactive without restarting or reading the home."""
 
     assert_result(
         entry.state,
         config_entries.ConfigEntryState.NOT_LOADED,
-        "stopped safe options must begin with HASC not loaded",
+        "inactive safe options must begin with HASC not loaded",
+    )
+    assert_result(
+        entry.disabled_by,
+        expected_disabled_by,
+        "inactive safe options must begin with the expected user state",
     )
     integration = await loader.async_get_integration(hass, domain)
     adapters = (
@@ -501,10 +507,10 @@ async def async_update_stopped_safe_options_without_reading_home(
     original_async_reload = hass.config_entries.async_reload
 
     def fail_if_home_is_read(*_: object, **__: object) -> object:
-        raise RuntimeError("stopped safe options must not read the home")
+        raise RuntimeError("inactive safe options must not read the home")
 
     async def async_recording_reload(entry_id: str) -> bool:
-        """Record any unexpected attempt to restart HASC while it is stopped."""
+        """Record any unexpected attempt to restart inactive HASC."""
 
         reload_calls.append(entry_id)
         return await original_async_reload(entry_id)
@@ -514,7 +520,7 @@ async def async_update_stopped_safe_options_without_reading_home(
     hass.config_entries.async_reload = async_recording_reload
     try:
         options_form = await hass.config_entries.options.async_init(entry.entry_id)
-        assert_result(options_form["type"], "form", "stopped options must show a form")
+        assert_result(options_form["type"], "form", "inactive options must show a form")
         safe_options = await hass.config_entries.options.async_configure(
             options_form["flow_id"],
             {"mode": target_mode},
@@ -528,37 +534,37 @@ async def async_update_stopped_safe_options_without_reading_home(
     assert_result(
         safe_options["type"],
         "create_entry",
-        f"stopped HASC must accept {target_mode} options",
+        f"inactive HASC must accept {target_mode} options",
     )
     assert_result(
         entry.options.get("mode"),
         target_mode,
-        "stopped safe options must preserve the selected mode",
+        "inactive safe options must preserve the selected mode",
     )
     assert_result(
         dict(entry.options),
         {"mode": target_mode},
-        "stopped safe options must keep the exact safe option shape",
+        "inactive safe options must keep the exact safe option shape",
     )
     assert_result(
         entry.data["direct_execution_status"],
         "direct_execution_blocked",
-        "stopped safe options must keep direct execution blocked",
+        "inactive safe options must keep direct execution blocked",
     )
     assert_result(
         entry.disabled_by,
-        None,
-        "stopped safe options must keep HASC user-enabled",
+        expected_disabled_by,
+        "inactive safe options must preserve the user state",
     )
     assert_result(
         reload_calls,
         [],
-        "stopped safe options must not reload HASC",
+        "inactive safe options must not reload HASC",
     )
     assert_result(
         entry.state,
         config_entries.ConfigEntryState.NOT_LOADED,
-        "stopped safe options must leave HASC not loaded",
+        "inactive safe options must leave HASC not loaded",
     )
 
 
@@ -2451,11 +2457,12 @@ async def async_run_check() -> None:
                 ordinary_unload_reader_token,
                 "HASC ordinary unload",
             )
-            await async_update_stopped_safe_options_without_reading_home(
+            await async_update_inactive_safe_options_without_reading_home(
                 hass,
                 domain,
                 read_only_entry,
                 "shadow",
+                expected_disabled_by=None,
             )
             assert_result(
                 read_only_entry.data,
@@ -2535,14 +2542,56 @@ async def async_run_check() -> None:
                 deactivation_reader_token,
                 "HASC deactivation",
             )
+            deactivation_data = dict(read_only_entry.data)
+            await async_update_inactive_safe_options_without_reading_home(
+                hass,
+                domain,
+                read_only_entry,
+                "read-only",
+                expected_disabled_by=ConfigEntryDisabler.USER,
+            )
+            assert_result(
+                dict(read_only_entry.data),
+                deactivation_data,
+                "user-deactivated safe options must not mutate entry data",
+            )
+            assert_entry_has_disabled_summary_sensors(
+                hass,
+                domain,
+                read_only_entry.entry_id,
+                LEGACY_SUMMARY_SENSOR_ENTITY_IDS,
+            )
+            await async_assert_closed_diagnostics(
+                hass,
+                domain,
+                read_only_entry,
+                "saving safe options while HASC is user-deactivated",
+            )
+            await async_assert_local_summary_is_unavailable(
+                hass,
+                domain,
+                deactivation_reader_token,
+                "saving safe options while HASC is user-deactivated",
+            )
+            deactivation_options = dict(read_only_entry.options)
             await async_enable_safe_entry(hass, read_only_entry)
+            assert_result(
+                dict(read_only_entry.data),
+                deactivation_data,
+                "user reactivation must preserve safe entry data",
+            )
+            assert_result(
+                dict(read_only_entry.options),
+                deactivation_options,
+                "user reactivation must preserve saved safe options",
+            )
             assert_entry_has_only_summary_sensors(
                 hass,
                 domain,
                 read_only_entry.entry_id,
                 LEGACY_SUMMARY_SENSOR_ENTITY_IDS,
             )
-            await async_assert_safe_diagnostics(hass, domain, read_only_entry, "shadow")
+            await async_assert_safe_diagnostics(hass, domain, read_only_entry, "read-only")
             assert_local_summary_view(hass, domain)
             await async_assert_authenticated_local_summary_http_access(
                 hass,
@@ -2621,7 +2670,7 @@ async def async_run_check() -> None:
                 restarted_hass,
                 domain,
                 restored_entry,
-                "shadow",
+                "read-only",
             )
             assert_local_summary_view(restarted_hass, domain)
             assert_entry_has_only_summary_sensors(
