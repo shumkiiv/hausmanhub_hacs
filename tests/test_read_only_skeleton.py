@@ -401,7 +401,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             core_check_source.count(
                 "await async_assert_local_summary_is_unavailable_after_removal("
             ),
-            3,
+            4,
         )
 
     def test_core_smoke_check_removes_state_values_after_removal(self) -> None:
@@ -463,6 +463,31 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         self.assertIn(
             "assert_reserved_name_does_not_block_hasc(",
             lifecycle_source,
+        )
+
+    def test_core_smoke_check_closes_the_fresh_reinstall_cycle(self) -> None:
+        """The fresh setup must also be removed before the final empty restart."""
+
+        core_check_source = (ROOT / "tools" / "check_home_assistant_core.py").read_text(
+            encoding="utf-8"
+        )
+        lifecycle_source = core_check_source.split("async def async_run_check()", 1)[1]
+
+        self.assertLess(
+            lifecycle_source.index("fresh_entry = await async_create_safe_entry("),
+            lifecycle_source.index("fresh_removal_reader_token"),
+        )
+        self.assertIn(
+            "await async_remove_safe_entry(post_removal_hass, fresh_entry.entry_id)",
+            lifecycle_source,
+        )
+        self.assertIn(
+            "final_hass = await async_start_empty_home_assistant(config_directory)",
+            lifecycle_source,
+        )
+        self.assertGreaterEqual(
+            lifecycle_source.count("assert_hasc_stays_removed_after_restart("),
+            2,
         )
 
     def test_home_summary_rejects_impossible_totals(self) -> None:

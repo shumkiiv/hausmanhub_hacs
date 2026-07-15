@@ -121,6 +121,9 @@ Only after that absence check, the same empty system installs HASC again in
 `read-only` mode. The new setup must receive a new internal identifier, create
 only the nine allowed count sensors, preserve the external record, retain the
 safe diagnostics report, and restore the authenticated GET-only local page.
+That fresh setup is removed too. Its local page must immediately become
+unavailable without count data while the external record stays unchanged. A
+fourth empty test-system start then requires HASC to remain completely absent.
 
 For a manual check of an installed copy, see the Russian
 [safe-check guide](home-assistant-safe-check.md). It asks only for Home

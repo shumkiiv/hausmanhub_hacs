@@ -45,7 +45,10 @@ Last updated: 2026-07-15.
   temporary external record must still be unchanged. Only after that absence
   proof, the third instance creates a fresh `read-only` HASC setup with a new
   entry identifier, exactly nine count sensors, unchanged safe diagnostics,
-  unchanged external record, and a newly authenticated local route.
+  unchanged external record, and a newly authenticated local route. That fresh
+  setup is removed too, its route immediately fails closed, and a fourth empty
+  Home Assistant instance must again contain no HASC data while preserving the
+  external record.
 - Synthetic Common-contract fixtures, static validators, synthetic shadow
   evidence, and redacted diagnostics/repairs fixtures are present. They use
   Python's standard library and local JSON only.
@@ -271,6 +274,11 @@ Last updated: 2026-07-15.
   distinct temporary user name for the guarded local route. See the
   [fresh-reinstall review
   note](LLM_WIKI/Manual/2026-07-15-kimi-fresh-reinstall-after-cleanup-review.md).
+- Kimi reviewed the isolated closed fresh-reinstall cycle with no findings. It
+  confirmed that the fresh setup is removed, its route fails closed without
+  count data, and a fourth empty Home Assistant instance remains HASC-free
+  while the external record survives. See the [closed-cycle review
+  note](LLM_WIKI/Manual/2026-07-15-kimi-closed-fresh-reinstall-cycle-review.md).
 - The old private-first skeleton decision is now clearly marked historical and
   points to the current public manual-HACS decision. Kimi first asked for a
   less brittle document guard; after that correction, its final review found no
@@ -309,6 +317,9 @@ Only after that absence proof, it creates a fresh `read-only` HASC setup in the
 same third instance. The new setup must have a new entry identifier, exactly
 nine count sensors, the fixed safe diagnostics report, the unchanged external
 record, and the guarded authenticated local route.
+That fresh setup is then removed, its route must immediately fail closed
+without count data, and a fourth empty Home Assistant instance must contain no
+HASC data while the external record remains unchanged.
 
 Separately, direct local Codex observation passed a harmless availability
 check, a version-only check, and a count-only current-state check on

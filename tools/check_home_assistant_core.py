@@ -1015,8 +1015,35 @@ async def async_run_check() -> None:
                 post_removal_hass,
                 "HASC post-restart temporary",
             )
+            fresh_removal_reader_token = await async_create_test_read_only_access_token(
+                post_removal_hass,
+                "HASC post-restart removal test user",
+            )
+            removed_entries.append(
+                await async_remove_safe_entry(post_removal_hass, fresh_entry.entry_id)
+            )
+            await async_assert_local_summary_is_unavailable_after_removal(
+                post_removal_hass,
+                domain,
+                fresh_removal_reader_token,
+            )
+            assert_reserved_collision_entry_is_unchanged(
+                post_removal_hass,
+                reserved_entry,
+            )
         finally:
             await post_removal_hass.async_stop()
+
+        final_hass = await async_start_empty_home_assistant(config_directory)
+        try:
+            assert_hasc_stays_removed_after_restart(
+                final_hass,
+                domain,
+                tuple(removed_entries),
+                reserved_entry,
+            )
+        finally:
+            await final_hass.async_stop()
 
 
 def main() -> None:
