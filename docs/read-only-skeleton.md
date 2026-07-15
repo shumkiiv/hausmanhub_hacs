@@ -107,6 +107,12 @@ same nine enabled count sensors, the fixed safe diagnostics report, and the
 authenticated GET-only page. It must not create a device, service, or any
 control of the home.
 
+The same empty check turns HASC off again immediately before replacing its
+temporary HASC copy and restarting Home Assistant. The saved setup must remain
+disabled: it cannot restore runtime data, count states, or the local page by
+itself. Only an explicit activation after that restart may restore the same
+nine count sensors, safe diagnostics, and authenticated GET-only page.
+
 The empty check also reserves one HASC-like internal sensor name before a new
 safe setup. HASC must still create all nine count sensors under distinct,
 HASC-prefixed names. This protects a new installation from being blocked by a

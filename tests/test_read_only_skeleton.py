@@ -457,6 +457,37 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             2,
         )
 
+    def test_core_smoke_check_keeps_user_deactivation_after_restart(self) -> None:
+        """A restart or safe update must not silently reactivate HASC."""
+
+        core_check_source = (ROOT / "tools" / "check_home_assistant_core.py").read_text(
+            encoding="utf-8"
+        )
+        lifecycle_source = core_check_source.split("async def async_run_check()", 1)[1]
+
+        self.assertIn(
+            "assert_deactivated_entry_stays_inactive_after_restart",
+            core_check_source,
+        )
+        self.assertIn(
+            "a deactivated HASC must not restore its local page after restart",
+            core_check_source,
+        )
+        self.assertIn(
+            "a deactivated HASC must not restore state values after restart",
+            core_check_source,
+        )
+        self.assertIn('"HASC deactivation before restart",', lifecycle_source)
+        self.assertIn('"HASC disabled-restart temporary",', lifecycle_source)
+        self.assertLess(
+            lifecycle_source.rindex("await async_disable_safe_entry(hass, read_only_entry)"),
+            lifecycle_source.index("restarted_hass = await async_start_empty_home_assistant"),
+        )
+        self.assertLess(
+            lifecycle_source.index("assert_deactivated_entry_stays_inactive_after_restart("),
+            lifecycle_source.index("await async_enable_safe_entry(restarted_hass, restored_entry)"),
+        )
+
     def test_core_smoke_check_removes_state_values_after_removal(self) -> None:
         """A removed HASC entry must not leave count values in the state machine."""
 

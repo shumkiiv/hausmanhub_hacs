@@ -671,6 +671,44 @@ def assert_local_summary_view(hass: HomeAssistant, domain: str) -> None:
         raise RuntimeError(f"local summary route must be GET-only, got {methods!r}")
 
 
+def assert_deactivated_entry_stays_inactive_after_restart(
+    hass: HomeAssistant,
+    domain: str,
+    entry: ConfigEntry,
+    expected_entity_ids: frozenset[str],
+) -> None:
+    """Require a user's deactivation to survive the temporary restart/update."""
+
+    assert_result(
+        entry.disabled_by,
+        ConfigEntryDisabler.USER,
+        "restart must preserve user deactivation",
+    )
+    assert_result(
+        entry.state,
+        config_entries.ConfigEntryState.NOT_LOADED,
+        "a deactivated HASC must stay unloaded after restart",
+    )
+    if hass.data.get(domain) is not None:
+        raise RuntimeError("a deactivated HASC must not restore runtime data after restart")
+    if find_local_summary_route(hass) is not None:
+        raise RuntimeError("a deactivated HASC must not restore its local page after restart")
+    assert_entry_has_disabled_summary_sensors(
+        hass,
+        domain,
+        entry.entry_id,
+        expected_entity_ids,
+    )
+    for summary_sensor in entity_registry.async_entries_for_config_entry(
+        entity_registry.async_get(hass),
+        entry.entry_id,
+    ):
+        if hass.states.get(summary_sensor.entity_id) is not None:
+            raise RuntimeError(
+                "a deactivated HASC must not restore state values after restart"
+            )
+
+
 def assert_hasc_stays_removed_after_restart(
     hass: HomeAssistant,
     domain: str,
@@ -960,6 +998,19 @@ async def async_run_check() -> None:
                 hass,
                 "HASC temporary reactivation",
             )
+            await async_disable_safe_entry(hass, read_only_entry)
+            assert_entry_has_disabled_summary_sensors(
+                hass,
+                domain,
+                read_only_entry.entry_id,
+                LEGACY_SUMMARY_SENSOR_ENTITY_IDS,
+            )
+            await async_assert_local_summary_is_unavailable(
+                hass,
+                domain,
+                deactivation_reader_token,
+                "HASC deactivation before restart",
+            )
 
             entry_id = read_only_entry.entry_id
             expected_data = dict(read_only_entry.data)
@@ -989,11 +1040,13 @@ async def async_run_check() -> None:
                 expected_options,
                 "restart must preserve the selected safe options",
             )
-            assert_result(
-                restored_entry.state,
-                config_entries.ConfigEntryState.LOADED,
-                "restored safe entry must load successfully",
+            assert_deactivated_entry_stays_inactive_after_restart(
+                restarted_hass,
+                domain,
+                restored_entry,
+                LEGACY_SUMMARY_SENSOR_ENTITY_IDS,
             )
+            await async_enable_safe_entry(restarted_hass, restored_entry)
             assert_result(
                 restored_entry.data["direct_execution_status"],
                 "direct_execution_blocked",
@@ -1011,6 +1064,10 @@ async def async_run_check() -> None:
                 domain,
                 restored_entry.entry_id,
                 LEGACY_SUMMARY_SENSOR_ENTITY_IDS,
+            )
+            await async_assert_authenticated_local_summary_http_access(
+                restarted_hass,
+                "HASC disabled-restart temporary",
             )
             removed_entries.append(
                 await async_remove_safe_entry(restarted_hass, restored_entry.entry_id)
