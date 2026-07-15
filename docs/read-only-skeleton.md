@@ -146,6 +146,11 @@ the empty test system then restarts once while that corrected setup remains in
 place. It must remember the correction and restore the same nine sensors before
 the recovered setup is removed and checked through one more empty restart. This
 is a test of safe recovery, not a request to edit a real Home Assistant file.
+The same disposable check also saves an unsafe `proxy` value only in the
+separate temporary mode-choice setting. It must close just as completely, keep
+that unsafe choice closed through a restart, then recover only after the
+original approved choice is restored. That corrected choice must also survive
+its own empty restart before the setup is removed.
 After the final removal, the empty test system starts once more. HASC must stay
 absent there: no setup, sensor, device, service, count state, runtime data, or
 local page may return, while the unrelated temporary external record remains

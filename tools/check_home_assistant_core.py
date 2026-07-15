@@ -748,6 +748,7 @@ def assert_persisted_unsafe_entry_stays_closed(
     domain: str,
     entry_id: str,
     expected_data: dict[str, str],
+    expected_options: dict[str, Any],
     reserved_entry: ReservedCollisionEntry,
 ) -> None:
     """Require an invalid saved entry to fail closed after a restart."""
@@ -759,6 +760,11 @@ def assert_persisted_unsafe_entry_stays_closed(
         dict(entry.data),
         expected_data,
         "restart must preserve the temporary invalid entry data",
+    )
+    assert_result(
+        dict(entry.options),
+        expected_options,
+        "restart must preserve the temporary invalid entry options",
     )
     if entry.state is config_entries.ConfigEntryState.LOADED:
         raise RuntimeError("an invalid saved HASC entry must not load after restart")
@@ -816,7 +822,10 @@ async def async_assert_corrected_entry_stays_safe_after_restart(
         config_entries.ConfigEntryState.LOADED,
         "a manually corrected HASC entry must load after restart",
     )
-    await async_assert_safe_diagnostics(hass, domain, entry, expected_data["mode"])
+    expected_mode = expected_options.get("mode", expected_data["mode"])
+    if not isinstance(expected_mode, str):
+        raise RuntimeError("the manually corrected HASC mode must remain a string")
+    await async_assert_safe_diagnostics(hass, domain, entry, expected_mode)
     assert_entry_has_only_summary_sensors(
         hass,
         domain,
@@ -1397,6 +1406,7 @@ async def async_run_check() -> None:
                 domain,
                 invalid_entry_id,
                 invalid_entry_data,
+                recovered_entry_options,
                 reserved_entry,
             )
             recovered_entry = invalid_hass.config_entries.async_get_entry(invalid_entry_id)
@@ -1485,6 +1495,214 @@ async def async_run_check() -> None:
             )
         finally:
             await recovered_removal_hass.async_stop()
+
+        invalid_options_hass = await async_start_empty_home_assistant(config_directory)
+        invalid_options_entry_id: str | None = None
+        invalid_options_data: dict[str, str] | None = None
+        invalid_options_safe_options: dict[str, Any] | None = None
+        invalid_options_entity_ids: frozenset[str] | None = None
+        invalid_options = {"mode": "proxy"}
+        try:
+            assert_hasc_stays_removed_after_restart(
+                invalid_options_hass,
+                domain,
+                tuple(removed_entries),
+                reserved_entry,
+            )
+            invalid_options_entry = await async_create_safe_entry(
+                invalid_options_hass,
+                domain,
+                "read-only",
+            )
+            await async_update_safe_options(
+                invalid_options_hass,
+                invalid_options_entry,
+                "shadow",
+            )
+            invalid_options_entry_id = invalid_options_entry.entry_id
+            invalid_options_data = dict(invalid_options_entry.data)
+            invalid_options_safe_options = dict(invalid_options_entry.options)
+            invalid_options_entity_ids = frozenset(
+                entry.entity_id
+                for entry in entity_registry.async_entries_for_config_entry(
+                    entity_registry.async_get(invalid_options_hass),
+                    invalid_options_entry.entry_id,
+                )
+            )
+            assert_result(
+                len(invalid_options_entity_ids),
+                len(SUMMARY_SENSOR_KEYS),
+                "the temporary invalid-options HASC entry must start with nine count sensors",
+            )
+            await async_assert_safe_diagnostics(
+                invalid_options_hass,
+                domain,
+                invalid_options_entry,
+                "shadow",
+            )
+            assert_entry_has_only_summary_sensors(
+                invalid_options_hass,
+                domain,
+                invalid_options_entry.entry_id,
+                expected_entity_ids=invalid_options_entity_ids,
+            )
+            assert_local_summary_view(invalid_options_hass, domain)
+            invalid_options_reader_token = await async_create_test_read_only_access_token(
+                invalid_options_hass,
+                "HASC temporary invalid-options test user",
+            )
+            invalid_options_hass.config_entries.async_update_entry(
+                invalid_options_entry,
+                options=invalid_options,
+            )
+            await invalid_options_hass.async_block_till_done()
+            assert_result(
+                dict(invalid_options_entry.options),
+                invalid_options,
+                "the temporary invalid HASC options must persist",
+            )
+            reloaded_invalid_options_entry = await invalid_options_hass.config_entries.async_reload(
+                invalid_options_entry.entry_id
+            )
+            assert_result(
+                reloaded_invalid_options_entry,
+                False,
+                "an invalid saved HASC options entry must reject reload",
+            )
+            await invalid_options_hass.async_block_till_done()
+            if invalid_options_entry.state is config_entries.ConfigEntryState.LOADED:
+                raise RuntimeError("invalid saved HASC options must unload on reload")
+            await async_assert_local_summary_is_unavailable(
+                invalid_options_hass,
+                domain,
+                invalid_options_reader_token,
+                "invalid HASC options reload",
+            )
+        finally:
+            await invalid_options_hass.async_stop()
+
+        if (
+            invalid_options_entry_id is None
+            or invalid_options_data is None
+            or invalid_options_safe_options is None
+            or invalid_options_entity_ids is None
+        ):
+            raise RuntimeError("the lifecycle check must create its temporary invalid-options entry")
+        invalid_options_restarted_hass = await async_start_empty_home_assistant(
+            config_directory
+        )
+        try:
+            assert_persisted_unsafe_entry_stays_closed(
+                invalid_options_restarted_hass,
+                domain,
+                invalid_options_entry_id,
+                invalid_options_data,
+                invalid_options,
+                reserved_entry,
+            )
+            recovered_options_entry = invalid_options_restarted_hass.config_entries.async_get_entry(
+                invalid_options_entry_id
+            )
+            if recovered_options_entry is None:
+                raise RuntimeError("the temporary invalid HASC options entry must remain repairable")
+            invalid_options_restarted_hass.config_entries.async_update_entry(
+                recovered_options_entry,
+                options=invalid_options_safe_options,
+            )
+            await invalid_options_restarted_hass.async_block_till_done()
+            reloaded_recovered_options_entry = (
+                await invalid_options_restarted_hass.config_entries.async_reload(
+                    recovered_options_entry.entry_id
+                )
+            )
+            assert_result(
+                reloaded_recovered_options_entry,
+                True,
+                "manually corrected HASC options must reload successfully",
+            )
+            await invalid_options_restarted_hass.async_block_till_done()
+            assert_result(
+                dict(recovered_options_entry.data),
+                invalid_options_data,
+                "manual options correction must preserve approved entry data",
+            )
+            assert_result(
+                dict(recovered_options_entry.options),
+                invalid_options_safe_options,
+                "manual options correction must restore approved options",
+            )
+            assert_result(
+                recovered_options_entry.state,
+                config_entries.ConfigEntryState.LOADED,
+                "manually corrected HASC options must load safely",
+            )
+            await async_assert_safe_diagnostics(
+                invalid_options_restarted_hass,
+                domain,
+                recovered_options_entry,
+                "shadow",
+            )
+            assert_entry_has_only_summary_sensors(
+                invalid_options_restarted_hass,
+                domain,
+                recovered_options_entry.entry_id,
+                expected_entity_ids=invalid_options_entity_ids,
+            )
+            assert_local_summary_view(invalid_options_restarted_hass, domain)
+            await async_assert_authenticated_local_summary_http_access(
+                invalid_options_restarted_hass,
+                "HASC corrected-options temporary",
+            )
+            assert_reserved_collision_entry_is_unchanged(
+                invalid_options_restarted_hass,
+                reserved_entry,
+            )
+        finally:
+            await invalid_options_restarted_hass.async_stop()
+
+        recovered_options_hass = await async_start_empty_home_assistant(config_directory)
+        try:
+            recovered_options_entry = await async_assert_corrected_entry_stays_safe_after_restart(
+                recovered_options_hass,
+                domain,
+                invalid_options_entry_id,
+                invalid_options_data,
+                invalid_options_safe_options,
+                invalid_options_entity_ids,
+                reserved_entry,
+            )
+            options_recovery_removal_reader_token = await async_create_test_read_only_access_token(
+                recovered_options_hass,
+                "HASC corrected-options removal test user",
+            )
+            removed_entries.append(
+                await async_remove_safe_entry(
+                    recovered_options_hass,
+                    recovered_options_entry.entry_id,
+                )
+            )
+            await async_assert_local_summary_is_unavailable(
+                recovered_options_hass,
+                domain,
+                options_recovery_removal_reader_token,
+                "corrected HASC options removal",
+            )
+            assert_reserved_collision_entry_is_unchanged(recovered_options_hass, reserved_entry)
+        finally:
+            await recovered_options_hass.async_stop()
+
+        recovered_options_removal_hass = await async_start_empty_home_assistant(
+            config_directory
+        )
+        try:
+            assert_hasc_stays_removed_after_restart(
+                recovered_options_removal_hass,
+                domain,
+                tuple(removed_entries),
+                reserved_entry,
+            )
+        finally:
+            await recovered_options_removal_hass.async_stop()
 
 
 def main() -> None:

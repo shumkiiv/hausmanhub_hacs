@@ -80,6 +80,12 @@ Last updated: 2026-07-15.
   must restore the same nine count-sensor names, fixed diagnostics, and the
   authenticated GET-only page with no devices or services. Only then is the
   temporary HASC setup removed and checked through a final empty restart.
+- The same disposable lifecycle separately covers a bad saved mode choice in
+  HASC options. A temporary `proxy` choice rejects reload and remains closed
+  after restart; restoring the exact original safe choice must preserve the
+  same nine count-sensor names, safe diagnostics, and GET-only page through its
+  own empty restart before removal. The check keeps no data beyond its
+  temporary fixtures.
 - Synthetic Common-contract fixtures, static validators, synthetic shadow
   evidence, and redacted diagnostics/repairs fixtures are present. They use
   Python's standard library and local JSON only.
@@ -340,6 +346,11 @@ Last updated: 2026-07-15.
   nine-count sensor names, fixed diagnostics, GET-only local page, collision
   preservation, and clean removal. See the [corrected-settings recovery review
   note](LLM_WIKI/Manual/2026-07-15-kimi-corrected-settings-recovery-review.md).
+- Kimi reviewed the bad saved mode-option lifecycle with no findings. It
+  confirmed option persistence, Core compatibility, the exact nine-count
+  boundary, collision preservation, GET-only local access, and final cleanup.
+  See the [invalid-options review
+  note](LLM_WIKI/Manual/2026-07-15-kimi-invalid-persisted-options-review.md).
 - The old private-first skeleton decision is now clearly marked historical and
   points to the current public manual-HACS decision. Kimi first asked for a
   less brittle document guard; after that correction, its final review found no
