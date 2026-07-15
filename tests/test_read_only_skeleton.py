@@ -363,6 +363,21 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         self.assertIn("HASC removal must keep the external collision fixture", core_check_source)
         self.assertIn("HASC removal must not change the external collision fixture", core_check_source)
 
+    def test_core_smoke_check_can_reinstall_after_collision_cleanup(self) -> None:
+        """A clean removal must not block the next safe HASC setup."""
+
+        core_check_source = (ROOT / "tools" / "check_home_assistant_core.py").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("reinstalled_entry = await async_create_safe_entry(", core_check_source)
+        self.assertIn('"read-only",', core_check_source)
+        self.assertIn("reinstalled_entry.entry_id", core_check_source)
+        self.assertIn(
+            "await async_remove_safe_entry(restarted_hass, reinstalled_entry.entry_id)",
+            core_check_source,
+        )
+
     def test_home_summary_rejects_impossible_totals(self) -> None:
         """Bad aggregate data cannot reach diagnostics silently."""
 

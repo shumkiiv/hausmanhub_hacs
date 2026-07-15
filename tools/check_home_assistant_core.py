@@ -806,6 +806,26 @@ async def async_run_check() -> None:
             )
             await async_remove_safe_entry(restarted_hass, shadow_entry.entry_id)
             assert_reserved_collision_entry_is_unchanged(restarted_hass, reserved_entry)
+
+            reinstalled_entry = await async_create_safe_entry(
+                restarted_hass,
+                domain,
+                "read-only",
+            )
+            assert_entry_has_only_summary_sensors(
+                restarted_hass,
+                domain,
+                reinstalled_entry.entry_id,
+                expected_entity_ids=None,
+            )
+            assert_reserved_name_does_not_block_hasc(
+                restarted_hass,
+                reinstalled_entry.entry_id,
+                reserved_entry,
+            )
+            assert_reserved_collision_entry_is_unchanged(restarted_hass, reserved_entry)
+            await async_remove_safe_entry(restarted_hass, reinstalled_entry.entry_id)
+            assert_reserved_collision_entry_is_unchanged(restarted_hass, reserved_entry)
         finally:
             await restarted_hass.async_stop()
 

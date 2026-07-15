@@ -104,7 +104,10 @@ safe setup. HASC must still create all nine count sensors under distinct,
 HASC-prefixed names. This protects a new installation from being blocked by a
 name that was already in use, without reading a real home. After HASC is
 removed, that same temporary external record must still exist unchanged. This
-proves that cleanup removes only HASC's own records.
+proves that cleanup removes only HASC's own records. The same empty system then
+installs HASC again and requires the same nine count sensors while keeping the
+external record unchanged. It removes that second setup too and checks the
+external record once more.
 
 For a manual check of an installed copy, see the Russian
 [safe-check guide](home-assistant-safe-check.md). It asks only for Home

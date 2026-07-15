@@ -30,10 +30,12 @@ Last updated: 2026-07-15.
   configuration, then proves that a new HASC setup keeps all nine count
   sensors, does not overwrite the occupied name, and leaves the other eight
   protected names unchanged. After HASC is removed, that temporary external
-  record must still be unchanged. The same isolated check requires no HASC
-  device record and requires each of the nine HASC sensors to remain unattached
-  to a device. It also requires Home Assistant to refuse a second HASC setup
-  while keeping the existing setup unchanged and limited to its nine sensors.
+  record must still be unchanged. The same isolated check then creates and
+  removes HASC once more, requiring the same nine sensors and the unchanged
+  external record again. It requires no HASC device record and requires each of
+  the nine HASC sensors to remain unattached to a device. It also requires Home
+  Assistant to refuse a second HASC setup while keeping the existing setup
+  unchanged and limited to its nine sensors.
 - Synthetic Common-contract fixtures, static validators, synthetic shadow
   evidence, and redacted diagnostics/repairs fixtures are present. They use
   Python's standard library and local JSON only.
@@ -233,6 +235,11 @@ Last updated: 2026-07-15.
   confirmed that after HASC removal, the temporary external entry still has the
   same identity and no HASC or device ownership. See the [external-cleanup
   review note](LLM_WIKI/Manual/2026-07-15-kimi-external-collision-cleanup-review.md).
+- Kimi reviewed the isolated repeat-install check with no findings. It
+  confirmed that the second safe setup creates the same nine count sensors,
+  keeps the external entry unchanged, and removes cleanly. See the
+  [repeat-install review
+  note](LLM_WIKI/Manual/2026-07-15-kimi-repeat-install-after-cleanup-review.md).
 - The old private-first skeleton decision is now clearly marked historical and
   points to the current public manual-HACS decision. Kimi first asked for a
   less brittle document guard; after that correction, its final review found no
@@ -253,11 +260,12 @@ requires the old names to survive while a new entry receives the protected
 v0.3.1 names. Before that new entry, the check reserves one protected-looking
 name only in the disposable registry and requires the occupied name to remain
 external while all nine HASC sensors still appear. After HASC removal, it
-requires that external record to remain unchanged. It proves neither live-home
-behaviour nor execution authority. It also requires no HASC device registry
-entry and no device attachment for each HASC sensor. It also tries a second
-safe setup and requires Home Assistant to refuse it while preserving the
-original nine-sensor setup.
+requires that external record to remain unchanged. It then creates and removes
+another safe HASC setup, requiring its nine sensors and the same external
+record again. It proves neither live-home behaviour nor execution authority. It
+also requires no HASC device registry entry and no device attachment for each
+HASC sensor. It also tries a second safe setup and requires Home Assistant to
+refuse it while preserving the original nine-sensor setup.
 
 Separately, direct local Codex observation passed a harmless availability
 check, a version-only check, and a count-only current-state check on
