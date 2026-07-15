@@ -80,8 +80,9 @@ Last updated: 2026-07-15.
   must restore the same nine count-sensor names, fixed diagnostics, and the
   authenticated GET-only page with no devices or services. Only then is the
   temporary HASC setup removed and checked through a final empty restart.
-- The same disposable lifecycle separately covers a bad saved mode choice in
-  HASC options. A temporary `proxy` choice rejects reload and remains closed
+- The same disposable lifecycle separately covers two bad saved mode choices
+  in HASC options: a temporary `proxy` choice and an otherwise safe `shadow`
+  choice with one extra synthetic field. Each rejects reload and remains closed
   after restart; restoring the exact original safe choice must preserve the
   same nine count-sensor names, safe diagnostics, and GET-only page through its
   own empty restart before removal. The check keeps no data beyond its
@@ -351,6 +352,12 @@ Last updated: 2026-07-15.
   boundary, collision preservation, GET-only local access, and final cleanup.
   See the [invalid-options review
   note](LLM_WIKI/Manual/2026-07-15-kimi-invalid-persisted-options-review.md).
+- Kimi reviewed the shared lifecycle for both an unsafe saved mode and a
+  safe-looking mode with an extra field, with no findings. It confirmed the
+  exact settings shape closes HASC through reload and restart, and that only the
+  original safe choice restores the same nine counts before cleanup. See the
+  [extra-option review
+  note](LLM_WIKI/Manual/2026-07-15-kimi-extra-saved-option-review.md).
 - The old private-first skeleton decision is now clearly marked historical and
   points to the current public manual-HACS decision. Kimi first asked for a
   less brittle document guard; after that correction, its final review found no

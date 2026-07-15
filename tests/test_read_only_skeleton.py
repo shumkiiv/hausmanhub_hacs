@@ -576,41 +576,50 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         )
 
     def test_core_smoke_check_closes_and_recovers_invalid_saved_options(self) -> None:
-        """A bad saved mode choice must close, then recover only when corrected."""
+        """Every bad saved mode choice must close, then recover only when corrected."""
 
         core_check_source = (ROOT / "tools" / "check_home_assistant_core.py").read_text(
             encoding="utf-8"
         )
         lifecycle_source = core_check_source.split("async def async_run_check()", 1)[1]
 
-        self.assertIn('invalid_options = {"mode": "proxy"}', lifecycle_source)
-        self.assertIn("invalid_options_safe_options", lifecycle_source)
-        self.assertIn("invalid_options_entity_ids", lifecycle_source)
+        self.assertIn("async_assert_invalid_saved_options_lifecycle", core_check_source)
+        self.assertIn('UNSAFE_PROXY_OPTIONS = {"mode": "proxy"}', core_check_source)
+        self.assertIn("UNSAFE_EXTRA_FIELD_OPTIONS", core_check_source)
+        self.assertIn('"mode": "shadow",', core_check_source)
+        self.assertIn('"unmodelled": "outside_contract",', core_check_source)
+        self.assertEqual(
+            2,
+            lifecycle_source.count("async_assert_invalid_saved_options_lifecycle("),
+        )
+        self.assertIn("UNSAFE_PROXY_OPTIONS", lifecycle_source)
+        self.assertIn("UNSAFE_EXTRA_FIELD_OPTIONS", lifecycle_source)
+        self.assertIn('"invalid-mode options",', lifecycle_source)
+        self.assertIn('"extra-field options",', lifecycle_source)
+        self.assertIn("invalid_options_safe_options", core_check_source)
+        self.assertIn("invalid_options_entity_ids", core_check_source)
         self.assertIn(
-            "an invalid saved HASC options entry must reject reload",
-            lifecycle_source,
+            "an unsafe saved HASC options entry must reject reload",
+            core_check_source,
         )
         self.assertIn(
             "manually corrected HASC options must reload successfully",
-            lifecycle_source,
+            core_check_source,
         )
         self.assertIn(
             "restart must preserve the temporary invalid entry options",
             core_check_source,
         )
-        self.assertIn("HASC corrected-options temporary", lifecycle_source)
-        self.assertIn("corrected HASC options removal", lifecycle_source)
+        self.assertIn("HASC corrected {scenario_name} temporary", core_check_source)
+        self.assertIn("corrected HASC options removal", core_check_source)
+        self.assertIn("(*previous_removed_entries, removed_entry)", core_check_source)
         self.assertLess(
-            lifecycle_source.index("invalid_options_hass = await async_start_empty_home_assistant"),
-            lifecycle_source.index("invalid_options_restarted_hass ="),
+            lifecycle_source.index("UNSAFE_PROXY_OPTIONS"),
+            lifecycle_source.index("UNSAFE_EXTRA_FIELD_OPTIONS"),
         )
         self.assertLess(
-            lifecycle_source.index("invalid_options_restarted_hass ="),
-            lifecycle_source.index("recovered_options_hass ="),
-        )
-        self.assertLess(
-            lifecycle_source.index("recovered_options_hass ="),
-            lifecycle_source.index("recovered_options_removal_hass ="),
+            core_check_source.index("invalid_options_hass = await async_start_empty_home_assistant"),
+            core_check_source.index("invalid_options_restarted_hass ="),
         )
 
     def test_core_smoke_check_removes_state_values_after_removal(self) -> None:
