@@ -132,13 +132,14 @@ of the nine counts. The nine temporary count states must also be absent.
 Whenever a safe setup is active, the empty check also requires exactly one
 such page. This covers the repeated activation, deactivation, removal, and
 reinstallation cycle, so the page cannot quietly accumulate copies.
-The same empty check also saves three deliberately invalid main settings in
+The same empty check also saves four deliberately invalid main settings in
 its temporary HASC setup, then restarts: an unsafe mode, a broken marker that
-would otherwise claim execution is allowed, and an otherwise safe setting with
-one extra synthetic field. HASC must refuse to load every case: no runtime
-data, count state, stale HASC records, device, service, or local page may
-return. Fast tests also reject further representative extra fields in either
-part of the settings.
+would otherwise claim execution is allowed, a setting with the required
+execution block missing, and an otherwise safe setting with one extra
+synthetic field. HASC must refuse to load every case: no runtime data, count
+state, stale HASC records, device, service, or local page may return. Fast
+tests also reject further representative extra fields in either part of the
+settings.
 The same temporary check also proves that an explicit reload of each bad setup
 closes the page immediately. These checks do not use a real Home Assistant
 configuration.

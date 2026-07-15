@@ -78,6 +78,7 @@ UNSAFE_ALLOWED_DIRECT_EXECUTION_DATA = {
     "mode": "read-only",
     "direct_execution_status": "allowed",
 }
+UNSAFE_MISSING_DIRECT_EXECUTION_DATA = {"mode": "read-only"}
 UNSAFE_EXTRA_FIELD_DATA = {
     "mode": "read-only",
     "direct_execution_status": "direct_execution_blocked",
@@ -1813,6 +1814,16 @@ async def async_run_check() -> None:
                 reserved_entry,
                 UNSAFE_ALLOWED_DIRECT_EXECUTION_DATA,
                 "unblocked-execution data",
+            )
+        )
+        removed_entries.append(
+            await async_assert_invalid_saved_data_lifecycle(
+                config_directory,
+                domain,
+                tuple(removed_entries),
+                reserved_entry,
+                UNSAFE_MISSING_DIRECT_EXECUTION_DATA,
+                "missing-execution-block data",
             )
         )
         removed_entries.append(
