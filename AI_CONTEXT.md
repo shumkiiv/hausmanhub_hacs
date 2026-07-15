@@ -128,6 +128,12 @@ Last updated: 2026-07-16.
   final `read-only` choice. Kimi found no remaining issue in the final review;
   see the [safe mode cycle review
   note](LLM_WIKI/Manual/2026-07-16-kimi-safe-mode-cycle-review.md).
+- The disposable Core lifecycle also saves `shadow` while HASC is ordinarily
+  stopped but still user-enabled. That save must neither reload HASC nor read
+  a home summary, and its nine values, diagnostics, and local page stay
+  closed. Only an explicit start restores the same nine sensors and safe
+  `shadow` diagnostics. Kimi found no issue; see the [stopped safe-options
+  review note](LLM_WIKI/Manual/2026-07-16-kimi-stopped-safe-options-review.md).
 - Kimi independently reviewed the automatic saved-setting reload and closure.
   Its first review requested an explicit no-read check during the closing
   interval; the follow-up review found no remaining issues. See the

@@ -475,6 +475,93 @@ async def async_update_safe_options(
     )
 
 
+async def async_update_stopped_safe_options_without_reading_home(
+    hass: HomeAssistant,
+    domain: str,
+    entry: ConfigEntry,
+    target_mode: str,
+) -> None:
+    """Save an allowed mode while stopped without restarting or reading the home."""
+
+    assert_result(
+        entry.state,
+        config_entries.ConfigEntryState.NOT_LOADED,
+        "stopped safe options must begin with HASC not loaded",
+    )
+    integration = await loader.async_get_integration(hass, domain)
+    adapters = (
+        await integration.async_get_platform("sensor"),
+        await integration.async_get_platform("diagnostics"),
+        await integration.async_get_platform("local_summary"),
+    )
+    original_collectors = tuple(
+        (adapter, adapter.collect_home_summary) for adapter in adapters
+    )
+    reload_calls: list[str] = []
+    original_async_reload = hass.config_entries.async_reload
+
+    def fail_if_home_is_read(*_: object, **__: object) -> object:
+        raise RuntimeError("stopped safe options must not read the home")
+
+    async def async_recording_reload(entry_id: str) -> bool:
+        """Record any unexpected attempt to restart HASC while it is stopped."""
+
+        reload_calls.append(entry_id)
+        return await original_async_reload(entry_id)
+
+    for adapter, _ in original_collectors:
+        adapter.collect_home_summary = fail_if_home_is_read
+    hass.config_entries.async_reload = async_recording_reload
+    try:
+        options_form = await hass.config_entries.options.async_init(entry.entry_id)
+        assert_result(options_form["type"], "form", "stopped options must show a form")
+        safe_options = await hass.config_entries.options.async_configure(
+            options_form["flow_id"],
+            {"mode": target_mode},
+        )
+        await hass.async_block_till_done()
+    finally:
+        hass.config_entries.async_reload = original_async_reload
+        for adapter, original_collect_home_summary in original_collectors:
+            adapter.collect_home_summary = original_collect_home_summary
+
+    assert_result(
+        safe_options["type"],
+        "create_entry",
+        f"stopped HASC must accept {target_mode} options",
+    )
+    assert_result(
+        entry.options.get("mode"),
+        target_mode,
+        "stopped safe options must preserve the selected mode",
+    )
+    assert_result(
+        dict(entry.options),
+        {"mode": target_mode},
+        "stopped safe options must keep the exact safe option shape",
+    )
+    assert_result(
+        entry.data["direct_execution_status"],
+        "direct_execution_blocked",
+        "stopped safe options must keep direct execution blocked",
+    )
+    assert_result(
+        entry.disabled_by,
+        None,
+        "stopped safe options must keep HASC user-enabled",
+    )
+    assert_result(
+        reload_calls,
+        [],
+        "stopped safe options must not reload HASC",
+    )
+    assert_result(
+        entry.state,
+        config_entries.ConfigEntryState.NOT_LOADED,
+        "stopped safe options must leave HASC not loaded",
+    )
+
+
 async def async_assert_broken_options_form_defaults_to_read_only(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -2330,7 +2417,7 @@ async def async_run_check() -> None:
             )
 
             ordinary_unload_data = dict(read_only_entry.data)
-            ordinary_unload_options = dict(read_only_entry.options)
+            ordinary_unload_options_before_save = dict(read_only_entry.options)
             ordinary_unload_reader_token = await async_create_test_read_only_access_token(
                 hass,
                 "HASC temporary ordinary-unload test user",
@@ -2343,7 +2430,7 @@ async def async_run_check() -> None:
             )
             assert_result(
                 read_only_entry.options,
-                ordinary_unload_options,
+                ordinary_unload_options_before_save,
                 "ordinary unload must not mutate safe entry options",
             )
             assert_entry_has_unloaded_summary_sensors(
@@ -2364,13 +2451,43 @@ async def async_run_check() -> None:
                 ordinary_unload_reader_token,
                 "HASC ordinary unload",
             )
+            await async_update_stopped_safe_options_without_reading_home(
+                hass,
+                domain,
+                read_only_entry,
+                "shadow",
+            )
+            assert_result(
+                read_only_entry.data,
+                ordinary_unload_data,
+                "stopped safe options must not mutate safe entry data",
+            )
+            assert_entry_has_unloaded_summary_sensors(
+                hass,
+                domain,
+                read_only_entry.entry_id,
+                LEGACY_SUMMARY_SENSOR_ENTITY_IDS,
+            )
+            await async_assert_closed_diagnostics(
+                hass,
+                domain,
+                read_only_entry,
+                "saving safe options while HASC is stopped",
+            )
+            await async_assert_local_summary_is_unavailable(
+                hass,
+                domain,
+                ordinary_unload_reader_token,
+                "saving safe options while HASC is stopped",
+            )
             await async_assert_stale_local_summary_pointer_is_unavailable_without_reading(
                 hass,
                 domain,
                 read_only_entry,
                 ordinary_unload_reader_token,
-                "HASC ordinary unload with a stale local-summary pointer",
+                "saving safe options while HASC is stopped with a stale local-summary pointer",
             )
+            ordinary_unload_options = dict(read_only_entry.options)
             await async_setup_safe_entry(hass, read_only_entry)
             assert_result(
                 read_only_entry.data,
@@ -2388,7 +2505,7 @@ async def async_run_check() -> None:
                 read_only_entry.entry_id,
                 LEGACY_SUMMARY_SENSOR_ENTITY_IDS,
             )
-            await async_assert_safe_diagnostics(hass, domain, read_only_entry, "read-only")
+            await async_assert_safe_diagnostics(hass, domain, read_only_entry, "shadow")
             assert_local_summary_view(hass, domain)
             await async_assert_authenticated_local_summary_http_access(
                 hass,
@@ -2425,7 +2542,7 @@ async def async_run_check() -> None:
                 read_only_entry.entry_id,
                 LEGACY_SUMMARY_SENSOR_ENTITY_IDS,
             )
-            await async_assert_safe_diagnostics(hass, domain, read_only_entry, "read-only")
+            await async_assert_safe_diagnostics(hass, domain, read_only_entry, "shadow")
             assert_local_summary_view(hass, domain)
             await async_assert_authenticated_local_summary_http_access(
                 hass,
@@ -2504,7 +2621,7 @@ async def async_run_check() -> None:
                 restarted_hass,
                 domain,
                 restored_entry,
-                "read-only",
+                "shadow",
             )
             assert_local_summary_view(restarted_hass, domain)
             assert_entry_has_only_summary_sensors(
