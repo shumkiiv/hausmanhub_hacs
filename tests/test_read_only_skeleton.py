@@ -428,6 +428,35 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             lifecycle_source.index("await async_enable_safe_entry(hass, read_only_entry)"),
         )
 
+    def test_core_smoke_check_removes_a_deactivated_hasc_setup(self) -> None:
+        """Deleting a disabled HASC setup must still clear its own records."""
+
+        core_check_source = (ROOT / "tools" / "check_home_assistant_core.py").read_text(
+            encoding="utf-8"
+        )
+        lifecycle_source = core_check_source.split("async def async_run_check()", 1)[1]
+
+        self.assertIn(
+            "await async_disable_safe_entry(restarted_hass, reinstalled_entry)",
+            lifecycle_source,
+        )
+        self.assertIn(
+            "reinstalled_entry.entry_id,\n                expected_entity_ids=None,",
+            lifecycle_source,
+        )
+        self.assertLess(
+            lifecycle_source.index(
+                "await async_disable_safe_entry(restarted_hass, reinstalled_entry)"
+            ),
+            lifecycle_source.index(
+                "await async_remove_safe_entry(restarted_hass, reinstalled_entry.entry_id)"
+            ),
+        )
+        self.assertGreaterEqual(
+            lifecycle_source.count('"HASC deactivation",'),
+            2,
+        )
+
     def test_core_smoke_check_removes_state_values_after_removal(self) -> None:
         """A removed HASC entry must not leave count values in the state machine."""
 

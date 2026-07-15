@@ -56,6 +56,10 @@ Last updated: 2026-07-15.
   unavailable response with no count keys. Reactivation must restore the same
   nine enabled count sensors, safe diagnostics, and authenticated GET-only
   page, still with no device, service, proxy, or execution capability.
+- One later temporary reinstallation is deliberately deactivated before it is
+  removed. Its nine HASC registry records, temporary states, and guarded local
+  page must then be cleared, while the unrelated temporary external record is
+  preserved through the following empty restart.
 - Synthetic Common-contract fixtures, static validators, synthetic shadow
   evidence, and redacted diagnostics/repairs fixtures are present. They use
   Python's standard library and local JSON only.
@@ -291,6 +295,11 @@ Last updated: 2026-07-15.
   count entries disabled and closes the guarded page, while reactivation
   restores only the same safe observation surface. See the [deactivation
   review note](LLM_WIKI/Manual/2026-07-15-kimi-deactivation-reactivation-review.md).
+- Kimi reviewed the removal of a deactivated temporary HASC setup with no
+  findings. It confirmed that the test closes the page before removal, clears
+  only HASC's own temporary records, and preserves the unrelated external
+  record. See the [deactivated-removal review
+  note](LLM_WIKI/Manual/2026-07-15-kimi-deactivated-removal-review.md).
 - The old private-first skeleton decision is now clearly marked historical and
   points to the current public manual-HACS decision. Kimi first asked for a
   less brittle document guard; after that correction, its final review found no
@@ -340,6 +349,11 @@ local route must return only an unavailable response without count keys. After
 reactivation, it must restore the same nine enabled count sensors, safe
 diagnostics, and the authenticated GET-only route without any device, service,
 proxy, or execution capability.
+
+One later temporary reinstallation is deactivated before removal. The check
+then requires removal to clear its nine HASC records, temporary states, and
+guarded page, while preserving the unrelated temporary external record through
+the next empty restart.
 
 Separately, direct local Codex observation passed a harmless availability
 check, a version-only check, and a count-only current-state check on

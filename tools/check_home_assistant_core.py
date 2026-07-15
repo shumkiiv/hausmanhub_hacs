@@ -1076,6 +1076,20 @@ async def async_run_check() -> None:
                 reserved_entry,
             )
             assert_reserved_collision_entry_is_unchanged(restarted_hass, reserved_entry)
+            await async_disable_safe_entry(restarted_hass, reinstalled_entry)
+            assert_entry_has_disabled_summary_sensors(
+                restarted_hass,
+                domain,
+                reinstalled_entry.entry_id,
+                expected_entity_ids=None,
+            )
+            await async_assert_local_summary_is_unavailable(
+                restarted_hass,
+                domain,
+                removal_reader_token,
+                "HASC deactivation",
+            )
+            assert_reserved_collision_entry_is_unchanged(restarted_hass, reserved_entry)
             removed_entries.append(
                 await async_remove_safe_entry(restarted_hass, reinstalled_entry.entry_id)
             )

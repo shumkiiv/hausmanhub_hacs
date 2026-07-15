@@ -114,8 +114,10 @@ name that was already in use, without reading a real home. After HASC is
 removed, that same temporary external record must still exist unchanged. This
 proves that cleanup removes only HASC's own records. The same empty system then
 installs HASC again and requires the same nine count sensors while keeping the
-external record unchanged. It removes that second setup too and checks the
-external record once more.
+external record unchanged. It deactivates that second setup before removing it
+and then requires the nine HASC records, temporary states, and local page to be
+cleared while the external record remains unchanged. This confirms that a user
+can remove a deactivated HASC setup without leaving its own data behind.
 
 The local nine-count page remains registered so a later safe setup can reuse
 it without creating a duplicate. After each removal, however, an authenticated
