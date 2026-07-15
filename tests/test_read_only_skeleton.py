@@ -51,7 +51,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         self.assertEqual("hausman_hub", manifest["domain"])
         self.assertTrue(manifest["config_flow"])
         self.assertTrue(manifest["single_config_entry"])
-        self.assertEqual("0.3.8", manifest["version"])
+        self.assertEqual("0.3.9", manifest["version"])
 
     def test_current_manifest_version_has_a_plain_change_note(self) -> None:
         manifest = json.loads((INTEGRATION / "manifest.json").read_text(encoding="utf-8"))
@@ -281,6 +281,26 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             diagnostics_source.index("collect_home_summary("),
         )
 
+    def test_local_summary_checks_configuration_before_requesting_the_home(self) -> None:
+        """An unsafe saved entry must prevent even the aggregate read."""
+
+        application_source = (INTEGRATION / "application" / "local_summary.py").read_text(
+            encoding="utf-8"
+        )
+        local_adapter_source = (INTEGRATION / "local_summary.py").read_text(
+            encoding="utf-8"
+        )
+        snapshot_source = application_source.split("def local_summary_snapshot", 1)[1].split(
+            "def home_summary_payload", 1
+        )[0]
+
+        self.assertIn("home_summary_supplier", snapshot_source)
+        self.assertLess(
+            snapshot_source.index("effective_configuration("),
+            snapshot_source.index("home_summary_supplier()"),
+        )
+        self.assertIn("lambda: collect_home_summary", local_adapter_source)
+
     def test_home_summary_contains_totals_but_no_names_or_identifiers(self) -> None:
         """The application layer must receive and export counts only."""
 
@@ -314,7 +334,11 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         """The local view use case must not expand the diagnostics shape."""
 
         summary = self.home_summary()
-        payload = local_summary_snapshot(create_initial_entry("read-only"), {}, summary)
+        payload = local_summary_snapshot(
+            create_initial_entry("read-only"),
+            {},
+            lambda: summary,
+        )
 
         self.assertEqual(
             {
@@ -330,6 +354,13 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             },
             set(payload),
         )
+        home_read_attempted = False
+
+        def fail_if_home_is_read() -> object:
+            nonlocal home_read_attempted
+            home_read_attempted = True
+            raise AssertionError("an unsafe local summary must not read the home")
+
         with self.assertRaises(ConfigurationViolation):
             local_summary_snapshot(
                 {
@@ -337,8 +368,9 @@ class ReadOnlySkeletonTest(unittest.TestCase):
                     DIRECT_EXECUTION_STATUS_FIELD: "not_blocked",
                 },
                 {},
-                summary,
+                fail_if_home_is_read,
             )
+        self.assertFalse(home_read_attempted)
 
     def test_home_summary_display_has_exactly_the_same_nine_numbers(self) -> None:
         """The visible display cannot add data beyond the approved summary."""
@@ -840,6 +872,18 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         )
         self.assertIn(
             'f"{scenario_name} saved options",',
+            core_check_source,
+        )
+        self.assertIn(
+            "async_assert_unsafe_local_summary_is_unavailable_without_reading",
+            core_check_source,
+        )
+        self.assertIn(
+            "saving unsafe HASC data must not unload before an explicit reload",
+            core_check_source,
+        )
+        self.assertIn(
+            "saving unsafe HASC options must not unload before an explicit reload",
             core_check_source,
         )
         self.assertIn("corrected HASC data removal", core_check_source)

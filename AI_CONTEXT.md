@@ -85,12 +85,21 @@ Last updated: 2026-07-15.
   reload. At that point the entry is still loaded but unsafe, so all five main
   variants and both mode-choice variants must return only unavailable without
   reading the local home summary.
+- Version 0.3.9 gives the same before-reload protection to the authenticated
+  local summary page. Its application boundary validates saved data and options
+  before it asks for the nine counts. A loaded but unsafe entry therefore
+  returns only unavailable without reading the local home summary; the
+  disposable Core check covers the same five main-settings and two mode-choice
+  variants with a reader that fails if called.
 - Kimi independently reviewed the closed diagnostics change with no findings.
   See the [closed diagnostics review
   note](LLM_WIKI/Manual/2026-07-15-kimi-closed-diagnostics-review.md).
 - Kimi independently reviewed this before-reload diagnostics closure with no
   findings. See the [invalid saved-settings diagnostics review
   note](LLM_WIKI/Manual/2026-07-15-kimi-invalid-settings-diagnostics-review.md).
+- Kimi independently reviewed the local summary before-reload closure with no
+  findings. See the [local summary unsafe-settings review
+  note](LLM_WIKI/Manual/2026-07-15-kimi-local-summary-unsafe-settings-review.md).
 - Kimi independently reviewed the final live and restart duplicate-entry
   closure with no findings. See the [live duplicate fail-closed review
   note](LLM_WIKI/Manual/2026-07-15-kimi-live-duplicate-fail-closed-review.md).

@@ -1293,6 +1293,59 @@ async def async_assert_local_summary_is_unavailable(
         await client.close()
 
 
+async def async_assert_unsafe_local_summary_is_unavailable_without_reading(
+    hass: HomeAssistant,
+    domain: str,
+    entry: ConfigEntry,
+    reader_token: str,
+    unavailable_after: str,
+) -> None:
+    """Require a loaded but unsafe entry to close before reading the home."""
+
+    runtime = hass.data.get(domain)
+    if not isinstance(runtime, dict):
+        raise RuntimeError("the retained local summary route must keep its runtime data")
+    if runtime.get(LOCAL_SUMMARY_ACTIVE_ENTRY) is not entry:
+        raise RuntimeError(f"{unavailable_after} must retain the unsafe local summary entry")
+    assert_result(
+        entry.state,
+        config_entries.ConfigEntryState.LOADED,
+        f"{unavailable_after} must keep the unsafe HASC entry loaded before reload",
+    )
+    if len(find_local_summary_routes(hass)) != 1:
+        raise RuntimeError("the retained local summary route must remain unique")
+
+    integration = await loader.async_get_integration(hass, domain)
+    local_summary_platform = await integration.async_get_platform("local_summary")
+    original_collect_home_summary = local_summary_platform.collect_home_summary
+
+    def fail_if_home_is_read(*_: object, **__: object) -> object:
+        raise RuntimeError("an unsafe local summary must not read the home")
+
+    local_summary_platform.collect_home_summary = fail_if_home_is_read
+    server = TestServer(hass.http.app, host="127.0.0.1")
+    client = TestClient(server)
+    try:
+        await client.start_server()
+        unavailable = await client.get(
+            "/api/hausman_hub/local-summary",
+            headers={"Authorization": f"Bearer {reader_token}"},
+        )
+        assert_result(
+            unavailable.status,
+            HTTPStatus.SERVICE_UNAVAILABLE,
+            f"local summary must become unavailable after {unavailable_after}",
+        )
+        payload = await unavailable.json()
+        if not isinstance(payload, dict):
+            raise RuntimeError("unavailable local summary response must be a dictionary")
+        if set(payload) & set(SUMMARY_SENSOR_KEYS):
+            raise RuntimeError("unavailable local summary must not return count values")
+    finally:
+        local_summary_platform.collect_home_summary = original_collect_home_summary
+        await client.close()
+
+
 async def async_start_empty_home_assistant(config_directory: Path) -> HomeAssistant:
     """Start one disposable, empty Home Assistant configuration."""
 
@@ -1660,10 +1713,22 @@ async def async_assert_invalid_saved_data_lifecycle(
             saved_unsafe_data,
             "the temporary unsafe HASC data must persist",
         )
+        assert_result(
+            invalid_entry.state,
+            config_entries.ConfigEntryState.LOADED,
+            "saving unsafe HASC data must not unload before an explicit reload",
+        )
         await async_assert_closed_diagnostics(
             invalid_data_hass,
             domain,
             invalid_entry,
+            f"{scenario_name} saved main settings",
+        )
+        await async_assert_unsafe_local_summary_is_unavailable_without_reading(
+            invalid_data_hass,
+            domain,
+            invalid_entry,
+            invalid_reader_token,
             f"{scenario_name} saved main settings",
         )
         reloaded_invalid_entry = await invalid_data_hass.config_entries.async_reload(
@@ -1890,10 +1955,22 @@ async def async_assert_invalid_saved_options_lifecycle(
             saved_unsafe_options,
             "the temporary unsafe HASC options must persist",
         )
+        assert_result(
+            invalid_options_entry.state,
+            config_entries.ConfigEntryState.LOADED,
+            "saving unsafe HASC options must not unload before an explicit reload",
+        )
         await async_assert_closed_diagnostics(
             invalid_options_hass,
             domain,
             invalid_options_entry,
+            f"{scenario_name} saved options",
+        )
+        await async_assert_unsafe_local_summary_is_unavailable_without_reading(
+            invalid_options_hass,
+            domain,
+            invalid_options_entry,
+            invalid_options_reader_token,
             f"{scenario_name} saved options",
         )
         reloaded_invalid_options_entry = await invalid_options_hass.config_entries.async_reload(

@@ -430,6 +430,26 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
         self.assertEqual(503, unloaded_response.status)
 
+    def test_view_does_not_read_home_before_rejecting_an_unsafe_entry(self) -> None:
+        """A running view must reject unsafe saved data before the only home read."""
+
+        original_collect_home_summary = self.adapter.collect_home_summary
+
+        def fail_if_home_is_read(*_: object, **__: object) -> object:
+            raise AssertionError("an unsafe local summary must not read the home")
+
+        self.adapter.collect_home_summary = fail_if_home_is_read
+        try:
+            self.entry.data["direct_execution_status"] = "not_blocked"
+            response = asyncio.run(
+                self.view.get(FakeRequest("192.168.1.20", reader_user("system-read-only")))
+            )
+        finally:
+            self.adapter.collect_home_summary = original_collect_home_summary
+
+        self.assertEqual(503, response.status)
+        self.assertEqual({"message"}, set(response.payload))
+
     def test_view_fails_closed_if_a_second_saved_hasc_entry_appears(self) -> None:
         """The retained view must not leak counts during a corrupt live pair."""
 

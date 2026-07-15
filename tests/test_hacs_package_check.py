@@ -127,7 +127,8 @@ class HacsPackageCheckTest(unittest.TestCase):
             version_findings,
         )
 
-        manifest["version"] = "0.3.9"
+        missing_changelog_version = "999.999.999"
+        manifest["version"] = missing_changelog_version
         missing_note = replace_file(
             self.files,
             package.MANIFEST_PATH,
@@ -138,7 +139,7 @@ class HacsPackageCheckTest(unittest.TestCase):
             self.file_modes,
         )
         self.assertIn(
-            f"{package.CHANGELOG_PATH}: must describe manifest version 0.3.9",
+            f"{package.CHANGELOG_PATH}: must describe manifest version {missing_changelog_version}",
             note_findings,
         )
 

@@ -81,7 +81,7 @@ class LocalSummaryView(HomeAssistantView):
             summary = local_summary_snapshot(
                 entry.data,
                 entry.options,
-                collect_home_summary(self._hass, entry.entry_id),
+                lambda: collect_home_summary(self._hass, entry.entry_id),
             )
         except ConfigurationViolation:
             return self.json_message(

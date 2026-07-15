@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from ..domain.observation import HomeSummary
@@ -24,17 +24,17 @@ HOME_SUMMARY_COUNT_KEYS = (
 def local_summary_snapshot(
     entry_data: Mapping[str, Any],
     options: Mapping[str, Any],
-    home_summary: HomeSummary,
+    home_summary_supplier: Callable[[], HomeSummary],
 ) -> dict[str, int]:
-    """Return the fixed nine-count summary after rechecking safe configuration.
+    """Validate first, then request and return the fixed nine-count summary.
 
     This use case accepts no user, address, token, entity identifier, state
     value, or command. The outer Home Assistant adapter is responsible for
-    authentication and local-network checks before it supplies this summary.
+    authentication and local-network checks before it supplies the reader.
     """
 
     effective_configuration(entry_data, options)
-    return home_summary_payload(home_summary)
+    return home_summary_payload(home_summary_supplier())
 
 
 def home_summary_payload(home_summary: HomeSummary) -> dict[str, int]:
