@@ -1,6 +1,6 @@
 # HASC AI Context
 
-Last updated: 2026-07-15.
+Last updated: 2026-07-16.
 
 ## Project state
 
@@ -258,6 +258,12 @@ Last updated: 2026-07-15.
   origin check. It must have GET only, no outgoing connection, no token
   storage, no raw data, and no external or device-control capability. See the
   [local-access decision](LLM_WIKI/Manual/2026-07-14-local-read-only-access-decision.md).
+- The Russian guides now make clear that ordinary HASC counts and diagnostics
+  need no extra user. The optional local account belongs only to a viewer;
+  HASC never receives or stores its password, key, or Home Assistant
+  connection address, and only checks an incoming request origin momentarily.
+  Kimi reviewed that clarification with no findings. See the [local viewer
+  wording review](LLM_WIKI/Manual/2026-07-16-kimi-local-viewer-clarity-review.md).
 - On 2026-07-14, an owner-performed local v0.1.2 diagnostics check confirmed
   the exact nine-count shape and all required safe-mode markers. Its aggregate
   values and the diagnostics file were inspected only and were not copied into
