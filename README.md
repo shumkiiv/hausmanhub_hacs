@@ -58,6 +58,11 @@ If a change touches HASC itself or its HACS setup file, the same command also
 requires a higher integration version. This prevents an HACS-visible change
 from being published under an old version number.
 
+The same local command checks the prepared Git package needed for manual HACS
+installation: the approved metadata, integration entry files, translations,
+local icon, license, and release notes. It reads local Git data only and does
+not contact HACS or Home Assistant.
+
 Before publishing, run the local [repository safety check](docs/repository-safety-check.md).
 It looks only for accidentally added credentials and runtime files; it does
 not connect to the home.

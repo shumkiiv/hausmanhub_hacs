@@ -29,6 +29,7 @@ class LocalReleaseCheckTest(unittest.TestCase):
                 "shadow synthetic fixture",
                 "diagnostics synthetic fixture",
                 "staged release version",
+                "HACS installation package",
                 "published-file safety",
                 "staged-file safety",
             ),

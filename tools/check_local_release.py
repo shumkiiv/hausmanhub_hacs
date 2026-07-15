@@ -58,6 +58,7 @@ def local_checks(python_executable: str) -> tuple[Check, ...]:
             "staged release version",
             (python_executable, "tools/check_staged_release_version.py"),
         ),
+        ("HACS installation package", (python_executable, "tools/check_hacs_package.py")),
         ("published-file safety", (python_executable, "tools/check_repository_boundary.py")),
         (
             "staged-file safety",

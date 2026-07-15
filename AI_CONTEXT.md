@@ -251,6 +251,15 @@ Last updated: 2026-07-15.
   detects common runtime/backup file names and credential-shaped data, but is
   an additional guard rather than a substitute for a human check. It has no
   Home Assistant, Node-RED, device, or network access.
+- The local publication command also verifies the complete manual-HACS package
+  from Git-index blobs and modes: approved metadata and manifest, entry files,
+  both translations, the local icon, license, and release notes. It rejects a
+  missing or linked required file, unapproved metadata or manifest field, bad
+  JSON, mismatched translation shape, invalid icon, or missing version note.
+  It remains local-only and does not change the HASC runtime or home authority.
+- Kimi independently reviewed the local HACS-package check with no findings.
+  See the [HACS-package check review
+  note](LLM_WIKI/Manual/2026-07-15-kimi-hacs-package-check-review.md).
 - The supported baseline was lowered to Core 2026.6.4 after the isolated
   lifecycle check passed on that exact version. See the [2026.6.4 compatibility
   note](LLM_WIKI/Manual/2026-07-14-core-2026-6-4-compatibility.md).

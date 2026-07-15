@@ -32,11 +32,15 @@ python3 tools/check_local_release.py
 ```
 
 It runs the same fixed local checks below: tests, the three synthetic fixture
-checks, a local Git-only version check for HACS-visible changes, and the safety
-checks for published and prepared files. It does not start Home Assistant or
-contact a home. An automatic test locks down that command list: it must not
-contain a network address, Home Assistant, `curl`, or `wget`, and every named
-Python file must exist inside this repository.
+checks, a local Git-only version check for HACS-visible changes, a prepared
+HACS-package check, and the safety checks for published and prepared files.
+The package check makes sure the fixed installation surface is complete:
+metadata, the integration entry files, both translations, the local icon,
+license, release notes, and the approved manifest shape. It reads Git-index
+blobs and modes only. It does not start Home Assistant or contact a home. An
+automatic test locks down that command list: it must not contain a network
+address, Home Assistant, `curl`, or `wget`, and every named Python file must
+exist inside this repository.
 
 The individual commands remain available when one result needs closer review:
 
@@ -46,6 +50,7 @@ python3 tools/validate_fixture.py common fixtures/common_contract/valid_minimal.
 python3 tools/validate_fixture.py shadow fixtures/shadow_evidence/valid_unresolved.json
 python3 tools/validate_fixture.py diagnostics fixtures/diagnostics/valid_redacted.json
 python3 tools/check_staged_release_version.py
+python3 tools/check_hacs_package.py
 python3 tools/check_repository_boundary.py
 python3 tools/check_repository_boundary.py --staged
 ```
