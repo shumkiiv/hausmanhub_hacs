@@ -171,6 +171,13 @@ Last updated: 2026-07-16.
   damaged data stays for manual repair. Kimi found no issue; see the [unsafe
   direct-execution restart review
   note](LLM_WIKI/Manual/2026-07-16-kimi-unsafe-direct-execution-restart-review.md).
+- After that rejected activation, a separate temporary recovery check restores
+  the exact original safe data and explicitly reloads HASC. It returns only
+  the same nine safe counts, fixed diagnostics, and guarded local page with
+  direct execution blocked; it creates no service or device. The saved repair
+  itself cannot read the home or start HASC before the explicit reload. Kimi
+  found no issue; see the [unsafe direct-execution recovery review
+  note](LLM_WIKI/Manual/2026-07-16-kimi-unsafe-direct-execution-recovery-review.md).
 - Kimi independently reviewed the automatic saved-setting reload and closure.
   Its first review requested an explicit no-read check during the closing
   interval; the follow-up review found no remaining issues. See the

@@ -483,6 +483,107 @@ async def async_enable_unsafe_entry_without_reading_home(
     )
 
 
+async def async_repair_unsafe_entry_after_rejected_activation(
+    hass: HomeAssistant,
+    domain: str,
+    entry: ConfigEntry,
+    safe_data: dict[str, str],
+    safe_options: dict[str, Any],
+    expected_entity_ids: frozenset[str],
+    scenario_name: str,
+    *,
+    restore_main_data: bool,
+) -> str:
+    """Restore exact safe settings and explicitly start only safe HASC."""
+
+    assert_result(
+        entry.disabled_by,
+        None,
+        f"{scenario_name} must begin after the user's activation attempt",
+    )
+    assert_result(
+        entry.state,
+        config_entries.ConfigEntryState.SETUP_ERROR,
+        f"{scenario_name} must begin with the rejected setup error",
+    )
+    reload_calls: list[str] = []
+    original_async_reload = hass.config_entries.async_reload
+
+    async def async_recording_reload(entry_id: str) -> bool:
+        """Record the one reload requested after manual repair."""
+
+        reload_calls.append(entry_id)
+        return await original_async_reload(entry_id)
+
+    hass.config_entries.async_reload = async_recording_reload
+    try:
+        async with async_block_home_summary_reads(
+            hass,
+            domain,
+            f"{scenario_name} before explicit reload",
+        ):
+            if restore_main_data:
+                hass.config_entries.async_update_entry(entry, data=dict(safe_data))
+            else:
+                hass.config_entries.async_update_entry(entry, options=dict(safe_options))
+            await hass.async_block_till_done()
+        reloaded = await hass.config_entries.async_reload(entry.entry_id)
+        assert_result(reloaded, True, f"{scenario_name} must reload after manual repair")
+        await hass.async_block_till_done()
+    finally:
+        hass.config_entries.async_reload = original_async_reload
+
+    assert_result(
+        reload_calls,
+        [entry.entry_id],
+        f"{scenario_name} must reload HASC exactly once after manual repair",
+    )
+    assert_result(
+        dict(entry.data),
+        safe_data,
+        f"{scenario_name} must restore only the approved saved data",
+    )
+    assert_result(
+        dict(entry.options),
+        safe_options,
+        f"{scenario_name} must restore only the approved saved options",
+    )
+    assert_result(
+        entry.disabled_by,
+        None,
+        f"{scenario_name} must keep the user's activation choice",
+    )
+    assert_result(
+        entry.state,
+        config_entries.ConfigEntryState.LOADED,
+        f"{scenario_name} must load only after the exact safe repair",
+    )
+    assert_result(
+        entry.data["direct_execution_status"],
+        "direct_execution_blocked",
+        f"{scenario_name} must restore the direct execution block",
+    )
+    expected_mode = safe_options.get("mode", safe_data["mode"])
+    if not isinstance(expected_mode, str):
+        raise RuntimeError(f"{scenario_name} must restore a string safe mode")
+    await async_assert_safe_diagnostics(hass, domain, entry, expected_mode)
+    assert_entry_has_only_summary_sensors(
+        hass,
+        domain,
+        entry.entry_id,
+        expected_entity_ids=expected_entity_ids,
+    )
+    assert_local_summary_view(hass, domain)
+    await async_assert_authenticated_local_summary_http_access(
+        hass,
+        f"HASC repaired {scenario_name} temporary",
+    )
+    return await async_create_test_read_only_access_token(
+        hass,
+        f"HASC repaired {scenario_name} removal test user",
+    )
+
+
 async def async_update_safe_options(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -2439,6 +2540,7 @@ async def async_assert_user_deactivated_unsafe_settings_cannot_enable_lifecycle(
     unsafe_options: dict[str, str] | None = None,
     scenario_name: str,
     restart_before_activation: bool = False,
+    repair_after_rejected_activation: bool = False,
 ) -> RemovedHascEntry:
     """Prove manual activation cannot bypass one unsafe saved HASC setting."""
 
@@ -2615,6 +2717,21 @@ async def async_assert_user_deactivated_unsafe_settings_cannot_enable_lifecycle(
             f"user activation with {scenario_name}",
             expect_retained_local_summary_route=expect_retained_local_summary_route,
         )
+        if repair_after_rejected_activation:
+            activation_reader_token = (
+                await async_repair_unsafe_entry_after_rejected_activation(
+                    activation_hass,
+                    domain,
+                    activation_entry,
+                    safe_data,
+                    safe_options,
+                    unsafe_entry_entity_ids,
+                    scenario_name,
+                    restore_main_data=unsafe_data is not None,
+                )
+            )
+            expect_retained_local_summary_route = True
+            assert_reserved_collision_entry_is_unchanged(activation_hass, reserved_entry)
         removed_entry = await async_remove_safe_entry(
             activation_hass,
             activation_entry.entry_id,
@@ -3522,6 +3639,18 @@ async def async_run_check() -> None:
                 unsafe_data=UNSAFE_ALLOWED_DIRECT_EXECUTION_DATA,
                 scenario_name="unsafe direct-execution block after restart",
                 restart_before_activation=True,
+            )
+        )
+        removed_entries.append(
+            await async_assert_user_deactivated_unsafe_settings_cannot_enable_lifecycle(
+                config_directory,
+                domain,
+                tuple(removed_entries),
+                reserved_entry,
+                unsafe_data=UNSAFE_ALLOWED_DIRECT_EXECUTION_DATA,
+                scenario_name="unsafe direct-execution repair after restart",
+                restart_before_activation=True,
+                repair_after_rejected_activation=True,
             )
         )
         removed_entries.extend(

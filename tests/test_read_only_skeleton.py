@@ -1128,6 +1128,10 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         self.assertIn("unsafe_options: dict[str, str] | None = None", core_check_source)
         self.assertIn("restart_before_activation: bool = False", core_check_source)
         self.assertIn(
+            "repair_after_rejected_activation: bool = False",
+            core_check_source,
+        )
+        self.assertIn(
             "expect_retained_local_summary_route: bool = True",
             core_check_source,
         )
@@ -1137,8 +1141,20 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         )
         self.assertIn("must not restore HASC runtime data", core_check_source)
         self.assertIn("must not restore the local summary route", core_check_source)
+        self.assertIn(
+            "async_repair_unsafe_entry_after_rejected_activation",
+            core_check_source,
+        )
+        self.assertIn(
+            "must reload HASC exactly once after manual repair",
+            core_check_source,
+        )
+        self.assertIn(
+            "must restore the direct execution block",
+            core_check_source,
+        )
         self.assertEqual(
-            3,
+            4,
             lifecycle_source.count(
                 "async_assert_user_deactivated_unsafe_settings_cannot_enable_lifecycle("
             ),
@@ -1151,6 +1167,11 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             lifecycle_source,
         )
         self.assertIn("restart_before_activation=True", lifecycle_source)
+        self.assertIn(
+            'scenario_name="unsafe direct-execution repair after restart"',
+            lifecycle_source,
+        )
+        self.assertIn("repair_after_rejected_activation=True", lifecycle_source)
 
     def test_core_smoke_check_recovers_corrected_saved_configuration(self) -> None:
         """A repaired temporary entry must recover only the approved surface."""
