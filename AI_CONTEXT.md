@@ -49,13 +49,19 @@ Last updated: 2026-07-15.
   setup is removed too, its route immediately fails closed, and a fourth empty
   Home Assistant instance must again contain no HASC data while preserving the
   external record.
+- Version 0.3.5 clears the current state values of only the nine HASC count
+  sensors after a successful HASC unload. A deactivation therefore no longer
+  leaves old aggregate values in memory; reactivation restores only the same
+  nine counts. It does not alter a device, service, external state, or
+  home-control boundary.
 - Before its first temporary restart, the same isolated lifecycle check also
   uses Home Assistant's ordinary user deactivation and reactivation path. While
   deactivated, the saved HASC setup is not loaded, its nine registry entries
-  are marked disabled by that setup, and the guarded local page returns only an
-  unavailable response with no count keys. Reactivation must restore the same
-  nine enabled count sensors, safe diagnostics, and authenticated GET-only
-  page, still with no device, service, proxy, or execution capability.
+  are marked disabled by that setup, their temporary state values are absent,
+  and the guarded local page returns only an unavailable response with no count
+  keys. Reactivation must restore the same nine enabled count sensors, safe
+  diagnostics, and authenticated GET-only page, still with no device, service,
+  proxy, or execution capability.
 - One later temporary reinstallation is deliberately deactivated before it is
   removed. Its nine HASC registry records, temporary states, and guarded local
   page must then be cleared, while the unrelated temporary external record is
@@ -377,6 +383,12 @@ Last updated: 2026-07-15.
   rejected setup cannot create a page, sensor, device, service, or execution
   path. See the [missing-main-mode review
   note](LLM_WIKI/Manual/2026-07-15-kimi-missing-main-mode-review.md).
+- Kimi reviewed the v0.3.5 cleanup of HASC state values after a successful
+  unload, with no findings. It confirmed that HASC removes only its own nine
+  displayed values, keeps its registry records, preserves an external state,
+  and restores only the same nine counts after reactivation. See the
+  [unload-state-cleanup review
+  note](LLM_WIKI/Manual/2026-07-15-kimi-unload-state-cleanup-review.md).
 - Kimi reviewed recovery after a corrected temporary saved setting with no
   findings. It confirmed the additional persistence restart, exact same
   nine-count sensor names, fixed diagnostics, GET-only local page, collision

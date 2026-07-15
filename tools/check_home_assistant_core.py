@@ -544,7 +544,7 @@ def assert_entry_has_disabled_summary_sensors(
     entry_id: str,
     expected_entity_ids: frozenset[str] | None = PROTECTED_SUMMARY_SENSOR_ENTITY_IDS,
 ) -> None:
-    """Require deactivation to mark all nine count sensors as disabled."""
+    """Require deactivation to disable all nine count sensors and clear values."""
 
     entries = assert_summary_sensor_registry(
         hass,
@@ -558,6 +558,8 @@ def assert_entry_has_disabled_summary_sensors(
             entity_registry.RegistryEntryDisabler.CONFIG_ENTRY,
             "a deactivated HASC summary sensor must be disabled by its setup",
         )
+        if hass.states.get(entry.entity_id) is not None:
+            raise RuntimeError("a deactivated HASC summary sensor must not keep a state")
 
 
 def reserve_summary_sensor_name_for_test(hass: HomeAssistant) -> ReservedCollisionEntry:

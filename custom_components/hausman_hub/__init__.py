@@ -73,8 +73,21 @@ def _clear_restored_hasc_records_for_invalid_entry(
         async_at_started(hass, clear_hasc_records_after_start)
 
 
+def _clear_hasc_state_values(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Clear only current state values owned by one HASC setup."""
+
+    from homeassistant.helpers import entity_registry
+
+    entities = entity_registry.async_get(hass)
+    for registered_entity in entity_registry.async_entries_for_config_entry(
+        entities,
+        entry.entry_id,
+    ):
+        hass.states.async_remove(registered_entity.entity_id)
+
+
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload the count display and make its local summary unavailable."""
+    """Unload the count display, clear its values, and close its local summary."""
 
     from homeassistant.const import Platform
 
@@ -82,5 +95,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     unloaded = await hass.config_entries.async_unload_platforms(entry, (Platform.SENSOR,))
     if unloaded:
+        _clear_hasc_state_values(hass, entry)
         clear_local_summary_access(hass, entry)
     return unloaded

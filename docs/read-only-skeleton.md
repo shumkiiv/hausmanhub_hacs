@@ -101,11 +101,11 @@ the safe persistence path for an HASC update without touching a real home.
 
 Before that first empty system is stopped, the check also uses Home Assistant's
 normal user deactivation control. The saved HASC setup remains, but all nine
-count sensors are marked disabled and the local summary page becomes
-unavailable without returning counts. Turning HASC back on must restore the
-same nine enabled count sensors, the fixed safe diagnostics report, and the
-authenticated GET-only page. It must not create a device, service, or any
-control of the home.
+count sensors are marked disabled, their temporary values disappear, and the
+local summary page becomes unavailable without returning counts. Turning HASC
+back on must restore the same nine enabled count sensors, the fixed safe
+diagnostics report, and the authenticated GET-only page. It must not create a
+device, service, or any control of the home.
 
 The same empty check turns HASC off again immediately before replacing its
 temporary HASC copy and restarting Home Assistant. The saved setup must remain

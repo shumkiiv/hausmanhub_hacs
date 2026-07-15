@@ -393,6 +393,26 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
         self.assertEqual(503, unloaded_response.status)
 
+    def test_unload_clears_only_hasc_owned_state_values(self) -> None:
+        """Turning HASC off must not leave its old counts or touch another state."""
+
+        hasc_state = "sensor.hausman_hub_hasc_entities_count"
+        self.hass.entity_registry.entities["hasc-owned"] = SimpleNamespace(
+            domain="sensor",
+            entity_id=hasc_state,
+            config_entry_id=self.entry.entry_id,
+            disabled_by=None,
+        )
+        self.hass.states.values[hasc_state] = SimpleNamespace(state="7")
+
+        self.assertTrue(asyncio.run(self.integration.async_unload_entry(self.hass, self.entry)))
+
+        self.assertEqual([hasc_state], self.hass.states.removed)
+        self.assertNotIn(hasc_state, self.hass.states.values)
+        self.assertIn("hasc-owned", self.hass.entity_registry.entities)
+        self.assertEqual([], self.hass.entity_registry.removed)
+        self.assertIn("sensor.synthetic_private_temperature", self.hass.states.values)
+
     def test_setup_rejects_an_unsafe_entry_before_registering_the_view(self) -> None:
         """A rejected entry must not open even the local count-only path."""
 
