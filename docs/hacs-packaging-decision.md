@@ -14,7 +14,8 @@ the public HACS catalog.
   or newer.
 - The `custom_components/hausman_hub/` read-only skeleton is limited to
   `read-only` and `shadow`.
-- It has no service, entity, device, Node-RED, or execution surface.
+- It has no service, device, Node-RED, or execution surface. Its only entities
+  are the nine approved diagnostic count sensors.
 - Proxy and direct execution remain unapproved and blocked.
 
 ## Previous options

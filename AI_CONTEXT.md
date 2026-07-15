@@ -228,6 +228,11 @@ Last updated: 2026-07-15.
   that `single_instance_allowed` is the Home Assistant result for a second
   attempt when the manifest permits only one HASC setup. See the [one-setup
   review note](LLM_WIKI/Manual/2026-07-15-kimi-one-setup-check-review.md).
+- The old private-first skeleton decision is now clearly marked historical and
+  points to the current public manual-HACS decision. Kimi first asked for a
+  less brittle document guard; after that correction, its final review found no
+  issues. See the [historical-decision review
+  note](LLM_WIKI/Manual/2026-07-15-kimi-historical-skeleton-decision-review.md).
 
 ## Verification
 
@@ -284,12 +289,12 @@ separately approved Codex observation path does not bypass it. Its credential
 stays outside the repository and chat. Public HACS catalog listing, proxy, and
 direct execution remain out of scope.
 
-The public custom-HACS decision and its narrow implementation boundary are
-recorded in the [HACS packaging decision record](docs/hacs-packaging-decision.md).
-
-The required explicit choice is documented in
-[the read-only skeleton decision record](docs/read-only-skeleton-decision.md).
-Its implementation boundary is documented in
+The current public manual-HACS decision and its narrow implementation boundary
+are recorded in the [HACS packaging decision
+record](docs/hacs-packaging-decision.md). The original private-first skeleton
+choice is preserved in [the historical skeleton decision
+record](docs/read-only-skeleton-decision.md); it is not the current installation
+instruction. The skeleton's implementation boundary is documented in
 [the read-only skeleton guide](docs/read-only-skeleton.md).
 
 See [repository basics](docs/repository-basics.md) and

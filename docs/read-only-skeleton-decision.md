@@ -1,14 +1,21 @@
-# Decision record: private read-only integration skeleton
+# Historical decision record: private read-only integration skeleton
 
 ## Status
 
-Approved for option 2 on 2026-07-13: a private read-only skeleton may exist.
-The approval does not cover HACS metadata, runtime authority, Home Assistant
-service calls, proxy, or direct execution.
+Historical record. On 2026-07-13 the owner approved original option 2: a
+private read-only skeleton may exist. Its safety boundary still applies: the
+only modes are `read-only` and `shadow`, and it does not receive runtime
+authority, Home Assistant service calls, proxy, or direct execution.
 
-## Decision to make
+The private/no-`hacs.json` distribution statements below are retained only as
+history; they are not current instructions. HACS cannot use a private GitHub
+repository. On 2026-07-14 the owner approved the current public repository for
+manual HACS installation. See the
+[current HACS packaging decision](hacs-packaging-decision.md).
 
-Choose one of the following paths for `hausman_hub`:
+## Original decision
+
+These were the original paths for `hausman_hub`:
 
 1. **Defer the skeleton.** Keep the repository limited to synthetic contract,
    shadow-evidence, and diagnostics schema validation.
@@ -17,14 +24,14 @@ Choose one of the following paths for `hausman_hub`:
    selectors, redacted diagnostics, and manual-only repairs in `read-only` and
    `shadow` modes.
 
-## Preconditions already met
+## Preconditions at the time
 
 - Repository basics, synthetic contracts, local validation, and redacted
   diagnostics fixtures are in place.
 - The static harness received a Kimi review and one remediation iteration.
 - No runtime integration, HACS metadata, proxy, or direct execution exists.
 
-## Required approval details
+## Original approval details
 
 An approval for option 2 must confirm all of the following:
 
@@ -38,7 +45,10 @@ An approval for option 2 must confirm all of the following:
   policy.
 - Verification is local and synthetic only until another owner decision.
 
-## If option 2 is approved
+## Original implementation requirements
+
+The Clean Architecture and safety requirements in this section continue to
+apply. The historical private/no-metadata distribution detail above does not.
 
 The implementation must use Clean Architecture:
 
@@ -52,7 +62,7 @@ The resulting skeleton must be a separate commit from all existing static
 validation work. It must not change the decision gates for HACS metadata,
 proxy, canary, rollback, or direct execution.
 
-## Explicitly not decided here
+## Not decided by the original approval
 
 - Public release or HACS metadata.
 - Proxy approval or rollback notes.

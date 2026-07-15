@@ -56,6 +56,42 @@ class ReadOnlySkeletonTest(unittest.TestCase):
 
         self.assertIn(f"## {manifest['version']} —", change_history)
 
+    def test_distribution_documents_mark_the_private_choice_as_history(self) -> None:
+        """Keep current manual-HACS instructions separate from the old choice."""
+
+        historical_decision = (ROOT / "docs" / "read-only-skeleton-decision.md").read_text(
+            encoding="utf-8"
+        )
+        packaging_decision = (ROOT / "docs" / "hacs-packaging-decision.md").read_text(
+            encoding="utf-8"
+        )
+        skeleton_guide = (ROOT / "docs" / "read-only-skeleton.md").read_text(encoding="utf-8")
+        context = (ROOT / "AI_CONTEXT.md").read_text(encoding="utf-8")
+
+        historical_heading = historical_decision.partition("\n")[0]
+        self.assertIn("Historical", historical_heading)
+        self.assertNotEqual("# Decision record: private read-only integration skeleton", historical_heading)
+        self.assertIn("hacs-packaging-decision.md", historical_decision)
+
+        for current_requirement in (
+            "repository is public",
+            "added manually in HACS",
+            "nine approved diagnostic count sensors",
+        ):
+            self.assertIn(current_requirement, packaging_decision)
+
+        for document in (skeleton_guide, context):
+            self.assertIn("read-only-skeleton-decision.md", document)
+            self.assertIn("hacs-packaging-decision.md", document)
+
+        for outdated_instruction in (
+            "The skeleton remains private",
+            "does not add `hacs.json`",
+            "private HACS installation",
+        ):
+            for document in (packaging_decision, skeleton_guide, context):
+                self.assertNotIn(outdated_instruction, document)
+
     def test_brand_icon_is_a_square_transparent_png(self) -> None:
         """Keep the local Home Assistant brand image present and usable."""
 

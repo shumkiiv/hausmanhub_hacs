@@ -1,7 +1,10 @@
 # Read-only integration skeleton
 
-Created on 2026-07-13 after explicit owner approval for the safe skeleton
-described in [the decision record](read-only-skeleton-decision.md).
+Created on 2026-07-13 after explicit owner approval for the safe skeleton.
+The original private-first choice is preserved in [the historical skeleton
+decision](read-only-skeleton-decision.md). The current public, manual-HACS
+installation rule is recorded in [the HACS packaging
+decision](hacs-packaging-decision.md).
 
 ## What it does
 
