@@ -90,10 +90,11 @@ Last updated: 2026-07-15.
   keys. Reactivation must restore the same nine enabled count sensors, safe
   diagnostics, and authenticated GET-only page, still with no device, service,
   proxy, or execution capability.
-- One later temporary reinstallation is deliberately deactivated before it is
-  removed. Its nine HASC registry records, temporary states, and guarded local
-  page must then be cleared, while the unrelated temporary external record is
-  preserved through the following empty restart.
+- One later temporary reinstallation is deliberately deactivated, persisted
+  through an empty restart, and then removed. Its nine HASC registry records,
+  temporary states, and guarded local page must stay cleared through the
+  following empty restart, while the unrelated temporary external record is
+  preserved.
 - The first safe setup is also deactivated immediately before a temporary
   restart that replaces only the temporary HASC copy. It must stay disabled and
   not restore runtime data, count states, or the guarded page on its own.
@@ -449,6 +450,11 @@ Last updated: 2026-07-15.
   activation restores only the same nine safe counts. See the [disabled
   duplicate-setup review
   note](LLM_WIKI/Manual/2026-07-15-kimi-disabled-duplicate-setup-review.md).
+- Kimi reviewed removal of a saved user-deactivated HASC setup after an empty
+  restart, with no findings. It confirmed the same collision-aware nine
+  disabled records survive until removal and that the following restart remains
+  HASC-free. See the [disabled removal-after-restart review
+  note](LLM_WIKI/Manual/2026-07-15-kimi-disabled-removal-after-restart-review.md).
 - Kimi reviewed the isolated extra-input boundary check for both HASC setup
   forms with no findings. It confirmed that the test preserves the fixed safe
   saved shape and adds no runtime, device, service, network, or home-data

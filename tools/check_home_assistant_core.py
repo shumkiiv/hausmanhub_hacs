@@ -1901,6 +1901,8 @@ async def async_run_check() -> None:
         finally:
             await restarted_hass.async_stop()
 
+        disabled_reinstall_entry_id: str | None = None
+        disabled_reinstall_entity_ids: frozenset[str] | None = None
         ordinary_unload_restarted_hass = await async_start_empty_home_assistant(
             config_directory
         )
@@ -2013,6 +2015,14 @@ async def async_run_check() -> None:
                 reinstalled_entry.entry_id,
                 expected_entity_ids=None,
             )
+            disabled_reinstall_entry_id = reinstalled_entry.entry_id
+            disabled_reinstall_entity_ids = frozenset(
+                entry.entity_id
+                for entry in entity_registry.async_entries_for_config_entry(
+                    entity_registry.async_get(ordinary_unload_restarted_hass),
+                    reinstalled_entry.entry_id,
+                )
+            )
             await async_assert_local_summary_is_unavailable(
                 ordinary_unload_restarted_hass,
                 domain,
@@ -2023,27 +2033,49 @@ async def async_run_check() -> None:
                 ordinary_unload_restarted_hass,
                 reserved_entry,
             )
-            removed_entries.append(
-                await async_remove_safe_entry(
-                    ordinary_unload_restarted_hass,
-                    reinstalled_entry.entry_id,
-                )
-            )
-            await async_assert_local_summary_is_unavailable(
-                ordinary_unload_restarted_hass,
-                domain,
-                removal_reader_token,
-                "HASC removal",
-            )
-            assert_reserved_collision_entry_is_unchanged(
-                ordinary_unload_restarted_hass,
-                reserved_entry,
-            )
         finally:
             await ordinary_unload_restarted_hass.async_stop()
 
         if reserved_entry is None:
             raise RuntimeError("the lifecycle check must reserve its external fixture")
+        if (
+            disabled_reinstall_entry_id is None
+            or disabled_reinstall_entity_ids is None
+        ):
+            raise RuntimeError(
+                "the lifecycle check must retain a disabled HASC setup for removal"
+            )
+
+        disabled_removal_hass = await async_start_empty_home_assistant(config_directory)
+        try:
+            disabled_reinstall_entry = disabled_removal_hass.config_entries.async_get_entry(
+                disabled_reinstall_entry_id
+            )
+            if disabled_reinstall_entry is None:
+                raise RuntimeError("disabled HASC setup must persist until its removal")
+            assert_deactivated_entry_stays_inactive_after_restart(
+                disabled_removal_hass,
+                domain,
+                disabled_reinstall_entry,
+                disabled_reinstall_entity_ids,
+            )
+            assert_reserved_collision_entry_is_unchanged(
+                disabled_removal_hass,
+                reserved_entry,
+            )
+            removed_entries.append(
+                await async_remove_safe_entry(
+                    disabled_removal_hass,
+                    disabled_reinstall_entry.entry_id,
+                )
+            )
+            assert_reserved_collision_entry_is_unchanged(
+                disabled_removal_hass,
+                reserved_entry,
+            )
+        finally:
+            await disabled_removal_hass.async_stop()
+
         post_removal_hass = await async_start_empty_home_assistant(config_directory)
         try:
             assert_hasc_stays_removed_after_restart(

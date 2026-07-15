@@ -396,7 +396,11 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         self.assertIn('"read-only",', core_check_source)
         self.assertIn("reinstalled_entry.entry_id", core_check_source)
         self.assertIn(
-            "ordinary_unload_restarted_hass,\n                    reinstalled_entry.entry_id,",
+            "disabled_reinstall_entry_id = reinstalled_entry.entry_id",
+            core_check_source,
+        )
+        self.assertIn(
+            "disabled_reinstall_entry.entry_id",
             core_check_source,
         )
 
@@ -600,38 +604,59 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         self.assertLess(disabled_marker_position, second_inactive_position)
         self.assertLess(second_inactive_position, enable_position)
 
-    def test_core_smoke_check_removes_a_deactivated_hasc_setup(self) -> None:
-        """Deleting a disabled HASC setup must still clear its own records."""
+    def test_core_smoke_check_removes_a_disabled_hasc_setup_after_restart(self) -> None:
+        """A saved disabled HASC setup must be removable after a restart."""
 
         core_check_source = (ROOT / "tools" / "check_home_assistant_core.py").read_text(
             encoding="utf-8"
         )
         lifecycle_source = core_check_source.split("async def async_run_check()", 1)[1]
 
-        deactivation_call = (
-            "await async_disable_safe_entry(\n"
-            "                ordinary_unload_restarted_hass,\n"
-            "                reinstalled_entry,"
+        for requirement in (
+            "disabled_reinstall_entry_id",
+            "disabled_reinstall_entity_ids",
+            "disabled_removal_hass = await async_start_empty_home_assistant",
+            "disabled HASC setup must persist until its removal",
+        ):
+            self.assertIn(requirement, lifecycle_source)
+
+        reinstallation_start = lifecycle_source.index(
+            "reinstalled_entry = await async_create_safe_entry("
         )
-        removal_call = (
-            "ordinary_unload_restarted_hass,\n"
-            "                    reinstalled_entry.entry_id,"
+        deactivation_start = lifecycle_source.index(
+            "await async_disable_safe_entry(",
+            reinstallation_start,
         )
+        disabled_restart_start = lifecycle_source.index(
+            "disabled_removal_hass = await async_start_empty_home_assistant",
+            deactivation_start,
+        )
+        persisted_entry_start = lifecycle_source.index(
+            "disabled_reinstall_entry = disabled_removal_hass.config_entries.async_get_entry(",
+            disabled_restart_start,
+        )
+        inactive_start = lifecycle_source.index(
+            "assert_deactivated_entry_stays_inactive_after_restart(",
+            persisted_entry_start,
+        )
+        removal_start = lifecycle_source.index(
+            "await async_remove_safe_entry(",
+            inactive_start,
+        )
+        following_restart_start = lifecycle_source.index(
+            "post_removal_hass = await async_start_empty_home_assistant",
+            removal_start,
+        )
+
+        self.assertLess(reinstallation_start, deactivation_start)
+        self.assertLess(deactivation_start, disabled_restart_start)
+        self.assertLess(disabled_restart_start, persisted_entry_start)
+        self.assertLess(persisted_entry_start, inactive_start)
+        self.assertLess(inactive_start, removal_start)
+        self.assertLess(removal_start, following_restart_start)
         self.assertIn(
-            deactivation_call,
-            lifecycle_source,
-        )
-        self.assertIn(
-            "reinstalled_entry.entry_id,\n                expected_entity_ids=None,",
-            lifecycle_source,
-        )
-        self.assertLess(
-            lifecycle_source.index(deactivation_call),
-            lifecycle_source.index(removal_call),
-        )
-        self.assertGreaterEqual(
-            lifecycle_source.count('"HASC deactivation",'),
-            2,
+            "removed_entries.append(",
+            lifecycle_source[inactive_start:following_restart_start],
         )
 
     def test_core_smoke_check_keeps_user_deactivation_after_restart(self) -> None:
