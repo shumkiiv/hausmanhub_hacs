@@ -782,6 +782,56 @@ def assert_persisted_unsafe_entry_stays_closed(
     assert_reserved_collision_entry_is_unchanged(hass, reserved_entry)
 
 
+async def async_assert_corrected_entry_stays_safe_after_restart(
+    hass: HomeAssistant,
+    domain: str,
+    entry_id: str,
+    expected_data: dict[str, str],
+    expected_options: dict[str, Any],
+    expected_entity_ids: frozenset[str],
+    reserved_entry: ReservedCollisionEntry,
+) -> ConfigEntry:
+    """Require a manually corrected temporary entry to survive an empty restart."""
+
+    entry = hass.config_entries.async_get_entry(entry_id)
+    if entry is None:
+        raise RuntimeError("the manually corrected HASC entry must remain registered")
+    assert_result(
+        [configured_entry.entry_id for configured_entry in hass.config_entries.async_entries(domain)],
+        [entry_id],
+        "restart must preserve only the corrected HASC entry",
+    )
+    assert_result(
+        dict(entry.data),
+        expected_data,
+        "restart must preserve the manually corrected safe entry data",
+    )
+    assert_result(
+        dict(entry.options),
+        expected_options,
+        "restart must preserve the manually corrected safe entry options",
+    )
+    assert_result(
+        entry.state,
+        config_entries.ConfigEntryState.LOADED,
+        "a manually corrected HASC entry must load after restart",
+    )
+    await async_assert_safe_diagnostics(hass, domain, entry, expected_data["mode"])
+    assert_entry_has_only_summary_sensors(
+        hass,
+        domain,
+        entry.entry_id,
+        expected_entity_ids=expected_entity_ids,
+    )
+    assert_local_summary_view(hass, domain)
+    await async_assert_authenticated_local_summary_http_access(
+        hass,
+        "HASC corrected-settings restart temporary",
+    )
+    assert_reserved_collision_entry_is_unchanged(hass, reserved_entry)
+    return entry
+
+
 async def async_create_test_access_token(
     hass: HomeAssistant,
     user: Any,
@@ -1269,10 +1319,13 @@ async def async_run_check() -> None:
 
         final_hass = await async_start_empty_home_assistant(config_directory)
         invalid_entry_id: str | None = None
+        invalid_entry_entity_ids: frozenset[str] | None = None
         invalid_entry_data = {
             "mode": "proxy",
             "direct_execution_status": "direct_execution_blocked",
         }
+        recovered_entry_data: dict[str, str] | None = None
+        recovered_entry_options: dict[str, Any] | None = None
         try:
             assert_hasc_stays_removed_after_restart(
                 final_hass,
@@ -1282,6 +1335,20 @@ async def async_run_check() -> None:
             )
             invalid_entry = await async_create_safe_entry(final_hass, domain, "read-only")
             invalid_entry_id = invalid_entry.entry_id
+            recovered_entry_data = dict(invalid_entry.data)
+            recovered_entry_options = dict(invalid_entry.options)
+            invalid_entry_entity_ids = frozenset(
+                entry.entity_id
+                for entry in entity_registry.async_entries_for_config_entry(
+                    entity_registry.async_get(final_hass),
+                    invalid_entry.entry_id,
+                )
+            )
+            assert_result(
+                len(invalid_entry_entity_ids),
+                len(SUMMARY_SENSOR_KEYS),
+                "the temporary invalid HASC entry must start with nine count sensors",
+            )
             invalid_reader_token = await async_create_test_read_only_access_token(
                 final_hass,
                 "HASC temporary invalid-settings test user",
@@ -1316,7 +1383,12 @@ async def async_run_check() -> None:
         finally:
             await final_hass.async_stop()
 
-        if invalid_entry_id is None:
+        if (
+            invalid_entry_id is None
+            or invalid_entry_entity_ids is None
+            or recovered_entry_data is None
+            or recovered_entry_options is None
+        ):
             raise RuntimeError("the lifecycle check must create its temporary invalid entry")
         invalid_hass = await async_start_empty_home_assistant(config_directory)
         try:
@@ -1327,8 +1399,92 @@ async def async_run_check() -> None:
                 invalid_entry_data,
                 reserved_entry,
             )
+            recovered_entry = invalid_hass.config_entries.async_get_entry(invalid_entry_id)
+            if recovered_entry is None:
+                raise RuntimeError("the temporary invalid HASC entry must remain repairable")
+            invalid_hass.config_entries.async_update_entry(
+                recovered_entry,
+                data=recovered_entry_data,
+            )
+            await invalid_hass.async_block_till_done()
+            reloaded_recovered_entry = await invalid_hass.config_entries.async_reload(
+                recovered_entry.entry_id
+            )
+            assert_result(
+                reloaded_recovered_entry,
+                True,
+                "a manually corrected HASC entry must reload successfully",
+            )
+            await invalid_hass.async_block_till_done()
+            assert_result(
+                recovered_entry.data,
+                recovered_entry_data,
+                "manual correction must restore only approved entry data",
+            )
+            assert_result(
+                recovered_entry.state,
+                config_entries.ConfigEntryState.LOADED,
+                "a manually corrected HASC entry must load safely",
+            )
+            await async_assert_safe_diagnostics(
+                invalid_hass,
+                domain,
+                recovered_entry,
+                "read-only",
+            )
+            assert_entry_has_only_summary_sensors(
+                invalid_hass,
+                domain,
+                recovered_entry.entry_id,
+                expected_entity_ids=invalid_entry_entity_ids,
+            )
+            assert_local_summary_view(invalid_hass, domain)
+            await async_assert_authenticated_local_summary_http_access(
+                invalid_hass,
+                "HASC corrected-settings temporary",
+            )
+            assert_reserved_collision_entry_is_unchanged(invalid_hass, reserved_entry)
         finally:
             await invalid_hass.async_stop()
+
+        recovered_hass = await async_start_empty_home_assistant(config_directory)
+        try:
+            recovered_entry = await async_assert_corrected_entry_stays_safe_after_restart(
+                recovered_hass,
+                domain,
+                invalid_entry_id,
+                recovered_entry_data,
+                recovered_entry_options,
+                invalid_entry_entity_ids,
+                reserved_entry,
+            )
+            recovery_removal_reader_token = await async_create_test_read_only_access_token(
+                recovered_hass,
+                "HASC corrected-settings removal test user",
+            )
+            removed_entries.append(
+                await async_remove_safe_entry(recovered_hass, recovered_entry.entry_id)
+            )
+            await async_assert_local_summary_is_unavailable(
+                recovered_hass,
+                domain,
+                recovery_removal_reader_token,
+                "corrected HASC removal",
+            )
+            assert_reserved_collision_entry_is_unchanged(recovered_hass, reserved_entry)
+        finally:
+            await recovered_hass.async_stop()
+
+        recovered_removal_hass = await async_start_empty_home_assistant(config_directory)
+        try:
+            assert_hasc_stays_removed_after_restart(
+                recovered_removal_hass,
+                domain,
+                tuple(removed_entries),
+                reserved_entry,
+            )
+        finally:
+            await recovered_removal_hass.async_stop()
 
 
 def main() -> None:

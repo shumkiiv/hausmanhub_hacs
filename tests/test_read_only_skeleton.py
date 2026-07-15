@@ -535,6 +535,46 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             lifecycle_source.index("invalid_hass = await async_start_empty_home_assistant"),
         )
 
+    def test_core_smoke_check_recovers_corrected_saved_configuration(self) -> None:
+        """A repaired temporary entry must recover only the approved surface."""
+
+        core_check_source = (ROOT / "tools" / "check_home_assistant_core.py").read_text(
+            encoding="utf-8"
+        )
+        lifecycle_source = core_check_source.split("async def async_run_check()", 1)[1]
+
+        self.assertIn("recovered_entry_data", lifecycle_source)
+        self.assertIn("invalid_entry_entity_ids", lifecycle_source)
+        self.assertIn("recovered_entry_options", lifecycle_source)
+        self.assertIn("async_assert_corrected_entry_stays_safe_after_restart", core_check_source)
+        self.assertIn(
+            "a manually corrected HASC entry must reload successfully",
+            lifecycle_source,
+        )
+        self.assertIn(
+            "manual correction must restore only approved entry data",
+            lifecycle_source,
+        )
+        self.assertIn("HASC corrected-settings temporary", lifecycle_source)
+        self.assertIn("HASC corrected-settings restart temporary", core_check_source)
+        self.assertIn(
+            "restart must preserve the manually corrected safe entry data",
+            core_check_source,
+        )
+        self.assertIn("corrected HASC removal", lifecycle_source)
+        self.assertLess(
+            lifecycle_source.index("assert_persisted_unsafe_entry_stays_closed("),
+            lifecycle_source.index("reloaded_recovered_entry ="),
+        )
+        self.assertLess(
+            lifecycle_source.index("reloaded_recovered_entry ="),
+            lifecycle_source.index("recovered_hass = await async_start_empty_home_assistant"),
+        )
+        self.assertLess(
+            lifecycle_source.index("recovered_hass = await async_start_empty_home_assistant"),
+            lifecycle_source.index("recovered_removal_hass ="),
+        )
+
     def test_core_smoke_check_removes_state_values_after_removal(self) -> None:
         """A removed HASC entry must not leave count values in the state machine."""
 

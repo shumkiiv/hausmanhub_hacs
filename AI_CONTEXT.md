@@ -74,6 +74,12 @@ Last updated: 2026-07-15.
   the fixed safety contract, HASC rejects a reload and, after restart, removes
   only its own restored count states after Home Assistant finishes startup. It
   does not alter devices, services, other entities, Climate, or Automation.
+- The same disposable lifecycle now corrects only its own deliberately bad
+  saved data back to the exact original safe data, then starts one more empty
+  Home Assistant while the corrected HASC setup remains installed. That restart
+  must restore the same nine count-sensor names, fixed diagnostics, and the
+  authenticated GET-only page with no devices or services. Only then is the
+  temporary HASC setup removed and checked through a final empty restart.
 - Synthetic Common-contract fixtures, static validators, synthetic shadow
   evidence, and redacted diagnostics/repairs fixtures are present. They use
   Python's standard library and local JSON only.
@@ -329,6 +335,11 @@ Last updated: 2026-07-15.
   startup, immediately clears them on a reload, and does not touch a device,
   service, external entity, or home-control boundary. See the [invalid-settings
   review note](LLM_WIKI/Manual/2026-07-15-kimi-invalid-persisted-settings-review.md).
+- Kimi reviewed recovery after a corrected temporary saved setting with no
+  findings. It confirmed the additional persistence restart, exact same
+  nine-count sensor names, fixed diagnostics, GET-only local page, collision
+  preservation, and clean removal. See the [corrected-settings recovery review
+  note](LLM_WIKI/Manual/2026-07-15-kimi-corrected-settings-recovery-review.md).
 - The old private-first skeleton decision is now clearly marked historical and
   points to the current public manual-HACS decision. Kimi first asked for a
   less brittle document guard; after that correction, its final review found no

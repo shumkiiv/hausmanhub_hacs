@@ -139,6 +139,13 @@ tests cover an unblocked execution flag and extra saved fields in either part
 of the settings. The same temporary check also proves that an explicit reload
 of that bad setup closes the page immediately. These checks do not use a real
 Home Assistant configuration.
+Within that empty test only, the deliberately bad saved setting is then
+corrected to the approved read-only setting and reloaded. HASC must restore
+only its nine count sensors, safe diagnostics, and authenticated GET-only page;
+the empty test system then restarts once while that corrected setup remains in
+place. It must remember the correction and restore the same nine sensors before
+the recovered setup is removed and checked through one more empty restart. This
+is a test of safe recovery, not a request to edit a real Home Assistant file.
 After the final removal, the empty test system starts once more. HASC must stay
 absent there: no setup, sensor, device, service, count state, runtime data, or
 local page may return, while the unrelated temporary external record remains
