@@ -54,6 +54,9 @@ Last updated: 2026-07-15.
   leaves old aggregate values in memory; reactivation restores only the same
   nine counts. It does not alter a device, service, external state, or
   home-control boundary.
+- The local HASC adapter check also covers a failed unload. In that case it
+  keeps the current safe display intact rather than partly clearing its values
+  or local page while Home Assistant still has HASC loaded.
 - Before its first temporary restart, the same isolated lifecycle check also
   uses Home Assistant's ordinary user deactivation and reactivation path. While
   deactivated, the saved HASC setup is not loaded, its nine registry entries
@@ -389,6 +392,11 @@ Last updated: 2026-07-15.
   and restores only the same nine counts after reactivation. See the
   [unload-state-cleanup review
   note](LLM_WIKI/Manual/2026-07-15-kimi-unload-state-cleanup-review.md).
+- Kimi reviewed the test-only failed-unload case with no findings. It confirmed
+  that a failed platform unload leaves the current safe display intact rather
+  than partly clearing state or the local page, with no new home access or
+  control. See the [failed-unload review
+  note](LLM_WIKI/Manual/2026-07-15-kimi-failed-unload-review.md).
 - Kimi reviewed recovery after a corrected temporary saved setting with no
   findings. It confirmed the additional persistence restart, exact same
   nine-count sensor names, fixed diagnostics, GET-only local page, collision

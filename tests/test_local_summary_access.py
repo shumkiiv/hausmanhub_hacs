@@ -63,9 +63,10 @@ class FakeHttp:
 class FakeConfigEntries:
     """Record platform lifecycle requests without loading a platform."""
 
-    def __init__(self) -> None:
+    def __init__(self, unload_succeeds: bool = True) -> None:
         self.forwarded: list[tuple[object, tuple[object, ...]]] = []
         self.unloaded: list[tuple[object, tuple[object, ...]]] = []
+        self.unload_succeeds = unload_succeeds
 
     async def async_forward_entry_setups(
         self,
@@ -80,7 +81,7 @@ class FakeConfigEntries:
         platforms: tuple[object, ...],
     ) -> bool:
         self.unloaded.append((entry, platforms))
-        return True
+        return self.unload_succeeds
 
 
 class FakeStates:
@@ -154,10 +155,10 @@ class FakeEntityRegistry:
 class FakeHomeAssistant:
     """Minimal Home Assistant shape required by the local summary adapter."""
 
-    def __init__(self) -> None:
+    def __init__(self, unload_succeeds: bool = True) -> None:
         self.data: dict[str, dict[str, object]] = {}
         self.http = FakeHttp()
-        self.config_entries = FakeConfigEntries()
+        self.config_entries = FakeConfigEntries(unload_succeeds)
         self.area_registry = SimpleNamespace(areas={"synthetic-area": object()})
         self.device_registry = SimpleNamespace(
             devices={"synthetic-device-one": object(), "synthetic-device-two": object()}
@@ -412,6 +413,43 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertIn("hasc-owned", self.hass.entity_registry.entities)
         self.assertEqual([], self.hass.entity_registry.removed)
         self.assertIn("sensor.synthetic_private_temperature", self.hass.states.values)
+
+    def test_failed_unload_keeps_the_current_hasc_state_and_page(self) -> None:
+        """A failed unload must not leave a half-cleared HASC display behind."""
+
+        failed_hass = FakeHomeAssistant(unload_succeeds=False)
+        failed_entry = FakeEntry(
+            {
+                "mode": "read-only",
+                "direct_execution_status": "direct_execution_blocked",
+            },
+            {},
+        )
+        self.assertTrue(asyncio.run(self.integration.async_setup_entry(failed_hass, failed_entry)))
+
+        hasc_state = "sensor.hausman_hub_hasc_entities_count"
+        failed_hass.entity_registry.entities["hasc-owned"] = SimpleNamespace(
+            domain="sensor",
+            entity_id=hasc_state,
+            config_entry_id=failed_entry.entry_id,
+            disabled_by=None,
+        )
+        failed_hass.states.values[hasc_state] = SimpleNamespace(state="7")
+
+        self.assertFalse(
+            asyncio.run(self.integration.async_unload_entry(failed_hass, failed_entry))
+        )
+
+        self.assertEqual([], failed_hass.states.removed)
+        self.assertIn(hasc_state, failed_hass.states.values)
+        self.assertIn("hasc-owned", failed_hass.entity_registry.entities)
+        self.assertEqual([], failed_hass.entity_registry.removed)
+        response = asyncio.run(
+            failed_hass.http.views[0].get(
+                FakeRequest("127.0.0.1", reader_user("system-read-only"))
+            )
+        )
+        self.assertEqual(200, response.status)
 
     def test_setup_rejects_an_unsafe_entry_before_registering_the_view(self) -> None:
         """A rejected entry must not open even the local count-only path."""
