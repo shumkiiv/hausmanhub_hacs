@@ -235,6 +235,36 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("hausman_hub_read_only_skeleton", flow.unique_id)
         self.assertTrue(flow.unique_id_checked)
 
+    async def test_forms_discard_extra_user_input(self) -> None:
+        """Only the approved mode may cross either HASC form boundary."""
+
+        extra_input = {
+            "mode": "shadow",
+            "direct_execution_status": "allowed",
+            "unmodelled": "outside_contract",
+        }
+        user_flow = self.config_flow.HausmanHubConfigFlow()
+        user_result = await user_flow.async_step_user(extra_input)
+
+        self.assertEqual("create_entry", user_result["type"])
+        self.assertEqual(
+            {
+                "mode": "shadow",
+                "direct_execution_status": "direct_execution_blocked",
+            },
+            user_result["data"],
+        )
+
+        options_flow = self.config_flow.HausmanHubOptionsFlow()
+        options_flow.config_entry = FakeConfigEntry(
+            {"mode": "read-only", "direct_execution_status": "direct_execution_blocked"},
+            {},
+        )
+        options_result = await options_flow.async_step_init(extra_input)
+
+        self.assertEqual("create_entry", options_result["type"])
+        self.assertEqual({"mode": "shadow"}, options_result["data"])
+
     async def test_user_flow_rejects_proxy_mode(self) -> None:
         flow = self.config_flow.HausmanHubConfigFlow()
 
