@@ -188,6 +188,13 @@ async def async_assert_second_entry_is_rejected(
 async def async_remove_safe_entry(hass: HomeAssistant, entry_id: str) -> None:
     """Remove a safe entry and require the inert unload path to succeed."""
 
+    owned_entity_ids = tuple(
+        entry.entity_id
+        for entry in entity_registry.async_entries_for_config_entry(
+            entity_registry.async_get(hass),
+            entry_id,
+        )
+    )
     removal = await hass.config_entries.async_remove(entry_id)
     assert_result(
         removal["require_restart"],
@@ -208,6 +215,9 @@ async def async_remove_safe_entry(hass: HomeAssistant, entry_id: str) -> None:
         [],
         "removed entry must not leave entities behind",
     )
+    for entity_id in owned_entity_ids:
+        if hass.states.get(entity_id) is not None:
+            raise RuntimeError("removed entry must not leave state values behind")
 
 
 async def async_update_safe_options(

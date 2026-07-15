@@ -112,7 +112,7 @@ external record once more.
 The local nine-count page remains registered so a later safe setup can reuse
 it without creating a duplicate. After each removal, however, an authenticated
 temporary read-only user must receive only an unavailable response, never any
-of the nine counts.
+of the nine counts. The nine temporary count states must also be absent.
 
 For a manual check of an installed copy, see the Russian
 [safe-check guide](home-assistant-safe-check.md). It asks only for Home

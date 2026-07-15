@@ -404,6 +404,20 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             3,
         )
 
+    def test_core_smoke_check_removes_state_values_after_removal(self) -> None:
+        """A removed HASC entry must not leave count values in the state machine."""
+
+        core_check_source = (ROOT / "tools" / "check_home_assistant_core.py").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("owned_entity_ids", core_check_source)
+        self.assertIn("hass.states.get(entity_id) is not None", core_check_source)
+        self.assertIn(
+            "removed entry must not leave state values behind",
+            core_check_source,
+        )
+
     def test_home_summary_rejects_impossible_totals(self) -> None:
         """Bad aggregate data cannot reach diagnostics silently."""
 

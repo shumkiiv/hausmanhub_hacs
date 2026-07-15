@@ -38,6 +38,8 @@ Last updated: 2026-07-15.
   unchanged and limited to its nine sensors. After each HASC removal, an
   authenticated temporary exact read-only user must receive only an unavailable
   response from the retained local summary route, with none of the nine counts.
+  It also requires every removed HASC count state to be absent from the
+  temporary state machine.
 - Synthetic Common-contract fixtures, static validators, synthetic shadow
   evidence, and redacted diagnostics/repairs fixtures are present. They use
   Python's standard library and local JSON only.
@@ -247,6 +249,11 @@ Last updated: 2026-07-15.
   returns an unavailable response without count data to a temporary local
   read-only user. See the [local-summary closure review
   note](LLM_WIKI/Manual/2026-07-15-kimi-local-summary-closed-after-removal-review.md).
+- Kimi reviewed the isolated state-cleanup check with no findings. It confirmed
+  that the test remembers only HASC's temporary internal state names before
+  removal, then rejects any state left afterward without reading or printing a
+  count value. See the [state-cleanup review
+  note](LLM_WIKI/Manual/2026-07-15-kimi-state-cleanup-after-removal-review.md).
 - The old private-first skeleton decision is now clearly marked historical and
   points to the current public manual-HACS decision. Kimi first asked for a
   less brittle document guard; after that correction, its final review found no
@@ -272,7 +279,9 @@ another safe HASC setup, requiring its nine sensors and the same external
 record again. After each removal it sends one authenticated loopback GET from a
 temporary exact read-only user to the retained local-summary route, requires an
 unavailable response, and rejects any returned count key. It proves neither
-live-home behaviour nor execution authority. It also requires no HASC device
+live-home behaviour nor execution authority. It also records the temporary
+HASC state names before each removal and requires all of those states to be
+absent afterward, without reading their values. It also requires no HASC device
 registry entry and no device attachment for each HASC sensor. It also tries a
 second safe setup and requires Home Assistant to refuse it while preserving the
 original nine-sensor setup.
