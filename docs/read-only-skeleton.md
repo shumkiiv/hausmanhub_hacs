@@ -74,7 +74,8 @@ The script creates a temporary empty Home Assistant configuration, copies the
 local integration into it, and removes the temporary configuration afterwards.
 It checks both approved initial modes, a safe change between those modes, a
 real reload, the fixed redacted diagnostics report, clean removal, exactly nine
-HASC diagnostic count sensors, and the absence of HASC services. It also starts a temporary loopback-only
+HASC diagnostic count sensors, and the absence of HASC services or devices.
+It also starts a temporary loopback-only
 Home Assistant server to prove that the local nine-count page rejects an
 unsigned request and an administrator, accepts only the temporary read-only
 test account, and rejects POST. An attempt to submit `proxy` through options

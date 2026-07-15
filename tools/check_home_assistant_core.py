@@ -29,7 +29,7 @@ from homeassistant.bootstrap import async_from_config_dict
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import InvalidData
-from homeassistant.helpers import entity_registry
+from homeassistant.helpers import device_registry, entity_registry
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -311,6 +311,14 @@ def assert_entry_has_only_summary_sensors(
         None,
         "the integration must not register services",
     )
+    assert_result(
+        device_registry.async_entries_for_config_entry(
+            device_registry.async_get(hass),
+            entry_id,
+        ),
+        [],
+        "the integration must not create devices",
+    )
     entries = entity_registry.async_entries_for_config_entry(
         entity_registry.async_get(hass),
         entry_id,
@@ -338,6 +346,11 @@ def assert_entry_has_only_summary_sensors(
     ):
         raise RuntimeError("new HASC display entities must keep the protected prefix")
     for entry in entries:
+        assert_result(
+            entry.device_id,
+            None,
+            "a HASC summary sensor must not be attached to a device",
+        )
         state = hass.states.get(entry.entity_id)
         if state is None:
             raise RuntimeError("every HASC summary sensor must have a state")

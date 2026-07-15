@@ -29,7 +29,9 @@ Last updated: 2026-07-15.
   change. It also reserves one HASC-like sensor name only in that temporary
   configuration, then proves that a new HASC setup keeps all nine count
   sensors, does not overwrite the occupied name, and leaves the other eight
-  protected names unchanged.
+  protected names unchanged. The same isolated check requires no HASC device
+  record and requires each of the nine HASC sensors to remain unattached to a
+  device.
 - Synthetic Common-contract fixtures, static validators, synthetic shadow
   evidence, and redacted diagnostics/repairs fixtures are present. They use
   Python's standard library and local JSON only.
@@ -217,6 +219,10 @@ Last updated: 2026-07-15.
   the check now requires only a different protected HASC name and exact names
   for the other eight sensors. The final review found no issues. See the
   [occupied-name review note](LLM_WIKI/Manual/2026-07-15-kimi-occupied-name-check-review.md).
+- Kimi reviewed the no-device runtime check with no findings. It confirmed
+  that the isolated check requires both an empty HASC device list and no
+  device attachment for each of the nine sensors. See the [no-device review
+  note](LLM_WIKI/Manual/2026-07-15-kimi-no-device-check-review.md).
 
 ## Verification
 
@@ -232,7 +238,8 @@ requires the old names to survive while a new entry receives the protected
 v0.3.1 names. Before that new entry, the check reserves one protected-looking
 name only in the disposable registry and requires the occupied name to remain
 external while all nine HASC sensors still appear. It proves neither live-home
-behaviour nor execution authority.
+behaviour nor execution authority. It also requires no HASC device registry
+entry and no device attachment for each HASC sensor.
 
 Separately, direct local Codex observation passed a harmless availability
 check, a version-only check, and a count-only current-state check on

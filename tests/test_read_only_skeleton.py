@@ -293,6 +293,17 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             sensor_source,
         )
 
+    def test_core_smoke_check_requires_no_hasc_devices(self) -> None:
+        """Keep the real-Core check aligned with the no-device promise."""
+
+        core_check_source = (ROOT / "tools" / "check_home_assistant_core.py").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("device_registry.async_entries_for_config_entry", core_check_source)
+        self.assertIn("the integration must not create devices", core_check_source)
+        self.assertIn("entry.device_id", core_check_source)
+
     def test_home_summary_rejects_impossible_totals(self) -> None:
         """Bad aggregate data cannot reach diagnostics silently."""
 
