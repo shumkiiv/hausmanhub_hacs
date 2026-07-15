@@ -103,3 +103,6 @@ HASC device control; the only available modes remain `read-only` and `shadow`.
 
 See the short Russian [version history](CHANGELOG.md) for the changes in each
 published version.
+
+For maintainers, the Russian [release checklist](docs/hacs-release-checklist.md)
+explains when an HACS update is needed and how to publish it safely.

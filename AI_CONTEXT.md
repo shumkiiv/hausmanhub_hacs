@@ -220,6 +220,10 @@ https://github.com/shumkiiv/hausmanhub_hasc/actions/runs/29352007883.
 Public contribution guidance and a pull-request safety checklist are present.
 They require the local check, Kimi review for code, and an explicit statement
 that no home data or control capability is being introduced.
+A Russian release checklist records the safe order for a real HACS update:
+version, version history, local check, Kimi review, GitHub check, published
+release, HACS refresh, and Home Assistant restart. Documentation-only and
+test-only changes do not need a new HACS version.
 
 ## Next decision gate
 
