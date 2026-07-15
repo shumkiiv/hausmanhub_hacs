@@ -35,7 +35,9 @@ Last updated: 2026-07-15.
   external record again. It requires no HASC device record and requires each of
   the nine HASC sensors to remain unattached to a device. It also requires Home
   Assistant to refuse a second HASC setup while keeping the existing setup
-  unchanged and limited to its nine sensors.
+  unchanged and limited to its nine sensors. After each HASC removal, an
+  authenticated temporary exact read-only user must receive only an unavailable
+  response from the retained local summary route, with none of the nine counts.
 - Synthetic Common-contract fixtures, static validators, synthetic shadow
   evidence, and redacted diagnostics/repairs fixtures are present. They use
   Python's standard library and local JSON only.
@@ -240,6 +242,11 @@ Last updated: 2026-07-15.
   keeps the external entry unchanged, and removes cleanly. See the
   [repeat-install review
   note](LLM_WIKI/Manual/2026-07-15-kimi-repeat-install-after-cleanup-review.md).
+- Kimi reviewed the isolated local-summary closure check with no findings. It
+  confirmed that a retained route has no active entry after every removal and
+  returns an unavailable response without count data to a temporary local
+  read-only user. See the [local-summary closure review
+  note](LLM_WIKI/Manual/2026-07-15-kimi-local-summary-closed-after-removal-review.md).
 - The old private-first skeleton decision is now clearly marked historical and
   points to the current public manual-HACS decision. Kimi first asked for a
   less brittle document guard; after that correction, its final review found no
@@ -262,10 +269,13 @@ name only in the disposable registry and requires the occupied name to remain
 external while all nine HASC sensors still appear. After HASC removal, it
 requires that external record to remain unchanged. It then creates and removes
 another safe HASC setup, requiring its nine sensors and the same external
-record again. It proves neither live-home behaviour nor execution authority. It
-also requires no HASC device registry entry and no device attachment for each
-HASC sensor. It also tries a second safe setup and requires Home Assistant to
-refuse it while preserving the original nine-sensor setup.
+record again. After each removal it sends one authenticated loopback GET from a
+temporary exact read-only user to the retained local-summary route, requires an
+unavailable response, and rejects any returned count key. It proves neither
+live-home behaviour nor execution authority. It also requires no HASC device
+registry entry and no device attachment for each HASC sensor. It also tries a
+second safe setup and requires Home Assistant to refuse it while preserving the
+original nine-sensor setup.
 
 Separately, direct local Codex observation passed a harmless availability
 check, a version-only check, and a count-only current-state check on

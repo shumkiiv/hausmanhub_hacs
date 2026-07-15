@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from http import HTTPStatus
 import importlib
 import json
 from pathlib import Path
@@ -51,6 +52,7 @@ PROTECTED_SUMMARY_SENSOR_ENTITY_IDS = frozenset(
 )
 RESERVED_SUMMARY_SENSOR_ENTITY_ID = "sensor.hausman_hub_hasc_areas_count"
 EXTERNAL_COLLISION_PLATFORM = "homeassistant"
+LOCAL_SUMMARY_ACTIVE_ENTRY = "local_summary_active_entry"
 # These are the generic names Home Assistant produced for version 0.3.0.
 # They are fixed here only to prove that an existing registry keeps them on
 # update; no live Home Assistant names are read or stored by this check.
@@ -570,6 +572,21 @@ async def async_create_test_access_token(
     return hass.auth.async_create_access_token(refresh_token, "127.0.0.1")
 
 
+async def async_create_test_read_only_access_token(
+    hass: HomeAssistant,
+    user_name: str,
+) -> str:
+    """Create one temporary exact read-only user only inside the empty Core."""
+
+    reader = await hass.auth.async_create_user(
+        user_name,
+        group_ids=[GROUP_ID_READ_ONLY],
+        local_only=True,
+    )
+    assert_result(reader.is_admin, False, "temporary reader must not be an administrator")
+    return await async_create_test_access_token(hass, reader)
+
+
 async def async_assert_authenticated_local_summary_http_access(
     hass: HomeAssistant,
 ) -> None:
@@ -581,14 +598,11 @@ async def async_assert_authenticated_local_summary_http_access(
         group_ids=[GROUP_ID_ADMIN],
     )
     assert_result(owner.is_admin, True, "temporary owner must be an administrator")
-    reader = await hass.auth.async_create_user(
+    reader_token = await async_create_test_read_only_access_token(
+        hass,
         "HASC temporary read-only test user",
-        group_ids=[GROUP_ID_READ_ONLY],
-        local_only=True,
     )
-    assert_result(reader.is_admin, False, "temporary reader must not be an administrator")
 
-    reader_token = await async_create_test_access_token(hass, reader)
     owner_token = await async_create_test_access_token(hass, owner)
     server = TestServer(hass.http.app, host="127.0.0.1")
     client = TestClient(server)
@@ -627,6 +641,44 @@ async def async_assert_authenticated_local_summary_http_access(
             headers={"Authorization": f"Bearer {reader_token}"},
         )
         assert_result(mutation.status, 405, "local summary must not accept POST")
+    finally:
+        await client.close()
+
+
+async def async_assert_local_summary_is_unavailable_after_removal(
+    hass: HomeAssistant,
+    domain: str,
+    reader_token: str,
+) -> None:
+    """Require the retained GET route to fail closed after HASC removal."""
+
+    runtime = hass.data.get(domain)
+    if not isinstance(runtime, dict):
+        raise RuntimeError("the retained local summary route must keep its runtime data")
+    assert_result(
+        runtime.get(LOCAL_SUMMARY_ACTIVE_ENTRY),
+        None,
+        "HASC removal must clear the active local summary entry",
+    )
+
+    server = TestServer(hass.http.app, host="127.0.0.1")
+    client = TestClient(server)
+    try:
+        await client.start_server()
+        unavailable = await client.get(
+            "/api/hausman_hub/local-summary",
+            headers={"Authorization": f"Bearer {reader_token}"},
+        )
+        assert_result(
+            unavailable.status,
+            HTTPStatus.SERVICE_UNAVAILABLE,
+            "local summary must become unavailable after HASC removal",
+        )
+        payload = await unavailable.json()
+        if not isinstance(payload, dict):
+            raise RuntimeError("unavailable local summary response must be a dictionary")
+        if set(payload) & set(SUMMARY_SENSOR_KEYS):
+            raise RuntimeError("unavailable local summary must not return count values")
     finally:
         await client.close()
 
@@ -740,6 +792,10 @@ async def async_run_check() -> None:
         refresh_test_integration(config_directory, domain)
         restarted_hass = await async_start_empty_home_assistant(config_directory)
         try:
+            removal_reader_token = await async_create_test_read_only_access_token(
+                restarted_hass,
+                "HASC temporary removal test user",
+            )
             restored_entry = restarted_hass.config_entries.async_get_entry(entry_id)
             if restored_entry is None:
                 raise RuntimeError("safe entry must persist after the disposable restart")
@@ -777,6 +833,11 @@ async def async_run_check() -> None:
                 LEGACY_SUMMARY_SENSOR_ENTITY_IDS,
             )
             await async_remove_safe_entry(restarted_hass, restored_entry.entry_id)
+            await async_assert_local_summary_is_unavailable_after_removal(
+                restarted_hass,
+                domain,
+                removal_reader_token,
+            )
 
             reserved_entry = reserve_summary_sensor_name_for_test(restarted_hass)
             shadow_entry = await async_create_safe_entry(restarted_hass, domain, "shadow")
@@ -805,6 +866,11 @@ async def async_run_check() -> None:
                 reserved_entry,
             )
             await async_remove_safe_entry(restarted_hass, shadow_entry.entry_id)
+            await async_assert_local_summary_is_unavailable_after_removal(
+                restarted_hass,
+                domain,
+                removal_reader_token,
+            )
             assert_reserved_collision_entry_is_unchanged(restarted_hass, reserved_entry)
 
             reinstalled_entry = await async_create_safe_entry(
@@ -825,6 +891,11 @@ async def async_run_check() -> None:
             )
             assert_reserved_collision_entry_is_unchanged(restarted_hass, reserved_entry)
             await async_remove_safe_entry(restarted_hass, reinstalled_entry.entry_id)
+            await async_assert_local_summary_is_unavailable_after_removal(
+                restarted_hass,
+                domain,
+                removal_reader_token,
+            )
             assert_reserved_collision_entry_is_unchanged(restarted_hass, reserved_entry)
         finally:
             await restarted_hass.async_stop()

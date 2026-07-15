@@ -109,6 +109,11 @@ installs HASC again and requires the same nine count sensors while keeping the
 external record unchanged. It removes that second setup too and checks the
 external record once more.
 
+The local nine-count page remains registered so a later safe setup can reuse
+it without creating a duplicate. After each removal, however, an authenticated
+temporary read-only user must receive only an unavailable response, never any
+of the nine counts.
+
 For a manual check of an installed copy, see the Russian
 [safe-check guide](home-assistant-safe-check.md). It asks only for Home
 Assistant screens and explicitly excludes diagnostics archives and home data.

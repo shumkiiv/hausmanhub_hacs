@@ -378,6 +378,32 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             core_check_source,
         )
 
+    def test_core_smoke_check_closes_the_local_summary_after_removal(self) -> None:
+        """The retained route must not serve counts without an active HASC entry."""
+
+        core_check_source = (ROOT / "tools" / "check_home_assistant_core.py").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn(
+            "async_assert_local_summary_is_unavailable_after_removal",
+            core_check_source,
+        )
+        self.assertIn(
+            "HASC removal must clear the active local summary entry",
+            core_check_source,
+        )
+        self.assertIn(
+            "local summary must become unavailable after HASC removal",
+            core_check_source,
+        )
+        self.assertGreaterEqual(
+            core_check_source.count(
+                "await async_assert_local_summary_is_unavailable_after_removal("
+            ),
+            3,
+        )
+
     def test_home_summary_rejects_impossible_totals(self) -> None:
         """Bad aggregate data cannot reach diagnostics silently."""
 
