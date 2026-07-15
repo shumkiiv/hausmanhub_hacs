@@ -91,6 +91,13 @@ Last updated: 2026-07-15.
   returns only unavailable without reading the local home summary; the
   disposable Core check covers the same five main-settings and two mode-choice
   variants with a reader that fails if called.
+- Version 0.3.10 also requires the authenticated local page to find exactly
+  one saved HASC entry that Home Assistant still reports as loaded. A stale
+  in-memory page pointer after an ordinary stop therefore returns only
+  unavailable and does not read the nine-count summary. The disposable Core
+  check deliberately restores that stale pointer only after the ordinary stop,
+  replaces the reader with a failing function, and requires 503 with no count
+  keys.
 - Kimi independently reviewed the closed diagnostics change with no findings.
   See the [closed diagnostics review
   note](LLM_WIKI/Manual/2026-07-15-kimi-closed-diagnostics-review.md).
@@ -100,6 +107,9 @@ Last updated: 2026-07-15.
 - Kimi independently reviewed the local summary before-reload closure with no
   findings. See the [local summary unsafe-settings review
   note](LLM_WIKI/Manual/2026-07-15-kimi-local-summary-unsafe-settings-review.md).
+- Kimi independently reviewed the stale local-summary pointer closure with no
+  findings. See the [stale local-summary pointer review
+  note](LLM_WIKI/Manual/2026-07-15-kimi-stale-local-summary-pointer-review.md).
 - Kimi independently reviewed the final live and restart duplicate-entry
   closure with no findings. See the [live duplicate fail-closed review
   note](LLM_WIKI/Manual/2026-07-15-kimi-live-duplicate-fail-closed-review.md).

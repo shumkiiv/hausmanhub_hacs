@@ -1350,6 +1350,65 @@ async def async_assert_local_summary_is_unavailable(
         await client.close()
 
 
+async def async_assert_stale_local_summary_pointer_is_unavailable_without_reading(
+    hass: HomeAssistant,
+    domain: str,
+    entry: ConfigEntry,
+    reader_token: str,
+    unavailable_after: str,
+) -> None:
+    """Require a stale local page pointer to close before reading the home."""
+
+    runtime = hass.data.get(domain)
+    if not isinstance(runtime, dict):
+        raise RuntimeError("the retained local summary route must keep its runtime data")
+    assert_result(
+        entry.state,
+        config_entries.ConfigEntryState.NOT_LOADED,
+        f"{unavailable_after} must keep HASC unloaded",
+    )
+    assert_result(
+        runtime.get(LOCAL_SUMMARY_ACTIVE_ENTRY),
+        None,
+        f"{unavailable_after} must start with no active local summary entry",
+    )
+    if len(find_local_summary_routes(hass)) != 1:
+        raise RuntimeError("the retained local summary route must remain unique")
+
+    runtime[LOCAL_SUMMARY_ACTIVE_ENTRY] = entry
+    integration = await loader.async_get_integration(hass, domain)
+    local_summary_platform = await integration.async_get_platform("local_summary")
+    original_collect_home_summary = local_summary_platform.collect_home_summary
+
+    def fail_if_home_is_read(*_: object, **__: object) -> object:
+        raise RuntimeError("a stale local summary pointer must not read the home")
+
+    local_summary_platform.collect_home_summary = fail_if_home_is_read
+    server = TestServer(hass.http.app, host="127.0.0.1")
+    client = TestClient(server)
+    try:
+        await client.start_server()
+        unavailable = await client.get(
+            "/api/hausman_hub/local-summary",
+            headers={"Authorization": f"Bearer {reader_token}"},
+        )
+        assert_result(
+            unavailable.status,
+            HTTPStatus.SERVICE_UNAVAILABLE,
+            f"local summary must become unavailable after {unavailable_after}",
+        )
+        payload = await unavailable.json()
+        if not isinstance(payload, dict):
+            raise RuntimeError("unavailable local summary response must be a dictionary")
+        if set(payload) & set(SUMMARY_SENSOR_KEYS):
+            raise RuntimeError("unavailable local summary must not return count values")
+    finally:
+        if runtime.get(LOCAL_SUMMARY_ACTIVE_ENTRY) is entry:
+            runtime.pop(LOCAL_SUMMARY_ACTIVE_ENTRY, None)
+        local_summary_platform.collect_home_summary = original_collect_home_summary
+        await client.close()
+
+
 async def async_assert_unsafe_local_summary_is_unavailable_without_reading(
     hass: HomeAssistant,
     domain: str,
@@ -2272,6 +2331,13 @@ async def async_run_check() -> None:
                 domain,
                 ordinary_unload_reader_token,
                 "HASC ordinary unload",
+            )
+            await async_assert_stale_local_summary_pointer_is_unavailable_without_reading(
+                hass,
+                domain,
+                read_only_entry,
+                ordinary_unload_reader_token,
+                "HASC ordinary unload with a stale local-summary pointer",
             )
             await async_setup_safe_entry(hass, read_only_entry)
             assert_result(

@@ -51,7 +51,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         self.assertEqual("hausman_hub", manifest["domain"])
         self.assertTrue(manifest["config_flow"])
         self.assertTrue(manifest["single_config_entry"])
-        self.assertEqual("0.3.9", manifest["version"])
+        self.assertEqual("0.3.10", manifest["version"])
 
     def test_current_manifest_version_has_a_plain_change_note(self) -> None:
         manifest = json.loads((INTEGRATION / "manifest.json").read_text(encoding="utf-8"))
@@ -300,6 +300,23 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             snapshot_source.index("home_summary_supplier()"),
         )
         self.assertIn("lambda: collect_home_summary", local_adapter_source)
+
+    def test_local_summary_requires_a_currently_loaded_hasc_entry(self) -> None:
+        """A stale local pointer must close before the adapter reads the home."""
+
+        local_adapter_source = (INTEGRATION / "local_summary.py").read_text(
+            encoding="utf-8"
+        )
+        active_entry_source = local_adapter_source.split("def _active_entry", 1)[1].split(
+            "def _is_local_read_only_request", 1
+        )[0]
+
+        self.assertIn("async_loaded_entries(DOMAIN)", active_entry_source)
+        self.assertIn("return configured_entry", active_entry_source)
+        self.assertLess(
+            active_entry_source.index("async_loaded_entries(DOMAIN)"),
+            active_entry_source.index("return configured_entry"),
+        )
 
     def test_home_summary_contains_totals_but_no_names_or_identifiers(self) -> None:
         """The application layer must receive and export counts only."""

@@ -111,6 +111,12 @@ GET-only page. This is separate from user deactivation: it does not mark the
 saved setup or its sensor records as disabled, and it does not touch a real
 home.
 
+That same temporary stop also simulates an old internal page reference that
+would otherwise remain after HASC stops. The retained page must answer only
+that the summary is unavailable before it reads any count. This is a
+fail-closed check in the disposable empty configuration; it does not inspect a
+real Home Assistant or home.
+
 The empty test also repeats that ordinary stop and then fully stops its
 temporary Home Assistant. A new empty Home Assistant must automatically load
 the same still-enabled HASC setup. It must restore only the same nine count

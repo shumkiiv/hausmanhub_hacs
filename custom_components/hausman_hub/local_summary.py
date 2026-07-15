@@ -91,7 +91,7 @@ class LocalSummaryView(HomeAssistantView):
         return self.json(summary)
 
     def _active_entry(self) -> ConfigEntry | None:
-        """Return the loaded safe entry without exposing its contents."""
+        """Return the one saved entry only while it is currently loaded."""
 
         runtime = self._hass.data.get(DOMAIN)
         if runtime is None:
@@ -99,13 +99,18 @@ class LocalSummaryView(HomeAssistantView):
         entry = runtime.get(DATA_ACTIVE_ENTRY)
         if entry is None:
             return None
-        configured_entry_ids = tuple(
-            configured_entry.entry_id
-            for configured_entry in self._hass.config_entries.async_entries(DOMAIN)
-        )
-        if configured_entry_ids != (entry.entry_id,):
+        configured_entries = self._hass.config_entries.async_entries(DOMAIN)
+        if len(configured_entries) != 1:
             return None
-        return entry
+        configured_entry = configured_entries[0]
+        if configured_entry.entry_id != entry.entry_id:
+            return None
+        if not any(
+            loaded_entry.entry_id == configured_entry.entry_id
+            for loaded_entry in self._hass.config_entries.async_loaded_entries(DOMAIN)
+        ):
+            return None
+        return configured_entry
 
 
 def _is_local_read_only_request(request: Any) -> bool:

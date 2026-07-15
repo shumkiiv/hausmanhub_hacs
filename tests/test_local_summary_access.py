@@ -450,6 +450,35 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertEqual(503, response.status)
         self.assertEqual({"message"}, set(response.payload))
 
+    def test_view_does_not_read_home_when_a_stale_pointer_outlives_hasc(self) -> None:
+        """A retained runtime pointer must not outlive the loaded HASC entry."""
+
+        self.assertEqual(
+            [self.entry],
+            self.hass.config_entries.async_loaded_entries(self.entry.domain),
+        )
+        self.assertIs(
+            self.entry,
+            self.hass.data[self.adapter.DOMAIN][self.adapter.DATA_ACTIVE_ENTRY],
+        )
+        self.hass.config_entries.loaded_entries.clear()
+
+        original_collect_home_summary = self.adapter.collect_home_summary
+
+        def fail_if_home_is_read(*_: object, **__: object) -> object:
+            raise AssertionError("a stale local summary pointer must not read the home")
+
+        self.adapter.collect_home_summary = fail_if_home_is_read
+        try:
+            response = asyncio.run(
+                self.view.get(FakeRequest("192.168.1.20", reader_user("system-read-only")))
+            )
+        finally:
+            self.adapter.collect_home_summary = original_collect_home_summary
+
+        self.assertEqual(503, response.status)
+        self.assertEqual({"message"}, set(response.payload))
+
     def test_view_fails_closed_if_a_second_saved_hasc_entry_appears(self) -> None:
         """The retained view must not leak counts during a corrupt live pair."""
 
