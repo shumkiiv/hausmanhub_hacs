@@ -157,6 +157,12 @@ Last updated: 2026-07-16.
   it stays absent after an empty restart. Kimi found no issue; see the [unsafe
   user-activation review
   note](LLM_WIKI/Manual/2026-07-16-kimi-unsafe-user-activation-review.md).
+- After that rejected proxy-mode activation, a separate disposable repair
+  restores the exact safe options. The correction cannot read the home or
+  start HASC by itself; only one explicit reload returns the same nine counts,
+  fixed diagnostics, and guarded page with direct execution blocked. Kimi
+  found no issue; see the [unsafe proxy-option repair review
+  note](LLM_WIKI/Manual/2026-07-16-kimi-unsafe-proxy-option-repair-review.md).
 - The same disposable activation check now separately uses damaged main data
   whose direct-execution marker says `allowed`. The user activation is still
   rejected before any home read; HASC stays in a setup-error state with no

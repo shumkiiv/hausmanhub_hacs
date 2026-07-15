@@ -3736,6 +3736,17 @@ async def async_run_check() -> None:
                 domain,
                 tuple(removed_entries),
                 reserved_entry,
+                unsafe_options=UNSAFE_PROXY_OPTIONS,
+                scenario_name="unsafe proxy option repair",
+                repair_after_rejected_activation=True,
+            )
+        )
+        removed_entries.append(
+            await async_assert_user_deactivated_unsafe_settings_cannot_enable_lifecycle(
+                config_directory,
+                domain,
+                tuple(removed_entries),
+                reserved_entry,
                 unsafe_data=UNSAFE_ALLOWED_DIRECT_EXECUTION_DATA,
                 scenario_name="unsafe direct-execution block",
             )
