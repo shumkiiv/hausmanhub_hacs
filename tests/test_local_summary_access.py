@@ -418,6 +418,10 @@ class LocalSummaryAccessTest(unittest.TestCase):
         invalid_configurations = (
             ({**safe_data, "mode": "proxy"}, {}),
             ({**safe_data, "direct_execution_status": "allowed"}, {}),
+            (
+                {"direct_execution_status": "direct_execution_blocked"},
+                {"mode": "shadow"},
+            ),
             ({**safe_data, "synthetic_extra": "ignored"}, {}),
             (safe_data, {"mode": "proxy"}),
             (safe_data, {"mode": "read-only", "synthetic_extra": "ignored"}),

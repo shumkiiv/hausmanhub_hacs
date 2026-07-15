@@ -79,6 +79,9 @@ UNSAFE_ALLOWED_DIRECT_EXECUTION_DATA = {
     "direct_execution_status": "allowed",
 }
 UNSAFE_MISSING_DIRECT_EXECUTION_DATA = {"mode": "read-only"}
+UNSAFE_MISSING_MODE_DATA = {
+    "direct_execution_status": "direct_execution_blocked",
+}
 UNSAFE_EXTRA_FIELD_DATA = {
     "mode": "read-only",
     "direct_execution_status": "direct_execution_blocked",
@@ -1048,6 +1051,7 @@ async def async_assert_invalid_saved_data_lifecycle(
     reserved_entry: ReservedCollisionEntry,
     unsafe_data: dict[str, str],
     scenario_name: str,
+    safe_options_mode: str | None = None,
 ) -> RemovedHascEntry:
     """Prove one unsafe saved main-settings block stays closed until corrected."""
 
@@ -1065,6 +1069,13 @@ async def async_assert_invalid_saved_data_lifecycle(
             reserved_entry,
         )
         invalid_entry = await async_create_safe_entry(invalid_data_hass, domain, "read-only")
+        if safe_options_mode is not None:
+            await async_update_safe_options(
+                invalid_data_hass,
+                invalid_entry,
+                safe_options_mode,
+            )
+        safe_mode = safe_options_mode or "read-only"
         invalid_entry_id = invalid_entry.entry_id
         recovered_entry_data = dict(invalid_entry.data)
         recovered_entry_options = dict(invalid_entry.options)
@@ -1084,7 +1095,7 @@ async def async_assert_invalid_saved_data_lifecycle(
             invalid_data_hass,
             domain,
             invalid_entry,
-            "read-only",
+            safe_mode,
         )
         assert_entry_has_only_summary_sensors(
             invalid_data_hass,
@@ -1187,7 +1198,7 @@ async def async_assert_invalid_saved_data_lifecycle(
             recovered_data_hass,
             domain,
             recovered_entry,
-            "read-only",
+            safe_mode,
         )
         assert_entry_has_only_summary_sensors(
             recovered_data_hass,
@@ -1824,6 +1835,17 @@ async def async_run_check() -> None:
                 reserved_entry,
                 UNSAFE_MISSING_DIRECT_EXECUTION_DATA,
                 "missing-execution-block data",
+            )
+        )
+        removed_entries.append(
+            await async_assert_invalid_saved_data_lifecycle(
+                config_directory,
+                domain,
+                tuple(removed_entries),
+                reserved_entry,
+                UNSAFE_MISSING_MODE_DATA,
+                "missing-mode data",
+                safe_options_mode="shadow",
             )
         )
         removed_entries.append(

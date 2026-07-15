@@ -70,6 +70,10 @@ Last updated: 2026-07-15.
   guarded page; after an in-process deactivation or removal that one retained
   page must fail closed without counts; after a full temporary restart while
   disabled or removed, no such page may exist.
+- Version 0.3.4 requires both fixed fields in saved HASC main data. Even a
+  safe `shadow` mode in the separate options cannot fill in a missing main
+  mode, so an incomplete saved setup stays closed until its exact data is
+  restored. This does not add any home-control feature.
 - Version 0.3.3 keeps a bad saved HASC setup closed. If its saved data violates
   the fixed safety contract, HASC rejects a reload and removes only its own
   restored count states and stale HASC records, both after startup and during a
@@ -77,12 +81,12 @@ Last updated: 2026-07-15.
   on Home Assistant's main loop, and the local test fake rejects an unmarked
   startup callback. It does not alter devices, services, other entities,
   Climate, or Automation.
-- The same disposable Core lifecycle now checks four deliberately invalid main
+- The same disposable Core lifecycle now checks five deliberately invalid main
   saved settings separately: an unsafe mode, a false unblocked-execution
-  marker, a missing required execution block, and an otherwise safe main
-  setting with one extra synthetic field. Each must close through reload and
-  restart, recover only after the exact safe data is restored, and keep the
-  unrelated temporary record unchanged.
+  marker, a missing required execution block, a missing required mode, and an
+  otherwise safe main setting with one extra synthetic field. Each must close
+  through reload and restart, recover only after the exact safe data is
+  restored, and keep the unrelated temporary record unchanged.
 - The same disposable lifecycle now corrects only its own deliberately bad
   saved data back to the exact original safe data, then starts one more empty
   Home Assistant while the corrected HASC setup remains installed. That restart
@@ -367,6 +371,12 @@ Last updated: 2026-07-15.
   after exact correction, and never touches the external temporary record. See
   the [missing-execution-block review
   note](LLM_WIKI/Manual/2026-07-15-kimi-missing-execution-block-review.md).
+- Kimi reviewed the v0.3.4 correction for a missing main mode with a safe
+  `shadow` option, with no findings. It confirmed that complete main saved data
+  is now required, empty options still work for a complete setting, and the
+  rejected setup cannot create a page, sensor, device, service, or execution
+  path. See the [missing-main-mode review
+  note](LLM_WIKI/Manual/2026-07-15-kimi-missing-main-mode-review.md).
 - Kimi reviewed recovery after a corrected temporary saved setting with no
   findings. It confirmed the additional persistence restart, exact same
   nine-count sensor names, fixed diagnostics, GET-only local page, collision

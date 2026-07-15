@@ -48,7 +48,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         self.assertEqual("hausman_hub", manifest["domain"])
         self.assertTrue(manifest["config_flow"])
         self.assertTrue(manifest["single_config_entry"])
-        self.assertEqual("0.3.3", manifest["version"])
+        self.assertEqual("0.3.4", manifest["version"])
 
     def test_current_manifest_version_has_a_plain_change_note(self) -> None:
         manifest = json.loads((INTEGRATION / "manifest.json").read_text(encoding="utf-8"))
@@ -121,6 +121,13 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         self.assertEqual("shadow", configuration.mode)
         self.assertEqual(DIRECT_EXECUTION_BLOCKED, configuration.direct_execution_status)
 
+    def test_empty_options_keep_a_complete_main_setting_safe(self) -> None:
+        """Options are optional only after main saved data is complete."""
+
+        configuration = effective_configuration(create_initial_entry("read-only"), {})
+        self.assertEqual("read-only", configuration.mode)
+        self.assertEqual(DIRECT_EXECUTION_BLOCKED, configuration.direct_execution_status)
+
     def test_proxy_direct_and_unknown_data_are_rejected(self) -> None:
         for unsafe_mode in ("proxy", "direct", "", None):
             with self.subTest(mode=unsafe_mode):
@@ -134,6 +141,21 @@ class ReadOnlySkeletonTest(unittest.TestCase):
 
         with self.assertRaises(ConfigurationViolation):
             effective_configuration(create_initial_entry("read-only"), {"token": "blocked"})
+
+    def test_persisted_configuration_requires_both_main_fields(self) -> None:
+        """A safe option must not fill in a missing saved main field."""
+
+        partial_entries = (
+            ({MODE_FIELD: "read-only"}, {}),
+            (
+                {DIRECT_EXECUTION_STATUS_FIELD: DIRECT_EXECUTION_BLOCKED},
+                {MODE_FIELD: "shadow"},
+            ),
+        )
+        for entry_data, options in partial_entries:
+            with self.subTest(entry_data=entry_data, options=options):
+                with self.assertRaises(ConfigurationViolation):
+                    effective_configuration(entry_data, options)
 
     def test_persisted_configuration_rejects_representative_extra_top_level_fields(
         self,
@@ -542,15 +564,19 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         self.assertIn("UNSAFE_PROXY_DATA", core_check_source)
         self.assertIn("UNSAFE_ALLOWED_DIRECT_EXECUTION_DATA", core_check_source)
         self.assertIn("UNSAFE_MISSING_DIRECT_EXECUTION_DATA", core_check_source)
+        self.assertIn("UNSAFE_MISSING_MODE_DATA", core_check_source)
         self.assertIn("UNSAFE_EXTRA_FIELD_DATA", core_check_source)
+        self.assertIn("safe_options_mode: str | None = None", core_check_source)
         self.assertIn('"direct_execution_status": "allowed",', core_check_source)
         self.assertEqual(
-            4,
+            5,
             lifecycle_source.count("async_assert_invalid_saved_data_lifecycle("),
         )
         self.assertIn('"invalid-mode data",', lifecycle_source)
         self.assertIn('"unblocked-execution data",', lifecycle_source)
         self.assertIn('"missing-execution-block data",', lifecycle_source)
+        self.assertIn('"missing-mode data",', lifecycle_source)
+        self.assertIn('safe_options_mode="shadow",', lifecycle_source)
         self.assertIn('"extra-field data",', lifecycle_source)
         self.assertIn(
             "an unsafe saved HASC data entry must reject reload",
@@ -568,6 +594,10 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         )
         self.assertLess(
             lifecycle_source.index("UNSAFE_MISSING_DIRECT_EXECUTION_DATA"),
+            lifecycle_source.index("UNSAFE_MISSING_MODE_DATA"),
+        )
+        self.assertLess(
+            lifecycle_source.index("UNSAFE_MISSING_MODE_DATA"),
             lifecycle_source.index("UNSAFE_EXTRA_FIELD_DATA"),
         )
         self.assertLess(

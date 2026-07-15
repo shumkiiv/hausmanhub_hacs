@@ -1,7 +1,8 @@
 """Use cases for storing and reading safe configuration values.
 
 Only an approved mode and the hard direct-execution block are represented.
-Unknown values are rejected instead of being copied into a config entry.
+Both are required in saved entry data. Unknown values are rejected instead of
+being copied into a config entry.
 """
 
 from __future__ import annotations
@@ -51,7 +52,7 @@ def effective_configuration(
         {MODE_FIELD, DIRECT_EXECUTION_STATUS_FIELD},
         "entry data",
     )
-    _require_exact_keys(options, {MODE_FIELD}, "options")
+    _require_allowed_keys(options, {MODE_FIELD}, "options")
 
     if entry_data.get(DIRECT_EXECUTION_STATUS_FIELD) != DIRECT_EXECUTION_BLOCKED:
         raise ConfigurationViolation("direct execution must remain blocked")
@@ -70,7 +71,20 @@ def _configuration_for(mode_value: object) -> SafeConfiguration:
 def _require_exact_keys(
     values: Mapping[str, Any], allowed: set[str], label: str
 ) -> None:
-    """Reject unmodelled config data so it cannot become a hidden channel."""
+    """Require every fixed saved field and reject any hidden channel."""
+
+    missing = allowed - set(values)
+    if missing:
+        names = ", ".join(sorted(missing))
+        raise ConfigurationViolation(f"{label} is missing required fields: {names}")
+
+    _require_allowed_keys(values, allowed, label)
+
+
+def _require_allowed_keys(
+    values: Mapping[str, Any], allowed: set[str], label: str
+) -> None:
+    """Reject unmodelled optional fields so they cannot become a hidden channel."""
 
     unexpected = set(values) - allowed
     if unexpected:
