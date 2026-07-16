@@ -3769,6 +3769,17 @@ async def async_run_check() -> None:
                 domain,
                 tuple(removed_entries),
                 reserved_entry,
+                unsafe_data=UNSAFE_EXTRA_FIELD_DATA,
+                scenario_name="unsafe extra-field data repair",
+                repair_after_rejected_activation=True,
+            )
+        )
+        removed_entries.append(
+            await async_assert_user_deactivated_unsafe_settings_cannot_enable_lifecycle(
+                config_directory,
+                domain,
+                tuple(removed_entries),
+                reserved_entry,
                 unsafe_options=UNSAFE_EXTRA_FIELD_OPTIONS,
                 scenario_name="unsafe extra-field option repair",
                 repair_after_rejected_activation=True,
