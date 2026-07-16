@@ -1131,6 +1131,10 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             "repair_after_rejected_activation: bool = False",
             core_check_source,
         )
+        self.assertIn(
+            "partial_main_repair_before_options: bool = False",
+            core_check_source,
+        )
         self.assertIn("reclose_after_recovery: bool = False", core_check_source)
         self.assertIn(
             "repair_after_repeat_closure: bool = False",
@@ -1183,11 +1187,31 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             core_check_source,
         )
         self.assertIn(
+            "two unsafe mappings require a partial main repair",
+            core_check_source,
+        )
+        self.assertIn(
+            "partial main repair requires unsafe data, unsafe options, final recovery, and no restart",
+            core_check_source,
+        )
+        self.assertIn(
+            "partial main repair does not support repeated recovery",
+            core_check_source,
+        )
+        self.assertIn(
             "repeated unsafe data must remain available for manual repair",
             core_check_source,
         )
+        self.assertIn(
+            "async_assert_partial_main_repair_keeps_hasc_closed",
+            core_check_source,
+        )
+        self.assertIn(
+            "must not reload after an incomplete repair",
+            core_check_source,
+        )
         self.assertEqual(
-            11,
+            12,
             lifecycle_source.count(
                 "async_assert_user_deactivated_unsafe_settings_cannot_enable_lifecycle("
             ),
@@ -1217,6 +1241,8 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             'scenario_name="unsafe direct-execution repair"',
             lifecycle_source,
         )
+        self.assertIn('scenario_name="unsafe partial repair"', lifecycle_source)
+        self.assertIn("partial_main_repair_before_options=True", lifecycle_source)
         self.assertIn(
             'scenario_name="unsafe direct-execution block after restart"',
             lifecycle_source,

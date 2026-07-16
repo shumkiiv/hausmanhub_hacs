@@ -584,6 +584,74 @@ async def async_repair_unsafe_entry_after_rejected_activation(
     )
 
 
+async def async_assert_partial_main_repair_keeps_hasc_closed(
+    hass: HomeAssistant,
+    domain: str,
+    entry: ConfigEntry,
+    safe_data: dict[str, str],
+    unsafe_options: dict[str, str],
+    expected_entity_ids: frozenset[str],
+    reader_token: str,
+    scenario_name: str,
+) -> None:
+    """Prove correcting only one of two broken mappings cannot start HASC."""
+
+    assert_result(
+        entry.state,
+        config_entries.ConfigEntryState.SETUP_ERROR,
+        f"{scenario_name} must begin with the rejected setup error",
+    )
+    reload_calls: list[str] = []
+    original_async_reload = hass.config_entries.async_reload
+
+    async def async_recording_reload(entry_id: str) -> bool:
+        """Record any unexpected reload during the incomplete repair."""
+
+        reload_calls.append(entry_id)
+        return await original_async_reload(entry_id)
+
+    hass.config_entries.async_reload = async_recording_reload
+    try:
+        async with async_block_home_summary_reads(
+            hass,
+            domain,
+            f"{scenario_name} after repairing only main data",
+        ):
+            hass.config_entries.async_update_entry(entry, data=dict(safe_data))
+            await hass.async_block_till_done()
+    finally:
+        hass.config_entries.async_reload = original_async_reload
+
+    assert_result(
+        reload_calls,
+        [],
+        f"{scenario_name} must not reload after an incomplete repair",
+    )
+    assert_result(
+        dict(entry.data),
+        safe_data,
+        f"{scenario_name} must preserve the repaired main data",
+    )
+    assert_result(
+        dict(entry.options),
+        unsafe_options,
+        f"{scenario_name} must retain the remaining unsafe option",
+    )
+    assert_result(
+        entry.disabled_by,
+        None,
+        f"{scenario_name} must preserve the user's activation attempt",
+    )
+    await async_assert_unsafe_saved_update_closes_hasc(
+        hass,
+        domain,
+        entry,
+        expected_entity_ids,
+        reader_token,
+        f"{scenario_name} after repairing only main data",
+    )
+
+
 async def async_update_safe_options(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -1680,17 +1748,19 @@ async def async_save_unsafe_hasc_setting_without_reading_home(
     data: dict[str, str] | None = None,
     options: dict[str, str] | None = None,
 ) -> None:
-    """Save one unsafe mapping while every HASC home reader fails immediately."""
+    """Save unsafe mappings while every HASC home reader fails immediately."""
 
-    if (data is None) is (options is None):
-        raise RuntimeError("the unsafe HASC update must change exactly one saved mapping")
+    if data is None and options is None:
+        raise RuntimeError("the unsafe HASC update must change a saved mapping")
 
     async with async_block_home_summary_reads(
         hass,
         domain,
         f"{scenario_name} automatic closure",
     ):
-        if data is not None:
+        if data is not None and options is not None:
+            hass.config_entries.async_update_entry(entry, data=data, options=options)
+        elif data is not None:
             hass.config_entries.async_update_entry(entry, data=data)
         else:
             hass.config_entries.async_update_entry(entry, options=options)
@@ -2541,15 +2611,40 @@ async def async_assert_user_deactivated_unsafe_settings_cannot_enable_lifecycle(
     scenario_name: str,
     restart_before_activation: bool = False,
     repair_after_rejected_activation: bool = False,
+    partial_main_repair_before_options: bool = False,
     reclose_after_recovery: bool = False,
     repair_after_repeat_closure: bool = False,
     restart_after_repeat_repair: bool = False,
     reclose_after_repeat_repair_restart: bool = False,
 ) -> RemovedHascEntry:
-    """Prove manual activation cannot bypass one unsafe saved HASC setting."""
+    """Prove manual activation cannot bypass unsafe saved HASC settings."""
 
-    if (unsafe_data is None) is (unsafe_options is None):
-        raise RuntimeError("unsafe activation must change exactly one saved mapping")
+    if unsafe_data is None and unsafe_options is None:
+        raise RuntimeError("unsafe activation must change a saved mapping")
+    if (
+        unsafe_data is not None
+        and unsafe_options is not None
+        and not partial_main_repair_before_options
+    ):
+        raise RuntimeError("two unsafe mappings require a partial main repair")
+    if partial_main_repair_before_options and (
+        not repair_after_rejected_activation
+        or unsafe_data is None
+        or unsafe_options is None
+        or restart_before_activation
+    ):
+        raise RuntimeError(
+            "partial main repair requires unsafe data, unsafe options, final recovery, and no restart"
+        )
+    if partial_main_repair_before_options and any(
+        (
+            reclose_after_recovery,
+            repair_after_repeat_closure,
+            restart_after_repeat_repair,
+            reclose_after_repeat_repair_restart,
+        )
+    ):
+        raise RuntimeError("partial main repair does not support repeated recovery")
     if reclose_after_recovery and not repair_after_rejected_activation:
         raise RuntimeError("repeat closure requires a completed safe recovery")
     if repair_after_repeat_closure and not reclose_after_recovery:
@@ -2729,6 +2824,21 @@ async def async_assert_user_deactivated_unsafe_settings_cannot_enable_lifecycle(
             f"user activation with {scenario_name}",
             expect_retained_local_summary_route=expect_retained_local_summary_route,
         )
+        if partial_main_repair_before_options:
+            if activation_reader_token is None:
+                raise RuntimeError(
+                    "partial repair requires the retained local summary reader token"
+                )
+            await async_assert_partial_main_repair_keeps_hasc_closed(
+                activation_hass,
+                domain,
+                activation_entry,
+                safe_data,
+                expected_options,
+                unsafe_entry_entity_ids,
+                activation_reader_token,
+                scenario_name,
+            )
         if repair_after_rejected_activation:
             activation_reader_token = (
                 await async_repair_unsafe_entry_after_rejected_activation(
@@ -2739,7 +2849,10 @@ async def async_assert_user_deactivated_unsafe_settings_cannot_enable_lifecycle(
                     safe_options,
                     unsafe_entry_entity_ids,
                     scenario_name,
-                    restore_main_data=unsafe_data is not None,
+                    restore_main_data=(
+                        unsafe_data is not None
+                        and not partial_main_repair_before_options
+                    ),
                 )
             )
             expect_retained_local_summary_route = True
@@ -3815,6 +3928,19 @@ async def async_run_check() -> None:
                 unsafe_data=UNSAFE_ALLOWED_DIRECT_EXECUTION_DATA,
                 scenario_name="unsafe direct-execution repair",
                 repair_after_rejected_activation=True,
+            )
+        )
+        removed_entries.append(
+            await async_assert_user_deactivated_unsafe_settings_cannot_enable_lifecycle(
+                config_directory,
+                domain,
+                tuple(removed_entries),
+                reserved_entry,
+                unsafe_data=UNSAFE_ALLOWED_DIRECT_EXECUTION_DATA,
+                unsafe_options=UNSAFE_PROXY_OPTIONS,
+                scenario_name="unsafe partial repair",
+                repair_after_rejected_activation=True,
+                partial_main_repair_before_options=True,
             )
         )
         removed_entries.append(

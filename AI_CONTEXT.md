@@ -203,6 +203,13 @@ Last updated: 2026-07-16.
   counts with direct execution still blocked. Kimi found no issue; see the
   [unsafe direct-execution repair review
   note](LLM_WIKI/Manual/2026-07-16-kimi-unsafe-direct-execution-repair-review.md).
+- A user-disabled HASC entry with both an unblocked direct-execution marker
+  and a prohibited proxy option remains closed after only one part is repaired.
+  It cannot reload or read the home until the remaining part is repaired and
+  the owner explicitly reloads HASC. Repeated partial recovery is explicitly
+  rejected. Kimi found no issue after an independent review found and closed
+  that edge case; see the [unsafe partial-repair review
+  note](LLM_WIKI/Manual/2026-07-16-kimi-unsafe-partial-repair-review.md).
 - That unsafe direct-execution activation check also has a separate full
   temporary restart between saving the bad data and the user's activation
   attempt. The saved setup remains user-disabled and unloaded with no runtime
