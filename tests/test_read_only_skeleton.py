@@ -1187,13 +1187,17 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             core_check_source,
         )
         self.assertEqual(
-            5,
+            6,
             lifecycle_source.count(
                 "async_assert_user_deactivated_unsafe_settings_cannot_enable_lifecycle("
             ),
         )
         self.assertIn("unsafe_options=UNSAFE_PROXY_OPTIONS", lifecycle_source)
         self.assertIn('scenario_name="unsafe proxy option repair"', lifecycle_source)
+        self.assertIn(
+            'scenario_name="unsafe extra-field option repair"',
+            lifecycle_source,
+        )
         self.assertIn("unsafe_data=UNSAFE_ALLOWED_DIRECT_EXECUTION_DATA", lifecycle_source)
         self.assertIn('scenario_name="unsafe direct-execution block"', lifecycle_source)
         self.assertIn(
