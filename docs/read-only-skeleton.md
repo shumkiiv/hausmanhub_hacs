@@ -83,9 +83,11 @@ HASC diagnostic count sensors, and the absence of HASC services or devices.
 It also starts a temporary loopback-only
 Home Assistant server to prove that the local nine-count page rejects an
 unsigned request and an administrator, accepts only the temporary read-only
-test account, and rejects POST. An attempt to submit `proxy` through options
-is required to be rejected before it can persist anything. It does not read any
-real Home Assistant configuration, credentials, entities, or devices.
+test account, and rejects POST. It then changes that temporary account to the
+ordinary user group and proves that its existing local token immediately loses
+access without reading the summary. An attempt to submit `proxy` through
+options is required to be rejected before it can persist anything. It does not
+read any real Home Assistant configuration, credentials, entities, or devices.
 
 The same empty test removes one safe HASC setup completely and then creates a
 new one in the other safe mode. This confirms that removing and installing

@@ -27,7 +27,7 @@ from typing import Any
 
 from aiohttp.test_utils import TestClient, TestServer
 from homeassistant import config_entries
-from homeassistant.auth.const import GROUP_ID_ADMIN, GROUP_ID_READ_ONLY
+from homeassistant.auth.const import GROUP_ID_ADMIN, GROUP_ID_READ_ONLY, GROUP_ID_USER
 from homeassistant import loader
 from homeassistant.bootstrap import async_from_config_dict
 from homeassistant.config_entries import ConfigEntry, ConfigEntryDisabler
@@ -1624,10 +1624,10 @@ async def async_create_test_access_token(
     return hass.auth.async_create_access_token(refresh_token, "127.0.0.1")
 
 
-async def async_create_test_read_only_access_token(
+async def async_create_test_read_only_user(
     hass: HomeAssistant,
     user_name: str,
-) -> str:
+) -> Any:
     """Create one temporary exact read-only user only inside the empty Core."""
 
     reader = await hass.auth.async_create_user(
@@ -1636,6 +1636,16 @@ async def async_create_test_read_only_access_token(
         local_only=True,
     )
     assert_result(reader.is_admin, False, "temporary reader must not be an administrator")
+    return reader
+
+
+async def async_create_test_read_only_access_token(
+    hass: HomeAssistant,
+    user_name: str,
+) -> str:
+    """Create a token for one temporary exact read-only user."""
+
+    reader = await async_create_test_read_only_user(hass, user_name)
     return await async_create_test_access_token(hass, reader)
 
 
@@ -1651,10 +1661,11 @@ async def async_assert_authenticated_local_summary_http_access(
         group_ids=[GROUP_ID_ADMIN],
     )
     assert_result(owner.is_admin, True, "temporary owner must be an administrator")
-    reader_token = await async_create_test_read_only_access_token(
+    reader = await async_create_test_read_only_user(
         hass,
         f"{test_user_prefix} read-only test user",
     )
+    reader_token = await async_create_test_access_token(hass, reader)
 
     owner_token = await async_create_test_access_token(hass, owner)
     server = TestServer(hass.http.app, host="127.0.0.1")
@@ -1688,6 +1699,28 @@ async def async_assert_authenticated_local_summary_http_access(
             "local summary must accept the exact local read-only user",
         )
         assert_safe_home_summary(await accepted_reader.json())
+
+        await hass.auth.async_update_user(reader, group_ids=[GROUP_ID_USER])
+        await hass.async_block_till_done()
+        async with async_block_home_summary_reads(
+            hass,
+            load_integration_domain(),
+            f"{test_user_prefix} demoted reader",
+        ):
+            rejected_demoted_reader = await client.get(
+                "/api/hausman_hub/local-summary",
+                headers={"Authorization": f"Bearer {reader_token}"},
+            )
+        assert_result(
+            rejected_demoted_reader.status,
+            HTTPStatus.FORBIDDEN,
+            "local summary must reject a demoted read-only user",
+        )
+        demoted_payload = await rejected_demoted_reader.json()
+        if not isinstance(demoted_payload, dict):
+            raise RuntimeError("demoted local summary response must be a dictionary")
+        if set(demoted_payload) & set(SUMMARY_SENSOR_KEYS):
+            raise RuntimeError("demoted local summary must not return count values")
 
         mutation = await client.post(
             "/api/hausman_hub/local-summary",

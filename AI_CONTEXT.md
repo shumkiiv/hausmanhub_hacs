@@ -210,6 +210,12 @@ Last updated: 2026-07-16.
   rejected. Kimi found no issue after an independent review found and closed
   that edge case; see the [unsafe partial-repair review
   note](LLM_WIKI/Manual/2026-07-16-kimi-unsafe-partial-repair-review.md).
+- The disposable local-page check also confirms that an existing temporary
+  local token loses access immediately when its user changes from Home
+  Assistant's exact read-only group to the ordinary group. That request must
+  return only an access refusal, without any of the nine counts or a home
+  summary read. Kimi found no issue; see the [local access-revocation review
+  note](LLM_WIKI/Manual/2026-07-16-kimi-local-access-revocation-review.md).
 - That unsafe direct-execution activation check also has a separate full
   temporary restart between saving the bad data and the user's activation
   attempt. The saved setup remains user-disabled and unloaded with no runtime

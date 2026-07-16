@@ -1001,6 +1001,29 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             core_check_source,
         )
 
+    def test_core_smoke_check_revokes_local_summary_after_reader_demotion(self) -> None:
+        """An old local token must lose access as soon as its role changes."""
+
+        core_check_source = (ROOT / "tools" / "check_home_assistant_core.py").read_text(
+            encoding="utf-8"
+        )
+        access_check_source = core_check_source.split(
+            "async def async_assert_authenticated_local_summary_http_access", 1
+        )[1].split("async def async_assert_local_summary_is_unavailable", 1)[0]
+
+        self.assertIn("GROUP_ID_USER", core_check_source)
+        self.assertIn("await hass.auth.async_update_user(", access_check_source)
+        self.assertIn("group_ids=[GROUP_ID_USER]", access_check_source)
+        self.assertIn("async_block_home_summary_reads(", access_check_source)
+        self.assertIn(
+            "local summary must reject a demoted read-only user",
+            access_check_source,
+        )
+        self.assertIn(
+            "demoted local summary must not return count values",
+            access_check_source,
+        )
+
     def test_core_smoke_check_closes_invalid_saved_configuration(self) -> None:
         """Every unsafe saved main setting must close through a temporary restart."""
 
