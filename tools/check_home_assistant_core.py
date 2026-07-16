@@ -3813,6 +3813,17 @@ async def async_run_check() -> None:
                 tuple(removed_entries),
                 reserved_entry,
                 unsafe_data=UNSAFE_ALLOWED_DIRECT_EXECUTION_DATA,
+                scenario_name="unsafe direct-execution repair",
+                repair_after_rejected_activation=True,
+            )
+        )
+        removed_entries.append(
+            await async_assert_user_deactivated_unsafe_settings_cannot_enable_lifecycle(
+                config_directory,
+                domain,
+                tuple(removed_entries),
+                reserved_entry,
+                unsafe_data=UNSAFE_ALLOWED_DIRECT_EXECUTION_DATA,
                 scenario_name="unsafe direct-execution block after restart",
                 restart_before_activation=True,
             )

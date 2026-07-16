@@ -197,6 +197,12 @@ Last updated: 2026-07-16.
   explicit reload, without enabling proxy. Kimi found no issue; see the
   [unsafe proxy-data repair review
   note](LLM_WIKI/Manual/2026-07-16-kimi-unsafe-proxy-data-repair-review.md).
+- A user-disabled HASC entry whose main data attempts to unblock direct
+  execution remains closed even without an intervening Home Assistant restart.
+  Manual exact repair and one explicit reload restore only the same nine
+  counts with direct execution still blocked. Kimi found no issue; see the
+  [unsafe direct-execution repair review
+  note](LLM_WIKI/Manual/2026-07-16-kimi-unsafe-direct-execution-repair-review.md).
 - That unsafe direct-execution activation check also has a separate full
   temporary restart between saving the bad data and the user's activation
   attempt. The saved setup remains user-disabled and unloaded with no runtime
