@@ -34,20 +34,35 @@ FAKE_MODULE_NAMES = (
 class FakeResponse:
     """Small stand-in for a Home Assistant JSON response."""
 
-    def __init__(self, payload: object, status: int) -> None:
+    def __init__(
+        self,
+        payload: object,
+        status: int,
+        headers: dict[str, str] | None = None,
+    ) -> None:
         self.payload = payload
         self.status = status
+        self.headers = dict(headers or {})
 
 
 class FakeHomeAssistantView:
     """Expose only the JSON helpers used by the local summary view."""
 
     @staticmethod
-    def json(payload: object, status_code: int = 200) -> FakeResponse:
-        return FakeResponse(payload, int(status_code))
+    def json(
+        payload: object,
+        status_code: int = 200,
+        headers: dict[str, str] | None = None,
+    ) -> FakeResponse:
+        return FakeResponse(payload, int(status_code), headers)
 
-    def json_message(self, message: str, status_code: int = 200) -> FakeResponse:
-        return self.json({"message": message}, status_code)
+    def json_message(
+        self,
+        message: str,
+        status_code: int = 200,
+        headers: dict[str, str] | None = None,
+    ) -> FakeResponse:
+        return self.json({"message": message}, status_code, headers)
 
 
 class FakeHttp:
@@ -403,6 +418,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
         self.assertEqual(5, response.payload["entities_count"])
         self.assertEqual(1, response.payload["disabled_entities_count"])
+        self.assertEqual("no-store", response.headers.get("Cache-Control"))
         serialized = json.dumps(response.payload)
         for forbidden_value in ("synthetic_private", "21.5", "token", "command"):
             self.assertNotIn(forbidden_value, serialized)
@@ -423,6 +439,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 response = asyncio.run(self.view.get(request))
                 self.assertEqual(403, response.status)
                 self.assertEqual({"message"}, set(response.payload))
+                self.assertEqual("no-store", response.headers.get("Cache-Control"))
 
     def test_view_accepts_loopback_and_private_ipv6_origins(self) -> None:
         """Accept private IPv6 forms while rejecting public mapped addresses."""
@@ -463,6 +480,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             self.view.get(FakeRequest("192.168.1.20", reader_user("system-read-only")))
         )
         self.assertEqual(503, unsafe_response.status)
+        self.assertEqual("no-store", unsafe_response.headers.get("Cache-Control"))
 
         self.entry.data["direct_execution_status"] = "direct_execution_blocked"
         asyncio.run(self.integration.async_unload_entry(self.hass, self.entry))
@@ -470,6 +488,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             self.view.get(FakeRequest("192.168.1.20", reader_user("system-read-only")))
         )
         self.assertEqual(503, unloaded_response.status)
+        self.assertEqual("no-store", unloaded_response.headers.get("Cache-Control"))
 
     def test_view_does_not_read_home_before_rejecting_an_unsafe_entry(self) -> None:
         """A running view must reject unsafe saved data before the only home read."""

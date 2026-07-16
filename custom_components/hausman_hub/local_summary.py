@@ -27,6 +27,7 @@ DATA_ACTIVE_ENTRY = "local_summary_active_entry"
 DATA_VIEW = "local_summary_view"
 DOMAIN = "hausman_hub"
 LOCAL_SUMMARY_PATH = "/api/hausman_hub/local-summary"
+NO_STORE_HEADERS = {"Cache-Control": "no-store"}
 
 
 def register_local_summary_access(hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -68,6 +69,7 @@ class LocalSummaryView(HomeAssistantView):
             return self.json_message(
                 "Local read-only access is required.",
                 HTTPStatus.FORBIDDEN,
+                headers=NO_STORE_HEADERS,
             )
 
         entry = self._active_entry()
@@ -75,6 +77,7 @@ class LocalSummaryView(HomeAssistantView):
             return self.json_message(
                 "The local summary is unavailable.",
                 HTTPStatus.SERVICE_UNAVAILABLE,
+                headers=NO_STORE_HEADERS,
             )
 
         try:
@@ -87,8 +90,9 @@ class LocalSummaryView(HomeAssistantView):
             return self.json_message(
                 "The local summary is unavailable.",
                 HTTPStatus.SERVICE_UNAVAILABLE,
+                headers=NO_STORE_HEADERS,
             )
-        return self.json(summary)
+        return self.json(summary, headers=NO_STORE_HEADERS)
 
     def _active_entry(self) -> ConfigEntry | None:
         """Return the one saved entry only while it is currently loaded."""

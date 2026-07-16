@@ -51,7 +51,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         self.assertEqual("hausman_hub", manifest["domain"])
         self.assertTrue(manifest["config_flow"])
         self.assertTrue(manifest["single_config_entry"])
-        self.assertEqual("0.3.13", manifest["version"])
+        self.assertEqual("0.3.14", manifest["version"])
 
     def test_current_manifest_version_has_a_plain_change_note(self) -> None:
         manifest = json.loads((INTEGRATION / "manifest.json").read_text(encoding="utf-8"))
@@ -1022,6 +1022,28 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         self.assertIn(
             "demoted local summary must not return count values",
             access_check_source,
+        )
+
+    def test_core_smoke_check_prevents_local_summary_caching(self) -> None:
+        """Every HASC-produced local-page response must tell browsers not to store it."""
+
+        core_check_source = (ROOT / "tools" / "check_home_assistant_core.py").read_text(
+            encoding="utf-8"
+        )
+        safe_summary_source = core_check_source.split("def assert_safe_home_summary", 1)[
+            1
+        ].split("def assert_local_summary_response_is_not_stored", 1)[0]
+        cache_check_source = core_check_source.split(
+            "def assert_local_summary_response_is_not_stored", 1
+        )[1].split("def assert_summary_sensor_registry", 1)[0]
+
+        self.assertIn("home summary values must be non-negative integers", safe_summary_source)
+        self.assertIn("home summary availability counts must equal entity count", safe_summary_source)
+        self.assertIn('headers.get("Cache-Control")', cache_check_source)
+        self.assertIn('"no-store"', cache_check_source)
+        self.assertGreaterEqual(
+            core_check_source.count("assert_local_summary_response_is_not_stored("),
+            5,
         )
 
     def test_core_smoke_check_closes_invalid_saved_configuration(self) -> None:

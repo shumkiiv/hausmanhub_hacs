@@ -963,6 +963,19 @@ def assert_safe_home_summary(home_summary: Any) -> None:
         raise RuntimeError("home summary availability counts must equal entity count")
 
 
+def assert_local_summary_response_is_not_stored(response: Any, response_name: str) -> None:
+    """Require HASC's own local-page response to prevent browser caching."""
+
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        raise RuntimeError(f"{response_name} must include HTTP response headers")
+    assert_result(
+        headers.get("Cache-Control"),
+        "no-store",
+        f"{response_name} must not be stored by the browser",
+    )
+
+
 def assert_summary_sensor_registry(
     hass: HomeAssistant,
     domain: str,
@@ -1688,6 +1701,10 @@ async def async_assert_authenticated_local_summary_http_access(
             403,
             "local summary must reject an administrator",
         )
+        assert_local_summary_response_is_not_stored(
+            rejected_owner,
+            "rejected local summary owner response",
+        )
 
         accepted_reader = await client.get(
             "/api/hausman_hub/local-summary",
@@ -1697,6 +1714,10 @@ async def async_assert_authenticated_local_summary_http_access(
             accepted_reader.status,
             200,
             "local summary must accept the exact local read-only user",
+        )
+        assert_local_summary_response_is_not_stored(
+            accepted_reader,
+            "accepted local summary response",
         )
         assert_safe_home_summary(await accepted_reader.json())
 
@@ -1715,6 +1736,10 @@ async def async_assert_authenticated_local_summary_http_access(
             rejected_demoted_reader.status,
             HTTPStatus.FORBIDDEN,
             "local summary must reject a demoted read-only user",
+        )
+        assert_local_summary_response_is_not_stored(
+            rejected_demoted_reader,
+            "rejected local summary demoted-reader response",
         )
         demoted_payload = await rejected_demoted_reader.json()
         if not isinstance(demoted_payload, dict):
@@ -1762,6 +1787,10 @@ async def async_assert_local_summary_is_unavailable(
             unavailable.status,
             HTTPStatus.SERVICE_UNAVAILABLE,
             f"local summary must become unavailable after {unavailable_after}",
+        )
+        assert_local_summary_response_is_not_stored(
+            unavailable,
+            f"unavailable local summary response after {unavailable_after}",
         )
         payload = await unavailable.json()
         if not isinstance(payload, dict):

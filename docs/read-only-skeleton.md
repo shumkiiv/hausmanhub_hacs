@@ -85,9 +85,11 @@ Home Assistant server to prove that the local nine-count page rejects an
 unsigned request and an administrator, accepts only the temporary read-only
 test account, and rejects POST. It then changes that temporary account to the
 ordinary user group and proves that its existing local token immediately loses
-access without reading the summary. An attempt to submit `proxy` through
-options is required to be rejected before it can persist anything. It does not
-read any real Home Assistant configuration, credentials, entities, or devices.
+access without reading the summary. Every response produced by HASC's local
+page also asks the client not to store it, so a browser cannot retain an old
+successful nine-count response. An attempt to submit `proxy` through options
+is required to be rejected before it can persist anything. It does not read
+any real Home Assistant configuration, credentials, entities, or devices.
 
 The same empty test removes one safe HASC setup completely and then creates a
 new one in the other safe mode. This confirms that removing and installing
