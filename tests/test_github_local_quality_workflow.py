@@ -21,9 +21,13 @@ class GitHubLocalQualityWorkflowTest(unittest.TestCase):
         self.assertIn("persist-credentials: false", workflow)
         self.assertIn("uses: actions/setup-python@v6", workflow)
         self.assertIn('python-version: "3.13"', workflow)
+        self.assertIn(
+            "python3 -m pip install --disable-pip-version-check jsonschema==4.25.1",
+            workflow,
+        )
         self.assertIn("run: python3 tools/check_local_release.py", workflow)
         self.assertEqual(2, workflow.count("\n        uses:"))
-        self.assertEqual(1, workflow.count("\n        run:"))
+        self.assertEqual(2, workflow.count("\n        run:"))
 
     def test_workflow_runs_for_main_changes_and_has_no_home_target(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8").lower()

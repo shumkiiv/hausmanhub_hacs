@@ -24,5 +24,7 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.13"
+      - name: Install schema test dependency
+        run: python3 -m pip install --disable-pip-version-check jsonschema==4.25.1
       - name: Run local HASC checks
         run: python3 tools/check_local_release.py
