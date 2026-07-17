@@ -22,8 +22,10 @@ These standards apply to every future HASC code change.
   details through explicit boundary interfaces.
 - Tests and synthetic fixtures exercise the same contract boundaries without
   requiring a live runtime.
-- The existing HASC safety boundary still applies: read-only/shadow first;
-  no proxy or direct execution without the separately required approval.
+- Read-only/shadow remain the observation modes. Version 0.4.0 permits only
+  the separately approved, opt-in single-`input_boolean` canary. No proxy,
+  physical-device domain, or general execution may be added without another
+  explicit owner decision and a device-specific rollback plan.
 
 ## Code review: Kimi and a temporary alternative
 

@@ -1,12 +1,15 @@
-"""Safety policy for the first HausMan Hub integration modes.
+"""Safety policy for the approved HausMan Hub integration modes.
 
 The module intentionally has no Home Assistant imports. It is the innermost
-layer and knows only the two modes that are currently approved.
+layer and keeps general direct execution blocked. The optional control canary
+may target only the separate domain model for one Home Assistant input helper.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+
+from .control import CanaryControlTarget
 
 
 READ_ONLY_MODE = "read-only"
@@ -27,12 +30,14 @@ class UnsafeModeError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class SafeConfiguration:
-    """The complete safe state of the first integration skeleton."""
+    """The complete validated HASC configuration."""
 
     mode: str
     direct_execution_status: str = DIRECT_EXECUTION_BLOCKED
     local_summary_enabled: bool = True
     summary_update_interval: str = SUMMARY_UPDATE_INTERVAL_DEFAULT
+    canary_control_enabled: bool = False
+    canary_control_target: CanaryControlTarget | None = None
 
 
 def configuration_for_mode(value: object) -> SafeConfiguration:

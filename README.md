@@ -1,14 +1,14 @@
 # HausMan Hub HASC
 
-Read-only foundation for a future Home Assistant custom integration for
-HausMan Hub.
+Safety-first Home Assistant custom integration for HausMan Hub.
 
 ## Current status
 
-This repository contains a public, read-only Home Assistant skeleton under
-`custom_components/hausman_hub/`. It contains no device-control runtime,
-service definition, or outgoing connection. It creates only nine diagnostic
-number sensors from the approved aggregate summary.
+This repository contains a public Home Assistant integration under
+`custom_components/hausman_hub/`. It always creates nine diagnostic number
+sensors from the approved aggregate summary. Version 0.4.0 adds one opt-in
+control-canary switch for one explicitly selected `input_boolean`. It contains
+no physical-device protocol, HASC service definition, or outgoing connection.
 
 - Visibility: public.
 - License: MIT.
@@ -21,13 +21,16 @@ number sensors from the approved aggregate summary.
 
 This repository does not own Climate policy, Automation policy, the Common
 smart-home contract, or Smart Home Center decisions. It must not deploy
-Node-RED, invoke Home Assistant services, hold device authority, or contain
-secrets, live entity identifiers, flow snapshots, service paths, command
-payloads, or deployment scripts.
+Node-RED, hold physical-device authority, or contain secrets, live entity
+identifiers, flow snapshots, physical command payloads, or deployment scripts.
+The only approved Home Assistant service boundary is an explicitly armed
+single-`input_boolean` canary using its standard on/off services. The selected
+runtime identifier stays in Home Assistant options and is never committed or
+exported in diagnostics.
 
-Proxy requires a separate owner approval and rollback notes. Direct execution
-is blocked until proven shadow parity, a separate canary/rollback/authority
-decision, and owner signoff.
+Proxy and general device execution still require separate owner approval,
+shadow evidence, a device-specific canary/rollback/authority decision, and
+owner signoff. The helper-only canary grants no physical-device authority.
 
 ## Current safe scope
 
@@ -52,6 +55,12 @@ decision, and owner signoff.
 8. Show only the effective validated HASC mode, optional-page choice, and
    five-, 15-, or 30-minute refresh choice in the existing redacted
    diagnostics. Raw entry data and options are never copied into the report.
+9. In version 0.4.0, let the owner explicitly arm one HASC switch for one
+   `input_boolean`. Every command revalidates the single HASC entry and exact
+   target. Other domains are rejected, and disarming removes the saved target
+   and HASC switch. Diagnostics show only the fixed canary scope and enabled
+   flag, never the selected identifier. See the [canary control
+   contract](docs/canary-input-boolean-control.md).
 
 See [repository basics](docs/repository-basics.md) and
 [AI context](AI_CONTEXT.md) before changing the repository.
@@ -113,8 +122,10 @@ custom HACS repository.
 4. Restart Home Assistant, then add **HausMan Hub HASC** from its integration
    settings. Choose only `read-only` or `shadow`.
 
-Installation does not grant device control. It must not be used to call
-services, send commands, or enable `proxy` or direct execution.
+Installation does not grant physical-device control. The optional canary is
+off by default and may call only one selected `input_boolean`. Do not attach
+that helper to an automation during the first check. `proxy` and general
+device execution remain blocked.
 
 For the short, safe Home Assistant check after installation, see the Russian
 [safe-check guide](docs/home-assistant-safe-check.md).
@@ -123,8 +134,8 @@ For the short, safe Home Assistant check after installation, see the Russian
 
 Published versions make it easier for HACS to show what can be updated. After
 HACS refreshes the repository information, choose the latest published version
-in its update screen, then restart Home Assistant. An update does not grant
-HASC device control; the only available modes remain `read-only` and `shadow`.
+in its update screen, then restart Home Assistant. The observation modes remain
+`read-only` and `shadow`; helper-canary control must be armed separately.
 
 See the short Russian [version history](CHANGELOG.md) for the changes in each
 published version.

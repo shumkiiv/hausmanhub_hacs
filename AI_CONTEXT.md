@@ -7,14 +7,26 @@ Last updated: 2026-07-17.
 - Repository: `shumkiiv/hausmanhub_hasc` (public, MIT, `main`).
 - Local checkout: `/home/ivsh/projects/hausmanhub_hasc`.
 - Home Assistant baseline: Core 2026.6.4 or newer.
-- A public `custom_components/hausman_hub/` read-only skeleton is approved
-  and present. It may be added manually as an HACS custom repository; it is
-  not in the public HACS catalog.
+- Uncommitted local version 0.4.0 begins the first explicitly requested HASC
+  control path with one off-by-default `input_boolean` canary. When armed in
+  options it creates one HASC switch, revalidates the exact single entry and
+  target before each on/off service call, and rejects every other entity
+  domain. Disarming removes the saved target and HASC switch while leaving the
+  helper unchanged. Diagnostics expose only the enabled flag and fixed scope,
+  never the runtime identifier. 153 local tests and disposable Core 2026.6.4
+  and 2026.7.0 checks passed. The final staged implementation received the
+  required read-only Kimi review with no findings. No live home, commit, push,
+  release, or deployment was used. The boundary and current verification are
+  recorded in the [0.4.0 canary note](LLM_WIKI/Manual/2026-07-17-hasc-v0-4-0-input-boolean-canary-control.md).
+- A public `custom_components/hausman_hub/` observation foundation with the
+  local 0.4.0 helper-canary addition is present. It may be added manually as an
+  HACS custom repository; it is not in the public HACS catalog.
 - The skeleton contains a local square `brand/icon.png`, so Home Assistant can
   show its original icon without relying on an external brand asset.
 - A Russian safe-check guide is available at
   `docs/home-assistant-safe-check.md`. It guides HACS refresh, installation,
-  visual confirmation, and the local aggregate diagnostic summary; it still
+  visual confirmation, the local aggregate diagnostic summary, and the
+  isolated helper-canary check; it still
   explicitly excludes sharing diagnostics archives, configuration files, home
   addresses, credentials, names, identifiers, and device data.
 - The optional local-viewer guide now ends with a simple choice: when the page
@@ -531,10 +543,15 @@ Last updated: 2026-07-17.
   HausMan Hub runtime.
 - Initial modes are read-only and shadow only.
 - Proxy requires separate owner approval and rollback notes.
-- Direct execution remains blocked pending proven shadow parity, a separate
-  canary/rollback/authority decision, and owner signoff.
-- Do not commit secrets, live identifiers, flow snapshots, service paths,
-  command payloads, or deployment scripts.
+- On 2026-07-17 the owner asked development to move toward working control.
+  This authorizes the local 0.4.0 single-`input_boolean` canary only. It does
+  not authorize a live deployment, a physical device, another service domain,
+  multiple targets, Climate/Automation/Common ownership, proxy, or Node-RED.
+- General physical-device execution remains blocked pending proven shadow
+  parity, a device-specific canary/stop/rollback/authority decision, and owner
+  signoff. The virtual-helper canary is not a physical authority transfer.
+- Do not commit secrets, live identifiers, flow snapshots, device-specific
+  service paths, physical command payloads, or deployment scripts.
 - Every code change needs independent review. It follows Clean Code and Clean
   Architecture. Kimi must review the final current diff before the
   change is considered complete or before a commit, push, release, deployment,
@@ -965,13 +982,15 @@ test-only changes do not need a new HACS version.
 
 ## Next decision gate
 
-The read-only skeleton is limited to the two approved modes, local synthetic
-verification, the narrowly approved aggregate diagnostics summary, exactly nine
-diagnostic count sensors, and the guarded local count-only path. The stricter
-HASC route still requires the exact Home Assistant read-only account; the
-separately approved Codex observation path does not bypass it. Its credential
-stays outside the repository and chat. Public HACS catalog listing, proxy, and
-direct execution remain out of scope.
+HASC now has the two observation modes, nine aggregate sensors, guarded local
+count-only path, and one opt-in virtual `input_boolean` control canary. The
+stricter HASC route still requires the exact Home Assistant read-only account;
+the separately approved Codex observation path does not bypass it. Its
+credential stays outside the repository and chat. The next control gate is a
+separate owner choice of one physical domain and target plus shadow evidence,
+emergency stop, rollback, authority boundary, and live-test permission. Public
+HACS catalog listing, proxy, general device execution, and live deployment
+remain out of scope.
 
 The current public manual-HACS decision and its narrow implementation boundary
 are recorded in the [HACS packaging decision

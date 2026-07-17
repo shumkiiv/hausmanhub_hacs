@@ -1,13 +1,13 @@
-"""Run the HASC read-only skeleton against an isolated Home Assistant Core.
+"""Run HASC observation and input-boolean canary against isolated HA Core.
 
 This is an explicit compatibility smoke check, not a live-home test. It copies
 the integration into a new temporary Home Assistant configuration directory,
-exercises safe ``read-only`` and ``shadow`` config entries, and removes all
-temporary files when finished. It never receives a real credential, connects
-to a real or remote network, or calls Home Assistant services or devices. Its
-only HTTP check starts a temporary loopback server to test the authenticated
-local nine-count route. The test permits exactly nine HASC diagnostic sensors
-and no other HASC entity or service.
+exercises safe ``read-only`` and ``shadow`` config entries plus one disposable
+``input_boolean`` canary, and removes all temporary files when finished. It
+never receives a real credential, connects to a real or remote network, or
+calls a physical device. Its only HASC command test calls the temporary
+helper's standard local on/off services. The HTTP check starts a temporary
+loopback server to test the authenticated local nine-count route.
 """
 
 from __future__ import annotations
@@ -30,9 +30,19 @@ from aiohttp.test_utils import TestClient, TestServer
 import voluptuous_serialize
 from homeassistant import config_entries
 from homeassistant.auth.const import GROUP_ID_ADMIN, GROUP_ID_READ_ONLY, GROUP_ID_USER
+from homeassistant.components.input_boolean import InputBoolean
 from homeassistant import loader
 from homeassistant.bootstrap import async_from_config_dict
 from homeassistant.config_entries import ConfigEntry, ConfigEntryDisabler
+from homeassistant.const import (
+    ATTR_ENTITY_ID,
+    CONF_ID,
+    CONF_NAME,
+    SERVICE_TURN_OFF,
+    SERVICE_TURN_ON,
+    STATE_OFF,
+    STATE_ON,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import InvalidData
 from homeassistant.helpers import config_validation, device_registry, entity_registry
@@ -72,6 +82,12 @@ LOCAL_SUMMARY_ACTIVE_ENTRY = "local_summary_active_entry"
 LOCAL_SUMMARY_ENABLED_FIELD = "local_summary_enabled"
 SUMMARY_UPDATE_INTERVAL_FIELD = "summary_update_interval"
 SUMMARY_UPDATE_INTERVAL_DEFAULT = "5m"
+CANARY_CONTROL_ENABLED_FIELD = "canary_control_enabled"
+CANARY_CONTROL_TARGET_FIELD = "canary_control_target"
+CANARY_CONTROL_SCOPE = "single_input_boolean"
+CANARY_TARGET_ENTITY_ID = "input_boolean.hasc_disposable_canary"
+CANARY_SWITCH_ENTITY_ID = "switch.hausman_hub_hasc_canary_control"
+CANARY_SWITCH_UNIQUE_ID_SUFFIX = "canary_control"
 SUMMARY_UPDATE_INTERVAL_MINUTES = {
     "5m": 5,
     "15m": 15,
@@ -859,7 +875,7 @@ async def async_update_safe_options(
 
 
 def assert_options_form_uses_safe_native_selectors(options_form: dict[str, Any]) -> None:
-    """Require the page and cadence to remain native fixed frontend selectors."""
+    """Require observation and canary fields to use native fixed selectors."""
 
     data_schema = options_form.get("data_schema")
     serialized_schema = voluptuous_serialize.convert(
@@ -907,6 +923,218 @@ def assert_options_form_uses_safe_native_selectors(options_form: dict[str, Any])
         [option.get("value") for option in serialized_options],
         list(SUMMARY_UPDATE_INTERVAL_MINUTES),
         "summary update interval selector must expose only 5, 15, and 30 minutes",
+    )
+    canary_enabled_fields = [
+        field
+        for field in serialized_schema
+        if isinstance(field, dict)
+        and field.get("name") == CANARY_CONTROL_ENABLED_FIELD
+    ]
+    if len(canary_enabled_fields) != 1:
+        raise RuntimeError("options form must serialize one canary arm field")
+    assert_result(
+        canary_enabled_fields[0].get("selector"),
+        {"boolean": {}},
+        "canary arm setting must serialize as a native boolean selector",
+    )
+    canary_target_fields = [
+        field
+        for field in serialized_schema
+        if isinstance(field, dict)
+        and field.get("name") == CANARY_CONTROL_TARGET_FIELD
+    ]
+    if len(canary_target_fields) != 1:
+        raise RuntimeError("options form must serialize one canary target field")
+    target_selector = canary_target_fields[0].get("selector")
+    if not isinstance(target_selector, dict):
+        raise RuntimeError("canary target must serialize as an entity selector")
+    entity_selector = target_selector.get("entity")
+    if not isinstance(entity_selector, dict):
+        raise RuntimeError("canary target must use Home Assistant's entity selector")
+    assert_result(
+        entity_selector.get("domain"),
+        ["input_boolean"],
+        "canary target selector must expose only input_boolean helpers",
+    )
+    assert_result(
+        entity_selector.get("multiple"),
+        False,
+        "canary target selector must accept only one helper",
+    )
+
+
+async def async_assert_canary_control_lifecycle(
+    hass: HomeAssistant,
+    domain: str,
+    entry: ConfigEntry,
+    expected_summary_entity_ids: frozenset[str] | None,
+) -> None:
+    """Arm, use, and remove one disposable input-boolean canary."""
+
+    entity_components = hass.data.get(DATA_INSTANCES)
+    if not isinstance(entity_components, dict):
+        raise RuntimeError("Home Assistant must expose loaded entity components")
+    input_boolean_component = entity_components.get("input_boolean")
+    if input_boolean_component is None:
+        raise RuntimeError("disposable Home Assistant must load input_boolean")
+    await input_boolean_component.async_add_entities(
+        [
+            InputBoolean.from_yaml(
+                {
+                    CONF_ID: "hasc_disposable_canary",
+                    CONF_NAME: "HASC disposable canary",
+                    "initial": False,
+                }
+            )
+        ]
+    )
+    await hass.async_block_till_done()
+    target_state = hass.states.get(CANARY_TARGET_ENTITY_ID)
+    if target_state is None:
+        raise RuntimeError("disposable canary target must have a state")
+    assert_result(target_state.state, STATE_OFF, "canary target must begin off")
+
+    current_mode = entry.options.get("mode", entry.data["mode"])
+    current_local_page_enabled = entry.options.get(LOCAL_SUMMARY_ENABLED_FIELD, True)
+    current_summary_interval = entry.options.get(
+        SUMMARY_UPDATE_INTERVAL_FIELD,
+        SUMMARY_UPDATE_INTERVAL_DEFAULT,
+    )
+    options_form = await hass.config_entries.options.async_init(entry.entry_id)
+    assert_result(options_form["type"], "form", "canary arm must show options")
+    assert_options_form_uses_safe_native_selectors(options_form)
+    armed = await hass.config_entries.options.async_configure(
+        options_form["flow_id"],
+        {
+            "mode": current_mode,
+            LOCAL_SUMMARY_ENABLED_FIELD: current_local_page_enabled,
+            SUMMARY_UPDATE_INTERVAL_FIELD: current_summary_interval,
+            CANARY_CONTROL_ENABLED_FIELD: True,
+            CANARY_CONTROL_TARGET_FIELD: CANARY_TARGET_ENTITY_ID,
+        },
+    )
+    assert_result(armed["type"], "create_entry", "safe canary must be accepted")
+    await hass.async_block_till_done()
+    assert_result(
+        entry.options.get(CANARY_CONTROL_ENABLED_FIELD),
+        True,
+        "canary must record explicit arming",
+    )
+    assert_result(
+        entry.options.get(CANARY_CONTROL_TARGET_FIELD),
+        CANARY_TARGET_ENTITY_ID,
+        "canary must retain only the selected helper target",
+    )
+    assert_result(
+        hass.services.async_services().get(domain),
+        None,
+        "canary must not register a HASC service",
+    )
+
+    entries = entity_registry.async_entries_for_config_entry(
+        entity_registry.async_get(hass),
+        entry.entry_id,
+    )
+    canary_entries = [
+        registry_entry
+        for registry_entry in entries
+        if registry_entry.unique_id
+        == f"{entry.entry_id}_{CANARY_SWITCH_UNIQUE_ID_SUFFIX}"
+    ]
+    assert_result(len(canary_entries), 1, "armed canary must create one HASC switch")
+    canary_entry = canary_entries[0]
+    assert_result(
+        canary_entry.entity_id,
+        CANARY_SWITCH_ENTITY_ID,
+        "canary switch must keep its protected HASC name",
+    )
+    assert_result(canary_entry.device_id, None, "canary switch must create no device")
+    assert_result(
+        len(entries),
+        len(SUMMARY_SENSOR_KEYS) + 1,
+        "armed canary must add only one entity beside the nine counts",
+    )
+    assert_result(
+        hass.states.get(CANARY_SWITCH_ENTITY_ID).state,
+        STATE_OFF,
+        "HASC canary switch must mirror the helper's initial state",
+    )
+
+    await hass.services.async_call(
+        "switch",
+        SERVICE_TURN_ON,
+        {ATTR_ENTITY_ID: CANARY_SWITCH_ENTITY_ID},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+    assert_result(
+        hass.states.get(CANARY_TARGET_ENTITY_ID).state,
+        STATE_ON,
+        "HASC canary turn-on must reach only the disposable helper",
+    )
+    assert_result(
+        hass.states.get(CANARY_SWITCH_ENTITY_ID).state,
+        STATE_ON,
+        "HASC canary switch must mirror the helper after turn-on",
+    )
+
+    await hass.services.async_call(
+        "switch",
+        SERVICE_TURN_OFF,
+        {ATTR_ENTITY_ID: CANARY_SWITCH_ENTITY_ID},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+    assert_result(
+        hass.states.get(CANARY_TARGET_ENTITY_ID).state,
+        STATE_OFF,
+        "HASC canary turn-off must reach only the disposable helper",
+    )
+    await async_assert_safe_diagnostics(hass, domain, entry, current_mode)
+
+    rollback_form = await hass.config_entries.options.async_init(entry.entry_id)
+    rollback = await hass.config_entries.options.async_configure(
+        rollback_form["flow_id"],
+        {
+            "mode": current_mode,
+            LOCAL_SUMMARY_ENABLED_FIELD: current_local_page_enabled,
+            SUMMARY_UPDATE_INTERVAL_FIELD: current_summary_interval,
+            CANARY_CONTROL_ENABLED_FIELD: False,
+            # Deliberately submit the visible old target. The application
+            # boundary must discard it as part of the rollback.
+            CANARY_CONTROL_TARGET_FIELD: CANARY_TARGET_ENTITY_ID,
+        },
+    )
+    assert_result(rollback["type"], "create_entry", "canary rollback must save")
+    await hass.async_block_till_done()
+    assert_result(
+        entry.options.get(CANARY_CONTROL_ENABLED_FIELD),
+        False,
+        "canary rollback must record the disarmed state",
+    )
+    if CANARY_CONTROL_TARGET_FIELD in entry.options:
+        raise RuntimeError("canary rollback must delete its saved target")
+    if hass.states.get(CANARY_SWITCH_ENTITY_ID) is not None:
+        raise RuntimeError("canary rollback must remove the HASC switch state")
+    assert_result(
+        entity_registry.async_get(hass).async_get_entity_id(
+            "switch",
+            domain,
+            f"{entry.entry_id}_{CANARY_SWITCH_UNIQUE_ID_SUFFIX}",
+        ),
+        None,
+        "canary rollback must remove its HASC registry row",
+    )
+    assert_result(
+        hass.states.get(CANARY_TARGET_ENTITY_ID).state,
+        STATE_OFF,
+        "canary rollback must not remove or change the owner's helper",
+    )
+    assert_entry_has_only_summary_sensors(
+        hass,
+        domain,
+        entry.entry_id,
+        expected_summary_entity_ids,
     )
 
 
@@ -998,8 +1226,9 @@ async def async_update_optional_local_page(
             "mode": current_mode,
             LOCAL_SUMMARY_ENABLED_FIELD: enabled,
             SUMMARY_UPDATE_INTERVAL_FIELD: current_summary_update_interval,
+            CANARY_CONTROL_ENABLED_FIELD: False,
         },
-        "optional local page must retain only the three approved saved options",
+        "optional local page must retain only the approved saved options",
     )
     assert_result(
         entry.data["direct_execution_status"],
@@ -1124,8 +1353,9 @@ async def async_update_summary_interval(
             "mode": current_mode,
             LOCAL_SUMMARY_ENABLED_FIELD: current_local_page_enabled,
             SUMMARY_UPDATE_INTERVAL_FIELD: target_interval,
+            CANARY_CONTROL_ENABLED_FIELD: False,
         },
-        "summary interval must retain only the three approved saved options",
+        "summary interval must retain only the approved saved options",
     )
     assert_result(
         reload_calls,
@@ -1222,6 +1452,7 @@ async def async_update_inactive_safe_options_without_reading_home(
             "mode": target_mode,
             LOCAL_SUMMARY_ENABLED_FIELD: target_local_page_enabled,
             SUMMARY_UPDATE_INTERVAL_FIELD: target_summary_update_interval,
+            CANARY_CONTROL_ENABLED_FIELD: False,
         },
         "inactive safe options must keep the exact safe option shape",
     )
@@ -1264,16 +1495,27 @@ async def async_assert_broken_options_form_defaults_to_read_only(
     )
     schema = options_form.get("data_schema")
     schema_fields = getattr(schema, "schema", None)
-    if not isinstance(schema_fields, dict) or len(schema_fields) != 3:
-        raise RuntimeError(f"{scenario_name} options form must expose only three safe settings")
-    mode_field, local_page_field, summary_interval_field = schema_fields
+    if not isinstance(schema_fields, dict) or len(schema_fields) != 5:
+        raise RuntimeError(
+            f"{scenario_name} options form must expose only the approved settings"
+        )
+    assert_options_form_uses_safe_native_selectors(options_form)
+    (
+        mode_field,
+        local_page_field,
+        summary_interval_field,
+        canary_enabled_field,
+        _,
+    ) = schema_fields
     mode_default_factory = getattr(mode_field, "default", None)
     local_page_default_factory = getattr(local_page_field, "default", None)
     summary_interval_default_factory = getattr(summary_interval_field, "default", None)
+    canary_enabled_default_factory = getattr(canary_enabled_field, "default", None)
     if (
         not callable(mode_default_factory)
         or not callable(local_page_default_factory)
         or not callable(summary_interval_default_factory)
+        or not callable(canary_enabled_default_factory)
     ):
         raise RuntimeError(f"{scenario_name} options form must provide safe defaults")
     assert_result(
@@ -1290,6 +1532,11 @@ async def async_assert_broken_options_form_defaults_to_read_only(
         summary_interval_default_factory(),
         SUMMARY_UPDATE_INTERVAL_DEFAULT,
         f"{scenario_name} options form must default to the established five minutes",
+    )
+    assert_result(
+        canary_enabled_default_factory(),
+        False,
+        f"{scenario_name} options form must default to a disarmed canary",
     )
     hass.config_entries.options.async_abort(options_form["flow_id"])
     await hass.async_block_till_done()
@@ -1325,6 +1572,13 @@ async def async_assert_safe_diagnostics(
     )
     if expected_summary_update_interval not in SUMMARY_UPDATE_INTERVAL_MINUTES:
         raise RuntimeError("diagnostics test entry has an invalid refresh interval")
+    expected_canary_control_enabled = entry.options.get(
+        CANARY_CONTROL_ENABLED_FIELD,
+        False,
+    )
+    if type(expected_canary_control_enabled) is not bool:
+        raise RuntimeError("diagnostics test entry has an invalid canary setting")
+    canary_target = entry.options.get(CANARY_CONTROL_TARGET_FIELD)
 
     integration = await loader.async_get_integration(hass, domain)
     diagnostics_platform = await integration.async_get_platform("diagnostics")
@@ -1338,6 +1592,8 @@ async def async_assert_safe_diagnostics(
                 "mode": expected_mode,
                 "local_summary_enabled": expected_local_summary_enabled,
                 "summary_update_interval": expected_summary_update_interval,
+                "canary_control_enabled": expected_canary_control_enabled,
+                "canary_control_scope": CANARY_CONTROL_SCOPE,
                 "single_config_entry": True,
             },
             "safety_model": {
@@ -1360,6 +1616,8 @@ async def async_assert_safe_diagnostics(
         },
         "diagnostics must contain only the fixed safe report",
     )
+    if canary_target is not None and canary_target in json.dumps(snapshot):
+        raise RuntimeError("diagnostics must not expose the canary target")
     assert_safe_home_summary(home_summary)
 
 
@@ -3988,6 +4246,13 @@ async def async_run_check() -> None:
                 domain,
                 read_only_entry.entry_id,
                 "15m",
+            )
+
+            await async_assert_canary_control_lifecycle(
+                hass,
+                domain,
+                read_only_entry,
+                LEGACY_SUMMARY_SENSOR_ENTITY_IDS,
             )
 
             optional_page_reader_token = await async_create_test_read_only_access_token(

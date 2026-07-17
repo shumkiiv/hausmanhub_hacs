@@ -307,7 +307,7 @@ def fake_home_assistant_modules() -> dict[str, ModuleType]:
     const = ModuleType("homeassistant.const")
     const.STATE_UNAVAILABLE = "unavailable"  # type: ignore[attr-defined]
     const.STATE_UNKNOWN = "unknown"  # type: ignore[attr-defined]
-    const.Platform = SimpleNamespace(SENSOR="sensor")  # type: ignore[attr-defined]
+    const.Platform = SimpleNamespace(SENSOR="sensor", SWITCH="switch")  # type: ignore[attr-defined]
     core = ModuleType("homeassistant.core")
     core.HomeAssistant = FakeHomeAssistant  # type: ignore[attr-defined]
 
@@ -588,7 +588,10 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
         self.assertEqual(1, len(self.hass.http.views))
         self.assertEqual(
-            [(self.entry, ("sensor",)), (self.entry, ("sensor",))],
+            [
+                (self.entry, ("sensor", "switch")),
+                (self.entry, ("sensor", "switch")),
+            ],
             self.hass.config_entries.forwarded,
         )
 
@@ -861,7 +864,10 @@ class LocalSummaryAccessTest(unittest.TestCase):
 
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(closed_hass, closed_entry)))
 
-        self.assertEqual([(closed_entry, ("sensor",))], closed_hass.config_entries.forwarded)
+        self.assertEqual(
+            [(closed_entry, ("sensor", "switch"))],
+            closed_hass.config_entries.forwarded,
+        )
         self.assertEqual([], closed_hass.http.views)
         self.assertEqual({}, closed_hass.data)
         self.assertEqual(1, len(closed_entry.update_listeners))

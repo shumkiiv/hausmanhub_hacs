@@ -6,6 +6,11 @@ decision](read-only-skeleton-decision.md). The current public, manual-HACS
 installation rule is recorded in [the HACS packaging
 decision](hacs-packaging-decision.md).
 
+The observation skeleton remains the base of HASC. Version 0.4.0 adds one
+separate opt-in `input_boolean` canary described in the [control-canary
+contract](canary-input-boolean-control.md). References below to exactly nine
+entities and no control describe the default disarmed state.
+
 ## What it does
 
 The `custom_components/hausman_hub/` package provides only a small Home
@@ -14,7 +19,8 @@ Assistant-facing shell around framework-independent safety rules:
 - a single config entry with a selector for `read-only` or `shadow`;
 - an options flow that can change only between those same two modes, close or
   restore the already-approved optional local page, and keep the established
-  five-minute nine-count refresh or slow it to 15 or 30 minutes;
+  five-minute nine-count refresh or slow it to 15 or 30 minutes. It may also
+  explicitly arm one canary for one selected `input_boolean`;
 - a diagnostics snapshot assembled from a strict allow-list. Its entry summary
   contains only the validated effective HASC mode, optional-page boolean, and
   fixed five-, 15-, or 30-minute refresh choice; raw config-entry data and
@@ -30,6 +36,10 @@ Assistant-facing shell around framework-independent safety rules:
   have no action, and expose no source name, identifier, reading, or history.
   Each has only a fixed ordinary visual icon, so the nine rows are easier to
   recognise without showing anything else about the home.
+- when explicitly armed, one HASC switch that mirrors one selected
+  `input_boolean` and calls only that helper's standard on/off services. It is
+  absent by default, has no device attachment, and is removed with its saved
+  target when the owner disarms it.
 - one authenticated, local-network view at one fixed address for the
   already-approved nine-count summary. Only GET can return the nine counts;
   Home Assistant's service check is closed before any read. The view has no
@@ -48,16 +58,18 @@ Home Assistant modules are thin adapters at the outer boundary.
 
 ## What it deliberately does not do
 
-- It does not list, select, store, or expose real areas, devices, or entities.
-- It does not use Home Assistant services, Node-RED, external APIs, or device
-  commands.
-- It does not create devices, buttons, control entities, `services.yaml`,
-  repairs issues, or automatic fixes. Its only entities are the nine approved
-  diagnostic count sensors.
+- It does not list or expose real areas or devices. The only selectable entity
+  is the one local `input_boolean` canary target, stored in Home Assistant
+  options and omitted from diagnostics.
+- It does not use Node-RED, external APIs, or physical-device commands. Its
+  only approved service calls are the canary helper's standard on/off actions.
+- It does not create devices, buttons, `services.yaml`, repairs issues, or
+  automatic fixes. Its default entities are the nine approved diagnostic count
+  sensors; an armed canary adds exactly one HASC switch without a device.
 - Its small `hacs.json` supports manual HACS installation from this public
   repository. It does not add the integration to the public HACS catalog or
   change its runtime behavior.
-- `proxy` is absent and direct execution is always
+- `proxy` is absent and general physical-device execution remains
   `direct_execution_blocked`.
 
 ## Local verification
@@ -69,8 +81,8 @@ python3 -m unittest discover -s tests -v
 ```
 
 This checks the pure safety rules, manifest, translations, diagnostics
-allow-list, and absence of execution surfaces. It does not load Home Assistant
-or access a live home.
+allow-list, and exact single-helper execution boundary. It does not load Home
+Assistant or access a live home.
 
 The suite also includes an in-memory adapter test for config and options flow.
 It supplies only the small Home Assistant form API surface used by this package
@@ -95,7 +107,10 @@ local integration into it, and removes the temporary configuration afterwards.
 It checks both approved initial modes, a safe change between those modes, a
 real reload, the redacted diagnostics report with only effective validated
 HASC settings, clean removal, exactly nine HASC diagnostic count sensors, and
-the absence of HASC services or devices. It also checks that a legacy entry
+the absence of HASC services or devices in the default disarmed state. It then
+creates one disposable `input_boolean`, arms the HASC canary, verifies the one
+extra switch and its real local on/off calls, disarms it, and requires the
+target and HASC switch to disappear without changing the helper. It also checks that a legacy entry
 with empty options reports the safe page and five-minute defaults.
 It also starts a temporary loopback-only
 Home Assistant server to prove that the local nine-count page rejects an

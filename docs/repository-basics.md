@@ -28,7 +28,9 @@ The first implementation work, when explicitly requested, is limited to:
 ## Non-negotiable boundaries
 
 - Do not modify or deploy the HausMan Hub Node-RED/Home Assistant runtime.
-- Do not call live Home Assistant APIs, services, or physical devices.
+- Do not call a live home during repository checks. Runtime code may call only
+  the explicitly armed single-`input_boolean` canary's standard on/off service;
+  physical devices and every other service domain remain excluded.
 - Do not own or change Climate, Automation, Common, or Smart Home Center
   policy.
 - Do not add secrets, `.env` files, tokens, Node-RED flows, live entity IDs,
@@ -37,8 +39,10 @@ The first implementation work, when explicitly requested, is limited to:
   Smart Home Center runtime work.
 
 Proxy is possible only after separate owner approval and documented rollback.
-Direct execution remains `direct_execution_blocked` until proven shadow parity,
-a separate canary/rollback/authority decision, and owner signoff.
+General device execution remains `direct_execution_blocked` until proven
+shadow parity, a device-specific canary and rollback plan, explicit authority
+transfer, and owner signoff. The version 0.4.0 helper-only canary is not an
+authority transfer to a physical device.
 
 ## Architecture sources
 

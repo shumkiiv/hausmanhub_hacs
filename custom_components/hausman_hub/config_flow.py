@@ -1,10 +1,9 @@
-"""Home Assistant form adapter for the safe HausMan Hub modes.
+"""Home Assistant form adapter for HASC observation and control-canary options.
 
-The forms intentionally offer no area, device, entity, token, route, proxy, or
-direct-execution field. The initial selector chooses an approved mode. Later
-settings may only keep or close the already-approved optional local page.
-They may also keep the established five-minute count refresh or slow it to one
-of two fixed choices.
+The initial selector still chooses only an approved observation mode. Later
+settings may explicitly arm one canary switch for one ``input_boolean`` helper.
+No other entity domain, device, token, route, proxy, or general execution field
+is accepted.
 """
 
 from __future__ import annotations
@@ -19,12 +18,17 @@ from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.selector import (
     BooleanSelector,
+    EntitySelector,
+    EntitySelectorConfig,
     SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
 )
 
 from .application.configuration import (
+    CANARY_CONTROL_ENABLED_DEFAULT,
+    CANARY_CONTROL_ENABLED_FIELD,
+    CANARY_CONTROL_TARGET_FIELD,
     ConfigurationViolation,
     LOCAL_SUMMARY_ENABLED_DEFAULT,
     LOCAL_SUMMARY_ENABLED_FIELD,
@@ -41,6 +45,7 @@ from .domain.configuration import (
     READ_ONLY_MODE,
     SUMMARY_UPDATE_INTERVAL_DEFAULT,
 )
+from .domain.control import INPUT_BOOLEAN_DOMAIN
 
 
 MODE_SELECTOR = SelectSelector(
@@ -58,10 +63,13 @@ SUMMARY_UPDATE_INTERVAL_SELECTOR = SelectSelector(
         translation_key="summary_update_interval",
     )
 )
+CANARY_CONTROL_TARGET_SELECTOR = EntitySelector(
+    EntitySelectorConfig(domain=INPUT_BOOLEAN_DOMAIN, multiple=False)
+)
 
 
 class StrictBooleanSelector(BooleanSelector):
-    """Keep the optional page choice exact instead of coercing a truth-like value."""
+    """Keep boolean choices exact instead of coercing truth-like values."""
 
     selector_type = "boolean"
 
@@ -69,7 +77,7 @@ class StrictBooleanSelector(BooleanSelector):
         """Accept only the two actual boolean values at the form boundary."""
 
         if type(value) is not bool:
-            raise vol.Invalid("local summary setting must be true or false")
+            raise vol.Invalid("setting must be true or false")
         return value
 
 
@@ -81,22 +89,36 @@ def _options_schema(
     mode_default: str,
     local_summary_enabled_default: bool,
     summary_update_interval_default: str,
+    canary_control_enabled_default: bool,
+    canary_control_target_default: str | None,
 ) -> vol.Schema:
-    """Show only the mode, optional page, and fixed safe refresh choices."""
+    """Show observation choices and the one narrow control-canary target."""
 
-    return vol.Schema(
-        {
-            vol.Required(MODE_FIELD, default=mode_default): MODE_SELECTOR,
-            vol.Required(
-                LOCAL_SUMMARY_ENABLED_FIELD,
-                default=local_summary_enabled_default,
-            ): StrictBooleanSelector(),
-            vol.Required(
-                SUMMARY_UPDATE_INTERVAL_FIELD,
-                default=summary_update_interval_default,
-            ): SUMMARY_UPDATE_INTERVAL_SELECTOR,
-        }
+    fields: dict[vol.Marker, object] = {
+        vol.Required(MODE_FIELD, default=mode_default): MODE_SELECTOR,
+        vol.Required(
+            LOCAL_SUMMARY_ENABLED_FIELD,
+            default=local_summary_enabled_default,
+        ): StrictBooleanSelector(),
+        vol.Required(
+            SUMMARY_UPDATE_INTERVAL_FIELD,
+            default=summary_update_interval_default,
+        ): SUMMARY_UPDATE_INTERVAL_SELECTOR,
+        vol.Required(
+            CANARY_CONTROL_ENABLED_FIELD,
+            default=canary_control_enabled_default,
+        ): StrictBooleanSelector(),
+    }
+    target_field = (
+        vol.Optional(
+            CANARY_CONTROL_TARGET_FIELD,
+            default=canary_control_target_default,
+        )
+        if canary_control_target_default is not None
+        else vol.Optional(CANARY_CONTROL_TARGET_FIELD)
     )
+    fields[target_field] = CANARY_CONTROL_TARGET_SELECTOR
+    return vol.Schema(fields)
 
 
 def _safe_mode_default(
@@ -132,6 +154,29 @@ def _safe_summary_update_interval_default(
         return SUMMARY_UPDATE_INTERVAL_DEFAULT
 
 
+def _safe_canary_control_enabled_default(
+    entry_data: Mapping[str, Any], options: Mapping[str, Any]
+) -> bool:
+    """Keep damaged saved settings from visibly arming the canary."""
+
+    try:
+        return effective_configuration(entry_data, options).canary_control_enabled
+    except ConfigurationViolation:
+        return CANARY_CONTROL_ENABLED_DEFAULT
+
+
+def _safe_canary_control_target_default(
+    entry_data: Mapping[str, Any], options: Mapping[str, Any]
+) -> str | None:
+    """Expose a target default only for one completely valid armed canary."""
+
+    try:
+        target = effective_configuration(entry_data, options).canary_control_target
+    except ConfigurationViolation:
+        return None
+    return None if target is None else target.entity_id
+
+
 def _option_error_field(user_input: Mapping[str, Any]) -> str:
     """Point a rejected form value at the field that can safely explain it."""
 
@@ -142,7 +187,18 @@ def _option_error_field(user_input: Mapping[str, Any]) -> str:
         and type(user_input[LOCAL_SUMMARY_ENABLED_FIELD]) is not bool
     ):
         return LOCAL_SUMMARY_ENABLED_FIELD
-    return SUMMARY_UPDATE_INTERVAL_FIELD
+    if (
+        SUMMARY_UPDATE_INTERVAL_FIELD in user_input
+        and user_input[SUMMARY_UPDATE_INTERVAL_FIELD]
+        not in APPROVED_SUMMARY_UPDATE_INTERVALS
+    ):
+        return SUMMARY_UPDATE_INTERVAL_FIELD
+    if (
+        CANARY_CONTROL_ENABLED_FIELD in user_input
+        and type(user_input[CANARY_CONTROL_ENABLED_FIELD]) is not bool
+    ):
+        return CANARY_CONTROL_ENABLED_FIELD
+    return CANARY_CONTROL_TARGET_FIELD
 
 
 class HausmanHubConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -181,10 +237,10 @@ class HausmanHubConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class HausmanHubOptionsFlow(config_entries.OptionsFlow):
-    """Edit only the safe mode, optional page, and count refresh interval."""
+    """Edit observation settings and the opt-in input-boolean canary."""
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Keep future options within the same read-only boundary."""
+        """Keep future options within the validated canary boundary."""
 
         mode_default = _safe_mode_default(self.config_entry.data, self.config_entry.options)
         local_summary_enabled_default = _safe_local_summary_default(
@@ -192,6 +248,14 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
             self.config_entry.options,
         )
         summary_update_interval_default = _safe_summary_update_interval_default(
+            self.config_entry.data,
+            self.config_entry.options,
+        )
+        canary_control_enabled_default = _safe_canary_control_enabled_default(
+            self.config_entry.data,
+            self.config_entry.options,
+        )
+        canary_control_target_default = _safe_canary_control_target_default(
             self.config_entry.data,
             self.config_entry.options,
         )
@@ -208,6 +272,14 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
                         SUMMARY_UPDATE_INTERVAL_FIELD,
                         summary_update_interval_default,
                     ),
+                    user_input.get(
+                        CANARY_CONTROL_ENABLED_FIELD,
+                        canary_control_enabled_default,
+                    ),
+                    user_input.get(
+                        CANARY_CONTROL_TARGET_FIELD,
+                        canary_control_target_default,
+                    ),
                 )
             except ConfigurationViolation:
                 error_field = _option_error_field(user_input)
@@ -215,8 +287,12 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
                     errors[error_field] = "unsafe_mode"
                 elif error_field == LOCAL_SUMMARY_ENABLED_FIELD:
                     errors[error_field] = "unsafe_local_summary_setting"
-                else:
+                elif error_field == SUMMARY_UPDATE_INTERVAL_FIELD:
                     errors[error_field] = "unsafe_summary_update_interval"
+                elif error_field == CANARY_CONTROL_ENABLED_FIELD:
+                    errors[error_field] = "unsafe_canary_control_setting"
+                else:
+                    errors[error_field] = "unsafe_canary_control_target"
             else:
                 return self.async_create_entry(title="", data=options)
 
@@ -226,6 +302,8 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
                 mode_default,
                 local_summary_enabled_default,
                 summary_update_interval_default,
+                canary_control_enabled_default,
+                canary_control_target_default,
             ),
             errors=errors,
         )

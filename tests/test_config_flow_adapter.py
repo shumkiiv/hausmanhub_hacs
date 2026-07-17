@@ -44,6 +44,14 @@ class FakeRequired:
         self.default = default
 
 
+class FakeOptional:
+    """Capture an optional schema field and any visible default."""
+
+    def __init__(self, key: str, *, default: object = None) -> None:
+        self.key = key
+        self.default = default
+
+
 class FakeSelectSelectorConfig:
     """Capture selector settings supplied by the adapter."""
 
@@ -61,6 +69,21 @@ class FakeSelectSelector:
 
 class FakeBooleanSelector:
     """Represent the one local-page setting without a Home Assistant runtime."""
+
+
+class FakeEntitySelectorConfig:
+    """Capture the exact entity domain permitted by the canary selector."""
+
+    def __init__(self, *, domain: str, multiple: bool) -> None:
+        self.domain = domain
+        self.multiple = multiple
+
+
+class FakeEntitySelector:
+    """Represent the canary target selector without an entity registry."""
+
+    def __init__(self, config: FakeEntitySelectorConfig) -> None:
+        self.config = config
 
 
 class FakeConfigEntry:
@@ -137,6 +160,7 @@ def fake_home_assistant_modules() -> dict[str, ModuleType]:
     voluptuous = ModuleType("voluptuous")
     voluptuous.Schema = FakeSchema  # type: ignore[attr-defined]
     voluptuous.Required = FakeRequired  # type: ignore[attr-defined]
+    voluptuous.Optional = FakeOptional  # type: ignore[attr-defined]
 
     homeassistant = ModuleType("homeassistant")
     config_entries = ModuleType("homeassistant.config_entries")
@@ -157,6 +181,8 @@ def fake_home_assistant_modules() -> dict[str, ModuleType]:
         "label": label,
     }
     selector.BooleanSelector = FakeBooleanSelector  # type: ignore[attr-defined]
+    selector.EntitySelector = FakeEntitySelector  # type: ignore[attr-defined]
+    selector.EntitySelectorConfig = FakeEntitySelectorConfig  # type: ignore[attr-defined]
     selector.SelectSelector = FakeSelectSelector  # type: ignore[attr-defined]
     selector.SelectSelectorConfig = FakeSelectSelectorConfig  # type: ignore[attr-defined]
 
@@ -217,14 +243,18 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         expected_mode_default: str,
         expected_local_page_default: bool,
         expected_summary_update_interval_default: str,
+        expected_canary_control_enabled_default: bool = False,
+        expected_canary_control_target_default: str | None = None,
     ) -> FakeSelectSelector:
-        """Verify the three fixed settings without another input surface."""
+        """Verify the fixed observation fields and narrow canary selector."""
 
-        self.assertEqual(3, len(schema.fields))
+        self.assertEqual(5, len(schema.fields))
         fields = list(schema.fields.items())
         mode_field, mode_selector = fields[0]
         page_field, page_selector = fields[1]
         interval_field, interval_selector = fields[2]
+        canary_field, canary_selector = fields[3]
+        target_field, target_selector = fields[4]
         self.assertIsInstance(mode_field, FakeRequired)
         self.assertEqual("mode", mode_field.key)
         self.assertEqual(expected_mode_default, mode_field.default)
@@ -249,6 +279,17 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
             "summary_update_interval",
             interval_selector.config.translation_key,
         )
+        self.assertIsInstance(canary_field, FakeRequired)
+        self.assertEqual("canary_control_enabled", canary_field.key)
+        self.assertEqual(expected_canary_control_enabled_default, canary_field.default)
+        self.assertIsInstance(canary_selector, FakeBooleanSelector)
+        self.assertEqual("boolean", canary_selector.selector_type)
+        self.assertIsInstance(target_field, FakeOptional)
+        self.assertEqual("canary_control_target", target_field.key)
+        self.assertEqual(expected_canary_control_target_default, target_field.default)
+        self.assertIsInstance(target_selector, FakeEntitySelector)
+        self.assertEqual("input_boolean", target_selector.config.domain)
+        self.assertFalse(target_selector.config.multiple)
         return mode_selector
 
     async def test_user_form_exposes_only_the_two_approved_modes(self) -> None:
@@ -313,6 +354,7 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
                 "mode": "shadow",
                 "local_summary_enabled": True,
                 "summary_update_interval": "5m",
+                "canary_control_enabled": False,
             },
             options_result["data"],
         )
@@ -344,6 +386,7 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
                 "mode": "shadow",
                 "local_summary_enabled": True,
                 "summary_update_interval": "5m",
+                "canary_control_enabled": False,
             },
             shadow_result["data"],
         )
@@ -445,6 +488,7 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
                 "mode": "read-only",
                 "local_summary_enabled": False,
                 "summary_update_interval": "5m",
+                "canary_control_enabled": False,
             },
             result["data"],
         )
@@ -464,6 +508,7 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
                 "mode": "shadow",
                 "local_summary_enabled": False,
                 "summary_update_interval": "30m",
+                "canary_control_enabled": False,
             }
         )
 
@@ -474,9 +519,99 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
                 "mode": "shadow",
                 "local_summary_enabled": False,
                 "summary_update_interval": "30m",
+                "canary_control_enabled": False,
             },
             result["data"],
         )
+
+    async def test_options_can_arm_and_disarm_one_input_boolean_canary(self) -> None:
+        """The form exposes one exact helper target and a reversible arm switch."""
+
+        options_flow = self.config_flow.HausmanHubOptionsFlow()
+        options_flow.config_entry = FakeConfigEntry(
+            {"mode": "read-only", "direct_execution_status": "direct_execution_blocked"},
+            {},
+        )
+
+        armed = await options_flow.async_step_init(
+            {
+                "mode": "read-only",
+                "local_summary_enabled": True,
+                "summary_update_interval": "5m",
+                "canary_control_enabled": True,
+                "canary_control_target": "input_boolean.hasc_canary",
+            }
+        )
+
+        self.assertEqual("create_entry", armed["type"])
+        self.assertEqual(
+            {
+                "mode": "read-only",
+                "local_summary_enabled": True,
+                "summary_update_interval": "5m",
+                "canary_control_enabled": True,
+                "canary_control_target": "input_boolean.hasc_canary",
+            },
+            armed["data"],
+        )
+
+        options_flow.config_entry.options = dict(armed["data"])
+        armed_form = await options_flow.async_step_init()
+        self.assert_options_fields(
+            armed_form["schema"],
+            "read-only",
+            True,
+            "5m",
+            True,
+            "input_boolean.hasc_canary",
+        )
+
+        disarmed = await options_flow.async_step_init(
+            {
+                **armed["data"],
+                "canary_control_enabled": False,
+            }
+        )
+        self.assertEqual("create_entry", disarmed["type"])
+        self.assertFalse(disarmed["data"]["canary_control_enabled"])
+        self.assertNotIn("canary_control_target", disarmed["data"])
+
+    async def test_options_reject_unsafe_canary_values(self) -> None:
+        """No missing target, other entity domain, or truth-like arm value passes."""
+
+        options_flow = self.config_flow.HausmanHubOptionsFlow()
+        options_flow.config_entry = FakeConfigEntry(
+            {"mode": "read-only", "direct_execution_status": "direct_execution_blocked"},
+            {},
+        )
+        base = {
+            "mode": "read-only",
+            "local_summary_enabled": True,
+            "summary_update_interval": "5m",
+        }
+
+        for invalid_input, expected_error in (
+            (
+                {**base, "canary_control_enabled": "true"},
+                {"canary_control_enabled": "unsafe_canary_control_setting"},
+            ),
+            (
+                {**base, "canary_control_enabled": True},
+                {"canary_control_target": "unsafe_canary_control_target"},
+            ),
+            (
+                {
+                    **base,
+                    "canary_control_enabled": True,
+                    "canary_control_target": "light.kitchen",
+                },
+                {"canary_control_target": "unsafe_canary_control_target"},
+            ),
+        ):
+            with self.subTest(invalid_input=invalid_input):
+                result = await options_flow.async_step_init(invalid_input)
+                self.assertEqual("form", result["type"])
+                self.assertEqual(expected_error, result["errors"])
 
     async def test_options_reject_a_non_boolean_local_page_setting(self) -> None:
         """Truth-like strings and numbers cannot silently open the local page."""

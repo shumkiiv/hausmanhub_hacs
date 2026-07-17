@@ -12,11 +12,14 @@ the public HACS catalog.
 - The repository is public: `shumkiiv/hausmanhub_hasc`.
 - The license is MIT and the supported baseline is Home Assistant Core 2026.6.4
   or newer.
-- The `custom_components/hausman_hub/` read-only skeleton is limited to
+- The `custom_components/hausman_hub/` observation modes remain limited to
   `read-only` and `shadow`.
-- It has no service, device, Node-RED, or execution surface. Its only entities
-  are the nine approved diagnostic count sensors.
-- Proxy and direct execution remain unapproved and blocked.
+- The nine approved diagnostic count sensors remain the default HASC entity
+  surface.
+- Version 0.4.0 adds one separately approved, off-by-default HASC switch for
+  one selected `input_boolean`. It registers no HASC service, creates no
+  device, and has no Node-RED, external, or physical-device execution path.
+- Proxy and general device execution remain unapproved and blocked.
 
 ## Previous options
 
@@ -52,23 +55,24 @@ not add it to the public HACS catalog.
 - The public repository is added manually in HACS, not to its public catalog.
 - The metadata contains no credentials, live identifiers, service paths,
   command payloads, deployment scripts, or runtime configuration.
-- It does not expand the approved modes, add proxy, or lift
-  `direct_execution_blocked`.
+- It does not expand the approved observation modes, add proxy, or lift
+  general `direct_execution_blocked`. The helper-only canary is governed by
+  its separate [control contract](canary-input-boolean-control.md).
 - Repository verification remains local and read-only, with no live Home
   Assistant, Node-RED, device, or external API calls.
 - The metadata change received Kimi review before commit and push.
 
 ## Implementation boundary after approval
 
-The implementation is one isolated metadata-only change. It must not modify
+This paragraph records the original 2026-07-14 metadata change. That
+implementation was one isolated metadata-only change. It did not modify
 the HASC integration's runtime behavior, alter Climate, Automation, Common,
-or Smart Home Center policy, or be combined with another feature. Before it
-is committed, re-run the local tests, inspect staged files for prohibited
-data, record the Kimi review, and push the dedicated commit only after all
-checks pass.
+or Smart Home Center policy. Later approved runtime versions, including the
+0.4.0 helper canary, keep their own decision and review records.
 
 ## Explicitly still out of scope
 
-- Public release, marketplace listing, or support promise.
+- Public HACS catalog listing or support promise.
 - Proxy approval, rollback procedure, or live source connection.
-- Shadow-parity acceptance, canary, authority transfer, or direct execution.
+- Shadow-parity acceptance, physical-device canary, authority transfer, or
+  general device execution.

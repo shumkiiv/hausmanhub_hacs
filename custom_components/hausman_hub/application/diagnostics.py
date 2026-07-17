@@ -7,6 +7,7 @@ from typing import Any
 
 from ..domain.observation import HomeSummary
 from ..domain.configuration import DIRECT_EXECUTION_BLOCKED, SafeConfiguration
+from ..domain.control import CANARY_CONTROL_SCOPE
 from .configuration import effective_configuration
 from .local_summary import home_summary_payload
 
@@ -41,6 +42,8 @@ def diagnostics_snapshot_for_configuration(
             "mode": configuration.mode,
             "local_summary_enabled": configuration.local_summary_enabled,
             "summary_update_interval": configuration.summary_update_interval,
+            "canary_control_enabled": configuration.canary_control_enabled,
+            "canary_control_scope": CANARY_CONTROL_SCOPE,
             "single_config_entry": True,
         },
         "safety_model": {

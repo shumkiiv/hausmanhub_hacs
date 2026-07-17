@@ -1,9 +1,9 @@
 """Use cases for storing and reading safe configuration values.
 
-Only an approved mode and the hard direct-execution block are represented in
-saved entry data. Options add only the optional-page boolean and one fixed
-same-or-slower count refresh choice. Unknown values are rejected instead of
-being copied into a config entry.
+Only an approved mode and the hard general direct-execution block are
+represented in saved entry data. Options may also arm the deliberately narrow
+input-boolean control canary. Unknown values are rejected instead of being
+copied into a config entry.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from ..domain.configuration import (
     UnsafeModeError,
     configuration_for_mode,
 )
+from ..domain.control import UnsafeCanaryTargetError, canary_control_target
 
 
 MODE_FIELD = "mode"
@@ -26,6 +27,9 @@ DIRECT_EXECUTION_STATUS_FIELD = "direct_execution_status"
 LOCAL_SUMMARY_ENABLED_FIELD = "local_summary_enabled"
 LOCAL_SUMMARY_ENABLED_DEFAULT = True
 SUMMARY_UPDATE_INTERVAL_FIELD = "summary_update_interval"
+CANARY_CONTROL_ENABLED_FIELD = "canary_control_enabled"
+CANARY_CONTROL_ENABLED_DEFAULT = False
+CANARY_CONTROL_TARGET_FIELD = "canary_control_target"
 
 
 class ConfigurationViolation(ValueError):
@@ -46,19 +50,33 @@ def create_options(
     mode_value: object,
     local_summary_enabled_value: object = LOCAL_SUMMARY_ENABLED_DEFAULT,
     summary_update_interval_value: object = SUMMARY_UPDATE_INTERVAL_DEFAULT,
+    canary_control_enabled_value: object = CANARY_CONTROL_ENABLED_DEFAULT,
+    canary_control_target_value: object = None,
 ) -> dict[str, str | bool]:
-    """Return only the safe mode, page choice, and fixed refresh choice."""
+    """Return only validated observation and canary-control choices."""
 
+    if canary_control_enabled_value is False:
+        # Turning the canary off is the rollback path. Never retain a previous
+        # target merely because the frontend still submitted its visible value.
+        canary_control_target_value = None
     configuration = _configuration_for(
         mode_value,
         local_summary_enabled_value,
         summary_update_interval_value,
+        canary_control_enabled_value,
+        canary_control_target_value,
     )
-    return {
+    options: dict[str, str | bool] = {
         MODE_FIELD: configuration.mode,
         LOCAL_SUMMARY_ENABLED_FIELD: configuration.local_summary_enabled,
         SUMMARY_UPDATE_INTERVAL_FIELD: configuration.summary_update_interval,
+        CANARY_CONTROL_ENABLED_FIELD: configuration.canary_control_enabled,
     }
+    if configuration.canary_control_target is not None:
+        options[CANARY_CONTROL_TARGET_FIELD] = (
+            configuration.canary_control_target.entity_id
+        )
+    return options
 
 
 def effective_configuration(
@@ -77,6 +95,8 @@ def effective_configuration(
             MODE_FIELD,
             LOCAL_SUMMARY_ENABLED_FIELD,
             SUMMARY_UPDATE_INTERVAL_FIELD,
+            CANARY_CONTROL_ENABLED_FIELD,
+            CANARY_CONTROL_TARGET_FIELD,
         },
         "options",
     )
@@ -93,10 +113,17 @@ def effective_configuration(
         SUMMARY_UPDATE_INTERVAL_FIELD,
         SUMMARY_UPDATE_INTERVAL_DEFAULT,
     )
+    canary_control_enabled_value = options.get(
+        CANARY_CONTROL_ENABLED_FIELD,
+        CANARY_CONTROL_ENABLED_DEFAULT,
+    )
+    canary_control_target_value = options.get(CANARY_CONTROL_TARGET_FIELD)
     return _configuration_for(
         mode_value,
         local_summary_enabled_value,
         summary_update_interval_value,
+        canary_control_enabled_value,
+        canary_control_target_value,
     )
 
 
@@ -104,8 +131,10 @@ def _configuration_for(
     mode_value: object,
     local_summary_enabled_value: object = LOCAL_SUMMARY_ENABLED_DEFAULT,
     summary_update_interval_value: object = SUMMARY_UPDATE_INTERVAL_DEFAULT,
+    canary_control_enabled_value: object = CANARY_CONTROL_ENABLED_DEFAULT,
+    canary_control_target_value: object = None,
 ) -> SafeConfiguration:
-    """Build the safe configuration after checking both optional choices."""
+    """Build the configuration after checking every optional choice."""
 
     if type(local_summary_enabled_value) is not bool:
         raise ConfigurationViolation("local summary setting must be true or false")
@@ -117,6 +146,19 @@ def _configuration_for(
             "summary update interval must be one of: "
             + ", ".join(APPROVED_SUMMARY_UPDATE_INTERVALS)
         )
+    if type(canary_control_enabled_value) is not bool:
+        raise ConfigurationViolation("canary control setting must be true or false")
+
+    target = None
+    if canary_control_enabled_value:
+        try:
+            target = canary_control_target(canary_control_target_value)
+        except UnsafeCanaryTargetError as error:
+            raise ConfigurationViolation(str(error)) from error
+    elif canary_control_target_value is not None:
+        raise ConfigurationViolation(
+            "disabled canary control must not retain a target"
+        )
 
     try:
         mode_configuration = configuration_for_mode(mode_value)
@@ -127,6 +169,8 @@ def _configuration_for(
         direct_execution_status=mode_configuration.direct_execution_status,
         local_summary_enabled=local_summary_enabled_value,
         summary_update_interval=summary_update_interval_value,
+        canary_control_enabled=canary_control_enabled_value,
+        canary_control_target=target,
     )
 
 

@@ -2,7 +2,7 @@
   "config": {
     "step": {
       "user": {
-        "title": "HausMan Hub HASC safety mode",
+        "title": "HausMan Hub HASC settings",
         "description": "This integration does not change the home or control devices.",
         "data": {
           "mode": "Operating mode"
@@ -19,24 +19,30 @@
   "options": {
     "step": {
       "init": {
-        "title": "HausMan Hub HASC safety mode",
-        "description": "This changes only a safe mode, the optional local page, and how often the same nine counts refresh, without home control.",
+        "title": "HausMan Hub HASC settings",
+        "description": "The control canary is off by default. If you arm it, HASC can switch only one selected input boolean. An automation attached to that helper may still cause other actions.",
         "data": {
           "mode": "Operating mode",
           "local_summary_enabled": "Optional local page",
-          "summary_update_interval": "Nine-count refresh interval"
+          "summary_update_interval": "Nine-count refresh interval",
+          "canary_control_enabled": "Arm control canary",
+          "canary_control_target": "Canary input boolean"
         },
         "data_description": {
           "mode": "Choose read-only observation or a comparison without changes.",
           "local_summary_enabled": "Shows or closes only the optional local page with the same nine aggregate counts. It does not control the home.",
-          "summary_update_interval": "Choose 5, 15, or 30 minutes for the same nine local counts. HASC never reads them more often than the existing five-minute interval."
+          "summary_update_interval": "Choose 5, 15, or 30 minutes for the same nine local counts. HASC never reads them more often than the existing five-minute interval.",
+          "canary_control_enabled": "Creates one HASC switch only for the selected input boolean. Turn this off for immediate rollback.",
+          "canary_control_target": "Select exactly one input_boolean helper. Lights, climate, locks, covers, scripts, scenes, and other domains are rejected."
         }
       }
     },
     "error": {
       "unsafe_mode": "Only read-only and comparison-without-changes modes are allowed.",
       "unsafe_local_summary_setting": "The optional local page can only be turned on or off.",
-      "unsafe_summary_update_interval": "Choose only 5, 15, or 30 minutes for the nine-count refresh."
+      "unsafe_summary_update_interval": "Choose only 5, 15, or 30 minutes for the nine-count refresh.",
+      "unsafe_canary_control_setting": "The control canary can only be armed or disarmed.",
+      "unsafe_canary_control_target": "An armed control canary requires exactly one input_boolean helper."
     }
   },
   "selector": {
@@ -65,6 +71,9 @@
       "unknown_entities_count": {"name": "Entities with unknown state"},
       "not_reported_entities_count": {"name": "Entities without a state"},
       "disabled_entities_count": {"name": "Disabled entities"}
+    },
+    "switch": {
+      "canary_control": {"name": "Input boolean control canary"}
     }
   }
 }

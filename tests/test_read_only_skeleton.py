@@ -12,6 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from custom_components.hausman_hub.application.configuration import (  # noqa: E402
+    CANARY_CONTROL_ENABLED_DEFAULT,
+    CANARY_CONTROL_ENABLED_FIELD,
     ConfigurationViolation,
     DIRECT_EXECUTION_STATUS_FIELD,
     LOCAL_SUMMARY_ENABLED_DEFAULT,
@@ -56,7 +58,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         self.assertEqual("hausman_hub", manifest["domain"])
         self.assertTrue(manifest["config_flow"])
         self.assertTrue(manifest["single_config_entry"])
-        self.assertEqual("0.3.18", manifest["version"])
+        self.assertEqual("0.4.0", manifest["version"])
 
     def test_current_manifest_version_has_a_plain_change_note(self) -> None:
         manifest = json.loads((INTEGRATION / "manifest.json").read_text(encoding="utf-8"))
@@ -358,6 +360,22 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             lifecycle_source,
         )
 
+    def test_core_smoke_check_exercises_and_rolls_back_the_canary(self) -> None:
+        """The disposable runtime must prove the one real helper action path."""
+
+        core_check_source = (ROOT / "tools" / "check_home_assistant_core.py").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("async_assert_canary_control_lifecycle", core_check_source)
+        self.assertIn("CANARY_TARGET_ENTITY_ID", core_check_source)
+        self.assertIn("CANARY_SWITCH_ENTITY_ID", core_check_source)
+        self.assertIn('"input_boolean"', core_check_source)
+        self.assertIn("SERVICE_TURN_ON", core_check_source)
+        self.assertIn("SERVICE_TURN_OFF", core_check_source)
+        self.assertIn("canary rollback must delete its saved target", core_check_source)
+        self.assertIn("canary rollback must remove its HASC registry row", core_check_source)
+
     def test_distribution_documents_mark_the_private_choice_as_history(self) -> None:
         """Keep current manual-HACS instructions separate from the old choice."""
 
@@ -442,6 +460,8 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             SUMMARY_UPDATE_INTERVAL_DEFAULT,
             configuration.summary_update_interval,
         )
+        self.assertFalse(configuration.canary_control_enabled)
+        self.assertIsNone(configuration.canary_control_target)
 
     def test_optional_local_page_can_be_closed_without_changing_the_safe_mode(self) -> None:
         """This setting protects only the already-approved local page."""
@@ -479,6 +499,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
                         MODE_FIELD: "read-only",
                         LOCAL_SUMMARY_ENABLED_FIELD: True,
                         SUMMARY_UPDATE_INTERVAL_FIELD: interval,
+                        CANARY_CONTROL_ENABLED_FIELD: False,
                     },
                     options,
                 )
@@ -594,13 +615,17 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             SUMMARY_UPDATE_INTERVAL_DEFAULT,
             snapshot["entry_summary"]["summary_update_interval"],
         )
+        self.assertIs(
+            CANARY_CONTROL_ENABLED_DEFAULT,
+            snapshot["entry_summary"]["canary_control_enabled"],
+        )
         self.assertEqual("not_granted", snapshot["safety_model"]["device_authority"])
         self.assertEqual(DIRECT_EXECUTION_BLOCKED, snapshot["safety_model"]["direct_execution_status"])
         for forbidden_value in ("token", "entity_id", "device_id", "command", "payload"):
             self.assertNotIn(forbidden_value, serialized)
 
     def test_diagnostics_show_only_effective_safe_hasc_settings(self) -> None:
-        """Options may affect only the three validated HASC settings shown."""
+        """Diagnostics expose canary status and scope without its target."""
 
         snapshot = diagnostics_snapshot(
             create_initial_entry("read-only"),
@@ -613,6 +638,8 @@ class ReadOnlySkeletonTest(unittest.TestCase):
                 "mode": "shadow",
                 "local_summary_enabled": False,
                 "summary_update_interval": "30m",
+                "canary_control_enabled": False,
+                "canary_control_scope": "single_input_boolean",
                 "single_config_entry": True,
             },
             snapshot["entry_summary"],
@@ -643,6 +670,8 @@ class ReadOnlySkeletonTest(unittest.TestCase):
                 "mode",
                 "local_summary_enabled",
                 "summary_update_interval",
+                "canary_control_enabled",
+                "canary_control_scope",
                 "single_config_entry",
             },
             set(snapshot["entry_summary"]),
@@ -2149,7 +2178,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
                     {field.name for field in fields(guidance)},
                 )
 
-    def test_outer_adapter_has_no_execution_surface_and_only_summary_sensors(self) -> None:
+    def test_outer_adapter_limits_execution_to_the_canary_switch(self) -> None:
         forbidden_fragments = (
             "hass.services",
             "async_call(",
@@ -2166,12 +2195,31 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         source = "\n".join(
             path.read_text(encoding="utf-8").lower()
             for path in INTEGRATION.rglob("*.py")
+            if path.name != "switch.py"
         )
         for fragment in forbidden_fragments:
             self.assertNotIn(fragment, source)
         self.assertTrue((INTEGRATION / "sensor.py").is_file())
-        for absent_module in ("services.yaml", "switch.py", "climate.py"):
+        self.assertTrue((INTEGRATION / "switch.py").is_file())
+        for absent_module in ("services.yaml", "light.py", "climate.py"):
             self.assertFalse((INTEGRATION / absent_module).exists())
+
+        switch_source = (INTEGRATION / "switch.py").read_text(encoding="utf-8")
+        self.assertEqual(1, switch_source.count("hass.services.async_call("))
+        self.assertIn("INPUT_BOOLEAN_DOMAIN", switch_source)
+        self.assertIn("SERVICE_TURN_ON", switch_source)
+        self.assertIn("SERVICE_TURN_OFF", switch_source)
+        self.assertIn("blocking=True", switch_source)
+        self.assertIn("context=self._context", switch_source)
+        for forbidden_target in ("light", "climate", "lock", "cover", "script", "scene"):
+            self.assertNotIn(f'"{forbidden_target}"', switch_source)
+        for forbidden_surface in (
+            "async_register_entity_service",
+            "async_register(",
+            "requests",
+            "websocket",
+        ):
+            self.assertNotIn(forbidden_surface, switch_source.lower())
 
         sensor_source = (INTEGRATION / "sensor.py").read_text(encoding="utf-8")
         self.assertIn("HOME_SUMMARY_COUNT_KEYS", sensor_source)
@@ -2190,7 +2238,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         for blocked_method in ("async def post", "async def put", "async def patch", "async def delete"):
             self.assertNotIn(blocked_method, local_view_source)
 
-    def test_translations_describe_the_three_safe_settings(self) -> None:
+    def test_translations_describe_observation_and_canary_settings(self) -> None:
         for language in ("en", "ru"):
             content = json.loads(
                 (INTEGRATION / "translations" / f"{language}.json").read_text(encoding="utf-8")
@@ -2223,6 +2271,10 @@ class ReadOnlySkeletonTest(unittest.TestCase):
                 set(APPROVED_SUMMARY_UPDATE_INTERVALS),
                 set(content["selector"]["summary_update_interval"]["options"]),
             )
+            self.assertIn("canary_control_enabled", content["options"]["step"]["init"]["data"])
+            self.assertIn("canary_control_target", content["options"]["step"]["init"]["data"])
+            self.assertIn("unsafe_canary_control_setting", content["options"]["error"])
+            self.assertIn("unsafe_canary_control_target", content["options"]["error"])
 
     def test_sensor_translations_have_only_the_approved_nine_counts(self) -> None:
         """Every visible label must map to an already-approved aggregate count."""
@@ -2238,6 +2290,10 @@ class ReadOnlySkeletonTest(unittest.TestCase):
                 labels = content["entity"]["sensor"]
                 self.assertEqual(expected_keys, set(labels))
                 self.assertTrue(all(set(label) == {"name"} for label in labels.values()))
+                self.assertEqual(
+                    {"canary_control"},
+                    set(content["entity"]["switch"]),
+                )
 
     def test_translations_describe_the_public_non_controlling_shell(self) -> None:
         """Keep installation language honest about the integration's safety."""
@@ -2273,9 +2329,13 @@ class ReadOnlySkeletonTest(unittest.TestCase):
                         options_step["data_description"]["mode"],
                         options_step["data_description"]["local_summary_enabled"],
                         options_step["data_description"]["summary_update_interval"],
+                        options_step["data_description"]["canary_control_enabled"],
+                        options_step["data_description"]["canary_control_target"],
                         content["options"]["error"]["unsafe_mode"],
                         content["options"]["error"]["unsafe_local_summary_setting"],
                         content["options"]["error"]["unsafe_summary_update_interval"],
+                        content["options"]["error"]["unsafe_canary_control_setting"],
+                        content["options"]["error"]["unsafe_canary_control_target"],
                         *content["selector"]["mode"]["options"].values(),
                         *content["selector"]["summary_update_interval"]["options"].values(),
                     )
@@ -2288,9 +2348,9 @@ class ReadOnlySkeletonTest(unittest.TestCase):
                 )
 
         self.assertIn("does not change the home", english["config"]["step"]["user"]["description"])
-        self.assertIn("without home control", english["options"]["step"]["init"]["description"])
+        self.assertIn("input boolean", english["options"]["step"]["init"]["description"])
         self.assertIn("не меняет", russian["config"]["step"]["user"]["description"])
-        self.assertIn("без управления домом", russian["options"]["step"]["init"]["description"])
+        self.assertIn("input_boolean", russian["options"]["step"]["init"]["description"])
 
     @staticmethod
     def home_summary() -> HomeSummary:

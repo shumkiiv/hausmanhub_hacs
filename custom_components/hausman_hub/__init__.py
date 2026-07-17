@@ -1,8 +1,10 @@
-"""Home Assistant boundary for the read-only HausMan Hub integration.
+"""Home Assistant boundary for the HausMan Hub HASC integration.
 
-It creates only nine diagnostic count sensors from the approved aggregate
-summary. It has no services, device connections, or execution routes, and its
-separate local view remains authenticated and GET-only.
+It always creates the nine diagnostic count sensors. An explicitly armed
+canary may additionally create one switch that can call only the selected
+``input_boolean`` helper's standard on/off services. HASC registers no service,
+connects to no device, and its separate local view remains authenticated and
+GET-only.
 """
 
 from __future__ import annotations
@@ -17,7 +19,7 @@ if TYPE_CHECKING:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Load the safe count display without acquiring runtime authority."""
+    """Load the count display and an optional narrow canary switch."""
 
     configured_entry_ids = tuple(
         configured_entry.entry_id
@@ -40,7 +42,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     from .local_summary import register_local_summary_access
 
-    await hass.config_entries.async_forward_entry_setups(entry, (Platform.SENSOR,))
+    await hass.config_entries.async_forward_entry_setups(
+        entry,
+        (Platform.SENSOR, Platform.SWITCH),
+    )
     if configuration.local_summary_enabled:
         register_local_summary_access(hass, entry)
     entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
@@ -142,13 +147,16 @@ def _clear_hasc_state_values(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload the count display, clear its values, and close its local summary."""
+    """Unload HASC entities, clear their values, and close its local summary."""
 
     from homeassistant.const import Platform
 
     from .local_summary import clear_local_summary_access
 
-    unloaded = await hass.config_entries.async_unload_platforms(entry, (Platform.SENSOR,))
+    unloaded = await hass.config_entries.async_unload_platforms(
+        entry,
+        (Platform.SENSOR, Platform.SWITCH),
+    )
     if unloaded:
         _clear_hasc_state_values(hass, entry)
         clear_local_summary_access(hass, entry)
