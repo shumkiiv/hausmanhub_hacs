@@ -12,7 +12,7 @@ Last updated: 2026-07-17.
   review passed. This source push did not create a tag, release, HACS
   publication, deployment, or live-home change. The boundary is recorded in
   the [0.4.0 canary note](LLM_WIKI/Manual/2026-07-17-hasc-v0-4-0-input-boolean-canary-control.md).
-- Uncommitted version 0.5.0 implements the first complete climate facade in
+- Version 0.5.0 implements the first complete climate facade in
   HASC. It adds a versioned logical Device Registry for rooms, ACs, TRVs,
   humidifiers, floor heating, sensors, private endpoint roles, capabilities,
   control owner, and observed/canary/managed scope. Import from the current
