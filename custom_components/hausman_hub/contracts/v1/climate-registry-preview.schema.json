@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub_hasc/contracts/v1/climate-registry-preview.schema.json",
+  "title": "HASC climate registry preview v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "status", "save_allowed", "fresh", "registry", "reconciliation", "reasons"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {"name": {"const": "hausman-hasc-climate-registry-preview"}, "version": {"const": 1}}
+    },
+    "status": {"enum": ["validated_offline", "unavailable", "not_ready", "ready"]},
+    "save_allowed": {"type": "boolean"},
+    "fresh": {"type": "boolean"},
+    "registry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "room_count", "device_count"],
+      "properties": {"version": {"const": 1}, "room_count": {"type": "integer", "minimum": 0, "maximum": 128}, "device_count": {"type": "integer", "minimum": 0, "maximum": 512}}
+    },
+    "reconciliation": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["matches", "matched_device_count", "missing_device_count", "room_mismatch_device_count", "unregistered_source_count"],
+          "properties": {
+            "matches": {"type": "boolean"},
+            "matched_device_count": {"type": "integer", "minimum": 0, "maximum": 512},
+            "missing_device_count": {"type": "integer", "minimum": 0, "maximum": 512},
+            "room_mismatch_device_count": {"type": "integer", "minimum": 0, "maximum": 512},
+            "unregistered_source_count": {"type": "integer", "minimum": 0, "maximum": 512}
+          }
+        }
+      ]
+    },
+    "reasons": {"type": "array", "uniqueItems": true, "items": {"enum": ["bridge_disabled", "climate_state_unavailable", "state_stale", "registry_has_no_rooms", "registry_has_no_devices", "registry_mismatch", "canary_registry_locked"]}}
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub_hasc/contracts/v1/climate-registry.schema.json",
+  "title": "HASC private climate registry v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "rooms", "devices"],
+  "properties": {
+    "version": {"const": 1},
+    "rooms": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name"],
+        "properties": {
+          "id": {"$ref": "#/$defs/stable_id"},
+          "name": {"$ref": "#/$defs/name"}
+        }
+      }
+    },
+    "devices": {
+      "type": "array",
+      "maxItems": 512,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "room_id", "kind", "source_id", "control_scope", "control_owner", "capabilities", "endpoints"],
+        "properties": {
+          "id": {"$ref": "#/$defs/stable_id"},
+          "name": {"$ref": "#/$defs/name"},
+          "room_id": {"$ref": "#/$defs/stable_id"},
+          "kind": {"enum": ["air_conditioner", "radiator_thermostat", "humidifier", "floor_heating", "temperature_sensor", "humidity_sensor"]},
+          "source_id": {"type": "string", "minLength": 1, "maxLength": 255},
+          "control_scope": {"enum": ["observed", "canary", "managed"]},
+          "control_owner": {"enum": ["climate_core", "manual", "observed"]},
+          "capabilities": {
+            "type": "array",
+            "maxItems": 16,
+            "uniqueItems": true,
+            "items": {"enum": ["power", "target_temperature", "target_humidity", "hvac_mode", "fan_mode", "auto_manual", "target_strategy", "cooldown", "physical_feedback"]}
+          },
+          "endpoints": {
+            "type": "array",
+            "maxItems": 16,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["role", "entity_id"],
+              "properties": {
+                "role": {"enum": ["control", "temperature", "humidity", "physical_feedback", "fan", "valve_position", "child_lock", "water_level"]},
+                "entity_id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*\\.[a-z0-9_]+$"}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "stable_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+    "name": {"type": "string", "minLength": 1, "maxLength": 120, "pattern": "^\\S(?:.*\\S)?$"}
+  }
+}

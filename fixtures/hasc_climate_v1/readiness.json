@@ -1,0 +1,16 @@
+{
+  "contract": {"name": "hausman-hasc-climate-readiness", "version": 1},
+  "bridge_mode": "shadow",
+  "status": "ready",
+  "ready": true,
+  "fresh": true,
+  "registry": {"room_count": 2, "device_count": 2},
+  "reconciliation": {
+    "matches": true,
+    "matched_device_count": 2,
+    "missing_device_count": 0,
+    "room_mismatch_device_count": 0,
+    "unregistered_source_count": 0
+  },
+  "reasons": []
+}

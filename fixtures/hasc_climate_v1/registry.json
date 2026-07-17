@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "rooms": [
+    {"id": "living", "name": "Living room"},
+    {"id": "kids", "name": "Kids"}
+  ],
+  "devices": [
+    {
+      "id": "living_ac",
+      "name": "Living AC",
+      "room_id": "living",
+      "kind": "air_conditioner",
+      "source_id": "synthetic-ac-source-living",
+      "control_scope": "canary",
+      "control_owner": "climate_core",
+      "capabilities": ["power", "target_temperature", "hvac_mode", "fan_mode"],
+      "endpoints": [{"role": "control", "entity_id": "climate.synthetic_living_ac"}]
+    },
+    {
+      "id": "kids_humidifier",
+      "name": "Kids humidifier",
+      "room_id": "kids",
+      "kind": "humidifier",
+      "source_id": "synthetic-humidifier-source-kids",
+      "control_scope": "observed",
+      "control_owner": "observed",
+      "capabilities": ["power", "target_humidity"],
+      "endpoints": [{"role": "control", "entity_id": "humidifier.synthetic_kids"}]
+    }
+  ]
+}

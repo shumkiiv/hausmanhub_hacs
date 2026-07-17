@@ -3,16 +3,25 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from collections.abc import Callable
 from typing import Protocol
 
 from ..domain.climate import ClimateRegistry
 from ..domain.climate_bridge import ClimateBridgeMode
 from ..domain.configuration import SafeConfiguration
 from .android_climate import admin_climate_import_snapshot, android_climate_snapshot
-from .climate_commands import ClimateCommandPlan, plan_climate_command
+from .climate_commands import (
+    ClimateCommandPlan,
+    ClimateCommandRejected,
+    plan_climate_command,
+)
 from .climate_import import ClimateImportSnapshot
-from .climate_registry import registry_from_payload, registry_to_payload
+from .climate_operations import _ClimateOperationLedger, ClimateOperationReceipt
+from .climate_registry import (
+    reconcile_climate_registry,
+    registry_from_payload,
+    registry_to_payload,
+)
 
 
 class ClimateRuntimeUnavailable(RuntimeError):
@@ -39,27 +48,6 @@ class ClimateBridgeClient(Protocol):
         """Post only a plan explicitly marked executable."""
 
 
-@dataclass(frozen=True, slots=True)
-class ClimateActionResult:
-    """Public action result without its private translated command."""
-
-    action: str
-    room_id: str
-    device_id: str | None
-    status: str
-
-    def as_payload(self) -> dict[str, object]:
-        """Return the fixed Android response shape."""
-
-        return {
-            "ok": True,
-            "action": self.action,
-            "room_id": self.room_id,
-            "device_id": self.device_id,
-            "status": self.status,
-        }
-
-
 class ClimateRuntime:
     """One loaded HASC entry's climate facade and rollout state."""
 
@@ -70,6 +58,8 @@ class ClimateRuntime:
         configuration: SafeConfiguration,
         registry_store: ClimateRegistryStorage,
         bridge_client: ClimateBridgeClient | None,
+        operation_id_factory: Callable[[], str] | None = None,
+        now_ms: Callable[[], int] | None = None,
     ) -> None:
         self.entry_id = entry_id
         self.configuration = configuration
@@ -78,6 +68,10 @@ class ClimateRuntime:
         self._registry = ClimateRegistry()
         self._snapshot: ClimateImportSnapshot | None = None
         self._lock = asyncio.Lock()
+        self._operations = _ClimateOperationLedger(
+            operation_id_factory=operation_id_factory,
+            now_ms=now_ms,
+        )
         self.last_error: str | None = None
 
     @property
@@ -147,6 +141,75 @@ class ClimateRuntime:
         async with self._lock:
             return registry_to_payload(self._registry)
 
+    async def async_readiness(self) -> dict[str, object]:
+        """Return redacted bridge and registry readiness to a local admin."""
+
+        async with self._lock:
+            mode = self.configuration.climate_bridge_mode
+            if mode is ClimateBridgeMode.DISABLED:
+                return self._readiness_payload(
+                    status="disabled",
+                    fresh=False,
+                    reconciliation=None,
+                    reasons=("bridge_disabled",),
+                )
+            try:
+                snapshot = await self._async_refresh_unlocked()
+            except ClimateRuntimeUnavailable:
+                return self._readiness_payload(
+                    status="unavailable",
+                    fresh=False,
+                    reconciliation=None,
+                    reasons=("climate_state_unavailable",),
+                )
+            reconciliation = reconcile_climate_registry(self._registry, snapshot)
+            reasons = _readiness_reasons(self._registry, snapshot, reconciliation.matches)
+            return self._readiness_payload(
+                status="ready" if not reasons else "not_ready",
+                fresh=snapshot.runtime_fresh,
+                reconciliation=reconciliation,
+                reasons=reasons,
+            )
+
+    async def async_preview_registry(self, payload: object) -> dict[str, object]:
+        """Validate and reconcile an unsaved registry without mutating storage."""
+
+        async with self._lock:
+            registry = registry_from_payload(payload)
+            mode = self.configuration.climate_bridge_mode
+            if mode is ClimateBridgeMode.DISABLED:
+                return _registry_preview_payload(
+                    registry,
+                    status="validated_offline",
+                    save_allowed=True,
+                    fresh=False,
+                    reconciliation=None,
+                    reasons=("bridge_disabled",),
+                )
+            try:
+                snapshot = await self._async_refresh_unlocked()
+            except ClimateRuntimeUnavailable:
+                return _registry_preview_payload(
+                    registry,
+                    status="unavailable",
+                    save_allowed=mode is ClimateBridgeMode.SHADOW,
+                    fresh=False,
+                    reconciliation=None,
+                    reasons=("climate_state_unavailable",),
+                )
+            reconciliation = reconcile_climate_registry(registry, snapshot)
+            reasons = _readiness_reasons(registry, snapshot, reconciliation.matches)
+            if mode is ClimateBridgeMode.CANARY:
+                reasons = (*reasons, "canary_registry_locked")
+            return _registry_preview_payload(
+                registry,
+                status="ready" if not reasons else "not_ready",
+                save_allowed=mode is not ClimateBridgeMode.CANARY,
+                fresh=snapshot.runtime_fresh,
+                reconciliation=reconciliation,
+                reasons=tuple(dict.fromkeys(reasons)),
+            )
+
     async def async_replace_registry(self, payload: object) -> dict[str, object]:
         """Validate and atomically replace the registry outside active canary."""
 
@@ -161,30 +224,62 @@ class ClimateRuntime:
             self.last_error = None
             return registry_to_payload(registry)
 
-    async def async_action(self, payload: object) -> ClimateActionResult:
-        """Refresh, authorize, and optionally post one typed climate action."""
+    async def async_action(self, payload: object) -> ClimateOperationReceipt:
+        """Idempotently validate and optionally post one typed climate action."""
 
         async with self._lock:
+            # Preserve complete rollback semantics: a disabled bridge exposes
+            # no action-validation oracle and performs no state I/O.
+            self._require_client()
+            request_id, intent, canonical = self._operations.parse_action(payload)
+            duplicate = self._operations.duplicate(request_id, canonical)
+            if duplicate is not None:
+                return duplicate
             snapshot = await self._async_refresh_unlocked()
             plan = plan_climate_command(
-                payload,
+                intent,
                 self._registry,
                 snapshot,
                 bridge_mode=self.configuration.climate_bridge_mode,
                 canary_room_id=self.configuration.climate_canary_room_id,
             )
             if plan.execute:
+                self._operations.ensure_submission_available(plan.room_id)
+                # Reserve the idempotency key before the POST. If transport
+                # becomes ambiguous, a retry returns this pending receipt and
+                # cannot submit a second physical command.
+                receipt = self._operations.record(
+                    request_id=request_id,
+                    canonical_intent=canonical,
+                    intent=intent,
+                    plan=plan,
+                )
                 client = self._require_client()
-                await client.async_execute(plan)
-                status = "submitted"
-            else:
-                status = "shadow"
-            return ClimateActionResult(
-                action=plan.action,
-                room_id=plan.room_id,
-                device_id=plan.device_id,
-                status=status,
+                try:
+                    await client.async_execute(plan)
+                except ClimateCommandRejected:
+                    return self._operations.reject(receipt.operation_id)
+                return receipt
+            return self._operations.record(
+                request_id=request_id,
+                canonical_intent=canonical,
+                intent=intent,
+                plan=plan,
             )
+
+    async def async_operation(self, payload: object) -> ClimateOperationReceipt:
+        """Return one bounded receipt and refresh only a pending canary result."""
+
+        async with self._lock:
+            snapshot = None
+            if self._operations.pending(payload):
+                try:
+                    snapshot = await self._async_refresh_unlocked()
+                except ClimateRuntimeUnavailable:
+                    # A transient read failure must not rewrite an accepted
+                    # command into a fabricated physical result.
+                    snapshot = None
+            return self._operations.lookup(payload, snapshot)
 
     async def _async_refresh_unlocked(self) -> ClimateImportSnapshot:
         client = self._require_client()
@@ -204,3 +299,88 @@ class ClimateRuntime:
         ):
             raise ClimateRuntimeUnavailable("climate bridge is disabled")
         return self._bridge_client
+
+    def _readiness_payload(
+        self,
+        *,
+        status: str,
+        fresh: bool,
+        reconciliation: object | None,
+        reasons: tuple[str, ...],
+    ) -> dict[str, object]:
+        return {
+            "contract": {
+                "name": "hausman-hasc-climate-readiness",
+                "version": 1,
+            },
+            "bridge_mode": self.configuration.climate_bridge_mode.value,
+            "status": status,
+            "ready": status == "ready",
+            "fresh": fresh,
+            "registry": {
+                "room_count": self.room_count,
+                "device_count": self.device_count,
+            },
+            "reconciliation": _reconciliation_counts(reconciliation),
+            "reasons": list(reasons),
+        }
+
+
+def _readiness_reasons(
+    registry: ClimateRegistry,
+    snapshot: ClimateImportSnapshot,
+    matches: bool,
+) -> tuple[str, ...]:
+    reasons: list[str] = []
+    if not snapshot.runtime_fresh:
+        reasons.append("state_stale")
+    if not registry.rooms:
+        reasons.append("registry_has_no_rooms")
+    if not registry.devices:
+        reasons.append("registry_has_no_devices")
+    if not matches:
+        reasons.append("registry_mismatch")
+    return tuple(reasons)
+
+
+def _registry_preview_payload(
+    registry: ClimateRegistry,
+    *,
+    status: str,
+    save_allowed: bool,
+    fresh: bool,
+    reconciliation: object | None,
+    reasons: tuple[str, ...],
+) -> dict[str, object]:
+    return {
+        "contract": {
+            "name": "hausman-hasc-climate-registry-preview",
+            "version": 1,
+        },
+        "status": status,
+        "save_allowed": save_allowed,
+        "fresh": fresh,
+        "registry": {
+            "version": registry.version,
+            "room_count": len(registry.rooms),
+            "device_count": len(registry.devices),
+        },
+        "reconciliation": _reconciliation_counts(reconciliation),
+        "reasons": list(reasons),
+    }
+
+
+def _reconciliation_counts(reconciliation: object | None) -> dict[str, object] | None:
+    if reconciliation is None:
+        return None
+    return {
+        "matches": reconciliation.matches,  # type: ignore[attr-defined]
+        "matched_device_count": len(reconciliation.matched_device_ids),  # type: ignore[attr-defined]
+        "missing_device_count": len(reconciliation.missing_device_ids),  # type: ignore[attr-defined]
+        "room_mismatch_device_count": len(  # type: ignore[attr-defined]
+            reconciliation.room_mismatch_device_ids  # type: ignore[attr-defined]
+        ),
+        "unregistered_source_count": len(  # type: ignore[attr-defined]
+            reconciliation.unregistered_source_ids  # type: ignore[attr-defined]
+        ),
+    }

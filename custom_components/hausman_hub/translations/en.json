@@ -29,7 +29,8 @@
           "canary_control_target": "Canary input boolean",
           "climate_bridge_mode": "Climate bridge rollout",
           "climate_bridge_target": "Private Climate API origin",
-          "climate_canary_room_id": "Climate canary room ID"
+          "climate_canary_room_id": "Climate canary room ID",
+          "next_step": "After this form"
         },
         "data_description": {
           "mode": "Choose read-only observation or a comparison without changes.",
@@ -39,7 +40,61 @@
           "canary_control_target": "Select exactly one input_boolean helper. Lights, climate, locks, covers, scripts, scenes, and other domains are rejected.",
           "climate_bridge_mode": "Disabled is full rollback. Shadow reads and validates without posting. Canary may post only typed commands for one eligible room.",
           "climate_bridge_target": "Use only an HTTP(S) origin with a literal loopback or RFC1918/ULA address, for example http://192.168.1.10:1880. Paths, credentials, DNS names, query strings, and public addresses are rejected.",
-          "climate_canary_room_id": "Required only in canary mode. Use the stable room ID advertised by the Climate API."
+          "climate_canary_room_id": "Required only in canary mode. Use the stable room ID advertised by the Climate API.",
+          "next_step": "Save these settings or open the separate local climate-registry setup."
+        }
+      },
+      "climate_registry": {
+        "title": "Climate device setup",
+        "description": "Add or replace rooms and devices with guided fields, then review the complete draft. Nothing is saved before the separate confirmation step.",
+        "data": {
+          "climate_registry_action": "Registry action"
+        },
+        "data_description": {
+          "climate_registry_action": "Choose the next guided setup step. Advanced JSON is optional."
+        }
+      },
+      "climate_registry_room": {
+        "title": "Add or replace a climate room",
+        "description": "A repeated stable room ID replaces that draft room. The draft remains unsaved.",
+        "data": {
+          "climate_room_id": "Stable room ID",
+          "climate_room_name": "Room name"
+        }
+      },
+      "climate_registry_device": {
+        "title": "Add or replace a climate device",
+        "description": "Describe one logical HASC device. A repeated stable device ID replaces that draft device. Controllable devices require one control entity; passive sensors must leave it empty and remain observed.",
+        "data": {
+          "climate_device_id": "Stable HASC device ID",
+          "climate_device_name": "Device name",
+          "climate_device_room": "HASC room",
+          "climate_device_kind": "Device kind",
+          "climate_device_source_id": "Private Climate API source ID",
+          "climate_device_control_scope": "Rollout scope",
+          "climate_device_control_owner": "Control owner",
+          "climate_device_capabilities": "Public capabilities",
+          "climate_device_control_entity": "Private control entity"
+        }
+      },
+      "climate_registry_json": {
+        "title": "Advanced climate registry JSON",
+        "description": "Optional advanced editor for the complete private registry. The next step still previews it and requires separate confirmation.",
+        "data": {
+          "climate_registry_json": "Private climate registry JSON"
+        },
+        "data_description": {
+          "climate_registry_json": "The installed v1 JSON Schema is authoritative. Private source/entity bindings never enter the tablet contract."
+        }
+      },
+      "climate_registry_confirm": {
+        "title": "Confirm climate registry",
+        "description": "Preview status: {status}. Rooms: {room_count}; devices: {device_count}; reasons: {reasons}. Confirm to atomically replace the registry.",
+        "data": {
+          "confirm_registry_save": "Replace the saved registry"
+        },
+        "data_description": {
+          "confirm_registry_save": "Nothing is saved unless this separate confirmation is enabled."
         }
       }
     },
@@ -51,7 +106,14 @@
       "unsafe_canary_control_target": "An armed control canary requires exactly one input_boolean helper.",
       "unsafe_climate_bridge_mode": "Choose disabled, shadow, or canary for the climate bridge.",
       "unsafe_climate_bridge_target": "Use one private literal HTTP(S) origin without a path or credentials.",
-      "unsafe_climate_canary_room": "Canary mode requires one stable lowercase room ID."
+      "unsafe_climate_canary_room": "Canary mode requires one stable lowercase room ID.",
+      "climate_runtime_unavailable": "The loaded HASC climate runtime is unavailable.",
+      "invalid_climate_registry": "The registry must be valid bounded HASC climate registry JSON v1.",
+      "climate_registry_locked": "Registry changes are locked while the climate bridge is in canary mode.",
+      "invalid_climate_registry_action": "Choose one approved registry setup action.",
+      "invalid_climate_room": "Use one stable lowercase room ID and a non-empty room name.",
+      "invalid_climate_device": "The device fields, required capabilities, ownership, scope, and control entity do not form a valid HASC device.",
+      "climate_registry_needs_room": "Add at least one room before adding a device."
     }
   },
   "selector": {
@@ -73,6 +135,58 @@
         "disabled": "Disabled",
         "shadow": "Shadow (read only)",
         "canary": "One-room canary"
+      }
+    },
+    "next_step": {
+      "options": {
+        "save_settings": "Save settings",
+        "manage_climate_registry": "Set up climate devices"
+      }
+    },
+    "climate_registry_action": {
+      "options": {
+        "add_room": "Add or replace room",
+        "add_device": "Add or replace device",
+        "review_registry": "Review and confirm draft",
+        "advanced_json": "Advanced JSON editor",
+        "reset_registry": "Reset complete registry"
+      }
+    },
+    "climate_device_kind": {
+      "options": {
+        "air_conditioner": "Air conditioner",
+        "radiator_thermostat": "Radiator thermostat",
+        "humidifier": "Humidifier",
+        "floor_heating": "Floor heating",
+        "temperature_sensor": "Temperature sensor",
+        "humidity_sensor": "Humidity sensor"
+      }
+    },
+    "climate_device_control_scope": {
+      "options": {
+        "observed": "Observed only",
+        "canary": "Canary",
+        "managed": "Managed"
+      }
+    },
+    "climate_device_control_owner": {
+      "options": {
+        "climate_core": "Climate core",
+        "manual": "Manual",
+        "observed": "Observed"
+      }
+    },
+    "climate_device_capabilities": {
+      "options": {
+        "power": "Power",
+        "target_temperature": "Target temperature",
+        "target_humidity": "Target humidity",
+        "hvac_mode": "HVAC mode",
+        "fan_mode": "Fan mode",
+        "auto_manual": "Auto/manual",
+        "target_strategy": "Target strategy",
+        "cooldown": "Cooldown",
+        "physical_feedback": "Physical feedback"
       }
     }
   },

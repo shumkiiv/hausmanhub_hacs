@@ -103,3 +103,12 @@ The immediate implementation order is:
 4. end-to-end zero-POST shadow harness;
 5. operation receipts and confirmation model;
 6. release 0.5.1 after the same local/Core/Kimi gates.
+
+## 0.5.1 implementation status
+
+Implemented on 2026-07-17: installed JSON Schemas and fixtures; guided
+room/device registry setup with preview and confirmation; redacted readiness;
+real-auth disposable shadow with measured zero command POSTs; idempotent
+request/operation IDs; typed receipts; observable confirmation; timeout; and
+one-pending-operation-per-room protection. Release, live HACS update, and final
+post-deployment verification remain the delivery gates for this worktree.

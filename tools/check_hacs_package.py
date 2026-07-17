@@ -36,6 +36,19 @@ TRANSLATION_PATHS = (
     INTEGRATION_DIRECTORY / "translations/en.json",
     INTEGRATION_DIRECTORY / "translations/ru.json",
 )
+CONTRACT_PATHS = tuple(
+    INTEGRATION_DIRECTORY / "contracts" / "v1" / name
+    for name in (
+        "climate-action-request.schema.json",
+        "climate-admin-import.schema.json",
+        "climate-home.schema.json",
+        "climate-operation-query.schema.json",
+        "climate-operation-receipt.schema.json",
+        "climate-readiness.schema.json",
+        "climate-registry-preview.schema.json",
+        "climate-registry.schema.json",
+    )
+)
 REQUIRED_PACKAGE_PATHS = (
     HACS_METADATA_PATH,
     README_PATH,
@@ -49,6 +62,7 @@ REQUIRED_PACKAGE_PATHS = (
     INTEGRATION_DIRECTORY / "application/android_climate.py",
     INTEGRATION_DIRECTORY / "application/climate_commands.py",
     INTEGRATION_DIRECTORY / "application/climate_import.py",
+    INTEGRATION_DIRECTORY / "application/climate_operations.py",
     INTEGRATION_DIRECTORY / "application/climate_registry.py",
     INTEGRATION_DIRECTORY / "application/climate_runtime.py",
     INTEGRATION_DIRECTORY / "domain/control.py",
@@ -60,6 +74,7 @@ REQUIRED_PACKAGE_PATHS = (
     MANIFEST_PATH,
     ICON_PATH,
     *TRANSLATION_PATHS,
+    *CONTRACT_PATHS,
 )
 EXPECTED_NAME = "HausMan Hub HASC"
 EXPECTED_DOMAIN = "hausman_hub"

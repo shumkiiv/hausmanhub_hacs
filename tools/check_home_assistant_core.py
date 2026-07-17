@@ -24,8 +24,10 @@ from pathlib import Path
 import shutil
 import sys
 import tempfile
+import time
 from typing import Any
 
+from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 import voluptuous_serialize
 from homeassistant import config_entries
@@ -51,6 +53,8 @@ from homeassistant.helpers.entity_component import DATA_INSTANCES
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 INTEGRATION_SOURCE = REPOSITORY_ROOT / "custom_components" / "hausman_hub"
+CLIMATE_STATE_FIXTURE = REPOSITORY_ROOT / "fixtures" / "climate_bridge" / "valid_state.json"
+CLIMATE_REGISTRY_FIXTURE = REPOSITORY_ROOT / "fixtures" / "hasc_climate_v1" / "registry.json"
 SUMMARY_SENSOR_KEYS = (
     "areas_count",
     "devices_count",
@@ -102,11 +106,17 @@ CLIMATE_HOME_PATH = "/api/hausman_hub/v1/home"
 CLIMATE_ACTION_PATH = "/api/hausman_hub/v1/actions"
 CLIMATE_ADMIN_IMPORT_PATH = "/api/hausman_hub/v1/admin/climate-import"
 CLIMATE_ADMIN_REGISTRY_PATH = "/api/hausman_hub/v1/admin/climate-registry"
+CLIMATE_ADMIN_REGISTRY_PREVIEW_PATH = "/api/hausman_hub/v1/admin/climate-registry-preview"
+CLIMATE_ADMIN_READINESS_PATH = "/api/hausman_hub/v1/admin/climate-readiness"
+CLIMATE_OPERATION_PATH = "/api/hausman_hub/v1/operations"
 CLIMATE_API_PATHS = (
     CLIMATE_HOME_PATH,
     CLIMATE_ACTION_PATH,
     CLIMATE_ADMIN_IMPORT_PATH,
     CLIMATE_ADMIN_REGISTRY_PATH,
+    CLIMATE_ADMIN_REGISTRY_PREVIEW_PATH,
+    CLIMATE_ADMIN_READINESS_PATH,
+    CLIMATE_OPERATION_PATH,
 )
 ALTERNATE_LOCAL_SUMMARY_TARGET_STATUSES = {
     f"{LOCAL_SUMMARY_PATH}/": HTTPStatus.NOT_FOUND,
@@ -1540,7 +1550,7 @@ async def async_assert_broken_options_form_defaults_to_read_only(
     )
     schema = options_form.get("data_schema")
     schema_fields = getattr(schema, "schema", None)
-    if not isinstance(schema_fields, dict) or len(schema_fields) != 8:
+    if not isinstance(schema_fields, dict) or len(schema_fields) != 9:
         raise RuntimeError(
             f"{scenario_name} options form must expose only the approved settings"
         )
@@ -1554,6 +1564,7 @@ async def async_assert_broken_options_form_defaults_to_read_only(
         _,
         _,
         _,
+        next_step_field,
     ) = schema_fields
     mode_default_factory = getattr(mode_field, "default", None)
     local_page_default_factory = getattr(local_page_field, "default", None)
@@ -1564,12 +1575,14 @@ async def async_assert_broken_options_form_defaults_to_read_only(
         "default",
         None,
     )
+    next_step_default_factory = getattr(next_step_field, "default", None)
     if (
         not callable(mode_default_factory)
         or not callable(local_page_default_factory)
         or not callable(summary_interval_default_factory)
         or not callable(canary_enabled_default_factory)
         or not callable(climate_bridge_mode_default_factory)
+        or not callable(next_step_default_factory)
     ):
         raise RuntimeError(f"{scenario_name} options form must provide safe defaults")
     assert_result(
@@ -1596,6 +1609,11 @@ async def async_assert_broken_options_form_defaults_to_read_only(
         climate_bridge_mode_default_factory(),
         CLIMATE_BRIDGE_MODE_DEFAULT,
         f"{scenario_name} climate bridge must default to disabled",
+    )
+    assert_result(
+        next_step_default_factory(),
+        "save_settings",
+        f"{scenario_name} options form must default to saving ordinary settings",
     )
     hass.config_entries.options.async_abort(options_form["flow_id"])
     await hass.async_block_till_done()
@@ -2115,13 +2133,16 @@ def assert_disabled_climate_facade(hass: HomeAssistant, domain: str, entry_id: s
     )
     views = runtime_data.get("climate_views")
     if not isinstance(views, tuple) or len(views) != len(CLIMATE_API_PATHS):
-        raise RuntimeError("disabled climate facade must retain exactly four fixed views")
+        raise RuntimeError("disabled climate facade must retain every fixed climate view")
 
     expected_methods = {
         CLIMATE_HOME_PATH: {"GET", "OPTIONS"},
         CLIMATE_ACTION_PATH: {"POST", "OPTIONS"},
         CLIMATE_ADMIN_IMPORT_PATH: {"GET", "OPTIONS"},
         CLIMATE_ADMIN_REGISTRY_PATH: {"GET", "POST", "OPTIONS"},
+        CLIMATE_ADMIN_REGISTRY_PREVIEW_PATH: {"POST", "OPTIONS"},
+        CLIMATE_ADMIN_READINESS_PATH: {"GET", "OPTIONS"},
+        CLIMATE_OPERATION_PATH: {"POST", "OPTIONS"},
     }
     for path, routes in find_climate_routes(hass).items():
         if len(routes) != 1:
@@ -2748,8 +2769,250 @@ async def async_assert_disabled_climate_http_access(hass: HomeAssistant) -> None
             HTTPStatus.SERVICE_UNAVAILABLE,
             "disabled climate import must not contact any bridge",
         )
+
+        readiness = await client.get(
+            CLIMATE_ADMIN_READINESS_PATH,
+            headers=owner_headers,
+        )
+        assert_result(
+            readiness.status,
+            HTTPStatus.OK,
+            "disabled readiness must remain available without bridge I/O",
+        )
+        readiness_payload = await readiness.json()
+        assert_result(
+            readiness_payload.get("status"),
+            "disabled",
+            "disabled readiness must report complete rollback",
+        )
+        assert_result(
+            readiness_payload.get("reasons"),
+            ["bridge_disabled"],
+            "disabled readiness must use one normalized reason",
+        )
+
+        preview = await client.post(
+            CLIMATE_ADMIN_REGISTRY_PREVIEW_PATH,
+            headers=owner_headers,
+            json={"version": 1, "rooms": [], "devices": []},
+        )
+        assert_result(
+            preview.status,
+            HTTPStatus.OK,
+            "disabled registry preview must validate without bridge I/O",
+        )
+        assert_result(
+            (await preview.json()).get("status"),
+            "validated_offline",
+            "disabled registry preview must clearly report offline validation",
+        )
+
+        unknown_operation = await client.post(
+            CLIMATE_OPERATION_PATH,
+            headers=tablet_headers,
+            json={"operation_id": "f" * 32},
+        )
+        assert_result(
+            unknown_operation.status,
+            HTTPStatus.OK,
+            "a well-formed unknown operation must return a typed redacted receipt",
+        )
+        unknown_payload = await unknown_operation.json()
+        assert_result(
+            (unknown_payload.get("known"), unknown_payload.get("status")),
+            (False, "unknown"),
+            "an unknown operation must disclose no prior action data",
+        )
     finally:
         await client.close()
+
+
+async def async_assert_shadow_climate_end_to_end(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+) -> None:
+    """Run real HA auth and shadow HTTP with a measured zero command-POST count."""
+
+    climate_state = json.loads(CLIMATE_STATE_FIXTURE.read_text(encoding="utf-8"))
+    climate_registry = json.loads(CLIMATE_REGISTRY_FIXTURE.read_text(encoding="utf-8"))
+    climate_state["generatedAt"] = int(time.time() * 1000)
+    state_gets: list[str] = []
+    command_posts: list[object] = []
+
+    async def state_handler(_: web.Request) -> web.Response:
+        state_gets.append("GET")
+        climate_state["generatedAt"] = int(time.time() * 1000)
+        return web.json_response(climate_state)
+
+    async def command_handler(request: web.Request) -> web.Response:
+        command_posts.append(await request.json())
+        return web.json_response({"accepted": True})
+
+    bridge_app = web.Application()
+    bridge_app.router.add_get("/endpoint/climate/api/v1/state", state_handler)
+    bridge_app.router.add_post("/endpoint/climate/api/v1/command", command_handler)
+    bridge_server = TestServer(bridge_app, host="127.0.0.1")
+    await bridge_server.start_server()
+    bridge_origin = str(bridge_server.make_url("/")).removesuffix("/")
+
+    owner = await hass.auth.async_create_user(
+        "HASC shadow climate test owner",
+        group_ids=[GROUP_ID_ADMIN],
+        local_only=True,
+    )
+    tablet = await hass.auth.async_create_user(
+        "HASC shadow climate tablet",
+        group_ids=[GROUP_ID_USER],
+        local_only=True,
+    )
+    owner_headers = {
+        "Authorization": f"Bearer {await async_create_test_access_token(hass, owner)}"
+    }
+    tablet_headers = {
+        "Authorization": f"Bearer {await async_create_test_access_token(hass, tablet)}"
+    }
+    home_server = TestServer(hass.http.app, host="127.0.0.1")
+    home_client = TestClient(home_server)
+    try:
+        form = await hass.config_entries.options.async_init(entry.entry_id)
+        configured = await hass.config_entries.options.async_configure(
+            form["flow_id"],
+            {
+                "mode": entry.options.get("mode", entry.data["mode"]),
+                CLIMATE_BRIDGE_MODE_FIELD: "shadow",
+                CLIMATE_BRIDGE_TARGET_FIELD: bridge_origin,
+            },
+        )
+        assert_result(
+            configured["type"],
+            "create_entry",
+            "temporary shadow bridge settings must save through the real options flow",
+        )
+        await hass.async_block_till_done()
+        await home_client.start_server()
+
+        preview = await home_client.post(
+            CLIMATE_ADMIN_REGISTRY_PREVIEW_PATH,
+            headers=owner_headers,
+            json=climate_registry,
+        )
+        assert_result(preview.status, HTTPStatus.OK, "shadow registry preview must succeed")
+        preview_payload = await preview.json()
+        assert_result(
+            (preview_payload.get("status"), preview_payload.get("save_allowed")),
+            ("ready", True),
+            "matching shadow registry must be ready for an explicit atomic save",
+        )
+
+        saved = await home_client.post(
+            CLIMATE_ADMIN_REGISTRY_PATH,
+            headers=owner_headers,
+            json=climate_registry,
+        )
+        assert_result(saved.status, HTTPStatus.OK, "previewed shadow registry must save")
+
+        readiness = await home_client.get(
+            CLIMATE_ADMIN_READINESS_PATH,
+            headers=owner_headers,
+        )
+        assert_result(readiness.status, HTTPStatus.OK, "shadow readiness must be readable")
+        readiness_payload = await readiness.json()
+        assert_result(
+            (readiness_payload.get("ready"), readiness_payload.get("reasons")),
+            (True, []),
+            "matching fresh shadow registry must report ready",
+        )
+
+        home = await home_client.get(CLIMATE_HOME_PATH, headers=tablet_headers)
+        assert_result(home.status, HTTPStatus.OK, "tablet must read the shadow home contract")
+        home_payload = await home.json()
+        serialized_home = json.dumps(home_payload, ensure_ascii=True, sort_keys=True)
+        if "source_id" in serialized_home or "entity_id" in serialized_home:
+            raise RuntimeError("tablet home contract must not expose private climate bindings")
+
+        action_payload = {
+            "request_id": "core-shadow-0001",
+            "action": "set_room_target",
+            "room_id": "living",
+            "target_temperature": 24.5,
+        }
+        first_action = await home_client.post(
+            CLIMATE_ACTION_PATH,
+            headers=tablet_headers,
+            json=action_payload,
+        )
+        assert_result(first_action.status, HTTPStatus.OK, "shadow action must return a receipt")
+        first_receipt = await first_action.json()
+        assert_result(
+            (first_receipt.get("status"), first_receipt.get("execution")),
+            ("accepted", "shadow"),
+            "shadow action must be accepted without physical submission",
+        )
+
+        duplicate_action = await home_client.post(
+            CLIMATE_ACTION_PATH,
+            headers=tablet_headers,
+            json=action_payload,
+        )
+        duplicate_receipt = await duplicate_action.json()
+        assert_result(
+            duplicate_receipt,
+            first_receipt,
+            "same Android request id and intent must return the same receipt",
+        )
+        operation = await home_client.post(
+            CLIMATE_OPERATION_PATH,
+            headers=tablet_headers,
+            json={"operation_id": first_receipt["operation_id"]},
+        )
+        assert_result(operation.status, HTTPStatus.OK, "known shadow operation must be queryable")
+        assert_result(
+            (await operation.json()).get("status"),
+            "accepted",
+            "shadow receipt must remain accepted rather than claim physical confirmation",
+        )
+        if not state_gets:
+            raise RuntimeError("shadow acceptance must perform measured read-only state GETs")
+        assert_result(
+            command_posts,
+            [],
+            "end-to-end shadow acceptance must issue zero Climate API command POSTs",
+        )
+        reset_registry = await home_client.post(
+            CLIMATE_ADMIN_REGISTRY_PATH,
+            headers=owner_headers,
+            json={"version": 1, "rooms": [], "devices": []},
+        )
+        assert_result(
+            reset_registry.status,
+            HTTPStatus.OK,
+            "disposable shadow fixture must remove only its temporary registry",
+        )
+    finally:
+        await home_client.close()
+        await bridge_server.close()
+
+    form = await hass.config_entries.options.async_init(entry.entry_id)
+    disabled = await hass.config_entries.options.async_configure(
+        form["flow_id"],
+        {
+            "mode": entry.options.get("mode", entry.data["mode"]),
+            CLIMATE_BRIDGE_MODE_FIELD: CLIMATE_BRIDGE_MODE_DEFAULT,
+        },
+    )
+    assert_result(
+        disabled["type"],
+        "create_entry",
+        "temporary shadow check must roll the bridge back through the options flow",
+    )
+    await hass.async_block_till_done()
+    assert_result(
+        entry.options.get(CLIMATE_BRIDGE_MODE_FIELD),
+        CLIMATE_BRIDGE_MODE_DEFAULT,
+        "shadow check must finish with climate bridge disabled",
+    )
+    if CLIMATE_BRIDGE_TARGET_FIELD in entry.options:
+        raise RuntimeError("disabled rollback must remove the temporary Climate API origin")
 
 
 async def async_assert_approved_local_summary_origins_are_accepted(
@@ -4526,6 +4789,8 @@ async def async_run_check() -> None:
             await async_assert_safe_diagnostics(hass, domain, read_only_entry, "read-only")
             assert_disabled_climate_facade(hass, domain, read_only_entry.entry_id)
             await async_assert_disabled_climate_http_access(hass)
+            await async_assert_shadow_climate_end_to_end(hass, read_only_entry)
+            assert_disabled_climate_facade(hass, domain, read_only_entry.entry_id)
             if find_local_summary_routes(hass):
                 raise RuntimeError("disabled optional local page must not restore its route")
 

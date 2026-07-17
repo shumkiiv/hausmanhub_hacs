@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub_hasc/contracts/v1/climate-readiness.schema.json",
+  "title": "HASC climate readiness v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "bridge_mode", "status", "ready", "fresh", "registry", "reconciliation", "reasons"],
+  "properties": {
+    "contract": {"$ref": "#/$defs/contract"},
+    "bridge_mode": {"enum": ["disabled", "shadow", "canary"]},
+    "status": {"enum": ["disabled", "unavailable", "not_ready", "ready"]},
+    "ready": {"type": "boolean"},
+    "fresh": {"type": "boolean"},
+    "registry": {"$ref": "#/$defs/counts"},
+    "reconciliation": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/reconciliation"}]},
+    "reasons": {"type": "array", "uniqueItems": true, "items": {"enum": ["bridge_disabled", "climate_state_unavailable", "state_stale", "registry_has_no_rooms", "registry_has_no_devices", "registry_mismatch"]}}
+  },
+  "$defs": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {"name": {"const": "hausman-hasc-climate-readiness"}, "version": {"const": 1}}
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["room_count", "device_count"],
+      "properties": {"room_count": {"type": "integer", "minimum": 0, "maximum": 128}, "device_count": {"type": "integer", "minimum": 0, "maximum": 512}}
+    },
+    "reconciliation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["matches", "matched_device_count", "missing_device_count", "room_mismatch_device_count", "unregistered_source_count"],
+      "properties": {
+        "matches": {"type": "boolean"},
+        "matched_device_count": {"type": "integer", "minimum": 0, "maximum": 512},
+        "missing_device_count": {"type": "integer", "minimum": 0, "maximum": 512},
+        "room_mismatch_device_count": {"type": "integer", "minimum": 0, "maximum": 512},
+        "unregistered_source_count": {"type": "integer", "minimum": 0, "maximum": 512}
+      }
+    }
+  }
+}

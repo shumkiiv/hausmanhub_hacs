@@ -1,0 +1,13 @@
+{
+  "contract": {"name": "hausman-hasc-operation", "version": 1},
+  "operation_id": "0123456789abcdef0123456789abcdef",
+  "request_id": "android-0001",
+  "action": "set_room_target",
+  "room_id": "living",
+  "device_id": null,
+  "status": "accepted",
+  "execution": "shadow",
+  "created_at": 1784280005000,
+  "updated_at": 1784280005000,
+  "known": true
+}

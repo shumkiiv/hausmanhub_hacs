@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Final
 from aiohttp import ClientError, ClientTimeout
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .application.climate_commands import ClimateCommandPlan
+from .application.climate_commands import ClimateCommandPlan, ClimateCommandRejected
 from .application.climate_import import (
     ClimateImportSnapshot,
     ClimateImportViolation,
@@ -69,11 +69,15 @@ class ClimateApiClient:
             CLIMATE_COMMAND_PATH,
             json_payload=plan.backend_payload,
         )
-        if not isinstance(result, Mapping) or not (
+        if isinstance(result, Mapping) and (
             result.get("accepted") is True or result.get("ok") is True
         ):
-            raise ClimateBridgeError("climate API did not accept the command")
-        return result
+            return result
+        if isinstance(result, Mapping) and (
+            result.get("accepted") is False or result.get("ok") is False
+        ):
+            raise ClimateCommandRejected("climate API rejected the command")
+        raise ClimateBridgeError("climate API command response is invalid")
 
     async def _async_json_request(
         self,

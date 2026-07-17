@@ -11,7 +11,7 @@ from __future__ import annotations
 import importlib
 from pathlib import Path
 import sys
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 import unittest
 
 
@@ -39,7 +39,7 @@ class FakeSchema:
 class FakeRequired:
     """Capture a required schema field and its declared default."""
 
-    def __init__(self, key: str, *, default: object) -> None:
+    def __init__(self, key: str, *, default: object = None) -> None:
         self.key = key
         self.default = default
 
@@ -55,9 +55,16 @@ class FakeOptional:
 class FakeSelectSelectorConfig:
     """Capture selector settings supplied by the adapter."""
 
-    def __init__(self, *, options: list[dict[str, str]], translation_key: str) -> None:
+    def __init__(
+        self,
+        *,
+        options: list[dict[str, str]],
+        translation_key: str | None = None,
+        multiple: bool = False,
+    ) -> None:
         self.options = options
         self.translation_key = translation_key
+        self.multiple = multiple
 
 
 class FakeSelectSelector:
@@ -84,6 +91,25 @@ class FakeEntitySelector:
 
     def __init__(self, config: FakeEntitySelectorConfig) -> None:
         self.config = config
+
+
+class FakeTextSelectorConfig:
+    """Capture multiline private-registry text settings."""
+
+    def __init__(self, *, multiline: bool, type: str) -> None:
+        self.multiline = multiline
+        self.type = type
+
+
+class FakeTextSelector:
+    """Represent the native multiline text selector."""
+
+    def __init__(self, config: FakeTextSelectorConfig) -> None:
+        self.config = config
+
+
+class FakeTextSelectorType:
+    TEXT = "text"
 
 
 class FakeConfigEntry:
@@ -122,12 +148,14 @@ class FakeConfigFlow:
         step_id: str,
         data_schema: FakeSchema,
         errors: dict[str, str],
+        **kwargs: object,
     ) -> dict[str, object]:
         return {
             "type": "form",
             "step_id": step_id,
             "schema": data_schema,
             "errors": errors,
+            **kwargs,
         }
 
 
@@ -145,12 +173,14 @@ class FakeOptionsFlow:
         step_id: str,
         data_schema: FakeSchema,
         errors: dict[str, str],
+        **kwargs: object,
     ) -> dict[str, object]:
         return {
             "type": "form",
             "step_id": step_id,
             "schema": data_schema,
             "errors": errors,
+            **kwargs,
         }
 
 
@@ -185,6 +215,9 @@ def fake_home_assistant_modules() -> dict[str, ModuleType]:
     selector.EntitySelectorConfig = FakeEntitySelectorConfig  # type: ignore[attr-defined]
     selector.SelectSelector = FakeSelectSelector  # type: ignore[attr-defined]
     selector.SelectSelectorConfig = FakeSelectSelectorConfig  # type: ignore[attr-defined]
+    selector.TextSelector = FakeTextSelector  # type: ignore[attr-defined]
+    selector.TextSelectorConfig = FakeTextSelectorConfig  # type: ignore[attr-defined]
+    selector.TextSelectorType = FakeTextSelectorType  # type: ignore[attr-defined]
 
     homeassistant.config_entries = config_entries  # type: ignore[attr-defined]
     homeassistant.core = core  # type: ignore[attr-defined]
@@ -251,7 +284,7 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
     ) -> FakeSelectSelector:
         """Verify fixed observation, helper-canary, and climate rollout fields."""
 
-        self.assertEqual(8, len(schema.fields))
+        self.assertEqual(9, len(schema.fields))
         fields = list(schema.fields.items())
         mode_field, mode_selector = fields[0]
         page_field, page_selector = fields[1]
@@ -261,6 +294,7 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         target_field, target_selector = fields[5]
         bridge_target_field, bridge_target_selector = fields[6]
         bridge_room_field, bridge_room_selector = fields[7]
+        next_step_field, next_step_selector = fields[8]
         self.assertIsInstance(mode_field, FakeRequired)
         self.assertEqual("mode", mode_field.key)
         self.assertEqual(expected_mode_default, mode_field.default)
@@ -312,6 +346,14 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("climate_canary_room_id", bridge_room_field.key)
         self.assertEqual(expected_climate_canary_room_default, bridge_room_field.default)
         self.assertIs(bridge_room_selector, str)
+        self.assertIsInstance(next_step_field, FakeRequired)
+        self.assertEqual("next_step", next_step_field.key)
+        self.assertEqual("save_settings", next_step_field.default)
+        self.assertIsInstance(next_step_selector, FakeSelectSelector)
+        self.assertEqual(
+            ["save_settings", "manage_climate_registry"],
+            [option["value"] for option in next_step_selector.config.options],
+        )
         return mode_selector
 
     async def test_user_form_exposes_only_the_two_approved_modes(self) -> None:
@@ -727,6 +769,109 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
                     {"summary_update_interval": "unsafe_summary_update_interval"},
                     result["errors"],
                 )
+
+    async def test_options_registry_setup_previews_then_requires_atomic_confirmation(self) -> None:
+        """The local admin flow must not save a registry from the edit step."""
+
+        from custom_components.hausman_hub.application.climate_import import (
+            import_climate_state,
+        )
+        from custom_components.hausman_hub.application.climate_runtime import ClimateRuntime
+        from custom_components.hausman_hub.domain.climate import ClimateRegistry
+        from custom_components.hausman_hub.domain.climate_bridge import ClimateBridgeMode
+        from custom_components.hausman_hub.domain.configuration import SafeConfiguration
+        from tests.test_climate_import import registry_payload, source_payload
+
+        class Store:
+            def __init__(self) -> None:
+                self.registry = ClimateRegistry()
+                self.saved = []
+
+            async def async_load(self):
+                return self.registry
+
+            async def async_save(self, registry):
+                self.registry = registry
+                self.saved.append(registry)
+
+        class Bridge:
+            async def async_fetch_state(self):
+                return import_climate_state(source_payload())
+
+            async def async_execute(self, plan):
+                raise AssertionError("registry setup must not execute a command")
+
+        store = Store()
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=SafeConfiguration(
+                mode="shadow",
+                climate_bridge_mode=ClimateBridgeMode.SHADOW,
+            ),
+            registry_store=store,
+            bridge_client=Bridge(),
+        )
+        await runtime.async_start()
+        options_flow = self.config_flow.HausmanHubOptionsFlow()
+        options_flow.config_entry = FakeConfigEntry(
+            {"mode": "read-only", "direct_execution_status": "direct_execution_blocked"},
+            {"mode": "shadow"},
+        )
+        options_flow.hass = SimpleNamespace(  # type: ignore[attr-defined]
+            data={"hausman_hub": {"climate_runtime": runtime}}
+        )
+
+        editor = await options_flow.async_step_init(
+            {"next_step": "manage_climate_registry"}
+        )
+        room_form = await options_flow.async_step_climate_registry(
+            {"climate_registry_action": "add_room"}
+        )
+        menu_after_room = await options_flow.async_step_climate_registry_room(
+            {"climate_room_id": "living", "climate_room_name": "Living room"}
+        )
+        device_form = await options_flow.async_step_climate_registry(
+            {"climate_registry_action": "add_device"}
+        )
+        menu_after_device = await options_flow.async_step_climate_registry_device(
+            {
+                "climate_device_id": "living_ac",
+                "climate_device_name": "Living AC",
+                "climate_device_room": "living",
+                "climate_device_kind": "air_conditioner",
+                "climate_device_source_id": "synthetic-ac-source-living",
+                "climate_device_control_scope": "canary",
+                "climate_device_control_owner": "climate_core",
+                "climate_device_capabilities": [
+                    "power",
+                    "target_temperature",
+                    "hvac_mode",
+                    "fan_mode",
+                ],
+                "climate_device_control_entity": "climate.synthetic_living_ac",
+            }
+        )
+        preview = await options_flow.async_step_climate_registry(
+            {"climate_registry_action": "review_registry"}
+        )
+
+        self.assertEqual("climate_registry", editor["step_id"])
+        self.assertEqual("climate_registry_room", room_form["step_id"])
+        self.assertEqual("climate_registry", menu_after_room["step_id"])
+        self.assertEqual("climate_registry_device", device_form["step_id"])
+        self.assertEqual("climate_registry", menu_after_device["step_id"])
+        self.assertEqual("climate_registry_confirm", preview["step_id"])
+        self.assertEqual([], store.saved)
+        saved = await options_flow.async_step_climate_registry_confirm(
+            {"confirm_registry_save": True}
+        )
+        self.assertEqual("create_entry", saved["type"])
+        self.assertEqual(1, len(store.saved))
+        self.assertEqual(["living"], [room.room_id for room in store.saved[0].rooms])
+        self.assertEqual(
+            ["living_ac"],
+            [device.device_id for device in store.saved[0].devices],
+        )
 
 
 if __name__ == "__main__":

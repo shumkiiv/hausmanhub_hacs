@@ -179,7 +179,9 @@ class ClimateBridgeAdapterTest(unittest.IsolatedAsyncioTestCase):
             backend_payload=shadow.backend_payload,
             execute=True,
         )
-        with self.assertRaisesRegex(self.adapter.ClimateBridgeError, "did not accept"):
+        with self.assertRaisesRegex(
+            self.adapter.ClimateCommandRejected, "rejected"
+        ):
             await client.async_execute(executable)
 
     async def test_redirect_large_invalid_and_public_targets_fail_closed(self) -> None:

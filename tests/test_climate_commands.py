@@ -112,6 +112,14 @@ class ClimateCommandsTest(unittest.TestCase):
                     "target_temperature": 24.2,
                 }
             )
+        with self.assertRaisesRegex(ClimateCommandViolation, "0.5 steps"):
+            plan(
+                {
+                    "action": "set_room_target",
+                    "room_id": "living",
+                    "target_temperature": 24.500000000000004,
+                }
+            )
         with self.assertRaisesRegex(ClimateCommandViolation, "HVAC mode"):
             plan(
                 {

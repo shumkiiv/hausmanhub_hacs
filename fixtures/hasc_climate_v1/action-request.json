@@ -1,0 +1,6 @@
+{
+  "request_id": "android-0001",
+  "action": "set_room_target",
+  "room_id": "living",
+  "target_temperature": 24.5
+}

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any
 
 from ..domain.climate import (
@@ -28,6 +29,10 @@ class ClimateCommandViolation(ValueError):
     """A public action is invalid or fails an execution safety gate."""
 
 
+class ClimateCommandRejected(RuntimeError):
+    """The climate backend explicitly declined a well-formed command."""
+
+
 @dataclass(frozen=True, slots=True)
 class ClimateCommandPlan:
     """A fixed backend command plus the decision whether it may be posted."""
@@ -38,6 +43,7 @@ class ClimateCommandPlan:
     backend_command_type: str
     backend_payload: dict[str, object]
     execute: bool
+    confirmation_source_id: str | None = None
 
 
 ROOM_ACTIONS = frozenset(
@@ -150,6 +156,7 @@ def _room_command(
         backend_command_type=required,
         backend_payload=backend,
         execute=False,
+        confirmation_source_id=device.source_id,
     )
 
 
@@ -212,6 +219,7 @@ def _device_command(
             "payload": {"type": command_type, **command_data},
         },
         execute=False,
+        confirmation_source_id=device.source_id,
     )
 
 
@@ -327,6 +335,7 @@ def _with_execute(plan: ClimateCommandPlan, execute: bool) -> ClimateCommandPlan
         backend_command_type=plan.backend_command_type,
         backend_payload=plan.backend_payload,
         execute=execute,
+        confirmation_source_id=plan.confirmation_source_id,
     )
 
 
@@ -345,7 +354,12 @@ def _temperature(value: object) -> float:
     if type(value) not in {int, float}:
         raise ClimateCommandViolation("temperature must be numeric")
     number = float(value)
-    if not 18 <= number <= 28 or number * 2 != round(number * 2):
+    exact = Decimal(str(value))
+    if (
+        not exact.is_finite()
+        or not Decimal(18) <= exact <= Decimal(28)
+        or exact % Decimal("0.5") != 0
+    ):
         raise ClimateCommandViolation("temperature must be 18..28 in 0.5 steps")
     return number
 

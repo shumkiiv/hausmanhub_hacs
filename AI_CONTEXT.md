@@ -47,6 +47,25 @@ Last updated: 2026-07-17.
   latest GitHub Release `v0.5.0`; its tag resolves to that exact commit and
   both GitHub source archives were reachable. Publication did not deploy HASC
   to a live home, enable either canary, or modify the Android repository.
+- Version 0.5.1 implements the first operator-ready HASC climate workflow.
+  Home Assistant options now contain a guided local-admin draft for rooms and
+  typed devices, a separate preview/reconciliation step, and explicit atomic
+  save confirmation. An advanced JSON editor remains optional. Eight JSON
+  Schema v1 files ship inside the integration for the Android and admin
+  contracts.
+- Android climate actions in 0.5.1 require a bounded public `request_id` and
+  return a bounded versioned receipt with an opaque HASC `operation_id`.
+  Identical retries return the same receipt without another GET or POST;
+  conflicting reuse is rejected. Canary HTTP acceptance is only `pending`,
+  an explicit negative backend answer is terminal `rejected`, and transport
+  ambiguity remains unavailable. HTTP acceptance is never physical success.
+  Only an observable later state can become
+  `confirmed`; a room cannot have two pending HASC canary submissions.
+- The disposable Core check now includes a temporary loopback Climate API and
+  real Home Assistant owner/tablet authentication. It previews and saves a
+  synthetic registry, reads the Android home contract, retries a shadow
+  action, queries its receipt, and asserts a measured zero command POST count
+  before restoring `disabled` and removing only the temporary registry.
 - Further HASC-only development is prioritized in the
   [post-0.5 roadmap](LLM_WIKI/Manual/2026-07-17-hasc-post-v0-5-0-roadmap.md):
   operator-friendly registry setup and a formal Android contract first,

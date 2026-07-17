@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub_hasc/contracts/v1/climate-admin-import.schema.json",
+  "title": "HASC climate admin import v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["generated_at", "fresh", "rooms", "candidates", "reconciliation"],
+  "properties": {
+    "generated_at": {"type": "integer", "minimum": 0},
+    "fresh": {"type": "boolean"},
+    "rooms": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "authority_eligible"],
+        "properties": {"id": {"$ref": "#/$defs/stable_id"}, "name": {"$ref": "#/$defs/name"}, "authority_eligible": {"type": "boolean"}}
+      }
+    },
+    "candidates": {
+      "type": "array",
+      "maxItems": 512,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source_id", "name", "room_id", "available", "command_types", "suggested_kinds"],
+        "properties": {
+          "source_id": {"type": "string", "minLength": 1, "maxLength": 255},
+          "name": {"$ref": "#/$defs/name"},
+          "room_id": {"$ref": "#/$defs/stable_id"},
+          "available": {"type": "boolean"},
+          "command_types": {"type": "array", "maxItems": 16, "uniqueItems": true, "items": {"type": "string"}},
+          "suggested_kinds": {"type": "array", "maxItems": 6, "uniqueItems": true, "items": {"enum": ["air_conditioner", "radiator_thermostat", "humidifier", "floor_heating", "temperature_sensor", "humidity_sensor"]}}
+        }
+      }
+    },
+    "reconciliation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["matches", "matched_device_ids", "missing_device_ids", "room_mismatch_device_ids", "unregistered_source_ids"],
+      "properties": {
+        "matches": {"type": "boolean"},
+        "matched_device_ids": {"$ref": "#/$defs/stable_ids"},
+        "missing_device_ids": {"$ref": "#/$defs/stable_ids"},
+        "room_mismatch_device_ids": {"$ref": "#/$defs/stable_ids"},
+        "unregistered_source_ids": {"type": "array", "maxItems": 512, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 255}}
+      }
+    }
+  },
+  "$defs": {
+    "stable_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+    "name": {"type": "string", "minLength": 1, "maxLength": 120, "pattern": "^\\S(?:.*\\S)?$"},
+    "stable_ids": {"type": "array", "maxItems": 512, "uniqueItems": true, "items": {"$ref": "#/$defs/stable_id"}}
+  }
+}

@@ -29,7 +29,8 @@
           "canary_control_target": "Помощник input_boolean для canary",
           "climate_bridge_mode": "Этап запуска климатического моста",
           "climate_bridge_target": "Приватный адрес Climate API",
-          "climate_canary_room_id": "ID климатической canary-комнаты"
+          "climate_canary_room_id": "ID климатической canary-комнаты",
+          "next_step": "После этой формы"
         },
         "data_description": {
           "mode": "Выберите только чтение или проверку без изменений.",
@@ -39,7 +40,61 @@
           "canary_control_target": "Выберите ровно один помощник input_boolean. Свет, климат, замки, шторы, скрипты, сцены и другие домены отклоняются.",
           "climate_bridge_mode": "Disabled — полный откат. Shadow только читает и проверяет. Canary разрешает только типизированные команды для одной готовой комнаты.",
           "climate_bridge_target": "Допустим только HTTP(S)-адрес с явным loopback/RFC1918/ULA IP, например http://192.168.1.10:1880. Пути, логины, DNS-имена, параметры и публичные адреса запрещены.",
-          "climate_canary_room_id": "Обязательно только для canary. Используйте стабильный ID комнаты из Climate API."
+          "climate_canary_room_id": "Обязательно только для canary. Используйте стабильный ID комнаты из Climate API.",
+          "next_step": "Сохранить эти настройки или открыть отдельную локальную настройку реестра климатических устройств."
+        }
+      },
+      "climate_registry": {
+        "title": "Настройка климатических устройств",
+        "description": "Добавляйте или заменяйте комнаты и устройства через отдельные поля, затем проверьте весь черновик. До отдельного подтверждения ничего не сохраняется.",
+        "data": {
+          "climate_registry_action": "Действие с реестром"
+        },
+        "data_description": {
+          "climate_registry_action": "Выберите следующий шаг мастера. Редактор JSON нужен только для расширенной настройки."
+        }
+      },
+      "climate_registry_room": {
+        "title": "Добавление или замена климатической комнаты",
+        "description": "Повторный стабильный ID заменяет комнату только в черновике. Черновик пока не сохраняется.",
+        "data": {
+          "climate_room_id": "Стабильный ID комнаты",
+          "climate_room_name": "Название комнаты"
+        }
+      },
+      "climate_registry_device": {
+        "title": "Добавление или замена климатического устройства",
+        "description": "Опишите одно логическое устройство HASC. Повторный стабильный ID заменяет устройство в черновике. Управляемому устройству нужен один control entity; для пассивного датчика поле остаётся пустым, а scope и owner — observed.",
+        "data": {
+          "climate_device_id": "Стабильный ID устройства HASC",
+          "climate_device_name": "Название устройства",
+          "climate_device_room": "Комната HASC",
+          "climate_device_kind": "Тип устройства",
+          "climate_device_source_id": "Приватный source ID из Climate API",
+          "climate_device_control_scope": "Область rollout",
+          "climate_device_control_owner": "Владелец управления",
+          "climate_device_capabilities": "Публичные возможности",
+          "climate_device_control_entity": "Приватный control entity"
+        }
+      },
+      "climate_registry_json": {
+        "title": "Расширенный JSON климатического реестра",
+        "description": "Необязательный редактор полного приватного реестра. Следующий шаг всё равно покажет проверку и потребует отдельное подтверждение.",
+        "data": {
+          "climate_registry_json": "Приватный JSON климатического реестра"
+        },
+        "data_description": {
+          "climate_registry_json": "Точный контракт задаёт установленная JSON Schema v1. Приватные source/entity не попадают в контракт планшета."
+        }
+      },
+      "climate_registry_confirm": {
+        "title": "Подтверждение климатического реестра",
+        "description": "Статус проверки: {status}. Комнат: {room_count}; устройств: {device_count}; причины: {reasons}. Подтвердите атомарную замену реестра.",
+        "data": {
+          "confirm_registry_save": "Заменить сохранённый реестр"
+        },
+        "data_description": {
+          "confirm_registry_save": "Без отдельного включённого подтверждения ничего не сохраняется."
         }
       }
     },
@@ -51,7 +106,14 @@
       "unsafe_canary_control_target": "Для включённого canary нужен ровно один помощник input_boolean.",
       "unsafe_climate_bridge_mode": "Выберите disabled, shadow или canary для климатического моста.",
       "unsafe_climate_bridge_target": "Укажите один приватный HTTP(S)-адрес с явным IP, без пути и логина.",
-      "unsafe_climate_canary_room": "Для canary нужен один стабильный ID комнаты в нижнем регистре."
+      "unsafe_climate_canary_room": "Для canary нужен один стабильный ID комнаты в нижнем регистре.",
+      "climate_runtime_unavailable": "Запущенный климатический контур HASC недоступен.",
+      "invalid_climate_registry": "Нужен корректный ограниченный JSON климатического реестра HASC v1.",
+      "climate_registry_locked": "В режиме climate canary изменение реестра заблокировано.",
+      "invalid_climate_registry_action": "Выберите одно разрешённое действие настройки реестра.",
+      "invalid_climate_room": "Нужны стабильный ID комнаты в нижнем регистре и непустое название.",
+      "invalid_climate_device": "Поля, обязательные capabilities, owner, scope и control entity не образуют корректное устройство HASC.",
+      "climate_registry_needs_room": "Сначала добавьте хотя бы одну комнату."
     }
   },
   "selector": {
@@ -73,6 +135,58 @@
         "disabled": "Выключен",
         "shadow": "Shadow (только чтение)",
         "canary": "Canary одной комнаты"
+      }
+    },
+    "next_step": {
+      "options": {
+        "save_settings": "Сохранить настройки",
+        "manage_climate_registry": "Настроить климатические устройства"
+      }
+    },
+    "climate_registry_action": {
+      "options": {
+        "add_room": "Добавить или заменить комнату",
+        "add_device": "Добавить или заменить устройство",
+        "review_registry": "Проверить и подтвердить черновик",
+        "advanced_json": "Расширенный редактор JSON",
+        "reset_registry": "Очистить весь реестр"
+      }
+    },
+    "climate_device_kind": {
+      "options": {
+        "air_conditioner": "Кондиционер",
+        "radiator_thermostat": "Термоголовка",
+        "humidifier": "Увлажнитель",
+        "floor_heating": "Тёплый пол",
+        "temperature_sensor": "Датчик температуры",
+        "humidity_sensor": "Датчик влажности"
+      }
+    },
+    "climate_device_control_scope": {
+      "options": {
+        "observed": "Только наблюдение",
+        "canary": "Canary",
+        "managed": "Управляемое"
+      }
+    },
+    "climate_device_control_owner": {
+      "options": {
+        "climate_core": "Климатический контур",
+        "manual": "Ручное управление",
+        "observed": "Наблюдение"
+      }
+    },
+    "climate_device_capabilities": {
+      "options": {
+        "power": "Питание",
+        "target_temperature": "Целевая температура",
+        "target_humidity": "Целевая влажность",
+        "hvac_mode": "Режим HVAC",
+        "fan_mode": "Скорость вентилятора",
+        "auto_manual": "Авто/ручной режим",
+        "target_strategy": "Стратегия цели",
+        "cooldown": "Cooldown",
+        "physical_feedback": "Физическое подтверждение"
       }
     }
   },

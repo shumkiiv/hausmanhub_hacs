@@ -23,6 +23,9 @@ HOME_PATH = "/api/hausman_hub/v1/home"
 ACTION_PATH = "/api/hausman_hub/v1/actions"
 ADMIN_IMPORT_PATH = "/api/hausman_hub/v1/admin/climate-import"
 ADMIN_REGISTRY_PATH = "/api/hausman_hub/v1/admin/climate-registry"
+ADMIN_REGISTRY_PREVIEW_PATH = "/api/hausman_hub/v1/admin/climate-registry-preview"
+ADMIN_READINESS_PATH = "/api/hausman_hub/v1/admin/climate-readiness"
+OPERATION_PATH = "/api/hausman_hub/v1/operations"
 NO_STORE_HEADERS = {"Cache-Control": "no-store"}
 MAX_ACTION_BODY_BYTES = 16 * 1024
 TABLET_GROUP_ID = "system-users"
@@ -45,6 +48,9 @@ def register_climate_api(hass: HomeAssistant, runtime: ClimateRuntime) -> None:
             ClimateActionView(hass),
             ClimateAdminImportView(hass),
             ClimateAdminRegistryView(hass),
+            ClimateAdminRegistryPreviewView(hass),
+            ClimateAdminReadinessView(hass),
+            ClimateOperationView(hass),
         )
         for view in views:
             hass.http.register_view(view)
@@ -144,6 +150,34 @@ class ClimateActionView(_ClimateView):
         return self.json(result.as_payload(), headers=NO_STORE_HEADERS)
 
 
+class ClimateOperationView(_ClimateView):
+    """Return one typed operation receipt to the exact local tablet role."""
+
+    url = OPERATION_PATH
+    name = "api:hausman_hub:climate_operations"
+
+    async def post(self, request: Any) -> Any:
+        if not _is_exact_request(request, OPERATION_PATH):
+            return _not_found(self)
+        if not _is_local_tablet_request(request):
+            return _forbidden(self)
+        runtime = self._runtime()
+        if runtime is None:
+            return self._unavailable()
+        try:
+            payload = await _request_json(request)
+            result = await runtime.async_operation(payload)
+        except (ClimateCommandViolation, ValueError):
+            return self.json_message(
+                "The climate operation query is invalid.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        except Exception:
+            return self._unavailable()
+        return self.json(result.as_payload(), headers=NO_STORE_HEADERS)
+
+
 class ClimateAdminImportView(_ClimateView):
     """Expose private import candidates only to a local administrator."""
 
@@ -202,6 +236,55 @@ class ClimateAdminRegistryView(_ClimateView):
                 HTTPStatus.BAD_REQUEST,
                 headers=NO_STORE_HEADERS,
             )
+        except Exception:
+            return self._unavailable()
+        return self.json(result, headers=NO_STORE_HEADERS)
+
+
+class ClimateAdminRegistryPreviewView(_ClimateView):
+    """Validate and reconcile an unsaved private registry without mutation."""
+
+    url = ADMIN_REGISTRY_PREVIEW_PATH
+    name = "api:hausman_hub:climate_admin_registry_preview"
+
+    async def post(self, request: Any) -> Any:
+        if not _is_exact_request(request, ADMIN_REGISTRY_PREVIEW_PATH):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        runtime = self._runtime()
+        if runtime is None:
+            return self._unavailable()
+        try:
+            payload = await _request_json(request)
+            result = await runtime.async_preview_registry(payload)
+        except (ClimateRegistryViolation, ValueError):
+            return self.json_message(
+                "The climate registry preview is invalid.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        except Exception:
+            return self._unavailable()
+        return self.json(result, headers=NO_STORE_HEADERS)
+
+
+class ClimateAdminReadinessView(_ClimateView):
+    """Expose only coarse climate rollout readiness to a local admin."""
+
+    url = ADMIN_READINESS_PATH
+    name = "api:hausman_hub:climate_admin_readiness"
+
+    async def get(self, request: Any) -> Any:
+        if not _is_exact_request(request, ADMIN_READINESS_PATH):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        runtime = self._runtime()
+        if runtime is None:
+            return self._unavailable()
+        try:
+            result = await runtime.async_readiness()
         except Exception:
             return self._unavailable()
         return self.json(result, headers=NO_STORE_HEADERS)

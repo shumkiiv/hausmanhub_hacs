@@ -6,8 +6,11 @@ Safety-first Home Assistant custom integration for HausMan Hub.
 
 This repository contains a public Home Assistant integration under
 `custom_components/hausman_hub/`. It always creates nine diagnostic number
-sensors from the approved aggregate summary. Version 0.5.0 adds a private
-logical climate-device registry, a local Android facade, read-only import of
+sensors from the approved aggregate summary. Version 0.5.1 adds a guided
+local-admin registry draft/preview/confirmation flow, installed JSON Schemas,
+redacted readiness, measurable zero-POST shadow acceptance, and idempotent
+typed operation receipts on top of the private logical climate-device
+registry, a local Android facade, read-only import of
 the existing Climate API, shadow validation, and a one-room typed climate
 canary. The existing climate-core remains the policy and execution owner.
 
@@ -68,6 +71,10 @@ separate.
     validate typed climate intents in shadow. A one-room canary can post only
     after fresh state, authority, capability, room, owner, and scope checks.
     See the [climate architecture](docs/climate-control-architecture.md).
+11. In version 0.5.1, prepare that registry through guided Home Assistant
+    options, preview and reconcile before atomic save, publish installed JSON
+    Schemas, and return idempotent operation receipts. Disposable real-auth
+    shadow coverage proves that this path performs zero command POSTs.
 
 See [repository basics](docs/repository-basics.md) and
 [AI context](AI_CONTEXT.md) before changing the repository.

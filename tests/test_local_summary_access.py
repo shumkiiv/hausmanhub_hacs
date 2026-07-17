@@ -594,6 +594,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                     tablet,
                     "/api/hausman_hub/v1/actions",
                     {
+                        "request_id": "adapter-shadow-1",
                         "action": "set_room_target",
                         "room_id": "living",
                         "target_temperature": 24.5,
@@ -602,7 +603,9 @@ class LocalSummaryAccessTest(unittest.TestCase):
             )
         )
         self.assertEqual(200, action_response.status)
-        self.assertEqual("shadow", action_response.payload["status"])
+        self.assertEqual("accepted", action_response.payload["status"])
+        self.assertEqual("shadow", action_response.payload["execution"])
+        self.assertEqual("adapter-shadow-1", action_response.payload["request_id"])
         self.assertEqual([], bridge.executed)
 
     def test_view_rejects_admin_mixed_group_system_and_public_requests(self) -> None:
@@ -758,7 +761,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertFalse(hasattr(self.view, method))
 
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
-        self.assertEqual(5, len(self.hass.http.views))
+        self.assertEqual(8, len(self.hass.http.views))
         self.assertEqual(
             1,
             sum(
@@ -1047,13 +1050,16 @@ class LocalSummaryAccessTest(unittest.TestCase):
             [(closed_entry, ("sensor", "switch"))],
             closed_hass.config_entries.forwarded,
         )
-        self.assertEqual(4, len(closed_hass.http.views))
+        self.assertEqual(7, len(closed_hass.http.views))
         self.assertEqual(
             {
                 "/api/hausman_hub/v1/home",
                 "/api/hausman_hub/v1/actions",
                 "/api/hausman_hub/v1/admin/climate-import",
                 "/api/hausman_hub/v1/admin/climate-registry",
+                "/api/hausman_hub/v1/admin/climate-registry-preview",
+                "/api/hausman_hub/v1/admin/climate-readiness",
+                "/api/hausman_hub/v1/operations",
             },
             {view.url for view in closed_hass.http.views},
         )

@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub_hasc/contracts/v1/climate-operation-query.schema.json",
+  "title": "HASC climate operation query v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["operation_id"],
+  "properties": {"operation_id": {"type": "string", "pattern": "^[a-f0-9]{32}$"}}
+}

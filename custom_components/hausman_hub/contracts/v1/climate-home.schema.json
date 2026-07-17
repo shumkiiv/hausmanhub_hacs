@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub_hasc/contracts/v1/climate-home.schema.json",
+  "title": "HASC Android climate home v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "generated_at", "climate", "rooms", "reconciliation"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {"name": {"const": "hausman-hasc-home"}, "version": {"const": 1}}
+    },
+    "generated_at": {"type": "integer", "minimum": 0},
+    "climate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fresh", "commands_enabled"],
+      "properties": {"fresh": {"type": "boolean"}, "commands_enabled": {"type": "boolean"}}
+    },
+    "rooms": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "temperature", "humidity", "target_temperature", "target_humidity", "mode", "authority_eligible", "devices"],
+        "properties": {
+          "id": {"$ref": "#/$defs/stable_id"},
+          "name": {"$ref": "#/$defs/name"},
+          "temperature": {"type": ["number", "null"]},
+          "humidity": {"type": ["number", "null"]},
+          "target_temperature": {"type": ["number", "null"]},
+          "target_humidity": {"type": ["number", "null"]},
+          "mode": {"enum": ["auto", "manual", null]},
+          "authority_eligible": {"type": "boolean"},
+          "devices": {
+            "type": "array",
+            "maxItems": 512,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "name", "kind", "control_scope", "capabilities", "available", "state"],
+              "properties": {
+                "id": {"$ref": "#/$defs/stable_id"},
+                "name": {"$ref": "#/$defs/name"},
+                "kind": {"enum": ["air_conditioner", "radiator_thermostat", "humidifier", "floor_heating", "temperature_sensor", "humidity_sensor"]},
+                "control_scope": {"enum": ["observed", "canary", "managed"]},
+                "capabilities": {"type": "array", "maxItems": 16, "uniqueItems": true, "items": {"type": "string"}},
+                "available": {"type": "boolean"},
+                "state": {"type": "string"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "reconciliation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["matches", "matched_device_ids", "missing_device_ids", "room_mismatch_device_ids", "unregistered_device_count"],
+      "properties": {
+        "matches": {"type": "boolean"},
+        "matched_device_ids": {"$ref": "#/$defs/stable_ids"},
+        "missing_device_ids": {"$ref": "#/$defs/stable_ids"},
+        "room_mismatch_device_ids": {"$ref": "#/$defs/stable_ids"},
+        "unregistered_device_count": {"type": "integer", "minimum": 0, "maximum": 512}
+      }
+    }
+  },
+  "$defs": {
+    "stable_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+    "name": {"type": "string", "minLength": 1, "maxLength": 120, "pattern": "^\\S(?:.*\\S)?$"},
+    "stable_ids": {"type": "array", "maxItems": 512, "uniqueItems": true, "items": {"$ref": "#/$defs/stable_id"}}
+  }
+}

@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub_hasc/contracts/v1/climate-action-request.schema.json",
+  "title": "HASC climate action request v1",
+  "oneOf": [
+    {"$ref": "#/$defs/set_room_target"},
+    {"$ref": "#/$defs/set_room_mode"},
+    {"$ref": "#/$defs/set_room_min_target"},
+    {"$ref": "#/$defs/set_room_target_strategy"},
+    {"$ref": "#/$defs/turn_room_off"},
+    {"$ref": "#/$defs/set_device_power"},
+    {"$ref": "#/$defs/set_device_target_temperature"},
+    {"$ref": "#/$defs/set_device_target_humidity"},
+    {"$ref": "#/$defs/set_device_hvac_mode"},
+    {"$ref": "#/$defs/set_device_fan_mode"}
+  ],
+  "$defs": {
+    "request_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"},
+    "stable_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+    "temperature": {"type": "number", "minimum": 18, "maximum": 28, "multipleOf": 0.5},
+    "base_room": {
+      "type": "object",
+      "required": ["request_id", "action", "room_id"],
+      "properties": {
+        "request_id": {"$ref": "#/$defs/request_id"},
+        "action": {"type": "string"},
+        "room_id": {"$ref": "#/$defs/stable_id"}
+      }
+    },
+    "base_device": {
+      "type": "object",
+      "required": ["request_id", "action", "device_id"],
+      "properties": {
+        "request_id": {"$ref": "#/$defs/request_id"},
+        "action": {"type": "string"},
+        "device_id": {"$ref": "#/$defs/stable_id"}
+      }
+    },
+    "set_room_target": {
+      "allOf": [
+        {"$ref": "#/$defs/base_room"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["request_id", "action", "room_id", "target_temperature"],
+          "properties": {
+            "request_id": {"$ref": "#/$defs/request_id"},
+            "action": {"const": "set_room_target"},
+            "room_id": {"$ref": "#/$defs/stable_id"},
+            "target_temperature": {"$ref": "#/$defs/temperature"}
+          }
+        }
+      ]
+    },
+    "set_room_mode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request_id", "action", "room_id", "mode"],
+      "properties": {
+        "request_id": {"$ref": "#/$defs/request_id"},
+        "action": {"const": "set_room_mode"},
+        "room_id": {"$ref": "#/$defs/stable_id"},
+        "mode": {"enum": ["auto", "manual"]}
+      }
+    },
+    "set_room_min_target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request_id", "action", "room_id", "min_temperature"],
+      "properties": {
+        "request_id": {"$ref": "#/$defs/request_id"},
+        "action": {"const": "set_room_min_target"},
+        "room_id": {"$ref": "#/$defs/stable_id"},
+        "min_temperature": {"$ref": "#/$defs/temperature"}
+      }
+    },
+    "set_room_target_strategy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request_id", "action", "room_id", "target_strategy"],
+      "properties": {
+        "request_id": {"$ref": "#/$defs/request_id"},
+        "action": {"const": "set_room_target_strategy"},
+        "room_id": {"$ref": "#/$defs/stable_id"},
+        "target_strategy": {"enum": ["soft", "normal", "aggressive"]}
+      }
+    },
+    "turn_room_off": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request_id", "action", "room_id"],
+      "properties": {
+        "request_id": {"$ref": "#/$defs/request_id"},
+        "action": {"const": "turn_room_off"},
+        "room_id": {"$ref": "#/$defs/stable_id"}
+      }
+    },
+    "set_device_power": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request_id", "action", "device_id", "on"],
+      "properties": {
+        "request_id": {"$ref": "#/$defs/request_id"},
+        "action": {"const": "set_device_power"},
+        "device_id": {"$ref": "#/$defs/stable_id"},
+        "on": {"type": "boolean"}
+      }
+    },
+    "set_device_target_temperature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request_id", "action", "device_id", "target_temperature"],
+      "properties": {
+        "request_id": {"$ref": "#/$defs/request_id"},
+        "action": {"const": "set_device_target_temperature"},
+        "device_id": {"$ref": "#/$defs/stable_id"},
+        "target_temperature": {"$ref": "#/$defs/temperature"}
+      }
+    },
+    "set_device_target_humidity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request_id", "action", "device_id", "target_humidity"],
+      "properties": {
+        "request_id": {"$ref": "#/$defs/request_id"},
+        "action": {"const": "set_device_target_humidity"},
+        "device_id": {"$ref": "#/$defs/stable_id"},
+        "target_humidity": {"type": "integer", "minimum": 30, "maximum": 70}
+      }
+    },
+    "set_device_hvac_mode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request_id", "action", "device_id", "hvac_mode"],
+      "properties": {
+        "request_id": {"$ref": "#/$defs/request_id"},
+        "action": {"const": "set_device_hvac_mode"},
+        "device_id": {"$ref": "#/$defs/stable_id"},
+        "hvac_mode": {"enum": ["cool", "heat"]}
+      }
+    },
+    "set_device_fan_mode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request_id", "action", "device_id", "fan_mode"],
+      "properties": {
+        "request_id": {"$ref": "#/$defs/request_id"},
+        "action": {"const": "set_device_fan_mode"},
+        "device_id": {"$ref": "#/$defs/stable_id"},
+        "fan_mode": {"enum": ["low", "medium", "high"]}
+      }
+    }
+  }
+}
