@@ -99,6 +99,6 @@ The final staged package passed on 2026-07-17:
 
 The reviewer changed no file or index entry and performed no commit, push,
 deployment, live Home Assistant request, or device access. The verified source
-is ready for the already-authorized commit and push. Live deployment, a real
-registry, one-room physical canary, and Android cutover remain later explicit
-steps.
+was committed as `5ac09c5` and pushed to `origin/main`. That source push made
+no tag, release, HACS publication, or deployment. A real registry, one-room
+physical canary, and Android cutover remain later explicit steps.

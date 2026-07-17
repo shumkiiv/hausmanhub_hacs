@@ -36,15 +36,16 @@ Last updated: 2026-07-17.
   accepted. The architecture and rollout are in
   [the climate guide](docs/climate-control-architecture.md) and the durable
   [0.5.0 decision](LLM_WIKI/Manual/2026-07-17-hasc-v0-5-0-climate-facade.md).
-- The staged 0.5.0 package passed 191 local tests, the HACS/version/repository
+- Version 0.5.0 was committed as `5ac09c5` and pushed to `origin/main` after
+  it passed 191 local tests, the HACS/version/repository
   safety checks, and disposable Home Assistant Core 2026.6.4 and 2026.7.0
   lifecycles on Python 3.14.3. The Core check also exercised all four climate
   routes through real loopback HTTP authentication in the disabled rollback
   state. Kimi model `kimi-for-coding/k2p7` completed the final read-only staged
   review in session `ses_09070e1c2ffeeTgDvZ3A3kiLUu` with no substantial
-  findings. Source commit/push is the remaining authorized delivery step.
-  None of this authorizes or performs live-home deployment, and the Android
-  repository was not modified in this HASC-only workstream.
+  findings. This source push created no tag, release, HACS publication, or
+  live-home deployment, and the Android repository was not modified in this
+  HASC-only workstream.
 - A public `custom_components/hausman_hub/` observation foundation with the
   local 0.4.0 helper-canary addition is present. It may be added manually as an
   HACS custom repository; it is not in the public HACS catalog.
