@@ -43,9 +43,15 @@ Last updated: 2026-07-17.
   routes through real loopback HTTP authentication in the disabled rollback
   state. Kimi model `kimi-for-coding/k2p7` completed the final read-only staged
   review in session `ses_09070e1c2ffeeTgDvZ3A3kiLUu` with no substantial
-  findings. This source push created no tag, release, HACS publication, or
-  live-home deployment, and the Android repository was not modified in this
-  HASC-only workstream.
+  findings. The verified `cc04029` tree was published as the non-prerelease
+  latest GitHub Release `v0.5.0`; its tag resolves to that exact commit and
+  both GitHub source archives were reachable. Publication did not deploy HASC
+  to a live home, enable either canary, or modify the Android repository.
+- Further HASC-only development is prioritized in the
+  [post-0.5 roadmap](LLM_WIKI/Manual/2026-07-17-hasc-post-v0-5-0-roadmap.md):
+  operator-friendly registry setup and a formal Android contract first,
+  measurable shadow next, then command receipts/confirmation and only after
+  those gates a separately authorized one-room physical canary.
 - A public `custom_components/hausman_hub/` observation foundation with the
   local 0.4.0 helper-canary addition is present. It may be added manually as an
   HACS custom repository; it is not in the public HACS catalog.

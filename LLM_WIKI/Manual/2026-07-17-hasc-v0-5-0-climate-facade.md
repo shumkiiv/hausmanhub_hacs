@@ -100,5 +100,9 @@ The final staged package passed on 2026-07-17:
 The reviewer changed no file or index entry and performed no commit, push,
 deployment, live Home Assistant request, or device access. The verified source
 was committed as `5ac09c5` and pushed to `origin/main`. That source push made
-no tag, release, HACS publication, or deployment. A real registry, one-room
-physical canary, and Android cutover remain later explicit steps.
+no deployment. On the owner's later explicit request, the current verified
+tree `cc04029` was tagged and published as the non-prerelease latest GitHub
+Release [`v0.5.0`](https://github.com/shumkiiv/hausmanhub_hasc/releases/tag/v0.5.0).
+The tag resolves exactly to `cc04029`, and both GitHub source archives returned
+HTTP 200 after publication. A real registry, one-room physical canary, and
+Android cutover remain later explicit steps.
