@@ -12,9 +12,13 @@ The `custom_components/hausman_hub/` package provides only a small Home
 Assistant-facing shell around framework-independent safety rules:
 
 - a single config entry with a selector for `read-only` or `shadow`;
-- an options flow that can change only between those same two modes;
-- a diagnostics snapshot assembled from a strict allow-list, rather than from
-  config-entry data;
+- an options flow that can change only between those same two modes, close or
+  restore the already-approved optional local page, and keep the established
+  five-minute nine-count refresh or slow it to 15 or 30 minutes;
+- a diagnostics snapshot assembled from a strict allow-list. Its entry summary
+  contains only the validated effective HASC mode, optional-page boolean, and
+  fixed five-, 15-, or 30-minute refresh choice; raw config-entry data and
+  options are never copied;
 - a fixed unavailable diagnostics response when HASC is not the one loaded
   setup. It contains no count and does not read the home;
 - fixed manual guidance texts for review; they do not create issues or make
@@ -24,9 +28,20 @@ Assistant-facing shell around framework-independent safety rules:
 - exactly nine diagnostic number sensors that show the already-approved
   aggregate summary. They share one local snapshot, do not count themselves,
   have no action, and expose no source name, identifier, reading, or history.
-- one authenticated, local-network, GET-only view for the already-approved
-  nine-count summary. It requires Home Assistant's exact built-in read-only
-  group and has no command method or outgoing connection.
+  Each has only a fixed ordinary visual icon, so the nine rows are easier to
+  recognise without showing anything else about the home.
+- one authenticated, local-network view at one fixed address for the
+  already-approved nine-count summary. Only GET can return the nine counts;
+  Home Assistant's service check is closed before any read. The view has no
+  alternate address, including the same address with an extra trailing slash or
+  added query data. It requires Home Assistant's exact built-in read-only group
+  and accepts only loopback (`127.0.0.0/8` or `::1`), RFC 1918 IPv4
+  (`10.0.0.0/8`, `172.16.0.0/12`, or `192.168.0.0/16`), or unique-local IPv6
+  (`fc00::/7`). An IPv4 address written inside IPv6, including
+  `::ffff:127.x.x.x`, follows the same IPv4 rule. It has no command method or
+  outgoing connection. The owner may close this optional page in HASC's
+  settings without changing the nine diagnostic numbers or diagnostics. A
+  previously opened address then returns only that the summary is unavailable.
 
 The inner `domain/` and `application/` layers use standard Python only. The
 Home Assistant modules are thin adapters at the outer boundary.
@@ -78,18 +93,39 @@ uv pip install --python /tmp/hasc-core/bin/python homeassistant==2026.6.4
 The script creates a temporary empty Home Assistant configuration, copies the
 local integration into it, and removes the temporary configuration afterwards.
 It checks both approved initial modes, a safe change between those modes, a
-real reload, the fixed redacted diagnostics report, clean removal, exactly nine
-HASC diagnostic count sensors, and the absence of HASC services or devices.
+real reload, the redacted diagnostics report with only effective validated
+HASC settings, clean removal, exactly nine HASC diagnostic count sensors, and
+the absence of HASC services or devices. It also checks that a legacy entry
+with empty options reports the safe page and five-minute defaults.
 It also starts a temporary loopback-only
 Home Assistant server to prove that the local nine-count page rejects an
 unsigned request and an administrator, accepts only the temporary read-only
-test account, and rejects POST. It then changes that temporary account to the
-ordinary user group and proves that its existing local token immediately loses
-access without reading the summary. Every response produced by HASC's local
-page also asks the client not to store it, so a browser cannot retain an old
+test account, and rejects every request method except GET before it can read
+the summary or return the names of its nine counts. It then changes that
+temporary account to the ordinary user group and proves that its existing local
+token immediately loses access without reading the summary. A guest and an
+administrator also receive no count names. Every response produced by HASC's
+local page also asks the client not to store it, so a browser cannot retain an old
 successful nine-count response. An attempt to submit `proxy` through options
 is required to be rejected before it can persist anything. It does not read
 any real Home Assistant configuration, credentials, entities, or devices.
+It also turns the optional local page off and back on. When it is off, the
+same nine sensors and redacted diagnostics remain, while an old authenticated
+address returns only unavailable before that page request can read a summary.
+The same approved counts may still refresh the nine retained sensors; turning
+off the page deliberately does not turn off that display. A text value such as
+`"false"` is rejected instead of being treated as an on/off choice.
+The check also rejects a faster one-minute cadence, applies the exact 5, 15,
+and 30 minute choices to the same shared coordinator, and proves that changing
+that choice while HASC is stopped or user-disabled neither reloads HASC nor
+reads the empty test home. The local GET page remains immediate per request.
+The same empty check also tries the otherwise identical address with one extra
+trailing slash and with added query data. Neither may reach HASC's one page,
+read the summary, or return the nine count names.
+
+The same empty check also makes the temporary local summary reader fail once.
+The page must then return only its fixed unavailable response, with no count or
+technical error detail.
 
 The same empty test removes one safe HASC setup completely and then creates a
 new one in the other safe mode. This confirms that removing and installing

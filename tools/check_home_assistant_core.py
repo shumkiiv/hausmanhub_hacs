@@ -16,6 +16,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import timedelta
 from http import HTTPStatus
 import importlib
 import json
@@ -26,6 +27,7 @@ import tempfile
 from typing import Any
 
 from aiohttp.test_utils import TestClient, TestServer
+import voluptuous_serialize
 from homeassistant import config_entries
 from homeassistant.auth.const import GROUP_ID_ADMIN, GROUP_ID_READ_ONLY, GROUP_ID_USER
 from homeassistant import loader
@@ -33,7 +35,8 @@ from homeassistant.bootstrap import async_from_config_dict
 from homeassistant.config_entries import ConfigEntry, ConfigEntryDisabler
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import InvalidData
-from homeassistant.helpers import device_registry, entity_registry
+from homeassistant.helpers import config_validation, device_registry, entity_registry
+from homeassistant.helpers.entity_component import DATA_INSTANCES
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -49,13 +52,99 @@ SUMMARY_SENSOR_KEYS = (
     "not_reported_entities_count",
     "disabled_entities_count",
 )
+SUMMARY_SENSOR_ICONS = {
+    "areas_count": "mdi:floor-plan",
+    "devices_count": "mdi:devices",
+    "entities_count": "mdi:shape",
+    "sensors_count": "mdi:eye-outline",
+    "available_entities_count": "mdi:check-circle-outline",
+    "unavailable_entities_count": "mdi:alert-circle-outline",
+    "unknown_entities_count": "mdi:help-circle-outline",
+    "not_reported_entities_count": "mdi:minus-circle-outline",
+    "disabled_entities_count": "mdi:pause-circle-outline",
+}
 PROTECTED_SUMMARY_SENSOR_ENTITY_IDS = frozenset(
     f"sensor.hausman_hub_hasc_{key}" for key in SUMMARY_SENSOR_KEYS
 )
 RESERVED_SUMMARY_SENSOR_ENTITY_ID = "sensor.hausman_hub_hasc_areas_count"
 EXTERNAL_COLLISION_PLATFORM = "homeassistant"
 LOCAL_SUMMARY_ACTIVE_ENTRY = "local_summary_active_entry"
+LOCAL_SUMMARY_ENABLED_FIELD = "local_summary_enabled"
+SUMMARY_UPDATE_INTERVAL_FIELD = "summary_update_interval"
+SUMMARY_UPDATE_INTERVAL_DEFAULT = "5m"
+SUMMARY_UPDATE_INTERVAL_MINUTES = {
+    "5m": 5,
+    "15m": 15,
+    "30m": 30,
+}
 LOCAL_SUMMARY_PATH = "/api/hausman_hub/local-summary"
+ALTERNATE_LOCAL_SUMMARY_TARGET_STATUSES = {
+    f"{LOCAL_SUMMARY_PATH}/": HTTPStatus.NOT_FOUND,
+    f"{LOCAL_SUMMARY_PATH}?unexpected=1": HTTPStatus.NOT_FOUND,
+}
+NON_GET_LOCAL_SUMMARY_STATUSES = {
+    "HEAD": HTTPStatus.METHOD_NOT_ALLOWED,
+    "OPTIONS": HTTPStatus.FORBIDDEN,
+    "POST": HTTPStatus.METHOD_NOT_ALLOWED,
+    "PUT": HTTPStatus.METHOD_NOT_ALLOWED,
+    "PATCH": HTTPStatus.METHOD_NOT_ALLOWED,
+    "DELETE": HTTPStatus.METHOD_NOT_ALLOWED,
+    "TRACE": HTTPStatus.METHOD_NOT_ALLOWED,
+    "CONNECT": HTTPStatus.NOT_FOUND,
+}
+APPROVED_LOCAL_SUMMARY_ORIGINS = (
+    "127.0.0.0",
+    "127.255.255.255",
+    "10.0.0.0",
+    "10.255.255.255",
+    "172.16.0.0",
+    "172.31.255.255",
+    "192.168.0.0",
+    "192.168.255.255",
+    "::1",
+    "fc00::",
+    "fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+    "::ffff:127.0.0.0",
+    "::ffff:127.255.255.255",
+    "::ffff:10.0.0.0",
+    "::ffff:10.255.255.255",
+    "::ffff:172.16.0.0",
+    "::ffff:172.31.255.255",
+    "::ffff:192.168.0.0",
+    "::ffff:192.168.255.255",
+)
+DISALLOWED_LOCAL_SUMMARY_ORIGINS = (
+    "0.0.0.0",
+    "::",
+    "::2",
+    "::ffff:0.0.0.0",
+    "126.255.255.255",
+    "128.0.0.0",
+    "9.255.255.255",
+    "11.0.0.0",
+    "172.15.255.255",
+    "172.32.0.0",
+    "192.167.255.255",
+    "192.169.0.0",
+    "192.0.2.1",
+    "198.51.100.1",
+    "203.0.113.1",
+    "169.254.1.1",
+    "100.64.0.1",
+    "fbff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+    "fe00::",
+    "fe80::1",
+    "2001:db8::1",
+    "::ffff:126.255.255.255",
+    "::ffff:128.0.0.0",
+    "::ffff:9.255.255.255",
+    "::ffff:11.0.0.0",
+    "::ffff:192.0.2.1",
+    "::ffff:172.15.255.255",
+    "::ffff:172.32.0.0",
+    "::ffff:192.167.255.255",
+    "::ffff:192.169.0.0",
+)
 # These are the generic names Home Assistant produced for version 0.3.0.
 # They are fixed here only to prove that an existing registry keeps them on
 # update; no live Home Assistant names are read or stored by this check.
@@ -114,6 +203,16 @@ class RemovedHascEntry:
 
     entry_id: str
     entity_ids: frozenset[str]
+
+
+class DirectLocalSummaryRequest(dict[str, Any]):
+    """Provide the minimal authenticated request shape for one direct view check."""
+
+    def __init__(self, remote: str, user: Any) -> None:
+        super().__init__(hass_user=user)
+        self.remote = remote
+        self.path = LOCAL_SUMMARY_PATH
+        self.query_string = ""
 
 
 def load_integration_domain() -> str:
@@ -659,6 +758,16 @@ async def async_update_safe_options(
 ) -> None:
     """Reject unsafe options and verify the saved mode applies immediately."""
 
+    current_local_page_enabled = entry.options.get(LOCAL_SUMMARY_ENABLED_FIELD, True)
+    if type(current_local_page_enabled) is not bool:
+        raise RuntimeError("safe options must retain a boolean optional local page choice")
+    current_summary_update_interval = entry.options.get(
+        SUMMARY_UPDATE_INTERVAL_FIELD,
+        SUMMARY_UPDATE_INTERVAL_DEFAULT,
+    )
+    if current_summary_update_interval not in SUMMARY_UPDATE_INTERVAL_MINUTES:
+        raise RuntimeError("safe options must retain an approved summary update interval")
+
     rejected_options_form = await hass.config_entries.options.async_init(entry.entry_id)
     assert_result(
         rejected_options_form["type"],
@@ -689,6 +798,7 @@ async def async_update_safe_options(
 
     options_form = await hass.config_entries.options.async_init(entry.entry_id)
     assert_result(options_form["type"], "form", "options flow must show a form")
+    assert_options_form_uses_safe_native_selectors(options_form)
     reload_calls: list[str] = []
     original_async_reload = hass.config_entries.async_reload
 
@@ -702,7 +812,11 @@ async def async_update_safe_options(
     try:
         safe_options = await hass.config_entries.options.async_configure(
             options_form["flow_id"],
-            {"mode": target_mode},
+            {
+                "mode": target_mode,
+                LOCAL_SUMMARY_ENABLED_FIELD: current_local_page_enabled,
+                SUMMARY_UPDATE_INTERVAL_FIELD: current_summary_update_interval,
+            },
         )
         await hass.async_block_till_done()
     finally:
@@ -716,6 +830,16 @@ async def async_update_safe_options(
         entry.options.get("mode"),
         target_mode,
         "options must preserve the safe mode",
+    )
+    assert_result(
+        entry.options.get(LOCAL_SUMMARY_ENABLED_FIELD),
+        current_local_page_enabled,
+        "mode settings must preserve the optional local page choice",
+    )
+    assert_result(
+        entry.options.get(SUMMARY_UPDATE_INTERVAL_FIELD),
+        current_summary_update_interval,
+        "mode settings must preserve the summary update interval",
     )
     assert_result(
         entry.data["direct_execution_status"],
@@ -734,14 +858,316 @@ async def async_update_safe_options(
     )
 
 
+def assert_options_form_uses_safe_native_selectors(options_form: dict[str, Any]) -> None:
+    """Require the page and cadence to remain native fixed frontend selectors."""
+
+    data_schema = options_form.get("data_schema")
+    serialized_schema = voluptuous_serialize.convert(
+        data_schema,
+        custom_serializer=config_validation.custom_serializer,
+    )
+    if not isinstance(serialized_schema, list):
+        raise RuntimeError("options form schema must serialize to frontend fields")
+    local_page_fields = [
+        field
+        for field in serialized_schema
+        if isinstance(field, dict)
+        and field.get("name") == LOCAL_SUMMARY_ENABLED_FIELD
+    ]
+    if len(local_page_fields) != 1:
+        raise RuntimeError("options form must serialize one optional local page field")
+    assert_result(
+        local_page_fields[0].get("selector"),
+        {"boolean": {}},
+        "optional local page must serialize as Home Assistant's native boolean selector",
+    )
+    interval_fields = [
+        field
+        for field in serialized_schema
+        if isinstance(field, dict)
+        and field.get("name") == SUMMARY_UPDATE_INTERVAL_FIELD
+    ]
+    if len(interval_fields) != 1:
+        raise RuntimeError("options form must serialize one summary update interval field")
+    interval_selector = interval_fields[0].get("selector")
+    if not isinstance(interval_selector, dict):
+        raise RuntimeError("summary update interval must serialize as a selector")
+    select_config = interval_selector.get("select")
+    if not isinstance(select_config, dict):
+        raise RuntimeError("summary update interval must use a native select selector")
+    assert_result(
+        select_config.get("translation_key"),
+        SUMMARY_UPDATE_INTERVAL_FIELD,
+        "summary update interval selector must retain its translated fixed choices",
+    )
+    serialized_options = select_config.get("options")
+    if not isinstance(serialized_options, list):
+        raise RuntimeError("summary update interval selector must serialize fixed options")
+    assert_result(
+        [option.get("value") for option in serialized_options],
+        list(SUMMARY_UPDATE_INTERVAL_MINUTES),
+        "summary update interval selector must expose only 5, 15, and 30 minutes",
+    )
+
+
+async def async_update_optional_local_page(
+    hass: HomeAssistant,
+    domain: str,
+    entry: ConfigEntry,
+    enabled: bool,
+    reader_token: str,
+    expected_entity_ids: frozenset[str] | None,
+) -> None:
+    """Toggle only the existing optional page and prove the nine counts stay safe."""
+
+    current_mode = entry.options.get("mode", entry.data["mode"])
+    if not isinstance(current_mode, str):
+        raise RuntimeError("the optional local page must retain a string safe mode")
+    current_summary_update_interval = entry.options.get(
+        SUMMARY_UPDATE_INTERVAL_FIELD,
+        SUMMARY_UPDATE_INTERVAL_DEFAULT,
+    )
+    if current_summary_update_interval not in SUMMARY_UPDATE_INTERVAL_MINUTES:
+        raise RuntimeError(
+            "the optional local page must retain an approved summary update interval"
+        )
+
+    rejected_form = await hass.config_entries.options.async_init(entry.entry_id)
+    assert_result(
+        rejected_form["type"],
+        "form",
+        "optional local page setting must show a form before rejecting text",
+    )
+    options_before_rejection = dict(entry.options)
+    try:
+        await hass.config_entries.options.async_configure(
+            rejected_form["flow_id"],
+            {
+                "mode": current_mode,
+                LOCAL_SUMMARY_ENABLED_FIELD: "false",
+                SUMMARY_UPDATE_INTERVAL_FIELD: current_summary_update_interval,
+            },
+        )
+    except InvalidData:
+        hass.config_entries.options.async_abort(rejected_form["flow_id"])
+    else:
+        raise RuntimeError("optional local page must reject a truth-like text value")
+    assert_result(
+        dict(entry.options),
+        options_before_rejection,
+        "rejected optional local page text must not change saved options",
+    )
+
+    options_form = await hass.config_entries.options.async_init(entry.entry_id)
+    assert_result(
+        options_form["type"],
+        "form",
+        "optional local page settings must show a form",
+    )
+    reload_calls: list[str] = []
+    original_async_reload = hass.config_entries.async_reload
+
+    async def async_recording_reload(entry_id: str) -> bool:
+        """Record the one HASC-only reload caused by this local page choice."""
+
+        reload_calls.append(entry_id)
+        return await original_async_reload(entry_id)
+
+    hass.config_entries.async_reload = async_recording_reload
+    try:
+        result = await hass.config_entries.options.async_configure(
+            options_form["flow_id"],
+            {
+                "mode": current_mode,
+                LOCAL_SUMMARY_ENABLED_FIELD: enabled,
+                SUMMARY_UPDATE_INTERVAL_FIELD: current_summary_update_interval,
+            },
+        )
+        await hass.async_block_till_done()
+    finally:
+        hass.config_entries.async_reload = original_async_reload
+
+    assert_result(
+        result["type"],
+        "create_entry",
+        "optional local page setting must be accepted",
+    )
+    assert_result(
+        dict(entry.options),
+        {
+            "mode": current_mode,
+            LOCAL_SUMMARY_ENABLED_FIELD: enabled,
+            SUMMARY_UPDATE_INTERVAL_FIELD: current_summary_update_interval,
+        },
+        "optional local page must retain only the three approved saved options",
+    )
+    assert_result(
+        entry.data["direct_execution_status"],
+        "direct_execution_blocked",
+        "optional local page must not change the direct execution block",
+    )
+    assert_result(
+        reload_calls,
+        [entry.entry_id],
+        "changing the optional local page must reload only HASC",
+    )
+    assert_result(
+        entry.state,
+        config_entries.ConfigEntryState.LOADED,
+        "changing the optional local page must leave HASC loaded",
+    )
+    assert_entry_has_only_summary_sensors(
+        hass,
+        domain,
+        entry.entry_id,
+        expected_entity_ids=expected_entity_ids,
+    )
+    await async_assert_safe_diagnostics(hass, domain, entry, current_mode)
+    assert_entry_uses_summary_update_interval(
+        hass,
+        domain,
+        entry.entry_id,
+        current_summary_update_interval,
+    )
+
+    if enabled:
+        assert_local_summary_view(hass, domain)
+        await async_assert_authenticated_local_summary_http_access(
+            hass,
+            "HASC optional page enabled temporary",
+        )
+        return
+
+    # The nine normal HASC rows intentionally remain loaded and may refresh
+    # their already-approved aggregate snapshot during the reload above. This
+    # separate guard proves only that a request to the now-closed extra page
+    # cannot trigger another home read.
+    async with async_block_home_summary_reads(
+        hass,
+        domain,
+        "closed optional local page request",
+    ):
+        await async_assert_local_summary_is_unavailable(
+            hass,
+            domain,
+            reader_token,
+            "closed optional local page request",
+        )
+
+
+async def async_update_summary_interval(
+    hass: HomeAssistant,
+    domain: str,
+    entry: ConfigEntry,
+    target_interval: str,
+    expected_entity_ids: frozenset[str] | None,
+) -> None:
+    """Apply one slower fixed cadence and prove it reaches all nine sensors."""
+
+    if target_interval not in SUMMARY_UPDATE_INTERVAL_MINUTES:
+        raise RuntimeError("summary interval check requires an approved target")
+    current_mode = entry.options.get("mode", entry.data["mode"])
+    current_local_page_enabled = entry.options.get(LOCAL_SUMMARY_ENABLED_FIELD, True)
+    if not isinstance(current_mode, str) or type(current_local_page_enabled) is not bool:
+        raise RuntimeError("summary interval settings must preserve safe current options")
+
+    rejected_form = await hass.config_entries.options.async_init(entry.entry_id)
+    options_before_rejection = dict(entry.options)
+    try:
+        await hass.config_entries.options.async_configure(
+            rejected_form["flow_id"],
+            {
+                "mode": current_mode,
+                LOCAL_SUMMARY_ENABLED_FIELD: current_local_page_enabled,
+                SUMMARY_UPDATE_INTERVAL_FIELD: "1m",
+            },
+        )
+    except InvalidData:
+        hass.config_entries.options.async_abort(rejected_form["flow_id"])
+    else:
+        raise RuntimeError("summary interval must reject an unapproved faster choice")
+    assert_result(
+        dict(entry.options),
+        options_before_rejection,
+        "rejected summary interval must not mutate the entry",
+    )
+
+    options_form = await hass.config_entries.options.async_init(entry.entry_id)
+    assert_options_form_uses_safe_native_selectors(options_form)
+    reload_calls: list[str] = []
+    original_async_reload = hass.config_entries.async_reload
+
+    async def async_recording_reload(entry_id: str) -> bool:
+        """Record the HASC-only reload caused by a cadence choice."""
+
+        reload_calls.append(entry_id)
+        return await original_async_reload(entry_id)
+
+    hass.config_entries.async_reload = async_recording_reload
+    try:
+        result = await hass.config_entries.options.async_configure(
+            options_form["flow_id"],
+            {
+                "mode": current_mode,
+                LOCAL_SUMMARY_ENABLED_FIELD: current_local_page_enabled,
+                SUMMARY_UPDATE_INTERVAL_FIELD: target_interval,
+            },
+        )
+        await hass.async_block_till_done()
+    finally:
+        hass.config_entries.async_reload = original_async_reload
+
+    assert_result(result["type"], "create_entry", "safe summary interval must save")
+    assert_result(
+        dict(entry.options),
+        {
+            "mode": current_mode,
+            LOCAL_SUMMARY_ENABLED_FIELD: current_local_page_enabled,
+            SUMMARY_UPDATE_INTERVAL_FIELD: target_interval,
+        },
+        "summary interval must retain only the three approved saved options",
+    )
+    assert_result(
+        reload_calls,
+        [entry.entry_id],
+        "changing summary interval must reload only HASC",
+    )
+    assert_result(
+        entry.state,
+        config_entries.ConfigEntryState.LOADED,
+        "changing summary interval must leave HASC loaded",
+    )
+    assert_entry_has_only_summary_sensors(
+        hass,
+        domain,
+        entry.entry_id,
+        expected_entity_ids,
+    )
+    assert_entry_uses_summary_update_interval(
+        hass,
+        domain,
+        entry.entry_id,
+        target_interval,
+    )
+    await async_assert_safe_diagnostics(hass, domain, entry, current_mode)
+
+
 async def async_update_inactive_safe_options_without_reading_home(
     hass: HomeAssistant,
     domain: str,
     entry: ConfigEntry,
     target_mode: str,
     expected_disabled_by: ConfigEntryDisabler | None,
+    *,
+    target_local_page_enabled: bool,
+    target_summary_update_interval: str,
 ) -> None:
-    """Save an allowed mode while inactive without restarting or reading the home."""
+    """Save allowed settings while inactive without restarting or reading the home."""
+
+    if type(target_local_page_enabled) is not bool:
+        raise RuntimeError("inactive options require a boolean optional local page choice")
+    if target_summary_update_interval not in SUMMARY_UPDATE_INTERVAL_MINUTES:
+        raise RuntimeError("inactive options require an approved summary update interval")
 
     assert_result(
         entry.state,
@@ -767,9 +1193,14 @@ async def async_update_inactive_safe_options_without_reading_home(
         async with async_block_home_summary_reads(hass, domain, "inactive safe options"):
             options_form = await hass.config_entries.options.async_init(entry.entry_id)
             assert_result(options_form["type"], "form", "inactive options must show a form")
+            assert_options_form_uses_safe_native_selectors(options_form)
             safe_options = await hass.config_entries.options.async_configure(
                 options_form["flow_id"],
-                {"mode": target_mode},
+                {
+                    "mode": target_mode,
+                    LOCAL_SUMMARY_ENABLED_FIELD: target_local_page_enabled,
+                    SUMMARY_UPDATE_INTERVAL_FIELD: target_summary_update_interval,
+                },
             )
             await hass.async_block_till_done()
     finally:
@@ -787,7 +1218,11 @@ async def async_update_inactive_safe_options_without_reading_home(
     )
     assert_result(
         dict(entry.options),
-        {"mode": target_mode},
+        {
+            "mode": target_mode,
+            LOCAL_SUMMARY_ENABLED_FIELD: target_local_page_enabled,
+            SUMMARY_UPDATE_INTERVAL_FIELD: target_summary_update_interval,
+        },
         "inactive safe options must keep the exact safe option shape",
     )
     assert_result(
@@ -829,16 +1264,32 @@ async def async_assert_broken_options_form_defaults_to_read_only(
     )
     schema = options_form.get("data_schema")
     schema_fields = getattr(schema, "schema", None)
-    if not isinstance(schema_fields, dict) or len(schema_fields) != 1:
-        raise RuntimeError(f"{scenario_name} options form must expose only one selector")
-    mode_field = next(iter(schema_fields))
-    default_factory = getattr(mode_field, "default", None)
-    if not callable(default_factory):
-        raise RuntimeError(f"{scenario_name} options form must provide a mode default")
+    if not isinstance(schema_fields, dict) or len(schema_fields) != 3:
+        raise RuntimeError(f"{scenario_name} options form must expose only three safe settings")
+    mode_field, local_page_field, summary_interval_field = schema_fields
+    mode_default_factory = getattr(mode_field, "default", None)
+    local_page_default_factory = getattr(local_page_field, "default", None)
+    summary_interval_default_factory = getattr(summary_interval_field, "default", None)
+    if (
+        not callable(mode_default_factory)
+        or not callable(local_page_default_factory)
+        or not callable(summary_interval_default_factory)
+    ):
+        raise RuntimeError(f"{scenario_name} options form must provide safe defaults")
     assert_result(
-        default_factory(),
+        mode_default_factory(),
         "read-only",
         f"{scenario_name} options form must default to read-only",
+    )
+    assert_result(
+        local_page_default_factory(),
+        True,
+        f"{scenario_name} options form must default to an enabled optional local page",
+    )
+    assert_result(
+        summary_interval_default_factory(),
+        SUMMARY_UPDATE_INTERVAL_DEFAULT,
+        f"{scenario_name} options form must default to the established five minutes",
     )
     hass.config_entries.options.async_abort(options_form["flow_id"])
     await hass.async_block_till_done()
@@ -862,6 +1313,19 @@ async def async_assert_safe_diagnostics(
 ) -> None:
     """Load diagnostics and verify its fixed safe shape with aggregate counts."""
 
+    expected_local_summary_enabled = entry.options.get(
+        LOCAL_SUMMARY_ENABLED_FIELD,
+        True,
+    )
+    if type(expected_local_summary_enabled) is not bool:
+        raise RuntimeError("diagnostics test entry has an invalid local page setting")
+    expected_summary_update_interval = entry.options.get(
+        SUMMARY_UPDATE_INTERVAL_FIELD,
+        SUMMARY_UPDATE_INTERVAL_DEFAULT,
+    )
+    if expected_summary_update_interval not in SUMMARY_UPDATE_INTERVAL_MINUTES:
+        raise RuntimeError("diagnostics test entry has an invalid refresh interval")
+
     integration = await loader.async_get_integration(hass, domain)
     diagnostics_platform = await integration.async_get_platform("diagnostics")
     snapshot = await diagnostics_platform.async_get_config_entry_diagnostics(hass, entry)
@@ -872,6 +1336,8 @@ async def async_assert_safe_diagnostics(
         {
             "entry_summary": {
                 "mode": expected_mode,
+                "local_summary_enabled": expected_local_summary_enabled,
+                "summary_update_interval": expected_summary_update_interval,
                 "single_config_entry": True,
             },
             "safety_model": {
@@ -976,6 +1442,17 @@ def assert_local_summary_response_is_not_stored(response: Any, response_name: st
     )
 
 
+async def async_assert_http_response_omits_summary_keys(
+    response: Any,
+    response_name: str,
+) -> None:
+    """Require a closed HTTP response to omit every approved count name."""
+
+    response_body = await response.read()
+    if any(key.encode() in response_body for key in SUMMARY_SENSOR_KEYS):
+        raise RuntimeError(f"{response_name} must not return count keys")
+
+
 def assert_summary_sensor_registry(
     hass: HomeAssistant,
     domain: str,
@@ -1059,12 +1536,70 @@ def assert_entry_has_only_summary_sensors(
         state = hass.states.get(entry.entity_id)
         if state is None:
             raise RuntimeError("every HASC summary sensor must have a state")
+        summary_key = entry.unique_id.removeprefix(f"{entry_id}_")
+        expected_icon = SUMMARY_SENSOR_ICONS.get(summary_key)
+        if expected_icon is None:
+            raise RuntimeError("a HASC summary sensor must have an approved icon key")
+        assert_result(
+            state.attributes.get("icon"),
+            expected_icon,
+            "a HASC summary sensor must keep its fixed visual icon",
+        )
         try:
             value = int(state.state)
         except (TypeError, ValueError) as exc:
             raise RuntimeError("every HASC summary sensor must be a whole number") from exc
         if value < 0:
             raise RuntimeError("every HASC summary sensor must be non-negative")
+
+
+def assert_entry_uses_summary_update_interval(
+    hass: HomeAssistant,
+    domain: str,
+    entry_id: str,
+    expected_interval: str,
+) -> None:
+    """Require every live HASC count sensor to share the selected cadence."""
+
+    expected_minutes = SUMMARY_UPDATE_INTERVAL_MINUTES.get(expected_interval)
+    if expected_minutes is None:
+        raise RuntimeError("summary update interval assertion requires an approved choice")
+    assert_result(
+        hass.services.async_services().get(domain),
+        None,
+        "summary interval choice must not add a HASC service",
+    )
+    entries = entity_registry.async_entries_for_config_entry(
+        entity_registry.async_get(hass),
+        entry_id,
+    )
+    assert_result(
+        {entry.unique_id for entry in entries},
+        {f"{entry_id}_{key}" for key in SUMMARY_SENSOR_KEYS},
+        "summary interval check must inspect exactly the nine HASC count sensors",
+    )
+    entity_components = hass.data.get(DATA_INSTANCES)
+    if not isinstance(entity_components, dict):
+        raise RuntimeError("Home Assistant must expose loaded entity components")
+    sensor_component = entity_components.get("sensor")
+    if sensor_component is None:
+        raise RuntimeError("Home Assistant must keep its loaded sensor component")
+
+    live_entities = [sensor_component.get_entity(entry.entity_id) for entry in entries]
+    if any(entity is None for entity in live_entities):
+        raise RuntimeError("every active HASC registry row must have a live sensor entity")
+    coordinators = {id(entity.coordinator): entity.coordinator for entity in live_entities}
+    assert_result(
+        len(coordinators),
+        1,
+        "all nine HASC count sensors must share one read-only coordinator",
+    )
+    coordinator = next(iter(coordinators.values()))
+    assert_result(
+        coordinator.update_interval,
+        timedelta(minutes=expected_minutes),
+        "HASC coordinator must use the selected fixed summary interval",
+    )
 
 
 def assert_entry_has_unloaded_summary_sensors(
@@ -1227,6 +1762,13 @@ def assert_local_summary_view(hass: HomeAssistant, domain: str) -> None:
     if view is None:
         raise RuntimeError("local summary view must be registered")
     assert_result(
+        getattr(view, "url", None),
+        LOCAL_SUMMARY_PATH,
+        "local summary view must keep its one fixed URL",
+    )
+    if tuple(getattr(view, "extra_urls", ())) != ():
+        raise RuntimeError("local summary view must not define alternate URLs")
+    assert_result(
         getattr(view, "requires_auth", None),
         True,
         "local summary view must require Home Assistant authentication",
@@ -1245,8 +1787,24 @@ def assert_local_summary_view(hass: HomeAssistant, domain: str) -> None:
         )
     resource = resources[0]
     methods = {route.method for route in resource}
-    if not methods or not methods <= {"GET", "HEAD", "OPTIONS"}:
-        raise RuntimeError(f"local summary route must be GET-only, got {methods!r}")
+    if methods != {"GET", "OPTIONS"}:
+        raise RuntimeError(
+            "local summary route must register GET and Home Assistant's safe OPTIONS only, "
+            f"got {methods!r}"
+        )
+
+
+def assert_local_summary_is_not_registered(
+    hass: HomeAssistant,
+    domain: str,
+    scenario_name: str,
+) -> None:
+    """Require a closed saved choice to leave no page runtime or route."""
+
+    if hass.data.get(domain) is not None:
+        raise RuntimeError(f"{scenario_name} must not keep local summary runtime data")
+    if find_local_summary_routes(hass):
+        raise RuntimeError(f"{scenario_name} must not register a local summary route")
 
 
 def assert_deactivated_entry_stays_inactive_after_restart(
@@ -1343,11 +1901,35 @@ async def async_assert_ordinary_unloaded_entry_recovers_after_restart(
         entry.entry_id,
         expected_entity_ids=expected_entity_ids,
     )
-    assert_local_summary_view(hass, domain)
-    await async_assert_authenticated_local_summary_http_access(
-        hass,
-        "HASC ordinary-unload restart temporary",
+    expected_summary_update_interval = expected_options.get(
+        SUMMARY_UPDATE_INTERVAL_FIELD,
+        SUMMARY_UPDATE_INTERVAL_DEFAULT,
     )
+    if expected_summary_update_interval not in SUMMARY_UPDATE_INTERVAL_MINUTES:
+        raise RuntimeError(
+            "ordinary unload restart must retain an approved summary update interval"
+        )
+    assert_entry_uses_summary_update_interval(
+        hass,
+        domain,
+        entry.entry_id,
+        expected_summary_update_interval,
+    )
+    local_page_enabled = expected_options.get(LOCAL_SUMMARY_ENABLED_FIELD, True)
+    if type(local_page_enabled) is not bool:
+        raise RuntimeError("ordinary unload restart must retain a boolean local page choice")
+    if local_page_enabled:
+        assert_local_summary_view(hass, domain)
+        await async_assert_authenticated_local_summary_http_access(
+            hass,
+            "HASC ordinary-unload restart temporary",
+        )
+    else:
+        assert_local_summary_is_not_registered(
+            hass,
+            domain,
+            "ordinary unload restart with its optional local page closed",
+        )
     return entry
 
 
@@ -1385,12 +1967,22 @@ async def async_assert_ordinary_unloaded_entry_can_be_removed(
         entry,
         "HASC ordinary unload before removal",
     )
-    await async_assert_local_summary_is_unavailable(
-        hass,
-        domain,
-        reader_token,
-        "HASC ordinary unload before removal",
-    )
+    local_page_enabled = expected_options.get(LOCAL_SUMMARY_ENABLED_FIELD, True)
+    if type(local_page_enabled) is not bool:
+        raise RuntimeError("ordinary unload removal must retain a boolean local page choice")
+    if local_page_enabled:
+        await async_assert_local_summary_is_unavailable(
+            hass,
+            domain,
+            reader_token,
+            "HASC ordinary unload before removal",
+        )
+    else:
+        assert_local_summary_is_not_registered(
+            hass,
+            domain,
+            "ordinary unload before removal with its optional local page closed",
+        )
 
     removed_entry = await async_remove_safe_entry(hass, entry.entry_id)
     await async_assert_closed_diagnostics(
@@ -1399,12 +1991,19 @@ async def async_assert_ordinary_unloaded_entry_can_be_removed(
         entry,
         "HASC removal after ordinary unload",
     )
-    await async_assert_local_summary_is_unavailable(
-        hass,
-        domain,
-        reader_token,
-        "HASC removal after ordinary unload",
-    )
+    if local_page_enabled:
+        await async_assert_local_summary_is_unavailable(
+            hass,
+            domain,
+            reader_token,
+            "HASC removal after ordinary unload",
+        )
+    else:
+        assert_local_summary_is_not_registered(
+            hass,
+            domain,
+            "removal after ordinary unload with its optional local page closed",
+        )
     return removed_entry
 
 
@@ -1662,6 +2261,174 @@ async def async_create_test_read_only_access_token(
     return await async_create_test_access_token(hass, reader)
 
 
+async def async_assert_approved_local_summary_origins_are_accepted(
+    hass: HomeAssistant,
+    reader: Any,
+) -> None:
+    """Prove every exact approved range boundary can read only safe totals."""
+
+    domain = load_integration_domain()
+    runtime = hass.data.get(domain)
+    if not isinstance(runtime, dict):
+        raise RuntimeError("the local summary runtime data must be present")
+    view = runtime.get("local_summary_view")
+    if view is None:
+        raise RuntimeError("the local summary view must be registered")
+
+    for remote in APPROVED_LOCAL_SUMMARY_ORIGINS:
+        accepted = await view.get(DirectLocalSummaryRequest(remote, reader))
+        assert_result(
+            accepted.status,
+            HTTPStatus.OK,
+            f"local summary must accept approved origin {remote}",
+        )
+        assert_local_summary_response_is_not_stored(
+            accepted,
+            f"approved local summary origin {remote}",
+        )
+        assert_safe_home_summary(json.loads(accepted.body))
+
+
+async def async_assert_disallowed_local_summary_origins_are_rejected(
+    hass: HomeAssistant,
+    reader: Any,
+    test_user_prefix: str,
+) -> None:
+    """Prove the real view closes every non-home source before any home read."""
+
+    domain = load_integration_domain()
+    runtime = hass.data.get(domain)
+    if not isinstance(runtime, dict):
+        raise RuntimeError("the local summary runtime data must be present")
+    view = runtime.get("local_summary_view")
+    if view is None:
+        raise RuntimeError("the local summary view must be registered")
+
+    async with async_block_home_summary_reads(
+        hass,
+        domain,
+        f"{test_user_prefix} disallowed local origin",
+    ):
+        for remote in DISALLOWED_LOCAL_SUMMARY_ORIGINS:
+            rejected = await view.get(DirectLocalSummaryRequest(remote, reader))
+            assert_result(
+                rejected.status,
+                HTTPStatus.FORBIDDEN,
+                f"local summary must reject disallowed origin {remote}",
+            )
+            assert_local_summary_response_is_not_stored(
+                rejected,
+                f"rejected disallowed local summary origin {remote}",
+            )
+            payload = json.loads(rejected.body)
+            if not isinstance(payload, dict):
+                raise RuntimeError("rejected disallowed origin response must be a dictionary")
+            if set(payload) & set(SUMMARY_SENSOR_KEYS):
+                raise RuntimeError("rejected disallowed origin must not return count values")
+
+
+async def async_assert_local_summary_observation_failure_is_unavailable(
+    hass: HomeAssistant,
+    reader: Any,
+    test_user_prefix: str,
+) -> None:
+    """Require an unexpected local reader failure to return no summary details."""
+
+    domain = load_integration_domain()
+    runtime = hass.data.get(domain)
+    if not isinstance(runtime, dict):
+        raise RuntimeError("the local summary runtime data must be present")
+    view = runtime.get("local_summary_view")
+    if view is None:
+        raise RuntimeError("the local summary view must be registered")
+
+    async with async_block_home_summary_reads(
+        hass,
+        domain,
+        f"{test_user_prefix} local summary observation failure",
+    ):
+        unavailable = await view.get(DirectLocalSummaryRequest("127.0.0.1", reader))
+
+    assert_result(
+        unavailable.status,
+        HTTPStatus.SERVICE_UNAVAILABLE,
+        "local summary observation failure must return unavailable",
+    )
+    assert_local_summary_response_is_not_stored(
+        unavailable,
+        "failed local summary observation",
+    )
+    payload = json.loads(unavailable.body)
+    if not isinstance(payload, dict):
+        raise RuntimeError("failed local summary response must be a dictionary")
+    if payload != {"message": "The local summary is unavailable."}:
+        raise RuntimeError("failed local summary response must not expose error details")
+    if set(payload) & set(SUMMARY_SENSOR_KEYS):
+        raise RuntimeError("failed local summary observation must not return count values")
+
+
+async def async_assert_local_summary_rejects_non_get_requests(
+    hass: HomeAssistant,
+    client: TestClient,
+    reader_token: str,
+    test_user_prefix: str,
+) -> None:
+    """Require every non-GET request to fail before it can read the home."""
+
+    domain = load_integration_domain()
+    async with async_block_home_summary_reads(
+        hass,
+        domain,
+        f"{test_user_prefix} non-GET local request",
+    ):
+        for method, expected_status in NON_GET_LOCAL_SUMMARY_STATUSES.items():
+            rejected = await client.request(
+                method,
+                LOCAL_SUMMARY_PATH,
+                headers={"Authorization": f"Bearer {reader_token}"},
+            )
+            assert_result(
+                rejected.status,
+                expected_status,
+                f"local summary must reject {method}",
+            )
+            await async_assert_http_response_omits_summary_keys(
+                rejected,
+                f"local summary must reject {method}",
+            )
+
+
+async def async_assert_local_summary_rejects_alternate_paths(
+    hass: HomeAssistant,
+    client: TestClient,
+    reader_token: str,
+    test_user_prefix: str,
+) -> None:
+    """Require a small address variation to stay outside the one safe route."""
+
+    domain = load_integration_domain()
+    async with async_block_home_summary_reads(
+        hass,
+        domain,
+        f"{test_user_prefix} alternate local summary path",
+    ):
+        for alternate_target, expected_status in ALTERNATE_LOCAL_SUMMARY_TARGET_STATUSES.items():
+            rejected = await client.get(
+                alternate_target,
+                headers={"Authorization": f"Bearer {reader_token}"},
+                allow_redirects=False,
+            )
+            assert_result(
+                rejected.status,
+                expected_status,
+                f"local summary must reject alternate target {alternate_target}",
+            )
+            await async_assert_http_response_omits_summary_keys(
+                rejected,
+                f"local summary must reject alternate target {alternate_target}",
+            )
+
+
 async def async_assert_authenticated_local_summary_http_access(
     hass: HomeAssistant,
     test_user_prefix: str = "HASC temporary",
@@ -1678,6 +2445,17 @@ async def async_assert_authenticated_local_summary_http_access(
         hass,
         f"{test_user_prefix} read-only test user",
     )
+    await async_assert_approved_local_summary_origins_are_accepted(hass, reader)
+    await async_assert_disallowed_local_summary_origins_are_rejected(
+        hass,
+        reader,
+        test_user_prefix,
+    )
+    await async_assert_local_summary_observation_failure_is_unavailable(
+        hass,
+        reader,
+        test_user_prefix,
+    )
     reader_token = await async_create_test_access_token(hass, reader)
 
     owner_token = await async_create_test_access_token(hass, owner)
@@ -1691,6 +2469,10 @@ async def async_assert_authenticated_local_summary_http_access(
             401,
             "local summary must reject an unauthenticated request",
         )
+        await async_assert_http_response_omits_summary_keys(
+            unauthenticated,
+            "unauthenticated local summary response",
+        )
 
         rejected_owner = await client.get(
             "/api/hausman_hub/local-summary",
@@ -1702,6 +2484,10 @@ async def async_assert_authenticated_local_summary_http_access(
             "local summary must reject an administrator",
         )
         assert_local_summary_response_is_not_stored(
+            rejected_owner,
+            "rejected local summary owner response",
+        )
+        await async_assert_http_response_omits_summary_keys(
             rejected_owner,
             "rejected local summary owner response",
         )
@@ -1720,6 +2506,19 @@ async def async_assert_authenticated_local_summary_http_access(
             "accepted local summary response",
         )
         assert_safe_home_summary(await accepted_reader.json())
+
+        await async_assert_local_summary_rejects_non_get_requests(
+            hass,
+            client,
+            reader_token,
+            test_user_prefix,
+        )
+        await async_assert_local_summary_rejects_alternate_paths(
+            hass,
+            client,
+            reader_token,
+            test_user_prefix,
+        )
 
         await hass.auth.async_update_user(reader, group_ids=[GROUP_ID_USER])
         await hass.async_block_till_done()
@@ -1746,12 +2545,6 @@ async def async_assert_authenticated_local_summary_http_access(
             raise RuntimeError("demoted local summary response must be a dictionary")
         if set(demoted_payload) & set(SUMMARY_SENSOR_KEYS):
             raise RuntimeError("demoted local summary must not return count values")
-
-        mutation = await client.post(
-            "/api/hausman_hub/local-summary",
-            headers={"Authorization": f"Bearer {reader_token}"},
-        )
-        assert_result(mutation.status, 405, "local summary must not accept POST")
     finally:
         await client.close()
 
@@ -3099,6 +3892,53 @@ async def async_run_check() -> None:
                 read_only_entry.entry_id,
                 LEGACY_SUMMARY_SENSOR_ENTITY_IDS,
             )
+            assert_entry_uses_summary_update_interval(
+                hass,
+                domain,
+                read_only_entry.entry_id,
+                SUMMARY_UPDATE_INTERVAL_DEFAULT,
+            )
+            legacy_default_entry_id = read_only_entry.entry_id
+            legacy_default_entry_data = dict(read_only_entry.data)
+            legacy_default_entry_options = dict(read_only_entry.options)
+            assert_result(
+                legacy_default_entry_options,
+                {},
+                "a legacy HASC entry must begin without the new interval option",
+            )
+            await hass.async_stop()
+            hass = await async_start_empty_home_assistant(config_directory)
+            read_only_entry = hass.config_entries.async_get_entry(legacy_default_entry_id)
+            if read_only_entry is None:
+                raise RuntimeError("legacy default interval entry must survive a restart")
+            assert_result(
+                dict(read_only_entry.data),
+                legacy_default_entry_data,
+                "legacy default interval restart must preserve entry data",
+            )
+            assert_result(
+                dict(read_only_entry.options),
+                legacy_default_entry_options,
+                "legacy default interval restart must not invent a saved option",
+            )
+            assert_entry_has_only_summary_sensors(
+                hass,
+                domain,
+                read_only_entry.entry_id,
+                LEGACY_SUMMARY_SENSOR_ENTITY_IDS,
+            )
+            await async_assert_safe_diagnostics(
+                hass,
+                domain,
+                read_only_entry,
+                "read-only",
+            )
+            assert_entry_uses_summary_update_interval(
+                hass,
+                domain,
+                read_only_entry.entry_id,
+                SUMMARY_UPDATE_INTERVAL_DEFAULT,
+            )
             await async_update_safe_options(hass, read_only_entry, "shadow")
             assert_result(
                 read_only_entry.data["mode"],
@@ -3115,6 +3955,19 @@ async def async_run_check() -> None:
                 LEGACY_SUMMARY_SENSOR_ENTITY_IDS,
             )
 
+            await async_update_summary_interval(
+                hass,
+                domain,
+                read_only_entry,
+                "15m",
+                LEGACY_SUMMARY_SENSOR_ENTITY_IDS,
+            )
+            assert_local_summary_view(hass, domain)
+            await async_assert_authenticated_local_summary_http_access(
+                hass,
+                "HASC slower summary interval temporary",
+            )
+
             await async_update_safe_options(hass, read_only_entry, "read-only")
             assert_result(
                 read_only_entry.data["mode"],
@@ -3128,6 +3981,66 @@ async def async_run_check() -> None:
                 hass,
                 domain,
                 read_only_entry.entry_id,
+                LEGACY_SUMMARY_SENSOR_ENTITY_IDS,
+            )
+            assert_entry_uses_summary_update_interval(
+                hass,
+                domain,
+                read_only_entry.entry_id,
+                "15m",
+            )
+
+            optional_page_reader_token = await async_create_test_read_only_access_token(
+                hass,
+                "HASC optional local page test user",
+            )
+            read_only_entry_id = read_only_entry.entry_id
+            await async_update_optional_local_page(
+                hass,
+                domain,
+                read_only_entry,
+                False,
+                optional_page_reader_token,
+                LEGACY_SUMMARY_SENSOR_ENTITY_IDS,
+            )
+            await hass.async_stop()
+            hass = await async_start_empty_home_assistant(config_directory)
+            read_only_entry = hass.config_entries.async_get_entry(read_only_entry_id)
+            if read_only_entry is None:
+                raise RuntimeError("disabled optional local page entry must survive a restart")
+            assert_result(
+                read_only_entry.state,
+                config_entries.ConfigEntryState.LOADED,
+                "disabled optional local page must keep HASC's count display loaded",
+            )
+            assert_entry_has_only_summary_sensors(
+                hass,
+                domain,
+                read_only_entry.entry_id,
+                LEGACY_SUMMARY_SENSOR_ENTITY_IDS,
+            )
+            assert_entry_uses_summary_update_interval(
+                hass,
+                domain,
+                read_only_entry.entry_id,
+                "15m",
+            )
+            await async_assert_safe_diagnostics(hass, domain, read_only_entry, "read-only")
+            if hass.data.get(domain) is not None:
+                raise RuntimeError("disabled optional local page must not restore HASC page data")
+            if find_local_summary_routes(hass):
+                raise RuntimeError("disabled optional local page must not restore its route")
+
+            optional_page_reader_token = await async_create_test_read_only_access_token(
+                hass,
+                "HASC optional local page restart test user",
+            )
+            await async_update_optional_local_page(
+                hass,
+                domain,
+                read_only_entry,
+                True,
+                optional_page_reader_token,
                 LEGACY_SUMMARY_SENSOR_ENTITY_IDS,
             )
 
@@ -3172,6 +4085,8 @@ async def async_run_check() -> None:
                 read_only_entry,
                 "shadow",
                 expected_disabled_by=None,
+                target_local_page_enabled=False,
+                target_summary_update_interval="30m",
             )
             assert_result(
                 read_only_entry.data,
@@ -3221,12 +4136,24 @@ async def async_run_check() -> None:
                 read_only_entry.entry_id,
                 LEGACY_SUMMARY_SENSOR_ENTITY_IDS,
             )
-            await async_assert_safe_diagnostics(hass, domain, read_only_entry, "shadow")
-            assert_local_summary_view(hass, domain)
-            await async_assert_authenticated_local_summary_http_access(
+            assert_entry_uses_summary_update_interval(
                 hass,
-                "HASC ordinary setup",
+                domain,
+                read_only_entry.entry_id,
+                "30m",
             )
+            await async_assert_safe_diagnostics(hass, domain, read_only_entry, "shadow")
+            async with async_block_home_summary_reads(
+                hass,
+                domain,
+                "HASC ordinary setup with its optional local page closed",
+            ):
+                await async_assert_local_summary_is_unavailable(
+                    hass,
+                    domain,
+                    ordinary_unload_reader_token,
+                    "HASC ordinary setup with its optional local page closed",
+                )
 
             deactivation_reader_token = await async_create_test_read_only_access_token(
                 hass,
@@ -3258,6 +4185,8 @@ async def async_run_check() -> None:
                 read_only_entry,
                 "read-only",
                 expected_disabled_by=ConfigEntryDisabler.USER,
+                target_local_page_enabled=True,
+                target_summary_update_interval="5m",
             )
             assert_result(
                 dict(read_only_entry.data),
@@ -3299,6 +4228,12 @@ async def async_run_check() -> None:
                 domain,
                 read_only_entry.entry_id,
                 LEGACY_SUMMARY_SENSOR_ENTITY_IDS,
+            )
+            assert_entry_uses_summary_update_interval(
+                hass,
+                domain,
+                read_only_entry.entry_id,
+                "5m",
             )
             await async_assert_safe_diagnostics(hass, domain, read_only_entry, "read-only")
             assert_local_summary_view(hass, domain)
@@ -3376,6 +4311,8 @@ async def async_run_check() -> None:
                 restored_entry,
                 "shadow",
                 expected_disabled_by=ConfigEntryDisabler.USER,
+                target_local_page_enabled=False,
+                target_summary_update_interval="15m",
             )
             assert_result(
                 dict(restored_entry.data),
@@ -3417,25 +4354,25 @@ async def async_run_check() -> None:
                 restored_entry,
                 "shadow",
             )
-            assert_local_summary_view(restarted_hass, domain)
             assert_entry_has_only_summary_sensors(
                 restarted_hass,
                 domain,
                 restored_entry.entry_id,
                 LEGACY_SUMMARY_SENSOR_ENTITY_IDS,
             )
-            await async_assert_authenticated_local_summary_http_access(
+            assert_entry_uses_summary_update_interval(
                 restarted_hass,
-                "HASC disabled-restart temporary",
+                domain,
+                restored_entry.entry_id,
+                "15m",
+            )
+            assert_local_summary_is_not_registered(
+                restarted_hass,
+                domain,
+                "user reactivation after restart with its optional local page closed",
             )
             ordinary_unload_restart_data = dict(restored_entry.data)
             ordinary_unload_restart_options = dict(restored_entry.options)
-            ordinary_unload_restart_reader_token = (
-                await async_create_test_read_only_access_token(
-                    restarted_hass,
-                    "HASC temporary ordinary-unload restart test user",
-                )
-            )
             await async_unload_safe_entry(restarted_hass, restored_entry)
             assert_result(
                 dict(restored_entry.data),
@@ -3471,11 +4408,10 @@ async def async_run_check() -> None:
                 restored_entry.entry_id,
                 LEGACY_SUMMARY_SENSOR_ENTITY_IDS,
             )
-            await async_assert_local_summary_is_unavailable(
+            assert_local_summary_is_not_registered(
                 restarted_hass,
                 domain,
-                ordinary_unload_restart_reader_token,
-                "HASC ordinary unload before restart",
+                "ordinary HASC stop before restart with its optional local page closed",
             )
         finally:
             await restarted_hass.async_stop()
@@ -3776,6 +4712,12 @@ async def async_run_check() -> None:
                 domain,
                 fresh_entry.entry_id,
                 expected_entity_ids=None,
+            )
+            assert_entry_uses_summary_update_interval(
+                post_removal_hass,
+                domain,
+                fresh_entry.entry_id,
+                SUMMARY_UPDATE_INTERVAL_DEFAULT,
             )
             assert_reserved_name_does_not_block_hasc(
                 post_removal_hass,

@@ -1,6 +1,6 @@
 # HASC AI Context
 
-Last updated: 2026-07-16.
+Last updated: 2026-07-17.
 
 ## Project state
 
@@ -223,6 +223,96 @@ Last updated: 2026-07-16.
   page. Empty Core 2026.6.4 and 2026.7.0 checks confirm the header on the
   approved and closed paths. Kimi found no issue; see the [local no-store
   review note](LLM_WIKI/Manual/2026-07-16-kimi-local-summary-no-store-review.md).
+- Unpublished local work for version 0.3.15 closes the unspecified local
+  origins 0.0.0.0, ::, and IPv4-mapped ::ffff:0.0.0.0 before any nine-count
+  read. The same nine approved rows now have only fixed ordinary visual icons;
+  the disposable Core check proves the icon for each row without adding data or
+  an action. It also proves in disposable Core 2026.6.4 and 2026.7.0 that the
+  guarded page accepts only GET: HEAD, POST, PUT, PATCH, DELETE, and TRACE
+  return 405; CONNECT does not reach the route and returns 404; OPTIONS returns
+  Home Assistant's safe 403 before any home read. Its one fixed address has no
+  alternate URL: even the same path with a trailing slash or added query data
+  is a closed 404 before a home read and without count names. The real route
+  registration must contain GET plus only that safe, closed Home Assistant
+  OPTIONS response. The local Core check also requires every rejected method
+  response, guest response, and administrator response to omit all nine count
+  names. The combined working tree passed 139 local tests and both disposable
+  Core checks. The later mixed-diff Kimi review cycle is recorded with version
+  0.3.16 below.
+- Unpublished local work for version 0.3.16 adds only the exact boolean
+  `local_summary_enabled` option. It lets the owner close or restore the
+  already-approved optional local nine-count page without adding a URL, data,
+  command, service, device, proxy, or execution right. With the page closed,
+  the existing nine HASC count rows and fixed diagnostics intentionally remain
+  available and may refresh the same approved aggregates; a request to the
+  closed old page itself fails before it can read them. After a full temporary
+  Home Assistant restart while closed, neither HASC page runtime data nor its
+  route is registered. Strings, numbers, and other truth-like values are
+  rejected. The disposable lifecycle now also changes this boolean while HASC
+  is ordinarily stopped, user-disabled, and user-disabled after a restart. Each
+  save must leave HASC `NOT_LOADED`, record no reload, and fail immediately if
+  any HASC home-summary reader runs. Only the following explicit setup or user
+  activation may apply the saved page choice; the after-restart case performs a
+  real `True` to `False` change and then keeps the page runtime and route absent
+  through activation, ordinary unload, another restart, and removal. The final
+  local diff passed 139 fast tests, the complete local release check, and
+  disposable Core 2026.6.4 and 2026.7.0 checks. A first temporary fallback
+  review found two test-only weaknesses: broad source-string assertions and no
+  after-restart boolean change. Both were corrected, and the final independent
+  OpenCode fallback review found no remaining issue; see the [inactive local
+  page options review](LLM_WIKI/Manual/2026-07-17-opencode-inactive-local-page-options-review.md).
+  After the provider quota renewed, Kimi reviewed the complete mixed diff and
+  raised one potential frontend-serialization risk for the strict boolean
+  selector. Both supported Core versions already serialize the inherited type
+  as the native `boolean`; the contract is now explicit, the unit adapter test
+  guards it, and the disposable Core harness checks the real serialized form.
+  Both Core checks, all 139 fast tests, and the complete local release check
+  passed again. The Kimi follow-up found no remaining issue; see the [0.3.15
+  and 0.3.16 Kimi review cycle](LLM_WIKI/Manual/2026-07-17-kimi-v0-3-15-v0-3-16-review.md).
+  These local reviews do not themselves authorize a commit, push, release,
+  deployment, or publication.
+- Unpublished local work for version 0.3.17 adds only one fixed refresh choice
+  for the same nine diagnostic count sensors: the established `5m` default or
+  the slower `15m` and `30m` choices. Exact validation rejects faster,
+  arbitrary, numeric, and missing submitted values. Old entries whose options
+  do not contain the new field still use `5m`; saved entry data is unchanged.
+  The one coordinator shared by all nine rows receives the selected interval.
+  No new count, data, entity, route, service, device, command, proxy, execution
+  path, or authority is added, and the optional authenticated local GET page
+  remains immediate per request. The disposable lifecycle covers active
+  changes, a real legacy empty-options restart, ordinary unload/restart,
+  stopped and user-disabled saves without reload or home reads, and later
+  explicit activation. Fast tests, the complete local release check, and Core
+  2026.6.4/2026.7.0 results are recorded with the [0.3.17 Kimi review
+  cycle](LLM_WIKI/Manual/2026-07-17-kimi-v0-3-17-summary-interval-review.md).
+  No review authorizes a commit, push, release, deployment, publication, or
+  live-home change.
+- Unpublished local work for version 0.3.18 adds only the effective validated
+  HASC settings to the existing redacted diagnostics `entry_summary`: safe
+  mode, the optional local-page boolean, and the exact `5m`, `15m`, or `30m`
+  nine-count refresh choice. It never copies raw entry data or options. Legacy
+  empty options report the safe enabled-page and `5m` defaults. Unsafe,
+  inactive, removed, and ambiguous setups still return only the fixed
+  unavailable response before any home-summary read. No count, home datum,
+  entity, route, service, device, command, proxy, execution path, automatic
+  repair, or authority is added. All 144 fast tests, the complete local
+  release check, and disposable Core 2026.6.4/2026.7.0 checks passed. The
+  implementation boundary and verification record are in the [0.3.18 safe
+  settings diagnostics note](LLM_WIKI/Manual/2026-07-17-hasc-v0-3-18-safe-settings-diagnostics.md).
+  A bounded Kimi `k2p7` review of the 0.3.18 delta returned `NO FINDINGS` after
+  its completed child session was resumed with the Kimi model explicitly
+  pinned. This local work and review do not authorize a commit, push, release,
+  deployment, publication, or live-home change.
+- The same unpublished version now accepts the local nine-count page only from
+  loopback, RFC 1918 IPv4, unique-local IPv6, or an IPv4-mapped form of the
+  same approved IPv4 range. Test, link-local, carrier-grade, public, and other
+  special addresses fail closed before the summary reader runs. The local fast
+  and disposable Core checks cover both exact range boundaries and those
+  refusals without using a live home.
+- The same local page now also fails closed when its approved nine-count reader
+  unexpectedly raises: it returns only the fixed unavailable response, with no
+  partial count or error detail. Fast and disposable Core checks use a failing
+  temporary reader to prove this without accessing a live home.
 - That unsafe direct-execution activation check also has a separate full
   temporary restart between saving the bad data and the user's activation
   attempt. The saved setup remains user-disabled and unloaded with no runtime
@@ -440,8 +530,16 @@ Last updated: 2026-07-16.
   canary/rollback/authority decision, and owner signoff.
 - Do not commit secrets, live identifiers, flow snapshots, service paths,
   command payloads, or deployment scripts.
-- Every future code change follows Clean Code and Clean Architecture and must
-  receive Kimi review before it is considered complete or pushed.
+- Every code change needs independent review. It follows Clean Code and Clean
+  Architecture. Kimi must review the final current diff before the
+  change is considered complete or before a commit, push, release, deployment,
+  or publication. If Kimi is temporarily unavailable, another
+  independent review may support every change permitted by the HASC boundaries,
+  including code, tests, documentation, and local checks or fixes. It must be
+  recorded. It does not authorize a commit, push, release, deployment,
+  publication, or new authority. Documentation-only edits do not require Kimi
+  only when the change contains no code; the final Kimi gate applies to a mixed
+  diff.
 - The owner approved a public GitHub repository on 2026-07-14 because HACS
   cannot use a private GitHub repository. This permits only the minimal root
   `hacs.json` and manual HACS custom-repository installation. It does not

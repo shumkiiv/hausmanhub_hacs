@@ -43,6 +43,15 @@ decision, and owner signoff.
 5. In version 0.2.0, provide that same fixed summary through one authenticated
    local GET-only view for a dedicated Home Assistant read-only user. It has
    no command method, external access, or token storage.
+6. Let the owner close or restore only that optional local view in HASC's
+   settings. Closing it leaves the same nine diagnostic numbers and redacted
+   diagnostics in place; it does not add a device action or any home control.
+7. Let the owner keep the established five-minute refresh for those same nine
+   numbers or slow it to 15 or 30 minutes. No faster choice, new data, entity,
+   route, service, device, command, or authority is added.
+8. Show only the effective validated HASC mode, optional-page choice, and
+   five-, 15-, or 30-minute refresh choice in the existing redacted
+   diagnostics. Raw entry data and options are never copied into the report.
 
 See [repository basics](docs/repository-basics.md) and
 [AI context](AI_CONTEXT.md) before changing the repository.
@@ -67,8 +76,15 @@ Before publishing, run the local [repository safety check](docs/repository-safet
 It looks only for accidentally added credentials and runtime files; it does
 not connect to the home.
 
-All future code follows the [engineering standards](docs/engineering-standards.md),
-including mandatory Kimi review before completion or push.
+All future code follows the [engineering standards](docs/engineering-standards.md).
+Every code change needs independent review. Kimi must review the final current
+diff before the change is considered complete or before a commit, push,
+release, deployment, or publication. If Kimi is temporarily unavailable,
+another independent review may support every change permitted by the HASC
+boundaries, including code, tests, documentation, and local checks or fixes.
+It does not authorize a commit, push, release, deployment, publication, or new
+authority. Documentation-only edits do not require Kimi only when the change
+contains no code; the final Kimi gate applies to a mixed diff.
 
 See [the read-only skeleton](docs/read-only-skeleton.md) and the Russian
 [safe home summary](docs/read-only-home-summary.md) for the exact safety

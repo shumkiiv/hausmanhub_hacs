@@ -8,8 +8,8 @@ handling. It serves only the already-approved nine aggregate counts.
 from __future__ import annotations
 
 from http import HTTPStatus
-from ipaddress import ip_address
-from typing import TYPE_CHECKING, Any
+from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network, ip_address
+from typing import TYPE_CHECKING, Any, Final
 
 from homeassistant.auth.const import GROUP_ID_READ_ONLY
 from homeassistant.components.http import HomeAssistantView
@@ -28,6 +28,12 @@ DATA_VIEW = "local_summary_view"
 DOMAIN = "hausman_hub"
 LOCAL_SUMMARY_PATH = "/api/hausman_hub/local-summary"
 NO_STORE_HEADERS = {"Cache-Control": "no-store"}
+HOME_IPV4_NETWORKS: Final[tuple[IPv4Network, ...]] = (
+    IPv4Network("10.0.0.0/8"),
+    IPv4Network("172.16.0.0/12"),
+    IPv4Network("192.168.0.0/16"),
+)
+HOME_IPV6_NETWORK: Final[IPv6Network] = IPv6Network("fc00::/7")
 
 
 def register_local_summary_access(hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -53,6 +59,7 @@ class LocalSummaryView(HomeAssistantView):
     """Serve the fixed aggregate summary to a dedicated local read-only user."""
 
     url = LOCAL_SUMMARY_PATH
+    extra_urls: tuple[str, ...] = ()
     name = "api:hausman_hub:local_summary"
     requires_auth = True
     cors_allowed = False
@@ -64,6 +71,13 @@ class LocalSummaryView(HomeAssistantView):
 
     async def get(self, request: Any) -> Any:
         """Return nine aggregate counts, or fail closed without home details."""
+
+        if not _is_exact_local_summary_request(request):
+            return self.json_message(
+                "The local summary is unavailable.",
+                HTTPStatus.NOT_FOUND,
+                headers=NO_STORE_HEADERS,
+            )
 
         if not _is_local_read_only_request(request):
             return self.json_message(
@@ -87,6 +101,15 @@ class LocalSummaryView(HomeAssistantView):
                 lambda: collect_home_summary(self._hass, entry.entry_id),
             )
         except ConfigurationViolation:
+            return self.json_message(
+                "The local summary is unavailable.",
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                headers=NO_STORE_HEADERS,
+            )
+        except Exception:
+            # The outer HTTP boundary must not expose an unexpected local
+            # observation failure or return a partial summary. Cancellation is
+            # a BaseException and must continue to the framework unchanged.
             return self.json_message(
                 "The local summary is unavailable.",
                 HTTPStatus.SERVICE_UNAVAILABLE,
@@ -127,8 +150,17 @@ def _is_local_read_only_request(request: Any) -> bool:
     return _is_local_address(getattr(request, "remote", None)) and _is_read_only_user(user)
 
 
+def _is_exact_local_summary_request(request: Any) -> bool:
+    """Require the one fixed path with no added query data."""
+
+    return (
+        getattr(request, "path", None) == LOCAL_SUMMARY_PATH
+        and getattr(request, "query_string", None) == ""
+    )
+
+
 def _is_local_address(remote: object) -> bool:
-    """Reject absent, named, public, and malformed request origins."""
+    """Accept only loopback and ordinary private home-network origins."""
 
     if not isinstance(remote, str):
         return False
@@ -136,7 +168,24 @@ def _is_local_address(remote: object) -> bool:
         address = ip_address(remote)
     except ValueError:
         return False
-    return address.is_loopback or address.is_private
+    if isinstance(address, IPv4Address):
+        return _is_home_ipv4_address(address)
+    mapped_address = address.ipv4_mapped
+    if mapped_address is not None:
+        return _is_home_ipv4_address(mapped_address)
+    return _is_home_ipv6_address(address)
+
+
+def _is_home_ipv4_address(address: IPv4Address) -> bool:
+    """Accept loopback or one of the three RFC 1918 home-network ranges."""
+
+    return address.is_loopback or any(address in network for network in HOME_IPV4_NETWORKS)
+
+
+def _is_home_ipv6_address(address: IPv6Address) -> bool:
+    """Accept loopback or the IPv6 range reserved for private local use."""
+
+    return address.is_loopback or address in HOME_IPV6_NETWORK
 
 
 def _is_read_only_user(user: object) -> bool:

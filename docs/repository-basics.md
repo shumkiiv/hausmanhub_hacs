@@ -54,6 +54,13 @@ Do not copy runtime configuration or sensitive examples from that repository.
 
 All future code follows Clean Code and Clean Architecture: dependencies point
 inward to framework-independent domain contracts, and external adapters do not
-own domain policy. Every code change requires Kimi review before completion or
-push; review findings must be addressed or explicitly documented. This quality
-gate does not relax any runtime, authority, or execution boundary.
+own domain policy. Every code change needs independent review. Kimi must review
+the final current diff before the change is considered complete or before a
+commit, push, release, deployment, or publication. If Kimi is
+temporarily unavailable, another independent review may support every change
+permitted by the HASC boundaries, including code, tests, documentation, and
+local checks or fixes. It does not authorize a commit, push, release,
+deployment, publication, or new authority. Documentation-only edits do not
+require Kimi only when the change contains no code; the final Kimi gate applies
+to a mixed diff. Review findings must be addressed or explicitly documented.
+This quality gate does not relax any runtime, authority, or execution boundary.

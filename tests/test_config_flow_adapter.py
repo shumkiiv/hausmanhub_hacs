@@ -39,7 +39,7 @@ class FakeSchema:
 class FakeRequired:
     """Capture a required schema field and its declared default."""
 
-    def __init__(self, key: str, *, default: str) -> None:
+    def __init__(self, key: str, *, default: object) -> None:
         self.key = key
         self.default = default
 
@@ -57,6 +57,10 @@ class FakeSelectSelector:
 
     def __init__(self, config: FakeSelectSelectorConfig) -> None:
         self.config = config
+
+
+class FakeBooleanSelector:
+    """Represent the one local-page setting without a Home Assistant runtime."""
 
 
 class FakeConfigEntry:
@@ -152,6 +156,7 @@ def fake_home_assistant_modules() -> dict[str, ModuleType]:
         "value": value,
         "label": label,
     }
+    selector.BooleanSelector = FakeBooleanSelector  # type: ignore[attr-defined]
     selector.SelectSelector = FakeSelectSelector  # type: ignore[attr-defined]
     selector.SelectSelectorConfig = FakeSelectSelectorConfig  # type: ignore[attr-defined]
 
@@ -205,6 +210,46 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(expected_default, field.default)
         self.assertIsInstance(selector, FakeSelectSelector)
         return selector
+
+    def assert_options_fields(
+        self,
+        schema: FakeSchema,
+        expected_mode_default: str,
+        expected_local_page_default: bool,
+        expected_summary_update_interval_default: str,
+    ) -> FakeSelectSelector:
+        """Verify the three fixed settings without another input surface."""
+
+        self.assertEqual(3, len(schema.fields))
+        fields = list(schema.fields.items())
+        mode_field, mode_selector = fields[0]
+        page_field, page_selector = fields[1]
+        interval_field, interval_selector = fields[2]
+        self.assertIsInstance(mode_field, FakeRequired)
+        self.assertEqual("mode", mode_field.key)
+        self.assertEqual(expected_mode_default, mode_field.default)
+        self.assertIsInstance(mode_selector, FakeSelectSelector)
+        self.assertIsInstance(page_field, FakeRequired)
+        self.assertEqual("local_summary_enabled", page_field.key)
+        self.assertEqual(expected_local_page_default, page_field.default)
+        self.assertIsInstance(page_selector, FakeBooleanSelector)
+        self.assertEqual("boolean", page_selector.selector_type)
+        self.assertIsInstance(interval_field, FakeRequired)
+        self.assertEqual("summary_update_interval", interval_field.key)
+        self.assertEqual(
+            expected_summary_update_interval_default,
+            interval_field.default,
+        )
+        self.assertIsInstance(interval_selector, FakeSelectSelector)
+        self.assertEqual(
+            ["5m", "15m", "30m"],
+            [option["value"] for option in interval_selector.config.options],
+        )
+        self.assertEqual(
+            "summary_update_interval",
+            interval_selector.config.translation_key,
+        )
+        return mode_selector
 
     async def test_user_form_exposes_only_the_two_approved_modes(self) -> None:
         flow = self.config_flow.HausmanHubConfigFlow()
@@ -263,7 +308,14 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         options_result = await options_flow.async_step_init(extra_input)
 
         self.assertEqual("create_entry", options_result["type"])
-        self.assertEqual({"mode": "shadow"}, options_result["data"])
+        self.assertEqual(
+            {
+                "mode": "shadow",
+                "local_summary_enabled": True,
+                "summary_update_interval": "5m",
+            },
+            options_result["data"],
+        )
 
     async def test_user_flow_rejects_proxy_mode(self) -> None:
         flow = self.config_flow.HausmanHubConfigFlow()
@@ -285,9 +337,16 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         proxy_result = await options_flow.async_step_init({"mode": "proxy"})
 
         self.assertEqual("form", initial_form["type"])
-        self.assert_mode_field(initial_form["schema"], "read-only")
+        self.assert_options_fields(initial_form["schema"], "read-only", True, "5m")
         self.assertEqual("create_entry", shadow_result["type"])
-        self.assertEqual({"mode": "shadow"}, shadow_result["data"])
+        self.assertEqual(
+            {
+                "mode": "shadow",
+                "local_summary_enabled": True,
+                "summary_update_interval": "5m",
+            },
+            shadow_result["data"],
+        )
         self.assertEqual("form", proxy_result["type"])
         self.assertEqual({"mode": "unsafe_mode"}, proxy_result["errors"])
 
@@ -345,7 +404,7 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
                 result = await options_flow.async_step_init()
 
                 self.assertEqual("form", result["type"])
-                self.assert_mode_field(result["schema"], "read-only")
+                self.assert_options_fields(result["schema"], "read-only", True, "5m")
                 self.assertEqual(original_data, options_flow.config_entry.data)
                 self.assertEqual(original_options, options_flow.config_entry.options)
 
@@ -363,9 +422,107 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         result = await options_flow.async_step_init()
 
         self.assertEqual("form", result["type"])
-        self.assert_mode_field(result["schema"], "shadow")
+        self.assert_options_fields(result["schema"], "shadow", True, "5m")
         self.assertEqual(original_data, options_flow.config_entry.data)
         self.assertEqual(original_options, options_flow.config_entry.options)
+
+    async def test_options_can_close_only_the_optional_local_page(self) -> None:
+        """The new setting changes no mode, device, or home-facing input."""
+
+        options_flow = self.config_flow.HausmanHubOptionsFlow()
+        options_flow.config_entry = FakeConfigEntry(
+            {"mode": "read-only", "direct_execution_status": "direct_execution_blocked"},
+            {},
+        )
+
+        result = await options_flow.async_step_init(
+            {"mode": "read-only", "local_summary_enabled": False}
+        )
+
+        self.assertEqual("create_entry", result["type"])
+        self.assertEqual(
+            {
+                "mode": "read-only",
+                "local_summary_enabled": False,
+                "summary_update_interval": "5m",
+            },
+            result["data"],
+        )
+
+    async def test_options_can_slow_only_the_same_nine_count_refresh(self) -> None:
+        """The new choice changes timing, not data or runtime authority."""
+
+        options_flow = self.config_flow.HausmanHubOptionsFlow()
+        options_flow.config_entry = FakeConfigEntry(
+            {"mode": "read-only", "direct_execution_status": "direct_execution_blocked"},
+            {"mode": "shadow", "local_summary_enabled": False},
+        )
+
+        initial_form = await options_flow.async_step_init()
+        result = await options_flow.async_step_init(
+            {
+                "mode": "shadow",
+                "local_summary_enabled": False,
+                "summary_update_interval": "30m",
+            }
+        )
+
+        self.assert_options_fields(initial_form["schema"], "shadow", False, "5m")
+        self.assertEqual("create_entry", result["type"])
+        self.assertEqual(
+            {
+                "mode": "shadow",
+                "local_summary_enabled": False,
+                "summary_update_interval": "30m",
+            },
+            result["data"],
+        )
+
+    async def test_options_reject_a_non_boolean_local_page_setting(self) -> None:
+        """Truth-like strings and numbers cannot silently open the local page."""
+
+        options_flow = self.config_flow.HausmanHubOptionsFlow()
+        options_flow.config_entry = FakeConfigEntry(
+            {"mode": "read-only", "direct_execution_status": "direct_execution_blocked"},
+            {},
+        )
+
+        for invalid_value in ("true", 1, None):
+            with self.subTest(invalid_value=invalid_value):
+                result = await options_flow.async_step_init(
+                    {"mode": "read-only", "local_summary_enabled": invalid_value}
+                )
+
+                self.assertEqual("form", result["type"])
+                self.assertEqual(
+                    {"local_summary_enabled": "unsafe_local_summary_setting"},
+                    result["errors"],
+                )
+
+    async def test_options_reject_an_unapproved_summary_update_interval(self) -> None:
+        """Strings, numbers, and faster choices cannot change the read cadence."""
+
+        options_flow = self.config_flow.HausmanHubOptionsFlow()
+        options_flow.config_entry = FakeConfigEntry(
+            {"mode": "read-only", "direct_execution_status": "direct_execution_blocked"},
+            {},
+        )
+
+        for invalid_value in ("1m", "60m", 5, None):
+            with self.subTest(invalid_value=invalid_value):
+                result = await options_flow.async_step_init(
+                    {
+                        "mode": "read-only",
+                        "local_summary_enabled": True,
+                        "summary_update_interval": invalid_value,
+                    }
+                )
+
+                self.assertEqual("form", result["type"])
+                self.assertEqual(
+                    {"summary_update_interval": "unsafe_summary_update_interval"},
+                    result["errors"],
+                )
 
 
 if __name__ == "__main__":

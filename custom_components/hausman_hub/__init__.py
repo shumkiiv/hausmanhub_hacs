@@ -29,7 +29,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         return False
 
     try:
-        effective_configuration(entry.data, entry.options)
+        configuration = effective_configuration(entry.data, entry.options)
     except ConfigurationViolation:
         _clear_restored_hasc_records(hass, (entry.entry_id,))
         return False
@@ -41,13 +41,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .local_summary import register_local_summary_access
 
     await hass.config_entries.async_forward_entry_setups(entry, (Platform.SENSOR,))
-    register_local_summary_access(hass, entry)
+    if configuration.local_summary_enabled:
+        register_local_summary_access(hass, entry)
     entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
     return True
 
 
 async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Apply a saved HASC setting by reloading only this HASC entry."""
+    """Apply a saved HASC setting by reloading only this HASC entry.
+
+    Turning off the optional local page closes any already active page before
+    Home Assistant reloads the nine-count display. An old address therefore
+    cannot read a summary during the short reload interval.
+    """
+
+    from .local_summary import clear_local_summary_access
+
+    try:
+        configuration = effective_configuration(entry.data, entry.options)
+    except ConfigurationViolation:
+        clear_local_summary_access(hass, entry)
+    else:
+        if not configuration.local_summary_enabled:
+            clear_local_summary_access(hass, entry)
 
     await hass.config_entries.async_reload(entry.entry_id)
 

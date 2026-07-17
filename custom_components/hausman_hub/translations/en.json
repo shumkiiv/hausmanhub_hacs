@@ -20,17 +20,23 @@
     "step": {
       "init": {
         "title": "HausMan Hub HASC safety mode",
-        "description": "This changes only a safe mode without home control.",
+        "description": "This changes only a safe mode, the optional local page, and how often the same nine counts refresh, without home control.",
         "data": {
-          "mode": "Operating mode"
+          "mode": "Operating mode",
+          "local_summary_enabled": "Optional local page",
+          "summary_update_interval": "Nine-count refresh interval"
         },
         "data_description": {
-          "mode": "Choose read-only observation or a comparison without changes."
+          "mode": "Choose read-only observation or a comparison without changes.",
+          "local_summary_enabled": "Shows or closes only the optional local page with the same nine aggregate counts. It does not control the home.",
+          "summary_update_interval": "Choose 5, 15, or 30 minutes for the same nine local counts. HASC never reads them more often than the existing five-minute interval."
         }
       }
     },
     "error": {
-      "unsafe_mode": "Only read-only and comparison-without-changes modes are allowed."
+      "unsafe_mode": "Only read-only and comparison-without-changes modes are allowed.",
+      "unsafe_local_summary_setting": "The optional local page can only be turned on or off.",
+      "unsafe_summary_update_interval": "Choose only 5, 15, or 30 minutes for the nine-count refresh."
     }
   },
   "selector": {
@@ -38,6 +44,13 @@
       "options": {
         "read-only": "Read-only",
         "shadow": "Comparison without changes"
+      }
+    },
+    "summary_update_interval": {
+      "options": {
+        "5m": "Every 5 minutes",
+        "15m": "Every 15 minutes",
+        "30m": "Every 30 minutes"
       }
     }
   },

@@ -29,22 +29,42 @@ from .home_observation import collect_home_summary
 
 
 _LOGGER: Final = logging.getLogger(__name__)
-SUMMARY_UPDATE_INTERVAL: Final = timedelta(minutes=5)
+SUMMARY_UPDATE_INTERVALS: Final[dict[str, timedelta]] = {
+    "5m": timedelta(minutes=5),
+    "15m": timedelta(minutes=15),
+    "30m": timedelta(minutes=30),
+}
 SENSOR_ENTITY_ID_PREFIX: Final = f"sensor.{DOMAIN}_hasc"
+SUMMARY_SENSOR_ICONS: Final[dict[str, str]] = {
+    "areas_count": "mdi:floor-plan",
+    "devices_count": "mdi:devices",
+    "entities_count": "mdi:shape",
+    "sensors_count": "mdi:eye-outline",
+    "available_entities_count": "mdi:check-circle-outline",
+    "unavailable_entities_count": "mdi:alert-circle-outline",
+    "unknown_entities_count": "mdi:help-circle-outline",
+    "not_reported_entities_count": "mdi:minus-circle-outline",
+    "disabled_entities_count": "mdi:pause-circle-outline",
+}
 
 
 class HomeSummaryCoordinator(DataUpdateCoordinator[dict[str, int]]):
     """Refresh one redacted aggregate snapshot for all nine display sensors."""
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
-        """Pass the saved entry so every refresh can validate it again."""
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        update_interval: timedelta,
+    ) -> None:
+        """Pass the saved entry and its approved fixed refresh interval."""
 
         super().__init__(
             hass,
             _LOGGER,
             config_entry=entry,
             name=DOMAIN,
-            update_interval=SUMMARY_UPDATE_INTERVAL,
+            update_interval=update_interval,
             always_update=False,
         )
 
@@ -71,7 +91,12 @@ async def async_setup_entry(
 ) -> None:
     """Add exactly nine diagnostic number sensors and nothing controllable."""
 
-    coordinator = HomeSummaryCoordinator(hass, entry)
+    configuration = effective_configuration(entry.data, entry.options)
+    coordinator = HomeSummaryCoordinator(
+        hass,
+        entry,
+        SUMMARY_UPDATE_INTERVALS[configuration.summary_update_interval],
+    )
     await coordinator.async_config_entry_first_refresh()
     async_add_entities(
         HomeSummaryCountSensor(coordinator, entry.entry_id, key)
@@ -98,6 +123,7 @@ class HomeSummaryCountSensor(CoordinatorEntity[HomeSummaryCoordinator], SensorEn
         self._summary_key = summary_key
         self._attr_translation_key = summary_key
         self._attr_unique_id = f"{entry_id}_{summary_key}"
+        self._attr_icon = SUMMARY_SENSOR_ICONS[summary_key]
         # Keep new installations away from generic names such as ``sensor.areas``.
         # Home Assistant preserves the existing registry name for current users.
         self.entity_id = f"{SENSOR_ENTITY_ID_PREFIX}_{summary_key}"

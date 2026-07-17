@@ -18,7 +18,7 @@ def diagnostics_snapshot(
 ) -> dict[str, object]:
     """Return a redacted snapshot without copying detailed home data.
 
-    Safety values come from the validated two-field configuration model. The
+    Safety values come from the validated effective configuration model. The
     only home data it accepts is a count-only domain object. This is stricter
     than removing known sensitive keys: names, identifiers, readings, history,
     and arbitrary config data never enter the export in the first place.
@@ -39,6 +39,8 @@ def diagnostics_snapshot_for_configuration(
     return {
         "entry_summary": {
             "mode": configuration.mode,
+            "local_summary_enabled": configuration.local_summary_enabled,
+            "summary_update_interval": configuration.summary_update_interval,
             "single_config_entry": True,
         },
         "safety_model": {

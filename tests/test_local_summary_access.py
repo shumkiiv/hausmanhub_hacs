@@ -220,11 +220,19 @@ class FakeHomeAssistant:
 
 
 class FakeRequest(dict[str, object]):
-    """Provide only the authenticated user and remote address to the view."""
+    """Provide the authenticated user, source address, and route shape to the view."""
 
-    def __init__(self, remote: object, user: object) -> None:
+    def __init__(
+        self,
+        remote: object,
+        user: object,
+        path: str = "/api/hausman_hub/local-summary",
+        query_string: str = "",
+    ) -> None:
         super().__init__(hass_user=user)
         self.remote = remote
+        self.path = path
+        self.query_string = query_string
 
 
 class FakeRequestWithoutUser(dict[str, object]):
@@ -233,6 +241,8 @@ class FakeRequestWithoutUser(dict[str, object]):
     def __init__(self, remote: object) -> None:
         super().__init__()
         self.remote = remote
+        self.path = "/api/hausman_hub/local-summary"
+        self.query_string = ""
 
 
 class FakeEntry:
@@ -441,21 +451,139 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertEqual({"message"}, set(response.payload))
                 self.assertEqual("no-store", response.headers.get("Cache-Control"))
 
-    def test_view_accepts_loopback_and_private_ipv6_origins(self) -> None:
-        """Accept private IPv6 forms while rejecting public mapped addresses."""
+    def test_view_rejects_disallowed_origins_before_reading_the_home(self) -> None:
+        """Only ordinary home-network source ranges may read the summary."""
 
-        for remote in ("::1", "fd00::20", "::ffff:192.168.1.20"):
+        original_collect_home_summary = self.adapter.collect_home_summary
+
+        def fail_if_home_is_read(*_: object, **__: object) -> object:
+            raise AssertionError("a disallowed local summary origin must not read the home")
+
+        self.adapter.collect_home_summary = fail_if_home_is_read
+        try:
+            for remote in (
+                "0.0.0.0",
+                "::",
+                "::2",
+                "::ffff:0.0.0.0",
+                "126.255.255.255",
+                "128.0.0.0",
+                "9.255.255.255",
+                "11.0.0.0",
+                "172.15.255.255",
+                "172.32.0.0",
+                "192.167.255.255",
+                "192.169.0.0",
+                "192.0.2.1",
+                "198.51.100.1",
+                "203.0.113.1",
+                "169.254.1.1",
+                "100.64.0.1",
+                "fbff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+                "fe00::",
+                "fe80::1",
+                "2001:db8::1",
+                "::ffff:126.255.255.255",
+                "::ffff:128.0.0.0",
+                "::ffff:9.255.255.255",
+                "::ffff:11.0.0.0",
+                "::ffff:192.0.2.1",
+                "::ffff:172.15.255.255",
+                "::ffff:172.32.0.0",
+                "::ffff:192.167.255.255",
+                "::ffff:192.169.0.0",
+            ):
+                with self.subTest(remote=remote):
+                    response = asyncio.run(
+                        self.view.get(FakeRequest(remote, reader_user("system-read-only")))
+                    )
+                    self.assertEqual(403, response.status)
+                    self.assertEqual({"message"}, set(response.payload))
+                    self.assertEqual("no-store", response.headers.get("Cache-Control"))
+        finally:
+            self.adapter.collect_home_summary = original_collect_home_summary
+
+    def test_view_rejects_changed_path_or_query_before_reading_the_home(self) -> None:
+        """Only the exact route without extra query data may read the summary."""
+
+        original_collect_home_summary = self.adapter.collect_home_summary
+
+        def fail_if_home_is_read(*_: object, **__: object) -> object:
+            raise AssertionError("an alternate local summary target must not read the home")
+
+        rejected_requests = (
+            FakeRequest(
+                "127.0.0.1",
+                reader_user("system-read-only"),
+                path="/api/hausman_hub/local-summary/",
+            ),
+            FakeRequest(
+                "127.0.0.1",
+                reader_user("system-read-only"),
+                query_string="unexpected=1",
+            ),
+        )
+        self.adapter.collect_home_summary = fail_if_home_is_read
+        try:
+            for request in rejected_requests:
+                with self.subTest(request=request):
+                    response = asyncio.run(self.view.get(request))
+                    self.assertEqual(404, response.status)
+                    self.assertEqual({"message"}, set(response.payload))
+                    self.assertEqual("no-store", response.headers.get("Cache-Control"))
+        finally:
+            self.adapter.collect_home_summary = original_collect_home_summary
+
+    def test_view_accepts_only_approved_home_network_origins(self) -> None:
+        """Allow loopback, RFC 1918 IPv4, ULA IPv6, and their safe mappings."""
+
+        for remote in (
+            "127.0.0.0",
+            "127.255.255.255",
+            "10.0.0.0",
+            "10.255.255.255",
+            "172.16.0.0",
+            "172.31.255.255",
+            "192.168.0.0",
+            "192.168.255.255",
+            "::1",
+            "fc00::",
+            "fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+            "::ffff:127.0.0.0",
+            "::ffff:127.255.255.255",
+            "::ffff:10.0.0.0",
+            "::ffff:10.255.255.255",
+            "::ffff:172.16.0.0",
+            "::ffff:172.31.255.255",
+            "::ffff:192.168.0.0",
+            "::ffff:192.168.255.255",
+        ):
             with self.subTest(remote=remote):
                 response = asyncio.run(
                     self.view.get(FakeRequest(remote, reader_user("system-read-only")))
                 )
                 self.assertEqual(200, response.status)
 
-    def test_view_has_no_mutating_http_method_and_registers_once(self) -> None:
-        self.assertFalse(hasattr(self.view, "post"))
-        self.assertFalse(hasattr(self.view, "put"))
-        self.assertFalse(hasattr(self.view, "patch"))
-        self.assertFalse(hasattr(self.view, "delete"))
+    def test_local_address_policy_uses_explicit_home_network_ranges(self) -> None:
+        """The adapter must not treat every Python-private address as home-local."""
+
+        source = Path(self.adapter.__file__).read_text(encoding="utf-8")
+
+        self.assertIn('IPv4Network("10.0.0.0/8")', source)
+        self.assertIn('IPv4Network("172.16.0.0/12")', source)
+        self.assertIn('IPv4Network("192.168.0.0/16")', source)
+        self.assertIn('IPv6Network("fc00::/7")', source)
+        self.assertIn("address.ipv4_mapped", source)
+        self.assertNotIn("address.is_private", source)
+
+    def test_view_has_only_get_http_method_and_registers_once(self) -> None:
+        """The local page must have one URL and no alternative request method."""
+
+        self.assertEqual("/api/hausman_hub/local-summary", self.view.url)
+        self.assertEqual((), self.view.extra_urls)
+        for method in ("post", "put", "patch", "delete", "head", "options"):
+            with self.subTest(method=method):
+                self.assertFalse(hasattr(self.view, method))
 
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
         self.assertEqual(1, len(self.hass.http.views))
@@ -473,6 +601,44 @@ class LocalSummaryAccessTest(unittest.TestCase):
         asyncio.run(listener(self.hass, self.entry))
 
         self.assertEqual([self.entry.entry_id], self.hass.config_entries.reloaded)
+
+    def test_turning_off_the_optional_page_closes_it_before_the_reload(self) -> None:
+        """An old page address cannot read while the saved choice takes effect."""
+
+        self.entry.options = {"local_summary_enabled": False}
+        listener = self.entry.update_listeners[0]
+
+        asyncio.run(listener(self.hass, self.entry))
+
+        self.assertEqual([self.entry.entry_id], self.hass.config_entries.reloaded)
+        self.assertIsNone(
+            self.hass.data[self.adapter.DOMAIN].get(self.adapter.DATA_ACTIVE_ENTRY)
+        )
+        response = asyncio.run(
+            self.view.get(FakeRequest("127.0.0.1", reader_user("system-read-only")))
+        )
+        self.assertEqual(503, response.status)
+        self.assertEqual({"message"}, set(response.payload))
+
+    def test_closed_optional_page_request_does_not_read_the_home(self) -> None:
+        """The page request remains closed even with a stale runtime pointer."""
+
+        self.entry.options = {"local_summary_enabled": False}
+        original_collect_home_summary = self.adapter.collect_home_summary
+
+        def fail_if_home_is_read(*_: object, **__: object) -> object:
+            raise AssertionError("a closed optional local page request must not read the home")
+
+        self.adapter.collect_home_summary = fail_if_home_is_read
+        try:
+            response = asyncio.run(
+                self.view.get(FakeRequest("127.0.0.1", reader_user("system-read-only")))
+            )
+        finally:
+            self.adapter.collect_home_summary = original_collect_home_summary
+
+        self.assertEqual(503, response.status)
+        self.assertEqual({"message"}, set(response.payload))
 
     def test_view_fails_closed_when_entry_is_unsafe_or_unloaded(self) -> None:
         self.entry.data["direct_execution_status"] = "not_blocked"
@@ -509,6 +675,46 @@ class LocalSummaryAccessTest(unittest.TestCase):
 
         self.assertEqual(503, response.status)
         self.assertEqual({"message"}, set(response.payload))
+
+    def test_view_fails_closed_when_the_home_summary_reader_raises(self) -> None:
+        """An unexpected local observation failure must reveal no error details."""
+
+        original_collect_home_summary = self.adapter.collect_home_summary
+
+        def fail_home_summary_reader(*_: object, **__: object) -> object:
+            raise RuntimeError("synthetic home summary reader failure")
+
+        self.adapter.collect_home_summary = fail_home_summary_reader
+        try:
+            response = asyncio.run(
+                self.view.get(FakeRequest("127.0.0.1", reader_user("system-read-only")))
+            )
+        finally:
+            self.adapter.collect_home_summary = original_collect_home_summary
+
+        self.assertEqual(503, response.status)
+        self.assertEqual({"message": "The local summary is unavailable."}, response.payload)
+        self.assertEqual("no-store", response.headers.get("Cache-Control"))
+        self.assertNotIn("synthetic", json.dumps(response.payload))
+
+    def test_view_does_not_swallow_cancelled_home_summary_read(self) -> None:
+        """Cancellation must remain visible to Home Assistant's async framework."""
+
+        original_collect_home_summary = self.adapter.collect_home_summary
+
+        def cancel_home_summary_reader(*_: object, **__: object) -> object:
+            raise asyncio.CancelledError
+
+        self.adapter.collect_home_summary = cancel_home_summary_reader
+        try:
+            with self.assertRaises(asyncio.CancelledError):
+                asyncio.run(
+                    self.view.get(
+                        FakeRequest("127.0.0.1", reader_user("system-read-only"))
+                    )
+                )
+        finally:
+            self.adapter.collect_home_summary = original_collect_home_summary
 
     def test_view_does_not_read_home_when_a_stale_pointer_outlives_hasc(self) -> None:
         """A retained runtime pointer must not outlive the loaded HASC entry."""
@@ -639,6 +845,26 @@ class LocalSummaryAccessTest(unittest.TestCase):
 
         self.assertFalse(asyncio.run(self.integration.async_setup_entry(unsafe_hass, unsafe_entry)))
         self.assertEqual([], unsafe_hass.http.views)
+
+    def test_setup_with_the_optional_page_closed_keeps_only_the_count_display(self) -> None:
+        """Closing the page must not remove the nine safe HASC count sensors."""
+
+        closed_hass = FakeHomeAssistant()
+        closed_entry = FakeEntry(
+            {
+                "mode": "read-only",
+                "direct_execution_status": "direct_execution_blocked",
+            },
+            {"local_summary_enabled": False},
+        )
+        closed_hass.config_entries.entries = [closed_entry]
+
+        self.assertTrue(asyncio.run(self.integration.async_setup_entry(closed_hass, closed_entry)))
+
+        self.assertEqual([(closed_entry, ("sensor",))], closed_hass.config_entries.forwarded)
+        self.assertEqual([], closed_hass.http.views)
+        self.assertEqual({}, closed_hass.data)
+        self.assertEqual(1, len(closed_entry.update_listeners))
 
     def test_setup_rejects_invalid_saved_configuration_before_loading(self) -> None:
         """Stored unsafe values must not open sensors, runtime data, or the page."""

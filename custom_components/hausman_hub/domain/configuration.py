@@ -13,6 +13,12 @@ READ_ONLY_MODE = "read-only"
 SHADOW_MODE = "shadow"
 APPROVED_MODES = (READ_ONLY_MODE, SHADOW_MODE)
 DIRECT_EXECUTION_BLOCKED = "direct_execution_blocked"
+SUMMARY_UPDATE_INTERVAL_DEFAULT = "5m"
+APPROVED_SUMMARY_UPDATE_INTERVALS = (
+    SUMMARY_UPDATE_INTERVAL_DEFAULT,
+    "15m",
+    "30m",
+)
 
 
 class UnsafeModeError(ValueError):
@@ -25,6 +31,8 @@ class SafeConfiguration:
 
     mode: str
     direct_execution_status: str = DIRECT_EXECUTION_BLOCKED
+    local_summary_enabled: bool = True
+    summary_update_interval: str = SUMMARY_UPDATE_INTERVAL_DEFAULT
 
 
 def configuration_for_mode(value: object) -> SafeConfiguration:

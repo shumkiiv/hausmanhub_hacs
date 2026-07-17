@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from ..domain.observation import HomeSummary
-from .configuration import effective_configuration
+from .configuration import ConfigurationViolation, effective_configuration
 
 HOME_SUMMARY_COUNT_KEYS = (
     "areas_count",
@@ -33,7 +33,9 @@ def local_summary_snapshot(
     authentication and local-network checks before it supplies the reader.
     """
 
-    effective_configuration(entry_data, options)
+    configuration = effective_configuration(entry_data, options)
+    if not configuration.local_summary_enabled:
+        raise ConfigurationViolation("local summary page is disabled")
     return home_summary_payload(home_summary_supplier())
 
 

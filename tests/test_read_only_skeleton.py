@@ -14,7 +14,10 @@ sys.path.insert(0, str(ROOT))
 from custom_components.hausman_hub.application.configuration import (  # noqa: E402
     ConfigurationViolation,
     DIRECT_EXECUTION_STATUS_FIELD,
+    LOCAL_SUMMARY_ENABLED_DEFAULT,
+    LOCAL_SUMMARY_ENABLED_FIELD,
     MODE_FIELD,
+    SUMMARY_UPDATE_INTERVAL_FIELD,
     create_initial_entry,
     create_options,
     effective_configuration,
@@ -34,7 +37,9 @@ from custom_components.hausman_hub.application.repairs import (  # noqa: E402
     manual_guidance_for,
 )
 from custom_components.hausman_hub.domain.configuration import (  # noqa: E402
+    APPROVED_SUMMARY_UPDATE_INTERVALS,
     DIRECT_EXECUTION_BLOCKED,
+    SUMMARY_UPDATE_INTERVAL_DEFAULT,
 )
 from custom_components.hausman_hub.domain.observation import (  # noqa: E402
     HomeSummary,
@@ -51,13 +56,140 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         self.assertEqual("hausman_hub", manifest["domain"])
         self.assertTrue(manifest["config_flow"])
         self.assertTrue(manifest["single_config_entry"])
-        self.assertEqual("0.3.14", manifest["version"])
+        self.assertEqual("0.3.18", manifest["version"])
 
     def test_current_manifest_version_has_a_plain_change_note(self) -> None:
         manifest = json.loads((INTEGRATION / "manifest.json").read_text(encoding="utf-8"))
         change_history = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
 
         self.assertIn(f"## {manifest['version']} —", change_history)
+
+    def test_local_access_guides_explain_the_exact_allowed_address_shapes(self) -> None:
+        """The visible instructions must not weaken the checked address boundary."""
+
+        local_access_guide = (ROOT / "docs" / "read-only-local-access.md").read_text(
+            encoding="utf-8"
+        )
+        skeleton_guide = (ROOT / "docs" / "read-only-skeleton.md").read_text(
+            encoding="utf-8"
+        )
+
+        local_access_rule = local_access_guide.split(
+            "1. Запрос пришёл с самого Home Assistant", 1
+        )[1].split("2. Пользователь Home Assistant", 1)[0]
+        self.assertEqual(
+            "— с адреса `127.x.x.x` или `::1` — либо с обычного адреса домашней "
+            "сети: `10.x.x.x`, `172.16.x.x`–`172.31.x.x`, `192.168.x.x` или с "
+            "домашнего IPv6-адреса, начинающегося с `fc` или `fd`. Пустые, "
+            "служебные, тестовые, временные, внешние и другие специальные адреса "
+            "HASC не принимает. Иногда IPv4-адрес записывается внутри IPv6 как "
+            "`::ffff:…`; HASC примет такую запись только если адрес внутри неё сам "
+            "относится к одному из перечисленных IPv4-адресов, включая `127.x.x.x`.",
+            " ".join(local_access_rule.split()),
+        )
+
+        skeleton_access_rule = skeleton_guide.split(
+            "and accepts only loopback", 1
+        )[1].split("\n\nThe inner", 1)[0]
+        self.assertEqual(
+            "(`127.0.0.0/8` or `::1`), RFC 1918 IPv4 (`10.0.0.0/8`, "
+            "`172.16.0.0/12`, or `192.168.0.0/16`), or unique-local IPv6 "
+            "(`fc00::/7`). An IPv4 address written inside IPv6, including "
+            "`::ffff:127.x.x.x`, follows the same IPv4 rule. It has no command "
+            "method or outgoing connection. The owner may close this optional page "
+            "in HASC's settings without changing the nine diagnostic numbers or "
+            "diagnostics. A previously opened address then returns only that the "
+            "summary is unavailable.",
+            " ".join(skeleton_access_rule.split()),
+        )
+
+    def test_review_policy_allows_permitted_work_without_publishing(self) -> None:
+        """A temporary reviewer may support all safe work, never publication."""
+
+        standards = (ROOT / "docs" / "engineering-standards.md").read_text(
+            encoding="utf-8"
+        )
+        contribution_guide = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
+        release_checklist = (ROOT / "docs" / "hacs-release-checklist.md").read_text(
+            encoding="utf-8"
+        )
+        repository_basics = (ROOT / "docs" / "repository-basics.md").read_text(
+            encoding="utf-8"
+        )
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        pull_request_template = (ROOT / ".github" / "pull_request_template.md").read_text(
+            encoding="utf-8"
+        )
+        context = (ROOT / "AI_CONTEXT.md").read_text(encoding="utf-8")
+        english_policy = (
+            "Every code change needs independent review.",
+            "Kimi must review the final current diff before the change is considered "
+            "complete or before a commit, push, release, deployment, or publication.",
+            "another independent review may support every change permitted by the HASC "
+            "boundaries, including code, tests, documentation, and local checks or fixes.",
+            "It does not authorize a commit, push, release, deployment, publication, or "
+            "new authority.",
+            "Documentation-only edits do not require Kimi only when the change contains no "
+            "code; the final Kimi gate applies to a mixed diff.",
+        )
+        russian_policy = (
+            "Kimi должен проверить окончательный текущий набор изменений до того, как "
+            "изменение будет считаться завершённым или будут выполнены коммит, отправка, "
+            "выпуск, развёртывание или публикация.",
+            "Он позволяет продолжать любые изменения внутри границ HASC: код, тесты, "
+            "документацию, местные проверки и исправления.",
+            "Он не разрешает коммит, отправку, выпуск, развёртывание, публикацию или новые "
+            "права.",
+            "Исключение для изменения только документации действует лишь когда в наборе нет "
+            "кода; в смешанном наборе действует финальная проверка Kimi.",
+        )
+        normalized_documents = {
+            "engineering standards": " ".join(standards.split()),
+            "contribution guide": " ".join(contribution_guide.split()),
+            "release checklist": " ".join(release_checklist.split()),
+            "repository basics": " ".join(repository_basics.split()),
+            "README": " ".join(readme.split()),
+            "pull request template": " ".join(pull_request_template.split()),
+            "project context": " ".join(context.split()),
+        }
+
+        for document_name in (
+            "README",
+            "repository basics",
+            "project context",
+        ):
+            with self.subTest(document=document_name):
+                for policy_sentence in english_policy:
+                    self.assertIn(policy_sentence, normalized_documents[document_name])
+
+        self.assertIn(
+            "For every code change, Kimi must review the final current diff before it is "
+            "considered complete or before a commit, push, release, deployment, or "
+            "publication.",
+            normalized_documents["engineering standards"],
+        )
+        self.assertIn(
+            "This alternative review lets every change already permitted by the HASC "
+            "boundaries continue safely, including code, tests, documentation, and "
+            "local checks or fixes. It does not authorize a commit, push, release, "
+            "deployment, publication, or new authority.",
+            normalized_documents["engineering standards"],
+        )
+        self.assertIn(
+            "Documentation-only edits that are not part of a code change do not require "
+            "Kimi review. This narrow exception never applies to a mixed diff: when code "
+            "is present, the final Kimi gate above applies to the entire diff.",
+            normalized_documents["engineering standards"],
+        )
+
+        for document_name in (
+            "contribution guide",
+            "release checklist",
+            "pull request template",
+        ):
+            with self.subTest(document=document_name):
+                for policy_sentence in russian_policy:
+                    self.assertIn(policy_sentence, normalized_documents[document_name])
 
     def test_saved_settings_reload_only_this_hasc_entry(self) -> None:
         """A saved HASC setting must apply without restarting the whole home."""
@@ -80,6 +212,151 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             integration_source.index("entry.async_on_unload(entry.add_update_listener"),
         )
         self.assertIn("saving safe options must reload only HASC", core_check_source)
+
+    def test_optional_local_page_can_close_without_changing_the_nine_counts(self) -> None:
+        """The new setting must only close the already-approved optional page."""
+
+        integration_source = (INTEGRATION / "__init__.py").read_text(encoding="utf-8")
+        local_summary_source = (INTEGRATION / "application" / "local_summary.py").read_text(
+            encoding="utf-8"
+        )
+        core_check_source = (ROOT / "tools" / "check_home_assistant_core.py").read_text(
+            encoding="utf-8"
+        )
+        lifecycle_source = core_check_source.split("async def async_run_check()", 1)[1]
+        inactive_options_source = core_check_source.split(
+            "async def async_update_inactive_safe_options_without_reading_home(",
+            1,
+        )[1].split(
+            "async def async_assert_broken_options_form_defaults_to_read_only(",
+            1,
+        )[0]
+
+        self.assertIn("if configuration.local_summary_enabled:", integration_source)
+        self.assertIn("clear_local_summary_access(hass, entry)", integration_source)
+        self.assertIn("if not configuration.local_summary_enabled:", local_summary_source)
+        self.assertIn("async def async_update_optional_local_page", core_check_source)
+        self.assertEqual(2, lifecycle_source.count("await async_update_optional_local_page("))
+        self.assertIn("optional local page must reject a truth-like text value", core_check_source)
+        self.assertIn("closed optional local page request", core_check_source)
+        self.assertIn("target_local_page_enabled: bool", inactive_options_source)
+        self.assertIn("target_summary_update_interval: str", inactive_options_source)
+        self.assertIn("async with async_block_home_summary_reads(", inactive_options_source)
+        self.assertIn("assert_result(\n        reload_calls,\n        [],", inactive_options_source)
+        self.assertEqual(2, lifecycle_source.count("target_local_page_enabled=False"))
+        self.assertEqual(1, lifecycle_source.count("target_local_page_enabled=True"))
+        stopped_update = """await async_update_inactive_safe_options_without_reading_home(
+                hass,
+                domain,
+                read_only_entry,
+                "shadow",
+                expected_disabled_by=None,
+                target_local_page_enabled=False,
+                target_summary_update_interval="30m",
+            )"""
+        disabled_update = """await async_update_inactive_safe_options_without_reading_home(
+                hass,
+                domain,
+                read_only_entry,
+                "read-only",
+                expected_disabled_by=ConfigEntryDisabler.USER,
+                target_local_page_enabled=True,
+                target_summary_update_interval="5m",
+            )"""
+        restart_update = """await async_update_inactive_safe_options_without_reading_home(
+                restarted_hass,
+                domain,
+                restored_entry,
+                "shadow",
+                expected_disabled_by=ConfigEntryDisabler.USER,
+                target_local_page_enabled=False,
+                target_summary_update_interval="15m",
+            )"""
+        for exact_update in (stopped_update, disabled_update, restart_update):
+            self.assertIn(exact_update, lifecycle_source)
+        self.assertLess(
+            lifecycle_source.index(stopped_update),
+            lifecycle_source.index("await async_setup_safe_entry(hass, read_only_entry)"),
+        )
+        self.assertLess(
+            lifecycle_source.index(disabled_update),
+            lifecycle_source.index("await async_enable_safe_entry(hass, read_only_entry)"),
+        )
+        self.assertLess(
+            lifecycle_source.index(restart_update),
+            lifecycle_source.index(
+                "await async_enable_safe_entry(restarted_hass, restored_entry)"
+            ),
+        )
+        self.assertIn(
+            "HASC ordinary setup with its optional local page closed",
+            lifecycle_source,
+        )
+        self.assertIn(
+            "user reactivation after restart with its optional local page closed",
+            lifecycle_source,
+        )
+
+    def test_core_smoke_check_applies_fixed_intervals_across_restarts(self) -> None:
+        """Guard the exact active, legacy, and ordinary-restart cadence checks."""
+
+        core_check_source = (ROOT / "tools" / "check_home_assistant_core.py").read_text(
+            encoding="utf-8"
+        )
+        lifecycle_source = core_check_source.split("async def async_run_check()", 1)[1]
+        ordinary_restart_source = core_check_source.split(
+            "async def async_assert_ordinary_unloaded_entry_recovers_after_restart(",
+            1,
+        )[1].split(
+            "async def async_assert_ordinary_unloaded_entry_can_be_removed(",
+            1,
+        )[0]
+
+        self.assertIn("async def async_update_summary_interval", core_check_source)
+        self.assertIn('SUMMARY_UPDATE_INTERVAL_FIELD: "1m"', core_check_source)
+        legacy_restart_check = """assert_result(
+                legacy_default_entry_options,
+                {},
+                "a legacy HASC entry must begin without the new interval option",
+            )
+            await hass.async_stop()
+            hass = await async_start_empty_home_assistant(config_directory)"""
+        self.assertIn(legacy_restart_check, lifecycle_source)
+        self.assertIn(
+            """assert_entry_uses_summary_update_interval(
+                hass,
+                domain,
+                read_only_entry.entry_id,
+                SUMMARY_UPDATE_INTERVAL_DEFAULT,
+            )
+            await async_update_safe_options""",
+            lifecycle_source,
+        )
+        self.assertIn(
+            "expected_summary_update_interval = expected_options.get(\n"
+            "        SUMMARY_UPDATE_INTERVAL_FIELD,\n"
+            "        SUMMARY_UPDATE_INTERVAL_DEFAULT,\n"
+            "    )",
+            ordinary_restart_source,
+        )
+        self.assertIn(
+            """assert_entry_uses_summary_update_interval(
+        hass,
+        domain,
+        entry.entry_id,
+        expected_summary_update_interval,
+    )""",
+            ordinary_restart_source,
+        )
+        self.assertIn(
+            """assert_entry_uses_summary_update_interval(
+                post_removal_hass,
+                domain,
+                fresh_entry.entry_id,
+                SUMMARY_UPDATE_INTERVAL_DEFAULT,
+            )""",
+            lifecycle_source,
+        )
 
     def test_distribution_documents_mark_the_private_choice_as_history(self) -> None:
         """Keep current manual-HACS instructions separate from the old choice."""
@@ -160,6 +437,55 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         )
         self.assertEqual("shadow", configuration.mode)
         self.assertEqual(DIRECT_EXECUTION_BLOCKED, configuration.direct_execution_status)
+        self.assertTrue(configuration.local_summary_enabled)
+        self.assertEqual(
+            SUMMARY_UPDATE_INTERVAL_DEFAULT,
+            configuration.summary_update_interval,
+        )
+
+    def test_optional_local_page_can_be_closed_without_changing_the_safe_mode(self) -> None:
+        """This setting protects only the already-approved local page."""
+
+        configuration = effective_configuration(
+            create_initial_entry("shadow"),
+            create_options("shadow", False),
+        )
+
+        self.assertEqual("shadow", configuration.mode)
+        self.assertEqual(DIRECT_EXECUTION_BLOCKED, configuration.direct_execution_status)
+        self.assertFalse(configuration.local_summary_enabled)
+
+        legacy_configuration = effective_configuration(create_initial_entry("read-only"), {})
+        self.assertEqual(LOCAL_SUMMARY_ENABLED_DEFAULT, legacy_configuration.local_summary_enabled)
+        self.assertEqual(
+            SUMMARY_UPDATE_INTERVAL_DEFAULT,
+            legacy_configuration.summary_update_interval,
+        )
+
+    def test_summary_update_interval_can_only_slow_the_same_nine_counts(self) -> None:
+        """The owner may reduce local reads without adding data or authority."""
+
+        for interval in APPROVED_SUMMARY_UPDATE_INTERVALS:
+            with self.subTest(interval=interval):
+                options = create_options("read-only", True, interval)
+                configuration = effective_configuration(
+                    create_initial_entry("read-only"),
+                    options,
+                )
+
+                self.assertEqual(interval, configuration.summary_update_interval)
+                self.assertEqual(
+                    {
+                        MODE_FIELD: "read-only",
+                        LOCAL_SUMMARY_ENABLED_FIELD: True,
+                        SUMMARY_UPDATE_INTERVAL_FIELD: interval,
+                    },
+                    options,
+                )
+                self.assertEqual(
+                    DIRECT_EXECUTION_BLOCKED,
+                    configuration.direct_execution_status,
+                )
 
     def test_empty_options_keep_a_complete_main_setting_safe(self) -> None:
         """Options are optional only after main saved data is complete."""
@@ -181,6 +507,22 @@ class ReadOnlySkeletonTest(unittest.TestCase):
 
         with self.assertRaises(ConfigurationViolation):
             effective_configuration(create_initial_entry("read-only"), {"token": "blocked"})
+
+        for invalid_local_page_value in ("true", 0, 1, None):
+            with self.subTest(invalid_local_page_value=invalid_local_page_value):
+                with self.assertRaises(ConfigurationViolation):
+                    effective_configuration(
+                        create_initial_entry("read-only"),
+                        {LOCAL_SUMMARY_ENABLED_FIELD: invalid_local_page_value},
+                    )
+
+        for invalid_interval in ("1m", "10m", "60m", 5, None):
+            with self.subTest(invalid_interval=invalid_interval):
+                with self.assertRaises(ConfigurationViolation):
+                    effective_configuration(
+                        create_initial_entry("read-only"),
+                        {SUMMARY_UPDATE_INTERVAL_FIELD: invalid_interval},
+                    )
 
     def test_persisted_configuration_requires_both_main_fields(self) -> None:
         """A safe option must not fill in a missing saved main field."""
@@ -247,10 +589,34 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         serialized = json.dumps(snapshot, ensure_ascii=False).lower()
 
         self.assertEqual("shadow", snapshot["entry_summary"]["mode"])
+        self.assertIs(True, snapshot["entry_summary"]["local_summary_enabled"])
+        self.assertEqual(
+            SUMMARY_UPDATE_INTERVAL_DEFAULT,
+            snapshot["entry_summary"]["summary_update_interval"],
+        )
         self.assertEqual("not_granted", snapshot["safety_model"]["device_authority"])
         self.assertEqual(DIRECT_EXECUTION_BLOCKED, snapshot["safety_model"]["direct_execution_status"])
         for forbidden_value in ("token", "entity_id", "device_id", "command", "payload"):
             self.assertNotIn(forbidden_value, serialized)
+
+    def test_diagnostics_show_only_effective_safe_hasc_settings(self) -> None:
+        """Options may affect only the three validated HASC settings shown."""
+
+        snapshot = diagnostics_snapshot(
+            create_initial_entry("read-only"),
+            create_options("shadow", False, "30m"),
+            self.home_summary(),
+        )
+
+        self.assertEqual(
+            {
+                "mode": "shadow",
+                "local_summary_enabled": False,
+                "summary_update_interval": "30m",
+                "single_config_entry": True,
+            },
+            snapshot["entry_summary"],
+        )
 
     def test_diagnostics_shape_is_a_fixed_allow_list(self) -> None:
         """Guard the redacted export against accidental future data expansion."""
@@ -272,7 +638,15 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             },
             set(snapshot),
         )
-        self.assertEqual({"mode", "single_config_entry"}, set(snapshot["entry_summary"]))
+        self.assertEqual(
+            {
+                "mode",
+                "local_summary_enabled",
+                "summary_update_interval",
+                "single_config_entry",
+            },
+            set(snapshot["entry_summary"]),
+        )
         self.assertEqual(
             {"device_authority", "direct_execution_status", "proxy_status"},
             set(snapshot["safety_model"]),
@@ -426,6 +800,24 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             )
         self.assertFalse(home_read_attempted)
 
+    def test_closed_optional_local_page_does_not_read_the_home(self) -> None:
+        """A stored off choice must fail before the aggregate supplier runs."""
+
+        home_read_attempted = False
+
+        def fail_if_home_is_read() -> object:
+            nonlocal home_read_attempted
+            home_read_attempted = True
+            raise AssertionError("a closed local summary page must not read the home")
+
+        with self.assertRaises(ConfigurationViolation):
+            local_summary_snapshot(
+                create_initial_entry("read-only"),
+                {LOCAL_SUMMARY_ENABLED_FIELD: False},
+                fail_if_home_is_read,
+            )
+        self.assertFalse(home_read_attempted)
+
     def test_home_summary_display_has_exactly_the_same_nine_numbers(self) -> None:
         """The visible display cannot add data beyond the approved summary."""
 
@@ -458,6 +850,25 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         self.assertIn(
             'self.entity_id = f"{SENSOR_ENTITY_ID_PREFIX}_{summary_key}"',
             sensor_source,
+        )
+
+    def test_summary_sensors_keep_fixed_visual_icons(self) -> None:
+        """The nine approved numbers may gain only static visual labels."""
+
+        sensor_source = (INTEGRATION / "sensor.py").read_text(encoding="utf-8")
+        core_check_source = (ROOT / "tools" / "check_home_assistant_core.py").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("SUMMARY_SENSOR_ICONS", sensor_source)
+        self.assertIn(
+            "self._attr_icon = SUMMARY_SENSOR_ICONS[summary_key]",
+            sensor_source,
+        )
+        self.assertIn("SUMMARY_SENSOR_ICONS", core_check_source)
+        self.assertIn(
+            "a HASC summary sensor must keep its fixed visual icon",
+            core_check_source,
         )
 
     def test_core_smoke_check_requires_no_hasc_devices(self) -> None:
@@ -587,7 +998,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             "an unloaded HASC summary sensor must remain enabled",
             "an unloaded HASC summary sensor must not keep a state",
             '"HASC ordinary unload",',
-            '"HASC ordinary setup",',
+            '"HASC ordinary setup with its optional local page closed",',
         ):
             self.assertIn(requirement, core_check_source)
 
@@ -617,8 +1028,9 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             "ordinary unload restart must auto-load HASC",
             "ordinary unload restart must preserve safe entry data",
             "ordinary unload restart must preserve safe entry options",
-            '"HASC ordinary unload before restart",',
+            '"ordinary HASC stop before restart with its optional local page closed",',
             '"HASC ordinary-unload restart temporary",',
+            '"ordinary unload restart with its optional local page closed",',
         ):
             self.assertIn(requirement, core_check_source)
 
@@ -790,7 +1202,9 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             rejection_call,
             lifecycle_source.index(unload_call),
         )
-        unavailable_marker = '"HASC ordinary unload before restart",'
+        unavailable_marker = (
+            '"ordinary HASC stop before restart with its optional local page closed",'
+        )
         self.assertLess(lifecycle_source.index(unload_call), rejection_start)
         self.assertLess(
             rejection_start,
@@ -921,7 +1335,10 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             core_check_source,
         )
         self.assertIn('"HASC deactivation before restart",', lifecycle_source)
-        self.assertIn('"HASC disabled-restart temporary",', lifecycle_source)
+        self.assertIn(
+            '"user reactivation after restart with its optional local page closed",',
+            lifecycle_source,
+        )
         self.assertLess(
             lifecycle_source.rindex("await async_disable_safe_entry(hass, read_only_entry)"),
             lifecycle_source.index("restarted_hass = await async_start_empty_home_assistant"),
@@ -993,6 +1410,22 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             core_check_source,
         )
         self.assertIn(
+            "local summary view must keep its one fixed URL",
+            core_check_source,
+        )
+        self.assertIn(
+            "local summary view must not define alternate URLs",
+            core_check_source,
+        )
+        self.assertIn(
+            'methods != {"GET", "OPTIONS"}',
+            core_check_source,
+        )
+        self.assertIn(
+            "local summary route must register GET and Home Assistant's safe OPTIONS only",
+            core_check_source,
+        )
+        self.assertIn(
             "the retained local summary route must remain unique",
             core_check_source,
         )
@@ -1044,6 +1477,174 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         self.assertGreaterEqual(
             core_check_source.count("assert_local_summary_response_is_not_stored("),
             5,
+        )
+
+    def test_core_smoke_check_rejects_disallowed_local_summary_origins(self) -> None:
+        """The disposable Core check must close non-home source addresses before reads."""
+
+        core_check_source = (ROOT / "tools" / "check_home_assistant_core.py").read_text(
+            encoding="utf-8"
+        )
+        disallowed_origin_source = core_check_source.split(
+            "async def async_assert_disallowed_local_summary_origins_are_rejected", 1
+        )[1].split("async def async_assert_authenticated_local_summary_http_access", 1)[0]
+
+        self.assertIn(
+            "DISALLOWED_LOCAL_SUMMARY_ORIGINS",
+            disallowed_origin_source,
+        )
+        for remote in (
+            '"::2"',
+            '"126.255.255.255"',
+            '"128.0.0.0"',
+            '"9.255.255.255"',
+            '"11.0.0.0"',
+            '"192.0.2.1"',
+            '"192.167.255.255"',
+            '"192.169.0.0"',
+            '"169.254.1.1"',
+            '"fbff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"',
+            '"fe00::"',
+            '"fe80::1"',
+            '"::ffff:192.0.2.1"',
+            '"::ffff:126.255.255.255"',
+            '"::ffff:128.0.0.0"',
+            '"::ffff:9.255.255.255"',
+            '"::ffff:11.0.0.0"',
+            '"::ffff:172.15.255.255"',
+            '"::ffff:172.32.0.0"',
+            '"::ffff:192.167.255.255"',
+            '"::ffff:192.169.0.0"',
+        ):
+            with self.subTest(remote=remote):
+                self.assertIn(remote, core_check_source)
+        self.assertIn("async_block_home_summary_reads(", disallowed_origin_source)
+        self.assertIn("DirectLocalSummaryRequest(remote, reader)", disallowed_origin_source)
+        self.assertIn("local summary must reject disallowed origin", disallowed_origin_source)
+        self.assertIn("rejected disallowed origin must not return count values", disallowed_origin_source)
+
+    def test_core_smoke_check_accepts_exact_home_network_boundaries(self) -> None:
+        """The disposable Core check must retain the exact allowed address edges."""
+
+        core_check_source = (ROOT / "tools" / "check_home_assistant_core.py").read_text(
+            encoding="utf-8"
+        )
+        approved_origin_source = core_check_source.split(
+            "async def async_assert_approved_local_summary_origins_are_accepted", 1
+        )[1].split("async def async_assert_disallowed_local_summary_origins_are_rejected", 1)[0]
+
+        self.assertIn("APPROVED_LOCAL_SUMMARY_ORIGINS", approved_origin_source)
+        for remote in (
+            '"127.0.0.0"',
+            '"127.255.255.255"',
+            '"10.0.0.0"',
+            '"10.255.255.255"',
+            '"172.16.0.0"',
+            '"172.31.255.255"',
+            '"192.168.0.0"',
+            '"192.168.255.255"',
+            '"fc00::"',
+            '"fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"',
+            '"::ffff:127.0.0.0"',
+            '"::ffff:127.255.255.255"',
+            '"::ffff:172.31.255.255"',
+        ):
+            with self.subTest(remote=remote):
+                self.assertIn(remote, core_check_source)
+        self.assertIn("DirectLocalSummaryRequest(remote, reader)", approved_origin_source)
+        self.assertIn("local summary must accept approved origin", approved_origin_source)
+        self.assertIn("assert_safe_home_summary(json.loads(accepted.body))", approved_origin_source)
+
+    def test_core_smoke_check_closes_a_failed_local_summary_read(self) -> None:
+        """A temporary reader failure must not expose any summary counts."""
+
+        core_check_source = (ROOT / "tools" / "check_home_assistant_core.py").read_text(
+            encoding="utf-8"
+        )
+        failure_source = core_check_source.split(
+            "async def async_assert_local_summary_observation_failure_is_unavailable", 1
+        )[1].split("async def async_assert_local_summary_rejects_non_get_requests", 1)[0]
+        access_check_source = core_check_source.split(
+            "async def async_assert_authenticated_local_summary_http_access", 1
+        )[1].split("async def async_assert_local_summary_is_unavailable", 1)[0]
+
+        self.assertIn("async_block_home_summary_reads(", failure_source)
+        self.assertIn("DirectLocalSummaryRequest(\"127.0.0.1\", reader)", failure_source)
+        self.assertIn("HTTPStatus.SERVICE_UNAVAILABLE", failure_source)
+        self.assertIn("failed local summary response must not expose error details", failure_source)
+        self.assertIn("failed local summary observation must not return count values", failure_source)
+        self.assertIn(
+            "await async_assert_local_summary_observation_failure_is_unavailable(",
+            access_check_source,
+        )
+
+    def test_core_smoke_check_rejects_non_get_local_summary_requests(self) -> None:
+        """The disposable Core check must close all non-GET route methods."""
+
+        core_check_source = (ROOT / "tools" / "check_home_assistant_core.py").read_text(
+            encoding="utf-8"
+        )
+        non_get_source = core_check_source.split(
+            "async def async_assert_local_summary_rejects_non_get_requests", 1
+        )[1].split("async def async_assert_authenticated_local_summary_http_access", 1)[0]
+        access_check_source = core_check_source.split(
+            "async def async_assert_authenticated_local_summary_http_access", 1
+        )[1].split("async def async_assert_local_summary_is_unavailable", 1)[0]
+
+        self.assertIn("NON_GET_LOCAL_SUMMARY_STATUSES", non_get_source)
+        self.assertIn('"OPTIONS": HTTPStatus.FORBIDDEN', core_check_source)
+        self.assertIn('"POST": HTTPStatus.METHOD_NOT_ALLOWED', core_check_source)
+        self.assertIn('"TRACE": HTTPStatus.METHOD_NOT_ALLOWED', core_check_source)
+        self.assertIn('"CONNECT": HTTPStatus.NOT_FOUND', core_check_source)
+        self.assertIn("async_block_home_summary_reads(", non_get_source)
+        self.assertIn("for method, expected_status", non_get_source)
+        self.assertIn("local summary must reject {method}", non_get_source)
+        self.assertIn("async_assert_http_response_omits_summary_keys(", non_get_source)
+        self.assertIn("await response.read()", core_check_source)
+        self.assertIn("must not return count keys", core_check_source)
+        self.assertIn(
+            "await async_assert_local_summary_rejects_non_get_requests(",
+            access_check_source,
+        )
+        self.assertIn(
+            '"unauthenticated local summary response"',
+            access_check_source,
+        )
+        self.assertIn(
+            '"rejected local summary owner response"',
+            access_check_source,
+        )
+
+    def test_core_smoke_check_rejects_alternate_local_summary_paths(self) -> None:
+        """The disposable Core check must keep small address variations closed."""
+
+        core_check_source = (ROOT / "tools" / "check_home_assistant_core.py").read_text(
+            encoding="utf-8"
+        )
+        alternate_path_source = core_check_source.split(
+            "async def async_assert_local_summary_rejects_alternate_paths", 1
+        )[1].split("async def async_assert_authenticated_local_summary_http_access", 1)[0]
+        access_check_source = core_check_source.split(
+            "async def async_assert_authenticated_local_summary_http_access", 1
+        )[1].split("async def async_assert_local_summary_is_unavailable", 1)[0]
+
+        self.assertIn(
+            "ALTERNATE_LOCAL_SUMMARY_TARGET_STATUSES = {",
+            core_check_source,
+        )
+        self.assertIn('f"{LOCAL_SUMMARY_PATH}?unexpected=1": HTTPStatus.NOT_FOUND', core_check_source)
+        self.assertIn("async_block_home_summary_reads(", alternate_path_source)
+        self.assertIn(
+            "for alternate_target, expected_status in ALTERNATE_LOCAL_SUMMARY_TARGET_STATUSES.items()",
+            alternate_path_source,
+        )
+        self.assertIn("HTTPStatus.NOT_FOUND", core_check_source)
+        self.assertIn("allow_redirects=False", alternate_path_source)
+        self.assertIn("local summary must reject alternate target", alternate_path_source)
+        self.assertIn("async_assert_http_response_omits_summary_keys(", alternate_path_source)
+        self.assertIn(
+            "await async_assert_local_summary_rejects_alternate_paths(",
+            access_check_source,
         )
 
     def test_core_smoke_check_closes_invalid_saved_configuration(self) -> None:
@@ -1574,7 +2175,12 @@ class ReadOnlySkeletonTest(unittest.TestCase):
 
         sensor_source = (INTEGRATION / "sensor.py").read_text(encoding="utf-8")
         self.assertIn("HOME_SUMMARY_COUNT_KEYS", sensor_source)
-        self.assertIn("timedelta(minutes=5)", sensor_source)
+        for minutes in (5, 15, 30):
+            self.assertIn(f'timedelta(minutes={minutes})', sensor_source)
+        self.assertIn(
+            "SUMMARY_UPDATE_INTERVALS[configuration.summary_update_interval]",
+            sensor_source,
+        )
         self.assertIn("EntityCategory.DIAGNOSTIC", sensor_source)
 
         local_view_source = (INTEGRATION / "local_summary.py").read_text(encoding="utf-8")
@@ -1584,13 +2190,39 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         for blocked_method in ("async def post", "async def put", "async def patch", "async def delete"):
             self.assertNotIn(blocked_method, local_view_source)
 
-    def test_translations_are_present_for_the_only_selector(self) -> None:
+    def test_translations_describe_the_three_safe_settings(self) -> None:
         for language in ("en", "ru"):
             content = json.loads(
                 (INTEGRATION / "translations" / f"{language}.json").read_text(encoding="utf-8")
             )
             self.assertIn("mode", content["selector"])
             self.assertIn("unsafe_mode", content["config"]["error"])
+            self.assertIn("local_summary_enabled", content["options"]["step"]["init"]["data"])
+            self.assertIn(
+                "local_summary_enabled",
+                content["options"]["step"]["init"]["data_description"],
+            )
+            self.assertIn(
+                "unsafe_local_summary_setting",
+                content["options"]["error"],
+            )
+            self.assertIn("summary_update_interval", content["selector"])
+            self.assertIn(
+                "summary_update_interval",
+                content["options"]["step"]["init"]["data"],
+            )
+            self.assertIn(
+                "summary_update_interval",
+                content["options"]["step"]["init"]["data_description"],
+            )
+            self.assertIn(
+                "unsafe_summary_update_interval",
+                content["options"]["error"],
+            )
+            self.assertEqual(
+                set(APPROVED_SUMMARY_UPDATE_INTERVALS),
+                set(content["selector"]["summary_update_interval"]["options"]),
+            )
 
     def test_sensor_translations_have_only_the_approved_nine_counts(self) -> None:
         """Every visible label must map to an already-approved aggregate count."""
@@ -1639,8 +2271,13 @@ class ReadOnlySkeletonTest(unittest.TestCase):
                         content["config"]["error"]["unsafe_mode"],
                         options_step["description"],
                         options_step["data_description"]["mode"],
+                        options_step["data_description"]["local_summary_enabled"],
+                        options_step["data_description"]["summary_update_interval"],
                         content["options"]["error"]["unsafe_mode"],
+                        content["options"]["error"]["unsafe_local_summary_setting"],
+                        content["options"]["error"]["unsafe_summary_update_interval"],
                         *content["selector"]["mode"]["options"].values(),
+                        *content["selector"]["summary_update_interval"]["options"].values(),
                     )
                 ).lower()
                 self.assertNotIn("private", rendered_text)
