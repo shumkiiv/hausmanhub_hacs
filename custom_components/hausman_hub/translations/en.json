@@ -46,12 +46,35 @@
       },
       "climate_registry": {
         "title": "Climate device setup",
-        "description": "Add or replace rooms and devices with guided fields, then review the complete draft. Nothing is saved before the separate confirmation step.",
+        "description": "Select devices from a fresh read-only import or add them manually, then review the complete draft. Nothing is saved before the separate confirmation step.",
         "data": {
           "climate_registry_action": "Registry action"
         },
         "data_description": {
           "climate_registry_action": "Choose the next guided setup step. Advanced JSON is optional."
+        }
+      },
+      "climate_import_candidate": {
+        "title": "Select a Climate API device",
+        "description": "HASC performs only a fresh read-only import. The list shows a name and room while the private source ID is neither displayed nor typed. The selection changes only the temporary draft.",
+        "data": {
+          "climate_import_candidate": "Climate API candidate"
+        }
+      },
+      "climate_import_device": {
+        "title": "Configure the imported device",
+        "description": "Set the public HASC ID and policy fields, then choose the control entity with Home Assistant's native selector. HASC rechecks the fresh candidate, supplies its private binding, and shows the normal preview. This step sends no command and saves nothing.",
+        "data": {
+          "climate_device_id": "Public HASC device ID",
+          "climate_device_name": "Device name",
+          "climate_device_kind": "Device kind",
+          "climate_device_control_scope": "Rollout scope",
+          "climate_device_control_owner": "Control owner",
+          "climate_device_control_entity": "Private control entity"
+        },
+        "data_description": {
+          "climate_device_id": "Use a stable lowercase ID; only this ID enters the Android contract.",
+          "climate_device_control_entity": "Select the entity instead of copying its ID. It remains only in the draft until separate confirmation."
         }
       },
       "climate_registry_room": {
@@ -131,6 +154,9 @@
       "invalid_climate_room": "Use one stable lowercase room ID and a non-empty room name.",
       "invalid_climate_device": "The device fields, required capabilities, ownership, scope, and control entity do not form a valid HASC device.",
       "climate_registry_needs_room": "Add at least one room before adding a device.",
+      "climate_import_unavailable": "A fresh read-only Climate API import is unavailable. Configure the shadow target and check its state without enabling canary.",
+      "climate_import_no_candidates": "The fresh import has no new supported candidates for this draft.",
+      "invalid_climate_candidate": "The candidate changed, is already present, or cannot form a safe typed device. Refresh the selection and try again.",
       "climate_shadow_evidence_unavailable": "Shadow evidence for this room is unavailable. Keep the bridge in shadow and check its target, registry, and current state."
     }
   },
@@ -163,6 +189,7 @@
     },
     "climate_registry_action": {
       "options": {
+        "import_candidate": "Select device from read-only import",
         "add_room": "Add or replace room",
         "add_device": "Add or replace device",
         "review_shadow_evidence": "Review shadow evidence",

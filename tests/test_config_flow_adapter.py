@@ -81,7 +81,7 @@ class FakeBooleanSelector:
 class FakeEntitySelectorConfig:
     """Capture the exact entity domain permitted by the canary selector."""
 
-    def __init__(self, *, domain: str, multiple: bool) -> None:
+    def __init__(self, *, domain: str | list[str], multiple: bool) -> None:
         self.domain = domain
         self.multiple = multiple
 
@@ -872,6 +872,155 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
             ["living_ac"],
             [device.device_id for device in store.saved[0].devices],
         )
+
+    async def test_options_import_candidates_without_private_id_copying(self) -> None:
+        """Opaque selector choices populate private bindings only after confirmation."""
+
+        from custom_components.hausman_hub.application.climate_import import (
+            import_climate_state,
+        )
+        from custom_components.hausman_hub.application.climate_runtime import ClimateRuntime
+        from custom_components.hausman_hub.domain.climate import ClimateRegistry
+        from custom_components.hausman_hub.domain.climate_bridge import ClimateBridgeMode
+        from custom_components.hausman_hub.domain.configuration import SafeConfiguration
+        from tests.test_climate_import import source_payload
+
+        class Store:
+            def __init__(self) -> None:
+                self.registry = ClimateRegistry()
+                self.saved = []
+
+            async def async_load(self):
+                return self.registry
+
+            async def async_save(self, registry):
+                self.registry = registry
+                self.saved.append(registry)
+
+        class Bridge:
+            def __init__(self) -> None:
+                self.executed = []
+                self.fetches = 0
+
+            async def async_fetch_state(self):
+                self.fetches += 1
+                return import_climate_state(source_payload())
+
+            async def async_execute(self, plan):
+                self.executed.append(plan)
+
+        store = Store()
+        bridge = Bridge()
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=SafeConfiguration(
+                mode="shadow",
+                climate_bridge_mode=ClimateBridgeMode.SHADOW,
+            ),
+            registry_store=store,
+            bridge_client=bridge,
+        )
+        await runtime.async_start()
+        options_flow = self.config_flow.HausmanHubOptionsFlow()
+        options_flow.config_entry = FakeConfigEntry(
+            {"mode": "read-only", "direct_execution_status": "direct_execution_blocked"},
+            {"mode": "shadow"},
+        )
+        options_flow.hass = SimpleNamespace(  # type: ignore[attr-defined]
+            data={"hausman_hub": {"climate_runtime": runtime}}
+        )
+
+        await options_flow.async_step_init({"next_step": "manage_climate_registry"})
+        ac_choices = await options_flow.async_step_climate_registry(
+            {"climate_registry_action": "import_candidate"}
+        )
+        choice_fields = list(ac_choices["schema"].fields.items())
+        choice_selector = choice_fields[0][1]
+        self.assertEqual(
+            ["candidate_001", "candidate_002"],
+            [option["value"] for option in choice_selector.config.options],
+        )
+        serialized_choices = str(choice_selector.config.options)
+        self.assertNotIn("synthetic-ac-source-living", serialized_choices)
+        self.assertNotIn("synthetic-humidifier-source-kids", serialized_choices)
+
+        fetches_before_selection = bridge.fetches
+        ac_form = await options_flow.async_step_climate_import_candidate(
+            {"climate_import_candidate": "candidate_001"}
+        )
+        self.assertEqual(fetches_before_selection, bridge.fetches)
+        ac_fields = {
+            field.key: selector for field, selector in ac_form["schema"].fields.items()
+        }
+        self.assertNotIn("climate_device_source_id", ac_fields)
+        self.assertNotIn("climate_device_room", ac_fields)
+        self.assertEqual(
+            "climate",
+            ac_fields["climate_device_control_entity"].config.domain,
+        )
+        menu_after_ac = await options_flow.async_step_climate_import_device(
+            {
+                "climate_device_id": "living_ac",
+                "climate_device_name": "Living AC",
+                "climate_device_kind": "air_conditioner",
+                "climate_device_control_scope": "canary",
+                "climate_device_control_owner": "climate_core",
+                "climate_device_control_entity": "climate.synthetic_living_ac",
+                "climate_device_source_id": "attacker-cannot-override-selection",
+            }
+        )
+        self.assertEqual("climate_registry", menu_after_ac["step_id"])
+        self.assertEqual([], store.saved)
+
+        humidifier_choices = await options_flow.async_step_climate_registry(
+            {"climate_registry_action": "import_candidate"}
+        )
+        remaining_selector = next(iter(humidifier_choices["schema"].fields.values()))
+        self.assertEqual(
+            ["candidate_002"],
+            [option["value"] for option in remaining_selector.config.options],
+        )
+        humidifier_form = await options_flow.async_step_climate_import_candidate(
+            {"climate_import_candidate": "candidate_002"}
+        )
+        humidifier_fields = {
+            field.key: selector
+            for field, selector in humidifier_form["schema"].fields.items()
+        }
+        self.assertEqual(
+            "humidifier",
+            humidifier_fields["climate_device_control_entity"].config.domain,
+        )
+        await options_flow.async_step_climate_import_device(
+            {
+                "climate_device_id": "kids_humidifier",
+                "climate_device_name": "Kids humidifier",
+                "climate_device_kind": "humidifier",
+                "climate_device_control_scope": "observed",
+                "climate_device_control_owner": "observed",
+                "climate_device_control_entity": "humidifier.synthetic_kids",
+            }
+        )
+        preview = await options_flow.async_step_climate_registry(
+            {"climate_registry_action": "review_registry"}
+        )
+
+        self.assertEqual("climate_registry_confirm", preview["step_id"])
+        self.assertEqual([], store.saved)
+        saved = await options_flow.async_step_climate_registry_confirm(
+            {"confirm_registry_save": True}
+        )
+        self.assertEqual("create_entry", saved["type"])
+        self.assertEqual(1, len(store.saved))
+        self.assertEqual(
+            ["living", "kids"],
+            [room.room_id for room in store.saved[0].rooms],
+        )
+        self.assertEqual(
+            ["synthetic-ac-source-living", "synthetic-humidifier-source-kids"],
+            [device.source_id for device in store.saved[0].devices],
+        )
+        self.assertEqual([], bridge.executed)
 
     async def test_options_show_redacted_shadow_evidence_without_saving(self) -> None:
         """The guided setup exposes candidate readiness as a read-only screen."""

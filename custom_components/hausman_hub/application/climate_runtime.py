@@ -177,6 +177,12 @@ class ClimateRuntime:
             snapshot = await self._async_refresh_unlocked()
             return admin_climate_import_snapshot(self._registry, snapshot)
 
+    async def async_registry_import_snapshot(self) -> ClimateImportSnapshot:
+        """Refresh one typed read-only snapshot for the local options wizard."""
+
+        async with self._lock:
+            return await self._async_refresh_unlocked()
+
     async def async_registry_payload(self) -> dict[str, object]:
         """Return the exact private registry shape to a local admin."""
 

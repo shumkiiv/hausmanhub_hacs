@@ -46,12 +46,35 @@
       },
       "climate_registry": {
         "title": "Настройка климатических устройств",
-        "description": "Добавляйте или заменяйте комнаты и устройства через отдельные поля, затем проверьте весь черновик. До отдельного подтверждения ничего не сохраняется.",
+        "description": "Выбирайте устройства из свежего read-only импорта или добавляйте их вручную, затем проверьте весь черновик. До отдельного подтверждения ничего не сохраняется.",
         "data": {
           "climate_registry_action": "Действие с реестром"
         },
         "data_description": {
           "climate_registry_action": "Выберите следующий шаг мастера. Редактор JSON нужен только для расширенной настройки."
+        }
+      },
+      "climate_import_candidate": {
+        "title": "Выбор устройства из Climate API",
+        "description": "HASC выполняет только свежий read-only импорт. В списке видны название и комната, а приватный source ID не показывается и не вводится вручную. Выбор пока изменяет только временный черновик.",
+        "data": {
+          "climate_import_candidate": "Кандидат Climate API"
+        }
+      },
+      "climate_import_device": {
+        "title": "Настройка импортируемого устройства",
+        "description": "Задайте публичный ID и параметры HASC, затем выберите control entity штатным списком Home Assistant. HASC повторно проверит свежий кандидат, сам подставит его приватную привязку и выведет обычный preview. Команда и сохранение на этом шаге не выполняются.",
+        "data": {
+          "climate_device_id": "Публичный ID устройства HASC",
+          "climate_device_name": "Название устройства",
+          "climate_device_kind": "Тип устройства",
+          "climate_device_control_scope": "Область rollout",
+          "climate_device_control_owner": "Владелец управления",
+          "climate_device_control_entity": "Приватный control entity"
+        },
+        "data_description": {
+          "climate_device_id": "Стабильный ID в нижнем регистре; только он попадёт в Android-контракт.",
+          "climate_device_control_entity": "Выберите entity из списка, не копируя его ID вручную. До отдельного подтверждения значение остаётся только в черновике."
         }
       },
       "climate_registry_room": {
@@ -131,6 +154,9 @@
       "invalid_climate_room": "Нужны стабильный ID комнаты в нижнем регистре и непустое название.",
       "invalid_climate_device": "Поля, обязательные capabilities, owner, scope и control entity не образуют корректное устройство HASC.",
       "climate_registry_needs_room": "Сначала добавьте хотя бы одну комнату.",
+      "climate_import_unavailable": "Свежий read-only импорт Climate API недоступен. Настройте shadow-адрес и проверьте состояние, не включая canary.",
+      "climate_import_no_candidates": "В свежем импорте нет новых поддерживаемых кандидатов для этого черновика.",
+      "invalid_climate_candidate": "Кандидат изменился, уже добавлен или не образует безопасное типизированное устройство. Обновите выбор и повторите.",
       "climate_shadow_evidence_unavailable": "Shadow-доказательства для комнаты недоступны. Оставьте мост в shadow и проверьте адрес, реестр и текущее состояние."
     }
   },
@@ -163,6 +189,7 @@
     },
     "climate_registry_action": {
       "options": {
+        "import_candidate": "Выбрать устройство из read-only импорта",
         "add_room": "Добавить или заменить комнату",
         "add_device": "Добавить или заменить устройство",
         "review_shadow_evidence": "Посмотреть shadow-доказательства",

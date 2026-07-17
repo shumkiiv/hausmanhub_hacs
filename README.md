@@ -6,10 +6,12 @@ Safety-first Home Assistant custom integration for HausMan Hub.
 
 This repository contains a public Home Assistant integration under
 `custom_components/hausman_hub/`. It always creates nine diagnostic number
-sensors from the approved aggregate summary. Version 0.5.2 adds a persistent,
-redacted 24-hour shadow-evidence window, guided candidate-room readiness, and
-a fail-closed evidence gate on top of the 0.5.1 registry workflow, installed
-JSON Schemas, zero-POST shadow acceptance, and idempotent operation receipts.
+sensors from the approved aggregate summary. Version 0.5.3 adds explicit
+read-only candidate selection with opaque form tokens and native Home
+Assistant entity selectors, so an operator can prepare a registry without
+copying private IDs. It builds on the persistent redacted shadow-evidence
+window, guided readiness, installed JSON Schemas, zero-POST shadow acceptance,
+and idempotent operation receipts.
 These features build on the private logical climate-device
 registry, a local Android facade, read-only import of
 the existing Climate API, shadow validation, and a one-room typed climate
@@ -81,6 +83,12 @@ The legacy single-`input_boolean` canary remains separate.
     room's `collecting`, `blocked`, or `ready` result in the guided options
     flow, and keep canary execution closed until three spaced exact samples and
     both initial room actions have been translated without anomalies.
+13. In version 0.5.3, select fresh Climate API candidates through opaque
+    non-private form tokens, choose their control entities with Home
+    Assistant's native selector, infer only advertised typed capabilities, and
+    keep the result in an unsaved draft until preview and separate atomic
+    confirmation. See the [inactive one-room rollout
+    checklist](docs/climate-canary-rollout-checklist.md).
 
 See [repository basics](docs/repository-basics.md) and
 [AI context](AI_CONTEXT.md) before changing the repository.

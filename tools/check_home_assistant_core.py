@@ -2911,6 +2911,122 @@ async def async_assert_shadow_climate_end_to_end(
         await hass.async_block_till_done()
         await home_client.start_server()
 
+        registry_form = await hass.config_entries.options.async_init(entry.entry_id)
+        registry_menu = await hass.config_entries.options.async_configure(
+            registry_form["flow_id"],
+            {"next_step": "manage_climate_registry"},
+        )
+        assert_result(
+            (registry_menu["type"], registry_menu["step_id"]),
+            ("form", "climate_registry"),
+            "real options flow must open the separate climate registry wizard",
+        )
+        ac_candidate_form = await hass.config_entries.options.async_configure(
+            registry_form["flow_id"],
+            {"climate_registry_action": "import_candidate"},
+        )
+        assert_result(
+            (ac_candidate_form["type"], ac_candidate_form["step_id"]),
+            ("form", "climate_import_candidate"),
+            "registry wizard must expose fresh read-only import candidates",
+        )
+        candidate_schema = repr(ac_candidate_form.get("data_schema"))
+        if (
+            "synthetic-ac-source-living" in candidate_schema
+            or "synthetic-humidifier-source-kids" in candidate_schema
+        ):
+            raise RuntimeError("candidate selector must not expose private source IDs")
+        ac_device_form = await hass.config_entries.options.async_configure(
+            registry_form["flow_id"],
+            {"climate_import_candidate": "candidate_001"},
+        )
+        assert_result(
+            (ac_device_form["type"], ac_device_form["step_id"]),
+            ("form", "climate_import_device"),
+            "opaque AC selection must open the public device fields",
+        )
+        ac_added = await hass.config_entries.options.async_configure(
+            registry_form["flow_id"],
+            {
+                "climate_device_id": "living_ac",
+                "climate_device_name": "Living AC",
+                "climate_device_kind": "air_conditioner",
+                "climate_device_control_scope": "canary",
+                "climate_device_control_owner": "climate_core",
+                "climate_device_control_entity": "climate.synthetic_living_ac",
+            },
+        )
+        assert_result(
+            (ac_added["type"], ac_added["step_id"]),
+            ("form", "climate_registry"),
+            "selected AC must return only to the unsaved registry draft",
+        )
+        humidifier_candidate_form = await hass.config_entries.options.async_configure(
+            registry_form["flow_id"],
+            {"climate_registry_action": "import_candidate"},
+        )
+        humidifier_device_form = await hass.config_entries.options.async_configure(
+            registry_form["flow_id"],
+            {"climate_import_candidate": "candidate_002"},
+        )
+        assert_result(
+            (
+                humidifier_candidate_form["step_id"],
+                humidifier_device_form["step_id"],
+            ),
+            ("climate_import_candidate", "climate_import_device"),
+            "second opaque candidate must remain selectable from the same draft",
+        )
+        humidifier_added = await hass.config_entries.options.async_configure(
+            registry_form["flow_id"],
+            {
+                "climate_device_id": "kids_humidifier",
+                "climate_device_name": "Kids humidifier",
+                "climate_device_kind": "humidifier",
+                "climate_device_control_scope": "observed",
+                "climate_device_control_owner": "observed",
+                "climate_device_control_entity": "humidifier.synthetic_kids",
+            },
+        )
+        assert_result(
+            (humidifier_added["type"], humidifier_added["step_id"]),
+            ("form", "climate_registry"),
+            "selected humidifier must remain unsaved until draft review",
+        )
+        registry_confirmation = await hass.config_entries.options.async_configure(
+            registry_form["flow_id"],
+            {"climate_registry_action": "review_registry"},
+        )
+        assert_result(
+            (registry_confirmation["type"], registry_confirmation["step_id"]),
+            ("form", "climate_registry_confirm"),
+            "imported draft must still require a separate preview confirmation",
+        )
+        registry_saved = await hass.config_entries.options.async_configure(
+            registry_form["flow_id"],
+            {"confirm_registry_save": True},
+        )
+        assert_result(
+            registry_saved["type"],
+            "create_entry",
+            "only explicit confirmation may atomically save imported candidates",
+        )
+        await hass.async_block_till_done()
+
+        imported_registry = await home_client.get(
+            CLIMATE_ADMIN_REGISTRY_PATH,
+            headers=owner_headers,
+        )
+        assert_result(
+            imported_registry.status,
+            HTTPStatus.OK,
+            "owner must be able to read the explicitly imported private registry",
+        )
+        assert_result(
+            await imported_registry.json(),
+            climate_registry,
+            "candidate wizard must produce the exact explicit registry fixture",
+        )
         preview = await home_client.post(
             CLIMATE_ADMIN_REGISTRY_PREVIEW_PATH,
             headers=owner_headers,
@@ -2923,13 +3039,6 @@ async def async_assert_shadow_climate_end_to_end(
             ("ready", True),
             "matching shadow registry must be ready for an explicit atomic save",
         )
-
-        saved = await home_client.post(
-            CLIMATE_ADMIN_REGISTRY_PATH,
-            headers=owner_headers,
-            json=climate_registry,
-        )
-        assert_result(saved.status, HTTPStatus.OK, "previewed shadow registry must save")
 
         readiness = await home_client.get(
             CLIMATE_ADMIN_READINESS_PATH,

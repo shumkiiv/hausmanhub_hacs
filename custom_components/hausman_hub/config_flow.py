@@ -47,6 +47,10 @@ from .application.configuration import (
     create_options,
     effective_configuration,
 )
+from .application.climate_import import (
+    ClimateImportSnapshot,
+    ImportedClimateDevice,
+)
 from .const import DOMAIN, ENTRY_TITLE, ENTRY_UNIQUE_ID
 from .domain.configuration import (
     APPROVED_MODES,
@@ -85,6 +89,7 @@ CLIMATE_DEVICE_CAPABILITIES_FIELD = "climate_device_capabilities"
 CLIMATE_DEVICE_CONTROL_ENTITY_FIELD = "climate_device_control_entity"
 CLIMATE_SHADOW_CANDIDATE_ROOM_FIELD = "climate_shadow_candidate_room"
 CLIMATE_SHADOW_EVIDENCE_CLOSE_FIELD = "close_shadow_evidence"
+CLIMATE_IMPORT_CANDIDATE_FIELD = "climate_import_candidate"
 MAX_CLIMATE_REGISTRY_FORM_BYTES = 16 * 1024
 
 
@@ -135,6 +140,7 @@ CLIMATE_REGISTRY_ACTION_SELECTOR = SelectSelector(
         options=[
             SelectOptionDict(value=value, label=value)
             for value in (
+                "import_candidate",
                 "add_room",
                 "add_device",
                 "review_shadow_evidence",
@@ -302,10 +308,64 @@ def _climate_registry_menu_schema() -> vol.Schema:
         {
             vol.Required(
                 CLIMATE_REGISTRY_ACTION_FIELD,
-                default="add_room",
+                default="import_candidate",
             ): CLIMATE_REGISTRY_ACTION_SELECTOR
         }
     )
+
+
+def _climate_import_candidate_schema(
+    candidates: list[dict[str, str]],
+) -> vol.Schema:
+    return vol.Schema(
+        {
+            vol.Required(CLIMATE_IMPORT_CANDIDATE_FIELD): SelectSelector(
+                SelectSelectorConfig(options=candidates)
+            )
+        }
+    )
+
+
+def _climate_import_device_schema(candidate: ImportedClimateDevice) -> vol.Schema:
+    from .application.climate_registry_import import candidate_control_domain
+
+    kinds = [value.value for value in candidate.suggested_kinds]
+    fields: dict[vol.Marker, object] = {
+        vol.Required(CLIMATE_DEVICE_ID_FIELD): str,
+        vol.Required(CLIMATE_DEVICE_NAME_FIELD, default=candidate.name): str,
+        vol.Required(CLIMATE_DEVICE_KIND_FIELD, default=kinds[0]): SelectSelector(
+            SelectSelectorConfig(
+                options=[SelectOptionDict(value=value, label=value) for value in kinds],
+                translation_key="climate_device_kind",
+            )
+        ),
+        vol.Required(
+            CLIMATE_DEVICE_SCOPE_FIELD,
+            default="observed",
+        ): CLIMATE_DEVICE_SCOPE_SELECTOR,
+        vol.Required(
+            CLIMATE_DEVICE_OWNER_FIELD,
+            default="observed",
+        ): CLIMATE_DEVICE_OWNER_SELECTOR,
+    }
+    domains: set[str] = set()
+    for value in kinds:
+        domain = candidate_control_domain(value)
+        if isinstance(domain, str):
+            domains.add(domain)
+        elif isinstance(domain, tuple):
+            domains.update(domain)
+    if domains:
+        if candidate.domain in domains:
+            selector_domain: str | list[str] = candidate.domain
+        else:
+            selector_domain = (
+                next(iter(domains)) if len(domains) == 1 else sorted(domains)
+            )
+        fields[vol.Required(CLIMATE_DEVICE_CONTROL_ENTITY_FIELD)] = EntitySelector(
+            EntitySelectorConfig(domain=selector_domain, multiple=False)
+        )
+    return vol.Schema(fields)
 
 
 def _climate_room_schema() -> vol.Schema:
@@ -534,6 +594,9 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
     _registry_draft: object | None = None
     _registry_preview: Mapping[str, Any] | None = None
     _shadow_evidence: Mapping[str, Any] | None = None
+    _import_snapshot: ClimateImportSnapshot | None = None
+    _import_candidates: dict[str, ImportedClimateDevice] | None = None
+    _selected_import_source_id: str | None = None
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Keep future options within the validated canary boundary."""
@@ -653,6 +716,8 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
 
         if user_input is not None and runtime is not None:
             action = user_input.get(CLIMATE_REGISTRY_ACTION_FIELD)
+            if action == "import_candidate":
+                return await self.async_step_climate_import_candidate()
             if action == "add_room":
                 return await self.async_step_climate_registry_room()
             if action == "add_device":
@@ -671,6 +736,111 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="climate_registry",
             data_schema=_climate_registry_menu_schema(),
+            errors=errors,
+        )
+
+    async def async_step_climate_import_candidate(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> FlowResult:
+        """Select one fresh candidate by an ephemeral non-private form token."""
+
+        runtime = self._climate_runtime()
+        errors: dict[str, str] = {}
+        candidates: list[dict[str, str]] = []
+        if runtime is None:
+            errors["base"] = "climate_runtime_unavailable"
+        elif user_input is not None:
+            candidates = self._import_candidate_options()
+            token = user_input.get(CLIMATE_IMPORT_CANDIDATE_FIELD)
+            selected = (self._import_candidates or {}).get(token)
+            if selected is None:
+                errors[CLIMATE_IMPORT_CANDIDATE_FIELD] = "invalid_climate_candidate"
+            else:
+                self._selected_import_source_id = selected.source_id
+                return await self.async_step_climate_import_device()
+        else:
+            try:
+                snapshot = await runtime.async_registry_import_snapshot()
+                if snapshot.runtime_fresh is not True:
+                    raise ValueError("stale import snapshot")
+                candidates = self._set_import_candidates(snapshot)
+            except Exception:
+                errors["base"] = "climate_import_unavailable"
+            else:
+                if not candidates:
+                    errors["base"] = "climate_import_no_candidates"
+        if not candidates:
+            candidates = [SelectOptionDict(value="missing", label="missing")]
+        return self.async_show_form(
+            step_id="climate_import_candidate",
+            data_schema=_climate_import_candidate_schema(candidates),
+            errors=errors,
+        )
+
+    async def async_step_climate_import_device(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> FlowResult:
+        """Configure public fields while HASC supplies the selected private binding."""
+
+        source_id = self._selected_import_source_id
+        snapshot = self._import_snapshot
+        selected = snapshot.device(source_id) if snapshot is not None else None
+        if selected is None or not selected.suggested_kinds:
+            return await self.async_step_climate_import_candidate()
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            runtime = self._climate_runtime()
+            if runtime is None:
+                errors["base"] = "climate_runtime_unavailable"
+            else:
+                try:
+                    current = await runtime.async_registry_import_snapshot()
+                    current_selected = current.device(source_id)
+                    from .application.climate_registry import (
+                        registry_from_payload,
+                        registry_to_payload,
+                    )
+                    from .application.climate_registry_import import (
+                        add_import_candidate_to_registry,
+                        import_candidate_is_unchanged,
+                    )
+
+                    if (
+                        current_selected is None
+                        or not import_candidate_is_unchanged(
+                            snapshot,
+                            current,
+                            source_id,
+                        )
+                    ):
+                        raise ValueError("import candidate changed")
+                    registry = registry_from_payload(self._copy_registry_draft())
+                    imported = add_import_candidate_to_registry(
+                        registry,
+                        current,
+                        source_id=source_id,
+                        device_id=user_input.get(CLIMATE_DEVICE_ID_FIELD),
+                        device_name=user_input.get(CLIMATE_DEVICE_NAME_FIELD),
+                        kind=user_input.get(CLIMATE_DEVICE_KIND_FIELD),
+                        control_scope=user_input.get(CLIMATE_DEVICE_SCOPE_FIELD),
+                        control_owner=user_input.get(CLIMATE_DEVICE_OWNER_FIELD),
+                        control_entity_id=user_input.get(
+                            CLIMATE_DEVICE_CONTROL_ENTITY_FIELD
+                        ),
+                    )
+                except ValueError:
+                    errors["base"] = "invalid_climate_candidate"
+                except Exception:
+                    errors["base"] = "climate_import_unavailable"
+                else:
+                    self._registry_draft = registry_to_payload(imported)
+                    self._clear_import_selection()
+                    return await self.async_step_climate_registry()
+        return self.async_show_form(
+            step_id="climate_import_device",
+            data_schema=_climate_import_device_schema(selected),
             errors=errors,
         )
 
@@ -948,6 +1118,59 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
             and isinstance(room.get("id"), str)
             and isinstance(room.get("name"), str)
         ]
+
+    def _set_import_candidates(
+        self,
+        snapshot: ClimateImportSnapshot,
+    ) -> list[dict[str, str]]:
+        from .application.climate_registry import registry_from_payload
+
+        registry = registry_from_payload(self._copy_registry_draft())
+        registered_sources = {device.source_id for device in registry.devices}
+        candidates: dict[str, ImportedClimateDevice] = {}
+        options: list[dict[str, str]] = []
+        for index, candidate in enumerate(snapshot.devices, start=1):
+            if (
+                candidate.source_id in registered_sources
+                or not candidate.suggested_kinds
+            ):
+                continue
+            room = snapshot.room(candidate.room_id)
+            if room is None:
+                continue
+            token = f"candidate_{index:03d}"
+            candidates[token] = candidate
+            options.append(
+                SelectOptionDict(
+                    value=token,
+                    label=f"{room.name} — {candidate.name}",
+                )
+            )
+        self._import_snapshot = snapshot
+        self._import_candidates = candidates
+        self._selected_import_source_id = None
+        return options
+
+    def _import_candidate_options(self) -> list[dict[str, str]]:
+        snapshot = self._import_snapshot
+        if snapshot is None:
+            return []
+        options: list[dict[str, str]] = []
+        for token, candidate in (self._import_candidates or {}).items():
+            room = snapshot.room(candidate.room_id)
+            if room is not None:
+                options.append(
+                    SelectOptionDict(
+                        value=token,
+                        label=f"{room.name} — {candidate.name}",
+                    )
+                )
+        return options
+
+    def _clear_import_selection(self) -> None:
+        self._import_snapshot = None
+        self._import_candidates = None
+        self._selected_import_source_id = None
 
     def _climate_runtime(self) -> Any | None:
         data = getattr(self, "hass", None)

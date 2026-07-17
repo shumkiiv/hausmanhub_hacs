@@ -95,11 +95,11 @@ not authorized by publishing 0.5.0 or by this roadmap.
 
 ## Next coding slice
 
-After the 0.5.2 measurable-shadow release, the next HASC-only work is to make
-the operator flow populate a registry from read-only import candidates without
-copying private IDs by hand, then prepare (but not activate) the supervised
-one-room rollout checklist. Physical canary execution still requires a new
-explicit authorization.
+After the 0.5.3 candidate-import release, the next HASC-only work is a single
+read-only operator preflight screen that combines registry reconciliation,
+shadow evidence, command scope, in-flight status, and rollback readiness for
+one room. It must prepare but never activate the supervised physical canary.
+Physical execution still requires a new explicit authorization.
 
 ## 0.5.1 implementation status
 
@@ -114,12 +114,28 @@ proved the operation route loaded while the live climate bridge remained
 
 ## 0.5.2 implementation status
 
-Implemented in the current worktree on 2026-07-17: a persisted rolling
+Implemented and released on 2026-07-17: a persisted rolling
 24-hour shadow evidence window sampled at a five-minute minimum interval;
 redacted matched/missing/moved/stale/rejected/translated counts; exact registry
 fingerprint reset; a local-admin candidate query/response contract; guided
 Home Assistant candidate-room evidence UX; and a fail-closed canary gate.
 Readiness requires three matching samples plus successful shadow translation
 of room target and room off. Runtime canary execution is limited to those two
-initial actions. Local/Core/Kimi/release/deployment gates remain pending, and
-live deployment must still finish in `disabled` without a physical canary.
+initial actions. Release `v0.5.2` points to `f3ec8ad`; local/Core/Kimi/GitHub
+gates passed and the owner completed the live HACS restart. Post-deploy
+verification proved the new route loaded while the bridge remained `disabled`
+without a target, physical command, or canary.
+
+## 0.5.3 implementation status
+
+Implemented in the current worktree on 2026-07-17: fresh read-only candidate
+selection with opaque form tokens, native entity selectors, typed capability
+inference, repeat-read drift rejection, automatic selected-room draft
+population, and preservation of the existing preview plus separate atomic
+confirmation. Disposable Core uses the real options flow for two candidates,
+requires the exact fixture registry, and measures zero command POSTs. A formal
+one-room rollout checklist is prepared but inactive. All 217 local tests,
+release/file-safety checks, and disposable Core 2026.6.4/2026.7.0 lifecycles
+passed. Kimi `kimi-for-coding/k2p7` returned PASS with no substantial findings
+in session `ses_08e986dbaffe6gCgi4wPgxStqP`. Release/live deployment gates
+remain pending; live deployment must finish in `disabled`.

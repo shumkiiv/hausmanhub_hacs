@@ -45,3 +45,13 @@ redaction, an incomplete single-sample result, and zero command POSTs. The live
 deployment must keep the bridge disabled. Selecting a real room, enabling the
 bridge, sending a physical command, or changing climate-core requires separate
 explicit authorization.
+
+## Live deployment closure
+
+Release `v0.5.2` points to `f3ec8ad` and passed GitHub Actions. HACS installed
+it on the live Core 2026.6.4 instance. After the owner restarted Core, the
+update entity reported installed/latest `v0.5.2`; the new evidence route was
+loaded and forbidden to the non-admin verification account. Climate home and
+a deliberately unregistered action both failed closed as unavailable because
+the saved bridge remained `disabled`. No target, physical command, or canary
+was used.

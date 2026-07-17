@@ -67,6 +67,7 @@ REQUIRED_PACKAGE_PATHS = (
     INTEGRATION_DIRECTORY / "application/climate_import.py",
     INTEGRATION_DIRECTORY / "application/climate_operations.py",
     INTEGRATION_DIRECTORY / "application/climate_registry.py",
+    INTEGRATION_DIRECTORY / "application/climate_registry_import.py",
     INTEGRATION_DIRECTORY / "application/climate_runtime.py",
     INTEGRATION_DIRECTORY / "domain/control.py",
     INTEGRATION_DIRECTORY / "domain/climate.py",

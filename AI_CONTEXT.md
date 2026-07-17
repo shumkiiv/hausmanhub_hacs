@@ -76,7 +76,7 @@ Last updated: 2026-07-17.
   live climate bridge remained `disabled`, with no target or canary room; the
   fail-closed action check returned unavailable before execution. No physical
   climate canary or device command was run.
-- Version 0.5.2 is the current measurable-shadow worktree. It persists a
+- Version 0.5.2 persists a
   redacted rolling 24-hour evidence window with a five-minute sample interval,
   bounded matched/missing/moved/stale observations and rejected/translated
   intents. The window stores only timestamps, public HASC room IDs, and
@@ -93,6 +93,32 @@ Last updated: 2026-07-17.
   not authorize or activate a live physical canary; live deployment must keep
   the climate bridge `disabled`. The durable decision is in
   [the 0.5.2 evidence note](LLM_WIKI/Manual/2026-07-17-hasc-v0-5-2-shadow-evidence.md).
+- HASC 0.5.2 was committed as `f3ec8ad`, passed 212 local tests, disposable
+  Core 2026.6.4/2026.7.0 checks, two final Kimi reviews, GitHub Actions, and was
+  published as the non-prerelease release `v0.5.2`. HACS installed it on the
+  live Core 2026.6.4 home. After the owner restarted Core, installed/latest
+  both reported `v0.5.2`, the new shadow-evidence admin route was present and
+  correctly forbidden to the non-admin verification account, and climate
+  home/action remained unavailable because the bridge was still `disabled`.
+  No physical command or canary was attempted.
+- Version 0.5.3 is the current HASC-only operator-import worktree. The options
+  wizard obtains fresh Climate API candidates read-only and exposes only
+  ephemeral `candidate_NNN` selector values plus device/room labels. The
+  private source ID is neither displayed nor accepted from the form. The
+  operator supplies a public HASC ID and chooses a control entity with Home
+  Assistant's native selector; HASC re-reads the snapshot, rejects drift, and
+  infers only capabilities supported by the candidate's typed command list.
+  The selected room/device remain in an unsaved draft until the existing
+  preview and separate atomic confirmation. It never auto-imports another
+  candidate, deletes a registry record, or sends a Climate API command POST.
+  The prepared package passed 217 local tests plus release/file-safety checks
+  and the full options-flow lifecycle on disposable Core 2026.6.4 and
+  2026.7.0 with an exact two-device registry and zero command POSTs. Kimi model
+  `kimi-for-coding/k2p7` completed the final read-only staged review in session
+  `ses_08e986dbaffe6gCgi4wPgxStqP` with no substantial findings. GitHub,
+  release, and disabled live-deployment gates remain pending.
+  A non-activating supervised one-room checklist is documented in
+  [the rollout checklist](docs/climate-canary-rollout-checklist.md).
 - Further HASC-only development is prioritized in the
   [post-0.5 roadmap](LLM_WIKI/Manual/2026-07-17-hasc-post-v0-5-0-roadmap.md):
   operator-friendly registry setup and a formal Android contract first,
