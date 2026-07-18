@@ -65,6 +65,13 @@ DEVICE_ACTIONS = frozenset(
     }
 )
 
+# These values are the single public temperature boundary used by both the
+# command validator and the Android contract. Keep the contract descriptive;
+# the validator below remains the final authority for every submitted value.
+CLIMATE_TEMPERATURE_MINIMUM = 18.0
+CLIMATE_TEMPERATURE_MAXIMUM = 28.0
+CLIMATE_TEMPERATURE_STEP = 0.5
+
 
 def plan_climate_command(
     request: object,
@@ -359,8 +366,10 @@ def _temperature(value: object) -> float:
     exact = Decimal(str(value))
     if (
         not exact.is_finite()
-        or not Decimal(18) <= exact <= Decimal(28)
-        or exact % Decimal("0.5") != 0
+        or not Decimal(str(CLIMATE_TEMPERATURE_MINIMUM))
+        <= exact
+        <= Decimal(str(CLIMATE_TEMPERATURE_MAXIMUM))
+        or exact % Decimal(str(CLIMATE_TEMPERATURE_STEP)) != 0
     ):
         raise ClimateCommandViolation("temperature must be 18..28 in 0.5 steps")
     return number

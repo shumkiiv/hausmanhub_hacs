@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub_hasc/contracts/v3/climate-home.schema.json",
+  "title": "HASC Android climate home v3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "generated_at", "climate", "rooms", "reconciliation"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hasc-home"},
+        "version": {"const": 3}
+      }
+    },
+    "generated_at": {"type": "integer", "minimum": 0},
+    "climate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fresh", "commands_enabled"],
+      "properties": {
+        "fresh": {"type": "boolean"},
+        "commands_enabled": {"type": "boolean"}
+      }
+    },
+    "rooms": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "temperature", "humidity", "target_temperature", "target_humidity", "mode", "authority_eligible", "control", "devices"],
+        "properties": {
+          "id": {"$ref": "#/$defs/stable_id"},
+          "name": {"$ref": "#/$defs/name"},
+          "temperature": {"type": ["number", "null"]},
+          "humidity": {"type": ["number", "null"]},
+          "target_temperature": {"type": ["number", "null"]},
+          "target_humidity": {"type": ["number", "null"]},
+          "mode": {"enum": ["auto", "manual", null]},
+          "authority_eligible": {"type": "boolean"},
+          "control": {"$ref": "#/$defs/room_control"},
+          "devices": {
+            "type": "array",
+            "maxItems": 512,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "name", "kind", "control_scope", "capabilities", "available", "state"],
+              "properties": {
+                "id": {"$ref": "#/$defs/stable_id"},
+                "name": {"$ref": "#/$defs/name"},
+                "kind": {"enum": ["air_conditioner", "radiator_thermostat", "humidifier", "floor_heating", "temperature_sensor", "humidity_sensor"]},
+                "control_scope": {"enum": ["observed", "canary", "managed"]},
+                "capabilities": {"type": "array", "maxItems": 16, "uniqueItems": true, "items": {"type": "string"}},
+                "available": {"type": "boolean"},
+                "state": {"type": "string"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "reconciliation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["matches", "matched_device_ids", "missing_device_ids", "room_mismatch_device_ids", "unregistered_device_count"],
+      "properties": {
+        "matches": {"type": "boolean"},
+        "matched_device_ids": {"$ref": "#/$defs/stable_ids"},
+        "missing_device_ids": {"$ref": "#/$defs/stable_ids"},
+        "room_mismatch_device_ids": {"$ref": "#/$defs/stable_ids"},
+        "unregistered_device_count": {"type": "integer", "minimum": 0, "maximum": 512}
+      }
+    }
+  },
+  "$defs": {
+    "stable_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+    "name": {"type": "string", "minLength": 1, "maxLength": 120, "pattern": "^\\S(?:.*\\S)?$"},
+    "stable_ids": {"type": "array", "maxItems": 512, "uniqueItems": true, "items": {"$ref": "#/$defs/stable_id"}},
+    "room_action": {"enum": ["set_room_target", "turn_room_off"]},
+    "blocked_reason": {
+      "enum": [
+        "bridge_disabled",
+        "shadow_only",
+        "room_not_selected",
+        "state_stale",
+        "registry_mismatch",
+        "authority_not_ready",
+        "device_unavailable",
+        "actions_unsupported",
+        "evidence_not_ready",
+        "operation_pending"
+      ]
+    },
+    "temperature_input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "required", "minimum", "maximum", "step", "unit"],
+      "properties": {
+        "type": {"const": "number"},
+        "required": {"const": true},
+        "minimum": {"const": 18},
+        "maximum": {"const": 28},
+        "step": {"const": 0.5},
+        "unit": {"const": "°C"}
+      }
+    },
+    "action_inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "maxProperties": 1,
+      "properties": {
+        "set_room_target": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["target_temperature"],
+          "properties": {
+            "target_temperature": {"$ref": "#/$defs/temperature_input"}
+          }
+        }
+      }
+    },
+    "room_control": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "actions", "action_inputs", "blocked_reasons"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "actions": {"type": "array", "maxItems": 2, "uniqueItems": true, "items": {"$ref": "#/$defs/room_action"}},
+        "action_inputs": {"$ref": "#/$defs/action_inputs"},
+        "blocked_reasons": {"type": "array", "maxItems": 10, "uniqueItems": true, "items": {"$ref": "#/$defs/blocked_reason"}}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"enabled": {"const": true}}, "required": ["enabled"]},
+          "then": {
+            "properties": {
+              "actions": {"const": ["set_room_target", "turn_room_off"]},
+              "blocked_reasons": {"maxItems": 0}
+            }
+          },
+          "else": {"properties": {"blocked_reasons": {"minItems": 1}}}
+        },
+        {
+          "if": {
+            "properties": {
+              "actions": {"contains": {"const": "set_room_target"}}
+            },
+            "required": ["actions"]
+          },
+          "then": {
+            "properties": {
+              "action_inputs": {"required": ["set_room_target"]}
+            }
+          },
+          "else": {
+            "properties": {
+              "action_inputs": {"maxProperties": 0}
+            }
+          }
+        }
+      ]
+    }
+  }
+}

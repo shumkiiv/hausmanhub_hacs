@@ -3084,8 +3084,8 @@ async def async_assert_shadow_climate_end_to_end(
             raise RuntimeError("tablet home contract must not expose private climate bindings")
         assert_result(
             home_payload.get("contract"),
-            {"name": "hausman-hasc-home", "version": 2},
-            "tablet must receive the explicit v2 home contract",
+            {"name": "hausman-hasc-home", "version": 3},
+            "tablet must receive the explicit v3 home contract",
         )
         home_rooms = home_payload.get("rooms", [])
         living_room = next(
@@ -3105,12 +3105,25 @@ async def async_assert_shadow_climate_end_to_end(
             (
                 living_control.get("enabled"),
                 living_control.get("actions"),
+                living_control.get("action_inputs"),
                 living_control.get("blocked_reasons"),
                 home_payload.get("climate", {}).get("commands_enabled"),
             ),
             (
                 False,
                 ["set_room_target", "turn_room_off"],
+                {
+                    "set_room_target": {
+                        "target_temperature": {
+                            "type": "number",
+                            "required": True,
+                            "minimum": 18.0,
+                            "maximum": 28.0,
+                            "step": 0.5,
+                            "unit": "°C",
+                        }
+                    }
+                },
                 ["shadow_only"],
                 False,
             ),

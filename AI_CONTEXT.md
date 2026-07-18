@@ -180,17 +180,33 @@ Last updated: 2026-07-18.
   climate bridge and action path stayed closed; the owner restart remained
   pending when the next development slice began. The decision is recorded in
   [the 0.5.6 room-control note](LLM_WIKI/Manual/2026-07-18-hasc-v0-5-6-android-room-control.md).
-- Version 0.5.7 is the current HASC-only worktree. It replaces mixed Russian
+- Version 0.5.7 replaced mixed Russian
   and internal English operator text with plain Russian names, descriptions,
   errors, statuses, reasons, actions, and room names. Fixed selectors now pass
   string values plus translation keys instead of explicit English labels that
   could override frontend translations. Unknown result codes stay hidden.
-  The repository README and GitHub workflow labels are Russian, and the public
-  GitHub About description will be updated during publication. This slice
-  changes no climate contract or authority and must deploy with the bridge
-  disabled. It passed 231 local tests and disposable Core 2026.6.4/2026.7.0
-  before final review. See the
+  The repository README, GitHub workflow labels, and public GitHub About
+  description are Russian. This slice changed no climate contract or authority
+  and deployed with the bridge disabled. It passed 231 local tests,
+  disposable Core 2026.6.4/2026.7.0, final Kimi review, and GitHub Actions.
+  Commit `979c4c5` was published as latest stable release `v0.5.7`; HACS
+  installed it on the live home without configuring a registry or enabling
+  the bridge. See the
   [0.5.7 Russian interface note](LLM_WIKI/Manual/2026-07-18-hasc-v0-5-7-russian-interface.md).
+- Version 0.5.8 is the current HASC-only worktree. Android home contract v3
+  keeps the v2 room action and blocked-reason shape and adds `action_inputs`.
+  The target-temperature input is numeric and required, with an exact public
+  range of 18–28 °C and a 0.5 °C step. The command validator and public
+  projection use the same constants; an unsupported target action does not
+  advertise input metadata. Strict v3 schema/fixture are added while v1/v2
+  remain packaged. This is contract preparation only: it does not change the
+  Android repository, live registry, bridge state, or physical authority. The
+  prepared package passed 232 local tests, release/package/file-safety checks,
+  and disposable Core 2026.6.4/2026.7.0 with zero climate command POSTs. Kimi
+  model `kimi-for-coding/k2p7` completed the final read-only staged review in
+  session `ses_08b312059ffedrMEVGxBLevcNI` with PASS and no substantial
+  findings. See
+  the [0.5.8 input-contract note](LLM_WIKI/Manual/2026-07-18-hasc-v0-5-8-action-inputs.md).
 - Further HASC-only development is tracked in the
   [post-0.5 roadmap](LLM_WIKI/Manual/2026-07-17-hasc-post-v0-5-0-roadmap.md):
   the operator registry, formal Android contract, measurable shadow, command

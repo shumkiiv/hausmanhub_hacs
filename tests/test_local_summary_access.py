@@ -609,12 +609,21 @@ class LocalSummaryAccessTest(unittest.TestCase):
             )
         )
         self.assertEqual(200, home_response.status)
-        self.assertEqual(2, home_response.payload["contract"]["version"])
+        self.assertEqual(3, home_response.payload["contract"]["version"])
         living_control = home_response.payload["rooms"][0]["control"]
         self.assertFalse(living_control["enabled"])
         self.assertEqual(
             ["set_room_target", "turn_room_off"],
             living_control["actions"],
+        )
+        self.assertEqual(
+            (18.0, 28.0, 0.5, "°C"),
+            tuple(
+                living_control["action_inputs"]["set_room_target"][
+                    "target_temperature"
+                ][key]
+                for key in ("minimum", "maximum", "step", "unit")
+            ),
         )
         self.assertEqual(["shadow_only"], living_control["blocked_reasons"])
         serialized = json.dumps(home_response.payload)

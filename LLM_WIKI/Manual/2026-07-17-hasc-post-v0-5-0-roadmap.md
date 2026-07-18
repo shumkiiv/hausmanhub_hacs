@@ -95,13 +95,13 @@ not authorized by publishing 0.5.0 or by this roadmap.
 
 ## Next coding slice
 
-After the 0.5.6 per-room availability release, the next HASC-only work should
-add typed public input constraints for each enabled room action, starting with
-the target-temperature minimum, maximum, and step. Android must be able to
-render a correct control without hard-coded climate-core details. This remains
-contract preparation, not Android repository work or physical authorization.
-Physical execution still requires a new explicit authorization naming one
-public room and exact actions.
+The 0.5.8 worktree implements the typed public target-temperature constraints
+planned after 0.5.6. The next HASC-only slice should add stable public display
+metadata for the two first room actions and their fields, so Android can render
+Russian labels and explanations from a versioned contract without learning
+backend details. This remains contract preparation, not Android repository
+work or physical authorization. Physical execution still requires a new
+explicit authorization naming one public room and exact actions.
 
 ## 0.5.1 implementation status
 
@@ -196,3 +196,28 @@ release/package/file-safety checks, disposable Core 2026.6.4/2026.7.0, and
 Kimi `kimi-for-coding/k2p7` session `ses_08b7a860affeOVomxNvxlvfWbi` with PASS
 after a test-coverage follow-up. Publication and disabled live-deployment gates
 remain.
+
+## 0.5.7 implementation status
+
+Implemented and released on 2026-07-18: the Home Assistant operator interface,
+errors, result summaries, entity names, README, workflow labels, and GitHub
+About description use plain Russian text instead of mixed internal English
+codes. The release changed no climate contract or authority. All 231 local
+tests, disposable Core 2026.6.4/2026.7.0, Kimi review, and GitHub Actions
+passed. Commit `979c4c5` was published as stable `v0.5.7` and installed through
+HACS with the live climate bridge left disabled.
+
+## 0.5.8 implementation status
+
+Implemented in the current worktree on 2026-07-18: Android home contract v3
+adds per-room `action_inputs`. The target-temperature field declares type,
+required status, minimum 18 °C, maximum 28 °C, step 0.5 °C, and unit. These
+values come from the same constants as command validation. Metadata is omitted
+when the target action is not advertised. The v1 and v2 home schemas remain
+packaged; strict v3 schema and fixture cover the new boundary. Android code,
+live registry configuration, bridge activation, and physical commands remain
+outside this slice. All 232 local tests, the release/package/file-safety
+checks, and disposable Core 2026.6.4/2026.7.0 passed with measured zero climate
+command POSTs. Kimi `kimi-for-coding/k2p7` session
+`ses_08b312059ffedrMEVGxBLevcNI` returned PASS with no substantial findings.
+Publication gates remain.

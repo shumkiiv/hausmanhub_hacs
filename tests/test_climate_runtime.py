@@ -337,7 +337,7 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertFalse(snapshot["climate"]["commands_enabled"])  # type: ignore[index]
-        self.assertEqual(2, snapshot["contract"]["version"])  # type: ignore[index]
+        self.assertEqual(3, snapshot["contract"]["version"])  # type: ignore[index]
         self.assertIn(
             "evidence_not_ready",
             snapshot["rooms"][0]["control"]["blocked_reasons"],  # type: ignore[index]

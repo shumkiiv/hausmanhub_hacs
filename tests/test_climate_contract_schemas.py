@@ -54,6 +54,7 @@ class ClimateContractSchemasTest(unittest.TestCase):
             "hasc_climate_v1/canary-preflight-query.json": "v1/climate-canary-preflight-query.schema.json",
             "hasc_climate_v1/canary-preflight.json": "v1/climate-canary-preflight.schema.json",
             "hasc_climate_v2/home.json": "v2/climate-home.schema.json",
+            "hasc_climate_v3/home.json": "v3/climate-home.schema.json",
         }
         for fixture_name, schema_name in pairs.items():
             with self.subTest(fixture=fixture_name):
@@ -74,7 +75,7 @@ class ClimateContractSchemasTest(unittest.TestCase):
         )
         admin = admin_climate_import_snapshot(registry, snapshot)
 
-        validator("v2/climate-home.schema.json").validate(home)
+        validator("v3/climate-home.schema.json").validate(home)
         validator("v1/climate-admin-import.schema.json").validate(admin)
         serialized_home = json.dumps(home, ensure_ascii=True, sort_keys=True)
         self.assertNotIn("source_id", serialized_home)
@@ -141,6 +142,22 @@ class ClimateContractSchemasTest(unittest.TestCase):
         ]
         with self.assertRaises(Exception):
             validator("v2/climate-home.schema.json").validate(unknown_reason)
+
+        missing_inputs = load_json(
+            ROOT / "fixtures" / "hasc_climate_v3" / "home.json"
+        )
+        missing_inputs["rooms"][0]["control"].pop("action_inputs")  # type: ignore[index]
+        with self.assertRaises(Exception):
+            validator("v3/climate-home.schema.json").validate(missing_inputs)
+
+        weakened_limit = load_json(
+            ROOT / "fixtures" / "hasc_climate_v3" / "home.json"
+        )
+        weakened_limit["rooms"][0]["control"]["action_inputs"][  # type: ignore[index]
+            "set_room_target"
+        ]["target_temperature"]["maximum"] = 30
+        with self.assertRaises(Exception):
+            validator("v3/climate-home.schema.json").validate(weakened_limit)
 
 
 if __name__ == "__main__":

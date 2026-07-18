@@ -28,13 +28,28 @@ class AndroidClimateTest(unittest.TestCase):
         )
 
         self.assertEqual("hausman-hasc-home", result["contract"]["name"])
-        self.assertEqual(2, result["contract"]["version"])
+        self.assertEqual(3, result["contract"]["version"])
         self.assertEqual("living_ac", result["rooms"][0]["devices"][0]["id"])
         self.assertEqual(25.8, result["rooms"][0]["temperature"])
         self.assertFalse(result["climate"]["commands_enabled"])
         self.assertEqual(
             ["set_room_target", "turn_room_off"],
             result["rooms"][0]["control"]["actions"],
+        )
+        self.assertEqual(
+            {
+                "set_room_target": {
+                    "target_temperature": {
+                        "type": "number",
+                        "required": True,
+                        "minimum": 18.0,
+                        "maximum": 28.0,
+                        "step": 0.5,
+                        "unit": "°C",
+                    }
+                }
+            },
+            result["rooms"][0]["control"]["action_inputs"],
         )
         self.assertEqual(
             ["shadow_only"],
@@ -59,6 +74,25 @@ class AndroidClimateTest(unittest.TestCase):
         self.assertNotIn("climate.synthetic_living_ac", encoded)
         self.assertNotIn("source_id", encoded)
         self.assertNotIn("entity_id", encoded)
+
+    def test_action_inputs_exist_only_for_advertised_typed_actions(self) -> None:
+        source = source_payload()
+        source["capabilities"][0]["commandTypes"].remove(  # type: ignore[index]
+            "climate.set_temperature"
+        )
+
+        result = android_climate_snapshot(
+            registry_from_payload(registry_payload()),
+            import_climate_state(source),
+            bridge_mode=ClimateBridgeMode.CANARY,
+            canary_room_id="living",
+            candidate_ready=True,
+        )
+        control = result["rooms"][0]["control"]
+
+        self.assertEqual(["turn_room_off"], control["actions"])
+        self.assertEqual({}, control["action_inputs"])
+        self.assertIn("actions_unsupported", control["blocked_reasons"])
 
     def test_room_control_fails_closed_for_unavailable_device_and_pending_operation(
         self,

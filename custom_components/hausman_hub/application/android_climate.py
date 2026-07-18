@@ -16,12 +16,17 @@ from ..domain.climate import (
     ClimateRegistry,
 )
 from ..domain.climate_bridge import ClimateBridgeMode
+from .climate_commands import (
+    CLIMATE_TEMPERATURE_MAXIMUM,
+    CLIMATE_TEMPERATURE_MINIMUM,
+    CLIMATE_TEMPERATURE_STEP,
+)
 from .climate_import import ClimateImportSnapshot
 from .climate_registry import reconcile_climate_registry
 
 
 ANDROID_CLIMATE_CONTRACT_NAME = "hausman-hasc-home"
-ANDROID_CLIMATE_CONTRACT_VERSION = 2
+ANDROID_CLIMATE_CONTRACT_VERSION = 3
 ANDROID_ROOM_CONTROL_ACTIONS = (
     "set_room_target",
     "turn_room_off",
@@ -194,7 +199,27 @@ def _room_control_projection(
     return {
         "enabled": not blocked_reasons,
         "actions": actions,
+        "action_inputs": _room_action_inputs(actions),
         "blocked_reasons": blocked_reasons,
+    }
+
+
+def _room_action_inputs(actions: Collection[str]) -> dict[str, object]:
+    """Describe only the typed values accepted by the advertised actions."""
+
+    if "set_room_target" not in actions:
+        return {}
+    return {
+        "set_room_target": {
+            "target_temperature": {
+                "type": "number",
+                "required": True,
+                "minimum": CLIMATE_TEMPERATURE_MINIMUM,
+                "maximum": CLIMATE_TEMPERATURE_MAXIMUM,
+                "step": CLIMATE_TEMPERATURE_STEP,
+                "unit": "°C",
+            }
+        }
     }
 
 
