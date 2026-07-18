@@ -43,4 +43,9 @@ The final staged package passed 226 local tests, the complete
 release/file-safety checks, and disposable Home Assistant Core 2026.6.4 and
 2026.7.0 lifecycles. Kimi `kimi-for-coding/k2p7` session
 `ses_08b9a95d1ffe9AVm46wQzzPqZQ` completed a read-only review with PASS and no
-substantial findings. Publication and disabled live deployment remain pending.
+substantial findings. Commit `23aa3f8` was published as the latest stable
+release `v0.5.5` after successful GitHub Actions. HACS installed it on the live
+Core 2026.6.4 home. After the owner restart, installed/latest both reported
+`v0.5.5`, the new route was present and forbidden to the non-admin verification
+account, and climate home/action stayed unavailable because the bridge remained
+`disabled`. No physical command or canary ran.

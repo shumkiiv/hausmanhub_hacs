@@ -174,5 +174,9 @@ performs no bridge GET, shadow performs no command POST, and activation remains
 structurally false. The final staged package passed 226 local tests, the full
 release/file-safety checks, and disposable Core 2026.6.4/2026.7.0. Kimi
 `kimi-for-coding/k2p7` session `ses_08b9a95d1ffe9AVm46wQzzPqZQ` returned PASS
-with no substantial findings. Publication and disabled live-deployment gates
-remain.
+with no substantial findings. Commit `23aa3f8` was published as the latest
+stable `v0.5.5` after successful GitHub Actions. HACS installed it on the live
+Core 2026.6.4 home, the owner restarted Core, and the new admin preflight route
+loaded while remaining forbidden to the non-admin verification account.
+Climate home/action stayed unavailable because the bridge remained `disabled`;
+no physical command or canary ran.

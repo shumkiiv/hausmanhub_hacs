@@ -154,8 +154,13 @@ Last updated: 2026-07-18.
   tests, the full release/file-safety checks, and disposable Core
   2026.6.4/2026.7.0. Kimi model `kimi-for-coding/k2p7` completed the read-only
   staged review in session `ses_08b9a95d1ffe9AVm46wQzzPqZQ` with PASS and no
-  substantial findings. Publication and disabled live deployment remain
-  pending. The decision is recorded in
+  substantial findings. Commit `23aa3f8` was pushed and published as the
+  latest stable release `v0.5.5` after successful GitHub Actions. HACS
+  installed it on the live Core 2026.6.4 home; after the owner restart,
+  installed/latest both reported `v0.5.5`, the new admin preflight route was
+  present and forbidden to the non-admin verification account, and climate
+  home/action remained unavailable because the bridge stayed `disabled`. No
+  physical command or canary was attempted. The decision is recorded in
   [the 0.5.5 contract note](LLM_WIKI/Manual/2026-07-18-hasc-v0-5-5-preflight-admin-contract.md).
 - Further HASC-only development is tracked in the
   [post-0.5 roadmap](LLM_WIKI/Manual/2026-07-17-hasc-post-v0-5-0-roadmap.md):
