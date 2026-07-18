@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub_hasc/contracts/v1/climate-canary-preflight.schema.json",
+  "title": "HASC climate canary preflight v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "room_id", "status", "ready_for_authorization", "bridge_mode", "freshness", "registry", "shadow", "command_scope", "operation", "rollback", "activation", "reasons"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hasc-climate-canary-preflight"},
+        "version": {"const": 1}
+      }
+    },
+    "room_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+    "status": {"enum": ["collecting", "blocked", "ready"]},
+    "ready_for_authorization": {"type": "boolean"},
+    "bridge_mode": {"enum": ["disabled", "shadow", "canary"]},
+    "freshness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["checked_at", "state_generated_at", "state_valid_until", "state_fresh"],
+      "properties": {
+        "checked_at": {"type": "integer", "minimum": 0},
+        "state_generated_at": {
+          "oneOf": [
+            {"type": "null"},
+            {"type": "integer", "minimum": 0}
+          ]
+        },
+        "state_valid_until": {
+          "oneOf": [
+            {"type": "null"},
+            {"type": "integer", "minimum": 0}
+          ]
+        },
+        "state_fresh": {"type": "boolean"}
+      }
+    },
+    "registry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["room_device_count", "reconciliation"],
+      "properties": {
+        "room_device_count": {"type": "integer", "minimum": 0, "maximum": 512},
+        "reconciliation": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/reconciliation"}
+          ]
+        }
+      }
+    },
+    "shadow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "ready", "matched_observation_count", "required_matched_observation_count", "translated_action_count", "required_action_count", "anomaly_count"],
+      "properties": {
+        "status": {"enum": ["collecting", "blocked", "ready"]},
+        "ready": {"type": "boolean"},
+        "matched_observation_count": {"type": "integer", "minimum": 0, "maximum": 288},
+        "required_matched_observation_count": {"const": 3},
+        "translated_action_count": {"type": "integer", "minimum": 0, "maximum": 2},
+        "required_action_count": {"const": 2},
+        "anomaly_count": {"type": "integer", "minimum": 0, "maximum": 1000000}
+      }
+    },
+    "command_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actions", "qualified"],
+      "properties": {
+        "actions": {"$ref": "#/$defs/actions"},
+        "qualified": {"type": "boolean"}
+      }
+    },
+    "operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "pending"],
+      "properties": {
+        "status": {"enum": ["clear", "pending"]},
+        "pending": {"type": "boolean"}
+      }
+    },
+    "rollback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "status", "ready"],
+      "properties": {
+        "mode": {"const": "disabled"},
+        "status": {"enum": ["effective", "ready", "blocked"]},
+        "ready": {"type": "boolean"}
+      }
+    },
+    "activation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowed", "separate_authorization_required"],
+      "properties": {
+        "allowed": {"const": false},
+        "separate_authorization_required": {"const": true}
+      }
+    },
+    "reasons": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "bridge_disabled",
+          "candidate_not_registered",
+          "climate_state_unavailable",
+          "state_stale",
+          "registry_mismatch",
+          "authority_not_ready",
+          "required_actions_unsupported",
+          "insufficient_matching_observations",
+          "required_shadow_intents_missing",
+          "shadow_anomalies_observed",
+          "preflight_requires_shadow",
+          "registry_not_reconciled",
+          "command_scope_not_qualified",
+          "preflight_state_not_fresh",
+          "pending_operation",
+          "rollback_not_ready"
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "actions": {
+      "type": "array",
+      "prefixItems": [
+        {"const": "set_room_target"},
+        {"const": "turn_room_off"}
+      ],
+      "items": false,
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "reconciliation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["matches", "matched_device_count", "missing_device_count", "room_mismatch_device_count", "unregistered_source_count"],
+      "properties": {
+        "matches": {"type": "boolean"},
+        "matched_device_count": {"type": "integer", "minimum": 0, "maximum": 512},
+        "missing_device_count": {"type": "integer", "minimum": 0, "maximum": 512},
+        "room_mismatch_device_count": {"type": "integer", "minimum": 0, "maximum": 512},
+        "unregistered_source_count": {"type": "integer", "minimum": 0, "maximum": 512}
+      }
+    }
+  }
+}

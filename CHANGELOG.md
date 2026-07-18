@@ -1,5 +1,27 @@
 # История версий
 
+## 0.5.5 — 2026-07-18
+
+- Единый one-room preflight теперь доступен local admin через фиксированный
+  `POST /api/hausman_hub/v1/admin/climate-canary-preflight`. Запрос принимает
+  только публичный HASC `room_id`; аккаунт планшета получает 403 и не видит
+  административный контракт.
+- Ответ использует тот же контракт v1, что options-flow, и добавляет явную
+  freshness-границу: время проверки, время исходного snapshot, срок его
+  действия и строгий `state_fresh`. Просроченный или слишком будущий snapshot
+  блокирует `ready_for_authorization`, даже если прежние evidence-счётчики
+  выглядели готовыми.
+- В HACS-пакет добавлены строгие query/response JSON Schema и совместимые
+  fixtures; теперь интеграция устанавливает двенадцать климатических схем.
+  Схема ответа навсегда фиксирует `activation.allowed=false` и обязательное
+  отдельное разрешение владельца.
+- Маршрут использует сохранённый registry, `Cache-Control: no-store`, local
+  admin auth и только свежий state GET в `shadow`. Он не сохраняет
+  options/registry, не включает canary и не выполняет climate command POST.
+- Disposable Home Assistant Core проверяет новый admin route в `disabled` и
+  `shadow`, разделение ролей, timestamps, redaction и измеренный ноль command
+  POST. Физический canary в релиз не входит.
+
 ## 0.5.4 — 2026-07-18
 
 - В мастере климатического реестра появился единый read-only preflight для

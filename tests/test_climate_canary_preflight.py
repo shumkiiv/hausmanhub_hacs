@@ -67,6 +67,7 @@ class ClimateCanaryPreflightTest(unittest.TestCase):
             bridge_mode=ClimateBridgeMode.SHADOW,
             room_id="living",
             pending_operation=False,
+            checked_at=NOW,
         )
 
         self.assertEqual("ready", result["status"])
@@ -77,6 +78,8 @@ class ClimateCanaryPreflightTest(unittest.TestCase):
         )
         self.assertEqual("clear", result["operation"]["status"])  # type: ignore[index]
         self.assertTrue(result["rollback"]["ready"])  # type: ignore[index]
+        self.assertTrue(result["freshness"]["state_fresh"])  # type: ignore[index]
+        self.assertEqual(NOW, result["freshness"]["checked_at"])  # type: ignore[index]
         self.assertFalse(result["activation"]["allowed"])  # type: ignore[index]
         self.assertTrue(  # type: ignore[index]
             result["activation"]["separate_authorization_required"]
@@ -102,6 +105,7 @@ class ClimateCanaryPreflightTest(unittest.TestCase):
             bridge_mode=ClimateBridgeMode.DISABLED,
             room_id="living",
             pending_operation=False,
+            checked_at=NOW,
         )
         pending = climate_canary_preflight(
             registry,
@@ -110,6 +114,7 @@ class ClimateCanaryPreflightTest(unittest.TestCase):
             bridge_mode=ClimateBridgeMode.SHADOW,
             room_id="living",
             pending_operation=True,
+            checked_at=NOW,
         )
 
         self.assertEqual("blocked", disabled["status"])
@@ -139,6 +144,7 @@ class ClimateCanaryPreflightTest(unittest.TestCase):
                 bridge_mode=ClimateBridgeMode.SHADOW,
                 room_id="living",
                 pending_operation=False,
+                checked_at=NOW,
             )
 
     def test_internal_shadow_readiness_mismatch_fails_closed(self) -> None:
@@ -159,7 +165,26 @@ class ClimateCanaryPreflightTest(unittest.TestCase):
                 bridge_mode=ClimateBridgeMode.SHADOW,
                 room_id="living",
                 pending_operation=False,
+                checked_at=NOW,
             )
+
+    def test_expired_state_blocks_an_otherwise_ready_preflight(self) -> None:
+        registry, snapshot, evidence = ready_inputs()
+
+        result = climate_canary_preflight(
+            registry,
+            snapshot,
+            evidence,
+            bridge_mode=ClimateBridgeMode.SHADOW,
+            room_id="living",
+            pending_operation=False,
+            checked_at=snapshot.generated_at + 300_001,
+        )
+
+        self.assertEqual("blocked", result["status"])
+        self.assertFalse(result["ready_for_authorization"])
+        self.assertFalse(result["freshness"]["state_fresh"])  # type: ignore[index]
+        self.assertIn("preflight_state_not_fresh", result["reasons"])
 
 
 if __name__ == "__main__":

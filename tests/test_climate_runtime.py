@@ -236,6 +236,27 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(bridge.fetch_count, fetches_before)
         self.assertEqual([], bridge.executed)
 
+    async def test_disabled_canary_preflight_never_fetches_or_activates(self) -> None:
+        bridge = MemoryBridge()
+        registry = complete_registry_payload()
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateBridgeMode.DISABLED),
+            registry_store=MemoryStore(registry_from_payload(registry)),
+            bridge_client=bridge,
+            evidence_store=ready_evidence_store(registry),
+            now_ms=lambda: 1784280005000,
+        )
+        await runtime.async_start()
+
+        result = await runtime.async_canary_preflight({"room_id": "living"})
+
+        self.assertEqual("blocked", result["status"])
+        self.assertFalse(result["ready_for_authorization"])
+        self.assertFalse(result["freshness"]["state_fresh"])  # type: ignore[index]
+        self.assertEqual(0, bridge.fetch_count)
+        self.assertEqual([], bridge.executed)
+
     async def test_canary_preflight_reports_pending_and_requires_rollback(self) -> None:
         bridge = MemoryBridge()
         registry = complete_registry_payload()

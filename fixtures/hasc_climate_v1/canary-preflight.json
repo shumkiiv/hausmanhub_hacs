@@ -1,0 +1,53 @@
+{
+  "contract": {
+    "name": "hausman-hasc-climate-canary-preflight",
+    "version": 1
+  },
+  "room_id": "living",
+  "status": "ready",
+  "ready_for_authorization": true,
+  "bridge_mode": "shadow",
+  "freshness": {
+    "checked_at": 1784280005000,
+    "state_generated_at": 1784280000000,
+    "state_valid_until": 1784280300000,
+    "state_fresh": true
+  },
+  "registry": {
+    "room_device_count": 1,
+    "reconciliation": {
+      "matches": true,
+      "matched_device_count": 2,
+      "missing_device_count": 0,
+      "room_mismatch_device_count": 0,
+      "unregistered_source_count": 0
+    }
+  },
+  "shadow": {
+    "status": "ready",
+    "ready": true,
+    "matched_observation_count": 3,
+    "required_matched_observation_count": 3,
+    "translated_action_count": 2,
+    "required_action_count": 2,
+    "anomaly_count": 0
+  },
+  "command_scope": {
+    "actions": ["set_room_target", "turn_room_off"],
+    "qualified": true
+  },
+  "operation": {
+    "status": "clear",
+    "pending": false
+  },
+  "rollback": {
+    "mode": "disabled",
+    "status": "ready",
+    "ready": true
+  },
+  "activation": {
+    "allowed": false,
+    "separate_authorization_required": true
+  },
+  "reasons": []
+}

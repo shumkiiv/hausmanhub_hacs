@@ -6,11 +6,13 @@ Safety-first Home Assistant custom integration for HausMan Hub.
 
 This repository contains a public Home Assistant integration under
 `custom_components/hausman_hub/`. It always creates nine diagnostic number
-sensors from the approved aggregate summary. Version 0.5.4 adds one complete
-read-only canary preflight for a saved public HASC room. It combines registry
-reconciliation, redacted shadow evidence, the fixed command scope, pending
-operation state, and disabled rollback readiness without activating canary or
-sending a climate command. It builds on explicit candidate selection with
+sensors from the approved aggregate summary. Version 0.5.5 exposes the same
+complete one-room canary preflight as a strict local-admin API with an explicit
+state-freshness deadline and installed request/response JSON Schemas. The
+options screen and API combine registry reconciliation, redacted shadow
+evidence, the fixed command scope, pending operation state, and disabled
+rollback readiness without activating canary or sending a climate command.
+It builds on explicit candidate selection with
 opaque form tokens, native Home Assistant entity selectors, the persistent
 shadow-evidence window, installed JSON Schemas, zero-POST shadow acceptance,
 and idempotent operation receipts.
@@ -97,6 +99,11 @@ The legacy single-`input_boolean` canary remains separate.
     rollback can produce `ready_for_authorization`. The screen still cannot
     enable canary or send a command, and separate owner authorization remains
     mandatory.
+15. In version 0.5.5, consume that same canonical result through one
+    local-admin-only POST contract. Its explicit check/generated/valid-until
+    timestamps close an expired result, while two strict installed schemas
+    keep callers from guessing request or response fields. The tablet role is
+    forbidden and activation remains structurally false.
 
 See [repository basics](docs/repository-basics.md) and
 [AI context](AI_CONTEXT.md) before changing the repository.

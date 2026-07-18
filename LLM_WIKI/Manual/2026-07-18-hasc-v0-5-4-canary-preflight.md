@@ -41,9 +41,13 @@ real options flow and keeps its measured command POST count at zero. The
 prepared release passed 224 local tests and the complete release/file-safety
 checks, then passed disposable Core 2026.6.4 and 2026.7.0. Kimi model
 `kimi-for-coding/k2p7` returned PASS with no substantial findings from the
-read-only staged review session `ses_08ca230b5ffe4LBnH7j2hMTROH`. Remaining
-gates are GitHub Actions, exact release tag, and a live HACS install ending
-with the bridge still `disabled`.
+read-only staged review session `ses_08ca230b5ffe4LBnH7j2hMTROH`. Commit
+`2435c7f` passed GitHub Actions and was published as the exact latest stable
+release `v0.5.4`; both source archives were reachable. HACS installed it on
+the live Core 2026.6.4 home. After the owner restart, installed/latest both
+reported `v0.5.4`, the new preflight steps/fields loaded, and climate
+home/action remained fail-closed because the bridge stayed `disabled`. No
+physical command or canary was attempted.
 
 Publication or installation of 0.5.4 is not authorization for physical climate
 control. A live one-room canary still requires a new explicit owner decision

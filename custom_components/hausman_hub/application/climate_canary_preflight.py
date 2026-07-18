@@ -7,7 +7,11 @@ from collections.abc import Mapping
 from ..domain.climate import ClimateRegistry
 from ..domain.climate_bridge import ClimateBridgeMode
 from .climate_evidence import SHADOW_EVIDENCE_REQUIRED_ACTIONS
-from .climate_import import ClimateImportSnapshot
+from .climate_import import (
+    MAX_CLIMATE_STATE_AGE_MS,
+    MAX_FUTURE_SKEW_MS,
+    ClimateImportSnapshot,
+)
 from .climate_registry import reconcile_climate_registry
 
 
@@ -43,6 +47,7 @@ def climate_canary_preflight(
     bridge_mode: ClimateBridgeMode,
     room_id: object,
     pending_operation: object,
+    checked_at: object,
 ) -> dict[str, object]:
     """Return preparation state while keeping physical activation impossible."""
 
@@ -54,6 +59,10 @@ def climate_canary_preflight(
         raise ClimateCanaryPreflightViolation("preflight room is not registered")
     if type(pending_operation) is not bool:
         raise ClimateCanaryPreflightViolation("preflight operation state is invalid")
+    if type(checked_at) is not int or checked_at < 0:
+        raise ClimateCanaryPreflightViolation("preflight timestamp is invalid")
+    if snapshot is not None and not isinstance(snapshot, ClimateImportSnapshot):
+        raise ClimateCanaryPreflightViolation("preflight snapshot is invalid")
 
     root = _mapping(evidence_payload, "shadow evidence")
     candidate = _mapping(root.get("candidate"), "shadow candidate")
@@ -100,6 +109,19 @@ def climate_canary_preflight(
         snapshot is not None
         and "required_actions_unsupported" not in evidence_reasons
     )
+    state_generated_at = snapshot.generated_at if snapshot is not None else None
+    state_valid_until = (
+        snapshot.generated_at + MAX_CLIMATE_STATE_AGE_MS
+        if snapshot is not None
+        else None
+    )
+    state_fresh = (
+        snapshot is not None
+        and snapshot.runtime_fresh
+        and snapshot.generated_at - MAX_FUTURE_SKEW_MS
+        <= checked_at
+        <= snapshot.generated_at + MAX_CLIMATE_STATE_AGE_MS
+    )
     rollback_ready = (
         bridge_mode in {ClimateBridgeMode.DISABLED, ClimateBridgeMode.SHADOW}
         and not pending_operation
@@ -111,6 +133,8 @@ def climate_canary_preflight(
         reasons.append("registry_not_reconciled")
     if not scope_qualified:
         reasons.append("command_scope_not_qualified")
+    if not state_fresh:
+        reasons.append("preflight_state_not_fresh")
     if pending_operation:
         reasons.append("pending_operation")
     if not rollback_ready:
@@ -122,6 +146,7 @@ def climate_canary_preflight(
         and registry_reconciled
         and shadow_ready
         and scope_qualified
+        and state_fresh
         and not pending_operation
         and rollback_ready
     )
@@ -133,6 +158,7 @@ def climate_canary_preflight(
         and shadow_status == "collecting"
         and registry_reconciled
         and scope_qualified
+        and state_fresh
         and not pending_operation
         and rollback_ready
         else "blocked"
@@ -156,6 +182,12 @@ def climate_canary_preflight(
         "status": status,
         "ready_for_authorization": ready,
         "bridge_mode": bridge_mode.value,
+        "freshness": {
+            "checked_at": checked_at,
+            "state_generated_at": state_generated_at,
+            "state_valid_until": state_valid_until,
+            "state_fresh": state_fresh,
+        },
         "registry": {
             "room_device_count": room_device_count,
             "reconciliation": reconciliation,

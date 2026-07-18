@@ -257,13 +257,14 @@ class ClimateRuntime:
                     )
                 except ClimateRuntimeUnavailable:
                     snapshot = None
+            checked_at = self._safe_now()
             evidence = self._require_evidence()
             evidence_payload = evidence.as_payload(
                 registry=self._registry,
                 snapshot=snapshot,
                 bridge_mode=self.configuration.climate_bridge_mode,
                 candidate_room_id=candidate_room_id,
-                now_ms=self._safe_now(),
+                now_ms=checked_at,
             )
             await self._async_save_evidence()
             return climate_canary_preflight(
@@ -275,6 +276,7 @@ class ClimateRuntime:
                 pending_operation=self._operations.room_has_pending(
                     candidate_room_id
                 ),
+                checked_at=checked_at,
             )
 
     async def async_preview_registry(self, payload: object) -> dict[str, object]:

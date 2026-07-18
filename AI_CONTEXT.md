@@ -124,7 +124,7 @@ Last updated: 2026-07-18.
   remained `disabled`; no physical command or canary was attempted.
   A non-activating supervised one-room checklist is documented in
   [the rollout checklist](docs/climate-canary-rollout-checklist.md).
-- Version 0.5.4 is the current HASC-only release candidate. Its guided options
+- Version 0.5.4 adds the HASC-only one-room preflight. Its guided options
   flow selects one room strictly from the saved registry and combines exact
   reconciliation, redacted shadow evidence, the fixed `set_room_target` plus
   `turn_room_off` scope, per-room pending state, and disabled rollback
@@ -136,9 +136,27 @@ Last updated: 2026-07-18.
   release/file-safety checks, and disposable Core 2026.6.4/2026.7.0. Kimi
   model `kimi-for-coding/k2p7` completed the final read-only staged review in
   session `ses_08ca230b5ffe4LBnH7j2hMTROH` with PASS and no substantial
-  findings. Publication and disabled live-install gates remain. The
+  findings. Commit `2435c7f` was pushed and published as the latest stable
+  release `v0.5.4` after successful GitHub Actions. HACS installed it on the
+  live Core 2026.6.4 home; after the owner restart, installed/latest both
+  reported `v0.5.4`, the new preflight steps and fields were loaded, and
+  climate home/action remained unavailable because the bridge stayed
+  `disabled`. No physical command or canary was attempted. The
   implementation decision is recorded in
   [the 0.5.4 preflight note](LLM_WIKI/Manual/2026-07-18-hasc-v0-5-4-canary-preflight.md).
+- Version 0.5.5 is the current HASC-only worktree. It exposes the canonical
+  saved-room preflight through one local-admin-only POST route and adds
+  explicit checked/generated/valid-until freshness timestamps. Expired state
+  blocks readiness independently of saved evidence. Two installed JSON
+  Schemas define the exact query and response; activation remains structurally
+  false, the tablet role is forbidden, and no options, registry, canary mode,
+  or command POST can be changed. The final staged package passed 226 local
+  tests, the full release/file-safety checks, and disposable Core
+  2026.6.4/2026.7.0. Kimi model `kimi-for-coding/k2p7` completed the read-only
+  staged review in session `ses_08b9a95d1ffe9AVm46wQzzPqZQ` with PASS and no
+  substantial findings. Publication and disabled live deployment remain
+  pending. The decision is recorded in
+  [the 0.5.5 contract note](LLM_WIKI/Manual/2026-07-18-hasc-v0-5-5-preflight-admin-contract.md).
 - Further HASC-only development is tracked in the
   [post-0.5 roadmap](LLM_WIKI/Manual/2026-07-17-hasc-post-v0-5-0-roadmap.md):
   the operator registry, formal Android contract, measurable shadow, command

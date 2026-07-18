@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub_hasc/contracts/v1/climate-canary-preflight-query.schema.json",
+  "title": "HASC climate canary preflight query v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["room_id"],
+  "properties": {
+    "room_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"}
+  }
+}

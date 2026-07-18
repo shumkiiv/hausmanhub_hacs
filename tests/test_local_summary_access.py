@@ -526,6 +526,31 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
         self.assertEqual(403, tablet_response.status)
 
+        preflight_path = "/api/hausman_hub/v1/admin/climate-canary-preflight"
+        preflight = views[preflight_path]
+        invalid_admin_response = asyncio.run(
+            preflight.post(
+                FakeJsonRequest(
+                    "127.0.0.1",
+                    admin,
+                    preflight_path,
+                    {"room_id": "living"},
+                )
+            )
+        )
+        self.assertEqual(400, invalid_admin_response.status)
+        forbidden_preflight = asyncio.run(
+            preflight.post(
+                FakeJsonRequest(
+                    "127.0.0.1",
+                    tablet,
+                    preflight_path,
+                    {"room_id": "living"},
+                )
+            )
+        )
+        self.assertEqual(403, forbidden_preflight.status)
+
     def test_shadow_climate_route_returns_public_state_and_never_posts(self) -> None:
         """Exercise the Android facade with an actual runtime and in-memory bridge."""
 
@@ -538,11 +563,11 @@ class LocalSummaryAccessTest(unittest.TestCase):
         from custom_components.hausman_hub.application.climate_runtime import ClimateRuntime
         from custom_components.hausman_hub.domain.climate_bridge import ClimateBridgeMode
         from custom_components.hausman_hub.domain.configuration import SafeConfiguration
-        from tests.test_climate_import import registry_payload, source_payload
+        from tests.test_climate_import import complete_registry_payload, source_payload
 
         class Store:
             async def async_load(self):
-                return registry_from_payload(registry_payload())
+                return registry_from_payload(complete_registry_payload())
 
             async def async_save(self, registry):
                 return None
@@ -567,6 +592,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             ),
             registry_store=Store(),
             bridge_client=bridge,
+            now_ms=lambda: 1784280005000,
         )
         asyncio.run(runtime.async_start())
         self.hass.data["hausman_hub"]["climate_runtime"] = runtime
@@ -636,6 +662,42 @@ class LocalSummaryAccessTest(unittest.TestCase):
             )
         )
         self.assertEqual(403, forbidden.status)
+
+        preflight_path = "/api/hausman_hub/v1/admin/climate-canary-preflight"
+        preflight_view = views[preflight_path]
+        preflight_response = asyncio.run(
+            preflight_view.post(
+                FakeJsonRequest(
+                    "192.168.1.20",
+                    reader_user("system-admin", admin=True),
+                    preflight_path,
+                    {"room_id": "living"},
+                )
+            )
+        )
+        self.assertEqual(200, preflight_response.status)
+        self.assertEqual("collecting", preflight_response.payload["status"])
+        self.assertFalse(preflight_response.payload["ready_for_authorization"])
+        self.assertTrue(preflight_response.payload["freshness"]["state_fresh"])
+        self.assertFalse(preflight_response.payload["activation"]["allowed"])
+        self.assertEqual(
+            "no-store",
+            preflight_response.headers.get("Cache-Control"),
+        )
+        preflight_json = json.dumps(preflight_response.payload, sort_keys=True)
+        self.assertNotIn("synthetic-ac-source-living", preflight_json)
+        self.assertNotIn("entity_id", preflight_json)
+        forbidden_preflight = asyncio.run(
+            preflight_view.post(
+                FakeJsonRequest(
+                    "192.168.1.20",
+                    tablet,
+                    preflight_path,
+                    {"room_id": "living"},
+                )
+            )
+        )
+        self.assertEqual(403, forbidden_preflight.status)
         self.assertEqual([], bridge.executed)
 
     def test_view_rejects_admin_mixed_group_system_and_public_requests(self) -> None:
@@ -791,7 +853,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertFalse(hasattr(self.view, method))
 
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
-        self.assertEqual(9, len(self.hass.http.views))
+        self.assertEqual(10, len(self.hass.http.views))
         self.assertEqual(
             1,
             sum(
@@ -1080,7 +1142,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             [(closed_entry, ("sensor", "switch"))],
             closed_hass.config_entries.forwarded,
         )
-        self.assertEqual(8, len(closed_hass.http.views))
+        self.assertEqual(9, len(closed_hass.http.views))
         self.assertEqual(
             {
                 "/api/hausman_hub/v1/home",
@@ -1090,6 +1152,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 "/api/hausman_hub/v1/admin/climate-registry-preview",
                 "/api/hausman_hub/v1/admin/climate-readiness",
                 "/api/hausman_hub/v1/admin/climate-shadow-evidence",
+                "/api/hausman_hub/v1/admin/climate-canary-preflight",
                 "/api/hausman_hub/v1/operations",
             },
             {view.url for view in closed_hass.http.views},

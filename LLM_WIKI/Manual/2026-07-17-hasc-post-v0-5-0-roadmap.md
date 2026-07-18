@@ -95,13 +95,13 @@ not authorized by publishing 0.5.0 or by this roadmap.
 
 ## Next coding slice
 
-After the 0.5.4 preflight release, the next HASC-only work should make the
-same redacted readiness decision available as a versioned local-admin contract
-with an installed JSON Schema and explicit freshness timestamp. This lets a
-future operator surface consume one canonical result without gaining climate
-authority. It must remain read-only, exclude private bindings, and never
-create an authorization or activate canary. Physical execution still requires
-a new explicit authorization naming one public room and exact actions.
+After the 0.5.5 local-admin contract release, the next HASC-only work should
+design a compatible Android home-contract v2 projection of per-room control
+availability and normalized blocked reasons. It must remain capability-driven,
+contain only public HASC IDs, and keep commands disabled unless the existing
+runtime gate allows them. This is contract preparation, not Android repository
+work or physical authorization. Physical execution still requires a new
+explicit authorization naming one public room and exact actions.
 
 ## 0.5.1 implementation status
 
@@ -147,7 +147,7 @@ because the bridge remained `disabled`; no physical command or canary ran.
 
 ## 0.5.4 implementation status
 
-Implemented in the current release candidate on 2026-07-18: one saved-room
+Implemented and released on 2026-07-18: one saved-room
 read-only preflight combines full registry reconciliation, redacted shadow
 evidence, exact initial command scope, per-room pending-operation status, and
 disabled rollback readiness in the real Home Assistant options flow. Only a
@@ -156,5 +156,23 @@ always false and separate owner authorization remains mandatory. The flow does
 not save registry/options, enable canary, or execute command POST. Final local,
 Core, and independent review gates passed: 224 local tests, disposable Core
 2026.6.4/2026.7.0, and Kimi `kimi-for-coding/k2p7` session
-`ses_08ca230b5ffe4LBnH7j2hMTROH` with PASS and no substantial findings.
-Publication and disabled live-install gates remain.
+`ses_08ca230b5ffe4LBnH7j2hMTROH` with PASS and no substantial findings. Commit
+`2435c7f` was published as the latest stable `v0.5.4` after successful GitHub
+Actions. HACS installed it on the live Core 2026.6.4 home, the owner restarted
+Core, and the new preflight translation keys loaded. Climate home/action
+remained unavailable because the bridge stayed `disabled`; no physical
+command or canary ran.
+
+## 0.5.5 implementation status
+
+Implemented in the current worktree on 2026-07-18: one fixed local-admin POST
+returns the same redacted saved-room preflight as options, including explicit
+state generation and expiration timestamps. Expired state fails closed even
+against ready historical evidence. Strict query/response schemas bring the
+installed climate schema set to twelve. The tablet role is forbidden, disabled
+performs no bridge GET, shadow performs no command POST, and activation remains
+structurally false. The final staged package passed 226 local tests, the full
+release/file-safety checks, and disposable Core 2026.6.4/2026.7.0. Kimi
+`kimi-for-coding/k2p7` session `ses_08b9a95d1ffe9AVm46wQzzPqZQ` returned PASS
+with no substantial findings. Publication and disabled live-deployment gates
+remain.

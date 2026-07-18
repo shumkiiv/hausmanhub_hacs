@@ -109,6 +109,7 @@ CLIMATE_ADMIN_REGISTRY_PATH = "/api/hausman_hub/v1/admin/climate-registry"
 CLIMATE_ADMIN_REGISTRY_PREVIEW_PATH = "/api/hausman_hub/v1/admin/climate-registry-preview"
 CLIMATE_ADMIN_READINESS_PATH = "/api/hausman_hub/v1/admin/climate-readiness"
 CLIMATE_ADMIN_SHADOW_EVIDENCE_PATH = "/api/hausman_hub/v1/admin/climate-shadow-evidence"
+CLIMATE_ADMIN_CANARY_PREFLIGHT_PATH = "/api/hausman_hub/v1/admin/climate-canary-preflight"
 CLIMATE_OPERATION_PATH = "/api/hausman_hub/v1/operations"
 CLIMATE_API_PATHS = (
     CLIMATE_HOME_PATH,
@@ -118,6 +119,7 @@ CLIMATE_API_PATHS = (
     CLIMATE_ADMIN_REGISTRY_PREVIEW_PATH,
     CLIMATE_ADMIN_READINESS_PATH,
     CLIMATE_ADMIN_SHADOW_EVIDENCE_PATH,
+    CLIMATE_ADMIN_CANARY_PREFLIGHT_PATH,
     CLIMATE_OPERATION_PATH,
 )
 ALTERNATE_LOCAL_SUMMARY_TARGET_STATUSES = {
@@ -2145,6 +2147,7 @@ def assert_disabled_climate_facade(hass: HomeAssistant, domain: str, entry_id: s
         CLIMATE_ADMIN_REGISTRY_PREVIEW_PATH: {"POST", "OPTIONS"},
         CLIMATE_ADMIN_READINESS_PATH: {"GET", "OPTIONS"},
         CLIMATE_ADMIN_SHADOW_EVIDENCE_PATH: {"POST", "OPTIONS"},
+        CLIMATE_ADMIN_CANARY_PREFLIGHT_PATH: {"POST", "OPTIONS"},
         CLIMATE_OPERATION_PATH: {"POST", "OPTIONS"},
     }
     for path, routes in find_climate_routes(hass).items():
@@ -2811,6 +2814,27 @@ async def async_assert_disabled_climate_http_access(hass: HomeAssistant) -> None
             "disabled shadow evidence must never claim candidate readiness",
         )
 
+        disabled_preflight = await client.post(
+            CLIMATE_ADMIN_CANARY_PREFLIGHT_PATH,
+            headers=owner_headers,
+            json={"room_id": "room-one"},
+        )
+        assert_result(
+            disabled_preflight.status,
+            HTTPStatus.BAD_REQUEST,
+            "preflight must reject a room absent from the saved registry without bridge I/O",
+        )
+        tablet_preflight = await client.post(
+            CLIMATE_ADMIN_CANARY_PREFLIGHT_PATH,
+            headers=tablet_headers,
+            json={"room_id": "room-one"},
+        )
+        assert_result(
+            tablet_preflight.status,
+            HTTPStatus.FORBIDDEN,
+            "preflight must remain unavailable to the ordinary tablet role",
+        )
+
         preview = await client.post(
             CLIMATE_ADMIN_REGISTRY_PREVIEW_PATH,
             headers=owner_headers,
@@ -3129,6 +3153,44 @@ async def async_assert_shadow_climate_end_to_end(
             1,
             "shadow evidence must count one translated intent without a POST",
         )
+
+        api_preflight = await home_client.post(
+            CLIMATE_ADMIN_CANARY_PREFLIGHT_PATH,
+            headers=owner_headers,
+            json={"room_id": "living"},
+        )
+        assert_result(
+            api_preflight.status,
+            HTTPStatus.OK,
+            "local administrator must read the canonical one-room preflight",
+        )
+        api_preflight_payload = await api_preflight.json()
+        api_freshness = api_preflight_payload.get("freshness", {})
+        assert_result(
+            (
+                api_preflight_payload.get("status"),
+                api_preflight_payload.get("ready_for_authorization"),
+                api_preflight_payload.get("activation", {}).get("allowed"),
+                api_freshness.get("state_fresh"),
+            ),
+            ("collecting", False, False, True),
+            "API preflight must be fresh but non-activating below the evidence gate",
+        )
+        checked_at = api_freshness.get("checked_at")
+        valid_until = api_freshness.get("state_valid_until")
+        if (
+            type(checked_at) is not int
+            or type(valid_until) is not int
+            or valid_until < checked_at
+        ):
+            raise RuntimeError("API preflight must expose a bounded freshness deadline")
+        api_preflight_serialized = json.dumps(
+            api_preflight_payload,
+            ensure_ascii=True,
+            sort_keys=True,
+        )
+        if "source_id" in api_preflight_serialized or "entity_id" in api_preflight_serialized:
+            raise RuntimeError("API preflight must not expose private climate bindings")
 
         preflight_flow = await hass.config_entries.options.async_init(entry.entry_id)
         preflight_menu = await hass.config_entries.options.async_configure(

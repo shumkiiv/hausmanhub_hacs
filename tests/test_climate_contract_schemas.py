@@ -13,8 +13,13 @@ from custom_components.hausman_hub.application.android_climate import (
     admin_climate_import_snapshot,
     android_climate_snapshot,
 )
+from custom_components.hausman_hub.application.climate_canary_preflight import (
+    climate_canary_preflight,
+)
 from custom_components.hausman_hub.application.climate_import import import_climate_state
 from custom_components.hausman_hub.application.climate_registry import registry_from_payload
+from custom_components.hausman_hub.domain.climate_bridge import ClimateBridgeMode
+from tests.test_climate_canary_preflight import NOW, ready_inputs
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -46,6 +51,8 @@ class ClimateContractSchemasTest(unittest.TestCase):
             "registry-preview.json": "climate-registry-preview.schema.json",
             "shadow-candidate-query.json": "climate-shadow-candidate-query.schema.json",
             "shadow-evidence.json": "climate-shadow-evidence.schema.json",
+            "canary-preflight-query.json": "climate-canary-preflight-query.schema.json",
+            "canary-preflight.json": "climate-canary-preflight.schema.json",
         }
         for fixture_name, schema_name in pairs.items():
             with self.subTest(fixture=fixture_name):
@@ -68,6 +75,37 @@ class ClimateContractSchemasTest(unittest.TestCase):
         self.assertNotIn("source_id", serialized_home)
         self.assertNotIn("entity_id", serialized_home)
 
+        preflight_registry, preflight_snapshot, evidence = ready_inputs()
+        preflight = climate_canary_preflight(
+            preflight_registry,
+            preflight_snapshot,
+            evidence,
+            bridge_mode=ClimateBridgeMode.SHADOW,
+            room_id="living",
+            pending_operation=False,
+            checked_at=NOW,
+        )
+        validator("climate-canary-preflight.schema.json").validate(preflight)
+
+        disabled_evidence = copy.deepcopy(evidence)
+        disabled_evidence["candidate"]["status"] = "blocked"  # type: ignore[index]
+        disabled_evidence["candidate"]["ready"] = False  # type: ignore[index]
+        disabled_evidence["candidate"]["reasons"] = [  # type: ignore[index]
+            "bridge_disabled"
+        ]
+        disabled_preflight = climate_canary_preflight(
+            preflight_registry,
+            None,
+            disabled_evidence,
+            bridge_mode=ClimateBridgeMode.DISABLED,
+            room_id="living",
+            pending_operation=False,
+            checked_at=NOW,
+        )
+        validator("climate-canary-preflight.schema.json").validate(
+            disabled_preflight
+        )
+
     def test_action_and_registry_schemas_reject_extra_or_missing_boundary_fields(self) -> None:
         action = load_json(FIXTURES / "action-request.json")
         missing_request = copy.deepcopy(action)
@@ -79,6 +117,11 @@ class ClimateContractSchemasTest(unittest.TestCase):
         registry["devices"][0]["service"] = "climate.set_temperature"  # type: ignore[index]
         with self.assertRaises(Exception):
             validator("climate-registry.schema.json").validate(registry)
+
+        preflight = load_json(FIXTURES / "canary-preflight.json")
+        preflight["activation"]["allowed"] = True  # type: ignore[index]
+        with self.assertRaises(Exception):
+            validator("climate-canary-preflight.schema.json").validate(preflight)
 
 
 if __name__ == "__main__":
