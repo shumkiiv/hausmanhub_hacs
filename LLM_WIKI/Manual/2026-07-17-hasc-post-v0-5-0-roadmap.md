@@ -5,10 +5,11 @@ Date: 2026-07-17.
 ## Product direction
 
 HASC remains the single backend contract that Android should eventually know.
-The existing climate-core remains the owner of automatic policy, cooldown,
-authority, safety, physical feedback, and actual execution. The next HASC work
-must make the 0.5.0 backend operable and observable before expanding physical
-authority.
+The product direction changed with 0.6.0: rooms, targets, policy, and decisions
+will move into HASC itself. The existing climate-core remains a transitional
+observation and execution adapter while native HASC behavior is implemented,
+compared, and rolled out safely. Android must not need to know when that
+internal cutover happens.
 
 This roadmap covers HASC source only. Installing it in a live home, preparing a
 registry with real identifiers, changing climate-core, changing Android, and
@@ -93,16 +94,44 @@ not authorized by publishing 0.5.0 or by this roadmap.
 4. Remove transitional direct client paths only after comparison and rollback
    evidence is complete.
 
+## Phase 6 — native HASC climate controller
+
+1. Store a HASC-owned one-room comfort policy and calculate temperature and
+   humidity demand from fresh observed state without producing a command.
+2. Bind native Home Assistant observation entities for temperature and
+   humidity, compare them with the transitional Climate API, and fail closed on
+   drift or stale state.
+3. Produce an internal typed desired-action plan for AC, TRV, humidifier, and
+   floor heating. Keep execution structurally disabled while policy, cooldown,
+   conflicts, manual override, and rollback are verified.
+4. Expose HASC-owned room targets and decisions to Android through a versioned
+   public contract, preserving the current stable HASC room/device IDs.
+5. Only after separate authorization, execute one native action for one room,
+   confirm physical feedback, and retain the existing climate-core as rollback.
+6. Remove the transitional executor only after native parity and rollback are
+   proven for every device kind in scope.
+
 ## Next coding slice
 
-The 0.5.9 worktree implements stable public display metadata for the first two
-room actions and the target-temperature field. The next HASC-only slice should
-add stable Russian presentation metadata for the public blocked reasons and
-operation lifecycle, so Android can explain why a control is unavailable or
-still waiting without translating backend codes itself. This remains contract
-preparation, not Android repository work or physical authorization. Physical
-execution still requires a new explicit authorization naming one public room
-and exact actions.
+The 0.6.0 worktree implements the first non-executing HASC-owned policy and
+decision preview for one room. The next HASC-only slice should add native Home
+Assistant observation bindings for the room's temperature and humidity, then
+show parity against the transitional Climate API. It must still create no
+physical command. A later slice can build a typed desired-action plan with
+cooldown and manual-override rules before any executor is authorized.
+
+## 0.6.0 implementation status
+
+Implemented in the current worktree on 2026-07-18: a validated one-room policy
+stores temperature and humidity targets; a pure decision engine uses fixed
+deadbands, fresh transitional observations, registered device types, and
+availability to report heating, cooling, humidifying, hold, or unavailable.
+The Home Assistant options menu has a dedicated Russian-language built-in
+controller flow with a result screen and separate save confirmation. Its
+contract always returns `preview_only` and `commands_enabled=false`; a disabled
+bridge performs no state I/O. Existing installations default to disabled and
+retain no room or target fields. Publication and live installation remain
+pending until all local/Core/review gates pass.
 
 ## 0.5.1 implementation status
 

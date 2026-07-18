@@ -24,6 +24,7 @@ from custom_components.hausman_hub.domain.climate_bridge import (
     climate_bridge_target,
 )
 from custom_components.hausman_hub.domain.configuration import SafeConfiguration
+from custom_components.hausman_hub.domain.native_climate import native_climate_policy
 from tests.test_climate_import import (
     complete_registry_payload,
     registry_payload,
@@ -126,6 +127,45 @@ def ready_evidence_store(
 
 
 class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
+    async def test_native_preview_reads_state_but_never_posts(self) -> None:
+        bridge = MemoryBridge()
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateBridgeMode.SHADOW),
+            registry_store=MemoryStore(registry_from_payload(registry_payload())),
+            bridge_client=bridge,
+            now_ms=lambda: 1784280005000,
+        )
+        await runtime.async_start()
+
+        result = await runtime.async_native_climate_preview(
+            native_climate_policy("preview", "living", 22.0, 45)
+        )
+
+        self.assertEqual("ready", result["status"])
+        self.assertEqual("cooling", result["decision"]["temperature"])  # type: ignore[index]
+        self.assertFalse(result["execution"]["commands_enabled"])  # type: ignore[index]
+        self.assertEqual([], bridge.executed)
+
+    async def test_native_preview_with_disabled_bridge_performs_no_io(self) -> None:
+        bridge = MemoryBridge()
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateBridgeMode.DISABLED),
+            registry_store=MemoryStore(registry_from_payload(registry_payload())),
+            bridge_client=bridge,
+            now_ms=lambda: 1784280005000,
+        )
+        await runtime.async_start()
+
+        result = await runtime.async_native_climate_preview(
+            native_climate_policy("preview", "living", 22.0, 45)
+        )
+
+        self.assertEqual("unavailable", result["status"])
+        self.assertEqual(0, bridge.fetch_count)
+        self.assertEqual([], bridge.executed)
+
     async def test_shadow_refreshes_but_never_posts(self) -> None:
         bridge = MemoryBridge()
         runtime = ClimateRuntime(

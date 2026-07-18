@@ -10,6 +10,7 @@ from typing import Protocol
 from ..domain.climate import ClimateRegistry
 from ..domain.climate_bridge import ClimateBridgeMode
 from ..domain.configuration import SafeConfiguration
+from ..domain.native_climate import NativeClimatePolicy, preview_native_climate
 from .android_climate import admin_climate_import_snapshot, android_climate_snapshot
 from .climate_canary_preflight import climate_canary_preflight
 from .climate_commands import (
@@ -195,6 +196,24 @@ class ClimateRuntime:
 
         async with self._lock:
             return registry_to_payload(self._registry)
+
+    async def async_native_climate_preview(
+        self,
+        policy: NativeClimatePolicy,
+    ) -> dict[str, object]:
+        """Calculate HASC's one-room decision without enabling any command."""
+
+        async with self._lock:
+            snapshot = self._snapshot
+            if self.configuration.climate_bridge_mode is not ClimateBridgeMode.DISABLED:
+                try:
+                    snapshot = await self._async_refresh_unlocked(
+                        persist_evidence=False
+                    )
+                except ClimateRuntimeUnavailable:
+                    snapshot = None
+            decision = preview_native_climate(policy, self._registry, snapshot)
+            return decision.as_payload()
 
     async def async_readiness(self) -> dict[str, object]:
         """Return redacted bridge and registry readiness to a local admin."""

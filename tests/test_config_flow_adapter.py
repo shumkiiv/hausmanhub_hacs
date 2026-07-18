@@ -299,6 +299,7 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
             "mode": self.config_flow.MODE_SELECTOR,
             "summary_update_interval": self.config_flow.SUMMARY_UPDATE_INTERVAL_SELECTOR,
             "climate_bridge_mode": self.config_flow.CLIMATE_BRIDGE_MODE_SELECTOR,
+            "native_climate_mode": self.config_flow.NATIVE_CLIMATE_MODE_SELECTOR,
             "settings_section": self.config_flow.OPTIONS_SECTION_SELECTOR,
             "climate_registry_action": self.config_flow.CLIMATE_REGISTRY_ACTION_SELECTOR,
             "climate_device_kind": self.config_flow.CLIMATE_DEVICE_KIND_SELECTOR,
@@ -328,6 +329,7 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
             [
                 "climate_registry",
                 "climate_connection",
+                "native_climate",
                 "general_settings",
                 "test_switch",
             ],
@@ -817,6 +819,118 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("disabled", disabled["data"]["climate_bridge_mode"])
         self.assertNotIn("climate_bridge_target", disabled["data"])
         self.assertNotIn("climate_canary_room_id", disabled["data"])
+
+    async def test_options_preview_one_room_native_climate_without_commands(self) -> None:
+        """The built-in HASC controller stores targets only after preview."""
+
+        from custom_components.hausman_hub.application.climate_import import (
+            import_climate_state,
+        )
+        from custom_components.hausman_hub.application.climate_registry import (
+            registry_from_payload,
+        )
+        from custom_components.hausman_hub.application.climate_runtime import ClimateRuntime
+        from custom_components.hausman_hub.domain.climate_bridge import ClimateBridgeMode
+        from custom_components.hausman_hub.domain.configuration import SafeConfiguration
+        from tests.test_climate_import import registry_payload, source_payload
+
+        class Store:
+            async def async_load(self):
+                return registry_from_payload(registry_payload())
+
+            async def async_save(self, registry):
+                raise AssertionError("native policy must not rewrite the registry")
+
+        class Bridge:
+            def __init__(self) -> None:
+                self.executed = []
+
+            async def async_fetch_state(self):
+                return import_climate_state(source_payload())
+
+            async def async_execute(self, plan):
+                self.executed.append(plan)
+
+        bridge = Bridge()
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=SafeConfiguration(
+                mode="shadow",
+                climate_bridge_mode=ClimateBridgeMode.SHADOW,
+            ),
+            registry_store=Store(),
+            bridge_client=bridge,
+        )
+        await runtime.async_start()
+        options_flow = self.config_flow.HausmanHubOptionsFlow()
+        options_flow.config_entry = FakeConfigEntry(
+            {"mode": "read-only", "direct_execution_status": "direct_execution_blocked"},
+            {
+                "mode": "shadow",
+                "climate_bridge_mode": "shadow",
+                "climate_bridge_target": "http://127.0.0.1:1880",
+            },
+        )
+        options_flow.hass = SimpleNamespace(  # type: ignore[attr-defined]
+            data={"hausman_hub": {"climate_runtime": runtime}}
+        )
+
+        mode_form = await options_flow.async_step_init(
+            {"settings_section": "native_climate"}
+        )
+        policy_form = await options_flow.async_step_native_climate(
+            {"native_climate_mode": "preview"}
+        )
+        preview_form = await options_flow.async_step_native_climate_policy(
+            {
+                "native_climate_room_id": "living",
+                "native_target_temperature": "22.0",
+                "native_target_humidity": "45",
+            }
+        )
+
+        self.assertEqual("native_climate", mode_form["step_id"])
+        self.assertEqual("native_climate_policy", policy_form["step_id"])
+        self.assertEqual("native_climate_confirm", preview_form["step_id"])
+        self.assertEqual(
+            "нужно охлаждать",
+            preview_form["description_placeholders"]["temperature_decision"],
+        )
+        self.assertEqual("нет", preview_form["description_placeholders"]["commands"])
+        self.assertEqual([], bridge.executed)
+
+        saved = await options_flow.async_step_native_climate_confirm(
+            {"confirm_native_climate_preview": True}
+        )
+
+        self.assertEqual("create_entry", saved["type"])
+        self.assertEqual("preview", saved["data"]["native_climate_mode"])
+        self.assertEqual("living", saved["data"]["native_climate_room_id"])
+        self.assertEqual(22.0, saved["data"]["native_target_temperature"])
+        self.assertEqual(45, saved["data"]["native_target_humidity"])
+        self.assertNotIn("commands_enabled", saved["data"])
+        self.assertEqual([], bridge.executed)
+
+        options_flow.config_entry.options = dict(saved["data"])
+        general = await options_flow.async_step_general_settings(
+            {
+                "mode": "shadow",
+                "local_summary_enabled": True,
+                "summary_update_interval": "15m",
+            }
+        )
+        self.assertEqual("preview", general["data"]["native_climate_mode"])
+        self.assertEqual("living", general["data"]["native_climate_room_id"])
+
+        options_flow.config_entry.options = dict(general["data"])
+        disabled = await options_flow.async_step_native_climate(
+            {"native_climate_mode": "disabled"}
+        )
+        self.assertNotIn("native_climate_mode", disabled["data"])
+        self.assertNotIn("native_climate_room_id", disabled["data"])
+        self.assertNotIn("native_target_temperature", disabled["data"])
+        self.assertNotIn("native_target_humidity", disabled["data"])
+        self.assertEqual([], bridge.executed)
 
     async def test_options_reject_unsafe_canary_values(self) -> None:
         """No missing target, other entity domain, or truth-like arm value passes."""

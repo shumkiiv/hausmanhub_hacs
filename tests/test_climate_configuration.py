@@ -14,6 +14,7 @@ from custom_components.hausman_hub.domain.climate_bridge import (
     UnsafeClimateBridgeTarget,
     climate_bridge_target,
 )
+from custom_components.hausman_hub.domain.native_climate import NativeClimateMode
 
 
 ENTRY = {
@@ -106,6 +107,59 @@ class ClimateConfigurationTest(unittest.TestCase):
             )
         with self.assertRaisesRegex(ConfigurationViolation, "unsupported fields"):
             effective_configuration(ENTRY, {"climate_bridge_token": "secret"})
+
+    def test_native_preview_persists_one_room_targets_without_authority(self) -> None:
+        result = create_options(
+            "shadow",
+            native_climate_mode_value="preview",
+            native_climate_room_id_value="living",
+            native_target_temperature_value="22.5",
+            native_target_humidity_value=45,
+        )
+
+        configuration = effective_configuration(ENTRY, result)
+        policy = configuration.native_climate_policy
+        self.assertIs(policy.mode, NativeClimateMode.PREVIEW)
+        self.assertEqual("living", policy.room_id)
+        self.assertEqual(22.5, policy.target_temperature)
+        self.assertEqual(45, policy.target_humidity)
+        self.assertNotIn("commands_enabled", result)
+
+    def test_disabling_native_preview_drops_room_and_targets(self) -> None:
+        result = create_options(
+            "read-only",
+            native_climate_mode_value="disabled",
+            native_climate_room_id_value="living",
+            native_target_temperature_value=22.0,
+            native_target_humidity_value=45,
+        )
+
+        self.assertNotIn("native_climate_mode", result)
+        self.assertNotIn("native_climate_room_id", result)
+        self.assertNotIn("native_target_temperature", result)
+        self.assertNotIn("native_target_humidity", result)
+        self.assertIs(
+            effective_configuration(ENTRY, result).native_climate_policy.mode,
+            NativeClimateMode.DISABLED,
+        )
+
+    def test_persisted_incomplete_native_preview_fails_closed(self) -> None:
+        for options in (
+            {"native_climate_mode": "preview"},
+            {
+                "native_climate_mode": "preview",
+                "native_climate_room_id": "living",
+                "native_target_temperature": 22.0,
+            },
+            {
+                "native_climate_mode": "disabled",
+                "native_climate_room_id": "living",
+            },
+        ):
+            with self.subTest(options=options), self.assertRaises(
+                ConfigurationViolation
+            ):
+                effective_configuration(ENTRY, options)
 
 
 if __name__ == "__main__":

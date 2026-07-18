@@ -23,12 +23,12 @@
     "step": {
       "init": {
         "title": "HASC: choose a settings area",
-        "description": "Choose one area. The next screen shows only its relevant fields. For normal climate setup, start with rooms and devices, then connect the existing climate controller separately.",
+        "description": "Choose one area. For the new climate path, add rooms and devices, connect the existing controller as the temporary observation source, then open HASC's built-in climate controller.",
         "data": {
           "settings_section": "Settings area"
         },
         "data_description": {
-          "settings_section": "Rooms and devices is the main setup wizard. Climate connection configures the safe connection mode and address. General information and the service test are separate."
+          "settings_section": "Rooms and devices describes what is installed. Connection supplies current observations. The built-in HASC controller stores room targets and previews its own decision."
         }
       },
       "general_settings": {
@@ -77,6 +77,40 @@
         "data_description": {
           "climate_bridge_target": "Example: http://192.168.1.10:1880. Enter only the protocol, local IP, and port, without paths, DNS names, credentials, or parameters.",
           "climate_canary_room_id": "This is not a room name or Home Assistant entity. Use a stable ID from the saved HASC registry, for example living."
+        }
+      },
+      "native_climate": {
+        "title": "HASC: built-in climate controller",
+        "description": "HASC can own the decision to heat, cool, or humidify a room. The first stage is a one-room preview only: it never turns a device on or off.",
+        "data": {
+          "native_climate_mode": "How to use the built-in climate controller"
+        },
+        "data_description": {
+          "native_climate_mode": "Preview stores targets and calculates the room state. Device commands are always disabled in this mode."
+        }
+      },
+      "native_climate_policy": {
+        "title": "HASC: one-room comfort targets",
+        "description": "Choose a room and its targets. HASC reads current values from the connected existing controller and shows its own decision on the next screen without sending commands.",
+        "data": {
+          "native_climate_room_id": "Room",
+          "native_target_temperature": "Target temperature, °C",
+          "native_target_humidity": "Target humidity, %"
+        },
+        "data_description": {
+          "native_climate_room_id": "Only rooms already saved in HASC are shown.",
+          "native_target_temperature": "HASC holds temperature within 0.5 °C of the target.",
+          "native_target_humidity": "HASC holds humidity within 5% of the target."
+        }
+      },
+      "native_climate_confirm": {
+        "title": "Built-in HASC climate decision",
+        "description": "Room: {room}. Result: {status}. Current temperature: {current_temperature}; target: {target_temperature}; decision: {temperature_decision}; suitable equipment available: {temperature_device}. Current humidity: {current_humidity}; target: {target_humidity}; decision: {humidity_decision}; humidifier available: {humidity_device}. Commands enabled: {commands}. Notes: {reasons}.",
+        "data": {
+          "confirm_native_climate_preview": "Save these preview targets"
+        },
+        "data_description": {
+          "confirm_native_climate_preview": "Only the room and targets are saved. HASC receives no device-control authority."
         }
       },
       "climate_registry": {
@@ -191,7 +225,7 @@
       }
     },
     "error": {
-      "unsafe_settings_section": "Choose one of the four HASC settings areas.",
+      "unsafe_settings_section": "Choose one of the five HASC settings areas.",
       "unsafe_mode": "Only read-only and comparison-without-changes modes are allowed.",
       "unsafe_local_summary_setting": "The optional local page can only be turned on or off.",
       "unsafe_summary_update_interval": "Choose only 5, 15, or 30 minutes for the nine-count refresh.",
@@ -200,6 +234,12 @@
       "unsafe_climate_bridge_mode": "Choose disabled, shadow, or canary for the climate bridge.",
       "unsafe_climate_bridge_target": "Use one private literal HTTP(S) origin without a path or credentials.",
       "unsafe_climate_canary_room": "Canary mode requires one stable lowercase room ID.",
+      "unsafe_native_climate_mode": "Choose disabled or decision preview for the built-in climate controller.",
+      "native_climate_needs_room": "First add and save at least one room under Rooms and climate devices.",
+      "invalid_native_climate_policy": "Choose a saved room, a temperature from 18 to 28 °C, and humidity from 30 to 70%.",
+      "invalid_native_climate_room": "Choose one room already saved in HASC.",
+      "native_climate_preview_unavailable": "The decision could not be calculated. Nothing was saved; check the climate connection and try again.",
+      "native_climate_confirmation_required": "Enable confirmation to save these targets. Commands will remain disabled.",
       "climate_runtime_unavailable": "The loaded HASC climate runtime is unavailable.",
       "invalid_climate_registry": "The registry must be valid bounded HASC climate registry JSON v1.",
       "climate_registry_locked": "Registry changes are locked while the climate bridge is in canary mode.",
@@ -235,10 +275,17 @@
         "canary": "One-room trial control — after verification"
       }
     },
+    "native_climate_mode": {
+      "options": {
+        "disabled": "Disable the built-in climate controller",
+        "preview": "Show decisions only — no commands"
+      }
+    },
     "settings_section": {
       "options": {
         "climate_registry": "Rooms and climate devices",
         "climate_connection": "Connect the existing climate controller",
+        "native_climate": "Built-in HASC climate controller",
         "general_settings": "HASC general information",
         "test_switch": "Service switch test — not climate"
       }

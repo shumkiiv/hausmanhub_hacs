@@ -221,7 +221,7 @@ Last updated: 2026-07-18.
   final read-only staged review in session `ses_08a6b28e4ffeLp6u9BYpGw1F4O`
   with PASS and no substantial findings. See the
   [0.5.9 action presentation note](LLM_WIKI/Manual/2026-07-18-hasc-v0-5-9-action-presentations.md).
-- Version 0.5.10 is the current HASC-only worktree. The single nine-field
+- Version 0.5.10 was published and installed through HACS. The single nine-field
   options form is replaced by a one-choice settings menu with four separate
   areas: rooms/devices, climate-controller connection, aggregate information,
   and a clearly non-climate service switch test. The connection flow asks for
@@ -234,8 +234,23 @@ Last updated: 2026-07-18.
   local tests and disposable Core 2026.6.4/2026.7.0 checks pass. Kimi model
   `kimi-for-coding/k2p7` completed the final staged read-only review in session
   `ses_08a36c03bffeXybMbvHK4IPj8g` with PASS and no substantial findings.
-  Commit, publication, and HACS installation remain pending. See the
+  Commit, publication, and HACS installation completed; the owner has not yet
+  confirmed the post-install Home Assistant restart. See the
   [0.5.10 settings-menu note](LLM_WIKI/Manual/2026-07-18-hasc-v0-5-10-simple-settings-menu.md).
+- Version 0.6.0 is the current HASC-only worktree and starts moving climate
+  policy into HASC. A validated one-room policy stores temperature and humidity
+  targets. A pure decision engine uses fresh transitional Climate API state,
+  fixed ±0.5 °C/±5% deadbands, registered device kinds, and availability to
+  report heating, cooling, humidifying, hold, stale, or unavailable. A fifth
+  Russian options area previews that decision and requires separate target
+  confirmation. Execution is structurally `preview_only` with commands always
+  false; a disabled bridge performs no state I/O. Existing installations
+  default to the disabled native policy. Existing climate-core remains the
+  transitional observation/execution adapter while native HASC observation,
+  planning, cooldown, manual override, and later separately authorized
+  execution are developed. Publication and live installation remain pending.
+  See the
+  [0.6.0 native preview note](LLM_WIKI/Manual/2026-07-18-hasc-v0-6-0-native-climate-preview.md).
 - Further HASC-only development is tracked in the
   [post-0.5 roadmap](LLM_WIKI/Manual/2026-07-17-hasc-post-v0-5-0-roadmap.md):
   the operator registry, formal Android contract, measurable shadow, command

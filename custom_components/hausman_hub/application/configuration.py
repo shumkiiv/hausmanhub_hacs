@@ -26,6 +26,11 @@ from ..domain.climate_bridge import (
     climate_bridge_target,
 )
 from ..domain.control import UnsafeCanaryTargetError, canary_control_target
+from ..domain.native_climate import (
+    NativeClimateMode,
+    NativeClimateViolation,
+    native_climate_policy,
+)
 
 
 MODE_FIELD = "mode"
@@ -40,6 +45,11 @@ CLIMATE_BRIDGE_MODE_FIELD = "climate_bridge_mode"
 CLIMATE_BRIDGE_MODE_DEFAULT = ClimateBridgeMode.DISABLED.value
 CLIMATE_BRIDGE_TARGET_FIELD = "climate_bridge_target"
 CLIMATE_CANARY_ROOM_ID_FIELD = "climate_canary_room_id"
+NATIVE_CLIMATE_MODE_FIELD = "native_climate_mode"
+NATIVE_CLIMATE_MODE_DEFAULT = NativeClimateMode.DISABLED.value
+NATIVE_CLIMATE_ROOM_ID_FIELD = "native_climate_room_id"
+NATIVE_TARGET_TEMPERATURE_FIELD = "native_target_temperature"
+NATIVE_TARGET_HUMIDITY_FIELD = "native_target_humidity"
 
 
 class ConfigurationViolation(ValueError):
@@ -65,7 +75,11 @@ def create_options(
     climate_bridge_mode_value: object = CLIMATE_BRIDGE_MODE_DEFAULT,
     climate_bridge_target_value: object = None,
     climate_canary_room_id_value: object = None,
-) -> dict[str, str | bool]:
+    native_climate_mode_value: object = NATIVE_CLIMATE_MODE_DEFAULT,
+    native_climate_room_id_value: object = None,
+    native_target_temperature_value: object = None,
+    native_target_humidity_value: object = None,
+) -> dict[str, str | bool | float | int]:
     """Return only validated observation and canary-control choices."""
 
     if canary_control_enabled_value is False:
@@ -79,6 +93,11 @@ def create_options(
         climate_canary_room_id_value = None
     elif climate_bridge_mode_value == ClimateBridgeMode.SHADOW.value:
         climate_canary_room_id_value = None
+    if native_climate_mode_value == NativeClimateMode.DISABLED.value:
+        # Preview rollback must also remove the selected room and its targets.
+        native_climate_room_id_value = None
+        native_target_temperature_value = None
+        native_target_humidity_value = None
     configuration = _configuration_for(
         mode_value,
         local_summary_enabled_value,
@@ -88,8 +107,12 @@ def create_options(
         climate_bridge_mode_value,
         climate_bridge_target_value,
         climate_canary_room_id_value,
+        native_climate_mode_value,
+        native_climate_room_id_value,
+        native_target_temperature_value,
+        native_target_humidity_value,
     )
-    options: dict[str, str | bool] = {
+    options: dict[str, str | bool | float | int] = {
         MODE_FIELD: configuration.mode,
         LOCAL_SUMMARY_ENABLED_FIELD: configuration.local_summary_enabled,
         SUMMARY_UPDATE_INTERVAL_FIELD: configuration.summary_update_interval,
@@ -104,6 +127,18 @@ def create_options(
         options[CLIMATE_BRIDGE_TARGET_FIELD] = configuration.climate_bridge_target.origin
     if configuration.climate_canary_room_id is not None:
         options[CLIMATE_CANARY_ROOM_ID_FIELD] = configuration.climate_canary_room_id
+    native_policy = configuration.native_climate_policy
+    if native_policy.mode is NativeClimateMode.PREVIEW:
+        if (
+            native_policy.room_id is None
+            or native_policy.target_temperature is None
+            or native_policy.target_humidity is None
+        ):
+            raise ConfigurationViolation("native climate preview is incomplete")
+        options[NATIVE_CLIMATE_MODE_FIELD] = native_policy.mode.value
+        options[NATIVE_CLIMATE_ROOM_ID_FIELD] = native_policy.room_id
+        options[NATIVE_TARGET_TEMPERATURE_FIELD] = native_policy.target_temperature
+        options[NATIVE_TARGET_HUMIDITY_FIELD] = native_policy.target_humidity
     return options
 
 
@@ -128,6 +163,10 @@ def effective_configuration(
             CLIMATE_BRIDGE_MODE_FIELD,
             CLIMATE_BRIDGE_TARGET_FIELD,
             CLIMATE_CANARY_ROOM_ID_FIELD,
+            NATIVE_CLIMATE_MODE_FIELD,
+            NATIVE_CLIMATE_ROOM_ID_FIELD,
+            NATIVE_TARGET_TEMPERATURE_FIELD,
+            NATIVE_TARGET_HUMIDITY_FIELD,
         },
         "options",
     )
@@ -155,6 +194,13 @@ def effective_configuration(
     )
     climate_bridge_target_value = options.get(CLIMATE_BRIDGE_TARGET_FIELD)
     climate_canary_room_id_value = options.get(CLIMATE_CANARY_ROOM_ID_FIELD)
+    native_climate_mode_value = options.get(
+        NATIVE_CLIMATE_MODE_FIELD,
+        NATIVE_CLIMATE_MODE_DEFAULT,
+    )
+    native_climate_room_id_value = options.get(NATIVE_CLIMATE_ROOM_ID_FIELD)
+    native_target_temperature_value = options.get(NATIVE_TARGET_TEMPERATURE_FIELD)
+    native_target_humidity_value = options.get(NATIVE_TARGET_HUMIDITY_FIELD)
     return _configuration_for(
         mode_value,
         local_summary_enabled_value,
@@ -164,6 +210,10 @@ def effective_configuration(
         climate_bridge_mode_value,
         climate_bridge_target_value,
         climate_canary_room_id_value,
+        native_climate_mode_value,
+        native_climate_room_id_value,
+        native_target_temperature_value,
+        native_target_humidity_value,
     )
 
 
@@ -176,6 +226,10 @@ def _configuration_for(
     climate_bridge_mode_value: object = CLIMATE_BRIDGE_MODE_DEFAULT,
     climate_bridge_target_value: object = None,
     climate_canary_room_id_value: object = None,
+    native_climate_mode_value: object = NATIVE_CLIMATE_MODE_DEFAULT,
+    native_climate_room_id_value: object = None,
+    native_target_temperature_value: object = None,
+    native_target_humidity_value: object = None,
 ) -> SafeConfiguration:
     """Build the configuration after checking every optional choice."""
 
@@ -233,6 +287,16 @@ def _configuration_for(
             raise ConfigurationViolation("shadow climate bridge must not retain a canary room")
 
     try:
+        native_policy = native_climate_policy(
+            native_climate_mode_value,
+            native_climate_room_id_value,
+            native_target_temperature_value,
+            native_target_humidity_value,
+        )
+    except NativeClimateViolation as error:
+        raise ConfigurationViolation(str(error)) from error
+
+    try:
         mode_configuration = configuration_for_mode(mode_value)
     except UnsafeModeError as error:
         raise ConfigurationViolation(str(error)) from error
@@ -246,6 +310,7 @@ def _configuration_for(
         climate_bridge_mode=bridge_mode,
         climate_bridge_target=bridge_target,
         climate_canary_room_id=canary_room_id,
+        native_climate_policy=native_policy,
     )
 
 

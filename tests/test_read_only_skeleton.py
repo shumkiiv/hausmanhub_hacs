@@ -61,7 +61,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         self.assertEqual("hausman_hub", manifest["domain"])
         self.assertTrue(manifest["config_flow"])
         self.assertTrue(manifest["single_config_entry"])
-        self.assertEqual("0.5.10", manifest["version"])
+        self.assertEqual("0.6.0", manifest["version"])
 
     def test_current_manifest_version_has_a_plain_change_note(self) -> None:
         manifest = json.loads((INTEGRATION / "manifest.json").read_text(encoding="utf-8"))
@@ -2296,6 +2296,22 @@ class ReadOnlySkeletonTest(unittest.TestCase):
                 {"climate_bridge_target", "climate_canary_room_id"},
                 set(steps["climate_endpoint"]["data"]),
             )
+            self.assertEqual(
+                {"native_climate_mode"},
+                set(steps["native_climate"]["data"]),
+            )
+            self.assertEqual(
+                {
+                    "native_climate_room_id",
+                    "native_target_temperature",
+                    "native_target_humidity",
+                },
+                set(steps["native_climate_policy"]["data"]),
+            )
+            self.assertEqual(
+                {"confirm_native_climate_preview"},
+                set(steps["native_climate_confirm"]["data"]),
+            )
             self.assertIn("unsafe_settings_section", content["options"]["error"])
             self.assertIn(
                 "unsafe_local_summary_setting",
@@ -2324,6 +2340,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
                 {
                     "climate_registry",
                     "climate_connection",
+                    "native_climate",
                     "general_settings",
                     "test_switch",
                 },
@@ -2393,6 +2410,14 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         self.assertEqual(
             {"disabled", "shadow", "canary"},
             set(english["selector"]["climate_bridge_mode"]["options"]),
+        )
+        self.assertIn(
+            "never turns a device",
+            english["options"]["step"]["native_climate"]["description"],
+        )
+        self.assertIn(
+            "ничего не включает и не выключает",
+            russian["options"]["step"]["native_climate"]["description"],
         )
         self.assertIn(
             "Управление устройствами здесь не включается",

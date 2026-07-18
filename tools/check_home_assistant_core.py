@@ -953,10 +953,11 @@ def assert_options_form_uses_safe_native_selectors(options_form: dict[str, Any])
         [
             "climate_registry",
             "climate_connection",
+            "native_climate",
             "general_settings",
             "test_switch",
         ],
-        "initial options form must expose exactly four separated settings areas",
+        "initial options form must expose exactly five separated settings areas",
     )
 
 

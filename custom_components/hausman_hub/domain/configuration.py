@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 from .climate_bridge import ClimateBridgeMode, ClimateBridgeTarget
 from .control import CanaryControlTarget
+from .native_climate import NativeClimatePolicy
 
 
 READ_ONLY_MODE = "read-only"
@@ -42,6 +43,7 @@ class SafeConfiguration:
     climate_bridge_mode: ClimateBridgeMode = ClimateBridgeMode.DISABLED
     climate_bridge_target: ClimateBridgeTarget | None = None
     climate_canary_room_id: str | None = None
+    native_climate_policy: NativeClimatePolicy = NativeClimatePolicy()
 
 
 def configuration_for_mode(value: object) -> SafeConfiguration:

@@ -42,6 +42,11 @@ from .application.configuration import (
     LOCAL_SUMMARY_ENABLED_DEFAULT,
     LOCAL_SUMMARY_ENABLED_FIELD,
     MODE_FIELD,
+    NATIVE_CLIMATE_MODE_DEFAULT,
+    NATIVE_CLIMATE_MODE_FIELD,
+    NATIVE_CLIMATE_ROOM_ID_FIELD,
+    NATIVE_TARGET_HUMIDITY_FIELD,
+    NATIVE_TARGET_TEMPERATURE_FIELD,
     SUMMARY_UPDATE_INTERVAL_FIELD,
     create_initial_entry,
     create_options,
@@ -69,6 +74,14 @@ from .domain.climate_bridge import (
     UnsafeClimateBridgeTarget,
     climate_bridge_target,
 )
+from .domain.native_climate import (
+    NATIVE_TARGET_HUMIDITY_DEFAULT,
+    NATIVE_TARGET_TEMPERATURE_DEFAULT,
+    NativeClimateMode,
+    NativeClimatePolicy,
+    NativeClimateViolation,
+    native_climate_policy,
+)
 
 
 OPTIONS_SECTION_FIELD = "settings_section"
@@ -92,6 +105,7 @@ CLIMATE_SHADOW_EVIDENCE_CLOSE_FIELD = "close_shadow_evidence"
 CLIMATE_IMPORT_CANDIDATE_FIELD = "climate_import_candidate"
 CLIMATE_PREFLIGHT_ROOM_FIELD = "climate_preflight_room"
 CLIMATE_PREFLIGHT_CLOSE_FIELD = "close_canary_preflight"
+NATIVE_CLIMATE_CONFIRM_FIELD = "confirm_native_climate_preview"
 MAX_CLIMATE_REGISTRY_FORM_BYTES = 16 * 1024
 MISSING_CLIMATE_DEVICE_LABEL = "Нет доступных устройств"
 MISSING_CLIMATE_ROOM_LABEL = "Сначала добавьте комнату"
@@ -131,6 +145,37 @@ _RUSSIAN_REASON_LABELS = {
 _RUSSIAN_ACTION_LABELS = {
     "set_room_target": "установка температуры",
     "turn_room_off": "выключение климата",
+}
+_RUSSIAN_NATIVE_STATUS_LABELS = {
+    "disabled": "выключен",
+    "ready": "расчёт выполнен",
+    "unavailable": "нет данных для расчёта",
+    "stale": "данные устарели",
+    "room_missing": "комната не найдена",
+}
+_RUSSIAN_TEMPERATURE_DEMAND_LABELS = {
+    "unavailable": "нет данных",
+    "heating": "нужно нагревать",
+    "hold": "температура в норме",
+    "cooling": "нужно охлаждать",
+}
+_RUSSIAN_HUMIDITY_DEMAND_LABELS = {
+    "unavailable": "нет данных",
+    "humidifying": "нужно увлажнять",
+    "hold": "влажность в норме",
+    "high": "влажность выше цели",
+}
+_RUSSIAN_NATIVE_REASON_LABELS = {
+    "controller_disabled": "встроенный расчёт выключен",
+    "room_not_registered": "комната не добавлена в HASC",
+    "climate_state_unavailable": "нет текущих данных из климатического контура",
+    "room_state_unavailable": "для комнаты нет текущих показаний",
+    "state_stale": "показания устарели",
+    "temperature_unavailable": "нет температуры",
+    "humidity_unavailable": "нет влажности",
+    "temperature_device_unavailable": "нет доступного устройства для температуры",
+    "humidity_device_unavailable": "нет доступного увлажнителя",
+    "humidity_above_target": "понижение влажности пока не автоматизировано",
 }
 
 
@@ -176,6 +221,35 @@ def _russian_yes_no(value: object) -> str:
     return "да" if value is True else "нет"
 
 
+def _display_measurement(value: object, unit: str) -> str:
+    """Render one optional numeric reading without accepting arbitrary text."""
+
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return "нет данных"
+    return f"{value:g}{unit}"
+
+
+def _russian_native_value(value: object, labels: Mapping[str, str]) -> str:
+    """Render one fixed native-controller code for the local operator."""
+
+    return labels.get(value, "неизвестно") if isinstance(value, str) else "неизвестно"
+
+
+def _russian_native_reasons(values: object) -> str:
+    """Render bounded preview reasons without exposing internal identifiers."""
+
+    if not isinstance(values, list) or not values:
+        return "нет"
+    return "; ".join(
+        dict.fromkeys(
+            _RUSSIAN_NATIVE_REASON_LABELS.get(value, "неизвестная причина")
+            if isinstance(value, str)
+            else "неизвестная причина"
+            for value in values
+        )
+    )
+
+
 MODE_SELECTOR = SelectSelector(
     SelectSelectorConfig(
         options=list(APPROVED_MODES),
@@ -197,15 +271,32 @@ CLIMATE_BRIDGE_MODE_SELECTOR = SelectSelector(
         translation_key="climate_bridge_mode",
     )
 )
+NATIVE_CLIMATE_MODE_SELECTOR = SelectSelector(
+    SelectSelectorConfig(
+        options=[mode.value for mode in NativeClimateMode],
+        translation_key="native_climate_mode",
+    )
+)
 OPTIONS_SECTION_SELECTOR = SelectSelector(
     SelectSelectorConfig(
         options=[
             "climate_registry",
             "climate_connection",
+            "native_climate",
             "general_settings",
             "test_switch",
         ],
         translation_key="settings_section",
+    )
+)
+NATIVE_TARGET_TEMPERATURE_SELECTOR = SelectSelector(
+    SelectSelectorConfig(
+        options=[f"{value / 2:.1f}" for value in range(36, 57)],
+    )
+)
+NATIVE_TARGET_HUMIDITY_SELECTOR = SelectSelector(
+    SelectSelectorConfig(
+        options=[str(value) for value in range(30, 71, 5)],
     )
 )
 CLIMATE_REGISTRY_JSON_SELECTOR = TextSelector(
@@ -388,6 +479,59 @@ def _climate_endpoint_schema(
         )
         fields[canary_room_field] = str
     return vol.Schema(fields)
+
+
+def _native_climate_mode_schema(mode_default: str) -> vol.Schema:
+    """Choose whether HASC should calculate its own room decision."""
+
+    return vol.Schema(
+        {
+            vol.Required(
+                NATIVE_CLIMATE_MODE_FIELD,
+                default=mode_default,
+            ): NATIVE_CLIMATE_MODE_SELECTOR
+        }
+    )
+
+
+def _native_climate_policy_schema(
+    rooms: list[dict[str, str]],
+    *,
+    room_default: str,
+    temperature_default: float,
+    humidity_default: int,
+) -> vol.Schema:
+    """Ask only for one room and its two comfort targets."""
+
+    return vol.Schema(
+        {
+            vol.Required(
+                NATIVE_CLIMATE_ROOM_ID_FIELD,
+                default=room_default,
+            ): SelectSelector(SelectSelectorConfig(options=rooms)),
+            vol.Required(
+                NATIVE_TARGET_TEMPERATURE_FIELD,
+                default=f"{temperature_default:.1f}",
+            ): NATIVE_TARGET_TEMPERATURE_SELECTOR,
+            vol.Required(
+                NATIVE_TARGET_HUMIDITY_FIELD,
+                default=str(humidity_default),
+            ): NATIVE_TARGET_HUMIDITY_SELECTOR,
+        }
+    )
+
+
+def _native_climate_confirm_schema() -> vol.Schema:
+    """Require a separate save after showing HASC's read-only decision."""
+
+    return vol.Schema(
+        {
+            vol.Required(
+                NATIVE_CLIMATE_CONFIRM_FIELD,
+                default=False,
+            ): StrictBooleanSelector()
+        }
+    )
 
 
 def _climate_registry_json_schema(default: str) -> vol.Schema:
@@ -629,11 +773,34 @@ def _safe_climate_bridge_defaults(
     )
 
 
+def _safe_native_climate_defaults(
+    entry_data: Mapping[str, Any],
+    options: Mapping[str, Any],
+) -> tuple[str, str | None, float, int]:
+    """Return safe stored preview values or conservative first-run defaults."""
+
+    try:
+        policy = effective_configuration(entry_data, options).native_climate_policy
+    except ConfigurationViolation:
+        return (
+            NATIVE_CLIMATE_MODE_DEFAULT,
+            None,
+            NATIVE_TARGET_TEMPERATURE_DEFAULT,
+            NATIVE_TARGET_HUMIDITY_DEFAULT,
+        )
+    return (
+        policy.mode.value,
+        policy.room_id,
+        policy.target_temperature or NATIVE_TARGET_TEMPERATURE_DEFAULT,
+        policy.target_humidity or NATIVE_TARGET_HUMIDITY_DEFAULT,
+    )
+
+
 def _merged_safe_options(
     entry_data: Mapping[str, Any],
     saved_options: Mapping[str, Any],
     updates: Mapping[str, object],
-) -> dict[str, str | bool]:
+) -> dict[str, str | bool | float | int]:
     """Apply one small settings screen while preserving other validated areas."""
 
     try:
@@ -648,6 +815,10 @@ def _merged_safe_options(
             CLIMATE_BRIDGE_MODE_FIELD: CLIMATE_BRIDGE_MODE_DEFAULT,
             CLIMATE_BRIDGE_TARGET_FIELD: None,
             CLIMATE_CANARY_ROOM_ID_FIELD: None,
+            NATIVE_CLIMATE_MODE_FIELD: NATIVE_CLIMATE_MODE_DEFAULT,
+            NATIVE_CLIMATE_ROOM_ID_FIELD: None,
+            NATIVE_TARGET_TEMPERATURE_FIELD: None,
+            NATIVE_TARGET_HUMIDITY_FIELD: None,
         }
     else:
         values = {
@@ -667,17 +838,27 @@ def _merged_safe_options(
                 else current.climate_bridge_target.origin
             ),
             CLIMATE_CANARY_ROOM_ID_FIELD: current.climate_canary_room_id,
+            NATIVE_CLIMATE_MODE_FIELD: current.native_climate_policy.mode.value,
+            NATIVE_CLIMATE_ROOM_ID_FIELD: current.native_climate_policy.room_id,
+            NATIVE_TARGET_TEMPERATURE_FIELD: (
+                current.native_climate_policy.target_temperature
+            ),
+            NATIVE_TARGET_HUMIDITY_FIELD: current.native_climate_policy.target_humidity,
         }
     values.update(updates)
     return create_options(
-        values[MODE_FIELD],
-        values[LOCAL_SUMMARY_ENABLED_FIELD],
-        values[SUMMARY_UPDATE_INTERVAL_FIELD],
-        values[CANARY_CONTROL_ENABLED_FIELD],
-        values[CANARY_CONTROL_TARGET_FIELD],
-        values[CLIMATE_BRIDGE_MODE_FIELD],
-        values[CLIMATE_BRIDGE_TARGET_FIELD],
-        values[CLIMATE_CANARY_ROOM_ID_FIELD],
+        mode_value=values[MODE_FIELD],
+        local_summary_enabled_value=values[LOCAL_SUMMARY_ENABLED_FIELD],
+        summary_update_interval_value=values[SUMMARY_UPDATE_INTERVAL_FIELD],
+        canary_control_enabled_value=values[CANARY_CONTROL_ENABLED_FIELD],
+        canary_control_target_value=values[CANARY_CONTROL_TARGET_FIELD],
+        climate_bridge_mode_value=values[CLIMATE_BRIDGE_MODE_FIELD],
+        climate_bridge_target_value=values[CLIMATE_BRIDGE_TARGET_FIELD],
+        climate_canary_room_id_value=values[CLIMATE_CANARY_ROOM_ID_FIELD],
+        native_climate_mode_value=values[NATIVE_CLIMATE_MODE_FIELD],
+        native_climate_room_id_value=values[NATIVE_CLIMATE_ROOM_ID_FIELD],
+        native_target_temperature_value=values[NATIVE_TARGET_TEMPERATURE_FIELD],
+        native_target_humidity_value=values[NATIVE_TARGET_HUMIDITY_FIELD],
     )
 
 
@@ -727,6 +908,10 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
     _import_snapshot: ClimateImportSnapshot | None = None
     _import_candidates: dict[str, ImportedClimateDevice] | None = None
     _selected_import_source_id: str | None = None
+    _native_climate_mode_draft: str | None = None
+    _native_climate_rooms: list[dict[str, str]] | None = None
+    _native_climate_policy_draft: NativeClimatePolicy | None = None
+    _native_climate_preview: Mapping[str, Any] | None = None
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Show one short choice instead of mixing unrelated settings."""
@@ -738,6 +923,8 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
                 return await self.async_step_climate_registry()
             if section == "climate_connection":
                 return await self.async_step_climate_connection()
+            if section == "native_climate":
+                return await self.async_step_native_climate()
             if section == "general_settings":
                 return await self.async_step_general_settings()
             if section == "test_switch":
@@ -929,6 +1116,161 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
                 climate_canary_room_id_default=room_default,
             ),
             errors=errors,
+        )
+
+    async def async_step_native_climate(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> FlowResult:
+        """Enable only HASC's non-executing decision preview."""
+
+        mode_default, _, _, _ = _safe_native_climate_defaults(
+            self.config_entry.data,
+            self.config_entry.options,
+        )
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            mode = user_input.get(NATIVE_CLIMATE_MODE_FIELD)
+            if mode not in {value.value for value in NativeClimateMode}:
+                errors[NATIVE_CLIMATE_MODE_FIELD] = "unsafe_native_climate_mode"
+            elif mode == NativeClimateMode.DISABLED.value:
+                options = _merged_safe_options(
+                    self.config_entry.data,
+                    self.config_entry.options,
+                    {
+                        NATIVE_CLIMATE_MODE_FIELD: mode,
+                        NATIVE_CLIMATE_ROOM_ID_FIELD: None,
+                        NATIVE_TARGET_TEMPERATURE_FIELD: None,
+                        NATIVE_TARGET_HUMIDITY_FIELD: None,
+                    },
+                )
+                return self.async_create_entry(title="", data=options)
+            else:
+                runtime = self._climate_runtime()
+                if runtime is None:
+                    errors["base"] = "climate_runtime_unavailable"
+                else:
+                    try:
+                        payload = await runtime.async_registry_payload()
+                    except Exception:
+                        errors["base"] = "climate_runtime_unavailable"
+                    else:
+                        rooms = self._rooms_from_registry_payload(payload)
+                        if not rooms:
+                            errors["base"] = "native_climate_needs_room"
+                        else:
+                            self._native_climate_mode_draft = mode
+                            self._native_climate_rooms = rooms
+                            return await self.async_step_native_climate_policy()
+
+        return self.async_show_form(
+            step_id="native_climate",
+            data_schema=_native_climate_mode_schema(mode_default),
+            errors=errors,
+        )
+
+    async def async_step_native_climate_policy(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> FlowResult:
+        """Configure one room's targets and calculate a safe preview."""
+
+        rooms = self._native_climate_rooms or []
+        runtime = self._climate_runtime()
+        if (
+            self._native_climate_mode_draft != NativeClimateMode.PREVIEW.value
+            or not rooms
+            or runtime is None
+        ):
+            return await self.async_step_init()
+        _, saved_room, temperature_default, humidity_default = (
+            _safe_native_climate_defaults(
+                self.config_entry.data,
+                self.config_entry.options,
+            )
+        )
+        room_values = {
+            room["value"]
+            for room in rooms
+            if isinstance(room.get("value"), str)
+        }
+        room_default = saved_room if saved_room in room_values else rooms[0]["value"]
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            room_id = user_input.get(NATIVE_CLIMATE_ROOM_ID_FIELD)
+            temperature = user_input.get(NATIVE_TARGET_TEMPERATURE_FIELD)
+            humidity_raw = user_input.get(NATIVE_TARGET_HUMIDITY_FIELD)
+            try:
+                humidity = (
+                    int(humidity_raw)
+                    if isinstance(humidity_raw, str) and humidity_raw.isdigit()
+                    else humidity_raw
+                )
+                policy = native_climate_policy(
+                    NativeClimateMode.PREVIEW.value,
+                    room_id,
+                    temperature,
+                    humidity,
+                )
+            except NativeClimateViolation:
+                errors["base"] = "invalid_native_climate_policy"
+            else:
+                if policy.room_id not in room_values:
+                    errors[NATIVE_CLIMATE_ROOM_ID_FIELD] = "invalid_native_climate_room"
+                else:
+                    try:
+                        preview = await runtime.async_native_climate_preview(policy)
+                    except Exception:
+                        errors["base"] = "native_climate_preview_unavailable"
+                    else:
+                        self._native_climate_policy_draft = policy
+                        self._native_climate_preview = preview
+                        return await self.async_step_native_climate_confirm()
+
+        return self.async_show_form(
+            step_id="native_climate_policy",
+            data_schema=_native_climate_policy_schema(
+                rooms,
+                room_default=room_default,
+                temperature_default=temperature_default,
+                humidity_default=humidity_default,
+            ),
+            errors=errors,
+        )
+
+    async def async_step_native_climate_confirm(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> FlowResult:
+        """Show the calculated result and separately confirm saving targets."""
+
+        policy = self._native_climate_policy_draft
+        if policy is None or self._native_climate_preview is None:
+            return await self.async_step_init()
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            confirmed = user_input.get(NATIVE_CLIMATE_CONFIRM_FIELD)
+            if confirmed is not True:
+                errors[NATIVE_CLIMATE_CONFIRM_FIELD] = (
+                    "native_climate_confirmation_required"
+                )
+            else:
+                options = _merged_safe_options(
+                    self.config_entry.data,
+                    self.config_entry.options,
+                    {
+                        NATIVE_CLIMATE_MODE_FIELD: policy.mode.value,
+                        NATIVE_CLIMATE_ROOM_ID_FIELD: policy.room_id,
+                        NATIVE_TARGET_TEMPERATURE_FIELD: policy.target_temperature,
+                        NATIVE_TARGET_HUMIDITY_FIELD: policy.target_humidity,
+                    },
+                )
+                return self.async_create_entry(title="", data=options)
+        return self.async_show_form(
+            step_id="native_climate_confirm",
+            data_schema=_native_climate_confirm_schema(),
+            errors=errors,
+            description_placeholders=self._native_climate_preview_placeholders(),
         )
 
     async def async_step_climate_registry(
@@ -1531,6 +1873,60 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
             "room_count": str(counts.get("room_count", 0)),
             "device_count": str(counts.get("device_count", 0)),
             "reasons": _russian_reasons(preview.get("reasons")),
+        }
+
+    def _native_climate_preview_placeholders(self) -> dict[str, str]:
+        """Render the HASC-owned decision in plain Russian for confirmation."""
+
+        preview = self._native_climate_preview or {}
+        current = preview.get("current")
+        current_values = current if isinstance(current, Mapping) else {}
+        targets = preview.get("targets")
+        target_values = targets if isinstance(targets, Mapping) else {}
+        decision = preview.get("decision")
+        decision_values = decision if isinstance(decision, Mapping) else {}
+        equipment = preview.get("equipment")
+        equipment_values = equipment if isinstance(equipment, Mapping) else {}
+        execution = preview.get("execution")
+        execution_values = execution if isinstance(execution, Mapping) else {}
+        return {
+            "room": str(preview.get("room_name") or "неизвестная комната"),
+            "status": _russian_native_value(
+                preview.get("status"),
+                _RUSSIAN_NATIVE_STATUS_LABELS,
+            ),
+            "current_temperature": _display_measurement(
+                current_values.get("temperature"),
+                " °C",
+            ),
+            "target_temperature": _display_measurement(
+                target_values.get("temperature"),
+                " °C",
+            ),
+            "temperature_decision": _russian_native_value(
+                decision_values.get("temperature"),
+                _RUSSIAN_TEMPERATURE_DEMAND_LABELS,
+            ),
+            "temperature_device": _russian_yes_no(
+                equipment_values.get("temperature_ready")
+            ),
+            "current_humidity": _display_measurement(
+                current_values.get("humidity"),
+                " %",
+            ),
+            "target_humidity": _display_measurement(
+                target_values.get("humidity"),
+                " %",
+            ),
+            "humidity_decision": _russian_native_value(
+                decision_values.get("humidity"),
+                _RUSSIAN_HUMIDITY_DEMAND_LABELS,
+            ),
+            "humidity_device": _russian_yes_no(
+                equipment_values.get("humidity_ready")
+            ),
+            "commands": _russian_yes_no(execution_values.get("commands_enabled")),
+            "reasons": _russian_native_reasons(preview.get("reasons")),
         }
 
     def _shadow_evidence_placeholders(self) -> dict[str, str]:
