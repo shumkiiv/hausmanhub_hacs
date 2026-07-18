@@ -182,7 +182,13 @@ class ClimateDevice:
             if self.control_scope is not ClimateControlScope.OBSERVED:
                 raise ClimateModelViolation("passive sensor must remain observed")
         elif len(control_endpoints) != 1:
-            raise ClimateModelViolation("controllable device needs one control endpoint")
+            source_managed = (
+                not control_endpoints
+                and self.control_owner is ClimateControlOwner.CLIMATE_CORE
+                and self.control_scope is ClimateControlScope.MANAGED
+            )
+            if not source_managed:
+                raise ClimateModelViolation("controllable device needs one control endpoint")
         if self.control_scope is ClimateControlScope.OBSERVED:
             if self.control_owner is not ClimateControlOwner.OBSERVED:
                 raise ClimateModelViolation("observed device must have observed ownership")

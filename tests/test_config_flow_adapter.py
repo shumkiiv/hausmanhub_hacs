@@ -301,6 +301,12 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
             "climate_bridge_mode": self.config_flow.CLIMATE_BRIDGE_MODE_SELECTOR,
             "native_climate_mode": self.config_flow.NATIVE_CLIMATE_MODE_SELECTOR,
             "settings_section": self.config_flow.OPTIONS_SECTION_SELECTOR,
+            "advanced_settings_action": (
+                self.config_flow.ADVANCED_SETTINGS_ACTION_SELECTOR
+            ),
+            "contour_action": self.config_flow.CONTOUR_ACTION_SELECTOR,
+            "contour_mode": self.config_flow.CONTOUR_MODE_SELECTOR,
+            "contour_strategy": self.config_flow.CONTOUR_STRATEGY_SELECTOR,
             "climate_registry_action": self.config_flow.CLIMATE_REGISTRY_ACTION_SELECTOR,
             "climate_device_kind": self.config_flow.CLIMATE_DEVICE_KIND_SELECTOR,
             "climate_device_control_scope": self.config_flow.CLIMATE_DEVICE_SCOPE_SELECTOR,
@@ -323,15 +329,13 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         field, selector = next(iter(schema.fields.items()))
         self.assertIsInstance(field, FakeRequired)
         self.assertEqual("settings_section", field.key)
-        self.assertEqual("climate_registry", field.default)
+        self.assertEqual("contours", field.default)
         self.assertIsInstance(selector, FakeSelectSelector)
         self.assertEqual(
             [
-                "climate_registry",
-                "climate_connection",
-                "native_climate",
+                "contours",
                 "general_settings",
-                "test_switch",
+                "advanced_settings",
             ],
             selector.config.options,
         )
@@ -875,8 +879,11 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
             data={"hausman_hub": {"climate_runtime": runtime}}
         )
 
-        mode_form = await options_flow.async_step_init(
-            {"settings_section": "native_climate"}
+        await options_flow.async_step_init(
+            {"settings_section": "advanced_settings"}
+        )
+        mode_form = await options_flow.async_step_advanced_settings(
+            {"advanced_settings_action": "native_climate"}
         )
         policy_form = await options_flow.async_step_native_climate(
             {"native_climate_mode": "preview"}
@@ -930,6 +937,151 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("native_climate_room_id", disabled["data"])
         self.assertNotIn("native_target_temperature", disabled["data"])
         self.assertNotIn("native_target_humidity", disabled["data"])
+        self.assertEqual([], bridge.executed)
+
+    async def test_simple_contour_wizard_selects_existing_engine_devices(self) -> None:
+        """The normal path creates one contour without technical registry fields."""
+
+        from custom_components.hausman_hub.application.climate_import import (
+            import_climate_state,
+        )
+        from custom_components.hausman_hub.application.climate_runtime import ClimateRuntime
+        from custom_components.hausman_hub.domain.climate import ClimateRegistry
+        from custom_components.hausman_hub.domain.climate_bridge import (
+            ClimateBridgeMode,
+            climate_bridge_target,
+        )
+        from custom_components.hausman_hub.domain.configuration import SafeConfiguration
+        from custom_components.hausman_hub.domain.contours import ContourRegistry
+        from tests.test_climate_import import source_payload
+
+        class ClimateStore:
+            def __init__(self) -> None:
+                self.registry = ClimateRegistry()
+
+            async def async_load(self):
+                return self.registry
+
+            async def async_save(self, registry):
+                self.registry = registry
+
+        class ContourStore:
+            def __init__(self) -> None:
+                self.registry = ContourRegistry()
+
+            async def async_load(self):
+                return self.registry
+
+            async def async_save(self, registry):
+                self.registry = registry
+
+        class Bridge:
+            def __init__(self) -> None:
+                self.executed = []
+
+            async def async_fetch_state(self):
+                return import_climate_state(source_payload())
+
+            async def async_execute(self, plan):
+                self.executed.append(plan)
+
+        climate_store = ClimateStore()
+        contour_store = ContourStore()
+        bridge = Bridge()
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=SafeConfiguration(
+                mode="shadow",
+                climate_bridge_mode=ClimateBridgeMode.SHADOW,
+                climate_bridge_target=climate_bridge_target(
+                    "http://127.0.0.1:1880"
+                ),
+            ),
+            registry_store=climate_store,
+            contour_store=contour_store,
+            bridge_client=bridge,
+        )
+        await runtime.async_start()
+        options_flow = self.config_flow.HausmanHubOptionsFlow()
+        options_flow.config_entry = FakeConfigEntry(
+            {"mode": "read-only", "direct_execution_status": "direct_execution_blocked"},
+            {
+                "mode": "shadow",
+                "climate_bridge_mode": "shadow",
+                "climate_bridge_target": "http://127.0.0.1:1880",
+            },
+        )
+        options_flow.hass = SimpleNamespace(  # type: ignore[attr-defined]
+            data={"hausman_hub": {"climate_runtime": runtime}}
+        )
+
+        contour_menu = await options_flow.async_step_init(
+            {"settings_section": "contours"}
+        )
+        setup_form = await options_flow.async_step_contours(
+            {"contour_action": "configure_climate"}
+        )
+
+        self.assertEqual("contours", contour_menu["step_id"])
+        self.assertEqual("climate_contour_setup", setup_form["step_id"])
+        fields = {
+            marker.key: selector
+            for marker, selector in setup_form["schema"].fields.items()
+        }
+        self.assertEqual(
+            {
+                "contour_name",
+                "contour_mode",
+                "contour_rooms",
+                "contour_devices",
+                "contour_target_temperature",
+                "contour_target_humidity",
+                "contour_strategy",
+            },
+            set(fields),
+        )
+        self.assertTrue(fields["contour_rooms"].config.multiple)
+        self.assertTrue(fields["contour_devices"].config.multiple)
+        self.assertNotIn(
+            "synthetic-ac-source-living",
+            str(fields["contour_devices"].config.options),
+        )
+
+        preview = await options_flow.async_step_climate_contour_setup(
+            {
+                "contour_name": "Климат",
+                "contour_mode": "automatic",
+                "contour_rooms": ["living"],
+                "contour_devices": ["device_001"],
+                "contour_target_temperature": "25.0",
+                "contour_target_humidity": "45",
+                "contour_strategy": "normal",
+            }
+        )
+
+        self.assertEqual("climate_contour_confirm", preview["step_id"])
+        self.assertEqual("да", preview["description_placeholders"]["automatic"])
+        self.assertEqual([], bridge.executed)
+        saved = await options_flow.async_step_climate_contour_confirm(
+            {"confirm_contour_save": True}
+        )
+
+        self.assertEqual("create_entry", saved["type"])
+        self.assertEqual("shadow", saved["data"]["climate_bridge_mode"])
+        self.assertEqual(1, len(contour_store.registry.contours))
+        self.assertEqual(1, len(climate_store.registry.rooms))
+        self.assertEqual(1, len(climate_store.registry.devices))
+        self.assertEqual([], bridge.executed)
+
+        options_flow.config_entry.options = dict(saved["data"])
+        disabled = await options_flow.async_step_contours(
+            {"contour_action": "disable_climate"}
+        )
+
+        self.assertEqual("create_entry", disabled["type"])
+        self.assertEqual("disabled", disabled["data"]["climate_bridge_mode"])
+        self.assertNotIn("climate_bridge_target", disabled["data"])
+        self.assertEqual("disabled", contour_store.registry.contours[0].mode.value)
         self.assertEqual([], bridge.executed)
 
     async def test_options_reject_unsafe_canary_values(self) -> None:
@@ -1059,8 +1211,11 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
             data={"hausman_hub": {"climate_runtime": runtime}}
         )
 
-        editor = await options_flow.async_step_init(
-            {"settings_section": "climate_registry"}
+        await options_flow.async_step_init(
+            {"settings_section": "advanced_settings"}
+        )
+        editor = await options_flow.async_step_advanced_settings(
+            {"advanced_settings_action": "climate_registry"}
         )
         room_form = await options_flow.async_step_climate_registry(
             {"climate_registry_action": "add_room"}
@@ -1168,7 +1323,10 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
             data={"hausman_hub": {"climate_runtime": runtime}}
         )
 
-        await options_flow.async_step_init({"settings_section": "climate_registry"})
+        await options_flow.async_step_init({"settings_section": "advanced_settings"})
+        await options_flow.async_step_advanced_settings(
+            {"advanced_settings_action": "climate_registry"}
+        )
         ac_choices = await options_flow.async_step_climate_registry(
             {"climate_registry_action": "import_candidate"}
         )
@@ -1316,7 +1474,10 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
             data={"hausman_hub": {"climate_runtime": runtime}}
         )
 
-        await options_flow.async_step_init({"settings_section": "climate_registry"})
+        await options_flow.async_step_init({"settings_section": "advanced_settings"})
+        await options_flow.async_step_advanced_settings(
+            {"advanced_settings_action": "climate_registry"}
+        )
         candidate_form = await options_flow.async_step_climate_registry(
             {"climate_registry_action": "review_shadow_evidence"}
         )
@@ -1403,7 +1564,10 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
             data={"hausman_hub": {"climate_runtime": runtime}}
         )
 
-        await options_flow.async_step_init({"settings_section": "climate_registry"})
+        await options_flow.async_step_init({"settings_section": "advanced_settings"})
+        await options_flow.async_step_advanced_settings(
+            {"advanced_settings_action": "climate_registry"}
+        )
         options_flow._registry_draft = {  # type: ignore[attr-defined]
             **registry,
             "rooms": [

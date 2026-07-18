@@ -22,6 +22,7 @@ DOMAIN = "hausman_hub"
 DATA_CLIMATE_RUNTIME = "climate_runtime"
 DATA_CLIMATE_VIEWS = "climate_views"
 HOME_PATH = "/api/hausman_hub/v1/home"
+CONTOURS_PATH = "/api/hausman_hub/v1/contours"
 ACTION_PATH = "/api/hausman_hub/v1/actions"
 ADMIN_IMPORT_PATH = "/api/hausman_hub/v1/admin/climate-import"
 ADMIN_REGISTRY_PATH = "/api/hausman_hub/v1/admin/climate-registry"
@@ -49,6 +50,7 @@ def register_climate_api(hass: HomeAssistant, runtime: ClimateRuntime) -> None:
     if DATA_CLIMATE_VIEWS not in data:
         views = (
             ClimateHomeView(hass),
+            ContoursView(hass),
             ClimateActionView(hass),
             ClimateAdminImportView(hass),
             ClimateAdminRegistryView(hass),
@@ -121,6 +123,27 @@ class ClimateHomeView(_ClimateView):
             return self._unavailable()
         try:
             payload = await runtime.async_public_snapshot()
+        except Exception:
+            return self._unavailable()
+        return self.json(payload, headers=NO_STORE_HEADERS)
+
+
+class ContoursView(_ClimateView):
+    """Serve public automatic-contour status to the local tablet."""
+
+    url = CONTOURS_PATH
+    name = "api:hausman_hub:contours"
+
+    async def get(self, request: Any) -> Any:
+        if not _is_exact_request(request, CONTOURS_PATH):
+            return _not_found(self)
+        if not _is_local_tablet_request(request):
+            return _forbidden(self)
+        runtime = self._runtime()
+        if runtime is None:
+            return self._unavailable()
+        try:
+            payload = await runtime.async_contours_snapshot()
         except Exception:
             return self._unavailable()
         return self.json(payload, headers=NO_STORE_HEADERS)

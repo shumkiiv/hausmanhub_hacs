@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hasc/contracts/v1/contours.schema.json",
+  "title": "HASC automatic contours v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "contours"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hasc-contours"},
+        "version": {"const": 1}
+      }
+    },
+    "contours": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {"$ref": "#/$defs/contour"}
+    }
+  },
+  "$defs": {
+    "stableId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+    },
+    "nullableNumber": {
+      "type": ["number", "null"]
+    },
+    "contour": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "kind", "mode", "status", "engine", "rooms", "execution", "reasons"],
+      "properties": {
+        "id": {"$ref": "#/$defs/stableId"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 120},
+        "kind": {"const": "climate"},
+        "mode": {"enum": ["disabled", "observe", "automatic"]},
+        "status": {"enum": ["disabled", "ready", "attention", "unavailable", "stale"]},
+        "engine": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "version"],
+          "properties": {
+            "name": {"const": "hausman-climate"},
+            "version": {"const": 1}
+          }
+        },
+        "rooms": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "items": {"$ref": "#/$defs/room"}
+        },
+        "execution": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["owner", "automatic_active", "hasc_direct_commands"],
+          "properties": {
+            "owner": {"const": "existing_climate_core"},
+            "automatic_active": {"type": "boolean"},
+            "hasc_direct_commands": {"const": false}
+          }
+        },
+        "reasons": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/reason"}
+        }
+      }
+    },
+    "room": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "status", "current", "targets", "device_count", "engine_mode", "authority_ready", "targets_in_sync", "automatic_active", "reasons"],
+      "properties": {
+        "id": {"$ref": "#/$defs/stableId"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 120},
+        "status": {"enum": ["ready", "unavailable"]},
+        "current": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["temperature", "humidity"],
+          "properties": {
+            "temperature": {"$ref": "#/$defs/nullableNumber"},
+            "humidity": {"$ref": "#/$defs/nullableNumber"}
+          }
+        },
+        "targets": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["temperature", "humidity", "strategy"],
+          "properties": {
+            "temperature": {"type": "number", "minimum": 18, "maximum": 28, "multipleOf": 0.5},
+            "humidity": {"type": "integer", "minimum": 30, "maximum": 70, "multipleOf": 5},
+            "strategy": {"enum": ["soft", "normal", "aggressive"]}
+          }
+        },
+        "device_count": {"type": "integer", "minimum": 1, "maximum": 512},
+        "engine_mode": {"type": ["string", "null"], "enum": ["auto", "manual", "forced_auto_only", null]},
+        "authority_ready": {"type": "boolean"},
+        "targets_in_sync": {"type": "boolean"},
+        "automatic_active": {"type": "boolean"},
+        "reasons": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/reason"}
+        }
+      }
+    },
+    "reason": {
+      "enum": [
+        "room_state_unavailable",
+        "state_stale",
+        "device_unavailable",
+        "engine_not_automatic",
+        "authority_not_ready",
+        "target_temperature_differs",
+        "target_humidity_differs"
+      ]
+    }
+  }
+}

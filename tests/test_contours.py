@@ -1,0 +1,208 @@
+"""Pure tests for the universal HASC contour model and climate adapter."""
+
+from __future__ import annotations
+
+import copy
+import json
+from pathlib import Path
+import unittest
+
+from custom_components.hausman_hub.application.climate_import import (
+    import_climate_state,
+)
+from custom_components.hausman_hub.application.contours import (
+    ContourRegistryViolation,
+    build_climate_contour_setup,
+    contour_registry_from_payload,
+    contour_registry_to_payload,
+    contour_snapshot,
+    validate_contour_bindings,
+    with_climate_contour_mode,
+)
+from custom_components.hausman_hub.domain.climate import (
+    ClimateControlOwner,
+    ClimateControlScope,
+)
+from custom_components.hausman_hub.domain.contours import ContourMode
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def source_payload() -> dict[str, object]:
+    return json.loads(
+        (ROOT / "fixtures" / "climate_bridge" / "valid_state.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+
+def source_snapshot():
+    payload = source_payload()
+    return import_climate_state(
+        payload,
+        now_ms=payload["generatedAt"] + 1_000,  # type: ignore[operator]
+    )
+
+
+def setup():
+    return build_climate_contour_setup(
+        source_snapshot(),
+        room_ids=["living"],
+        source_ids=["synthetic-ac-source-living"],
+        name="Климат",
+        mode="automatic",
+        target_temperature=25.0,
+        target_humidity=45,
+        strategy="normal",
+    )
+
+
+class ContoursTest(unittest.TestCase):
+    def test_existing_engine_selection_builds_public_contour_and_private_registry(
+        self,
+    ) -> None:
+        climate_registry, contours = setup()
+
+        contour = contours.contour("climate")
+        device = climate_registry.devices[0]
+        self.assertIsNotNone(contour)
+        self.assertIs(contour.mode, ContourMode.AUTOMATIC)  # type: ignore[union-attr]
+        self.assertEqual(("living_air_conditioner",), contour.rooms[0].device_ids)  # type: ignore[union-attr]
+        self.assertIs(device.control_scope, ClimateControlScope.MANAGED)
+        self.assertIs(device.control_owner, ClimateControlOwner.CLIMATE_CORE)
+        self.assertEqual((), device.endpoints)
+
+    def test_contour_payload_round_trip_is_exact_and_rejects_hidden_fields(self) -> None:
+        _, contours = setup()
+        payload = contour_registry_to_payload(contours)
+
+        self.assertEqual(contours, contour_registry_from_payload(payload))
+        hidden = copy.deepcopy(payload)
+        hidden["contours"][0]["private_source"] = "must-not-pass"  # type: ignore[index]
+        with self.assertRaises(ContourRegistryViolation):
+            contour_registry_from_payload(hidden)
+
+    def test_public_status_uses_existing_algorithm_without_private_ids(self) -> None:
+        climate_registry, contours = setup()
+
+        result = contour_snapshot(contours, climate_registry, source_snapshot())
+
+        contour = result["contours"][0]  # type: ignore[index]
+        self.assertEqual("hausman-climate", contour["engine"]["name"])
+        self.assertTrue(contour["execution"]["automatic_active"])
+        self.assertFalse(contour["execution"]["hasc_direct_commands"])
+        serialized = json.dumps(result, ensure_ascii=False)
+        self.assertNotIn("synthetic-ac-source-living", serialized)
+        self.assertNotIn("entity_id", serialized)
+
+    def test_unavailable_or_manual_engine_never_looks_automatic(self) -> None:
+        climate_registry, contours = setup()
+        payload = source_payload()
+        payload["rooms"][0]["mode"] = "manual"  # type: ignore[index]
+        manual = import_climate_state(
+            payload,
+            now_ms=payload["generatedAt"] + 1_000,  # type: ignore[operator]
+        )
+
+        missing = contour_snapshot(contours, climate_registry, None)
+        result = contour_snapshot(contours, climate_registry, manual)
+
+        self.assertEqual("unavailable", missing["contours"][0]["status"])  # type: ignore[index]
+        self.assertFalse(result["contours"][0]["execution"]["automatic_active"])  # type: ignore[index]
+
+    def test_different_engine_target_never_looks_automatic(self) -> None:
+        climate_registry, contours = setup()
+        payload = source_payload()
+        payload["rooms"][0]["targets"]["temperature"] = 26.0  # type: ignore[index]
+        different = import_climate_state(
+            payload,
+            now_ms=payload["generatedAt"] + 1_000,  # type: ignore[operator]
+        )
+
+        result = contour_snapshot(contours, climate_registry, different)
+
+        contour = result["contours"][0]  # type: ignore[index]
+        self.assertEqual("attention", contour["status"])
+        self.assertFalse(contour["execution"]["automatic_active"])
+        self.assertFalse(contour["rooms"][0]["targets_in_sync"])
+
+    def test_contour_bindings_reject_missing_and_cross_room_devices(self) -> None:
+        climate_registry, contours = setup()
+        payload = contour_registry_to_payload(contours)
+        payload["contours"][0]["rooms"][0]["device_ids"] = ["missing"]  # type: ignore[index]
+        invalid = contour_registry_from_payload(payload)
+
+        with self.assertRaisesRegex(ContourRegistryViolation, "missing"):
+            validate_contour_bindings(invalid, climate_registry)
+
+    def test_mode_change_preserves_assignments_and_parameters(self) -> None:
+        _, contours = setup()
+        disabled = with_climate_contour_mode(contours, "disabled")
+
+        self.assertIs(
+            disabled.contour("climate").mode,  # type: ignore[union-attr]
+            ContourMode.DISABLED,
+        )
+        self.assertEqual(
+            contours.contour("climate").rooms,  # type: ignore[union-attr]
+            disabled.contour("climate").rooms,  # type: ignore[union-attr]
+        )
+
+    def test_setup_requires_selected_rooms_devices_and_valid_parameters(self) -> None:
+        snapshot = source_snapshot()
+        for rooms, devices, temperature, humidity, strategy in (
+            ([], ["synthetic-ac-source-living"], 25, 45, "normal"),
+            (["living"], [], 25, 45, "normal"),
+            (["living"], ["synthetic-ac-source-living"], 17, 45, "normal"),
+            (["living"], ["synthetic-ac-source-living"], 25, 44, "normal"),
+            (["living"], ["synthetic-ac-source-living"], 25, 45, "unknown"),
+        ):
+            with self.subTest(
+                rooms=rooms,
+                devices=devices,
+                temperature=temperature,
+                humidity=humidity,
+                strategy=strategy,
+            ), self.assertRaises(ContourRegistryViolation):
+                build_climate_contour_setup(
+                    snapshot,
+                    room_ids=rooms,
+                    source_ids=devices,
+                    name="Климат",
+                    mode="observe",
+                    target_temperature=temperature,
+                    target_humidity=humidity,
+                    strategy=strategy,
+                )
+
+    def test_automatic_device_ids_stay_within_public_id_limit(self) -> None:
+        payload = source_payload()
+        long_room_id = "r" + "oom" * 21
+        payload["rooms"][0]["id"] = long_room_id  # type: ignore[index]
+        payload["devices"][0]["roomId"] = long_room_id  # type: ignore[index]
+        snapshot = import_climate_state(
+            payload,
+            now_ms=payload["generatedAt"] + 1_000,  # type: ignore[operator]
+        )
+
+        registry, contours = build_climate_contour_setup(
+            snapshot,
+            room_ids=[long_room_id],
+            source_ids=["synthetic-ac-source-living"],
+            name="Климат",
+            mode="observe",
+            target_temperature=25.0,
+            target_humidity=45,
+            strategy="normal",
+        )
+
+        self.assertLessEqual(len(registry.devices[0].device_id), 64)
+        self.assertEqual(
+            registry.devices[0].device_id,
+            contours.contours[0].rooms[0].device_ids[0],
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

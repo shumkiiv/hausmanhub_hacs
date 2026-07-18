@@ -7,6 +7,22 @@ Last updated: 2026-07-18.
 - Repository: `shumkiiv/hausmanhub_hasc` (public, MIT, `main`).
 - Local checkout: `/home/ivsh/projects/hausmanhub_hasc`.
 - Home Assistant baseline: Core 2026.6.4 or newer.
+- Version 1.0.0 is the current HASC-only worktree and establishes the product
+  as a platform of automatic contours. Climate is the first contour. The
+  ordinary Russian options flow chooses several rooms/devices plus shared
+  temperature, humidity, and strategy; old registry/bridge/native-preview and
+  helper-canary tools are hidden under advanced settings.
+- The 1.x climate contour deliberately reuses the existing `hausman-climate`
+  algorithm and executor instead of reimplementing its profiles, cooldown,
+  safety, manual override, authority, and physical feedback. Selected
+  source-managed devices need no duplicate HA control endpoint. Private
+  registry plus public contour storage save atomically.
+- Public `GET /api/hausman_hub/v1/contours` returns strict
+  `hausman-hasc-contours` v1 state without source/entity IDs. Automatic status
+  requires fresh engine state, auto mode, authority, device availability, and
+  matching targets. Version 1.0.0 sends no climate POST and does not sync
+  parameters into the engine; mismatches are explicit `attention`. See the
+  [1.0.0 contour decision](LLM_WIKI/Manual/2026-07-18-hasc-v1-0-0-universal-contours.md).
 - Version 0.4.0 was committed as `2e8cda3` and pushed to `origin/main` after
   its 153 tests, disposable Core 2026.6.4/2026.7.0 checks, and final Kimi
   review passed. This source push did not create a tag, release, HACS

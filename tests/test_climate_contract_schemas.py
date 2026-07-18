@@ -18,6 +18,10 @@ from custom_components.hausman_hub.application.climate_canary_preflight import (
 )
 from custom_components.hausman_hub.application.climate_import import import_climate_state
 from custom_components.hausman_hub.application.climate_registry import registry_from_payload
+from custom_components.hausman_hub.application.contours import (
+    build_climate_contour_setup,
+    contour_snapshot,
+)
 from custom_components.hausman_hub.domain.climate_bridge import ClimateBridgeMode
 from tests.test_climate_canary_preflight import NOW, ready_inputs
 
@@ -56,6 +60,7 @@ class ClimateContractSchemasTest(unittest.TestCase):
             "hasc_climate_v2/home.json": "v2/climate-home.schema.json",
             "hasc_climate_v3/home.json": "v3/climate-home.schema.json",
             "hasc_climate_v4/home.json": "v4/climate-home.schema.json",
+            "hasc_contours_v1/contours.json": "v1/contours.schema.json",
         }
         for fixture_name, schema_name in pairs.items():
             with self.subTest(fixture=fixture_name):
@@ -112,6 +117,26 @@ class ClimateContractSchemasTest(unittest.TestCase):
         validator("v1/climate-canary-preflight.schema.json").validate(
             disabled_preflight
         )
+
+        contour_climate_registry, contours = build_climate_contour_setup(
+            snapshot,
+            room_ids=["living"],
+            source_ids=["synthetic-ac-source-living"],
+            name="Климат",
+            mode="automatic",
+            target_temperature=25.0,
+            target_humidity=45,
+            strategy="normal",
+        )
+        generated_contours = contour_snapshot(
+            contours,
+            contour_climate_registry,
+            snapshot,
+        )
+        validator("v1/contours.schema.json").validate(generated_contours)
+        contour_json = json.dumps(generated_contours, ensure_ascii=True, sort_keys=True)
+        self.assertNotIn("synthetic-ac-source-living", contour_json)
+        self.assertNotIn("entity_id", contour_json)
 
     def test_action_and_registry_schemas_reject_extra_or_missing_boundary_fields(self) -> None:
         action = load_json(FIXTURES / "action-request.json")

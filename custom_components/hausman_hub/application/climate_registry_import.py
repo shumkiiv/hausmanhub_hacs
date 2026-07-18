@@ -48,11 +48,14 @@ def add_import_candidate_to_registry(
     control_scope: object,
     control_owner: object,
     control_entity_id: object = None,
+    source_engine_binding: bool = False,
 ) -> ClimateRegistry:
     """Return a new draft after one explicit fresh candidate selection."""
 
     if not isinstance(registry, ClimateRegistry):
         raise ClimateRegistryImportViolation("registry draft must be validated")
+    if type(source_engine_binding) is not bool:
+        raise ClimateRegistryImportViolation("source-engine binding must be boolean")
     if not isinstance(snapshot, ClimateImportSnapshot) or not snapshot.runtime_fresh:
         raise ClimateRegistryImportViolation("import snapshot must be fresh")
     if not isinstance(source_id, str):
@@ -94,7 +97,11 @@ def add_import_candidate_to_registry(
             control_scope=selected_scope,
             control_owner=selected_owner,
             capabilities=_candidate_capabilities(imported, selected_kind),
-            endpoints=_candidate_endpoints(selected_kind, control_entity_id),
+            endpoints=_candidate_endpoints(
+                selected_kind,
+                control_entity_id,
+                source_engine_binding=source_engine_binding,
+            ),
         )
         return ClimateRegistry(
             version=registry.version,
@@ -103,6 +110,107 @@ def add_import_candidate_to_registry(
         )
     except ClimateModelViolation as error:
         raise ClimateRegistryImportViolation(str(error)) from error
+
+
+def import_managed_climate_selection(
+    snapshot: ClimateImportSnapshot,
+    *,
+    room_ids: object,
+    source_ids: object,
+) -> ClimateRegistry:
+    """Build an exact registry from devices already owned by climate-core.
+
+    The existing engine already owns the private device bindings. HASC therefore
+    needs only the selected source candidate, inferred kind, and stable public
+    HASC id; it does not ask the owner to bind the same Home Assistant entity a
+    second time.
+    """
+
+    if not isinstance(snapshot, ClimateImportSnapshot) or not snapshot.runtime_fresh:
+        raise ClimateRegistryImportViolation("import snapshot must be fresh")
+    if not isinstance(room_ids, (list, tuple)) or any(
+        not isinstance(value, str) for value in room_ids
+    ):
+        raise ClimateRegistryImportViolation("selected rooms must be strings")
+    if not isinstance(source_ids, (list, tuple)) or any(
+        not isinstance(value, str) for value in source_ids
+    ):
+        raise ClimateRegistryImportViolation("selected devices must be strings")
+    selected_rooms = tuple(dict.fromkeys(room_ids))
+    selected_sources = tuple(dict.fromkeys(source_ids))
+    if not selected_rooms or len(selected_rooms) != len(room_ids):
+        raise ClimateRegistryImportViolation("selected rooms must be non-empty and unique")
+    if not selected_sources or len(selected_sources) != len(source_ids):
+        raise ClimateRegistryImportViolation("selected devices must be non-empty and unique")
+
+    room_set = set(selected_rooms)
+    rooms: list[ClimateRoom] = []
+    for room_id in selected_rooms:
+        imported_room = snapshot.room(room_id)
+        if imported_room is None:
+            raise ClimateRegistryImportViolation("selected room is unavailable")
+        rooms.append(ClimateRoom(room_id=imported_room.room_id, name=imported_room.name))
+    registry = ClimateRegistry(rooms=tuple(rooms))
+
+    candidates: list[ImportedClimateDevice] = []
+    for source_id in selected_sources:
+        candidate = snapshot.device(source_id)
+        if (
+            candidate is None
+            or candidate.room_id not in room_set
+            or not candidate.suggested_kinds
+        ):
+            raise ClimateRegistryImportViolation(
+                "selected device is unavailable or outside selected rooms"
+            )
+        candidates.append(candidate)
+    candidates.sort(key=lambda item: (item.room_id, item.name.casefold(), item.source_id))
+
+    id_counts: dict[tuple[str, ClimateDeviceKind], int] = {}
+    used_device_ids: set[str] = set()
+    for candidate in candidates:
+        kind = candidate.suggested_kinds[0]
+        count_key = (candidate.room_id, kind)
+        id_counts[count_key] = id_counts.get(count_key, 0) + 1
+        ordinal = id_counts[count_key]
+        while True:
+            ordinal_suffix = "" if ordinal == 1 else f"_{ordinal}"
+            suffix = f"_{kind.value}{ordinal_suffix}"
+            prefix_length = 64 - len(suffix)
+            if prefix_length < 1:
+                raise ClimateRegistryImportViolation(
+                    "selected devices cannot receive unique public ids"
+                )
+            device_id = f"{candidate.room_id[:prefix_length]}{suffix}"
+            if device_id not in used_device_ids:
+                used_device_ids.add(device_id)
+                id_counts[count_key] = ordinal
+                break
+            ordinal += 1
+        passive = kind in {
+            ClimateDeviceKind.TEMPERATURE_SENSOR,
+            ClimateDeviceKind.HUMIDITY_SENSOR,
+        }
+        registry = add_import_candidate_to_registry(
+            registry,
+            snapshot,
+            source_id=candidate.source_id,
+            device_id=device_id,
+            device_name=candidate.name,
+            kind=kind,
+            control_scope=(
+                ClimateControlScope.OBSERVED
+                if passive
+                else ClimateControlScope.MANAGED
+            ),
+            control_owner=(
+                ClimateControlOwner.OBSERVED
+                if passive
+                else ClimateControlOwner.CLIMATE_CORE
+            ),
+            source_engine_binding=not passive,
+        )
+    return registry
 
 
 def candidate_control_domain(kind: object) -> str | tuple[str, ...] | None:
@@ -218,11 +326,19 @@ def _candidate_capabilities(
 def _candidate_endpoints(
     kind: ClimateDeviceKind,
     control_entity_id: object,
+    *,
+    source_engine_binding: bool = False,
 ) -> tuple[ClimateEndpoint, ...]:
     if kind not in _ACTIVE_KINDS:
         if control_entity_id is not None and control_entity_id != "":
             raise ClimateRegistryImportViolation(
                 "passive import candidate cannot receive a control entity"
+            )
+        return ()
+    if source_engine_binding:
+        if control_entity_id not in {None, ""}:
+            raise ClimateRegistryImportViolation(
+                "source-engine binding must not accept a Home Assistant entity"
             )
         return ()
     if not isinstance(control_entity_id, str):

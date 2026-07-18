@@ -503,6 +503,32 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 )
                 self.assertEqual(403, response.status)
 
+        contours = views["/api/hausman_hub/v1/contours"]
+        contour_response = asyncio.run(
+            contours.get(
+                FakeRequest(
+                    "127.0.0.1",
+                    tablet,
+                    path="/api/hausman_hub/v1/contours",
+                )
+            )
+        )
+        self.assertEqual(200, contour_response.status)
+        self.assertEqual("hausman-hasc-contours", contour_response.payload["contract"]["name"])
+        self.assertEqual([], contour_response.payload["contours"])
+        self.assertEqual(
+            403,
+            asyncio.run(
+                contours.get(
+                    FakeRequest(
+                        "127.0.0.1",
+                        admin,
+                        path="/api/hausman_hub/v1/contours",
+                    )
+                )
+            ).status,
+        )
+
         registry = views["/api/hausman_hub/v1/admin/climate-registry"]
         admin_response = asyncio.run(
             registry.get(
@@ -888,7 +914,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertFalse(hasattr(self.view, method))
 
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
-        self.assertEqual(10, len(self.hass.http.views))
+        self.assertEqual(11, len(self.hass.http.views))
         self.assertEqual(
             1,
             sum(
@@ -1177,10 +1203,11 @@ class LocalSummaryAccessTest(unittest.TestCase):
             [(closed_entry, ("sensor", "switch"))],
             closed_hass.config_entries.forwarded,
         )
-        self.assertEqual(9, len(closed_hass.http.views))
+        self.assertEqual(10, len(closed_hass.http.views))
         self.assertEqual(
             {
                 "/api/hausman_hub/v1/home",
+                "/api/hausman_hub/v1/contours",
                 "/api/hausman_hub/v1/actions",
                 "/api/hausman_hub/v1/admin/climate-import",
                 "/api/hausman_hub/v1/admin/climate-registry",

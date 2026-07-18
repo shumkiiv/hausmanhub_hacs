@@ -104,6 +104,7 @@ SUMMARY_UPDATE_INTERVAL_MINUTES = {
 }
 LOCAL_SUMMARY_PATH = "/api/hausman_hub/local-summary"
 CLIMATE_HOME_PATH = "/api/hausman_hub/v1/home"
+CONTOURS_PATH = "/api/hausman_hub/v1/contours"
 CLIMATE_ACTION_PATH = "/api/hausman_hub/v1/actions"
 CLIMATE_ADMIN_IMPORT_PATH = "/api/hausman_hub/v1/admin/climate-import"
 CLIMATE_ADMIN_REGISTRY_PATH = "/api/hausman_hub/v1/admin/climate-registry"
@@ -114,6 +115,7 @@ CLIMATE_ADMIN_CANARY_PREFLIGHT_PATH = "/api/hausman_hub/v1/admin/climate-canary-
 CLIMATE_OPERATION_PATH = "/api/hausman_hub/v1/operations"
 CLIMATE_API_PATHS = (
     CLIMATE_HOME_PATH,
+    CONTOURS_PATH,
     CLIMATE_ACTION_PATH,
     CLIMATE_ADMIN_IMPORT_PATH,
     CLIMATE_ADMIN_REGISTRY_PATH,
@@ -950,14 +952,8 @@ def assert_options_form_uses_safe_native_selectors(options_form: dict[str, Any])
     )
     assert_result(
         select.get("options"),
-        [
-            "climate_registry",
-            "climate_connection",
-            "native_climate",
-            "general_settings",
-            "test_switch",
-        ],
-        "initial options form must expose exactly five separated settings areas",
+        ["contours", "general_settings", "advanced_settings"],
+        "initial options form must expose the ordinary contour workflow first",
     )
 
 
@@ -1118,10 +1114,26 @@ async def async_open_options_section(
     initial = await hass.config_entries.options.async_init(entry.entry_id)
     assert_result(initial["type"], "form", "options flow must show its section menu")
     assert_options_form_uses_safe_native_selectors(initial)
+    first_section = (
+        "advanced_settings"
+        if section
+        in {"climate_registry", "climate_connection", "native_climate", "test_switch"}
+        else section
+    )
     result = await hass.config_entries.options.async_configure(
         initial["flow_id"],
-        {OPTIONS_SECTION_FIELD: section},
+        {OPTIONS_SECTION_FIELD: first_section},
     )
+    if first_section == "advanced_settings":
+        assert_result(
+            (result["type"], result.get("step_id")),
+            ("form", "advanced_settings"),
+            "options menu must keep technical tools behind advanced settings",
+        )
+        result = await hass.config_entries.options.async_configure(
+            initial["flow_id"],
+            {"advanced_settings_action": section},
+        )
     assert_result(
         (result["type"], result.get("step_id")),
         ("form", section),
@@ -1670,8 +1682,8 @@ async def async_assert_broken_options_form_defaults_to_read_only(
         raise RuntimeError(f"{scenario_name} settings menu must provide a safe default")
     assert_result(
         section_default_factory(),
-        "climate_registry",
-        f"{scenario_name} settings menu must start with rooms and devices",
+        "contours",
+        f"{scenario_name} settings menu must start with automatic contours",
     )
 
     general_form = await hass.config_entries.options.async_configure(
@@ -2259,6 +2271,7 @@ def assert_disabled_climate_facade(hass: HomeAssistant, domain: str, entry_id: s
 
     expected_methods = {
         CLIMATE_HOME_PATH: {"GET", "OPTIONS"},
+        CONTOURS_PATH: {"GET", "OPTIONS"},
         CLIMATE_ACTION_PATH: {"POST", "OPTIONS"},
         CLIMATE_ADMIN_IMPORT_PATH: {"GET", "OPTIONS"},
         CLIMATE_ADMIN_REGISTRY_PATH: {"GET", "POST", "OPTIONS"},
@@ -2841,6 +2854,37 @@ async def async_assert_disabled_climate_http_access(hass: HomeAssistant) -> None
         assert_local_summary_response_is_not_stored(
             disabled_home,
             "disabled climate home response",
+        )
+
+        rejected_owner_contours = await client.get(
+            CONTOURS_PATH,
+            headers=owner_headers,
+        )
+        assert_result(
+            rejected_owner_contours.status,
+            HTTPStatus.FORBIDDEN,
+            "contours must reject an administrator as a tablet",
+        )
+        disabled_contours = await client.get(
+            CONTOURS_PATH,
+            headers=tablet_headers,
+        )
+        assert_result(
+            disabled_contours.status,
+            HTTPStatus.OK,
+            "tablet must read an empty contour collection while disabled",
+        )
+        assert_result(
+            await disabled_contours.json(),
+            {
+                "contract": {"name": "hausman-hasc-contours", "version": 1},
+                "contours": [],
+            },
+            "new disabled contour registry must be empty and versioned",
+        )
+        assert_local_summary_response_is_not_stored(
+            disabled_contours,
+            "disabled contours response",
         )
 
         disabled_action = await client.post(

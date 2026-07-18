@@ -12,12 +12,13 @@ parameters and safety limits, then let HASC run it automatically. Android is a
 status, setup, and temporary-override client of HASC, not the place where
 automation rules execute.
 
-Rooms, device roles, targets, policy, decisions, lifecycle, and operation move
-into HASC itself. The existing climate-core remains only a transitional
-observation and execution adapter while native HASC behavior is implemented,
-compared, and rolled out safely. Bridge, shadow, canary, private binding, and
-migration terms must not appear in the ordinary setup path. Android must not
-need to know when that internal cutover happens.
+Rooms, device roles, targets, lifecycle, and operation move behind HASC. The
+existing climate-core remains the climate algorithm and executor for the 1.x
+line: its profiles, safety, cooldown, manual override, authority, and physical
+feedback must be reused rather than reimplemented. Bridge, shadow, canary,
+private binding, and migration terms must not appear in the ordinary setup
+path. Android talks only to HASC and does not know which engine implements a
+contour.
 
 This roadmap covers HASC source only. Installing it in a live home, preparing a
 registry with real identifiers, changing climate-core, changing Android, and
@@ -121,15 +122,24 @@ not authorized by publishing 0.5.0 or by this roadmap.
 
 ## Next coding slice
 
-The 0.6.0 release implements the first non-executing HASC-owned policy and
-decision preview for one room. The next HASC-only slice should introduce the
-common contour model and a simple climate-contour setup wizard: choose rooms,
-native Home Assistant temperature/humidity observations, controlled devices,
-comfort targets, and safety limits. Transitional Climate API parity belongs in
-advanced diagnostics, not in this ordinary flow. The slice must still create
-no physical command. The following slice can add the continuous multi-room
-runtime and a typed desired-action plan with cooldown and manual-override rules
-before any executor is authorized.
+Version 1.0.0 introduces the common contour model, a simple multi-room climate
+wizard, atomic registry/contour persistence, a redacted tablet contour
+contract, and status delegated to the existing engine. The next 1.x slice is
+safe parameter synchronization: explicit user confirmation, typed room target,
+strategy and auto-mode changes, idempotent receipts, observed confirmation,
+partial-failure reporting, and no generic backend payload. After that, add
+per-room schedules and temporary override, then connect the Android contour UI.
+
+## 1.0.0 implementation status
+
+Prepared on 2026-07-18: the ordinary options path is now contour-first and
+hides technical migration tools under advanced settings. One climate contour
+can select several imported engine rooms and devices, assign shared comfort
+targets and strategy, and save the exact private registry plus public contour
+atomically. The public `hausman-hasc-contours` v1 contract contains no private
+source/entity IDs. Automatic status requires fresh state, engine auto mode,
+authority, device availability, and matching targets. HASC sends no climate
+POST in 1.0.0; climate-core remains the algorithm and physical executor.
 
 ## 0.6.0 implementation status
 

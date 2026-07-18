@@ -1,0 +1,47 @@
+{
+  "contract": {
+    "name": "hausman-hasc-contours",
+    "version": 1
+  },
+  "contours": [
+    {
+      "id": "climate",
+      "name": "Климат",
+      "kind": "climate",
+      "mode": "automatic",
+      "status": "ready",
+      "engine": {
+        "name": "hausman-climate",
+        "version": 1
+      },
+      "rooms": [
+        {
+          "id": "living",
+          "name": "Living room",
+          "status": "ready",
+          "current": {
+            "temperature": 25.8,
+            "humidity": 44
+          },
+          "targets": {
+            "temperature": 25.0,
+            "humidity": 45,
+            "strategy": "normal"
+          },
+          "device_count": 1,
+          "engine_mode": "auto",
+          "authority_ready": true,
+          "targets_in_sync": true,
+          "automatic_active": true,
+          "reasons": []
+        }
+      ],
+      "execution": {
+        "owner": "existing_climate_core",
+        "automatic_active": true,
+        "hasc_direct_commands": false
+      },
+      "reasons": []
+    }
+  ]
+}

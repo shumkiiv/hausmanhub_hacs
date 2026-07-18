@@ -23,13 +23,62 @@
     "step": {
       "init": {
         "title": "HASC: choose a settings area",
-        "description": "Choose one area. For the new climate path, add rooms and devices, connect the existing controller as the temporary observation source, then open HASC's built-in climate controller.",
+        "description": "Use Automatic contours for normal setup. General information only changes the aggregate page. Legacy connection and diagnostic tools are grouped under Advanced settings.",
         "data": {
           "settings_section": "Settings area"
         },
         "data_description": {
-          "settings_section": "Rooms and devices describes what is installed. Connection supplies current observations. The built-in HASC controller stores room targets and previews its own decision."
+          "settings_section": "Automatic contours is the main area for selecting rooms, devices, and operating parameters."
         }
+      },
+      "advanced_settings": {
+        "title": "HASC: advanced settings",
+        "description": "This area is for migration, diagnostics, and service checks. Use Automatic contours for normal climate setup.",
+        "data": {"advanced_settings_action": "Advanced tool"}
+      },
+      "contours": {
+        "title": "HASC: automatic contours",
+        "description": "Climate is the first universal HASC contour. Select rooms and devices, choose comfort parameters, and HASC connects them to the existing proven climate algorithm.",
+        "data": {"contour_action": "Climate contour action"},
+        "data_description": {"contour_action": "Configure creates or replaces the climate contour. Status is read-only. Disable affects only the HASC contour and sends no command to the existing engine."}
+      },
+      "climate_contour_source": {
+        "title": "Connect the existing climate algorithm",
+        "description": "Enter the local address once. HASC reads rooms, devices, and current state without sending commands.",
+        "data": {"climate_bridge_target": "Local climate-controller address"},
+        "data_description": {"climate_bridge_target": "Example: http://192.168.1.10:1880. Enter only protocol, local IP, and port."}
+      },
+      "climate_contour_setup": {
+        "title": "Configure the climate contour",
+        "description": "Select rooms and their devices. HASC creates stable bindings and delegates climate decisions to the existing algorithm with its safety rules, delays, and profiles.",
+        "data": {
+          "contour_name": "Contour name",
+          "contour_mode": "Operating mode",
+          "contour_rooms": "Rooms",
+          "contour_devices": "Contour devices",
+          "contour_target_temperature": "Comfort temperature, °C",
+          "contour_target_humidity": "Comfort humidity, %",
+          "contour_strategy": "Temperature strategy"
+        },
+        "data_description": {
+          "contour_mode": "Observe shows the algorithm without HASC commands. Automatic expects the selected rooms to be under the existing engine's automatic authority.",
+          "contour_rooms": "Multiple rooms can be selected.",
+          "contour_devices": "Only devices already understood by the existing climate engine are shown. Private identifiers remain hidden.",
+          "contour_target_temperature": "In 1.0 this is one desired value for all selected rooms. Choose the engine's current value or HASC will report a mismatch.",
+          "contour_target_humidity": "In 1.0 this is one desired value for all selected rooms. If the engine reports no humidity target, HASC still checks the remaining conditions.",
+          "contour_strategy": "Soft is quieter, normal is balanced, and aggressive reaches the target faster."
+        }
+      },
+      "climate_contour_confirm": {
+        "title": "Review the climate contour",
+        "description": "Contour: {name}. Mode: {mode}. Status: {status}. Rooms: {room_count}; devices: {device_count}. Algorithm: {algorithm}. Existing-engine automatic operation confirmed: {automatic}. Attention: {reasons}.",
+        "data": {"confirm_contour_save": "Save selected rooms, devices, and parameters"},
+        "data_description": {"confirm_contour_save": "HASC saves the configuration and enables continuous reads from the existing engine without sending climate commands."}
+      },
+      "contour_status": {
+        "title": "Climate contour status",
+        "description": "Contour: {name}. Mode: {mode}. Status: {status}. Rooms: {room_count}; devices: {device_count}. Algorithm: {algorithm}. Existing-engine automatic operation confirmed: {automatic}. Attention: {reasons}.",
+        "data": {"close_contour_status": "Close status"}
       },
       "general_settings": {
         "title": "HASC: general information",
@@ -225,7 +274,21 @@
       }
     },
     "error": {
-      "unsafe_settings_section": "Choose one of the five HASC settings areas.",
+      "unsafe_settings_section": "Choose Automatic contours, General information, or Advanced settings.",
+      "unsafe_advanced_action": "Choose one available advanced tool.",
+      "invalid_contour_action": "Choose configure, status, or disable for the climate contour.",
+      "contour_status_unavailable": "The climate contour status is unavailable.",
+      "contour_not_configured": "The climate contour has not been configured yet.",
+      "contour_save_failed": "The contour could not be saved safely. The previous configuration remains in place.",
+      "climate_contour_source_unavailable": "Fresh data could not be read from the existing climate controller. Check its address and runtime.",
+      "contour_rooms_required": "Select at least one room.",
+      "invalid_contour_rooms": "The room list changed. Refresh the wizard and select rooms again.",
+      "contour_devices_required": "Select at least one climate device.",
+      "invalid_contour_devices": "The device list changed. Refresh the wizard and select devices again.",
+      "device_outside_contour_rooms": "Every selected device must belong to a selected room.",
+      "invalid_contour_setup": "Check rooms, devices, temperature, humidity, and strategy. Every room needs a controllable device.",
+      "contour_confirmation_required": "Confirm saving the climate contour.",
+      "contour_status_close_required": "Enable this checkbox to close the status screen.",
       "unsafe_mode": "Only read-only and comparison-without-changes modes are allowed.",
       "unsafe_local_summary_setting": "The optional local page can only be turned on or off.",
       "unsafe_summary_update_interval": "Choose only 5, 15, or 30 minutes for the nine-count refresh.",
@@ -283,11 +346,37 @@
     },
     "settings_section": {
       "options": {
-        "climate_registry": "Rooms and climate devices",
-        "climate_connection": "Connect the existing climate controller",
-        "native_climate": "Built-in HASC climate controller",
+        "contours": "Automatic contours",
         "general_settings": "HASC general information",
-        "test_switch": "Service switch test — not climate"
+        "advanced_settings": "Advanced settings"
+      }
+    },
+    "advanced_settings_action": {
+      "options": {
+        "climate_registry": "Legacy room and device editor",
+        "climate_connection": "Technical connection setup",
+        "native_climate": "Legacy HASC decision preview",
+        "test_switch": "Service switch test"
+      }
+    },
+    "contour_action": {
+      "options": {
+        "configure_climate": "Create or edit climate contour",
+        "view_status": "View climate contour status",
+        "disable_climate": "Disable only the HASC climate contour"
+      }
+    },
+    "contour_mode": {
+      "options": {
+        "observe": "Observe without HASC commands",
+        "automatic": "Automatic through the existing climate engine"
+      }
+    },
+    "contour_strategy": {
+      "options": {
+        "soft": "Soft and quiet",
+        "normal": "Normal — recommended",
+        "aggressive": "Reach target faster"
       }
     },
     "climate_registry_action": {

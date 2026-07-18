@@ -56,6 +56,14 @@ from .application.climate_import import (
     ClimateImportSnapshot,
     ImportedClimateDevice,
 )
+from .application.contours import (
+    ContourRegistryViolation,
+    build_climate_contour_setup,
+    contour_registry_from_payload,
+    contour_registry_to_payload,
+    contour_snapshot,
+    with_climate_contour_mode,
+)
 from .const import DOMAIN, ENTRY_TITLE, ENTRY_UNIQUE_ID
 from .domain.configuration import (
     APPROVED_MODES,
@@ -82,10 +90,27 @@ from .domain.native_climate import (
     NativeClimateViolation,
     native_climate_policy,
 )
+from .domain.contours import (
+    CLIMATE_TARGET_HUMIDITY_DEFAULT,
+    CLIMATE_TARGET_TEMPERATURE_DEFAULT,
+    ClimateStrategy,
+    ContourMode,
+)
 
 
 OPTIONS_SECTION_FIELD = "settings_section"
-OPTIONS_SECTION_DEFAULT = "climate_registry"
+OPTIONS_SECTION_DEFAULT = "contours"
+ADVANCED_SETTINGS_ACTION_FIELD = "advanced_settings_action"
+CONTOUR_ACTION_FIELD = "contour_action"
+CONTOUR_NAME_FIELD = "contour_name"
+CONTOUR_MODE_FIELD = "contour_mode"
+CONTOUR_ROOMS_FIELD = "contour_rooms"
+CONTOUR_DEVICES_FIELD = "contour_devices"
+CONTOUR_TARGET_TEMPERATURE_FIELD = "contour_target_temperature"
+CONTOUR_TARGET_HUMIDITY_FIELD = "contour_target_humidity"
+CONTOUR_STRATEGY_FIELD = "contour_strategy"
+CONTOUR_CONFIRM_FIELD = "confirm_contour_save"
+CONTOUR_STATUS_CLOSE_FIELD = "close_contour_status"
 CLIMATE_REGISTRY_JSON_FIELD = "climate_registry_json"
 CLIMATE_REGISTRY_CONFIRM_FIELD = "confirm_registry_save"
 CLIMATE_REGISTRY_ACTION_FIELD = "climate_registry_action"
@@ -176,6 +201,27 @@ _RUSSIAN_NATIVE_REASON_LABELS = {
     "temperature_device_unavailable": "нет доступного устройства для температуры",
     "humidity_device_unavailable": "нет доступного увлажнителя",
     "humidity_above_target": "понижение влажности пока не автоматизировано",
+}
+_RUSSIAN_CONTOUR_STATUS_LABELS = {
+    "disabled": "выключен в HASC",
+    "ready": "готов",
+    "attention": "нужно проверить настройки",
+    "unavailable": "двигатель недоступен",
+    "stale": "данные устарели",
+}
+_RUSSIAN_CONTOUR_MODE_LABELS = {
+    "disabled": "выключен",
+    "observe": "наблюдение",
+    "automatic": "автоматически",
+}
+_RUSSIAN_CONTOUR_REASON_LABELS = {
+    "room_state_unavailable": "нет состояния комнаты",
+    "state_stale": "показания устарели",
+    "device_unavailable": "одно из устройств недоступно",
+    "engine_not_automatic": "существующий климатический двигатель не в автоматическом режиме",
+    "authority_not_ready": "двигатель не подтвердил готовность управления",
+    "target_temperature_differs": "температура в двигателе отличается от настройки HASC",
+    "target_humidity_differs": "влажность в двигателе отличается от настройки HASC",
 }
 
 
@@ -280,13 +326,40 @@ NATIVE_CLIMATE_MODE_SELECTOR = SelectSelector(
 OPTIONS_SECTION_SELECTOR = SelectSelector(
     SelectSelectorConfig(
         options=[
+            "contours",
+            "general_settings",
+            "advanced_settings",
+        ],
+        translation_key="settings_section",
+    )
+)
+ADVANCED_SETTINGS_ACTION_SELECTOR = SelectSelector(
+    SelectSelectorConfig(
+        options=[
             "climate_registry",
             "climate_connection",
             "native_climate",
-            "general_settings",
             "test_switch",
         ],
-        translation_key="settings_section",
+        translation_key="advanced_settings_action",
+    )
+)
+CONTOUR_ACTION_SELECTOR = SelectSelector(
+    SelectSelectorConfig(
+        options=["configure_climate", "view_status", "disable_climate"],
+        translation_key="contour_action",
+    )
+)
+CONTOUR_MODE_SELECTOR = SelectSelector(
+    SelectSelectorConfig(
+        options=[ContourMode.OBSERVE.value, ContourMode.AUTOMATIC.value],
+        translation_key="contour_mode",
+    )
+)
+CONTOUR_STRATEGY_SELECTOR = SelectSelector(
+    SelectSelectorConfig(
+        options=[value.value for value in ClimateStrategy],
+        translation_key="contour_strategy",
     )
 )
 NATIVE_TARGET_TEMPERATURE_SELECTOR = SelectSelector(
@@ -379,7 +452,7 @@ def _mode_schema(default: str) -> vol.Schema:
 
 
 def _options_section_schema() -> vol.Schema:
-    """Show only the four understandable settings areas on the first screen."""
+    """Keep ordinary contour setup separate from optional advanced tools."""
 
     return vol.Schema(
         {
@@ -387,6 +460,101 @@ def _options_section_schema() -> vol.Schema:
                 OPTIONS_SECTION_FIELD,
                 default=OPTIONS_SECTION_DEFAULT,
             ): OPTIONS_SECTION_SELECTOR
+        }
+    )
+
+
+def _advanced_settings_schema() -> vol.Schema:
+    return vol.Schema(
+        {
+            vol.Required(
+                ADVANCED_SETTINGS_ACTION_FIELD,
+                default="climate_connection",
+            ): ADVANCED_SETTINGS_ACTION_SELECTOR
+        }
+    )
+
+
+def _contour_action_schema() -> vol.Schema:
+    return vol.Schema(
+        {
+            vol.Required(
+                CONTOUR_ACTION_FIELD,
+                default="configure_climate",
+            ): CONTOUR_ACTION_SELECTOR
+        }
+    )
+
+
+def _climate_contour_source_schema(default: str | None) -> vol.Schema:
+    field = (
+        vol.Required(CLIMATE_BRIDGE_TARGET_FIELD, default=default)
+        if default is not None
+        else vol.Required(CLIMATE_BRIDGE_TARGET_FIELD)
+    )
+    return vol.Schema({field: str})
+
+
+def _climate_contour_setup_schema(
+    *,
+    rooms: list[dict[str, str]],
+    devices: list[dict[str, str]],
+    room_defaults: list[str],
+    device_defaults: list[str],
+    temperature_default: float,
+    humidity_default: int,
+    mode_default: str,
+) -> vol.Schema:
+    return vol.Schema(
+        {
+            vol.Required(CONTOUR_NAME_FIELD, default="Климат"): str,
+            vol.Required(
+                CONTOUR_MODE_FIELD,
+                default=mode_default,
+            ): CONTOUR_MODE_SELECTOR,
+            vol.Required(
+                CONTOUR_ROOMS_FIELD,
+                default=room_defaults,
+            ): SelectSelector(
+                SelectSelectorConfig(options=rooms, multiple=True)
+            ),
+            vol.Required(
+                CONTOUR_DEVICES_FIELD,
+                default=device_defaults,
+            ): SelectSelector(
+                SelectSelectorConfig(options=devices, multiple=True)
+            ),
+            vol.Required(
+                CONTOUR_TARGET_TEMPERATURE_FIELD,
+                default=f"{temperature_default:.1f}",
+            ): NATIVE_TARGET_TEMPERATURE_SELECTOR,
+            vol.Required(
+                CONTOUR_TARGET_HUMIDITY_FIELD,
+                default=str(humidity_default),
+            ): NATIVE_TARGET_HUMIDITY_SELECTOR,
+            vol.Required(
+                CONTOUR_STRATEGY_FIELD,
+                default=ClimateStrategy.NORMAL.value,
+            ): CONTOUR_STRATEGY_SELECTOR,
+        }
+    )
+
+
+def _contour_confirm_schema() -> vol.Schema:
+    return vol.Schema(
+        {
+            vol.Required(CONTOUR_CONFIRM_FIELD, default=False): StrictBooleanSelector()
+        }
+    )
+
+
+def _contour_status_schema() -> vol.Schema:
+    return vol.Schema(
+        {
+            vol.Required(
+                CONTOUR_STATUS_CLOSE_FIELD,
+                default=False,
+            ): StrictBooleanSelector()
         }
     )
 
@@ -912,6 +1080,12 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
     _native_climate_rooms: list[dict[str, str]] | None = None
     _native_climate_policy_draft: NativeClimatePolicy | None = None
     _native_climate_preview: Mapping[str, Any] | None = None
+    _contour_source_target: str | None = None
+    _contour_source_snapshot: ClimateImportSnapshot | None = None
+    _contour_device_tokens: dict[str, ImportedClimateDevice] | None = None
+    _contour_registry_draft: Mapping[str, object] | None = None
+    _contour_definition_draft: Mapping[str, object] | None = None
+    _contour_preview: Mapping[str, Any] | None = None
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Show one short choice instead of mixing unrelated settings."""
@@ -919,22 +1093,337 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
         errors: dict[str, str] = {}
         if user_input is not None:
             section = user_input.get(OPTIONS_SECTION_FIELD)
-            if section == "climate_registry":
-                return await self.async_step_climate_registry()
-            if section == "climate_connection":
-                return await self.async_step_climate_connection()
-            if section == "native_climate":
-                return await self.async_step_native_climate()
+            if section == "contours":
+                return await self.async_step_contours()
             if section == "general_settings":
                 return await self.async_step_general_settings()
-            if section == "test_switch":
-                return await self.async_step_test_switch()
+            if section == "advanced_settings":
+                return await self.async_step_advanced_settings()
             errors[OPTIONS_SECTION_FIELD] = "unsafe_settings_section"
 
         return self.async_show_form(
             step_id="init",
             data_schema=_options_section_schema(),
             errors=errors,
+        )
+
+    async def async_step_advanced_settings(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> FlowResult:
+        """Keep migration, diagnostics, and service tests out of normal setup."""
+
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            action = user_input.get(ADVANCED_SETTINGS_ACTION_FIELD)
+            if action == "climate_registry":
+                return await self.async_step_climate_registry()
+            if action == "climate_connection":
+                return await self.async_step_climate_connection()
+            if action == "native_climate":
+                return await self.async_step_native_climate()
+            if action == "test_switch":
+                return await self.async_step_test_switch()
+            errors[ADVANCED_SETTINGS_ACTION_FIELD] = "unsafe_advanced_action"
+        return self.async_show_form(
+            step_id="advanced_settings",
+            data_schema=_advanced_settings_schema(),
+            errors=errors,
+        )
+
+    async def async_step_contours(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> FlowResult:
+        """Open the ordinary automatic-contour workflow."""
+
+        runtime = self._climate_runtime()
+        errors: dict[str, str] = {}
+        if runtime is None:
+            errors["base"] = "climate_runtime_unavailable"
+        elif user_input is not None:
+            action = user_input.get(CONTOUR_ACTION_FIELD)
+            if action == "configure_climate":
+                return await self._async_begin_climate_contour(runtime)
+            if action == "view_status":
+                try:
+                    payload = await runtime.async_contours_snapshot()
+                except Exception:
+                    errors["base"] = "contour_status_unavailable"
+                else:
+                    if not payload.get("contours"):
+                        errors["base"] = "contour_not_configured"
+                    else:
+                        self._contour_preview = payload
+                        return await self.async_step_contour_status()
+            elif action == "disable_climate":
+                try:
+                    payload = await runtime.async_contour_registry_payload()
+                    contours = contour_registry_from_payload(payload)
+                    disabled = with_climate_contour_mode(
+                        contours,
+                        ContourMode.DISABLED.value,
+                    )
+                    await runtime.async_replace_contours(
+                        contour_registry_to_payload(disabled)
+                    )
+                    options = _merged_safe_options(
+                        self.config_entry.data,
+                        self.config_entry.options,
+                        {
+                            CLIMATE_BRIDGE_MODE_FIELD: (
+                                ClimateBridgeMode.DISABLED.value
+                            ),
+                            CLIMATE_BRIDGE_TARGET_FIELD: None,
+                            CLIMATE_CANARY_ROOM_ID_FIELD: None,
+                        },
+                    )
+                except ContourRegistryViolation:
+                    errors["base"] = "contour_not_configured"
+                except Exception:
+                    errors["base"] = "contour_save_failed"
+                else:
+                    return self.async_create_entry(title="", data=options)
+            else:
+                errors[CONTOUR_ACTION_FIELD] = "invalid_contour_action"
+        return self.async_show_form(
+            step_id="contours",
+            data_schema=_contour_action_schema(),
+            errors=errors,
+        )
+
+    async def _async_begin_climate_contour(self, runtime: Any) -> FlowResult:
+        """Reuse a configured engine or ask for its one-time local address."""
+
+        try:
+            configuration = effective_configuration(
+                self.config_entry.data,
+                self.config_entry.options,
+            )
+        except ConfigurationViolation:
+            return await self.async_step_climate_contour_source()
+        target = configuration.climate_bridge_target
+        if (
+            target is None
+            or configuration.climate_bridge_mode is ClimateBridgeMode.DISABLED
+        ):
+            return await self.async_step_climate_contour_source()
+        try:
+            snapshot = await runtime.async_registry_import_snapshot()
+        except Exception:
+            return await self.async_step_climate_contour_source()
+        self._contour_source_target = target.origin
+        self._set_contour_source_snapshot(snapshot)
+        return await self.async_step_climate_contour_setup()
+
+    async def async_step_climate_contour_source(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> FlowResult:
+        """Connect the existing climate engine once, using a read-only GET."""
+
+        _, saved_target, _ = _safe_climate_bridge_defaults(
+            self.config_entry.data,
+            self.config_entry.options,
+        )
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            raw_target = user_input.get(CLIMATE_BRIDGE_TARGET_FIELD)
+            try:
+                target = climate_bridge_target(raw_target)
+                from .climate_bridge import ClimateApiClient
+
+                snapshot = await ClimateApiClient(
+                    self.hass,
+                    target,
+                ).async_fetch_state()
+                if not snapshot.runtime_fresh:
+                    raise ValueError("climate source is stale")
+            except UnsafeClimateBridgeTarget:
+                errors[CLIMATE_BRIDGE_TARGET_FIELD] = "unsafe_climate_bridge_target"
+            except Exception:
+                errors["base"] = "climate_contour_source_unavailable"
+            else:
+                self._contour_source_target = target.origin
+                self._set_contour_source_snapshot(snapshot)
+                return await self.async_step_climate_contour_setup()
+        return self.async_show_form(
+            step_id="climate_contour_source",
+            data_schema=_climate_contour_source_schema(saved_target),
+            errors=errors,
+        )
+
+    async def async_step_climate_contour_setup(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> FlowResult:
+        """Choose rooms, devices, comfort, and the contour lifecycle."""
+
+        snapshot = self._contour_source_snapshot
+        tokens = self._contour_device_tokens or {}
+        if snapshot is None or not snapshot.runtime_fresh or not tokens:
+            return await self.async_step_climate_contour_source()
+        room_options = [
+            SelectOptionDict(value=room.room_id, label=room.name)
+            for room in snapshot.rooms
+        ]
+        device_options: list[dict[str, str]] = []
+        for token, device in tokens.items():
+            device_room = snapshot.room(device.room_id)
+            if device_room is None:
+                continue
+            device_options.append(
+                SelectOptionDict(
+                    value=token,
+                    label=f"{device_room.name} — {device.name}",
+                )
+            )
+        room_defaults: list[str] = []
+        device_defaults: list[str] = []
+        temperature_default, humidity_default = self._contour_target_defaults(snapshot)
+        mode_default = (
+            ContourMode.AUTOMATIC.value
+            if all(room.mode in {"auto", "forced_auto_only"} for room in snapshot.rooms)
+            else ContourMode.OBSERVE.value
+        )
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            room_ids = user_input.get(CONTOUR_ROOMS_FIELD)
+            device_tokens = user_input.get(CONTOUR_DEVICES_FIELD)
+            if not isinstance(room_ids, list) or not room_ids:
+                errors[CONTOUR_ROOMS_FIELD] = "contour_rooms_required"
+            elif any(snapshot.room(value) is None for value in room_ids):
+                errors[CONTOUR_ROOMS_FIELD] = "invalid_contour_rooms"
+            if not isinstance(device_tokens, list) or not device_tokens:
+                errors[CONTOUR_DEVICES_FIELD] = "contour_devices_required"
+                selected_sources: list[str] = []
+            else:
+                selected = [tokens.get(value) for value in device_tokens]
+                if any(value is None for value in selected):
+                    errors[CONTOUR_DEVICES_FIELD] = "invalid_contour_devices"
+                    selected_sources = []
+                else:
+                    selected_sources = [
+                        value.source_id for value in selected if value is not None
+                    ]
+                    if isinstance(room_ids, list) and any(
+                        value is not None and value.room_id not in room_ids
+                        for value in selected
+                    ):
+                        errors[CONTOUR_DEVICES_FIELD] = "device_outside_contour_rooms"
+            if not errors:
+                try:
+                    registry, contours = build_climate_contour_setup(
+                        snapshot,
+                        room_ids=room_ids,
+                        source_ids=selected_sources,
+                        name=user_input.get(CONTOUR_NAME_FIELD),
+                        mode=user_input.get(CONTOUR_MODE_FIELD),
+                        target_temperature=user_input.get(
+                            CONTOUR_TARGET_TEMPERATURE_FIELD
+                        ),
+                        target_humidity=user_input.get(CONTOUR_TARGET_HUMIDITY_FIELD),
+                        strategy=user_input.get(CONTOUR_STRATEGY_FIELD),
+                    )
+                    preview = contour_snapshot(contours, registry, snapshot)
+                except ContourRegistryViolation:
+                    errors["base"] = "invalid_contour_setup"
+                else:
+                    from .application.climate_registry import registry_to_payload
+
+                    self._contour_registry_draft = registry_to_payload(registry)
+                    self._contour_definition_draft = contour_registry_to_payload(
+                        contours
+                    )
+                    self._contour_preview = preview
+                    return await self.async_step_climate_contour_confirm()
+        return self.async_show_form(
+            step_id="climate_contour_setup",
+            data_schema=_climate_contour_setup_schema(
+                rooms=room_options,
+                devices=device_options,
+                room_defaults=room_defaults,
+                device_defaults=device_defaults,
+                temperature_default=temperature_default,
+                humidity_default=humidity_default,
+                mode_default=mode_default,
+            ),
+            errors=errors,
+        )
+
+    async def async_step_climate_contour_confirm(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> FlowResult:
+        """Show one plain summary and save both selected devices and contour."""
+
+        runtime = self._climate_runtime()
+        if (
+            runtime is None
+            or self._contour_registry_draft is None
+            or self._contour_definition_draft is None
+            or self._contour_preview is None
+            or self._contour_source_target is None
+        ):
+            return await self.async_step_contours()
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            if user_input.get(CONTOUR_CONFIRM_FIELD) is not True:
+                errors[CONTOUR_CONFIRM_FIELD] = "contour_confirmation_required"
+            else:
+                try:
+                    await runtime.async_replace_contour_setup(
+                        self._contour_registry_draft,
+                        self._contour_definition_draft,
+                    )
+                    options = _merged_safe_options(
+                        self.config_entry.data,
+                        self.config_entry.options,
+                        {
+                            CLIMATE_BRIDGE_MODE_FIELD: ClimateBridgeMode.SHADOW.value,
+                            CLIMATE_BRIDGE_TARGET_FIELD: self._contour_source_target,
+                            CLIMATE_CANARY_ROOM_ID_FIELD: None,
+                            NATIVE_CLIMATE_MODE_FIELD: NativeClimateMode.DISABLED.value,
+                            NATIVE_CLIMATE_ROOM_ID_FIELD: None,
+                            NATIVE_TARGET_TEMPERATURE_FIELD: None,
+                            NATIVE_TARGET_HUMIDITY_FIELD: None,
+                        },
+                    )
+                except Exception:
+                    errors["base"] = "contour_save_failed"
+                else:
+                    return self.async_create_entry(title="", data=options)
+        return self.async_show_form(
+            step_id="climate_contour_confirm",
+            data_schema=_contour_confirm_schema(),
+            errors=errors,
+            description_placeholders=self._contour_preview_placeholders(),
+        )
+
+    async def async_step_contour_status(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> FlowResult:
+        """Show current contour/engine state without changing anything."""
+
+        if self._contour_preview is None:
+            return await self.async_step_contours()
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            if user_input.get(CONTOUR_STATUS_CLOSE_FIELD) is not True:
+                errors[CONTOUR_STATUS_CLOSE_FIELD] = "contour_status_close_required"
+            else:
+                options = _merged_safe_options(
+                    self.config_entry.data,
+                    self.config_entry.options,
+                    {},
+                )
+                return self.async_create_entry(title="", data=options)
+        return self.async_show_form(
+            step_id="contour_status",
+            data_schema=_contour_status_schema(),
+            errors=errors,
+            description_placeholders=self._contour_preview_placeholders(),
         )
 
     async def async_step_general_settings(
@@ -1832,6 +2321,101 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
         self._import_candidates = candidates
         self._selected_import_source_id = None
         return options
+
+    def _set_contour_source_snapshot(
+        self,
+        snapshot: ClimateImportSnapshot,
+    ) -> None:
+        """Keep only ephemeral device tokens for the ordinary contour wizard."""
+
+        candidates: dict[str, ImportedClimateDevice] = {}
+        index = 0
+        for candidate in snapshot.devices:
+            if not candidate.suggested_kinds:
+                continue
+            index += 1
+            candidates[f"device_{index:03d}"] = candidate
+        self._contour_source_snapshot = snapshot
+        self._contour_device_tokens = candidates
+        self._contour_registry_draft = None
+        self._contour_definition_draft = None
+        self._contour_preview = None
+
+    def _contour_target_defaults(
+        self,
+        snapshot: ClimateImportSnapshot,
+    ) -> tuple[float, int]:
+        """Use current engine comfort values when they satisfy HASC bounds."""
+
+        temperature = next(
+            (
+                room.target_temperature
+                for room in snapshot.rooms
+                if isinstance(room.target_temperature, (int, float))
+                and not isinstance(room.target_temperature, bool)
+                and 18 <= room.target_temperature <= 28
+                and room.target_temperature * 2 == int(room.target_temperature * 2)
+            ),
+            CLIMATE_TARGET_TEMPERATURE_DEFAULT,
+        )
+        humidity = next(
+            (
+                int(room.target_humidity)
+                for room in snapshot.rooms
+                if isinstance(room.target_humidity, (int, float))
+                and not isinstance(room.target_humidity, bool)
+                and 30 <= room.target_humidity <= 70
+                and int(room.target_humidity) % 5 == 0
+            ),
+            CLIMATE_TARGET_HUMIDITY_DEFAULT,
+        )
+        return float(temperature), humidity
+
+    def _contour_preview_placeholders(self) -> dict[str, str]:
+        """Render one contour summary without private device identifiers."""
+
+        payload = self._contour_preview or {}
+        raw_contours = payload.get("contours")
+        contours = raw_contours if isinstance(raw_contours, list) else []
+        contour = contours[0] if contours and isinstance(contours[0], Mapping) else {}
+        raw_rooms = contour.get("rooms") if isinstance(contour, Mapping) else None
+        rooms = raw_rooms if isinstance(raw_rooms, list) else []
+        execution = contour.get("execution") if isinstance(contour, Mapping) else None
+        execution_values = execution if isinstance(execution, Mapping) else {}
+        raw_reasons = contour.get("reasons") if isinstance(contour, Mapping) else None
+        reasons = raw_reasons if isinstance(raw_reasons, list) else []
+        reason_text = "; ".join(
+            dict.fromkeys(
+                _RUSSIAN_CONTOUR_REASON_LABELS.get(value, "неизвестная причина")
+                for value in reasons
+                if isinstance(value, str)
+            )
+        )
+        return {
+            "name": str(contour.get("name") or "Климат"),
+            "mode": _RUSSIAN_CONTOUR_MODE_LABELS.get(
+                contour.get("mode"),
+                "неизвестно",
+            ),
+            "status": _RUSSIAN_CONTOUR_STATUS_LABELS.get(
+                contour.get("status"),
+                "неизвестно",
+            ),
+            "room_count": str(len(rooms)),
+            "device_count": str(
+                sum(
+                    room.get("device_count", 0)
+                    for room in rooms
+                    if isinstance(room, Mapping)
+                    and type(room.get("device_count")) is int
+                )
+            ),
+            "automatic": _russian_yes_no(
+                execution_values.get("automatic_active")
+            ),
+            "algorithm": "существующий климатический контур",
+            "reasons": reason_text or "нет",
+        }
 
     def _import_candidate_options(self) -> list[dict[str, str]]:
         snapshot = self._import_snapshot

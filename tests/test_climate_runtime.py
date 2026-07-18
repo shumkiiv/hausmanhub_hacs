@@ -18,6 +18,11 @@ from custom_components.hausman_hub.application.climate_runtime import (
     ClimateRuntime,
     ClimateRuntimeUnavailable,
 )
+from custom_components.hausman_hub.application.contours import (
+    build_climate_contour_setup,
+    contour_registry_to_payload,
+)
+from custom_components.hausman_hub.application.climate_registry import registry_to_payload
 from custom_components.hausman_hub.domain.climate import ClimateRegistry
 from custom_components.hausman_hub.domain.climate_bridge import (
     ClimateBridgeMode,
@@ -25,6 +30,7 @@ from custom_components.hausman_hub.domain.climate_bridge import (
 )
 from custom_components.hausman_hub.domain.configuration import SafeConfiguration
 from custom_components.hausman_hub.domain.native_climate import native_climate_policy
+from custom_components.hausman_hub.domain.contours import ContourRegistry
 from tests.test_climate_import import (
     complete_registry_payload,
     registry_payload,
@@ -45,6 +51,18 @@ class MemoryStore:
         self.saved.append(registry)
 
 
+class RegistryRollbackFailingStore(MemoryStore):
+    def __init__(self, registry: ClimateRegistry) -> None:
+        super().__init__(registry)
+        self.save_calls = 0
+
+    async def async_save(self, registry: ClimateRegistry) -> None:
+        self.save_calls += 1
+        if self.save_calls == 2:
+            raise RuntimeError("synthetic registry rollback failure")
+        await super().async_save(registry)
+
+
 class MemoryEvidenceStore:
     def __init__(self, evidence: ClimateShadowEvidence | None = None) -> None:
         self.evidence = evidence
@@ -56,6 +74,34 @@ class MemoryEvidenceStore:
     async def async_save(self, evidence: ClimateShadowEvidence) -> None:
         self.evidence = evidence
         self.saved.append(evidence.as_storage_payload())
+
+
+class MemoryContourStore:
+    def __init__(self, registry: ContourRegistry | None = None) -> None:
+        self.registry = registry or ContourRegistry()
+        self.saved: list[ContourRegistry] = []
+        self.fail = False
+
+    async def async_load(self) -> ContourRegistry:
+        return self.registry
+
+    async def async_save(self, registry: ContourRegistry) -> None:
+        if self.fail:
+            raise RuntimeError("synthetic contour persistence failure")
+        self.registry = registry
+        self.saved.append(registry)
+
+
+class ContourRollbackFailingStore(MemoryContourStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.save_calls = 0
+
+    async def async_save(self, registry: ContourRegistry) -> None:
+        self.save_calls += 1
+        if self.save_calls == 2:
+            raise RuntimeError("synthetic contour rollback failure")
+        await super().async_save(registry)
 
 
 class FailingEvidenceStore(MemoryEvidenceStore):
@@ -127,6 +173,230 @@ def ready_evidence_store(
 
 
 class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
+    async def test_contour_setup_uses_existing_engine_and_never_posts(self) -> None:
+        bridge = MemoryBridge()
+        climate_store = MemoryStore(ClimateRegistry())
+        contour_store = MemoryContourStore()
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateBridgeMode.SHADOW),
+            registry_store=climate_store,
+            contour_store=contour_store,
+            bridge_client=bridge,
+            now_ms=lambda: 1784280005000,
+        )
+        await runtime.async_start()
+        registry, contours = build_climate_contour_setup(
+            bridge.snapshot,
+            room_ids=["living"],
+            source_ids=["synthetic-ac-source-living"],
+            name="Климат",
+            mode="automatic",
+            target_temperature=25.0,
+            target_humidity=45,
+            strategy="normal",
+        )
+
+        await runtime.async_replace_contour_setup(
+            registry_to_payload(registry),
+            contour_registry_to_payload(contours),
+        )
+        result = await runtime.async_contours_snapshot()
+
+        self.assertEqual("ready", result["contours"][0]["status"])  # type: ignore[index]
+        self.assertTrue(
+            result["contours"][0]["execution"]["automatic_active"]  # type: ignore[index]
+        )
+        self.assertEqual([], bridge.executed)
+        self.assertEqual(contours, contour_store.registry)
+
+    async def test_disabled_contour_snapshot_performs_no_bridge_io(self) -> None:
+        bridge = MemoryBridge()
+        registry, contours = build_climate_contour_setup(
+            bridge.snapshot,
+            room_ids=["living"],
+            source_ids=["synthetic-ac-source-living"],
+            name="Климат",
+            mode="observe",
+            target_temperature=25.0,
+            target_humidity=45,
+            strategy="normal",
+        )
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateBridgeMode.DISABLED),
+            registry_store=MemoryStore(registry),
+            contour_store=MemoryContourStore(contours),
+            bridge_client=bridge,
+            now_ms=lambda: 1784280005000,
+        )
+        await runtime.async_start()
+
+        result = await runtime.async_contours_snapshot()
+
+        self.assertEqual("unavailable", result["contours"][0]["status"])  # type: ignore[index]
+        self.assertEqual(0, bridge.fetch_count)
+        self.assertEqual([], bridge.executed)
+
+    async def test_contour_store_failure_rolls_back_device_registry(self) -> None:
+        bridge = MemoryBridge()
+        original = ClimateRegistry()
+        climate_store = MemoryStore(original)
+        contour_store = MemoryContourStore()
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateBridgeMode.SHADOW),
+            registry_store=climate_store,
+            contour_store=contour_store,
+            bridge_client=bridge,
+            now_ms=lambda: 1784280005000,
+        )
+        await runtime.async_start()
+        registry, contours = build_climate_contour_setup(
+            bridge.snapshot,
+            room_ids=["living"],
+            source_ids=["synthetic-ac-source-living"],
+            name="Климат",
+            mode="observe",
+            target_temperature=25.0,
+            target_humidity=45,
+            strategy="normal",
+        )
+        contour_store.fail = True
+
+        with self.assertRaisesRegex(RuntimeError, "contour persistence"):
+            await runtime.async_replace_contour_setup(
+                registry_to_payload(registry),
+                contour_registry_to_payload(contours),
+            )
+
+        self.assertEqual(original, climate_store.registry)
+        self.assertEqual(ContourRegistry(), contour_store.registry)
+        self.assertEqual([], bridge.executed)
+
+    async def test_evidence_failure_rolls_back_both_contour_stores(self) -> None:
+        bridge = MemoryBridge()
+        original_registry = ClimateRegistry()
+        original_contours = ContourRegistry()
+        climate_store = MemoryStore(original_registry)
+        contour_store = MemoryContourStore(original_contours)
+        evidence_store = FailingEvidenceStore()
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateBridgeMode.SHADOW),
+            registry_store=climate_store,
+            contour_store=contour_store,
+            bridge_client=bridge,
+            evidence_store=evidence_store,
+            now_ms=lambda: 1784280005000,
+        )
+        await runtime.async_start()
+        registry, contours = build_climate_contour_setup(
+            bridge.snapshot,
+            room_ids=["living"],
+            source_ids=["synthetic-ac-source-living"],
+            name="Климат",
+            mode="automatic",
+            target_temperature=25.0,
+            target_humidity=45,
+            strategy="normal",
+        )
+        evidence_store.fail = True
+
+        with self.assertRaisesRegex(RuntimeError, "evidence persistence"):
+            await runtime.async_replace_contour_setup(
+                registry_to_payload(registry),
+                contour_registry_to_payload(contours),
+            )
+
+        self.assertEqual(original_registry, climate_store.registry)
+        self.assertEqual(original_contours, contour_store.registry)
+        self.assertEqual([], bridge.executed)
+
+    async def test_failed_registry_rollback_keeps_new_stores_consistent(self) -> None:
+        bridge = MemoryBridge()
+        climate_store = RegistryRollbackFailingStore(ClimateRegistry())
+        contour_store = MemoryContourStore()
+        evidence_store = FailingEvidenceStore()
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateBridgeMode.SHADOW),
+            registry_store=climate_store,
+            contour_store=contour_store,
+            bridge_client=bridge,
+            evidence_store=evidence_store,
+            now_ms=lambda: 1784280005000,
+        )
+        await runtime.async_start()
+        registry, contours = build_climate_contour_setup(
+            bridge.snapshot,
+            room_ids=["living"],
+            source_ids=["synthetic-ac-source-living"],
+            name="Климат",
+            mode="automatic",
+            target_temperature=25.0,
+            target_humidity=45,
+            strategy="normal",
+        )
+        evidence_store.fail = True
+
+        with self.assertRaisesRegex(
+            ClimateRuntimeUnavailable,
+            "rollback failed",
+        ):
+            await runtime.async_replace_contour_setup(
+                registry_to_payload(registry),
+                contour_registry_to_payload(contours),
+            )
+
+        self.assertEqual(registry, climate_store.registry)
+        self.assertEqual(contours, contour_store.registry)
+        self.assertEqual(
+            contour_registry_to_payload(contours),
+            await runtime.async_contour_registry_payload(),
+        )
+        self.assertEqual([], bridge.executed)
+
+    async def test_failed_contour_rollback_compensates_with_new_registry(self) -> None:
+        bridge = MemoryBridge()
+        climate_store = MemoryStore(ClimateRegistry())
+        contour_store = ContourRollbackFailingStore()
+        evidence_store = FailingEvidenceStore()
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateBridgeMode.SHADOW),
+            registry_store=climate_store,
+            contour_store=contour_store,
+            bridge_client=bridge,
+            evidence_store=evidence_store,
+            now_ms=lambda: 1784280005000,
+        )
+        await runtime.async_start()
+        registry, contours = build_climate_contour_setup(
+            bridge.snapshot,
+            room_ids=["living"],
+            source_ids=["synthetic-ac-source-living"],
+            name="Климат",
+            mode="automatic",
+            target_temperature=25.0,
+            target_humidity=45,
+            strategy="normal",
+        )
+        evidence_store.fail = True
+
+        with self.assertRaisesRegex(
+            ClimateRuntimeUnavailable,
+            "rollback failed",
+        ):
+            await runtime.async_replace_contour_setup(
+                registry_to_payload(registry),
+                contour_registry_to_payload(contours),
+            )
+
+        self.assertEqual(registry, climate_store.registry)
+        self.assertEqual(contours, contour_store.registry)
+        self.assertEqual([], bridge.executed)
+
     async def test_native_preview_reads_state_but_never_posts(self) -> None:
         bridge = MemoryBridge()
         runtime = ClimateRuntime(
