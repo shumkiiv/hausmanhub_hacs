@@ -4,12 +4,20 @@ Date: 2026-07-17.
 
 ## Product direction
 
-HASC remains the single backend contract that Android should eventually know.
-The product direction changed with 0.6.0: rooms, targets, policy, and decisions
-will move into HASC itself. The existing climate-core remains a transitional
+HASC is the platform that owns autonomous home-control contours. Climate is
+the first contour; lighting, security, water, energy, or other contours can be
+added later on the same shared foundation. The normal user path is always:
+create a contour, choose rooms, sensors, and controlled devices, set its
+parameters and safety limits, then let HASC run it automatically. Android is a
+status, setup, and temporary-override client of HASC, not the place where
+automation rules execute.
+
+Rooms, device roles, targets, policy, decisions, lifecycle, and operation move
+into HASC itself. The existing climate-core remains only a transitional
 observation and execution adapter while native HASC behavior is implemented,
-compared, and rolled out safely. Android must not need to know when that
-internal cutover happens.
+compared, and rolled out safely. Bridge, shadow, canary, private binding, and
+migration terms must not appear in the ordinary setup path. Android must not
+need to know when that internal cutover happens.
 
 This roadmap covers HASC source only. Installing it in a live home, preparing a
 registry with real identifiers, changing climate-core, changing Android, and
@@ -113,12 +121,15 @@ not authorized by publishing 0.5.0 or by this roadmap.
 
 ## Next coding slice
 
-The 0.6.0 worktree implements the first non-executing HASC-owned policy and
-decision preview for one room. The next HASC-only slice should add native Home
-Assistant observation bindings for the room's temperature and humidity, then
-show parity against the transitional Climate API. It must still create no
-physical command. A later slice can build a typed desired-action plan with
-cooldown and manual-override rules before any executor is authorized.
+The 0.6.0 release implements the first non-executing HASC-owned policy and
+decision preview for one room. The next HASC-only slice should introduce the
+common contour model and a simple climate-contour setup wizard: choose rooms,
+native Home Assistant temperature/humidity observations, controlled devices,
+comfort targets, and safety limits. Transitional Climate API parity belongs in
+advanced diagnostics, not in this ordinary flow. The slice must still create
+no physical command. The following slice can add the continuous multi-room
+runtime and a typed desired-action plan with cooldown and manual-override rules
+before any executor is authorized.
 
 ## 0.6.0 implementation status
 
@@ -127,11 +138,12 @@ stores temperature and humidity targets; a pure decision engine uses fixed
 deadbands, fresh transitional observations, registered device types, and
 availability to report heating, cooling, humidifying, hold, or unavailable.
 The Home Assistant options menu has a dedicated Russian-language built-in
-controller flow with a result screen and separate save confirmation. Its
+controller flow with a result screen and separate save confirmation. This is
+an internal one-room foundation, not the target contour setup experience. Its
 contract always returns `preview_only` and `commands_enabled=false`; a disabled
 bridge performs no state I/O. Existing installations default to disabled and
-retain no room or target fields. Publication and live installation remain
-pending until all local/Core/review gates pass.
+retain no room or target fields. Release `v0.6.0` is published and HACS reports
+it installed; an owner restart is still required to load it.
 
 ## 0.5.1 implementation status
 

@@ -255,6 +255,16 @@ Last updated: 2026-07-18.
   HACS reports installed/latest `v0.6.0`; the owner still needs to restart Home
   Assistant before using the new fifth settings area. See the
   [0.6.0 native preview note](LLM_WIKI/Manual/2026-07-18-hasc-v0-6-0-native-climate-preview.md).
+- The owner clarified the end product after 0.6.0: HASC is a platform of
+  autonomous contours, not a technical climate bridge or a collection of
+  manual device controls. A user adds a contour, assigns rooms, observations,
+  and actuator devices, sets comfort parameters and safety limits, then HASC
+  continuously owns its decisions and operation. Climate is the first contour;
+  later contours reuse a shared device registry, lifecycle, status, override,
+  and conflict model. Transitional climate-core, shadow, canary, private
+  bindings, and migration details must move out of the ordinary user path.
+  The 0.6.0 one-room preview is an internal foundation, not the target UX. See
+  the [contour-platform product direction](LLM_WIKI/Manual/2026-07-18-hasc-contour-platform-direction.md).
 - Further HASC-only development is tracked in the
   [post-0.5 roadmap](LLM_WIKI/Manual/2026-07-17-hasc-post-v0-5-0-roadmap.md):
   the operator registry, formal Android contract, measurable shadow, command
