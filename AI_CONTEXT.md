@@ -1,6 +1,6 @@
 # HASC AI Context
 
-Last updated: 2026-07-17.
+Last updated: 2026-07-18.
 
 ## Project state
 
@@ -101,7 +101,7 @@ Last updated: 2026-07-17.
   correctly forbidden to the non-admin verification account, and climate
   home/action remained unavailable because the bridge was still `disabled`.
   No physical command or canary was attempted.
-- Version 0.5.3 is the current HASC-only operator-import worktree. The options
+- Version 0.5.3 added the HASC-only operator-import workflow. The options
   wizard obtains fresh Climate API candidates read-only and exposes only
   ephemeral `candidate_NNN` selector values plus device/room labels. The
   private source ID is neither displayed nor accepted from the form. The
@@ -111,19 +111,39 @@ Last updated: 2026-07-17.
   The selected room/device remain in an unsaved draft until the existing
   preview and separate atomic confirmation. It never auto-imports another
   candidate, deletes a registry record, or sends a Climate API command POST.
-  The prepared package passed 217 local tests plus release/file-safety checks
+  The package passed 217 local tests plus release/file-safety checks
   and the full options-flow lifecycle on disposable Core 2026.6.4 and
   2026.7.0 with an exact two-device registry and zero command POSTs. Kimi model
   `kimi-for-coding/k2p7` completed the final read-only staged review in session
-  `ses_08e986dbaffe6gCgi4wPgxStqP` with no substantial findings. GitHub,
-  release, and disabled live-deployment gates remain pending.
+  `ses_08e986dbaffe6gCgi4wPgxStqP` with no substantial findings. Commit
+  `eb05bce` was pushed and published as the non-prerelease latest release
+  `v0.5.3` after successful GitHub Actions. HACS installed it on the live
+  Core 2026.6.4 home; after the owner restarted Core, installed/latest both
+  reported `v0.5.3` and the new candidate-import translation keys were loaded.
+  Climate home/action still returned unavailable because the live bridge
+  remained `disabled`; no physical command or canary was attempted.
   A non-activating supervised one-room checklist is documented in
   [the rollout checklist](docs/climate-canary-rollout-checklist.md).
-- Further HASC-only development is prioritized in the
+- Version 0.5.4 is the current HASC-only release candidate. Its guided options
+  flow selects one room strictly from the saved registry and combines exact
+  reconciliation, redacted shadow evidence, the fixed `set_room_target` plus
+  `turn_room_off` scope, per-room pending state, and disabled rollback
+  readiness. Only complete evidence in `shadow` can produce
+  `ready_for_authorization`; the result always keeps
+  `activation.allowed=false` and requires separate owner authorization. It
+  performs no climate command POST, does not enable canary, and does not save
+  options or registry. The prepared package passed 224 local tests, the full
+  release/file-safety checks, and disposable Core 2026.6.4/2026.7.0. Kimi
+  model `kimi-for-coding/k2p7` completed the final read-only staged review in
+  session `ses_08ca230b5ffe4LBnH7j2hMTROH` with PASS and no substantial
+  findings. Publication and disabled live-install gates remain. The
+  implementation decision is recorded in
+  [the 0.5.4 preflight note](LLM_WIKI/Manual/2026-07-18-hasc-v0-5-4-canary-preflight.md).
+- Further HASC-only development is tracked in the
   [post-0.5 roadmap](LLM_WIKI/Manual/2026-07-17-hasc-post-v0-5-0-roadmap.md):
-  operator-friendly registry setup and a formal Android contract first,
-  measurable shadow next, then command receipts/confirmation and only after
-  those gates a separately authorized one-room physical canary.
+  the operator registry, formal Android contract, measurable shadow, command
+  receipts, confirmation, and non-activating one-room preflight now exist.
+  Physical canary execution remains a separate explicitly authorized phase.
 - A public `custom_components/hausman_hub/` observation foundation with the
   local 0.4.0 helper-canary addition is present. It may be added manually as an
   HACS custom repository; it is not in the public HACS catalog.

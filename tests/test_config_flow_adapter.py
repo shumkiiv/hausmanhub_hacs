@@ -1097,6 +1097,103 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual("climate_registry", returned["step_id"])
 
+    async def test_options_show_complete_canary_preflight_without_activation(
+        self,
+    ) -> None:
+        """One screen combines only redacted rollout checks and cannot save."""
+
+        from custom_components.hausman_hub.application.climate_import import (
+            import_climate_state,
+        )
+        from custom_components.hausman_hub.application.climate_registry import (
+            registry_from_payload,
+        )
+        from custom_components.hausman_hub.application.climate_runtime import ClimateRuntime
+        from custom_components.hausman_hub.domain.climate_bridge import ClimateBridgeMode
+        from custom_components.hausman_hub.domain.configuration import SafeConfiguration
+        from tests.test_climate_import import complete_registry_payload, source_payload
+        from tests.test_climate_runtime import ready_evidence_store
+
+        registry = complete_registry_payload()
+
+        class Store:
+            def __init__(self) -> None:
+                self.saved = []
+
+            async def async_load(self):
+                return registry_from_payload(registry)
+
+            async def async_save(self, value):
+                self.saved.append(value)
+
+        class Bridge:
+            def __init__(self) -> None:
+                self.executed = []
+
+            async def async_fetch_state(self):
+                return import_climate_state(source_payload())
+
+            async def async_execute(self, plan):
+                self.executed.append(plan)
+
+        store = Store()
+        bridge = Bridge()
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=SafeConfiguration(
+                mode="shadow",
+                climate_bridge_mode=ClimateBridgeMode.SHADOW,
+            ),
+            registry_store=store,
+            bridge_client=bridge,
+            evidence_store=ready_evidence_store(registry),
+            now_ms=lambda: 1784280005000,
+        )
+        await runtime.async_start()
+        options_flow = self.config_flow.HausmanHubOptionsFlow()
+        options_flow.config_entry = FakeConfigEntry(
+            {"mode": "read-only", "direct_execution_status": "direct_execution_blocked"},
+            {"mode": "shadow"},
+        )
+        options_flow.hass = SimpleNamespace(  # type: ignore[attr-defined]
+            data={"hausman_hub": {"climate_runtime": runtime}}
+        )
+
+        await options_flow.async_step_init({"next_step": "manage_climate_registry"})
+        options_flow._registry_draft = {  # type: ignore[attr-defined]
+            **registry,
+            "rooms": [
+                *registry["rooms"],  # type: ignore[union-attr]
+                {"id": "draft_only", "name": "Unsaved room"},
+            ],
+        }
+        candidate = await options_flow.async_step_climate_registry(
+            {"climate_registry_action": "review_canary_preflight"}
+        )
+        candidate_selector = next(iter(candidate["schema"].fields.values()))
+        self.assertNotIn("draft_only", str(candidate_selector.config.options))
+        result = await options_flow.async_step_climate_preflight_candidate(
+            {"climate_preflight_room": "living"}
+        )
+
+        self.assertEqual("climate_preflight_candidate", candidate["step_id"])
+        self.assertEqual("climate_canary_preflight", result["step_id"])
+        placeholders = result["description_placeholders"]
+        self.assertEqual("ready", placeholders["status"])
+        self.assertEqual("true", placeholders["registry_matches"])
+        self.assertEqual("clear", placeholders["operation"])
+        self.assertEqual("ready", placeholders["rollback"])
+        self.assertIn("set_room_target", placeholders["scope"])
+        serialized = str(placeholders)
+        self.assertNotIn("synthetic-ac-source", serialized)
+        self.assertNotIn("climate.synthetic", serialized)
+        self.assertEqual([], store.saved)
+        self.assertEqual([], bridge.executed)
+        returned = await options_flow.async_step_climate_canary_preflight(
+            {"close_canary_preflight": True}
+        )
+        self.assertEqual("climate_registry", returned["step_id"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -62,6 +62,7 @@ REQUIRED_PACKAGE_PATHS = (
     INTEGRATION_DIRECTORY / "switch.py",
     INTEGRATION_DIRECTORY / "application/control.py",
     INTEGRATION_DIRECTORY / "application/android_climate.py",
+    INTEGRATION_DIRECTORY / "application/climate_canary_preflight.py",
     INTEGRATION_DIRECTORY / "application/climate_commands.py",
     INTEGRATION_DIRECTORY / "application/climate_evidence.py",
     INTEGRATION_DIRECTORY / "application/climate_import.py",

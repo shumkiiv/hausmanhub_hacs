@@ -24,7 +24,11 @@ from custom_components.hausman_hub.domain.climate_bridge import (
     climate_bridge_target,
 )
 from custom_components.hausman_hub.domain.configuration import SafeConfiguration
-from tests.test_climate_import import registry_payload, source_payload
+from tests.test_climate_import import (
+    complete_registry_payload,
+    registry_payload,
+    source_payload,
+)
 
 
 class MemoryStore:
@@ -102,8 +106,10 @@ def configuration(mode: ClimateBridgeMode) -> SafeConfiguration:
     )
 
 
-def ready_evidence_store() -> MemoryEvidenceStore:
-    registry = registry_from_payload(registry_payload())
+def ready_evidence_store(
+    payload: dict[str, object] | None = None,
+) -> MemoryEvidenceStore:
+    registry = registry_from_payload(payload or registry_payload())
     snapshot = import_climate_state(source_payload())
     start = 1784279405000
     evidence = ClimateShadowEvidence.for_registry(registry, now_ms=start)
@@ -207,6 +213,59 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
         await runtime.async_shadow_evidence({"room_id": "living"})
 
         self.assertEqual(saves_before_query + 1, len(evidence_store.saved))
+
+    async def test_shadow_canary_preflight_is_read_only_and_non_activating(self) -> None:
+        bridge = MemoryBridge()
+        registry = complete_registry_payload()
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateBridgeMode.SHADOW),
+            registry_store=MemoryStore(registry_from_payload(registry)),
+            bridge_client=bridge,
+            evidence_store=ready_evidence_store(registry),
+            now_ms=lambda: 1784280005000,
+        )
+        await runtime.async_start()
+        fetches_before = bridge.fetch_count
+
+        result = await runtime.async_canary_preflight({"room_id": "living"})
+
+        self.assertEqual("ready", result["status"])
+        self.assertTrue(result["ready_for_authorization"])
+        self.assertFalse(result["activation"]["allowed"])  # type: ignore[index]
+        self.assertGreater(bridge.fetch_count, fetches_before)
+        self.assertEqual([], bridge.executed)
+
+    async def test_canary_preflight_reports_pending_and_requires_rollback(self) -> None:
+        bridge = MemoryBridge()
+        registry = complete_registry_payload()
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateBridgeMode.CANARY),
+            registry_store=MemoryStore(registry_from_payload(registry)),
+            bridge_client=bridge,
+            evidence_store=ready_evidence_store(registry),
+            operation_id_factory=lambda: "d" * 32,
+            now_ms=lambda: 1784280005000,
+        )
+        await runtime.async_start()
+        await runtime.async_action(
+            {
+                "request_id": "preflight-pending",
+                "action": "set_room_target",
+                "room_id": "living",
+                "target_temperature": 24.5,
+            }
+        )
+
+        result = await runtime.async_canary_preflight({"room_id": "living"})
+
+        self.assertEqual("blocked", result["status"])
+        self.assertEqual("pending", result["operation"]["status"])  # type: ignore[index]
+        self.assertFalse(result["rollback"]["ready"])  # type: ignore[index]
+        self.assertIn("preflight_requires_shadow", result["reasons"])
+        self.assertIn("pending_operation", result["reasons"])
+        self.assertEqual(1, len(bridge.executed))
 
     async def test_rejected_intent_keeps_validation_error_when_evidence_save_fails(
         self,

@@ -77,6 +77,23 @@
           "climate_device_control_entity": "Выберите entity из списка, не копируя его ID вручную. До отдельного подтверждения значение остаётся только в черновике."
         }
       },
+      "climate_preflight_candidate": {
+        "title": "Выбор комнаты для canary preflight",
+        "description": "Выберите одну комнату из сохранённого реестра HASC. Проверка читает текущее состояние rollout, но не может включить canary или отправить климатическую команду.",
+        "data": {
+          "climate_preflight_room": "Сохранённая комната HASC"
+        }
+      },
+      "climate_canary_preflight": {
+        "title": "Проверка готовности climate canary",
+        "description": "Комната {room_id}: {status}. Совпадение реестра: {registry_matches}; устройств совпало/пропало/перемещено/не зарегистрировано: {matched_devices}/{missing_devices}/{moved_devices}/{unregistered_devices}. Shadow: {shadow_status}, наблюдений {matched}/{required_matched}, проверенных действий {translated}/{required_actions}, аномалий {anomalies}. Допустимый scope: {scope_qualified} ({scope}). Операция: {operation}. Откат в disabled: {rollback}. Причины: {reasons}. Этот экран никогда не включает canary; по-прежнему требуется отдельное разрешение.",
+        "data": {
+          "close_canary_preflight": "Вернуться к настройке климата"
+        },
+        "data_description": {
+          "close_canary_preflight": "Включите только для закрытия read-only результата. Настройки, реестр и устройства не изменяются."
+        }
+      },
       "climate_registry_room": {
         "title": "Добавление или замена климатической комнаты",
         "description": "Повторный стабильный ID заменяет комнату только в черновике. Черновик пока не сохраняется.",
@@ -157,6 +174,7 @@
       "climate_import_unavailable": "Свежий read-only импорт Climate API недоступен. Настройте shadow-адрес и проверьте состояние, не включая canary.",
       "climate_import_no_candidates": "В свежем импорте нет новых поддерживаемых кандидатов для этого черновика.",
       "invalid_climate_candidate": "Кандидат изменился, уже добавлен или не образует безопасное типизированное устройство. Обновите выбор и повторите.",
+      "climate_preflight_unavailable": "Полная обезличенная проверка готовности недоступна. Не включайте canary и проверьте сохранённый реестр, shadow и текущее состояние моста.",
       "climate_shadow_evidence_unavailable": "Shadow-доказательства для комнаты недоступны. Оставьте мост в shadow и проверьте адрес, реестр и текущее состояние."
     }
   },
@@ -192,6 +210,7 @@
         "import_candidate": "Выбрать устройство из read-only импорта",
         "add_room": "Добавить или заменить комнату",
         "add_device": "Добавить или заменить устройство",
+        "review_canary_preflight": "Проверить готовность canary одной комнаты",
         "review_shadow_evidence": "Посмотреть shadow-доказательства",
         "review_registry": "Проверить и подтвердить черновик",
         "advanced_json": "Расширенный редактор JSON",

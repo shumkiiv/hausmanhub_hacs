@@ -6,11 +6,13 @@ Safety-first Home Assistant custom integration for HausMan Hub.
 
 This repository contains a public Home Assistant integration under
 `custom_components/hausman_hub/`. It always creates nine diagnostic number
-sensors from the approved aggregate summary. Version 0.5.3 adds explicit
-read-only candidate selection with opaque form tokens and native Home
-Assistant entity selectors, so an operator can prepare a registry without
-copying private IDs. It builds on the persistent redacted shadow-evidence
-window, guided readiness, installed JSON Schemas, zero-POST shadow acceptance,
+sensors from the approved aggregate summary. Version 0.5.4 adds one complete
+read-only canary preflight for a saved public HASC room. It combines registry
+reconciliation, redacted shadow evidence, the fixed command scope, pending
+operation state, and disabled rollback readiness without activating canary or
+sending a climate command. It builds on explicit candidate selection with
+opaque form tokens, native Home Assistant entity selectors, the persistent
+shadow-evidence window, installed JSON Schemas, zero-POST shadow acceptance,
 and idempotent operation receipts.
 These features build on the private logical climate-device
 registry, a local Android facade, read-only import of
@@ -89,6 +91,12 @@ The legacy single-`input_boolean` canary remains separate.
     keep the result in an unsaved draft until preview and separate atomic
     confirmation. See the [inactive one-room rollout
     checklist](docs/climate-canary-rollout-checklist.md).
+14. In version 0.5.4, review one saved room in a single redacted rollout
+    preflight. Only complete shadow evidence, exact registry reconciliation,
+    the two fixed initial actions, no pending operation, and a ready disabled
+    rollback can produce `ready_for_authorization`. The screen still cannot
+    enable canary or send a command, and separate owner authorization remains
+    mandatory.
 
 See [repository basics](docs/repository-basics.md) and
 [AI context](AI_CONTEXT.md) before changing the repository.

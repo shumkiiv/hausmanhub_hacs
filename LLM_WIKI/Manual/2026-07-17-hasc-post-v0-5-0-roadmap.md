@@ -95,11 +95,13 @@ not authorized by publishing 0.5.0 or by this roadmap.
 
 ## Next coding slice
 
-After the 0.5.3 candidate-import release, the next HASC-only work is a single
-read-only operator preflight screen that combines registry reconciliation,
-shadow evidence, command scope, in-flight status, and rollback readiness for
-one room. It must prepare but never activate the supervised physical canary.
-Physical execution still requires a new explicit authorization.
+After the 0.5.4 preflight release, the next HASC-only work should make the
+same redacted readiness decision available as a versioned local-admin contract
+with an installed JSON Schema and explicit freshness timestamp. This lets a
+future operator surface consume one canonical result without gaining climate
+authority. It must remain read-only, exclude private bindings, and never
+create an authorization or activate canary. Physical execution still requires
+a new explicit authorization naming one public room and exact actions.
 
 ## 0.5.1 implementation status
 
@@ -128,7 +130,7 @@ without a target, physical command, or canary.
 
 ## 0.5.3 implementation status
 
-Implemented in the current worktree on 2026-07-17: fresh read-only candidate
+Implemented and released on 2026-07-17: fresh read-only candidate
 selection with opaque form tokens, native entity selectors, typed capability
 inference, repeat-read drift rejection, automatic selected-room draft
 population, and preservation of the existing preview plus separate atomic
@@ -137,5 +139,22 @@ requires the exact fixture registry, and measures zero command POSTs. A formal
 one-room rollout checklist is prepared but inactive. All 217 local tests,
 release/file-safety checks, and disposable Core 2026.6.4/2026.7.0 lifecycles
 passed. Kimi `kimi-for-coding/k2p7` returned PASS with no substantial findings
-in session `ses_08e986dbaffe6gCgi4wPgxStqP`. Release/live deployment gates
-remain pending; live deployment must finish in `disabled`.
+in session `ses_08e986dbaffe6gCgi4wPgxStqP`. Commit `eb05bce` was published as
+the latest non-prerelease `v0.5.3` after successful GitHub Actions. HACS
+installed it on the live Core 2026.6.4 home, the owner restarted Core, and the
+new translation keys loaded. Live climate home/action stayed unavailable
+because the bridge remained `disabled`; no physical command or canary ran.
+
+## 0.5.4 implementation status
+
+Implemented in the current release candidate on 2026-07-18: one saved-room
+read-only preflight combines full registry reconciliation, redacted shadow
+evidence, exact initial command scope, per-room pending-operation status, and
+disabled rollback readiness in the real Home Assistant options flow. Only a
+complete `shadow` result can be `ready_for_authorization`, while activation is
+always false and separate owner authorization remains mandatory. The flow does
+not save registry/options, enable canary, or execute command POST. Final local,
+Core, and independent review gates passed: 224 local tests, disposable Core
+2026.6.4/2026.7.0, and Kimi `kimi-for-coding/k2p7` session
+`ses_08ca230b5ffe4LBnH7j2hMTROH` with PASS and no substantial findings.
+Publication and disabled live-install gates remain.

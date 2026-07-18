@@ -41,8 +41,13 @@ release/file-safety checks passed. Disposable Core 2026.6.4 and 2026.7.0 both
 pass the real two-candidate options flow, exact registry comparison, and zero
 command POST assertion. Kimi `kimi-for-coding/k2p7` completed the final
 read-only staged review in session `ses_08e986dbaffe6gCgi4wPgxStqP` with PASS
-and no substantial findings. Publication gates remain required.
+and no substantial findings. Commit `eb05bce` was pushed and published as the
+latest non-prerelease release `v0.5.3` after successful GitHub Actions. HACS
+installed it on the live Core 2026.6.4 home; after the owner restart,
+installed/latest both reported `v0.5.3`, the new translation keys loaded, and
+climate home/action remained unavailable because the bridge was `disabled`.
+No physical command or canary was attempted.
 
 The companion [one-room checklist](../../docs/climate-canary-rollout-checklist.md)
 is documentation only. It does not authorize live shadow configuration or a
-physical canary. Live deployment of 0.5.3 must end in `disabled`.
+physical canary. Live deployment of 0.5.3 ended in `disabled`.

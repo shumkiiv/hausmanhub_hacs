@@ -262,6 +262,28 @@ class _ClimateOperationLedger:
             and record.receipt.status is ClimateOperationStatus.PENDING
         )
 
+    def room_has_pending(self, room_id: str) -> bool:
+        """Inspect one public room without exposing or mutating its receipts."""
+
+        if not isinstance(room_id, str):
+            raise ClimateCommandViolation("operation room id is invalid")
+        now = self._safe_now()
+        for record in self._records.values():
+            receipt = record.receipt
+            if (
+                receipt.room_id != room_id
+                or receipt.status is not ClimateOperationStatus.PENDING
+            ):
+                continue
+            created_at = receipt.created_at
+            if (
+                created_at is None
+                or now < created_at
+                or now - created_at < OPERATION_TIMEOUT_MS
+            ):
+                return True
+        return False
+
     def _prune(self) -> None:
         while len(self._records) > MAX_OPERATION_RECORDS:
             operation_id = next(iter(self._records))

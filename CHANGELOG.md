@@ -1,5 +1,26 @@
 # История версий
 
+## 0.5.4 — 2026-07-18
+
+- В мастере климатического реестра появился единый read-only preflight для
+  одной сохранённой HASC-комнаты. Он объединяет точность registry
+  reconciliation, shadow evidence, фиксированный command scope, отсутствие
+  pending-операции и готовность немедленного отката в `disabled`.
+- Результат содержит только публичный room ID, coarse-статусы и счётчики;
+  private source/entity IDs, адрес Climate API и payload команд в экран не
+  попадают. Выбор комнаты берётся из сохранённого реестра, а не из
+  неподтверждённого черновика.
+- Статус `ready_for_authorization` возможен только в `shadow` после полной
+  сверки, готового evidence для `set_room_target` и `turn_room_off`, при
+  отсутствии pending-операции. Сам preflight всегда возвращает
+  `activation.allowed=false` и требует отдельного разрешения владельца.
+- Проверка делает только свежий state GET в `shadow`, не сохраняет options или
+  registry, не включает canary и не выполняет climate command POST. В
+  `disabled` она не обращается к Climate API и показывает действующий откат.
+- Disposable Home Assistant Core-проверка проходит настоящий новый
+  options-flow и по-прежнему измеряет ноль command POST. Повреждённые или
+  противоречивые внутренние evidence-данные закрывают preflight fail closed.
+
 ## 0.5.3 — 2026-07-17
 
 - В мастере климатического реестра появился основной путь «Выбрать устройство

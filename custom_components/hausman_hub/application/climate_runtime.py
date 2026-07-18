@@ -11,6 +11,7 @@ from ..domain.climate import ClimateRegistry
 from ..domain.climate_bridge import ClimateBridgeMode
 from ..domain.configuration import SafeConfiguration
 from .android_climate import admin_climate_import_snapshot, android_climate_snapshot
+from .climate_canary_preflight import climate_canary_preflight
 from .climate_commands import (
     ClimateCommandPlan,
     ClimateCommandRejected,
@@ -242,6 +243,39 @@ class ClimateRuntime:
             )
             await self._async_save_evidence()
             return result
+
+    async def async_canary_preflight(self, payload: object) -> dict[str, object]:
+        """Combine one room's rollout checks without enabling or posting anything."""
+
+        candidate_room_id = candidate_room_from_payload(payload)
+        async with self._lock:
+            snapshot = self._snapshot
+            if self.configuration.climate_bridge_mode is not ClimateBridgeMode.DISABLED:
+                try:
+                    snapshot = await self._async_refresh_unlocked(
+                        persist_evidence=False
+                    )
+                except ClimateRuntimeUnavailable:
+                    snapshot = None
+            evidence = self._require_evidence()
+            evidence_payload = evidence.as_payload(
+                registry=self._registry,
+                snapshot=snapshot,
+                bridge_mode=self.configuration.climate_bridge_mode,
+                candidate_room_id=candidate_room_id,
+                now_ms=self._safe_now(),
+            )
+            await self._async_save_evidence()
+            return climate_canary_preflight(
+                self._registry,
+                snapshot,
+                evidence_payload,
+                bridge_mode=self.configuration.climate_bridge_mode,
+                room_id=candidate_room_id,
+                pending_operation=self._operations.room_has_pending(
+                    candidate_room_id
+                ),
+            )
 
     async def async_preview_registry(self, payload: object) -> dict[str, object]:
         """Validate and reconcile an unsaved registry without mutating storage."""

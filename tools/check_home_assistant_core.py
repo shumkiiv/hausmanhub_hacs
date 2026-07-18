@@ -3129,6 +3129,67 @@ async def async_assert_shadow_climate_end_to_end(
             1,
             "shadow evidence must count one translated intent without a POST",
         )
+
+        preflight_flow = await hass.config_entries.options.async_init(entry.entry_id)
+        preflight_menu = await hass.config_entries.options.async_configure(
+            preflight_flow["flow_id"],
+            {"next_step": "manage_climate_registry"},
+        )
+        preflight_candidate = await hass.config_entries.options.async_configure(
+            preflight_flow["flow_id"],
+            {"climate_registry_action": "review_canary_preflight"},
+        )
+        preflight_result = await hass.config_entries.options.async_configure(
+            preflight_flow["flow_id"],
+            {"climate_preflight_room": "living"},
+        )
+        assert_result(
+            (
+                preflight_menu["step_id"],
+                preflight_candidate["step_id"],
+                preflight_result["step_id"],
+            ),
+            (
+                "climate_registry",
+                "climate_preflight_candidate",
+                "climate_canary_preflight",
+            ),
+            "real options flow must open the one-room non-activating preflight",
+        )
+        preflight_placeholders = preflight_result.get(
+            "description_placeholders",
+            {},
+        )
+        assert_result(
+            (
+                preflight_placeholders.get("status"),
+                preflight_placeholders.get("registry_matches"),
+                preflight_placeholders.get("operation"),
+                preflight_placeholders.get("rollback"),
+            ),
+            ("collecting", "true", "clear", "ready"),
+            "preflight must combine reconciliation, evidence, operation, and rollback",
+        )
+        preflight_serialized = json.dumps(
+            preflight_placeholders,
+            ensure_ascii=True,
+            sort_keys=True,
+        )
+        if (
+            "source_id" in preflight_serialized
+            or "entity_id" in preflight_serialized
+        ):
+            raise RuntimeError("canary preflight must not expose private climate bindings")
+        closed_preflight = await hass.config_entries.options.async_configure(
+            preflight_flow["flow_id"],
+            {"close_canary_preflight": True},
+        )
+        assert_result(
+            closed_preflight["step_id"],
+            "climate_registry",
+            "closing preflight must only return to the registry menu",
+        )
+        hass.config_entries.options.async_abort(preflight_flow["flow_id"])
         if not state_gets:
             raise RuntimeError("shadow acceptance must perform measured read-only state GETs")
         assert_result(

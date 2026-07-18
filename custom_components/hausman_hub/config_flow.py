@@ -90,6 +90,8 @@ CLIMATE_DEVICE_CONTROL_ENTITY_FIELD = "climate_device_control_entity"
 CLIMATE_SHADOW_CANDIDATE_ROOM_FIELD = "climate_shadow_candidate_room"
 CLIMATE_SHADOW_EVIDENCE_CLOSE_FIELD = "close_shadow_evidence"
 CLIMATE_IMPORT_CANDIDATE_FIELD = "climate_import_candidate"
+CLIMATE_PREFLIGHT_ROOM_FIELD = "climate_preflight_room"
+CLIMATE_PREFLIGHT_CLOSE_FIELD = "close_canary_preflight"
 MAX_CLIMATE_REGISTRY_FORM_BYTES = 16 * 1024
 
 
@@ -143,6 +145,7 @@ CLIMATE_REGISTRY_ACTION_SELECTOR = SelectSelector(
                 "import_candidate",
                 "add_room",
                 "add_device",
+                "review_canary_preflight",
                 "review_shadow_evidence",
                 "review_registry",
                 "advanced_json",
@@ -435,6 +438,29 @@ def _climate_shadow_evidence_schema() -> vol.Schema:
     )
 
 
+def _climate_preflight_candidate_schema(
+    rooms: list[dict[str, str]],
+) -> vol.Schema:
+    return vol.Schema(
+        {
+            vol.Required(CLIMATE_PREFLIGHT_ROOM_FIELD): SelectSelector(
+                SelectSelectorConfig(options=rooms)
+            )
+        }
+    )
+
+
+def _climate_canary_preflight_schema() -> vol.Schema:
+    return vol.Schema(
+        {
+            vol.Required(
+                CLIMATE_PREFLIGHT_CLOSE_FIELD,
+                default=False,
+            ): StrictBooleanSelector()
+        }
+    )
+
+
 def _safe_mode_default(
     entry_data: Mapping[str, Any], options: Mapping[str, Any]
 ) -> str:
@@ -594,6 +620,7 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
     _registry_draft: object | None = None
     _registry_preview: Mapping[str, Any] | None = None
     _shadow_evidence: Mapping[str, Any] | None = None
+    _canary_preflight: Mapping[str, Any] | None = None
     _import_snapshot: ClimateImportSnapshot | None = None
     _import_candidates: dict[str, ImportedClimateDevice] | None = None
     _selected_import_source_id: str | None = None
@@ -722,6 +749,8 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
                 return await self.async_step_climate_registry_room()
             if action == "add_device":
                 return await self.async_step_climate_registry_device()
+            if action == "review_canary_preflight":
+                return await self.async_step_climate_preflight_candidate()
             if action == "review_shadow_evidence":
                 return await self.async_step_climate_shadow_candidate()
             if action == "advanced_json":
@@ -882,6 +911,65 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
             step_id="climate_shadow_candidate",
             data_schema=_climate_shadow_candidate_schema(rooms),
             errors=errors,
+        )
+
+    async def async_step_climate_preflight_candidate(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> FlowResult:
+        """Select one saved public room for a non-activating rollout preflight."""
+
+        runtime = self._climate_runtime()
+        errors: dict[str, str] = {}
+        rooms: list[dict[str, str]] = []
+        if runtime is None:
+            errors["base"] = "climate_runtime_unavailable"
+        else:
+            try:
+                saved_registry = await runtime.async_registry_payload()
+                rooms = self._rooms_from_registry_payload(saved_registry)
+            except Exception:
+                errors["base"] = "climate_preflight_unavailable"
+            else:
+                if not rooms:
+                    errors["base"] = "climate_registry_needs_room"
+        if user_input is not None and not errors and runtime is not None:
+            try:
+                preflight = await runtime.async_canary_preflight(
+                    {"room_id": user_input.get(CLIMATE_PREFLIGHT_ROOM_FIELD)}
+                )
+            except Exception:
+                errors["base"] = "climate_preflight_unavailable"
+            else:
+                self._canary_preflight = preflight
+                return await self.async_step_climate_canary_preflight()
+        if not rooms:
+            rooms = [SelectOptionDict(value="missing", label="missing")]
+        return self.async_show_form(
+            step_id="climate_preflight_candidate",
+            data_schema=_climate_preflight_candidate_schema(rooms),
+            errors=errors,
+        )
+
+    async def async_step_climate_canary_preflight(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> FlowResult:
+        """Show one complete redacted result without saving or activating."""
+
+        if self._canary_preflight is None:
+            return await self.async_step_climate_preflight_candidate()
+        if (
+            user_input is not None
+            and user_input.get(CLIMATE_PREFLIGHT_CLOSE_FIELD) is True
+        ):
+            self._canary_preflight = None
+            return await self.async_step_climate_registry()
+        return self.async_show_form(
+            step_id="climate_canary_preflight",
+            data_schema=_climate_canary_preflight_schema(),
+            errors={},
+            description_placeholders=self._canary_preflight_placeholders(),
         )
 
     async def async_step_climate_shadow_evidence(
@@ -1119,6 +1207,23 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
             and isinstance(room.get("name"), str)
         ]
 
+    def _rooms_from_registry_payload(
+        self,
+        payload: object,
+    ) -> list[dict[str, str]]:
+        if not isinstance(payload, Mapping):
+            return []
+        rooms = payload.get("rooms")
+        if not isinstance(rooms, list):
+            return []
+        return [
+            SelectOptionDict(value=room["id"], label=room["name"])
+            for room in rooms
+            if isinstance(room, Mapping)
+            and isinstance(room.get("id"), str)
+            and isinstance(room.get("name"), str)
+        ]
+
     def _set_import_candidates(
         self,
         snapshot: ClimateImportSnapshot,
@@ -1213,5 +1318,60 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
             "translated": str(candidate_values.get("translated_action_count", 0)),
             "anomalies": str(candidate_values.get("anomaly_count", 0)),
             "global_rejected": str(count_values.get("rejected", 0)),
+            "reasons": ", ".join(str(value) for value in reason_values) or "none",
+        }
+
+    def _canary_preflight_placeholders(self) -> dict[str, str]:
+        preflight = self._canary_preflight or {}
+        registry = preflight.get("registry")
+        registry_values = registry if isinstance(registry, Mapping) else {}
+        reconciliation = registry_values.get("reconciliation")
+        reconciliation_values = (
+            reconciliation if isinstance(reconciliation, Mapping) else {}
+        )
+        shadow = preflight.get("shadow")
+        shadow_values = shadow if isinstance(shadow, Mapping) else {}
+        scope = preflight.get("command_scope")
+        scope_values = scope if isinstance(scope, Mapping) else {}
+        actions = scope_values.get("actions")
+        action_values = actions if isinstance(actions, list) else []
+        operation = preflight.get("operation")
+        operation_values = operation if isinstance(operation, Mapping) else {}
+        rollback = preflight.get("rollback")
+        rollback_values = rollback if isinstance(rollback, Mapping) else {}
+        reasons = preflight.get("reasons")
+        reason_values = reasons if isinstance(reasons, list) else []
+        return {
+            "room_id": str(preflight.get("room_id", "unknown")),
+            "status": str(preflight.get("status", "blocked")),
+            "registry_matches": str(
+                reconciliation_values.get("matches", False)
+            ).lower(),
+            "matched_devices": str(
+                reconciliation_values.get("matched_device_count", 0)
+            ),
+            "missing_devices": str(
+                reconciliation_values.get("missing_device_count", 0)
+            ),
+            "moved_devices": str(
+                reconciliation_values.get("room_mismatch_device_count", 0)
+            ),
+            "unregistered_devices": str(
+                reconciliation_values.get("unregistered_source_count", 0)
+            ),
+            "shadow_status": str(shadow_values.get("status", "blocked")),
+            "matched": str(shadow_values.get("matched_observation_count", 0)),
+            "required_matched": str(
+                shadow_values.get("required_matched_observation_count", 3)
+            ),
+            "translated": str(shadow_values.get("translated_action_count", 0)),
+            "required_actions": str(
+                shadow_values.get("required_action_count", 2)
+            ),
+            "anomalies": str(shadow_values.get("anomaly_count", 0)),
+            "scope": ", ".join(str(value) for value in action_values) or "none",
+            "scope_qualified": str(scope_values.get("qualified", False)).lower(),
+            "operation": str(operation_values.get("status", "pending")),
+            "rollback": str(rollback_values.get("status", "blocked")),
             "reasons": ", ".join(str(value) for value in reason_values) or "none",
         }

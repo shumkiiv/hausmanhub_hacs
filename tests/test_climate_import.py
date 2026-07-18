@@ -65,6 +65,31 @@ def registry_payload() -> dict[str, object]:
     }
 
 
+def complete_registry_payload() -> dict[str, object]:
+    """Return exact bindings for every device in the synthetic source fixture."""
+
+    payload = registry_payload()
+    payload["devices"].append(  # type: ignore[union-attr]
+        {
+            "id": "kids_humidifier",
+            "name": "Kids humidifier",
+            "room_id": "kids",
+            "kind": "humidifier",
+            "source_id": "synthetic-humidifier-source-kids",
+            "control_scope": "observed",
+            "control_owner": "observed",
+            "capabilities": ["power", "target_humidity"],
+            "endpoints": [
+                {
+                    "role": "control",
+                    "entity_id": "humidifier.synthetic_kids",
+                }
+            ],
+        }
+    )
+    return payload
+
+
 class ClimateImportTest(unittest.TestCase):
     """Require explicit binding and fail-closed state/capability validation."""
 

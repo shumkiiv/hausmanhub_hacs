@@ -77,6 +77,23 @@
           "climate_device_control_entity": "Select the entity instead of copying its ID. It remains only in the draft until separate confirmation."
         }
       },
+      "climate_preflight_candidate": {
+        "title": "Select a room for canary preflight",
+        "description": "Select one room from the saved HASC registry. The check reads current rollout state but cannot activate canary or send a climate command.",
+        "data": {
+          "climate_preflight_room": "Saved HASC room"
+        }
+      },
+      "climate_canary_preflight": {
+        "title": "Climate canary preflight",
+        "description": "Room {room_id}: {status}. Registry match: {registry_matches}; devices matched/missing/moved/unregistered: {matched_devices}/{missing_devices}/{moved_devices}/{unregistered_devices}. Shadow: {shadow_status}, observations {matched}/{required_matched}, translated actions {translated}/{required_actions}, anomalies {anomalies}. Qualified scope: {scope_qualified} ({scope}). Operation: {operation}. Disabled rollback: {rollback}. Reasons: {reasons}. This screen never activates canary; separate authorization is still required.",
+        "data": {
+          "close_canary_preflight": "Return to climate setup"
+        },
+        "data_description": {
+          "close_canary_preflight": "Enable only to close this read-only result. No setting, registry entry, or device is changed."
+        }
+      },
       "climate_registry_room": {
         "title": "Add or replace a climate room",
         "description": "A repeated stable room ID replaces that draft room. The draft remains unsaved.",
@@ -157,6 +174,7 @@
       "climate_import_unavailable": "A fresh read-only Climate API import is unavailable. Configure the shadow target and check its state without enabling canary.",
       "climate_import_no_candidates": "The fresh import has no new supported candidates for this draft.",
       "invalid_climate_candidate": "The candidate changed, is already present, or cannot form a safe typed device. Refresh the selection and try again.",
+      "climate_preflight_unavailable": "A complete redacted preflight is unavailable. Keep canary off and check the saved registry, shadow state, and current bridge status.",
       "climate_shadow_evidence_unavailable": "Shadow evidence for this room is unavailable. Keep the bridge in shadow and check its target, registry, and current state."
     }
   },
@@ -192,6 +210,7 @@
         "import_candidate": "Select device from read-only import",
         "add_room": "Add or replace room",
         "add_device": "Add or replace device",
+        "review_canary_preflight": "Review one-room canary preflight",
         "review_shadow_evidence": "Review shadow evidence",
         "review_registry": "Review and confirm draft",
         "advanced_json": "Advanced JSON editor",
