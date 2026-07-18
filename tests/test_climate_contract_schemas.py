@@ -23,7 +23,7 @@ from tests.test_climate_canary_preflight import NOW, ready_inputs
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCHEMAS = ROOT / "custom_components" / "hausman_hub" / "contracts" / "v1"
+SCHEMAS = ROOT / "custom_components" / "hausman_hub" / "contracts"
 FIXTURES = ROOT / "fixtures" / "hasc_climate_v1"
 SOURCE_FIXTURE = ROOT / "fixtures" / "climate_bridge" / "valid_state.json"
 
@@ -43,22 +43,23 @@ class ClimateContractSchemasTest(unittest.TestCase):
 
     def test_every_packaged_schema_is_valid_and_each_fixture_matches(self) -> None:
         pairs = {
-            "action-request.json": "climate-action-request.schema.json",
-            "operation-query.json": "climate-operation-query.schema.json",
-            "operation-receipt.json": "climate-operation-receipt.schema.json",
-            "registry.json": "climate-registry.schema.json",
-            "readiness.json": "climate-readiness.schema.json",
-            "registry-preview.json": "climate-registry-preview.schema.json",
-            "shadow-candidate-query.json": "climate-shadow-candidate-query.schema.json",
-            "shadow-evidence.json": "climate-shadow-evidence.schema.json",
-            "canary-preflight-query.json": "climate-canary-preflight-query.schema.json",
-            "canary-preflight.json": "climate-canary-preflight.schema.json",
+            "hasc_climate_v1/action-request.json": "v1/climate-action-request.schema.json",
+            "hasc_climate_v1/operation-query.json": "v1/climate-operation-query.schema.json",
+            "hasc_climate_v1/operation-receipt.json": "v1/climate-operation-receipt.schema.json",
+            "hasc_climate_v1/registry.json": "v1/climate-registry.schema.json",
+            "hasc_climate_v1/readiness.json": "v1/climate-readiness.schema.json",
+            "hasc_climate_v1/registry-preview.json": "v1/climate-registry-preview.schema.json",
+            "hasc_climate_v1/shadow-candidate-query.json": "v1/climate-shadow-candidate-query.schema.json",
+            "hasc_climate_v1/shadow-evidence.json": "v1/climate-shadow-evidence.schema.json",
+            "hasc_climate_v1/canary-preflight-query.json": "v1/climate-canary-preflight-query.schema.json",
+            "hasc_climate_v1/canary-preflight.json": "v1/climate-canary-preflight.schema.json",
+            "hasc_climate_v2/home.json": "v2/climate-home.schema.json",
         }
         for fixture_name, schema_name in pairs.items():
             with self.subTest(fixture=fixture_name):
-                validator(schema_name).validate(load_json(FIXTURES / fixture_name))
+                validator(schema_name).validate(load_json(ROOT / "fixtures" / fixture_name))
 
-        for schema_path in SCHEMAS.glob("*.schema.json"):
+        for schema_path in SCHEMAS.rglob("*.schema.json"):
             with self.subTest(schema=schema_path.name):
                 Draft202012Validator.check_schema(load_json(schema_path))
 
@@ -66,11 +67,15 @@ class ClimateContractSchemasTest(unittest.TestCase):
         registry = registry_from_payload(load_json(FIXTURES / "registry.json"))
         snapshot = import_climate_state(load_json(SOURCE_FIXTURE))
 
-        home = android_climate_snapshot(registry, snapshot, commands_enabled=False)
+        home = android_climate_snapshot(
+            registry,
+            snapshot,
+            bridge_mode=ClimateBridgeMode.SHADOW,
+        )
         admin = admin_climate_import_snapshot(registry, snapshot)
 
-        validator("climate-home.schema.json").validate(home)
-        validator("climate-admin-import.schema.json").validate(admin)
+        validator("v2/climate-home.schema.json").validate(home)
+        validator("v1/climate-admin-import.schema.json").validate(admin)
         serialized_home = json.dumps(home, ensure_ascii=True, sort_keys=True)
         self.assertNotIn("source_id", serialized_home)
         self.assertNotIn("entity_id", serialized_home)
@@ -85,7 +90,7 @@ class ClimateContractSchemasTest(unittest.TestCase):
             pending_operation=False,
             checked_at=NOW,
         )
-        validator("climate-canary-preflight.schema.json").validate(preflight)
+        validator("v1/climate-canary-preflight.schema.json").validate(preflight)
 
         disabled_evidence = copy.deepcopy(evidence)
         disabled_evidence["candidate"]["status"] = "blocked"  # type: ignore[index]
@@ -102,7 +107,7 @@ class ClimateContractSchemasTest(unittest.TestCase):
             pending_operation=False,
             checked_at=NOW,
         )
-        validator("climate-canary-preflight.schema.json").validate(
+        validator("v1/climate-canary-preflight.schema.json").validate(
             disabled_preflight
         )
 
@@ -111,17 +116,31 @@ class ClimateContractSchemasTest(unittest.TestCase):
         missing_request = copy.deepcopy(action)
         missing_request.pop("request_id")  # type: ignore[union-attr]
         with self.assertRaises(Exception):
-            validator("climate-action-request.schema.json").validate(missing_request)
+            validator("v1/climate-action-request.schema.json").validate(missing_request)
 
         registry = load_json(FIXTURES / "registry.json")
         registry["devices"][0]["service"] = "climate.set_temperature"  # type: ignore[index]
         with self.assertRaises(Exception):
-            validator("climate-registry.schema.json").validate(registry)
+            validator("v1/climate-registry.schema.json").validate(registry)
 
         preflight = load_json(FIXTURES / "canary-preflight.json")
         preflight["activation"]["allowed"] = True  # type: ignore[index]
         with self.assertRaises(Exception):
-            validator("climate-canary-preflight.schema.json").validate(preflight)
+            validator("v1/climate-canary-preflight.schema.json").validate(preflight)
+
+        home = load_json(ROOT / "fixtures" / "hasc_climate_v2" / "home.json")
+        home["rooms"][0]["control"]["enabled"] = True  # type: ignore[index]
+        with self.assertRaises(Exception):
+            validator("v2/climate-home.schema.json").validate(home)
+
+        unknown_reason = load_json(
+            ROOT / "fixtures" / "hasc_climate_v2" / "home.json"
+        )
+        unknown_reason["rooms"][0]["control"]["blocked_reasons"] = [  # type: ignore[index]
+            "backend_private_error"
+        ]
+        with self.assertRaises(Exception):
+            validator("v2/climate-home.schema.json").validate(unknown_reason)
 
 
 if __name__ == "__main__":

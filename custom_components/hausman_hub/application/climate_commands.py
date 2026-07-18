@@ -301,6 +301,8 @@ def _require_backend_type(
     imported = snapshot.device(device.source_id)
     if imported is None or imported.room_id != device.room_id:
         raise ClimateCommandViolation("device binding does not match imported state")
+    if not imported.available:
+        raise ClimateCommandViolation("device is unavailable")
     if command_type not in imported.command_types:
         raise ClimateCommandViolation("backend command type is not advertised")
 

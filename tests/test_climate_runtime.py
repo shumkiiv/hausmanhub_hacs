@@ -337,7 +337,47 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertFalse(snapshot["climate"]["commands_enabled"])  # type: ignore[index]
+        self.assertEqual(2, snapshot["contract"]["version"])  # type: ignore[index]
+        self.assertIn(
+            "evidence_not_ready",
+            snapshot["rooms"][0]["control"]["blocked_reasons"],  # type: ignore[index]
+        )
         self.assertEqual([], bridge.executed)
+
+    async def test_public_room_control_closes_while_canary_operation_is_pending(
+        self,
+    ) -> None:
+        bridge = MemoryBridge()
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateBridgeMode.CANARY),
+            registry_store=MemoryStore(registry_from_payload(registry_payload())),
+            bridge_client=bridge,
+            evidence_store=ready_evidence_store(),
+            operation_id_factory=lambda: "1" * 32,
+            now_ms=lambda: 1784280005000,
+        )
+        await runtime.async_start()
+
+        ready = await runtime.async_public_snapshot()
+        await runtime.async_action(
+            {
+                "request_id": "pending-public-control",
+                "action": "turn_room_off",
+                "room_id": "living",
+            }
+        )
+        pending = await runtime.async_public_snapshot()
+
+        self.assertTrue(ready["rooms"][0]["control"]["enabled"])  # type: ignore[index]
+        self.assertTrue(ready["climate"]["commands_enabled"])  # type: ignore[index]
+        self.assertFalse(pending["rooms"][0]["control"]["enabled"])  # type: ignore[index]
+        self.assertEqual(
+            ["operation_pending"],
+            pending["rooms"][0]["control"]["blocked_reasons"],  # type: ignore[index]
+        )
+        self.assertFalse(pending["climate"]["commands_enabled"])  # type: ignore[index]
+        self.assertEqual(1, len(bridge.executed))
 
     async def test_canary_posts_only_evidence_qualified_private_plan(self) -> None:
         bridge = MemoryBridge()

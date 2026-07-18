@@ -162,6 +162,22 @@ Last updated: 2026-07-18.
   home/action remained unavailable because the bridge stayed `disabled`. No
   physical command or canary was attempted. The decision is recorded in
   [the 0.5.5 contract note](LLM_WIKI/Manual/2026-07-18-hasc-v0-5-5-preflight-admin-contract.md).
+- Version 0.5.6 is the current HASC-only worktree. The tablet home contract is
+  explicitly v2 and adds one public `control` result per room: whether commands
+  are enabled, the evidence-qualified target/off actions, and a closed set of
+  normalized blocked reasons. It derives availability from the same canary,
+  freshness, binding, authority, device availability, evidence, and pending
+  gates used by runtime. The old home v1 schema remains installed; a new strict
+  v2 schema and synthetic fixture define the added shape. Command planning now
+  also rejects a device marked unavailable. Android code, live registry,
+  bridge activation, and physical commands remain out of scope. The final
+  staged package passed 229 local tests, release/package/file-safety checks,
+  and disposable Core 2026.6.4/2026.7.0. Kimi
+  `kimi-for-coding/k2p7` session `ses_08b7a860affeOVomxNvxlvfWbi` completed
+  the staged review and follow-up with PASS and no substantial findings.
+  Publication and disabled live deployment remain pending. The decision is
+  recorded in
+  [the 0.5.6 room-control note](LLM_WIKI/Manual/2026-07-18-hasc-v0-5-6-android-room-control.md).
 - Further HASC-only development is tracked in the
   [post-0.5 roadmap](LLM_WIKI/Manual/2026-07-17-hasc-post-v0-5-0-roadmap.md):
   the operator registry, formal Android contract, measurable shadow, command

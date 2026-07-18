@@ -95,13 +95,13 @@ not authorized by publishing 0.5.0 or by this roadmap.
 
 ## Next coding slice
 
-After the 0.5.5 local-admin contract release, the next HASC-only work should
-design a compatible Android home-contract v2 projection of per-room control
-availability and normalized blocked reasons. It must remain capability-driven,
-contain only public HASC IDs, and keep commands disabled unless the existing
-runtime gate allows them. This is contract preparation, not Android repository
-work or physical authorization. Physical execution still requires a new
-explicit authorization naming one public room and exact actions.
+After the 0.5.6 per-room availability release, the next HASC-only work should
+add typed public input constraints for each enabled room action, starting with
+the target-temperature minimum, maximum, and step. Android must be able to
+render a correct control without hard-coded climate-core details. This remains
+contract preparation, not Android repository work or physical authorization.
+Physical execution still requires a new explicit authorization naming one
+public room and exact actions.
 
 ## 0.5.1 implementation status
 
@@ -180,3 +180,19 @@ Core 2026.6.4 home, the owner restarted Core, and the new admin preflight route
 loaded while remaining forbidden to the non-admin verification account.
 Climate home/action stayed unavailable because the bridge remained `disabled`;
 no physical command or canary ran.
+
+## 0.5.6 implementation status
+
+Implemented in the current worktree on 2026-07-18: Android home contract v2
+adds per-room `control.enabled`, the exact target/off action list, and a closed
+normalized blocked-reason vocabulary. Availability follows the same canary,
+freshness, binding, authority, imported-device availability, evidence, and
+pending-operation gates as runtime. The prior home v1 schema remains packaged;
+a strict v2 schema and synthetic fixture define the new response. The command
+planner also rejects unavailable imported devices. Android repository changes,
+live registry configuration, bridge activation, and physical commands remain
+outside this slice. The final staged package passed 229 local tests, the full
+release/package/file-safety checks, disposable Core 2026.6.4/2026.7.0, and
+Kimi `kimi-for-coding/k2p7` session `ses_08b7a860affeOVomxNvxlvfWbi` with PASS
+after a test-coverage follow-up. Publication and disabled live-deployment gates
+remain.

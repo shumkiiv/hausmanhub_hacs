@@ -3082,6 +3082,40 @@ async def async_assert_shadow_climate_end_to_end(
         serialized_home = json.dumps(home_payload, ensure_ascii=True, sort_keys=True)
         if "source_id" in serialized_home or "entity_id" in serialized_home:
             raise RuntimeError("tablet home contract must not expose private climate bindings")
+        assert_result(
+            home_payload.get("contract"),
+            {"name": "hausman-hasc-home", "version": 2},
+            "tablet must receive the explicit v2 home contract",
+        )
+        home_rooms = home_payload.get("rooms", [])
+        living_room = next(
+            (
+                room
+                for room in home_rooms
+                if isinstance(room, dict) and room.get("id") == "living"
+            ),
+            None,
+        )
+        living_control = (
+            living_room.get("control", {})
+            if isinstance(living_room, dict)
+            else {}
+        )
+        assert_result(
+            (
+                living_control.get("enabled"),
+                living_control.get("actions"),
+                living_control.get("blocked_reasons"),
+                home_payload.get("climate", {}).get("commands_enabled"),
+            ),
+            (
+                False,
+                ["set_room_target", "turn_room_off"],
+                ["shadow_only"],
+                False,
+            ),
+            "shadow home must describe room controls without enabling them",
+        )
 
         action_payload = {
             "request_id": "core-shadow-0001",

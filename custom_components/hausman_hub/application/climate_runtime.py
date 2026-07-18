@@ -157,9 +157,8 @@ class ClimateRuntime:
 
         async with self._lock:
             snapshot = await self._async_refresh_unlocked()
-            enabled = (
+            candidate_ready = (
                 self.configuration.climate_bridge_mode is ClimateBridgeMode.CANARY
-                and snapshot.runtime_fresh
                 and self._candidate_is_ready(
                     snapshot,
                     self.configuration.climate_canary_room_id,
@@ -168,7 +167,14 @@ class ClimateRuntime:
             return android_climate_snapshot(
                 self._registry,
                 snapshot,
-                commands_enabled=enabled,
+                bridge_mode=self.configuration.climate_bridge_mode,
+                canary_room_id=self.configuration.climate_canary_room_id,
+                candidate_ready=candidate_ready,
+                pending_room_ids=tuple(
+                    room.room_id
+                    for room in self._registry.rooms
+                    if self._operations.room_has_pending(room.room_id)
+                ),
             )
 
     async def async_admin_import_snapshot(self) -> dict[str, object]:

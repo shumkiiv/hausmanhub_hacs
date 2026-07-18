@@ -6,12 +6,13 @@ Safety-first Home Assistant custom integration for HausMan Hub.
 
 This repository contains a public Home Assistant integration under
 `custom_components/hausman_hub/`. It always creates nine diagnostic number
-sensors from the approved aggregate summary. Version 0.5.5 exposes the same
-complete one-room canary preflight as a strict local-admin API with an explicit
-state-freshness deadline and installed request/response JSON Schemas. The
-options screen and API combine registry reconciliation, redacted shadow
-evidence, the fixed command scope, pending operation state, and disabled
-rollback readiness without activating canary or sending a climate command.
+sensors from the approved aggregate summary. Version 0.5.6 adds an explicit
+Android home contract v2: every room says whether control is enabled, which
+first actions it supports, and why controls are blocked. The answer contains
+only public HASC IDs and never enables a command outside the existing runtime
+gate. Version 0.5.5 exposes the complete one-room canary preflight as a strict
+local-admin API with an explicit state-freshness deadline and installed
+request/response JSON Schemas.
 It builds on explicit candidate selection with
 opaque form tokens, native Home Assistant entity selectors, the persistent
 shadow-evidence window, installed JSON Schemas, zero-POST shadow acceptance,
@@ -104,6 +105,11 @@ The legacy single-`input_boolean` canary remains separate.
     timestamps close an expired result, while two strict installed schemas
     keep callers from guessing request or response fields. The tablet role is
     forbidden and activation remains structurally false.
+16. In version 0.5.6, publish Android home contract v2 with one `control`
+    result per room. It lists only the two evidence-qualified first actions
+    and a closed set of blocked reasons. Controls remain disabled in shadow,
+    for stale or mismatched state, unavailable devices, unready authority or
+    evidence, another room, and while an operation is pending.
 
 See [repository basics](docs/repository-basics.md) and
 [AI context](AI_CONTEXT.md) before changing the repository.

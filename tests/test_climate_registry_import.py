@@ -19,6 +19,7 @@ from custom_components.hausman_hub.application.climate_registry_import import (
     import_candidate_is_unchanged,
 )
 from custom_components.hausman_hub.domain.climate import ClimateRegistry
+from custom_components.hausman_hub.domain.climate_bridge import ClimateBridgeMode
 from tests.test_climate_import import source_payload
 
 
@@ -51,7 +52,11 @@ class ClimateRegistryImportTest(unittest.TestCase):
         self.assertEqual("climate", candidate_control_domain("air_conditioner"))
 
         public = json.dumps(
-            android_climate_snapshot(registry, snapshot, commands_enabled=False),
+            android_climate_snapshot(
+                registry,
+                snapshot,
+                bridge_mode=ClimateBridgeMode.SHADOW,
+            ),
             sort_keys=True,
         )
         self.assertNotIn("synthetic-ac-source-living", public)

@@ -142,6 +142,20 @@ class ClimateCommandsTest(unittest.TestCase):
                 bridge_mode=ClimateBridgeMode.SHADOW,
             )
 
+        unavailable = source_payload()
+        unavailable["devices"][0]["unavailable"] = True
+        unavailable["devices"][0]["state"] = "unavailable"
+        with self.assertRaisesRegex(ClimateCommandViolation, "unavailable"):
+            plan_climate_command(
+                {
+                    "action": "turn_room_off",
+                    "room_id": "living",
+                },
+                registry_from_payload(registry_payload()),
+                import_climate_state(unavailable),
+                bridge_mode=ClimateBridgeMode.SHADOW,
+            )
+
     def test_canary_requires_fresh_exact_room_and_authority(self) -> None:
         registry = registry_from_payload(registry_payload())
         snapshot = import_climate_state(source_payload())

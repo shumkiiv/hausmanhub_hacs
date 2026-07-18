@@ -7,23 +7,47 @@ available only through the separate administrator projection.
 
 from __future__ import annotations
 
-from ..domain.climate import ClimateRegistry
+from collections.abc import Collection
+
+from ..domain.climate import (
+    ClimateControlOwner,
+    ClimateControlScope,
+    ClimateDeviceKind,
+    ClimateRegistry,
+)
+from ..domain.climate_bridge import ClimateBridgeMode
 from .climate_import import ClimateImportSnapshot
 from .climate_registry import reconcile_climate_registry
 
 
 ANDROID_CLIMATE_CONTRACT_NAME = "hausman-hasc-home"
-ANDROID_CLIMATE_CONTRACT_VERSION = 1
+ANDROID_CLIMATE_CONTRACT_VERSION = 2
+ANDROID_ROOM_CONTROL_ACTIONS = (
+    "set_room_target",
+    "turn_room_off",
+)
+_ROOM_ACTION_COMMAND_TYPES = {
+    "set_room_target": "climate.set_temperature",
+    "turn_room_off": "climate.turn_off",
+}
 
 
 def android_climate_snapshot(
     registry: ClimateRegistry,
     snapshot: ClimateImportSnapshot,
     *,
-    commands_enabled: bool,
+    bridge_mode: ClimateBridgeMode,
+    canary_room_id: str | None = None,
+    candidate_ready: bool = False,
+    pending_room_ids: Collection[str] = (),
 ) -> dict[str, object]:
     """Build the fixed tablet contract without any private source binding."""
 
+    if not isinstance(bridge_mode, ClimateBridgeMode):
+        raise ValueError("climate bridge mode must be approved")
+    pending = frozenset(pending_room_ids)
+    if any(registry.room(room_id) is None for room_id in pending):
+        raise ValueError("pending climate rooms must be registered")
     reconciliation = reconcile_climate_registry(registry, snapshot)
     imported_by_source = {device.source_id: device for device in snapshot.devices}
     devices_by_room: dict[str, list[dict[str, object]]] = {
@@ -45,8 +69,19 @@ def android_climate_snapshot(
         )
 
     rooms: list[dict[str, object]] = []
+    room_control_enabled = False
     for room in registry.rooms:
         imported = snapshot.room(room.room_id)
+        control = _room_control_projection(
+            registry,
+            snapshot,
+            bridge_mode=bridge_mode,
+            canary_room_id=canary_room_id,
+            candidate_ready=candidate_ready,
+            pending=room.room_id in pending,
+            room_id=room.room_id,
+        )
+        room_control_enabled = room_control_enabled or control["enabled"] is True
         rooms.append(
             {
                 "id": room.room_id,
@@ -61,6 +96,7 @@ def android_climate_snapshot(
                 "authority_eligible": bool(
                     imported is not None and imported.authority_eligible
                 ),
+                "control": control,
                 "devices": devices_by_room[room.room_id],
             }
         )
@@ -73,7 +109,7 @@ def android_climate_snapshot(
         "generated_at": snapshot.generated_at,
         "climate": {
             "fresh": snapshot.runtime_fresh,
-            "commands_enabled": commands_enabled,
+            "commands_enabled": room_control_enabled,
         },
         "rooms": rooms,
         "reconciliation": {
@@ -87,6 +123,78 @@ def android_climate_snapshot(
                 reconciliation.unregistered_source_ids
             ),
         },
+    }
+
+
+def _room_control_projection(
+    registry: ClimateRegistry,
+    snapshot: ClimateImportSnapshot,
+    *,
+    bridge_mode: ClimateBridgeMode,
+    canary_room_id: str | None,
+    candidate_ready: bool,
+    pending: bool,
+    room_id: str,
+) -> dict[str, object]:
+    """Project only coarse gates used to enable the first room controls."""
+
+    reasons: list[str] = []
+    if bridge_mode is ClimateBridgeMode.DISABLED:
+        reasons.append("bridge_disabled")
+    elif bridge_mode is ClimateBridgeMode.SHADOW:
+        reasons.append("shadow_only")
+    elif room_id != canary_room_id:
+        reasons.append("room_not_selected")
+
+    if not snapshot.runtime_fresh:
+        reasons.append("state_stale")
+    imported_room = snapshot.room(room_id)
+    if imported_room is None:
+        reasons.append("registry_mismatch")
+    elif not imported_room.authority_eligible:
+        reasons.append("authority_not_ready")
+
+    controlled = [
+        device
+        for device in registry.devices
+        if device.room_id == room_id
+        and device.kind is ClimateDeviceKind.AIR_CONDITIONER
+        and device.control_owner is ClimateControlOwner.CLIMATE_CORE
+        and device.control_scope is not ClimateControlScope.OBSERVED
+    ]
+    actions: list[str] = []
+    if len(controlled) != 1:
+        reasons.append("actions_unsupported")
+    else:
+        imported_device = snapshot.device(controlled[0].source_id)
+        if imported_device is None or imported_device.room_id != room_id:
+            reasons.append("registry_mismatch")
+        else:
+            actions = [
+                action
+                for action in ANDROID_ROOM_CONTROL_ACTIONS
+                if _ROOM_ACTION_COMMAND_TYPES[action]
+                in imported_device.command_types
+            ]
+            if not imported_device.available:
+                reasons.append("device_unavailable")
+            if tuple(actions) != ANDROID_ROOM_CONTROL_ACTIONS:
+                reasons.append("actions_unsupported")
+
+    if (
+        bridge_mode is ClimateBridgeMode.CANARY
+        and room_id == canary_room_id
+        and not candidate_ready
+    ):
+        reasons.append("evidence_not_ready")
+    if pending:
+        reasons.append("operation_pending")
+
+    blocked_reasons = list(dict.fromkeys(reasons))
+    return {
+        "enabled": not blocked_reasons,
+        "actions": actions,
+        "blocked_reasons": blocked_reasons,
     }
 
 

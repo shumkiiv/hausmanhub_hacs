@@ -52,6 +52,8 @@ CONTRACT_PATHS = tuple(
         "climate-shadow-candidate-query.schema.json",
         "climate-shadow-evidence.schema.json",
     )
+) + (
+    INTEGRATION_DIRECTORY / "contracts" / "v2" / "climate-home.schema.json",
 )
 REQUIRED_PACKAGE_PATHS = (
     HACS_METADATA_PATH,

@@ -609,6 +609,14 @@ class LocalSummaryAccessTest(unittest.TestCase):
             )
         )
         self.assertEqual(200, home_response.status)
+        self.assertEqual(2, home_response.payload["contract"]["version"])
+        living_control = home_response.payload["rooms"][0]["control"]
+        self.assertFalse(living_control["enabled"])
+        self.assertEqual(
+            ["set_room_target", "turn_room_off"],
+            living_control["actions"],
+        )
+        self.assertEqual(["shadow_only"], living_control["blocked_reasons"])
         serialized = json.dumps(home_response.payload)
         self.assertNotIn("synthetic-ac-source-living", serialized)
         self.assertNotIn("entity_id", serialized)
