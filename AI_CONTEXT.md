@@ -105,13 +105,21 @@ Last updated: 2026-07-19.
   response containing only installed HASC features, public paths, and contract
   versions. It is independent of current climate command readiness and exposes
   no home data, private binding, or climate-module address.
-- Version 1.6.1 is the current HASC-only development version. The second
-  roadmap item advances `hausman-hasc-home` to v5 and embeds the
+- Version 1.6.1 completed the second HASC-only roadmap item. It advances
+  `hausman-hasc-home` to v5 and embeds the
   public contour projection in the same response as live rooms and devices.
   Both projections use one imported Climate API snapshot; the legacy
   `/contours` route remains available. Android and the climate module are not
   changed. The final staged review passed after fixture reachability was made
   explicit (Kimi session `ses_084b63f0bffeaYv70SAOrV4Jqu`).
+- Version 1.6.2 is the current HASC-only development version. Public home and
+  contour contracts v6 carry one immutable Russian `display_names` catalog.
+  Private engine room modes and arbitrary device states are normalized to a
+  bounded set of HASC codes before projection; unknown external text is never
+  echoed to the tablet. The catalog also covers every bounded room-control and
+  contour reason, and the schema allow-lists all device capability codes. The
+  final read-only Kimi review passed after those completeness checks were added
+  (session `ses_0849e5c55ffesSAtzPiPLoPqe2`).
   Progress is tracked in the
   [50-item HASC roadmap](LLM_WIKI/Manual/2026-07-19-hasc-50-point-roadmap.md).
 - Version 0.4.0 was committed as `2e8cda3` and pushed to `origin/main` after

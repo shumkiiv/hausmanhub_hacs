@@ -65,11 +65,13 @@ class ClimateContractSchemasTest(unittest.TestCase):
             "hasc_climate_v3/home.json": "v3/climate-home.schema.json",
             "hasc_climate_v4/home.json": "v4/climate-home.schema.json",
             "hasc_climate_v5/home.json": "v5/climate-home.schema.json",
+            "hasc_climate_v6/home.json": "v6/climate-home.schema.json",
             "hasc_contours_v1/contours.json": "v1/contours.schema.json",
             "hasc_contours_v2/contours.json": "v2/contours.schema.json",
             "hasc_contours_v3/contours.json": "v3/contours.schema.json",
             "hasc_contours_v4/contours.json": "v4/contours.schema.json",
             "hasc_contours_v5/contours.json": "v5/contours.schema.json",
+            "hasc_contours_v6/contours.json": "v6/contours.schema.json",
             "hasc_contour_apply_v1/request.json": "v1/contour-apply-request.schema.json",
             "hasc_contour_apply_v1/preview.json": "v1/contour-apply-preview.schema.json",
             "hasc_contour_apply_v1/receipt.json": "v1/contour-apply-receipt.schema.json",
@@ -112,7 +114,7 @@ class ClimateContractSchemasTest(unittest.TestCase):
         )
         admin = admin_climate_import_snapshot(registry, snapshot)
 
-        validator("v5/climate-home.schema.json").validate(home)
+        validator("v6/climate-home.schema.json").validate(home)
         validator("v1/climate-admin-import.schema.json").validate(admin)
         serialized_home = json.dumps(home, ensure_ascii=True, sort_keys=True)
         self.assertNotIn("source_id", serialized_home)
@@ -154,7 +156,7 @@ class ClimateContractSchemasTest(unittest.TestCase):
             contour_climate_registry,
             snapshot,
         )
-        validator("v5/contours.schema.json").validate(generated_contours)
+        validator("v6/contours.schema.json").validate(generated_contours)
         contour_json = json.dumps(generated_contours, ensure_ascii=True, sort_keys=True)
         self.assertNotIn("synthetic-ac-source-living", contour_json)
         self.assertNotIn("entity_id", contour_json)
@@ -273,6 +275,68 @@ class ClimateContractSchemasTest(unittest.TestCase):
         managed = contours["contours"][0]  # type: ignore[index]
         self.assertTrue(managed["execution"]["settings_apply"]["available"])
         self.assertTrue(managed["rooms"][0]["temporary_temperature"]["available"])
+
+    def test_v6_public_codes_have_plain_display_names(self) -> None:
+        home = load_json(ROOT / "fixtures" / "hasc_climate_v6" / "home.json")
+        home_schema = load_json(
+            ROOT
+            / "custom_components"
+            / "hausman_hub"
+            / "contracts"
+            / "v6"
+            / "climate-home.schema.json"
+        )
+        contour_schema = load_json(
+            ROOT
+            / "custom_components"
+            / "hausman_hub"
+            / "contracts"
+            / "v6"
+            / "contours.schema.json"
+        )
+        names = home["display_names"]  # type: ignore[index]
+        room = home["rooms"][0]  # type: ignore[index]
+        device = room["devices"][0]
+        contour = home["contours"][0]  # type: ignore[index]
+        contour_room = contour["rooms"][0]
+
+        checks = (
+            ("room_modes", room["mode"]),
+            ("device_kinds", device["kind"]),
+            ("control_scopes", device["control_scope"]),
+            ("device_states", device["state"]),
+            ("contour_kinds", contour["kind"]),
+            ("contour_modes", contour["mode"]),
+            ("contour_statuses", contour["status"]),
+            ("room_statuses", contour_room["status"]),
+            ("strategies", contour_room["targets"]["strategy"]),
+            ("profiles", contour_room["comfort_profiles"]["active"]),
+            ("room_modes", contour_room["engine_mode"]),
+            ("strategies", contour_room["engine_strategy"]),
+        )
+        checks += tuple(
+            ("device_capabilities", capability)
+            for capability in device["capabilities"]
+        )
+        for category, code in checks:
+            with self.subTest(category=category, code=code):
+                self.assertTrue(names[category][code])
+
+        home_definitions = home_schema["$defs"]  # type: ignore[index]
+        capability_codes = set(
+            home_definitions["device"]["properties"]["capabilities"]["items"][
+                "enum"
+            ]
+        )
+        blocked_reason_codes = set(home_definitions["blocked_reason"]["enum"])
+        contour_reason_codes = set(home_definitions["contour_reason"]["enum"])
+        self.assertEqual(capability_codes, set(names["device_capabilities"]))
+        self.assertEqual(blocked_reason_codes, set(names["blocked_reasons"]))
+        self.assertEqual(contour_reason_codes, set(names["contour_reasons"]))
+        self.assertEqual(
+            set(contour_schema["$defs"]["reason"]["enum"]),  # type: ignore[index]
+            set(names["contour_reasons"]),
+        )
 
 
 if __name__ == "__main__":

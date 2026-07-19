@@ -68,6 +68,8 @@ CONTRACT_PATHS = tuple(
     INTEGRATION_DIRECTORY / "contracts" / "v4" / "contours.schema.json",
     INTEGRATION_DIRECTORY / "contracts" / "v5" / "contours.schema.json",
     INTEGRATION_DIRECTORY / "contracts" / "v5" / "climate-home.schema.json",
+    INTEGRATION_DIRECTORY / "contracts" / "v6" / "climate-home.schema.json",
+    INTEGRATION_DIRECTORY / "contracts" / "v6" / "contours.schema.json",
 )
 REQUIRED_PACKAGE_PATHS = (
     HACS_METADATA_PATH,
@@ -92,6 +94,7 @@ REQUIRED_PACKAGE_PATHS = (
     INTEGRATION_DIRECTORY / "application/contour_apply.py",
     INTEGRATION_DIRECTORY / "application/contour_override.py",
     INTEGRATION_DIRECTORY / "application/contours.py",
+    INTEGRATION_DIRECTORY / "application/public_climate_values.py",
     INTEGRATION_DIRECTORY / "domain/control.py",
     INTEGRATION_DIRECTORY / "domain/climate.py",
     INTEGRATION_DIRECTORY / "domain/climate_bridge.py",

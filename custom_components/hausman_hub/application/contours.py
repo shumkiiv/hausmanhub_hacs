@@ -37,11 +37,16 @@ from .climate_registry_import import (
     ClimateRegistryImportViolation,
     import_managed_climate_selection,
 )
+from .public_climate_values import (
+    public_climate_display_names,
+    public_room_mode,
+    public_strategy,
+)
 
 
 CLIMATE_CONTOUR_ID = "climate"
 CONTOUR_CONTRACT_NAME = "hausman-hasc-contours"
-CONTOUR_CONTRACT_VERSION = 5
+CONTOUR_CONTRACT_VERSION = 6
 LEGACY_CONTOUR_REGISTRY_VERSION = 1
 PROFILE_CONTOUR_REGISTRY_VERSION = 2
 SCHEDULE_CONTOUR_REGISTRY_VERSION = 3
@@ -855,6 +860,7 @@ def contour_snapshot(
             "name": CONTOUR_CONTRACT_NAME,
             "version": CONTOUR_CONTRACT_VERSION,
         },
+        "display_names": public_climate_display_names(),
         "contours": [
             _contour_status(
                 contour,
@@ -1079,8 +1085,10 @@ def _room_status(
             "available": temporary_temperature_available,
         },
         "device_count": len(assignment.device_ids),
-        "engine_mode": None if imported_room is None else imported_room.mode,
-        "engine_strategy": (
+        "engine_mode": public_room_mode(
+            None if imported_room is None else imported_room.mode
+        ),
+        "engine_strategy": public_strategy(
             None if imported_room is None else imported_room.target_strategy
         ),
         "authority_ready": authority_ready,

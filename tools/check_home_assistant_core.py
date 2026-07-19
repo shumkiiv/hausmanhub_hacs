@@ -2884,7 +2884,7 @@ async def async_assert_disabled_climate_http_access(hass: HomeAssistant) -> None
             capabilities_payload.get("capabilities", {})
             .get("automatic_contours", {})
             .get("response_contract"),
-            {"name": "hausman-hasc-contours", "version": 5},
+            {"name": "hausman-hasc-contours", "version": 6},
             "HASC capabilities must advertise the current contour contract",
         )
         assert_local_summary_response_is_not_stored(
@@ -2935,13 +2935,21 @@ async def async_assert_disabled_climate_http_access(hass: HomeAssistant) -> None
             HTTPStatus.OK,
             "tablet must read an empty contour collection while disabled",
         )
+        disabled_contours_payload = await disabled_contours.json()
         assert_result(
-            await disabled_contours.json(),
-            {
-                "contract": {"name": "hausman-hasc-contours", "version": 5},
-                "contours": [],
-            },
-            "new disabled contour registry must be empty and versioned",
+            (
+                disabled_contours_payload.get("contract"),
+                disabled_contours_payload.get("contours"),
+                disabled_contours_payload.get("display_names", {})
+                .get("contour_modes", {})
+                .get("automatic"),
+            ),
+            (
+                {"name": "hausman-hasc-contours", "version": 6},
+                [],
+                "Автоматически",
+            ),
+            "disabled contours must keep stable codes and Russian names",
         )
         assert_local_summary_response_is_not_stored(
             disabled_contours,
@@ -3477,10 +3485,33 @@ async def async_assert_shadow_climate_end_to_end(
             raise RuntimeError("tablet home contract must not expose private climate bindings")
         assert_result(
             home_payload.get("contract"),
-            {"name": "hausman-hasc-home", "version": 5},
-            "tablet must receive the combined v5 home contract",
+            {"name": "hausman-hasc-home", "version": 6},
+            "tablet must receive the combined v6 home contract",
         )
         combined_contours = home_payload.get("contours", [])
+        assert_result(
+            (
+                home_payload.get("display_names", {})
+                .get("room_modes", {})
+                .get("automatic"),
+                home_payload.get("display_names", {})
+                .get("device_states", {})
+                .get("working"),
+                home_payload.get("display_names", {})
+                .get("blocked_reasons", {})
+                .get("shadow_only"),
+                home_payload.get("display_names", {})
+                .get("contour_reasons", {})
+                .get("engine_not_automatic"),
+            ),
+            (
+                "Автоматически",
+                "Работает",
+                "Включена только проверка без команд",
+                "В климатическом модуле выключена автоматика",
+            ),
+            "tablet home must carry stable Russian display names",
+        )
         assert_result(
             [
                 contour.get("id")
@@ -3503,6 +3534,20 @@ async def async_assert_shadow_climate_end_to_end(
             living_room.get("control", {})
             if isinstance(living_room, dict)
             else {}
+        )
+        living_devices = (
+            living_room.get("devices", [])
+            if isinstance(living_room, dict)
+            else []
+        )
+        assert_result(
+            [
+                device.get("state")
+                for device in living_devices
+                if isinstance(device, dict)
+            ],
+            ["working"],
+            "tablet device state must be normalized to a stable HASC code",
         )
         assert_result(
             (

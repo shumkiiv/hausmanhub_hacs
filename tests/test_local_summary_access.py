@@ -528,7 +528,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             capabilities_response.payload["contract"],
         )
         self.assertEqual(
-            5,
+            6,
             capabilities_response.payload["capabilities"]["automatic_contours"][  # type: ignore[index]
                 "response_contract"
             ]["version"],  # type: ignore[index]
@@ -839,7 +839,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             )
         )
         self.assertEqual(200, home_response.status)
-        self.assertEqual(5, home_response.payload["contract"]["version"])
+        self.assertEqual(6, home_response.payload["contract"]["version"])
         self.assertEqual(
             "climate",
             home_response.payload["contours"][0]["id"],

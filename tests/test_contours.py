@@ -96,7 +96,7 @@ class ContoursTest(unittest.TestCase):
         result = contour_snapshot(contours, climate_registry, source_snapshot())
 
         contour = result["contours"][0]  # type: ignore[index]
-        self.assertEqual(5, result["contract"]["version"])  # type: ignore[index]
+        self.assertEqual(6, result["contract"]["version"])  # type: ignore[index]
         self.assertEqual("hausman-climate", contour["engine"]["name"])
         self.assertTrue(contour["execution"]["automatic_active"])
         self.assertFalse(contour["execution"]["hasc_direct_commands"])

@@ -25,10 +25,15 @@ from .climate_commands import (
 from .climate_import import ClimateImportSnapshot
 from .climate_registry import reconcile_climate_registry
 from .contours import contour_snapshot
+from .public_climate_values import (
+    public_climate_display_names,
+    public_device_state,
+    public_room_mode,
+)
 
 
 ANDROID_CLIMATE_CONTRACT_NAME = "hausman-hasc-home"
-ANDROID_CLIMATE_CONTRACT_VERSION = 5
+ANDROID_CLIMATE_CONTRACT_VERSION = 6
 ANDROID_ROOM_CONTROL_ACTIONS = (
     "set_room_target",
     "turn_room_off",
@@ -72,7 +77,10 @@ def android_climate_snapshot(
                 "control_scope": device.control_scope.value,
                 "capabilities": [value.value for value in device.capabilities],
                 "available": bool(exact_match and imported.available),
-                "state": imported.state if exact_match else "unknown",
+                "state": public_device_state(
+                    None if imported is None else imported.state,
+                    available=bool(exact_match and imported.available),
+                ),
             }
         )
 
@@ -100,7 +108,7 @@ def android_climate_snapshot(
                     imported.target_temperature if imported else None
                 ),
                 "target_humidity": imported.target_humidity if imported else None,
-                "mode": imported.mode if imported else None,
+                "mode": public_room_mode(None if imported is None else imported.mode),
                 "authority_eligible": bool(
                     imported is not None and imported.authority_eligible
                 ),
@@ -125,6 +133,7 @@ def android_climate_snapshot(
             "fresh": snapshot.runtime_fresh,
             "commands_enabled": room_control_enabled,
         },
+        "display_names": public_climate_display_names(),
         "rooms": rooms,
         "contours": public_contours,
         "reconciliation": {

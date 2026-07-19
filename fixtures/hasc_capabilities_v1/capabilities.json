@@ -14,7 +14,7 @@
       "method": "GET",
       "response_contract": {
         "name": "hausman-hasc-home",
-        "version": 5
+        "version": 6
       }
     },
     "automatic_contours": {
@@ -23,7 +23,7 @@
       "method": "GET",
       "response_contract": {
         "name": "hausman-hasc-contours",
-        "version": 5
+        "version": 6
       }
     },
     "contour_settings_apply": {

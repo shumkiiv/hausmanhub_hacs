@@ -28,7 +28,13 @@ class AndroidClimateTest(unittest.TestCase):
         )
 
         self.assertEqual("hausman-hasc-home", result["contract"]["name"])
-        self.assertEqual(5, result["contract"]["version"])
+        self.assertEqual(6, result["contract"]["version"])
+        self.assertEqual(
+            "Автоматически",
+            result["display_names"]["room_modes"]["automatic"],
+        )
+        self.assertEqual("automatic", result["rooms"][0]["mode"])
+        self.assertEqual("working", result["rooms"][0]["devices"][0]["state"])
         self.assertEqual([], result["contours"])
         self.assertEqual("living_ac", result["rooms"][0]["devices"][0]["id"])
         self.assertEqual(25.8, result["rooms"][0]["temperature"])
@@ -100,6 +106,20 @@ class AndroidClimateTest(unittest.TestCase):
         self.assertNotIn("climate.synthetic_living_ac", encoded)
         self.assertNotIn("source_id", encoded)
         self.assertNotIn("entity_id", encoded)
+
+    def test_tablet_snapshot_never_echoes_private_engine_state(self) -> None:
+        source = source_payload()
+        source["devices"][0]["state"] = "vendor-private-cooling-stage-7"  # type: ignore[index]
+
+        result = android_climate_snapshot(
+            registry_from_payload(registry_payload()),
+            import_climate_state(source),
+            bridge_mode=ClimateBridgeMode.SHADOW,
+        )
+        encoded = json.dumps(result, sort_keys=True)
+
+        self.assertEqual("unknown", result["rooms"][0]["devices"][0]["state"])
+        self.assertNotIn("vendor-private-cooling-stage-7", encoded)
 
     def test_action_metadata_exists_only_for_advertised_actions(self) -> None:
         source = source_payload()
