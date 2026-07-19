@@ -860,7 +860,9 @@ def contour_snapshot(
             "name": CONTOUR_CONTRACT_NAME,
             "version": CONTOUR_CONTRACT_VERSION,
         },
-        "display_names": public_climate_display_names(),
+        "display_names": public_climate_display_names(
+            include_room_data_statuses=False,
+        ),
         "contours": [
             _contour_status(
                 contour,

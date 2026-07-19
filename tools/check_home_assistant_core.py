@@ -2882,6 +2882,13 @@ async def async_assert_disabled_climate_http_access(hass: HomeAssistant) -> None
         )
         assert_result(
             capabilities_payload.get("capabilities", {})
+            .get("climate_home", {})
+            .get("response_contract"),
+            {"name": "hausman-hasc-home", "version": 7},
+            "HASC capabilities must advertise the current home contract",
+        )
+        assert_result(
+            capabilities_payload.get("capabilities", {})
             .get("automatic_contours", {})
             .get("response_contract"),
             {"name": "hausman-hasc-contours", "version": 6},
@@ -3485,8 +3492,8 @@ async def async_assert_shadow_climate_end_to_end(
             raise RuntimeError("tablet home contract must not expose private climate bindings")
         assert_result(
             home_payload.get("contract"),
-            {"name": "hausman-hasc-home", "version": 6},
-            "tablet must receive the combined v6 home contract",
+            {"name": "hausman-hasc-home", "version": 7},
+            "tablet must receive the combined v7 home contract",
         )
         combined_contours = home_payload.get("contours", [])
         assert_result(
@@ -3503,12 +3510,16 @@ async def async_assert_shadow_climate_end_to_end(
                 home_payload.get("display_names", {})
                 .get("contour_reasons", {})
                 .get("engine_not_automatic"),
+                home_payload.get("display_names", {})
+                .get("data_statuses", {})
+                .get("current"),
             ),
             (
                 "Автоматически",
                 "Работает",
                 "Включена только проверка без команд",
                 "В климатическом модуле выключена автоматика",
+                "Данные актуальны",
             ),
             "tablet home must carry stable Russian display names",
         )
@@ -3539,6 +3550,16 @@ async def async_assert_shadow_climate_end_to_end(
             living_room.get("devices", [])
             if isinstance(living_room, dict)
             else []
+        )
+        assert_result(
+            living_room.get("actual") if isinstance(living_room, dict) else None,
+            {
+                "data_status": "current",
+                "temperature": 25.8,
+                "humidity": 44.0,
+                "mode": "automatic",
+            },
+            "tablet room must expose one explicit factual current-state block",
         )
         assert_result(
             [

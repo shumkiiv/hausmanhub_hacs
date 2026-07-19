@@ -8,6 +8,7 @@ from custom_components.hausman_hub.application.public_climate_values import (
     PUBLIC_CLIMATE_DISPLAY_NAMES,
     public_climate_display_names,
     public_device_state,
+    public_room_data_status,
     public_room_mode,
     public_strategy,
 )
@@ -30,6 +31,10 @@ class PublicClimateValuesTest(unittest.TestCase):
             "Работает",
             PUBLIC_CLIMATE_DISPLAY_NAMES["device_states"]["working"],
         )
+        self.assertNotIn(
+            "data_statuses",
+            public_climate_display_names(include_room_data_statuses=False),
+        )
 
     def test_private_engine_modes_are_normalized_to_hasc_codes(self) -> None:
         self.assertEqual("automatic", public_room_mode("auto"))
@@ -41,6 +46,20 @@ class PublicClimateValuesTest(unittest.TestCase):
         self.assertEqual(
             {capability.value for capability in ClimateCapability},
             set(PUBLIC_CLIMATE_DISPLAY_NAMES["device_capabilities"]),
+        )
+
+    def test_room_data_status_distinguishes_current_stale_and_missing(self) -> None:
+        self.assertEqual(
+            "current",
+            public_room_data_status(present=True, fresh=True),
+        )
+        self.assertEqual(
+            "stale",
+            public_room_data_status(present=True, fresh=False),
+        )
+        self.assertEqual(
+            "unavailable",
+            public_room_data_status(present=False, fresh=True),
         )
 
     def test_arbitrary_device_state_is_never_echoed(self) -> None:

@@ -66,6 +66,7 @@ class ClimateContractSchemasTest(unittest.TestCase):
             "hasc_climate_v4/home.json": "v4/climate-home.schema.json",
             "hasc_climate_v5/home.json": "v5/climate-home.schema.json",
             "hasc_climate_v6/home.json": "v6/climate-home.schema.json",
+            "hasc_climate_v7/home.json": "v7/climate-home.schema.json",
             "hasc_contours_v1/contours.json": "v1/contours.schema.json",
             "hasc_contours_v2/contours.json": "v2/contours.schema.json",
             "hasc_contours_v3/contours.json": "v3/contours.schema.json",
@@ -114,11 +115,47 @@ class ClimateContractSchemasTest(unittest.TestCase):
         )
         admin = admin_climate_import_snapshot(registry, snapshot)
 
-        validator("v6/climate-home.schema.json").validate(home)
+        validator("v7/climate-home.schema.json").validate(home)
         validator("v1/climate-admin-import.schema.json").validate(admin)
         serialized_home = json.dumps(home, ensure_ascii=True, sort_keys=True)
         self.assertNotIn("source_id", serialized_home)
         self.assertNotIn("entity_id", serialized_home)
+
+        stale_source = load_json(SOURCE_FIXTURE)
+        stale_source["runtimeHealth"]["status"] = "stale"  # type: ignore[index]
+        stale_home = android_climate_snapshot(
+            contour_climate_registry,
+            import_climate_state(stale_source),
+            contours=contours,
+            bridge_mode=ClimateBridgeMode.SHADOW,
+        )
+        validator("v7/climate-home.schema.json").validate(stale_home)
+        self.assertEqual(
+            "stale",
+            stale_home["rooms"][0]["actual"]["data_status"],  # type: ignore[index]
+        )
+
+        missing_source = load_json(SOURCE_FIXTURE)
+        missing_source["rooms"] = []  # type: ignore[index]
+        missing_source["devices"] = []  # type: ignore[index]
+        missing_source["capabilities"] = []  # type: ignore[index]
+        missing_source["authorityReadiness"]["rooms"] = []  # type: ignore[index]
+        missing_home = android_climate_snapshot(
+            contour_climate_registry,
+            import_climate_state(missing_source),
+            contours=contours,
+            bridge_mode=ClimateBridgeMode.SHADOW,
+        )
+        validator("v7/climate-home.schema.json").validate(missing_home)
+        self.assertEqual(
+            {
+                "data_status": "unavailable",
+                "temperature": None,
+                "humidity": None,
+                "mode": "unknown",
+            },
+            missing_home["rooms"][0]["actual"],  # type: ignore[index]
+        )
 
         preflight_registry, preflight_snapshot, evidence = ready_inputs()
         preflight = climate_canary_preflight(
@@ -337,6 +374,29 @@ class ClimateContractSchemasTest(unittest.TestCase):
             set(contour_schema["$defs"]["reason"]["enum"]),  # type: ignore[index]
             set(names["contour_reasons"]),
         )
+
+    def test_v7_room_actual_state_is_explicit_and_strict(self) -> None:
+        home = load_json(ROOT / "fixtures" / "hasc_climate_v7" / "home.json")
+        actual = home["rooms"][0]["actual"]  # type: ignore[index]
+
+        self.assertEqual(
+            {
+                "data_status": "current",
+                "temperature": 25.8,
+                "humidity": 44,
+                "mode": "automatic",
+            },
+            actual,
+        )
+        self.assertEqual(
+            "Данные актуальны",
+            home["display_names"]["data_statuses"]["current"],  # type: ignore[index]
+        )
+
+        unknown_status = copy.deepcopy(home)
+        unknown_status["rooms"][0]["actual"]["data_status"] = "vendor_fresh"  # type: ignore[index]
+        with self.assertRaises(Exception):
+            validator("v7/climate-home.schema.json").validate(unknown_status)
 
 
 if __name__ == "__main__":

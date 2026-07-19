@@ -1,0 +1,274 @@
+{
+  "contract": {
+    "name": "hausman-hasc-home",
+    "version": 7
+  },
+  "generated_at": 1784280000000,
+  "climate": {
+    "fresh": true,
+    "commands_enabled": false
+  },
+  "rooms": [
+    {
+      "id": "living",
+      "name": "Гостиная",
+      "temperature": 25.8,
+      "humidity": 44,
+      "target_temperature": 24,
+      "target_humidity": null,
+      "mode": "automatic",
+      "actual": {
+        "data_status": "current",
+        "temperature": 25.8,
+        "humidity": 44,
+        "mode": "automatic"
+      },
+      "authority_eligible": true,
+      "control": {
+        "enabled": false,
+        "actions": [
+          "set_room_target",
+          "turn_room_off"
+        ],
+        "action_inputs": {
+          "set_room_target": {
+            "target_temperature": {
+              "type": "number",
+              "required": true,
+              "minimum": 18,
+              "maximum": 28,
+              "step": 0.5,
+              "unit": "°C"
+            }
+          }
+        },
+        "action_presentations": {
+          "set_room_target": {
+            "title": "Установить температуру",
+            "description": "Изменить желаемую температуру в комнате.",
+            "confirmation_required": false,
+            "fields": {
+              "target_temperature": {
+                "title": "Желаемая температура",
+                "description": "Значение, которое должен поддерживать климатический контур."
+              }
+            }
+          },
+          "turn_room_off": {
+            "title": "Выключить климат",
+            "description": "Остановить поддержание климата в комнате.",
+            "confirmation_required": true,
+            "fields": {}
+          }
+        },
+        "blocked_reasons": [
+          "shadow_only"
+        ]
+      },
+      "devices": [
+        {
+          "id": "living_ac",
+          "name": "Кондиционер в гостиной",
+          "kind": "air_conditioner",
+          "control_scope": "canary",
+          "capabilities": [
+            "power",
+            "target_temperature",
+            "hvac_mode",
+            "fan_mode"
+          ],
+          "available": true,
+          "state": "working"
+        }
+      ]
+    }
+  ],
+  "contours": [
+    {
+      "id": "climate",
+      "name": "Климат",
+      "kind": "climate",
+      "mode": "automatic",
+      "status": "ready",
+      "engine": {
+        "name": "hausman-climate",
+        "version": 1
+      },
+      "schedule": {
+        "enabled": true,
+        "day_start": "07:00",
+        "night_start": "23:00"
+      },
+      "rooms": [
+        {
+          "id": "living",
+          "name": "Гостиная",
+          "status": "ready",
+          "current": {
+            "temperature": 25.8,
+            "humidity": 44
+          },
+          "targets": {
+            "temperature": 24,
+            "humidity": 45,
+            "strategy": "normal"
+          },
+          "comfort_profiles": {
+            "active": "day",
+            "day": {
+              "temperature": 24,
+              "humidity": 45,
+              "strategy": "normal"
+            },
+            "night": {
+              "temperature": 23,
+              "humidity": 45,
+              "strategy": "soft"
+            }
+          },
+          "temporary_temperature": {
+            "active": false,
+            "temperature": null,
+            "ends": null,
+            "available": false
+          },
+          "device_count": 1,
+          "engine_mode": "automatic",
+          "engine_strategy": "normal",
+          "authority_ready": true,
+          "targets_in_sync": true,
+          "automatic_active": true,
+          "reasons": []
+        }
+      ],
+      "execution": {
+        "owner": "existing_climate_core",
+        "automatic_active": true,
+        "hasc_direct_commands": false,
+        "settings_apply": {
+          "available": false,
+          "requires_confirmation": true,
+          "parameters": {
+            "temperature": true,
+            "strategy": true,
+            "automatic_mode": true,
+            "humidity": false
+          }
+        },
+        "temporary_temperature": {
+          "available": false,
+          "requires_confirmation": true,
+          "minimum": 18,
+          "maximum": 28,
+          "step": 0.5
+        }
+      },
+      "reasons": []
+    }
+  ],
+  "reconciliation": {
+    "matches": true,
+    "matched_device_ids": [
+      "living_ac"
+    ],
+    "missing_device_ids": [],
+    "room_mismatch_device_ids": [],
+    "unregistered_device_count": 0
+  },
+  "display_names": {
+    "room_modes": {
+      "automatic": "Автоматически",
+      "manual": "Вручную",
+      "unknown": "Режим неизвестен"
+    },
+    "device_kinds": {
+      "air_conditioner": "Кондиционер",
+      "radiator_thermostat": "Термоголовка радиатора",
+      "humidifier": "Увлажнитель",
+      "floor_heating": "Тёплый пол",
+      "temperature_sensor": "Датчик температуры",
+      "humidity_sensor": "Датчик влажности"
+    },
+    "control_scopes": {
+      "observed": "Только наблюдение",
+      "canary": "Пробное управление",
+      "managed": "Управление HASC"
+    },
+    "device_capabilities": {
+      "power": "Включение и выключение",
+      "target_temperature": "Установка температуры",
+      "target_humidity": "Установка влажности",
+      "hvac_mode": "Режим обогрева и охлаждения",
+      "fan_mode": "Скорость вентилятора",
+      "auto_manual": "Автоматический и ручной режим",
+      "target_strategy": "Характер работы",
+      "cooldown": "Защита от частых переключений",
+      "physical_feedback": "Подтверждение работы устройства"
+    },
+    "device_states": {
+      "working": "Работает",
+      "idle": "Ожидание",
+      "off": "Выключено",
+      "unavailable": "Недоступно",
+      "unknown": "Состояние неизвестно"
+    },
+    "data_statuses": {
+      "current": "Данные актуальны",
+      "stale": "Данные устарели",
+      "unavailable": "Данных нет"
+    },
+    "blocked_reasons": {
+      "bridge_disabled": "Управление климатом выключено",
+      "shadow_only": "Включена только проверка без команд",
+      "room_not_selected": "Комната не выбрана для управления",
+      "state_stale": "Данные о климате устарели",
+      "registry_mismatch": "Настройка устройств не совпадает",
+      "authority_not_ready": "Климатический модуль не готов к управлению",
+      "device_unavailable": "Устройство недоступно",
+      "actions_unsupported": "Устройство не поддерживает нужные действия",
+      "evidence_not_ready": "Проверка безопасности ещё не завершена",
+      "operation_pending": "Предыдущее действие ещё проверяется"
+    },
+    "contour_reasons": {
+      "room_state_unavailable": "Нет данных о комнате",
+      "state_stale": "Данные о климате устарели",
+      "device_unavailable": "Устройство недоступно",
+      "engine_not_automatic": "В климатическом модуле выключена автоматика",
+      "authority_not_ready": "Климатический модуль не готов к управлению",
+      "target_temperature_differs": "Заданная температура ещё не применена",
+      "target_humidity_differs": "Заданная влажность ещё не применена",
+      "target_strategy_unavailable": "Характер работы не поддерживается",
+      "target_strategy_differs": "Характер работы ещё не применён"
+    },
+
+    "contour_kinds": {
+      "climate": "Климат"
+    },
+    "contour_modes": {
+      "disabled": "Выключен в HASC",
+      "observe": "Наблюдение",
+      "automatic": "Автоматически"
+    },
+    "contour_statuses": {
+      "disabled": "Выключен",
+      "ready": "Работает",
+      "attention": "Требует внимания",
+      "unavailable": "Недоступен",
+      "stale": "Данные устарели"
+    },
+    "room_statuses": {
+      "ready": "Доступна",
+      "unavailable": "Недоступна"
+    },
+    "strategies": {
+      "soft": "Мягко и тихо",
+      "normal": "Обычно",
+      "aggressive": "Быстро",
+      "unknown": "Неизвестно"
+    },
+    "profiles": {
+      "day": "День",
+      "night": "Ночь"
+    }
+  }
+}

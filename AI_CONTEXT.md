@@ -112,7 +112,7 @@ Last updated: 2026-07-19.
   `/contours` route remains available. Android and the climate module are not
   changed. The final staged review passed after fixture reachability was made
   explicit (Kimi session `ses_084b63f0bffeaYv70SAOrV4Jqu`).
-- Version 1.6.2 is the current HASC-only development version. Public home and
+- Version 1.6.2 completed the third HASC-only roadmap item. Public home and
   contour contracts v6 carry one immutable Russian `display_names` catalog.
   Private engine room modes and arbitrary device states are normalized to a
   bounded set of HASC codes before projection; unknown external text is never
@@ -120,6 +120,12 @@ Last updated: 2026-07-19.
   contour reason, and the schema allow-lists all device capability codes. The
   final read-only Kimi review passed after those completeness checks were added
   (session `ses_0849e5c55ffesSAtzPiPLoPqe2`).
+- Version 1.6.3 is the current HASC-only development version. Home contract v7
+  gives every registered room an explicit factual `actual` block with current,
+  stale, or unavailable data status, temperature, humidity, and normalized
+  engine mode. Missing source data stays null/unknown; legacy flat fields remain
+  temporarily for Android compatibility. The final read-only Kimi review passed
+  (session `ses_084881905ffeftJ53HfmP6RXTu`).
   Progress is tracked in the
   [50-item HASC roadmap](LLM_WIKI/Manual/2026-07-19-hasc-50-point-roadmap.md).
 - Version 0.4.0 was committed as `2e8cda3` and pushed to `origin/main` after

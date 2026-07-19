@@ -28,13 +28,22 @@ class AndroidClimateTest(unittest.TestCase):
         )
 
         self.assertEqual("hausman-hasc-home", result["contract"]["name"])
-        self.assertEqual(6, result["contract"]["version"])
+        self.assertEqual(7, result["contract"]["version"])
         self.assertEqual(
             "Автоматически",
             result["display_names"]["room_modes"]["automatic"],
         )
         self.assertEqual("automatic", result["rooms"][0]["mode"])
         self.assertEqual("working", result["rooms"][0]["devices"][0]["state"])
+        self.assertEqual(
+            {
+                "data_status": "current",
+                "temperature": 25.8,
+                "humidity": 44.0,
+                "mode": "automatic",
+            },
+            result["rooms"][0]["actual"],
+        )
         self.assertEqual([], result["contours"])
         self.assertEqual("living_ac", result["rooms"][0]["devices"][0]["id"])
         self.assertEqual(25.8, result["rooms"][0]["temperature"])
@@ -88,6 +97,38 @@ class AndroidClimateTest(unittest.TestCase):
             result["rooms"][0]["control"]["blocked_reasons"],
         )
         self.assertEqual(1, result["reconciliation"]["unregistered_device_count"])
+
+    def test_room_actual_state_distinguishes_stale_and_missing_data(self) -> None:
+        stale_source = source_payload()
+        stale_source["runtimeHealth"]["status"] = "stale"  # type: ignore[index]
+        stale = android_climate_snapshot(
+            registry_from_payload(registry_payload()),
+            import_climate_state(stale_source),
+            bridge_mode=ClimateBridgeMode.SHADOW,
+        )
+
+        missing_source = source_payload()
+        missing_source["rooms"] = []
+        missing_source["devices"] = []
+        missing_source["capabilities"] = []
+        missing_source["authorityReadiness"]["rooms"] = []  # type: ignore[index]
+        missing = android_climate_snapshot(
+            registry_from_payload(registry_payload()),
+            import_climate_state(missing_source),
+            bridge_mode=ClimateBridgeMode.SHADOW,
+        )
+
+        self.assertEqual("stale", stale["rooms"][0]["actual"]["data_status"])
+        self.assertEqual(25.8, stale["rooms"][0]["actual"]["temperature"])
+        self.assertEqual(
+            {
+                "data_status": "unavailable",
+                "temperature": None,
+                "humidity": None,
+                "mode": "unknown",
+            },
+            missing["rooms"][0]["actual"],
+        )
 
     def test_tablet_snapshot_never_exposes_private_source_or_entity_ids(self) -> None:
         result = android_climate_snapshot(

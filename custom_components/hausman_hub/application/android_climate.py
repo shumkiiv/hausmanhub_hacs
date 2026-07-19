@@ -28,12 +28,13 @@ from .contours import contour_snapshot
 from .public_climate_values import (
     public_climate_display_names,
     public_device_state,
+    public_room_data_status,
     public_room_mode,
 )
 
 
 ANDROID_CLIMATE_CONTRACT_NAME = "hausman-hasc-home"
-ANDROID_CLIMATE_CONTRACT_VERSION = 6
+ANDROID_CLIMATE_CONTRACT_VERSION = 7
 ANDROID_ROOM_CONTROL_ACTIONS = (
     "set_room_target",
     "turn_room_off",
@@ -88,6 +89,7 @@ def android_climate_snapshot(
     room_control_enabled = False
     for room in registry.rooms:
         imported = snapshot.room(room.room_id)
+        public_mode = public_room_mode(None if imported is None else imported.mode)
         control = _room_control_projection(
             registry,
             snapshot,
@@ -108,7 +110,16 @@ def android_climate_snapshot(
                     imported.target_temperature if imported else None
                 ),
                 "target_humidity": imported.target_humidity if imported else None,
-                "mode": public_room_mode(None if imported is None else imported.mode),
+                "mode": public_mode,
+                "actual": {
+                    "data_status": public_room_data_status(
+                        present=imported is not None,
+                        fresh=snapshot.runtime_fresh,
+                    ),
+                    "temperature": imported.temperature if imported else None,
+                    "humidity": imported.humidity if imported else None,
+                    "mode": public_mode,
+                },
                 "authority_eligible": bool(
                     imported is not None and imported.authority_eligible
                 ),

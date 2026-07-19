@@ -166,7 +166,7 @@
       "required": ["name", "version"],
       "properties": {
         "name": {"const": "hausman-hasc-home"},
-        "version": {"const": 6}
+        "version": {"const": 7}
       }
     },
     "contours_contract": {

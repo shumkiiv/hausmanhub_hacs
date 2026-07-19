@@ -42,6 +42,11 @@ PUBLIC_CLIMATE_DISPLAY_NAMES: Mapping[str, Mapping[str, str]] = {
         "unavailable": "Недоступно",
         "unknown": "Состояние неизвестно",
     },
+    "data_statuses": {
+        "current": "Данные актуальны",
+        "stale": "Данные устарели",
+        "unavailable": "Данных нет",
+    },
     "blocked_reasons": {
         "bridge_disabled": "Управление климатом выключено",
         "shadow_only": "Включена только проверка без команд",
@@ -111,13 +116,19 @@ _IDLE_DEVICE_STATES = frozenset({"idle", "standby"})
 _OFF_DEVICE_STATES = frozenset({"closed", "disabled", "off"})
 
 
-def public_climate_display_names() -> dict[str, dict[str, str]]:
+def public_climate_display_names(
+    *,
+    include_room_data_statuses: bool = True,
+) -> dict[str, dict[str, str]]:
     """Return a detached fixed code-to-name catalog for public responses."""
 
-    return {
+    result = {
         category: dict(names)
         for category, names in PUBLIC_CLIMATE_DISPLAY_NAMES.items()
     }
+    if not include_room_data_statuses:
+        result.pop("data_statuses")
+    return result
 
 
 def public_room_mode(value: object) -> str:
@@ -128,6 +139,16 @@ def public_room_mode(value: object) -> str:
     if value == "manual":
         return "manual"
     return "unknown"
+
+
+def public_room_data_status(*, present: bool, fresh: bool) -> str:
+    """Describe whether one room has current, stale, or no factual data."""
+
+    if not present:
+        return "unavailable"
+    if not fresh:
+        return "stale"
+    return "current"
 
 
 def public_device_state(value: object, *, available: bool) -> str:

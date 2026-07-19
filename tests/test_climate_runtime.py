@@ -828,7 +828,7 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
         result = await runtime.async_public_snapshot()
 
         self.assertEqual(fetches_before + 1, bridge.fetch_count)
-        self.assertEqual(6, result["contract"]["version"])  # type: ignore[index]
+        self.assertEqual(7, result["contract"]["version"])  # type: ignore[index]
         self.assertEqual("climate", result["contours"][0]["id"])  # type: ignore[index]
         self.assertEqual(
             result["rooms"][0]["temperature"],  # type: ignore[index]
@@ -1245,7 +1245,7 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertFalse(snapshot["climate"]["commands_enabled"])  # type: ignore[index]
-        self.assertEqual(6, snapshot["contract"]["version"])  # type: ignore[index]
+        self.assertEqual(7, snapshot["contract"]["version"])  # type: ignore[index]
         self.assertIn(
             "evidence_not_ready",
             snapshot["rooms"][0]["control"]["blocked_reasons"],  # type: ignore[index]
