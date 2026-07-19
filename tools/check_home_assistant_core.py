@@ -94,6 +94,13 @@ CLIMATE_BRIDGE_MODE_DEFAULT = "disabled"
 CLIMATE_BRIDGE_TARGET_FIELD = "climate_bridge_target"
 CLIMATE_CANARY_ROOM_ID_FIELD = "climate_canary_room_id"
 OPTIONS_SECTION_FIELD = "settings_section"
+CONTOUR_NAME_FIELD = "contour_name"
+CONTOUR_MODE_FIELD = "contour_mode"
+CONTOUR_ROOMS_FIELD = "contour_rooms"
+CONTOUR_DEVICES_FIELD = "contour_devices"
+CONTOUR_TARGET_TEMPERATURE_FIELD = "contour_target_temperature"
+CONTOUR_TARGET_HUMIDITY_FIELD = "contour_target_humidity"
+CONTOUR_STRATEGY_FIELD = "contour_strategy"
 CANARY_TARGET_ENTITY_ID = "input_boolean.hasc_disposable_canary"
 CANARY_SWITCH_ENTITY_ID = "switch.hausman_hub_hasc_canary_control"
 CANARY_SWITCH_UNIQUE_ID_SUFFIX = "canary_control"
@@ -3246,6 +3253,132 @@ async def async_assert_shadow_climate_end_to_end(
             climate_registry,
             "candidate wizard must produce the exact explicit registry fixture",
         )
+
+        contour_flow = await async_open_options_section(hass, entry, "contours")
+        contour_setup = await hass.config_entries.options.async_configure(
+            contour_flow["flow_id"],
+            {"contour_action": "configure_climate"},
+        )
+        assert_result(
+            (contour_setup["type"], contour_setup["step_id"]),
+            ("form", "climate_contour_setup"),
+            "ordinary contour setup must open its room and device selection step",
+        )
+        setup_fields = serialized_options_fields(contour_setup)
+        assert_result(
+            [field.get("name") for field in setup_fields],
+            [
+                CONTOUR_NAME_FIELD,
+                CONTOUR_MODE_FIELD,
+                CONTOUR_ROOMS_FIELD,
+                CONTOUR_DEVICES_FIELD,
+            ],
+            "contour setup must separate selection from per-room comfort values",
+        )
+        setup_serialized = json.dumps(
+            setup_fields,
+            ensure_ascii=True,
+            sort_keys=True,
+        )
+        if (
+            "synthetic-ac-source-living" in setup_serialized
+            or "synthetic-humidifier-source-kids" in setup_serialized
+        ):
+            raise RuntimeError("contour selectors must not expose private source IDs")
+
+        living_room_form = await hass.config_entries.options.async_configure(
+            contour_flow["flow_id"],
+            {
+                CONTOUR_NAME_FIELD: "Климат",
+                CONTOUR_MODE_FIELD: "automatic",
+                CONTOUR_ROOMS_FIELD: ["living", "kids"],
+                CONTOUR_DEVICES_FIELD: ["device_001", "device_002"],
+            },
+        )
+        assert_result(
+            (
+                living_room_form["type"],
+                living_room_form["step_id"],
+                living_room_form.get("description_placeholders"),
+            ),
+            (
+                "form",
+                "climate_contour_room",
+                {
+                    "room_name": "Living room",
+                    "room_number": "1",
+                    "room_count": "2",
+                },
+            ),
+            "first selected room must receive its own comfort step",
+        )
+        assert_result(
+            [
+                field.get("name")
+                for field in serialized_options_fields(living_room_form)
+            ],
+            [
+                CONTOUR_TARGET_TEMPERATURE_FIELD,
+                CONTOUR_TARGET_HUMIDITY_FIELD,
+                CONTOUR_STRATEGY_FIELD,
+            ],
+            "each room step must contain only its three comfort parameters",
+        )
+
+        kids_room_form = await hass.config_entries.options.async_configure(
+            contour_flow["flow_id"],
+            {
+                CONTOUR_TARGET_TEMPERATURE_FIELD: "25.0",
+                CONTOUR_TARGET_HUMIDITY_FIELD: "45",
+                CONTOUR_STRATEGY_FIELD: "normal",
+            },
+        )
+        assert_result(
+            (
+                kids_room_form["type"],
+                kids_room_form["step_id"],
+                kids_room_form.get("description_placeholders"),
+            ),
+            (
+                "form",
+                "climate_contour_room",
+                {
+                    "room_name": "Kids",
+                    "room_number": "2",
+                    "room_count": "2",
+                },
+            ),
+            "second selected room must receive a separate comfort step",
+        )
+        contour_review = await hass.config_entries.options.async_configure(
+            contour_flow["flow_id"],
+            {
+                CONTOUR_TARGET_TEMPERATURE_FIELD: "23.5",
+                CONTOUR_TARGET_HUMIDITY_FIELD: "50",
+                CONTOUR_STRATEGY_FIELD: "soft",
+            },
+        )
+        assert_result(
+            (contour_review["type"], contour_review["step_id"]),
+            ("form", "climate_contour_confirm"),
+            "separate room parameters must lead to one explicit review step",
+        )
+        room_settings = contour_review.get("description_placeholders", {}).get(
+            "room_settings",
+            "",
+        )
+        if (
+            "Living room: 25 °C, 45 %, обычно" not in room_settings
+            or "Kids: 23.5 °C, 50 %, мягко и тихо" not in room_settings
+        ):
+            raise RuntimeError("contour review must show each room's distinct values")
+        assert_result(
+            command_posts,
+            [],
+            "opening and reviewing contour settings must issue zero command POSTs",
+        )
+        hass.config_entries.options.async_abort(contour_flow["flow_id"])
+
         preview = await home_client.post(
             CLIMATE_ADMIN_REGISTRY_PREVIEW_PATH,
             headers=owner_headers,

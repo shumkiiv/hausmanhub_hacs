@@ -1046,9 +1046,6 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
                 "contour_mode",
                 "contour_rooms",
                 "contour_devices",
-                "contour_target_temperature",
-                "contour_target_humidity",
-                "contour_strategy",
             },
             set(fields),
         )
@@ -1059,12 +1056,32 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
             str(fields["contour_devices"].config.options),
         )
 
-        preview = await options_flow.async_step_climate_contour_setup(
+        room_form = await options_flow.async_step_climate_contour_setup(
             {
                 "contour_name": "Климат",
                 "contour_mode": "automatic",
                 "contour_rooms": ["living"],
                 "contour_devices": ["device_001"],
+            }
+        )
+
+        self.assertEqual("climate_contour_room", room_form["step_id"])
+        self.assertEqual(
+            "Living room",
+            room_form["description_placeholders"]["room_name"],
+        )
+        self.assertEqual("1", room_form["description_placeholders"]["room_number"])
+        self.assertEqual("1", room_form["description_placeholders"]["room_count"])
+        self.assertEqual(
+            {
+                "contour_target_temperature",
+                "contour_target_humidity",
+                "contour_strategy",
+            },
+            {marker.key for marker in room_form["schema"].fields},
+        )
+        preview = await options_flow.async_step_climate_contour_room(
+            {
                 "contour_target_temperature": "25.0",
                 "contour_target_humidity": "45",
                 "contour_strategy": "normal",
@@ -1073,6 +1090,10 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("climate_contour_confirm", preview["step_id"])
         self.assertEqual("да", preview["description_placeholders"]["automatic"])
+        self.assertIn(
+            "Living room: 25 °C, 45 %, обычно",
+            preview["description_placeholders"]["room_settings"],
+        )
         self.assertEqual([], bridge.executed)
         saved = await options_flow.async_step_climate_contour_confirm(
             {"confirm_contour_save": True}
@@ -1089,6 +1110,32 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         bridge.payload["rooms"][0]["mode"] = "manual"
         bridge.payload["rooms"][0]["targets"]["temperature"] = 26
         bridge.payload["rooms"][0]["targets"]["targetStrategy"] = "soft"
+        edit_flow = self.config_flow.HausmanHubOptionsFlow()
+        edit_flow.config_entry = FakeConfigEntry(
+            options_flow.config_entry.data,
+            dict(saved["data"]),
+        )
+        edit_flow.hass = options_flow.hass
+        edit_setup = await edit_flow.async_step_contours(
+            {"contour_action": "configure_climate"}
+        )
+        edit_defaults = {
+            marker.key: marker.default
+            for marker in edit_setup["schema"].fields
+        }
+        self.assertEqual(["living"], edit_defaults["contour_rooms"])
+        self.assertEqual(["device_001"], edit_defaults["contour_devices"])
+        edit_room = await edit_flow.async_step_climate_contour_setup(
+            edit_defaults
+        )
+        room_defaults = {
+            marker.key: marker.default
+            for marker in edit_room["schema"].fields
+        }
+        self.assertEqual("25.0", room_defaults["contour_target_temperature"])
+        self.assertEqual("45", room_defaults["contour_target_humidity"])
+        self.assertEqual("normal", room_defaults["contour_strategy"])
+
         apply_form = await options_flow.async_step_contours(
             {"contour_action": "apply_climate"}
         )
@@ -1124,6 +1171,77 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("climate_bridge_target", disabled["data"])
         self.assertEqual("disabled", contour_store.registry.contours[0].mode.value)
         self.assertEqual(3, len(bridge.executed))
+
+    async def test_contour_wizard_collects_each_room_parameters_separately(
+        self,
+    ) -> None:
+        from custom_components.hausman_hub.application.climate_import import (
+            import_climate_state,
+        )
+        from tests.test_climate_import import source_payload
+
+        options_flow = self.config_flow.HausmanHubOptionsFlow()
+        snapshot = import_climate_state(source_payload())
+        options_flow._contour_source_target = "http://127.0.0.1:1880"
+        options_flow._set_contour_source_snapshot(snapshot)
+
+        living = await options_flow.async_step_climate_contour_setup(
+            {
+                "contour_name": "Климат",
+                "contour_mode": "automatic",
+                "contour_rooms": ["living", "kids"],
+                "contour_devices": ["device_001", "device_002"],
+            }
+        )
+
+        self.assertEqual("climate_contour_room", living["step_id"])
+        self.assertEqual("Living room", living["description_placeholders"]["room_name"])
+        invalid = await options_flow.async_step_climate_contour_room(
+            {
+                "contour_target_temperature": "25.0",
+                "contour_target_humidity": "45",
+                "contour_strategy": "normal",
+                "hidden": "must-not-pass",
+            }
+        )
+        self.assertEqual(
+            {"base": "invalid_contour_room_parameters"},
+            invalid["errors"],
+        )
+        kids = await options_flow.async_step_climate_contour_room(
+            {
+                "contour_target_temperature": "25.0",
+                "contour_target_humidity": "45",
+                "contour_strategy": "normal",
+            }
+        )
+
+        self.assertEqual("climate_contour_room", kids["step_id"])
+        self.assertEqual("Kids", kids["description_placeholders"]["room_name"])
+        self.assertEqual("2", kids["description_placeholders"]["room_number"])
+        await options_flow.async_step_climate_contour_room(
+            {
+                "contour_target_temperature": "23.5",
+                "contour_target_humidity": "50",
+                "contour_strategy": "soft",
+            }
+        )
+
+        placeholders = options_flow._contour_preview_placeholders()
+        self.assertIn(
+            "Living room: 25 °C, 45 %, обычно",
+            placeholders["room_settings"],
+        )
+        self.assertIn(
+            "Kids: 23.5 °C, 50 %, мягко и тихо",
+            placeholders["room_settings"],
+        )
+        draft = options_flow._contour_definition_draft
+        rooms = draft["contours"][0]["rooms"]  # type: ignore[index]
+        by_room = {room["room_id"]: room for room in rooms}
+        self.assertEqual(25.0, by_room["living"]["target_temperature"])
+        self.assertEqual(23.5, by_room["kids"]["target_temperature"])
+        self.assertEqual("soft", by_room["kids"]["strategy"])
 
     async def test_options_reject_unsafe_canary_values(self) -> None:
         """No missing target, other entity domain, or truth-like arm value passes."""

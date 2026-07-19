@@ -15,7 +15,6 @@ from ..domain.climate import (
 from ..domain.contours import (
     CONTOUR_REGISTRY_VERSION,
     ClimateContourRoom,
-    ClimateStrategy,
     ContourDefinition,
     ContourEngine,
     ContourKind,
@@ -42,6 +41,11 @@ _ACTIVE_KINDS = frozenset(
         ClimateDeviceKind.FLOOR_HEATING,
     }
 )
+_CLIMATE_ROOM_PARAMETER_FIELDS = {
+    "target_temperature",
+    "target_humidity",
+    "strategy",
+}
 
 
 class ContourRegistryViolation(ValueError):
@@ -174,11 +178,17 @@ def build_climate_contour_setup(
     source_ids: object,
     name: object,
     mode: object,
-    target_temperature: object,
-    target_humidity: object,
-    strategy: object,
+    target_temperature: object = None,
+    target_humidity: object = None,
+    strategy: object = None,
+    room_parameters: object = None,
 ) -> tuple[ClimateRegistry, ContourRegistry]:
-    """Create one climate contour from explicit existing-engine selections."""
+    """Create one climate contour from explicit existing-engine selections.
+
+    ``room_parameters`` is the normal multi-room input.  The three shared
+    values remain accepted for stored tests and older internal callers, but
+    both input styles can never be mixed.
+    """
 
     if not isinstance(name, str):
         raise ContourRegistryViolation("contour name is required")
@@ -194,7 +204,13 @@ def build_climate_contour_setup(
             room_ids=room_ids,
             source_ids=source_ids,
         )
-        selected_strategy = ClimateStrategy(strategy)
+        parameters_by_room = _climate_parameters_by_room(
+            registry,
+            room_parameters=room_parameters,
+            target_temperature=target_temperature,
+            target_humidity=target_humidity,
+            strategy=strategy,
+        )
         assignments = tuple(
             climate_contour_room(
                 room_id=room.room_id,
@@ -203,9 +219,7 @@ def build_climate_contour_setup(
                     for device in registry.devices
                     if device.room_id == room.room_id
                 ),
-                target_temperature=target_temperature,
-                target_humidity=target_humidity,
-                strategy=selected_strategy,
+                **parameters_by_room[room.room_id],
             )
             for room in registry.rooms
         )
@@ -225,6 +239,68 @@ def build_climate_contour_setup(
         return registry, contours
     except (ClimateRegistryImportViolation, ContourViolation, ValueError) as error:
         raise ContourRegistryViolation(str(error)) from error
+
+
+def climate_room_parameters(payload: object) -> dict[str, object]:
+    """Validate and normalize one room's three visible comfort parameters."""
+
+    values = _mapping(payload, "climate room parameters")
+    _exact_keys(
+        values,
+        _CLIMATE_ROOM_PARAMETER_FIELDS,
+        "climate room parameters",
+    )
+    try:
+        validated = climate_contour_room(
+            room_id="room",
+            device_ids=("device",),
+            target_temperature=values.get("target_temperature"),
+            target_humidity=values.get("target_humidity"),
+            strategy=values.get("strategy"),
+        )
+    except (ContourViolation, TypeError, ValueError) as error:
+        raise ContourRegistryViolation(str(error)) from error
+    return {
+        "target_temperature": validated.target_temperature,
+        "target_humidity": validated.target_humidity,
+        "strategy": validated.strategy.value,
+    }
+
+
+def _climate_parameters_by_room(
+    registry: ClimateRegistry,
+    *,
+    room_parameters: object,
+    target_temperature: object,
+    target_humidity: object,
+    strategy: object,
+) -> dict[str, dict[str, object]]:
+    room_ids = {room.room_id for room in registry.rooms}
+    if room_parameters is None:
+        shared = climate_room_parameters(
+            {
+                "target_temperature": target_temperature,
+                "target_humidity": target_humidity,
+                "strategy": strategy,
+            }
+        )
+        return {room_id: dict(shared) for room_id in room_ids}
+    if any(
+        value is not None
+        for value in (target_temperature, target_humidity, strategy)
+    ):
+        raise ContourRegistryViolation(
+            "shared and per-room climate parameters cannot be mixed"
+        )
+    raw = _mapping(room_parameters, "climate room parameter map")
+    if set(raw) != room_ids:
+        raise ContourRegistryViolation(
+            "climate room parameters must exactly match selected rooms"
+        )
+    return {
+        room_id: climate_room_parameters(raw[room_id])
+        for room_id in room_ids
+    }
 
 
 def with_climate_contour_mode(

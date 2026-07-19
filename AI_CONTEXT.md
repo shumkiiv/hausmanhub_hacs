@@ -7,11 +7,10 @@ Last updated: 2026-07-19.
 - Repository: `shumkiiv/hausmanhub_hasc` (public, MIT, `main`).
 - Local checkout: `/home/ivsh/projects/hausmanhub_hasc`.
 - Home Assistant baseline: Core 2026.6.4 or newer.
-- Version 1.0.0 is the current HASC-only worktree and establishes the product
-  as a platform of automatic contours. Climate is the first contour. The
-  ordinary Russian options flow chooses several rooms/devices plus shared
-  temperature, humidity, and strategy; old registry/bridge/native-preview and
-  helper-canary tools are hidden under advanced settings.
+- Version 1.0.0 established the product as a platform of automatic contours.
+  Climate is the first contour. The ordinary Russian options flow chooses
+  several rooms/devices; old registry/bridge/native-preview and helper-canary
+  tools are hidden under advanced settings.
 - The 1.x climate contour deliberately reuses the existing `hausman-climate`
   algorithm and executor instead of reimplementing its profiles, cooldown,
   safety, manual override, authority, and physical feedback. Selected
@@ -36,6 +35,18 @@ Last updated: 2026-07-19.
   observed strategy and apply capability; local tablet preview/apply routes
   expose no private binding or backend payload. See the
   [1.1.0 apply decision](LLM_WIKI/Manual/2026-07-19-hasc-v1-1-0-confirmed-contour-apply.md).
+- Version 1.2.0 is the current HASC-only worktree and replaces the shared
+  multi-room comfort fields with one short parameters step per selected room.
+  Each room stores its own validated temperature, humidity, and strategy using
+  the existing contour registry and Android contour v2 shapes, so no persisted
+  data migration or contract bump is needed. Editing preselects only a fully
+  validated saved contour and uses its saved values even when current engine
+  targets differ. Every selected room must have a selected device; exact
+  per-room keys prevent incomplete or hidden inputs. The review screen lists
+  public room names and their targets. Setup/save remain zero-command; the
+  separate confirmed 1.1 apply path is unchanged, including unsupported
+  humidity. See the
+  [1.2.0 room-parameters decision](LLM_WIKI/Manual/2026-07-19-hasc-v1-2-0-room-parameters.md).
 - Version 0.4.0 was committed as `2e8cda3` and pushed to `origin/main` after
   its 153 tests, disposable Core 2026.6.4/2026.7.0 checks, and final Kimi
   review passed. This source push did not create a tag, release, HACS

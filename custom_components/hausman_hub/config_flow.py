@@ -60,9 +60,11 @@ from .application.climate_import import (
 from .application.contours import (
     ContourRegistryViolation,
     build_climate_contour_setup,
+    climate_room_parameters,
     contour_registry_from_payload,
     contour_registry_to_payload,
     contour_snapshot,
+    validate_contour_bindings,
     with_climate_contour_mode,
 )
 from .application.contour_apply import ContourApplyViolation
@@ -217,6 +219,11 @@ _RUSSIAN_CONTOUR_MODE_LABELS = {
     "disabled": "выключен",
     "observe": "наблюдение",
     "automatic": "автоматически",
+}
+_RUSSIAN_CONTOUR_STRATEGY_LABELS = {
+    "soft": "мягко и тихо",
+    "normal": "обычно",
+    "aggressive": "быстрее достичь цели",
 }
 _RUSSIAN_CONTOUR_REASON_LABELS = {
     "room_state_unavailable": "нет состояния комнаты",
@@ -524,15 +531,14 @@ def _climate_contour_setup_schema(
     *,
     rooms: list[dict[str, str]],
     devices: list[dict[str, str]],
+    name_default: str,
     room_defaults: list[str],
     device_defaults: list[str],
-    temperature_default: float,
-    humidity_default: int,
     mode_default: str,
 ) -> vol.Schema:
     return vol.Schema(
         {
-            vol.Required(CONTOUR_NAME_FIELD, default="Климат"): str,
+            vol.Required(CONTOUR_NAME_FIELD, default=name_default): str,
             vol.Required(
                 CONTOUR_MODE_FIELD,
                 default=mode_default,
@@ -549,6 +555,18 @@ def _climate_contour_setup_schema(
             ): SelectSelector(
                 SelectSelectorConfig(options=devices, multiple=True)
             ),
+        }
+    )
+
+
+def _climate_contour_room_schema(
+    *,
+    temperature_default: float,
+    humidity_default: int,
+    strategy_default: str,
+) -> vol.Schema:
+    return vol.Schema(
+        {
             vol.Required(
                 CONTOUR_TARGET_TEMPERATURE_FIELD,
                 default=f"{temperature_default:.1f}",
@@ -559,7 +577,7 @@ def _climate_contour_setup_schema(
             ): NATIVE_TARGET_HUMIDITY_SELECTOR,
             vol.Required(
                 CONTOUR_STRATEGY_FIELD,
-                default=ClimateStrategy.NORMAL.value,
+                default=strategy_default,
             ): CONTOUR_STRATEGY_SELECTOR,
         }
     )
@@ -1130,6 +1148,16 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
     _contour_source_target: str | None = None
     _contour_source_snapshot: ClimateImportSnapshot | None = None
     _contour_device_tokens: dict[str, ImportedClimateDevice] | None = None
+    _contour_saved_name: str | None = None
+    _contour_saved_mode: str | None = None
+    _contour_saved_room_parameters: dict[str, dict[str, object]] | None = None
+    _contour_saved_source_ids: tuple[str, ...] = ()
+    _contour_name_draft: str | None = None
+    _contour_mode_draft: str | None = None
+    _contour_room_ids_draft: tuple[str, ...] = ()
+    _contour_source_ids_draft: tuple[str, ...] = ()
+    _contour_room_index: int = 0
+    _contour_room_parameters_draft: dict[str, dict[str, object]] | None = None
     _contour_registry_draft: Mapping[str, object] | None = None
     _contour_definition_draft: Mapping[str, object] | None = None
     _contour_preview: Mapping[str, Any] | None = None
@@ -1348,6 +1376,7 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
             return await self.async_step_climate_contour_source()
         self._contour_source_target = target.origin
         self._set_contour_source_snapshot(snapshot)
+        await self._async_load_saved_contour(runtime)
         return await self.async_step_climate_contour_setup()
 
     async def async_step_climate_contour_source(
@@ -1380,6 +1409,9 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
             else:
                 self._contour_source_target = target.origin
                 self._set_contour_source_snapshot(snapshot)
+                runtime = self._climate_runtime()
+                if runtime is not None:
+                    await self._async_load_saved_contour(runtime)
                 return await self.async_step_climate_contour_setup()
         return self.async_show_form(
             step_id="climate_contour_source",
@@ -1391,7 +1423,7 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
         self,
         user_input: dict[str, Any] | None = None,
     ) -> FlowResult:
-        """Choose rooms, devices, comfort, and the contour lifecycle."""
+        """Choose the contour, rooms, and devices before room parameters."""
 
         snapshot = self._contour_source_snapshot
         tokens = self._contour_device_tokens or {}
@@ -1412,52 +1444,200 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
                     label=f"{device_room.name} — {device.name}",
                 )
             )
-        room_defaults: list[str] = []
-        device_defaults: list[str] = []
-        temperature_default, humidity_default = self._contour_target_defaults(snapshot)
-        mode_default = (
+        saved_parameters = self._contour_saved_room_parameters or {}
+        room_defaults = [
+            room.room_id
+            for room in snapshot.rooms
+            if room.room_id in saved_parameters
+        ]
+        saved_sources = set(self._contour_saved_source_ids)
+        device_defaults = [
+            token
+            for token, device in tokens.items()
+            if device.source_id in saved_sources
+        ]
+        engine_mode_default = (
             ContourMode.AUTOMATIC.value
-            if all(room.mode in {"auto", "forced_auto_only"} for room in snapshot.rooms)
+            if all(
+                room.mode in {"auto", "forced_auto_only"}
+                for room in snapshot.rooms
+            )
             else ContourMode.OBSERVE.value
+        )
+        mode_default = (
+            self._contour_saved_mode
+            if self._contour_saved_mode
+            in {ContourMode.OBSERVE.value, ContourMode.AUTOMATIC.value}
+            else engine_mode_default
         )
         errors: dict[str, str] = {}
         if user_input is not None:
+            expected_fields = {
+                CONTOUR_NAME_FIELD,
+                CONTOUR_MODE_FIELD,
+                CONTOUR_ROOMS_FIELD,
+                CONTOUR_DEVICES_FIELD,
+            }
+            if set(user_input) != expected_fields:
+                errors["base"] = "invalid_contour_setup"
+            name = user_input.get(CONTOUR_NAME_FIELD)
+            mode = user_input.get(CONTOUR_MODE_FIELD)
             room_ids = user_input.get(CONTOUR_ROOMS_FIELD)
             device_tokens = user_input.get(CONTOUR_DEVICES_FIELD)
-            if not isinstance(room_ids, list) or not room_ids:
+            if (
+                not isinstance(name, str)
+                or name != name.strip()
+                or not name
+                or len(name) > 120
+            ):
+                errors[CONTOUR_NAME_FIELD] = "invalid_contour_name"
+            if mode not in {
+                ContourMode.OBSERVE.value,
+                ContourMode.AUTOMATIC.value,
+            }:
+                errors[CONTOUR_MODE_FIELD] = "invalid_contour_mode"
+            if (
+                not isinstance(room_ids, list)
+                or not room_ids
+                or any(not isinstance(value, str) for value in room_ids)
+                or len(room_ids) != len(set(room_ids))
+            ):
                 errors[CONTOUR_ROOMS_FIELD] = "contour_rooms_required"
             elif any(snapshot.room(value) is None for value in room_ids):
                 errors[CONTOUR_ROOMS_FIELD] = "invalid_contour_rooms"
-            if not isinstance(device_tokens, list) or not device_tokens:
+            if (
+                not isinstance(device_tokens, list)
+                or not device_tokens
+                or any(not isinstance(value, str) for value in device_tokens)
+                or len(device_tokens) != len(set(device_tokens))
+            ):
                 errors[CONTOUR_DEVICES_FIELD] = "contour_devices_required"
-                selected_sources: list[str] = []
+                selected: list[ImportedClimateDevice | None] = []
             else:
                 selected = [tokens.get(value) for value in device_tokens]
                 if any(value is None for value in selected):
                     errors[CONTOUR_DEVICES_FIELD] = "invalid_contour_devices"
-                    selected_sources = []
-                else:
-                    selected_sources = [
-                        value.source_id for value in selected if value is not None
-                    ]
-                    if isinstance(room_ids, list) and any(
-                        value is not None and value.room_id not in room_ids
-                        for value in selected
-                    ):
-                        errors[CONTOUR_DEVICES_FIELD] = "device_outside_contour_rooms"
+            if (
+                isinstance(room_ids, list)
+                and room_ids
+                and selected
+                and not any(value is None for value in selected)
+            ):
+                selected_rooms = set(room_ids)
+                if any(
+                    value is not None and value.room_id not in selected_rooms
+                    for value in selected
+                ):
+                    errors[CONTOUR_DEVICES_FIELD] = "device_outside_contour_rooms"
+                elif any(
+                    not any(
+                        device is not None and device.room_id == room_id
+                        for device in selected
+                    )
+                    for room_id in selected_rooms
+                ):
+                    errors[CONTOUR_DEVICES_FIELD] = "contour_room_device_required"
             if not errors:
+                selected_room_ids = set(room_ids)
+                selected_token_ids = set(device_tokens)
+                self._contour_name_draft = name
+                self._contour_mode_draft = mode
+                self._contour_room_ids_draft = tuple(
+                    room.room_id
+                    for room in snapshot.rooms
+                    if room.room_id in selected_room_ids
+                )
+                self._contour_source_ids_draft = tuple(
+                    device.source_id
+                    for token, device in tokens.items()
+                    if token in selected_token_ids
+                )
+                self._contour_room_index = 0
+                self._contour_room_parameters_draft = {}
+                return await self.async_step_climate_contour_room()
+        return self.async_show_form(
+            step_id="climate_contour_setup",
+            data_schema=_climate_contour_setup_schema(
+                rooms=room_options,
+                devices=device_options,
+                name_default=self._contour_saved_name or "Климат",
+                room_defaults=room_defaults,
+                device_defaults=device_defaults,
+                mode_default=mode_default,
+            ),
+            errors=errors,
+        )
+
+    async def async_step_climate_contour_room(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> FlowResult:
+        """Collect comfort parameters separately for each selected room."""
+
+        snapshot = self._contour_source_snapshot
+        parameters = self._contour_room_parameters_draft
+        if (
+            snapshot is None
+            or not snapshot.runtime_fresh
+            or parameters is None
+            or self._contour_name_draft is None
+            or self._contour_mode_draft is None
+            or not self._contour_room_ids_draft
+            or not self._contour_source_ids_draft
+            or not 0 <= self._contour_room_index < len(self._contour_room_ids_draft)
+        ):
+            return await self.async_step_climate_contour_setup()
+        room_id = self._contour_room_ids_draft[self._contour_room_index]
+        room = snapshot.room(room_id)
+        if room is None:
+            return await self.async_step_climate_contour_setup()
+        temperature_default, humidity_default, strategy_default = (
+            self._contour_room_defaults(snapshot, room_id)
+        )
+        saved = (self._contour_saved_room_parameters or {}).get(room_id)
+        if saved is not None:
+            temperature_default = float(saved["target_temperature"])
+            humidity_default = int(saved["target_humidity"])
+            strategy_default = str(saved["strategy"])
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            try:
+                normalized = climate_room_parameters(
+                    {
+                        "target_temperature": user_input.get(
+                            CONTOUR_TARGET_TEMPERATURE_FIELD
+                        ),
+                        "target_humidity": user_input.get(
+                            CONTOUR_TARGET_HUMIDITY_FIELD
+                        ),
+                        "strategy": user_input.get(CONTOUR_STRATEGY_FIELD),
+                    }
+                )
+                if set(user_input) != {
+                    CONTOUR_TARGET_TEMPERATURE_FIELD,
+                    CONTOUR_TARGET_HUMIDITY_FIELD,
+                    CONTOUR_STRATEGY_FIELD,
+                }:
+                    raise ContourRegistryViolation(
+                        "room parameter form has unsupported fields"
+                    )
+            except ContourRegistryViolation:
+                errors["base"] = "invalid_contour_room_parameters"
+            else:
+                parameters[room_id] = normalized
+                if self._contour_room_index + 1 < len(
+                    self._contour_room_ids_draft
+                ):
+                    self._contour_room_index += 1
+                    return await self.async_step_climate_contour_room()
                 try:
                     registry, contours = build_climate_contour_setup(
                         snapshot,
-                        room_ids=room_ids,
-                        source_ids=selected_sources,
-                        name=user_input.get(CONTOUR_NAME_FIELD),
-                        mode=user_input.get(CONTOUR_MODE_FIELD),
-                        target_temperature=user_input.get(
-                            CONTOUR_TARGET_TEMPERATURE_FIELD
-                        ),
-                        target_humidity=user_input.get(CONTOUR_TARGET_HUMIDITY_FIELD),
-                        strategy=user_input.get(CONTOUR_STRATEGY_FIELD),
+                        room_ids=list(self._contour_room_ids_draft),
+                        source_ids=list(self._contour_source_ids_draft),
+                        name=self._contour_name_draft,
+                        mode=self._contour_mode_draft,
+                        room_parameters=parameters,
                     )
                     preview = contour_snapshot(contours, registry, snapshot)
                 except ContourRegistryViolation:
@@ -1472,17 +1652,18 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
                     self._contour_preview = preview
                     return await self.async_step_climate_contour_confirm()
         return self.async_show_form(
-            step_id="climate_contour_setup",
-            data_schema=_climate_contour_setup_schema(
-                rooms=room_options,
-                devices=device_options,
-                room_defaults=room_defaults,
-                device_defaults=device_defaults,
+            step_id="climate_contour_room",
+            data_schema=_climate_contour_room_schema(
                 temperature_default=temperature_default,
                 humidity_default=humidity_default,
-                mode_default=mode_default,
+                strategy_default=strategy_default,
             ),
             errors=errors,
+            description_placeholders={
+                "room_name": room.name,
+                "room_number": str(self._contour_room_index + 1),
+                "room_count": str(len(self._contour_room_ids_draft)),
+            },
         )
 
     async def async_step_climate_contour_confirm(
@@ -2472,39 +2653,99 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
             candidates[f"device_{index:03d}"] = candidate
         self._contour_source_snapshot = snapshot
         self._contour_device_tokens = candidates
+        self._contour_saved_name = None
+        self._contour_saved_mode = None
+        self._contour_saved_room_parameters = None
+        self._contour_saved_source_ids = ()
+        self._contour_name_draft = None
+        self._contour_mode_draft = None
+        self._contour_room_ids_draft = ()
+        self._contour_source_ids_draft = ()
+        self._contour_room_index = 0
+        self._contour_room_parameters_draft = None
         self._contour_registry_draft = None
         self._contour_definition_draft = None
         self._contour_preview = None
 
-    def _contour_target_defaults(
+    async def _async_load_saved_contour(self, runtime: Any) -> None:
+        """Use only a fully valid saved contour as edit-form defaults."""
+
+        try:
+            from .application.climate_registry import registry_from_payload
+
+            climate_registry = registry_from_payload(
+                await runtime.async_registry_payload()
+            )
+            contours = contour_registry_from_payload(
+                await runtime.async_contour_registry_payload()
+            )
+            validate_contour_bindings(contours, climate_registry)
+            contour = contours.contour("climate")
+            if contour is None:
+                return
+            parameters = {
+                room.room_id: {
+                    "target_temperature": room.target_temperature,
+                    "target_humidity": room.target_humidity,
+                    "strategy": room.strategy.value,
+                }
+                for room in contour.rooms
+            }
+            source_ids: list[str] = []
+            for assignment in contour.rooms:
+                for device_id in assignment.device_ids:
+                    device = climate_registry.device(device_id)
+                    if device is None:
+                        raise ContourRegistryViolation(
+                            "saved contour device is unavailable"
+                        )
+                    source_ids.append(device.source_id)
+        except Exception:
+            return
+        self._contour_saved_name = contour.name
+        self._contour_saved_mode = contour.mode.value
+        self._contour_saved_room_parameters = parameters
+        self._contour_saved_source_ids = tuple(source_ids)
+
+    def _contour_room_defaults(
         self,
         snapshot: ClimateImportSnapshot,
-    ) -> tuple[float, int]:
-        """Use current engine comfort values when they satisfy HASC bounds."""
+        room_id: str,
+    ) -> tuple[float, int, str]:
+        """Use this room's current valid values, never another room's values."""
 
-        temperature = next(
-            (
-                room.target_temperature
-                for room in snapshot.rooms
-                if isinstance(room.target_temperature, (int, float))
-                and not isinstance(room.target_temperature, bool)
-                and 18 <= room.target_temperature <= 28
-                and room.target_temperature * 2 == int(room.target_temperature * 2)
-            ),
-            CLIMATE_TARGET_TEMPERATURE_DEFAULT,
+        room = snapshot.room(room_id)
+        temperature = (
+            room.target_temperature
+            if room is not None
+            and isinstance(room.target_temperature, (int, float))
+            and not isinstance(room.target_temperature, bool)
+            and 18 <= room.target_temperature <= 28
+            and room.target_temperature * 2
+            == int(room.target_temperature * 2)
+            else CLIMATE_TARGET_TEMPERATURE_DEFAULT
         )
-        humidity = next(
-            (
-                int(room.target_humidity)
-                for room in snapshot.rooms
-                if isinstance(room.target_humidity, (int, float))
-                and not isinstance(room.target_humidity, bool)
-                and 30 <= room.target_humidity <= 70
-                and int(room.target_humidity) % 5 == 0
-            ),
-            CLIMATE_TARGET_HUMIDITY_DEFAULT,
+        humidity = (
+            int(room.target_humidity)
+            if room is not None
+            and isinstance(room.target_humidity, (int, float))
+            and not isinstance(room.target_humidity, bool)
+            and room.target_humidity == int(room.target_humidity)
+            and 30 <= room.target_humidity <= 70
+            and int(room.target_humidity) % 5 == 0
+            else CLIMATE_TARGET_HUMIDITY_DEFAULT
         )
-        return float(temperature), humidity
+        strategy = (
+            room.target_strategy
+            if room is not None
+            and room.target_strategy in {
+                ClimateStrategy.SOFT.value,
+                ClimateStrategy.NORMAL.value,
+                ClimateStrategy.AGGRESSIVE.value,
+            }
+            else ClimateStrategy.NORMAL.value
+        )
+        return float(temperature), humidity, strategy
 
     def _contour_preview_placeholders(self) -> dict[str, str]:
         """Render one contour summary without private device identifiers."""
@@ -2526,6 +2767,29 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
                 if isinstance(value, str)
             )
         )
+        room_settings: list[str] = []
+        for room in rooms:
+            if not isinstance(room, Mapping):
+                continue
+            raw_targets = room.get("targets")
+            targets = raw_targets if isinstance(raw_targets, Mapping) else {}
+            room_settings.append(
+                "{name}: {temperature} °C, {humidity} %, {strategy}".format(
+                    name=str(room.get("name") or "Комната"),
+                    temperature=_display_measurement(
+                        targets.get("temperature"),
+                        "",
+                    ),
+                    humidity=_display_measurement(
+                        targets.get("humidity"),
+                        "",
+                    ),
+                    strategy=_RUSSIAN_CONTOUR_STRATEGY_LABELS.get(
+                        targets.get("strategy"),
+                        "неизвестно",
+                    ),
+                )
+            )
         return {
             "name": str(contour.get("name") or "Климат"),
             "mode": _RUSSIAN_CONTOUR_MODE_LABELS.get(
@@ -2550,6 +2814,7 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
             ),
             "algorithm": "существующий климатический контур",
             "reasons": reason_text or "нет",
+            "room_settings": "; ".join(room_settings) or "нет",
         }
 
     def _contour_apply_preview_placeholders(self) -> dict[str, str]:

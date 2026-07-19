@@ -49,29 +49,37 @@
         "data_description": {"climate_bridge_target": "Example: http://192.168.1.10:1880. Enter only protocol, local IP, and port."}
       },
       "climate_contour_setup": {
-        "title": "Configure the climate contour",
-        "description": "Select rooms and their devices. HASC creates stable bindings and delegates climate decisions to the existing algorithm with its safety rules, delays, and profiles.",
+        "title": "Step 1: rooms and devices",
+        "description": "Select rooms and their devices. The next screens collect separate settings for each room. Saved rooms and devices are preselected.",
         "data": {
           "contour_name": "Contour name",
           "contour_mode": "Operating mode",
           "contour_rooms": "Rooms",
-          "contour_devices": "Contour devices",
+          "contour_devices": "Contour devices"
+        },
+        "data_description": {
+          "contour_mode": "Observe only shows the algorithm. Automatic allows a separate confirmed application of temperature, strategy, and automatic mode to the existing engine.",
+          "contour_rooms": "Select every room served by this contour.",
+          "contour_devices": "Select at least one suitable device in every selected room. Private identifiers remain hidden."
+        }
+      },
+      "climate_contour_room": {
+        "title": "Settings for {room_name}",
+        "description": "Room {room_number} of {room_count}. Choose comfort values for this room. A previously saved contour uses its HASC settings as defaults.",
+        "data": {
           "contour_target_temperature": "Comfort temperature, °C",
           "contour_target_humidity": "Comfort humidity, %",
           "contour_strategy": "Temperature strategy"
         },
         "data_description": {
-          "contour_mode": "Observe only shows the algorithm. Automatic allows a separate confirmed application of temperature, strategy, and automatic mode to the existing engine.",
-          "contour_rooms": "Multiple rooms can be selected.",
-          "contour_devices": "Only devices already understood by the existing climate engine are shown. Private identifiers remain hidden.",
-          "contour_target_temperature": "This is currently one value for all selected rooms. It can be applied to the existing engine as a separate next action.",
-          "contour_target_humidity": "This is currently one desired value for all rooms. The existing engine has no shared room-humidity command, so HASC displays it without claiming to apply it.",
+          "contour_target_temperature": "This room temperature can be applied by a separate confirmed action after saving the contour.",
+          "contour_target_humidity": "Desired humidity is stored separately for this room. The existing engine has no shared room-humidity command, so HASC does not claim to apply it.",
           "contour_strategy": "Soft is quieter, normal is balanced, and aggressive reaches the target faster."
         }
       },
       "climate_contour_confirm": {
         "title": "Review the climate contour",
-        "description": "Contour: {name}. Mode: {mode}. Status: {status}. Rooms: {room_count}; devices: {device_count}. Algorithm: {algorithm}. Existing-engine automatic operation confirmed: {automatic}. Attention: {reasons}.",
+        "description": "Contour: {name}. Mode: {mode}. Rooms: {room_count}; devices: {device_count}. Room settings: {room_settings}. Algorithm: {algorithm}. Current status: {status}. Existing-engine automatic operation confirmed: {automatic}. Attention: {reasons}.",
         "data": {"confirm_contour_save": "Save selected rooms, devices, and parameters"},
         "data_description": {"confirm_contour_save": "HASC saves the configuration and enables continuous reads from the existing engine without sending climate commands."}
       },
@@ -297,6 +305,10 @@
       "contour_devices_required": "Select at least one climate device.",
       "invalid_contour_devices": "The device list changed. Refresh the wizard and select devices again.",
       "device_outside_contour_rooms": "Every selected device must belong to a selected room.",
+      "contour_room_device_required": "Select at least one climate device in every selected room.",
+      "invalid_contour_name": "Enter a non-empty contour name of at most 120 characters without leading or trailing spaces.",
+      "invalid_contour_mode": "Choose observe or automatic operation.",
+      "invalid_contour_room_parameters": "Check this room's temperature, humidity, and strategy.",
       "invalid_contour_setup": "Check rooms, devices, temperature, humidity, and strategy. Every room needs a controllable device.",
       "contour_confirmation_required": "Confirm saving the climate contour.",
       "contour_status_close_required": "Enable this checkbox to close the status screen.",

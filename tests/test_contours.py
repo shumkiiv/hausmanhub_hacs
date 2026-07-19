@@ -176,6 +176,80 @@ class ContoursTest(unittest.TestCase):
                     strategy=strategy,
                 )
 
+    def test_setup_keeps_distinct_parameters_for_each_selected_room(self) -> None:
+        registry, contours = build_climate_contour_setup(
+            source_snapshot(),
+            room_ids=["living", "kids"],
+            source_ids=[
+                "synthetic-ac-source-living",
+                "synthetic-humidifier-source-kids",
+            ],
+            name="Климат",
+            mode="automatic",
+            room_parameters={
+                "living": {
+                    "target_temperature": 25.0,
+                    "target_humidity": 45,
+                    "strategy": "normal",
+                },
+                "kids": {
+                    "target_temperature": 23.5,
+                    "target_humidity": 50,
+                    "strategy": "soft",
+                },
+            },
+        )
+
+        contour = contours.contour("climate")
+        self.assertEqual(2, len(registry.rooms))
+        self.assertEqual(2, len(contour.rooms))  # type: ignore[union-attr]
+        by_room = {room.room_id: room for room in contour.rooms}  # type: ignore[union-attr]
+        self.assertEqual(25.0, by_room["living"].target_temperature)
+        self.assertEqual(45, by_room["living"].target_humidity)
+        self.assertEqual("normal", by_room["living"].strategy.value)
+        self.assertEqual(23.5, by_room["kids"].target_temperature)
+        self.assertEqual(50, by_room["kids"].target_humidity)
+        self.assertEqual("soft", by_room["kids"].strategy.value)
+
+    def test_per_room_parameters_must_exactly_match_selected_rooms(self) -> None:
+        common = {
+            "snapshot": source_snapshot(),
+            "room_ids": ["living", "kids"],
+            "source_ids": [
+                "synthetic-ac-source-living",
+                "synthetic-humidifier-source-kids",
+            ],
+            "name": "Климат",
+            "mode": "automatic",
+        }
+        living = {
+            "target_temperature": 25.0,
+            "target_humidity": 45,
+            "strategy": "normal",
+        }
+        for parameters in (
+            {"living": living},
+            {"living": living, "kids": living, "other": living},
+            {
+                "living": living,
+                "kids": {**living, "hidden": "must-not-pass"},
+            },
+        ):
+            with self.subTest(parameters=parameters), self.assertRaises(
+                ContourRegistryViolation
+            ):
+                build_climate_contour_setup(
+                    **common,
+                    room_parameters=parameters,
+                )
+
+        with self.assertRaisesRegex(ContourRegistryViolation, "cannot be mixed"):
+            build_climate_contour_setup(
+                **common,
+                target_temperature=25.0,
+                room_parameters={"living": living, "kids": living},
+            )
+
     def test_automatic_device_ids_stay_within_public_id_limit(self) -> None:
         payload = source_payload()
         long_room_id = "r" + "oom" * 21
