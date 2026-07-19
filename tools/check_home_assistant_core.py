@@ -110,6 +110,7 @@ SUMMARY_UPDATE_INTERVAL_MINUTES = {
     "30m": 30,
 }
 LOCAL_SUMMARY_PATH = "/api/hausman_hub/local-summary"
+CAPABILITIES_PATH = "/api/hausman_hub/v1/capabilities"
 CLIMATE_HOME_PATH = "/api/hausman_hub/v1/home"
 CONTOURS_PATH = "/api/hausman_hub/v1/contours"
 CONTOUR_APPLY_PREVIEW_PATH = "/api/hausman_hub/v1/contours/apply-preview"
@@ -124,6 +125,7 @@ CLIMATE_ADMIN_SHADOW_EVIDENCE_PATH = "/api/hausman_hub/v1/admin/climate-shadow-e
 CLIMATE_ADMIN_CANARY_PREFLIGHT_PATH = "/api/hausman_hub/v1/admin/climate-canary-preflight"
 CLIMATE_OPERATION_PATH = "/api/hausman_hub/v1/operations"
 CLIMATE_API_PATHS = (
+    CAPABILITIES_PATH,
     CLIMATE_HOME_PATH,
     CONTOURS_PATH,
     CONTOUR_APPLY_PREVIEW_PATH,
@@ -2283,6 +2285,7 @@ def assert_disabled_climate_facade(hass: HomeAssistant, domain: str, entry_id: s
         raise RuntimeError("disabled climate facade must retain every fixed climate view")
 
     expected_methods = {
+        CAPABILITIES_PATH: {"GET", "OPTIONS"},
         CLIMATE_HOME_PATH: {"GET", "OPTIONS"},
         CONTOURS_PATH: {"GET", "OPTIONS"},
         CONTOUR_APPLY_PREVIEW_PATH: {"GET", "OPTIONS"},
@@ -2847,6 +2850,48 @@ async def async_assert_disabled_climate_http_access(hass: HomeAssistant) -> None
     client = TestClient(server)
     try:
         await client.start_server()
+        unauthenticated_capabilities = await client.get(CAPABILITIES_PATH)
+        assert_result(
+            unauthenticated_capabilities.status,
+            HTTPStatus.UNAUTHORIZED,
+            "HASC capabilities must require Home Assistant authentication",
+        )
+        rejected_owner_capabilities = await client.get(
+            CAPABILITIES_PATH,
+            headers=owner_headers,
+        )
+        assert_result(
+            rejected_owner_capabilities.status,
+            HTTPStatus.FORBIDDEN,
+            "HASC capabilities must reject an administrator as a tablet",
+        )
+        capabilities = await client.get(
+            CAPABILITIES_PATH,
+            headers=tablet_headers,
+        )
+        assert_result(
+            capabilities.status,
+            HTTPStatus.OK,
+            "the exact local tablet must discover installed HASC capabilities",
+        )
+        capabilities_payload = await capabilities.json()
+        assert_result(
+            capabilities_payload.get("contract"),
+            {"name": "hausman-hasc-capabilities", "version": 1},
+            "HASC capabilities must keep their exact public contract",
+        )
+        assert_result(
+            capabilities_payload.get("capabilities", {})
+            .get("automatic_contours", {})
+            .get("response_contract"),
+            {"name": "hausman-hasc-contours", "version": 5},
+            "HASC capabilities must advertise the current contour contract",
+        )
+        assert_local_summary_response_is_not_stored(
+            capabilities,
+            "HASC capabilities response",
+        )
+
         unauthenticated = await client.get(CLIMATE_HOME_PATH)
         assert_result(
             unauthenticated.status,

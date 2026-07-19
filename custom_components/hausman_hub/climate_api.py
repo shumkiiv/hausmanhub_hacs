@@ -9,6 +9,17 @@ from typing import TYPE_CHECKING, Any, Final
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.util import dt as dt_util
 
+from .application.api_capabilities import (
+    ACTION_PATH,
+    CAPABILITIES_PATH,
+    CONTOURS_PATH,
+    CONTOUR_APPLY_PATH,
+    CONTOUR_APPLY_PREVIEW_PATH,
+    HOME_PATH,
+    OPERATION_PATH,
+    TEMPORARY_TEMPERATURE_PATH,
+    api_capabilities_snapshot,
+)
 from .application.climate_canary_preflight import ClimateCanaryPreflightViolation
 from .application.climate_commands import ClimateCommandViolation
 from .application.contour_apply import ContourApplyViolation
@@ -24,21 +35,12 @@ if TYPE_CHECKING:
 DOMAIN = "hausman_hub"
 DATA_CLIMATE_RUNTIME = "climate_runtime"
 DATA_CLIMATE_VIEWS = "climate_views"
-HOME_PATH = "/api/hausman_hub/v1/home"
-CONTOURS_PATH = "/api/hausman_hub/v1/contours"
-CONTOUR_APPLY_PREVIEW_PATH = "/api/hausman_hub/v1/contours/apply-preview"
-CONTOUR_APPLY_PATH = "/api/hausman_hub/v1/contours/apply"
-TEMPORARY_TEMPERATURE_PATH = (
-    "/api/hausman_hub/v1/contours/temporary-temperature"
-)
-ACTION_PATH = "/api/hausman_hub/v1/actions"
 ADMIN_IMPORT_PATH = "/api/hausman_hub/v1/admin/climate-import"
 ADMIN_REGISTRY_PATH = "/api/hausman_hub/v1/admin/climate-registry"
 ADMIN_REGISTRY_PREVIEW_PATH = "/api/hausman_hub/v1/admin/climate-registry-preview"
 ADMIN_READINESS_PATH = "/api/hausman_hub/v1/admin/climate-readiness"
 ADMIN_SHADOW_EVIDENCE_PATH = "/api/hausman_hub/v1/admin/climate-shadow-evidence"
 ADMIN_CANARY_PREFLIGHT_PATH = "/api/hausman_hub/v1/admin/climate-canary-preflight"
-OPERATION_PATH = "/api/hausman_hub/v1/operations"
 NO_STORE_HEADERS = {"Cache-Control": "no-store"}
 MAX_ACTION_BODY_BYTES = 16 * 1024
 TABLET_GROUP_ID = "system-users"
@@ -57,6 +59,7 @@ def register_climate_api(hass: HomeAssistant, runtime: ClimateRuntime) -> None:
     data[DATA_CLIMATE_RUNTIME] = runtime
     if DATA_CLIMATE_VIEWS not in data:
         views = (
+            ClimateCapabilitiesView(hass),
             ClimateHomeView(hass),
             ContoursView(hass),
             ContourApplyPreviewView(hass),
@@ -116,6 +119,22 @@ class _ClimateView(HomeAssistantView):
             HTTPStatus.SERVICE_UNAVAILABLE,
             headers=NO_STORE_HEADERS,
         )
+
+
+class ClimateCapabilitiesView(_ClimateView):
+    """Advertise only installed, stable HASC tablet API capabilities."""
+
+    url = CAPABILITIES_PATH
+    name = "api:hausman_hub:capabilities"
+
+    async def get(self, request: Any) -> Any:
+        if not _is_exact_request(request, CAPABILITIES_PATH):
+            return _not_found(self)
+        if not _is_local_tablet_request(request):
+            return _forbidden(self)
+        if self._runtime() is None:
+            return self._unavailable()
+        return self.json(api_capabilities_snapshot(), headers=NO_STORE_HEADERS)
 
 
 class ClimateHomeView(_ClimateView):

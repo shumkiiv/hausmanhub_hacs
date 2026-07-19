@@ -1,0 +1,85 @@
+{
+  "contract": {
+    "name": "hausman-hasc-capabilities",
+    "version": 1
+  },
+  "api": {
+    "major_version": 1,
+    "base_path": "/api/hausman_hub/v1"
+  },
+  "capabilities": {
+    "climate_home": {
+      "available": true,
+      "path": "/api/hausman_hub/v1/home",
+      "method": "GET",
+      "response_contract": {
+        "name": "hausman-hasc-home",
+        "version": 4
+      }
+    },
+    "automatic_contours": {
+      "available": true,
+      "path": "/api/hausman_hub/v1/contours",
+      "method": "GET",
+      "response_contract": {
+        "name": "hausman-hasc-contours",
+        "version": 5
+      }
+    },
+    "contour_settings_apply": {
+      "available": true,
+      "preview_path": "/api/hausman_hub/v1/contours/apply-preview",
+      "path": "/api/hausman_hub/v1/contours/apply",
+      "method": "POST",
+      "requires_confirmation": true,
+      "request_contract": {
+        "name": "hausman-hasc-contour-apply-request",
+        "version": 1
+      },
+      "response_contract": {
+        "name": "hausman-hasc-contour-apply-receipt",
+        "version": 1
+      }
+    },
+    "temporary_room_temperature": {
+      "available": true,
+      "path": "/api/hausman_hub/v1/contours/temporary-temperature",
+      "method": "POST",
+      "requires_confirmation": true,
+      "request_contract": {
+        "name": "hausman-hasc-temporary-temperature-request",
+        "version": 1
+      },
+      "response_contract": {
+        "name": "hausman-hasc-contour-apply-receipt",
+        "version": 1
+      }
+    },
+    "climate_actions": {
+      "available": true,
+      "path": "/api/hausman_hub/v1/actions",
+      "method": "POST",
+      "request_contract": {
+        "name": "hausman-hasc-climate-action-request",
+        "version": 1
+      },
+      "response_contract": {
+        "name": "hausman-hasc-operation",
+        "version": 1
+      }
+    },
+    "operation_receipts": {
+      "available": true,
+      "path": "/api/hausman_hub/v1/operations",
+      "method": "POST",
+      "query_contract": {
+        "name": "hausman-hasc-climate-operation-query",
+        "version": 1
+      },
+      "response_contract": {
+        "name": "hausman-hasc-operation",
+        "version": 1
+      }
+    }
+  }
+}

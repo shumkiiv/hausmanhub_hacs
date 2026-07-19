@@ -6,6 +6,16 @@ Last updated: 2026-07-19.
 
 - Repository: `shumkiiv/hausmanhub_hasc` (public, MIT, `main`).
 - Local checkout: `/home/ivsh/projects/hausmanhub_hasc`.
+- Workspace boundary: this thread may change only HASC and its integration
+  wrapper. The Android application is developed separately in
+  `/home/ivsh/projects/УД-android`; it may be inspected only read-only for
+  contract compatibility. Never edit, format, generate files, build, commit,
+  push, or otherwise mutate that directory or its repository from this thread.
+- The existing climate contour/module is also strictly read-only for this
+  thread. HASC may read and call only its already available fixed Climate API;
+  never edit its source, Node-RED flows, configuration, repository, or live
+  runtime. New behavior must be implemented entirely inside HASC and must fail
+  closed when the existing climate contract cannot provide it.
 - Home Assistant baseline: Core 2026.6.4 or newer.
 - Version 1.0.0 established the product as a platform of automatic contours.
   Climate is the first contour. The ordinary Russian options flow chooses
@@ -76,7 +86,7 @@ Last updated: 2026-07-19.
   migrates v1/v2 with a disabled 07:00/23:00 schedule. Tablet contour contract
   v4 exposes only enabled/day/night times. See the
   [1.4.0 schedule decision](LLM_WIKI/Manual/2026-07-19-hasc-v1-4-0-russian-schedule.md).
-- Version 1.5.0 is the verified HASC-only release candidate. One room may receive a
+- Version 1.5.0 is the published HASC release. One room may receive a
   temporary 18–28 °C target in 0.5 °C steps while an automatic schedule is
   armed for the current local-time period. The override is stored separately
   from the saved day/night bundles, persists before the first POST, and is
@@ -90,6 +100,13 @@ Last updated: 2026-07-19.
 - The 1.5.0 release candidate passed 289 local tests, isolated Home Assistant
   2026.6.4 and 2026.7.0 checks, and a final read-only Kimi review with no
   significant findings (session `ses_084f948c2ffee4C3vSqj22zKaT`).
+- Version 1.6.0 is the current HASC-only development line. Its first roadmap
+  item adds `GET /api/hausman_hub/v1/capabilities`, a local-tablet discovery
+  response containing only installed HASC features, public paths, and contract
+  versions. It is independent of current climate command readiness and exposes
+  no home data, private binding, or climate-module address.
+  Progress is tracked in the
+  [50-item HASC roadmap](LLM_WIKI/Manual/2026-07-19-hasc-50-point-roadmap.md).
 - Version 0.4.0 was committed as `2e8cda3` and pushed to `origin/main` after
   its 153 tests, disposable Core 2026.6.4/2026.7.0 checks, and final Kimi
   review passed. This source push did not create a tag, release, HACS
@@ -1317,13 +1334,14 @@ test-only changes do not need a new HACS version.
 
 ## Next decision gate
 
-After the staged 1.5.0 verification and release, the next product layer is the
-real Android climate screen consuming home contract v4 and contour contract v5:
-room state, day/night profile, schedule, temporary target, result receipt, and
-plain Russian explanations. A readable decision journal, a continuous contour
-dispatcher, and further contour types follow on the same general contour model.
-Generic proxying, arbitrary device execution, and unsupervised live deployment
-remain out of scope.
+The active 50-item roadmap changes only HASC. Android is already developed in a
+separate read-only repository; HASC must provide stable contracts for it without
+editing or building the application here. The existing climate module is also
+read-only and remains the execution engine through its current fixed API. The
+first 1.6 milestone is API discovery and a combined climate projection; a
+readable decision journal, a continuous HASC dispatcher, and further contour
+types follow. Generic proxying, arbitrary device execution, changes to the
+climate module, and unsupervised live deployment remain out of scope.
 
 The current public manual-HACS decision and its narrow implementation boundary
 are recorded in the [HACS packaging decision

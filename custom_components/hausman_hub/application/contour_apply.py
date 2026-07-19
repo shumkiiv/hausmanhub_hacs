@@ -28,6 +28,7 @@ from .climate_commands import (
 from .climate_import import ClimateImportSnapshot
 
 
+CONTOUR_APPLY_REQUEST_CONTRACT_NAME = "hausman-hasc-contour-apply-request"
 CONTOUR_APPLY_PREVIEW_CONTRACT_NAME = "hausman-hasc-contour-apply-preview"
 CONTOUR_APPLY_RECEIPT_CONTRACT_NAME = "hausman-hasc-contour-apply-receipt"
 CONTOUR_APPLY_CONTRACT_VERSION = 1

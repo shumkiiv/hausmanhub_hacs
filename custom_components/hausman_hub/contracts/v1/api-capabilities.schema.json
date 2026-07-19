@@ -1,0 +1,236 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hasc/contracts/v1/api-capabilities.schema.json",
+  "title": "HASC tablet API capabilities v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "api", "capabilities"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hasc-capabilities"},
+        "version": {"const": 1}
+      }
+    },
+    "api": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["major_version", "base_path"],
+      "properties": {
+        "major_version": {"const": 1},
+        "base_path": {"const": "/api/hausman_hub/v1"}
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "climate_home",
+        "automatic_contours",
+        "contour_settings_apply",
+        "temporary_room_temperature",
+        "climate_actions",
+        "operation_receipts"
+      ],
+      "properties": {
+        "climate_home": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["available", "path", "method", "response_contract"],
+          "properties": {
+            "available": {"const": true},
+            "path": {"const": "/api/hausman_hub/v1/home"},
+            "method": {"const": "GET"},
+            "response_contract": {
+              "$ref": "#/$defs/climate_home_contract"
+            }
+          }
+        },
+        "automatic_contours": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["available", "path", "method", "response_contract"],
+          "properties": {
+            "available": {"const": true},
+            "path": {"const": "/api/hausman_hub/v1/contours"},
+            "method": {"const": "GET"},
+            "response_contract": {
+              "$ref": "#/$defs/contours_contract"
+            }
+          }
+        },
+        "contour_settings_apply": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available",
+            "preview_path",
+            "path",
+            "method",
+            "requires_confirmation",
+            "request_contract",
+            "response_contract"
+          ],
+          "properties": {
+            "available": {"const": true},
+            "preview_path": {"const": "/api/hausman_hub/v1/contours/apply-preview"},
+            "path": {"const": "/api/hausman_hub/v1/contours/apply"},
+            "method": {"const": "POST"},
+            "requires_confirmation": {"const": true},
+            "request_contract": {
+              "$ref": "#/$defs/contour_apply_request_contract"
+            },
+            "response_contract": {
+              "$ref": "#/$defs/contour_apply_receipt_contract"
+            }
+          }
+        },
+        "temporary_room_temperature": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available",
+            "path",
+            "method",
+            "requires_confirmation",
+            "request_contract",
+            "response_contract"
+          ],
+          "properties": {
+            "available": {"const": true},
+            "path": {"const": "/api/hausman_hub/v1/contours/temporary-temperature"},
+            "method": {"const": "POST"},
+            "requires_confirmation": {"const": true},
+            "request_contract": {
+              "$ref": "#/$defs/temporary_temperature_request_contract"
+            },
+            "response_contract": {
+              "$ref": "#/$defs/contour_apply_receipt_contract"
+            }
+          }
+        },
+        "climate_actions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available",
+            "path",
+            "method",
+            "request_contract",
+            "response_contract"
+          ],
+          "properties": {
+            "available": {"const": true},
+            "path": {"const": "/api/hausman_hub/v1/actions"},
+            "method": {"const": "POST"},
+            "request_contract": {
+              "$ref": "#/$defs/climate_action_request_contract"
+            },
+            "response_contract": {
+              "$ref": "#/$defs/operation_receipt_contract"
+            }
+          }
+        },
+        "operation_receipts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available",
+            "path",
+            "method",
+            "query_contract",
+            "response_contract"
+          ],
+          "properties": {
+            "available": {"const": true},
+            "path": {"const": "/api/hausman_hub/v1/operations"},
+            "method": {"const": "POST"},
+            "query_contract": {
+              "$ref": "#/$defs/operation_query_contract"
+            },
+            "response_contract": {
+              "$ref": "#/$defs/operation_receipt_contract"
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "climate_home_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hasc-home"},
+        "version": {"const": 4}
+      }
+    },
+    "contours_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hasc-contours"},
+        "version": {"const": 5}
+      }
+    },
+    "contour_apply_request_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hasc-contour-apply-request"},
+        "version": {"const": 1}
+      }
+    },
+    "contour_apply_receipt_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hasc-contour-apply-receipt"},
+        "version": {"const": 1}
+      }
+    },
+    "temporary_temperature_request_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hasc-temporary-temperature-request"},
+        "version": {"const": 1}
+      }
+    },
+    "climate_action_request_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hasc-climate-action-request"},
+        "version": {"const": 1}
+      }
+    },
+    "operation_query_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hasc-climate-operation-query"},
+        "version": {"const": 1}
+      }
+    },
+    "operation_receipt_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hasc-operation"},
+        "version": {"const": 1}
+      }
+    }
+  }
+}

@@ -10,6 +10,9 @@ import re
 from ..domain.contours import climate_target_temperature
 
 
+TEMPORARY_TEMPERATURE_REQUEST_CONTRACT_NAME = (
+    "hausman-hasc-temporary-temperature-request"
+)
 TEMPORARY_TEMPERATURE_REQUEST_CONTRACT_VERSION = 1
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
 _STABLE_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")

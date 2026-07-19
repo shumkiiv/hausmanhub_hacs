@@ -40,6 +40,7 @@ TRANSLATION_PATHS = (
 CONTRACT_PATHS = tuple(
     INTEGRATION_DIRECTORY / "contracts" / "v1" / name
     for name in (
+        "api-capabilities.schema.json",
         "climate-action-request.schema.json",
         "climate-admin-import.schema.json",
         "climate-canary-preflight-query.schema.json",
@@ -77,6 +78,7 @@ REQUIRED_PACKAGE_PATHS = (
     INTEGRATION_DIRECTORY / "sensor.py",
     INTEGRATION_DIRECTORY / "switch.py",
     INTEGRATION_DIRECTORY / "application/control.py",
+    INTEGRATION_DIRECTORY / "application/api_capabilities.py",
     INTEGRATION_DIRECTORY / "application/android_climate.py",
     INTEGRATION_DIRECTORY / "application/climate_canary_preflight.py",
     INTEGRATION_DIRECTORY / "application/climate_commands.py",

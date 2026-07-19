@@ -16,6 +16,7 @@ from .climate_commands import ClimateCommandPlan, ClimateCommandViolation
 from .climate_import import ClimateImportSnapshot
 
 
+OPERATION_QUERY_CONTRACT_NAME = "hausman-hasc-climate-operation-query"
 OPERATION_CONTRACT_NAME = "hausman-hasc-operation"
 OPERATION_CONTRACT_VERSION = 1
 MAX_OPERATION_RECORDS = 256

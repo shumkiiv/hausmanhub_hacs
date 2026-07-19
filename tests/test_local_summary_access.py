@@ -511,6 +511,57 @@ class LocalSummaryAccessTest(unittest.TestCase):
         admin = reader_user("system-admin", admin=True)
         read_only = reader_user("system-read-only")
 
+        capabilities_path = "/api/hausman_hub/v1/capabilities"
+        capabilities = views[capabilities_path]
+        capabilities_response = asyncio.run(
+            capabilities.get(
+                FakeRequest(
+                    "127.0.0.1",
+                    tablet,
+                    path=capabilities_path,
+                )
+            )
+        )
+        self.assertEqual(200, capabilities_response.status)
+        self.assertEqual(
+            {"name": "hausman-hasc-capabilities", "version": 1},
+            capabilities_response.payload["contract"],
+        )
+        self.assertEqual(
+            5,
+            capabilities_response.payload["capabilities"]["automatic_contours"][  # type: ignore[index]
+                "response_contract"
+            ]["version"],  # type: ignore[index]
+        )
+        self.assertEqual("no-store", capabilities_response.headers.get("Cache-Control"))
+        self.assertEqual(
+            404,
+            asyncio.run(
+                capabilities.get(
+                    FakeRequest(
+                        "127.0.0.1",
+                        tablet,
+                        path=capabilities_path,
+                        query_string="unexpected=1",
+                    )
+                )
+            ).status,
+        )
+        for user in (admin, read_only):
+            with self.subTest(capabilities_user=user):
+                self.assertEqual(
+                    403,
+                    asyncio.run(
+                        capabilities.get(
+                            FakeRequest(
+                                "127.0.0.1",
+                                user,
+                                path=capabilities_path,
+                            )
+                        )
+                    ).status,
+                )
+
         home = views["/api/hausman_hub/v1/home"]
         self.assertEqual(
             503,
@@ -1285,7 +1336,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertFalse(hasattr(self.view, method))
 
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
-        self.assertEqual(14, len(self.hass.http.views))
+        self.assertEqual(15, len(self.hass.http.views))
         self.assertEqual(
             1,
             sum(
@@ -1574,9 +1625,10 @@ class LocalSummaryAccessTest(unittest.TestCase):
             [(closed_entry, ("sensor", "switch"))],
             closed_hass.config_entries.forwarded,
         )
-        self.assertEqual(13, len(closed_hass.http.views))
+        self.assertEqual(14, len(closed_hass.http.views))
         self.assertEqual(
             {
+                "/api/hausman_hub/v1/capabilities",
                 "/api/hausman_hub/v1/home",
                 "/api/hausman_hub/v1/contours",
                 "/api/hausman_hub/v1/contours/apply-preview",

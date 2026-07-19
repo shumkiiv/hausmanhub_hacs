@@ -25,6 +25,10 @@ from ..domain.climate_bridge import ClimateBridgeMode
 from .climate_import import ClimateImportSnapshot
 
 
+CLIMATE_ACTION_REQUEST_CONTRACT_NAME = "hausman-hasc-climate-action-request"
+CLIMATE_ACTION_REQUEST_CONTRACT_VERSION = 1
+
+
 class ClimateCommandViolation(ValueError):
     """A public action is invalid or fails an execution safety gate."""
 

@@ -9,6 +9,9 @@ import unittest
 
 from jsonschema import Draft202012Validator
 
+from custom_components.hausman_hub.application.api_capabilities import (
+    api_capabilities_snapshot,
+)
 from custom_components.hausman_hub.application.android_climate import (
     admin_climate_import_snapshot,
     android_climate_snapshot,
@@ -47,6 +50,7 @@ class ClimateContractSchemasTest(unittest.TestCase):
 
     def test_every_packaged_schema_is_valid_and_each_fixture_matches(self) -> None:
         pairs = {
+            "hasc_capabilities_v1/capabilities.json": "v1/api-capabilities.schema.json",
             "hasc_climate_v1/action-request.json": "v1/climate-action-request.schema.json",
             "hasc_climate_v1/operation-query.json": "v1/climate-operation-query.schema.json",
             "hasc_climate_v1/operation-receipt.json": "v1/climate-operation-receipt.schema.json",
@@ -79,6 +83,13 @@ class ClimateContractSchemasTest(unittest.TestCase):
                 Draft202012Validator.check_schema(load_json(schema_path))
 
     def test_generated_home_and_admin_import_match_their_contracts(self) -> None:
+        capabilities = api_capabilities_snapshot()
+        validator("v1/api-capabilities.schema.json").validate(capabilities)
+        self.assertEqual(
+            load_json(ROOT / "fixtures" / "hasc_capabilities_v1" / "capabilities.json"),
+            capabilities,
+        )
+
         registry = registry_from_payload(load_json(FIXTURES / "registry.json"))
         snapshot = import_climate_state(load_json(SOURCE_FIXTURE))
 
@@ -147,6 +158,11 @@ class ClimateContractSchemasTest(unittest.TestCase):
         self.assertNotIn("entity_id", contour_json)
 
     def test_action_and_registry_schemas_reject_extra_or_missing_boundary_fields(self) -> None:
+        capabilities = api_capabilities_snapshot()
+        capabilities["private_origin"] = "http://192.168.1.10:1880"
+        with self.assertRaises(Exception):
+            validator("v1/api-capabilities.schema.json").validate(capabilities)
+
         action = load_json(FIXTURES / "action-request.json")
         missing_request = copy.deepcopy(action)
         missing_request.pop("request_id")  # type: ignore[union-attr]
