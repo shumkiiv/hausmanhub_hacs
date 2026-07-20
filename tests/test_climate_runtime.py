@@ -33,6 +33,7 @@ from custom_components.hausman_hub.application.climate_registry import registry_
 from custom_components.hausman_hub.domain.climate import (
     ClimateCapability,
     ClimateControlScope,
+    ClimateDeviceKind,
     ClimateEndpoint,
     ClimateEndpointRole,
     ClimateRegistry,
@@ -71,6 +72,10 @@ from custom_components.hausman_hub.domain.climate_ha_calls import (
     ClimateHaCallLimit,
     ClimateHaHvacMode,
     ClimateHaService,
+)
+from custom_components.hausman_hub.domain.climate_ownership import (
+    ClimateOwnershipReason,
+    ClimateOwnershipStatus,
 )
 from custom_components.hausman_hub.domain.climate_trial import (
     ClimateTrialReason,
@@ -174,6 +179,17 @@ class RecordingTrialExecutor:
         if self.fail:
             raise RuntimeError("synthetic trial execution failure")
         return len(calls)
+
+
+class FailingRegistryStore(MemoryStore):
+    def __init__(self, registry) -> None:
+        super().__init__(registry)
+        self.fail = False
+
+    async def async_save(self, registry) -> None:
+        if self.fail:
+            raise RuntimeError("synthetic registry persistence failure")
+        await super().async_save(registry)
 
 
 class ContourRollbackFailingStore(MemoryContourStore):
@@ -2114,6 +2130,7 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
         )
         await runtime.async_start()
 
+        self.assertIsNone(runtime.last_error)
         receipt = await runtime.async_run_climate_trial()
 
         self.assertIsNotNone(receipt)
@@ -2349,6 +2366,286 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             (ClimateTrialReason.EXECUTOR_UNAVAILABLE,),
             unavailable.reasons,  # type: ignore[union-attr]
         )
+        self.assertEqual([], bridge.executed)
+
+    async def test_promote_verified_room_and_manage_it_once_verified(
+        self,
+    ) -> None:
+        bridge = MemoryBridge()
+        registry, contours = build_climate_contour_setup(
+            bridge.snapshot,
+            room_ids=["living", "kids"],
+            source_ids=[
+                "synthetic-ac-source-living",
+                "synthetic-humidifier-source-kids",
+            ],
+            name="Климат",
+            mode="automatic",
+            target_temperature=25.0,
+            target_humidity=45,
+            strategy="normal",
+        )
+        registry = ClimateRegistry(
+            rooms=registry.rooms,
+            devices=(
+                replace(
+                    registry.devices[0],
+                    control_scope=ClimateControlScope.CANARY,
+                    capabilities=(
+                        ClimateCapability.POWER,
+                        ClimateCapability.TARGET_HUMIDITY,
+                    ),
+                    endpoints=(
+                        ClimateEndpoint(
+                            ClimateEndpointRole.CONTROL,
+                            "humidifier.kids",
+                        ),
+                    ),
+                ),
+                registry.devices[1],
+            ),
+        )
+        executor = RecordingTrialExecutor()
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateBridgeMode.CANARY),
+            registry_store=MemoryStore(registry),
+            contour_store=MemoryContourStore(contours),
+            bridge_client=bridge,
+            trial_executor=executor,
+            now_ms=lambda: 1784280005000,
+        )
+        await runtime.async_start()
+
+        receipt = await runtime.async_climate_promote_room("kids")
+
+        self.assertIsNotNone(receipt)
+        self.assertIs(receipt.status, ClimateOwnershipStatus.PROMOTED)  # type: ignore[union-attr]
+        self.assertEqual(1, receipt.promoted_count)  # type: ignore[union-attr]
+
+        again = await runtime.async_climate_promote_room("kids")
+        self.assertIs(again.status, ClimateOwnershipStatus.ALREADY_MANAGED)  # type: ignore[union-attr]
+
+        bridge.snapshot = replace(
+            bridge.snapshot,
+            devices=tuple(
+                replace(device, state="on")
+                if device.source_id == "synthetic-humidifier-source-kids"
+                else device
+                for device in bridge.snapshot.devices
+            ),
+        )
+        executor.batches.clear()
+
+        receipts = await runtime.async_run_climate_managed()
+
+        self.assertEqual(1, len(receipts))
+        managed = receipts[0]
+        self.assertEqual("kids", managed.room_id)
+        self.assertIs(managed.status, ClimateTrialStatus.APPLIED)
+        self.assertEqual(1, managed.call_count)
+        self.assertEqual(1, len(executor.batches))
+        (call,) = executor.batches[0]
+        self.assertIs(call.service, ClimateHaService.HUMIDIFIER_TURN_OFF)
+        self.assertEqual("humidifier.kids", call.entity_id)
+        self.assertEqual([], bridge.executed)
+
+    async def test_promote_denies_unverified_unbound_and_blocked_rooms(
+        self,
+    ) -> None:
+        bridge = MemoryBridge()
+        registry, contours = build_climate_contour_setup(
+            bridge.snapshot,
+            room_ids=["living", "kids"],
+            source_ids=[
+                "synthetic-ac-source-living",
+                "synthetic-humidifier-source-kids",
+            ],
+            name="Климат",
+            mode="automatic",
+            target_temperature=25.0,
+            target_humidity=45,
+            strategy="normal",
+        )
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateBridgeMode.CANARY),
+            registry_store=MemoryStore(registry),
+            contour_store=MemoryContourStore(contours),
+            bridge_client=bridge,
+            now_ms=lambda: 1784280005000,
+        )
+        await runtime.async_start()
+
+        unknown = await runtime.async_climate_promote_room("guest")
+        self.assertIs(unknown.status, ClimateOwnershipStatus.DENIED)  # type: ignore[union-attr]
+        self.assertEqual(
+            (ClimateOwnershipReason.ROOM_UNKNOWN,),
+            unknown.reasons,  # type: ignore[union-attr]
+        )
+
+        diverged = await runtime.async_climate_promote_room("living")
+        self.assertEqual(
+            (ClimateOwnershipReason.ROOM_NOT_VERIFIED,),
+            diverged.reasons,  # type: ignore[union-attr]
+        )
+
+        unbound = await runtime.async_climate_promote_room("kids")
+        self.assertEqual(
+            (ClimateOwnershipReason.DEVICE_BINDING_MISSING,),
+            unbound.reasons,  # type: ignore[union-attr]
+        )
+
+        shadow_runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateBridgeMode.SHADOW),
+            registry_store=MemoryStore(registry),
+            contour_store=MemoryContourStore(contours),
+            bridge_client=bridge,
+            now_ms=lambda: 1784280005000,
+        )
+        await shadow_runtime.async_start()
+
+        blocked = await shadow_runtime.async_climate_promote_room("kids")
+        self.assertEqual(
+            (ClimateOwnershipReason.MODE_BLOCKED,),
+            blocked.reasons,  # type: ignore[union-attr]
+        )
+        self.assertEqual([], bridge.executed)
+
+    async def test_promote_room_with_passive_sensor_keeps_it_observed(
+        self,
+    ) -> None:
+        payload = source_payload()
+        payload["devices"].append(  # type: ignore[union-attr]
+            {
+                "id": "synthetic-sensor-source-kids",
+                "name": "Kids sensor",
+                "roomId": "kids",
+                "domain": "sensor",
+                "category": "climate",
+                "kind": "temperature_sensor",
+                "state": "22.4",
+                "unavailable": False,
+            }
+        )
+        complete = import_climate_state(
+            payload,
+            now_ms=payload["generatedAt"] + 1_000,  # type: ignore[operator]
+        )
+        registry, contours = build_climate_contour_setup(
+            complete,
+            room_ids=["kids"],
+            source_ids=[
+                "synthetic-humidifier-source-kids",
+                "synthetic-sensor-source-kids",
+            ],
+            name="Климат",
+            mode="automatic",
+            target_temperature=25.0,
+            target_humidity=45,
+            strategy="normal",
+        )
+        registry = ClimateRegistry(
+            rooms=registry.rooms,
+            devices=tuple(
+                replace(
+                    device,
+                    control_scope=ClimateControlScope.CANARY,
+                    capabilities=(
+                        ClimateCapability.POWER,
+                        ClimateCapability.TARGET_HUMIDITY,
+                    ),
+                    endpoints=(
+                        ClimateEndpoint(
+                            ClimateEndpointRole.CONTROL,
+                            "humidifier.kids",
+                        ),
+                    ),
+                )
+                if device.kind is ClimateDeviceKind.HUMIDIFIER
+                else device
+                for device in registry.devices
+            ),
+        )
+        sensor = next(
+            device for device in registry.devices if device.room_id == "kids"
+            and device.kind is ClimateDeviceKind.TEMPERATURE_SENSOR
+        )
+        bridge = MemoryBridge()
+        bridge.snapshot = import_climate_state(payload)
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateBridgeMode.CANARY),
+            registry_store=MemoryStore(registry),
+            contour_store=MemoryContourStore(contours),
+            bridge_client=bridge,
+            now_ms=lambda: 1784280005000,
+        )
+        await runtime.async_start()
+
+        receipt = await runtime.async_climate_promote_room("kids")
+
+        self.assertIs(receipt.status, ClimateOwnershipStatus.PROMOTED)  # type: ignore[union-attr]
+        self.assertEqual(1, receipt.device_count)  # type: ignore[union-attr]
+        self.assertEqual(1, receipt.promoted_count)  # type: ignore[union-attr]
+        self.assertEqual((), receipt.reasons)  # type: ignore[union-attr]
+        self.assertIs(sensor.control_scope, ClimateControlScope.OBSERVED)
+
+    async def test_promote_registry_failure_keeps_the_previous_registry(
+        self,
+    ) -> None:
+        bridge = MemoryBridge()
+        registry, contours = build_climate_contour_setup(
+            bridge.snapshot,
+            room_ids=["kids"],
+            source_ids=["synthetic-humidifier-source-kids"],
+            name="Климат",
+            mode="automatic",
+            target_temperature=25.0,
+            target_humidity=45,
+            strategy="normal",
+        )
+        registry = ClimateRegistry(
+            rooms=registry.rooms,
+            devices=(
+                replace(
+                    registry.devices[0],
+                    control_scope=ClimateControlScope.CANARY,
+                    capabilities=(
+                        ClimateCapability.POWER,
+                        ClimateCapability.TARGET_HUMIDITY,
+                    ),
+                    endpoints=(
+                        ClimateEndpoint(
+                            ClimateEndpointRole.CONTROL,
+                            "humidifier.kids",
+                        ),
+                    ),
+                ),
+            ),
+        )
+        store = FailingRegistryStore(registry)
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateBridgeMode.CANARY),
+            registry_store=store,
+            contour_store=MemoryContourStore(contours),
+            bridge_client=bridge,
+            now_ms=lambda: 1784280005000,
+        )
+        await runtime.async_start()
+        store.fail = True
+
+        receipt = await runtime.async_climate_promote_room("kids")
+
+        self.assertIs(receipt.status, ClimateOwnershipStatus.FAILED)  # type: ignore[union-attr]
+        self.assertEqual(
+            (ClimateOwnershipReason.REGISTRY_SAVE_FAILED,),
+            receipt.reasons,  # type: ignore[union-attr]
+        )
+        retry = await runtime.async_climate_promote_room("kids")
+        self.assertIsNot(retry.status, ClimateOwnershipStatus.ALREADY_MANAGED)  # type: ignore[union-attr]
         self.assertEqual([], bridge.executed)
 
     async def test_shadow_refreshes_but_never_posts(self) -> None:

@@ -30,6 +30,7 @@ async def async_start_climate_trial(
     async def async_check(now: datetime) -> None:
         try:
             await runtime.async_run_climate_trial()
+            await runtime.async_run_climate_managed()
         except Exception as error:
             _LOGGER.warning(
                 "HausmanHub could not run the internal climate trial: %s",

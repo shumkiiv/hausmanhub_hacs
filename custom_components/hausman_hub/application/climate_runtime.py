@@ -8,12 +8,18 @@ from datetime import datetime
 import time
 from typing import Protocol
 
-from ..domain.climate import ClimateRegistry
+from ..domain.climate import (
+    ClimateControlScope,
+    ClimateDeviceKind,
+    ClimateEndpointRole,
+    ClimateRegistry,
+)
 from ..domain.climate_comparison import ClimateComparisonSnapshot
 from ..domain.climate_demand import ClimateDemandSnapshot
 from ..domain.climate_equipment import ClimateEquipmentSnapshot
 from ..domain.climate_ha_calls import ClimateHaCallPlanSnapshot, ClimateHaServiceCall
 from ..domain.climate_isolation import ClimateIsolationSnapshot
+from ..domain.climate_ownership import ClimateOwnershipReceipt
 from ..domain.climate_observation import (
     ClimateObservationSnapshot,
     ClimateObservationViolation,
@@ -68,6 +74,12 @@ from .climate_trial_control import (
     climate_trial_failure_receipt,
     climate_trial_skip_receipt,
     plan_climate_trial,
+)
+from .climate_ownership import (
+    climate_ownership_failure_receipt,
+    climate_ownership_promoted_receipt,
+    climate_ownership_skip_receipt,
+    plan_room_promotion,
 )
 from .climate_registry import (
     reconcile_climate_registry,
@@ -175,6 +187,14 @@ class ClimateTrialCallExecutor(Protocol):
 
     async def async_execute(self, calls: tuple[ClimateHaServiceCall, ...]) -> int:
         """Execute strict calls in order; return the completed count."""
+
+
+_PASSIVE_KINDS = frozenset(
+    {
+        ClimateDeviceKind.TEMPERATURE_SENSOR,
+        ClimateDeviceKind.HUMIDITY_SENSOR,
+    }
+)
 
 
 class ClimateRuntime:
@@ -1010,31 +1030,143 @@ class ClimateRuntime:
                 call_plan=call_plan,
                 registry=self._registry,
             )
-            if not decision.permitted:
-                return climate_trial_skip_receipt(decision)
-            if self._trial_executor is None:
-                return climate_trial_failure_receipt(
+            return await self._async_apply_trial_decision(decision)
+
+    async def async_run_climate_managed(
+        self,
+    ) -> tuple[ClimateTrialReceipt, ...]:
+        """Run one gated control check for every HausmanHub-managed room."""
+
+        async with self._lock:
+            contour = self._contours.contour(CLIMATE_CONTOUR_ID)
+            if contour is None:
+                return ()
+            managed_room_ids = self._managed_room_ids(contour)
+            if not managed_room_ids:
+                return ()
+            observation = await self._async_native_climate_observation_unlocked()
+            isolation = build_isolated_climate_policy_snapshot(contour, observation)
+            comparison = build_climate_comparison_snapshot(isolation, observation)
+            call_plan = build_climate_ha_call_plan(self._registry, isolation)
+            receipts: list[ClimateTrialReceipt] = []
+            for room_id in managed_room_ids:
+                decision = plan_climate_trial(
+                    room_id,
+                    bridge_mode=self.configuration.climate_bridge_mode,
+                    contour_mode=contour.mode,
+                    isolation=isolation,
+                    comparison=comparison,
+                    call_plan=call_plan,
+                    registry=self._registry,
+                    required_scope=ClimateControlScope.MANAGED,
+                    allowed_bridge_modes=frozenset(
+                        {
+                            ClimateBridgeMode.CANARY,
+                            ClimateBridgeMode.MANAGED,
+                        }
+                    ),
+                )
+                receipts.append(await self._async_apply_trial_decision(decision))
+            return tuple(receipts)
+
+    async def async_climate_promote_room(
+        self,
+        room_id: object,
+    ) -> ClimateOwnershipReceipt | None:
+        """Promote one verified room into HausmanHub management, atomically."""
+
+        async with self._lock:
+            contour = self._contours.contour(CLIMATE_CONTOUR_ID)
+            if contour is None or not isinstance(room_id, str):
+                return None
+            observation = await self._async_native_climate_observation_unlocked()
+            isolation = build_isolated_climate_policy_snapshot(contour, observation)
+            comparison = build_climate_comparison_snapshot(isolation, observation)
+            decision = plan_room_promotion(
+                room_id,
+                bridge_mode=self.configuration.climate_bridge_mode,
+                contour=contour,
+                isolation=isolation,
+                comparison=comparison,
+                registry=self._registry,
+            )
+            observed_at = observation.observed_at
+            if decision.registry is None:
+                return climate_ownership_skip_receipt(
                     decision,
-                    reason=ClimateTrialReason.EXECUTOR_UNAVAILABLE,
-                    executed_count=0,
+                    observed_at=observed_at,
+                )
+            if self._registry_store is None:
+                self.last_error = "ClimateRegistryStoreUnavailable"
+                return climate_ownership_failure_receipt(
+                    decision,
+                    observed_at=observed_at,
                 )
             try:
-                executed = await self._trial_executor.async_execute(decision.calls)
+                await self._registry_store.async_save(decision.registry)
             except Exception as error:
                 self.last_error = type(error).__name__
-                return climate_trial_failure_receipt(
+                return climate_ownership_failure_receipt(
                     decision,
-                    reason=ClimateTrialReason.SERVICE_ERROR,
-                    executed_count=getattr(error, "completed", 0),
+                    observed_at=observed_at,
                 )
-            if executed != len(decision.calls):
-                self.last_error = "ClimateTrialShortExecution"
-                return climate_trial_failure_receipt(
-                    decision,
-                    reason=ClimateTrialReason.SERVICE_ERROR,
-                    executed_count=executed,
-                )
-            return climate_trial_applied_receipt(decision)
+            self._registry = decision.registry
+            return climate_ownership_promoted_receipt(
+                decision,
+                observed_at=observed_at,
+            )
+
+    def _managed_room_ids(self, contour) -> tuple[str, ...]:
+        trial_room_id = self.configuration.climate_canary_room_id
+        result: list[str] = []
+        for room in contour.rooms:
+            if room.room_id == trial_room_id:
+                continue
+            actuators = tuple(
+                device
+                for device in self._registry.devices
+                if device.device_id in set(room.device_ids)
+                and device.kind not in _PASSIVE_KINDS
+            )
+            if not actuators:
+                continue
+            if all(
+                device.control_scope is ClimateControlScope.MANAGED
+                and device.endpoint(ClimateEndpointRole.CONTROL) is not None
+                for device in actuators
+            ):
+                result.append(room.room_id)
+        return tuple(result)
+
+    async def _async_apply_trial_decision(
+        self,
+        decision,
+    ) -> ClimateTrialReceipt:
+        if not decision.permitted:
+            return climate_trial_skip_receipt(decision)
+        if self._trial_executor is None:
+            return climate_trial_failure_receipt(
+                decision,
+                reason=ClimateTrialReason.EXECUTOR_UNAVAILABLE,
+                executed_count=0,
+            )
+        try:
+            executed = await self._trial_executor.async_execute(decision.calls)
+        except Exception as error:
+            self.last_error = type(error).__name__
+            return climate_trial_failure_receipt(
+                decision,
+                reason=ClimateTrialReason.SERVICE_ERROR,
+                executed_count=getattr(error, "completed", 0),
+            )
+        if executed != len(decision.calls):
+            self.last_error = "ClimateTrialShortExecution"
+            return climate_trial_failure_receipt(
+                decision,
+                reason=ClimateTrialReason.SERVICE_ERROR,
+                executed_count=executed,
+            )
+        return climate_trial_applied_receipt(decision)
 
     async def _async_native_climate_observation_unlocked(
         self,

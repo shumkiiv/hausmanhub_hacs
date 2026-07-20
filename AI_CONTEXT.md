@@ -355,7 +355,29 @@ Last updated: 2026-07-20.
   rooms to avoid double control. The source climate module and Android
   repository remain unchanged. The final staged tree passed 513 local tests,
   the HACS/package/boundary/Android checks, and disposable Home Assistant
-  Core 2026.6.4/2026.7.0.
+  Core   2026.6.4/2026.7.0.
+- Version 1.9.4 completes roadmap item 35. Ownership now expands one verified
+  room at a time. A strict promotion operation moves one room to HausmanHub
+  management only with every guard agreeing: the room is in the contour,
+  bridge mode is `canary` or `managed`, the contour is automatic, the
+  observation is fresh, the room is ready, and the comparison is aligned
+  (verified parity). Every room device must already hold a HausmanHub control
+  endpoint; a partially transferred room is denied. Promotion is atomic: the
+  registry is saved whole, a storage failure keeps the previous registry and
+  yields an honest failure receipt, and re-promotion answers
+  already-managed. Managed rooms run on the same one-minute guard chain as
+  the trial room: act only on divergence, skip on alignment, deny on
+  uncertainty, execute only the strict whitelist with fail-closed order.
+  Ownership receipts are redacted (stable room id, bounded status and
+  reasons, device counts). The source climate module and Android repository
+  remain unchanged. The final staged tree passed 518 local tests, the
+  HACS/package/boundary/Android checks, and disposable Home Assistant Core
+  2026.6.4/2026.7.0. The same iteration aligned contour binding validation
+  with the trial design: CANARY-scoped active devices now count as
+  engine-managed alongside MANAGED, so a trial room no longer starts with a
+  binding error. Passive temperature and humidity sensors legitimately stay
+  observed: they neither block their room's promotion nor need a control
+  endpoint.
 - Workspace boundary: this thread may change only HausmanHub and its integration
   wrapper. The Android application is developed separately in
   `/home/ivsh/projects/УД-android`; it may be inspected only read-only for
@@ -1901,5 +1923,5 @@ Engineering and review rules are in
 
 - Obsidian/context index: `LLM_WIKI/00_Index.md`.
 - Latest generated context: `LLM_WIKI/Context.md`.
-- Last sync: 2026-07-20T23:11:20+03:00.
+- Last sync: 2026-07-20T23:42:42+03:00.
 <!-- llm-wiki-sync:end -->

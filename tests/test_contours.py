@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
@@ -31,6 +32,9 @@ from custom_components.hausman_hub.application.contours import (
 from custom_components.hausman_hub.domain.climate import (
     ClimateControlOwner,
     ClimateControlScope,
+    ClimateEndpoint,
+    ClimateEndpointRole,
+    ClimateRegistry,
 )
 from custom_components.hausman_hub.domain.contours import (
     ClimateProfile,
@@ -523,6 +527,45 @@ class ContoursTest(unittest.TestCase):
 
         with self.assertRaisesRegex(ContourRegistryViolation, "missing"):
             validate_contour_bindings(invalid, climate_registry)
+
+    def test_contour_bindings_accept_canary_and_reject_observed_devices(self) -> None:
+        climate_registry, contours = setup()
+        canary_registry = ClimateRegistry(
+            rooms=climate_registry.rooms,
+            devices=(
+                replace(
+                    climate_registry.devices[0],
+                    control_scope=ClimateControlScope.CANARY,
+                    endpoints=(
+                        ClimateEndpoint(
+                            ClimateEndpointRole.CONTROL,
+                            "climate.living_ac",
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        validate_contour_bindings(contours, canary_registry)
+
+        observed_registry = ClimateRegistry(
+            rooms=climate_registry.rooms,
+            devices=(
+                replace(
+                    climate_registry.devices[0],
+                    control_scope=ClimateControlScope.OBSERVED,
+                    control_owner=ClimateControlOwner.OBSERVED,
+                    endpoints=(
+                        ClimateEndpoint(
+                            ClimateEndpointRole.CONTROL,
+                            "climate.living_ac",
+                        ),
+                    ),
+                ),
+            ),
+        )
+        with self.assertRaisesRegex(ContourRegistryViolation, "managed"):
+            validate_contour_bindings(contours, observed_registry)
 
     def test_mode_change_preserves_assignments_and_parameters(self) -> None:
         _, contours = setup()

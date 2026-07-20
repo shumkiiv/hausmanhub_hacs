@@ -277,7 +277,10 @@ def validate_contour_bindings(
                     )
                 if device.kind in _ACTIVE_KINDS:
                     active_devices += 1
-                    if device.control_scope is not ClimateControlScope.MANAGED:
+                    if device.control_scope not in {
+                        ClimateControlScope.CANARY,
+                        ClimateControlScope.MANAGED,
+                    }:
                         raise ContourRegistryViolation(
                             "automatic contour devices must be managed by their engine"
                         )

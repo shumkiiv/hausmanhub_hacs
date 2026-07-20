@@ -30,8 +30,12 @@ def plan_climate_trial(
     comparison: ClimateComparisonSnapshot,
     call_plan: ClimateHaCallPlanSnapshot,
     registry: ClimateRegistry,
+    required_scope: ClimateControlScope = ClimateControlScope.CANARY,
+    allowed_bridge_modes: frozenset[ClimateBridgeMode] = frozenset(
+        {ClimateBridgeMode.CANARY}
+    ),
 ) -> ClimateTrialDecision:
-    """Evaluate every gate for the single configured trial room."""
+    """Evaluate every gate for one internally controlled room."""
 
     if not isinstance(trial_room_id, str) or not trial_room_id:
         raise ClimateTrialViolation("trial room id is required")
@@ -66,7 +70,7 @@ def plan_climate_trial(
     isolated = isolation.room(trial_room_id)
     if isolated is None:
         return deny(ClimateTrialReason.NO_TRIAL_ROOM)
-    if bridge_mode is not ClimateBridgeMode.CANARY:
+    if bridge_mode not in allowed_bridge_modes:
         return deny(ClimateTrialReason.NOT_TRIAL_MODE)
     if contour_mode is not ContourMode.AUTOMATIC:
         return deny(ClimateTrialReason.CONTOUR_NOT_AUTOMATIC)
@@ -91,7 +95,7 @@ def plan_climate_trial(
         )
         if (
             registered is None
-            or registered.control_scope is not ClimateControlScope.CANARY
+            or registered.control_scope is not required_scope
         ):
             return deny(ClimateTrialReason.DEVICE_NOT_TRIAL_SCOPE)
     if any(device.limits for device in room_plan.devices):
