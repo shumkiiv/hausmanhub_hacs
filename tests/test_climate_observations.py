@@ -180,6 +180,12 @@ class ClimateObservationTest(unittest.TestCase):
                 availability=ClimateDeviceAvailability.MISSING,
                 activity=ClimateDeviceActivity.RUNNING,
             )
+        with self.assertRaises(ClimateObservationViolation):
+            ClimateHomeObservation(heat_load_temperature=101)
+        with self.assertRaises(ClimateObservationViolation):
+            ClimateHomeObservation(
+                heat_load_temperature=True,  # type: ignore[arg-type]
+            )
 
     def test_snapshot_rejects_mutable_duplicates_and_unknown_room_links(self) -> None:
         registry = registry_from_payload(registry_payload())

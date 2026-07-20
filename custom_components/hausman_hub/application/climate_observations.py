@@ -272,6 +272,10 @@ def climate_reference_observation(
                 values.get("outdoor_temperature"),
                 "outdoor temperature",
             ),
+            heat_load_temperature=_optional_number(
+                values.get("heat_load_temperature"),
+                "outdoor heat-load temperature",
+            ),
             central_heating_on=_optional_bool(
                 observation.get("central_heating_on"),
                 "central heating",

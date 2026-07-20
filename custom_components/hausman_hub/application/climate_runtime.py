@@ -10,6 +10,7 @@ from typing import Protocol
 
 from ..domain.climate import ClimateRegistry
 from ..domain.climate_demand import ClimateDemandSnapshot
+from ..domain.climate_equipment import ClimateEquipmentSnapshot
 from ..domain.climate_observation import (
     ClimateObservationSnapshot,
     ClimateObservationViolation,
@@ -34,6 +35,7 @@ from .climate_evidence import (
     candidate_room_from_payload,
     public_intent_context,
 )
+from .climate_equipment import build_climate_equipment_snapshot
 from .climate_import import ClimateImportSnapshot
 from .climate_demands import build_climate_demand_snapshot
 from .climate_operations import _ClimateOperationLedger, ClimateOperationReceipt
@@ -796,6 +798,26 @@ class ClimateRuntime:
             targets = build_climate_target_snapshot(contour, observation)
             demands = build_climate_demand_snapshot(targets, observation)
             return build_climate_resolution_snapshot(demands, observation)
+
+    async def async_native_climate_equipment(
+        self,
+    ) -> ClimateEquipmentSnapshot | None:
+        """Plan thermal equipment without creating intents or commands."""
+
+        async with self._lock:
+            contour = self._contours.contour(CLIMATE_CONTOUR_ID)
+            if contour is None:
+                return None
+            observation = await self._async_native_climate_observation_unlocked()
+            targets = build_climate_target_snapshot(contour, observation)
+            demands = build_climate_demand_snapshot(targets, observation)
+            resolutions = build_climate_resolution_snapshot(demands, observation)
+            return build_climate_equipment_snapshot(
+                contour,
+                targets,
+                resolutions,
+                observation,
+            )
 
     async def _async_native_climate_observation_unlocked(
         self,

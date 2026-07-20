@@ -151,6 +151,7 @@ class ClimateHomeObservation:
     season: ClimateSeason = ClimateSeason.UNKNOWN
     period: ClimateDayPeriod = ClimateDayPeriod.UNKNOWN
     outdoor_temperature: float | None = None
+    heat_load_temperature: float | None = None
     central_heating_on: bool | None = None
     occupancy: ClimateOccupancyMode = ClimateOccupancyMode.HOME
 
@@ -162,6 +163,12 @@ class ClimateHomeObservation:
             -80,
             80,
             "outdoor temperature",
+        )
+        _optional_number(
+            self.heat_load_temperature,
+            -80,
+            100,
+            "outdoor heat-load temperature",
         )
         _optional_bool(self.central_heating_on, "central heating state")
         _require_enum(self.occupancy, ClimateOccupancyMode, "occupancy")

@@ -162,6 +162,31 @@ Last updated: 2026-07-20.
   carried into item 26: the future native adapter must explicitly map the old
   `hvacMode == heating` and active-heating facts into HausmanHub's normalized
   heating-mode observation before external-source removal.
+- Version 1.8.5 completes roadmap item 26. A pure equipment-policy layer maps
+  the resolved thermal direction only to thermal devices explicitly selected
+  in each contour room. Generic air-conditioner profiles match the frozen
+  core's soft/normal/aggressive setpoint, fan, and quiet choices. Radiator
+  thermostats retain the frozen 19 C day, 17 C night, below -10 C cold
+  adjustment, and above 18 C daytime heat-load adjustment, while unknown
+  heating/period data fail closed to observation. Floor heating has an
+  explicitly documented new HausmanHub rule because the frozen module had no
+  complete floor policy. Unavailable devices clear all proposed settings;
+  stale and mixed snapshots cannot create a setting. The immutable plans keep
+  stable HausmanHub IDs only, expose `commands_enabled=False`, and contain no
+  HA entity, private source, service, intent, command, or execution authority.
+  Runtime derives the plan through one non-evidence-mutating read and never
+  posts. The transitional Climate API still does not supply ordinary runtime
+  observations with all home period/heating/weather facts, so live TRV plans
+  remain observe-only until a native HA observation adapter supplies them;
+  this limitation is explicit and must be closed before removing the external
+  module. Item 27 owns running-device hysteresis, timing, and short-cycle
+  protection. The source climate module and Android repository remain
+  unchanged. The final staged tree passed 424 local tests,
+  HACS/package/boundary/Android checks, and disposable Home Assistant Core
+  2026.6.4/2026.7.0. Two read-only OpenCode/Kimi k3 attempts inspected the
+  staged tree and frozen source but returned no terminal report, so neither is
+  counted as PASS: `ses_080b2d8a4ffeFX0o9wFoBmaVH0` and
+  `ses_080aa6566ffelElJG2iyoowP71`.
 - Workspace boundary: this thread may change only HausmanHub and its integration
   wrapper. The Android application is developed separately in
   `/home/ivsh/projects/УД-android`; it may be inspected only read-only for
