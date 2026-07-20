@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 from datetime import datetime
 import unittest
@@ -52,6 +53,9 @@ from custom_components.hausman_hub.domain.climate_stability import (
 from custom_components.hausman_hub.domain.climate_policy import (
     ClimateFinalDeviceAction,
     ClimateRoomPolicy,
+)
+from custom_components.hausman_hub.domain.climate_protection import (
+    ClimateProtectionMemory,
 )
 from custom_components.hausman_hub.domain.configuration import SafeConfiguration
 from custom_components.hausman_hub.domain.native_climate import native_climate_policy
@@ -115,6 +119,30 @@ class MemoryContourStore:
             raise RuntimeError("synthetic contour persistence failure")
         self.registry = registry
         self.saved.append(registry)
+
+
+class MemoryProtectionStore:
+    def __init__(self, memory: ClimateProtectionMemory | None = None) -> None:
+        self.memory = memory
+        self.saved: list[ClimateProtectionMemory] = []
+
+    async def async_load(self) -> ClimateProtectionMemory | None:
+        return self.memory
+
+    async def async_save(self, memory: ClimateProtectionMemory) -> None:
+        self.memory = memory
+        self.saved.append(memory)
+
+
+class FailingProtectionStore(MemoryProtectionStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.fail = False
+
+    async def async_save(self, memory: ClimateProtectionMemory) -> None:
+        if self.fail:
+            raise RuntimeError("synthetic protection persistence failure")
+        await super().async_save(memory)
 
 
 class ContourRollbackFailingStore(MemoryContourStore):
@@ -1700,6 +1728,115 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             ClimateStabilityAction.UNAVAILABLE,
         )
         self.assertEqual(0, bridge.fetch_count)
+        self.assertEqual([], bridge.executed)
+
+    async def test_native_climate_protection_rearms_once_after_restart(
+        self,
+    ) -> None:
+        bridge = MemoryBridge()
+        bridge.snapshot = replace(
+            bridge.snapshot,
+            rooms=tuple(
+                replace(room, temperature=24.0)
+                if room.room_id == "living"
+                else room
+                for room in bridge.snapshot.rooms
+            ),
+        )
+        registry, contours = build_climate_contour_setup(
+            bridge.snapshot,
+            room_ids=["living"],
+            source_ids=["synthetic-ac-source-living"],
+            name="Климат",
+            mode="automatic",
+            target_temperature=25.0,
+            target_humidity=45,
+            strategy="normal",
+        )
+        protection_store = MemoryProtectionStore()
+        clock = [1784280005000]
+        first_runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateBridgeMode.SHADOW),
+            registry_store=MemoryStore(registry),
+            contour_store=MemoryContourStore(contours),
+            protection_store=protection_store,
+            bridge_client=bridge,
+            now_ms=lambda: clock[0],
+        )
+        await first_runtime.async_start()
+
+        first = await first_runtime.async_native_climate_stability()
+
+        self.assertEqual(
+            480,
+            first.room("living")  # type: ignore[union-attr]
+            .device("living_air_conditioner")
+            .remaining_seconds,
+        )
+        self.assertIsNotNone(protection_store.memory)
+        clock[0] += 2 * 60_000
+        restarted_runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateBridgeMode.SHADOW),
+            registry_store=MemoryStore(registry),
+            contour_store=MemoryContourStore(contours),
+            protection_store=protection_store,
+            bridge_client=bridge,
+            now_ms=lambda: clock[0],
+        )
+        await restarted_runtime.async_start()
+
+        rearmed = await restarted_runtime.async_native_climate_stability()
+        clock[0] += 60_000
+        continued = await restarted_runtime.async_native_climate_stability()
+
+        self.assertEqual(
+            480,
+            rearmed.room("living")  # type: ignore[union-attr]
+            .device("living_air_conditioner")
+            .remaining_seconds,
+        )
+        self.assertEqual(
+            420,
+            continued.room("living")  # type: ignore[union-attr]
+            .device("living_air_conditioner")
+            .remaining_seconds,
+        )
+        self.assertFalse(continued.commands_enabled)  # type: ignore[union-attr]
+        self.assertEqual([], bridge.executed)
+
+    async def test_native_climate_protection_storage_failure_fails_closed(
+        self,
+    ) -> None:
+        bridge = MemoryBridge()
+        registry, contours = build_climate_contour_setup(
+            bridge.snapshot,
+            room_ids=["living"],
+            source_ids=["synthetic-ac-source-living"],
+            name="Климат",
+            mode="automatic",
+            target_temperature=25.0,
+            target_humidity=45,
+            strategy="normal",
+        )
+        protection_store = FailingProtectionStore()
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateBridgeMode.SHADOW),
+            registry_store=MemoryStore(registry),
+            contour_store=MemoryContourStore(contours),
+            protection_store=protection_store,
+            bridge_client=bridge,
+            now_ms=lambda: 1784280005000,
+        )
+        await runtime.async_start()
+        protection_store.fail = True
+
+        with self.assertRaises(ClimateRuntimeUnavailable):
+            await runtime.async_native_climate_stability()
+
+        self.assertEqual("RuntimeError", runtime.last_error)
         self.assertEqual([], bridge.executed)
 
     async def test_native_climate_policy_reads_once_without_evidence_or_posts(

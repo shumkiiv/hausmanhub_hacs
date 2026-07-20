@@ -17,6 +17,10 @@ from ..domain.climate_observation import (
     ClimateObservationViolation,
 )
 from ..domain.climate_policy import ClimatePolicySnapshot
+from ..domain.climate_protection import (
+    ClimateProtectionMemory,
+    empty_climate_protection_memory,
+)
 from ..domain.climate_resolution import ClimateResolutionSnapshot
 from ..domain.climate_stability import ClimateStabilitySnapshot
 from ..domain.climate_bridge import ClimateBridgeMode
@@ -48,6 +52,10 @@ from .climate_observations import (
     unavailable_climate_observation_snapshot,
 )
 from .climate_policy import build_climate_policy_snapshot
+from .climate_protection import (
+    reconcile_climate_protection_memory,
+    update_climate_protection,
+)
 from .climate_resolutions import build_climate_resolution_snapshot
 from .climate_stability import build_climate_stability_snapshot
 from .climate_registry import (
@@ -141,6 +149,16 @@ class ContourStorage(Protocol):
         """Atomically save one complete contour registry."""
 
 
+class ClimateProtectionStorage(Protocol):
+    """Minimal persistence boundary for restart-safe transition facts."""
+
+    async def async_load(self) -> ClimateProtectionMemory | None:
+        """Load validated protection memory when it exists."""
+
+    async def async_save(self, memory: ClimateProtectionMemory) -> None:
+        """Atomically save one complete protection memory."""
+
+
 class ClimateRuntime:
     """One loaded HausmanHub entry's climate facade and rollout state."""
 
@@ -153,6 +171,7 @@ class ClimateRuntime:
         bridge_client: ClimateBridgeClient | None,
         evidence_store: ClimateEvidenceStorage | None = None,
         contour_store: ContourStorage | None = None,
+        protection_store: ClimateProtectionStorage | None = None,
         operation_id_factory: Callable[[], str] | None = None,
         now_ms: Callable[[], int] | None = None,
         local_now: Callable[[], datetime] | None = None,
@@ -163,12 +182,15 @@ class ClimateRuntime:
         self._bridge_client = bridge_client
         self._evidence_store = evidence_store
         self._contour_store = contour_store
+        self._protection_store = protection_store
         self._now_ms = now_ms or (lambda: int(time.time() * 1000))
         self._local_now = local_now or (lambda: datetime.now().astimezone())
         self._registry = ClimateRegistry()
         self._snapshot: ClimateImportSnapshot | None = None
         self._evidence: ClimateShadowEvidence | None = None
         self._contours = ContourRegistry()
+        self._protection_memory = empty_climate_protection_memory(updated_at=0)
+        self._protection_restart_after: int | None = None
         self._lock = asyncio.Lock()
         self._operations = _ClimateOperationLedger(
             operation_id_factory=operation_id_factory,
@@ -217,6 +239,29 @@ class ClimateRuntime:
                 )
                 validate_contour_bindings(self._contours, self._registry)
                 now = self._safe_now()
+                loaded_protection = (
+                    await self._protection_store.async_load()
+                    if self._protection_store is not None
+                    else None
+                )
+                protection = loaded_protection or empty_climate_protection_memory(
+                    updated_at=now
+                )
+                protection, protection_changed = (
+                    reconcile_climate_protection_memory(
+                        protection,
+                        self._registry,
+                        now_ms=now,
+                    )
+                )
+                self._protection_memory = protection
+                self._protection_restart_after = (
+                    now
+                    if loaded_protection is not None and protection.devices
+                    else None
+                )
+                if loaded_protection is None or protection_changed:
+                    await self._async_save_protection(self._protection_memory)
                 loaded_evidence = (
                     await self._evidence_store.async_load()
                     if self._evidence_store is not None
@@ -912,7 +957,7 @@ class ClimateRuntime:
                 snapshot = None
         observed_at = self._safe_now()
         try:
-            return (
+            observation = (
                 unavailable_climate_observation_snapshot(
                     self._registry,
                     observed_at=observed_at,
@@ -925,10 +970,28 @@ class ClimateRuntime:
                 )
             )
         except ClimateObservationViolation:
-            return unavailable_climate_observation_snapshot(
+            observation = unavailable_climate_observation_snapshot(
                 self._registry,
                 observed_at=observed_at,
             )
+        try:
+            update = update_climate_protection(
+                self._protection_memory,
+                self._registry,
+                observation,
+                restart_rearm_after=self._protection_restart_after,
+            )
+            if update.changed:
+                await self._async_save_protection(update.memory)
+            self._protection_memory = update.memory
+            if update.rearm_complete:
+                self._protection_restart_after = None
+            return update.observation
+        except Exception as error:
+            self.last_error = type(error).__name__
+            raise ClimateRuntimeUnavailable(
+                "climate protection memory is unavailable"
+            ) from error
 
     async def async_readiness(self) -> dict[str, object]:
         """Return redacted bridge and registry readiness to a local admin."""
@@ -1343,6 +1406,13 @@ class ClimateRuntime:
     async def _async_save_evidence(self) -> None:
         if self._evidence_store is not None:
             await self._evidence_store.async_save(self._require_evidence())
+
+    async def _async_save_protection(
+        self,
+        memory: ClimateProtectionMemory,
+    ) -> None:
+        if self._protection_store is not None:
+            await self._protection_store.async_save(memory)
 
     def _candidate_is_ready(
         self,

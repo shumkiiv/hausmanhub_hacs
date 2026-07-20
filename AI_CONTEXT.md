@@ -262,9 +262,26 @@ Last updated: 2026-07-20.
   `commands_enabled=False`. Runtime obtains one observation without evidence
   mutation or POST. Item 30 owns restoration of state and protective delays
   after restart. The source climate module and Android repository remain
-  unchanged. The final staged tree passed 463 local tests,
-  HACS/package/boundary/Android checks, and disposable Home Assistant Core
-  2026.6.4/2026.7.0.
+   unchanged. The final staged tree passed 463 local tests,
+   HACS/package/boundary/Android checks, and disposable Home Assistant Core
+   2026.6.4/2026.7.0.
+- Version 1.8.9 completes roadmap item 30. Confirmed climate transition facts
+  now survive a Home Assistant restart. For every configured air conditioner a
+  versioned per-entry Home Assistant store persists only the normalized phase,
+  the last confirmed start and stop times, and the bounded confirmed
+  short-cycle count, keyed by stable HausmanHub ids with no private bindings,
+  sources, services, or command authority. On startup the memory is reconciled
+  against the current registry: unbound or moved devices are dropped and
+  future-dated memory after a clock change is reset. After a restart with
+  retained memory the protection rearms once conservatively from fresh
+  observations and then continues normally, so protective delays are not
+  silently restarted from zero. A storage failure fails the climate
+  calculation closed with no partial state and no commands;
+  `commands_enabled` remains `False`. The source climate module and Android
+  repository remain unchanged. The independent Kimi review passed after one
+  fix iteration that made the stored version check strictly typed. The final
+  staged tree passed 471 local tests, the HACS/package/boundary/Android
+  checks, and disposable Home Assistant Core 2026.6.4/2026.7.0.
 - Workspace boundary: this thread may change only HausmanHub and its integration
   wrapper. The Android application is developed separately in
   `/home/ivsh/projects/УД-android`; it may be inspected only read-only for
@@ -1804,3 +1821,11 @@ See [repository basics](docs/repository-basics.md) and
 [foundation handoff](LLM_WIKI/Manual/2026-07-13-hausmanhub-repository-foundation.md).
 Engineering and review rules are in
 [engineering standards](docs/engineering-standards.md).
+
+<!-- llm-wiki-sync:start -->
+## LLM Wiki
+
+- Obsidian/context index: `LLM_WIKI/00_Index.md`.
+- Latest generated context: `LLM_WIKI/Context.md`.
+- Last sync: 2026-07-20T21:05:52+03:00.
+<!-- llm-wiki-sync:end -->
