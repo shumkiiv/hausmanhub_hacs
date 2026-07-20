@@ -37,7 +37,7 @@
         "version": 1
       },
       "response_contract": {
-        "name": "hausman-hub-contour-apply-receipt",
+        "name": "hausman-hub-climate-control-receipt",
         "version": 1
       }
     },
@@ -51,7 +51,7 @@
         "version": 1
       },
       "response_contract": {
-        "name": "hausman-hub-contour-apply-receipt",
+        "name": "hausman-hub-climate-control-receipt",
         "version": 1
       }
     },

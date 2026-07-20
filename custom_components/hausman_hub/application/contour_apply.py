@@ -19,7 +19,13 @@ from typing import Any
 
 from ..domain.climate import ClimateRegistry
 from ..domain.climate_bridge import ClimateBridgeMode
-from ..domain.contours import ClimateContourRoom, ContourDefinition, ContourMode
+from ..domain.contours import (
+    ClimateContourRoom,
+    ClimateProfile,
+    ContourDefinition,
+    ContourMode,
+    climate_target_temperature,
+)
 from .climate_commands import (
     ClimateCommandPlan,
     ClimateCommandViolation,
@@ -30,12 +36,14 @@ from .climate_import import ClimateImportSnapshot
 
 CONTOUR_APPLY_REQUEST_CONTRACT_NAME = "hausman-hub-contour-apply-request"
 CONTOUR_APPLY_PREVIEW_CONTRACT_NAME = "hausman-hub-contour-apply-preview"
-CONTOUR_APPLY_RECEIPT_CONTRACT_NAME = "hausman-hub-contour-apply-receipt"
 CONTOUR_APPLY_CONTRACT_VERSION = 1
+CLIMATE_CONTROL_RECEIPT_CONTRACT_NAME = "hausman-hub-climate-control-receipt"
+CLIMATE_CONTROL_RECEIPT_CONTRACT_VERSION = 1
 MAX_CONTOUR_APPLY_RECORDS = 256
 MAX_CONTOUR_APPLY_COMMANDS = 128 * 3
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
 _OPERATION_ID = re.compile(r"^[a-f0-9]{32}$")
+_STABLE_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 
 
 class ContourApplyViolation(ValueError):
@@ -50,6 +58,101 @@ class ContourApplyStatus(StrEnum):
     PARTIAL = "partial"
     REJECTED = "rejected"
     UNAVAILABLE = "unavailable"
+
+
+class ClimateControlAction(StrEnum):
+    """User-visible actions sharing one climate-control receipt."""
+
+    APPLY_SAVED_SETTINGS = "apply_saved_settings"
+    APPLY_SCHEDULE_PROFILE = "apply_schedule_profile"
+    SET_TEMPORARY_TEMPERATURE = "set_temporary_temperature"
+    RETURN_TO_SCHEDULE = "return_to_schedule"
+
+
+_ACTION_NAMES = {
+    ClimateControlAction.APPLY_SAVED_SETTINGS: "Применить настройки климата",
+    ClimateControlAction.APPLY_SCHEDULE_PROFILE: "Переключить профиль по расписанию",
+    ClimateControlAction.SET_TEMPORARY_TEMPERATURE: "Временно изменить температуру",
+    ClimateControlAction.RETURN_TO_SCHEDULE: "Вернуть температуру по расписанию",
+}
+_STATUS_NAMES = {
+    ContourApplyStatus.PENDING: "Проверяется",
+    ContourApplyStatus.CONFIRMED: "Выполнено",
+    ContourApplyStatus.PARTIAL: "Выполнено частично",
+    ContourApplyStatus.REJECTED: "Отклонено",
+    ContourApplyStatus.UNAVAILABLE: "Результат неизвестен",
+}
+_REASON_NAMES = {
+    "already_in_sync": "Нужные настройки уже действуют.",
+    "engine_rejected": "Климатическая система отклонила команду.",
+    "command_result_unavailable": "Не удалось надёжно узнать результат команды.",
+    "verification_unavailable": "Команда принята, но проверка результата пока недоступна.",
+    "state_not_confirmed": "Новое состояние пока не подтверждено.",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class ClimateControlContext:
+    """Exact public meaning of one contour-backed climate operation."""
+
+    action: ClimateControlAction
+    room_id: str | None = None
+    target_temperature: float | None = None
+    profile: ClimateProfile | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.action, ClimateControlAction):
+            raise ContourApplyViolation("climate control action is invalid")
+        room_action = self.action in {
+            ClimateControlAction.SET_TEMPORARY_TEMPERATURE,
+            ClimateControlAction.RETURN_TO_SCHEDULE,
+        }
+        if room_action:
+            if (
+                not isinstance(self.room_id, str)
+                or _STABLE_ID.fullmatch(self.room_id) is None
+            ):
+                raise ContourApplyViolation("climate control room is invalid")
+            try:
+                normalized_temperature = climate_target_temperature(
+                    self.target_temperature
+                )
+            except ValueError as error:
+                raise ContourApplyViolation(str(error)) from error
+            object.__setattr__(
+                self,
+                "target_temperature",
+                normalized_temperature,
+            )
+            if self.profile is not None:
+                raise ContourApplyViolation(
+                    "room climate control cannot include a schedule profile"
+                )
+            return
+        if self.room_id is not None or self.target_temperature is not None:
+            raise ContourApplyViolation(
+                "whole-contour climate control cannot include room values"
+            )
+        if self.action is ClimateControlAction.APPLY_SCHEDULE_PROFILE:
+            if not isinstance(self.profile, ClimateProfile):
+                raise ContourApplyViolation(
+                    "scheduled climate control profile is invalid"
+                )
+        elif self.profile is not None:
+            raise ContourApplyViolation(
+                "manual contour application cannot include a schedule profile"
+            )
+
+    def as_payload(self) -> dict[str, object]:
+        """Return one strict self-describing action block."""
+
+        return {
+            "code": self.action.value,
+            "name": _ACTION_NAMES[self.action],
+            "room_id": self.room_id,
+            "target_temperature": self.target_temperature,
+            "profile": None if self.profile is None else self.profile.value,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,6 +213,7 @@ class ContourApplyReceipt:
     operation_id: str
     request_id: str
     contour_id: str
+    context: ClimateControlContext
     status: ContourApplyStatus
     room_count: int
     command_count: int
@@ -122,18 +226,28 @@ class ContourApplyReceipt:
     created_at: int
     updated_at: int
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.context, ClimateControlContext):
+            raise ContourApplyViolation("climate control receipt context is invalid")
+        if not isinstance(self.status, ContourApplyStatus):
+            raise ContourApplyViolation("climate control receipt status is invalid")
+        if any(reason not in _REASON_NAMES for reason in self.reasons):
+            raise ContourApplyViolation("climate control receipt reason is invalid")
+
     def as_payload(self) -> dict[str, object]:
         """Return the exact public receipt shape."""
 
         return {
             "contract": {
-                "name": CONTOUR_APPLY_RECEIPT_CONTRACT_NAME,
-                "version": CONTOUR_APPLY_CONTRACT_VERSION,
+                "name": CLIMATE_CONTROL_RECEIPT_CONTRACT_NAME,
+                "version": CLIMATE_CONTROL_RECEIPT_CONTRACT_VERSION,
             },
             "operation_id": self.operation_id,
             "request_id": self.request_id,
             "contour_id": self.contour_id,
+            "action": self.context.as_payload(),
             "status": self.status.value,
+            "status_name": _STATUS_NAMES[self.status],
             "room_count": self.room_count,
             "command_count": self.command_count,
             "accepted_count": self.accepted_count,
@@ -144,6 +258,7 @@ class ContourApplyReceipt:
                 "automatic_mode": self.automatic_mode_changes,
             },
             "reasons": list(self.reasons),
+            "reason_names": [_REASON_NAMES[reason] for reason in self.reasons],
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -174,19 +289,28 @@ class _ContourApplyLedger:
         self,
         request_id: str,
         fingerprint: str,
+        context: ClimateControlContext,
     ) -> _ContourApplyRecord | None:
         """Return an identical prior request or reject conflicting reuse."""
 
         record = self._records.get(request_id)
         if record is None:
             return None
-        if record.plan.fingerprint != fingerprint:
+        if (
+            record.plan.fingerprint != fingerprint
+            or record.receipt.context != context
+        ):
             raise ContourApplyViolation(
-                "request id was already used for another contour definition"
+                "request id was already used for another climate operation"
             )
         return record
 
-    def begin(self, request_id: str, plan: ContourApplyPlan) -> _ContourApplyRecord:
+    def begin(
+        self,
+        request_id: str,
+        plan: ContourApplyPlan,
+        context: ClimateControlContext,
+    ) -> _ContourApplyRecord:
         """Reserve idempotency before the first backend POST."""
 
         if len(self._records) >= MAX_CONTOUR_APPLY_RECORDS:
@@ -204,6 +328,7 @@ class _ContourApplyLedger:
             operation_id=operation_id,
             request_id=request_id,
             contour_id=plan.contour_id,
+            context=context,
             status=(
                 ContourApplyStatus.CONFIRMED
                 if not plan.commands

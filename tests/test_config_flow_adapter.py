@@ -1245,7 +1245,7 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual("climate_contour_apply_result", result["step_id"])
         self.assertEqual(
-            "настройки подтверждены системой климата",
+            "Выполнено",
             result["description_placeholders"]["status"],
         )
         self.assertEqual(2, len(bridge.executed))
@@ -1335,6 +1335,14 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
             "23.5",
             temporary_result["description_placeholders"]["current_temperature"],
         )
+        self.assertEqual(
+            "Временно изменить температуру",
+            temporary_result["description_placeholders"]["action"],
+        )
+        self.assertEqual(
+            "Выполнено",
+            temporary_result["description_placeholders"]["status"],
+        )
         room_policy = contour_store.registry.contours[0].rooms[0]
         self.assertEqual(23.5, room_policy.target_temperature)
         self.assertEqual(24.5, room_policy.profile_settings.target_temperature)
@@ -1360,6 +1368,14 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             "24.5",
             return_result["description_placeholders"]["current_temperature"],
+        )
+        self.assertEqual(
+            "Вернуть температуру по расписанию",
+            return_result["description_placeholders"]["action"],
+        )
+        self.assertEqual(
+            "Выполнено",
+            return_result["description_placeholders"]["status"],
         )
         self.assertIsNone(contour_store.registry.contours[0].rooms[0].temporary_override)
 

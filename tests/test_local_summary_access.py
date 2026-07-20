@@ -1783,6 +1783,18 @@ class LocalSummaryAccessTest(unittest.TestCase):
 
         self.assertEqual(200, first.status)
         self.assertEqual("confirmed", first.payload["status"])
+        self.assertEqual(
+            {
+                "name": "hausman-hub-climate-control-receipt",
+                "version": 1,
+            },
+            first.payload["contract"],
+        )
+        self.assertEqual(
+            "apply_saved_settings",
+            first.payload["action"]["code"],
+        )
+        self.assertEqual("Выполнено", first.payload["status_name"])
         self.assertEqual(first.payload, duplicate.payload)
         self.assertEqual(3, len(bridge.executed))
         serialized = json.dumps(first.payload, sort_keys=True)
@@ -1846,6 +1858,18 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertEqual(200, temporary_response.status)
         self.assertEqual("confirmed", temporary_response.payload["status"])
         self.assertEqual(1, temporary_response.payload["room_count"])
+        self.assertEqual(
+            "set_temporary_temperature",
+            temporary_response.payload["action"]["code"],
+        )
+        self.assertEqual(
+            "living",
+            temporary_response.payload["action"]["room_id"],
+        )
+        self.assertEqual(
+            23.5,
+            temporary_response.payload["action"]["target_temperature"],
+        )
         self.assertEqual(4, len(bridge.executed))
 
     def test_view_rejects_admin_mixed_group_system_and_public_requests(self) -> None:

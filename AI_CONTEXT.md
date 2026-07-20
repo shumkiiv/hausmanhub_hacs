@@ -52,6 +52,18 @@ Last updated: 2026-07-20.
   tests and disposable Home Assistant Core 2026.6.4/2026.7.0. The independent
   read-only review passed after this canary rule was made explicit and tested in
   OpenCode session `ses_08147ba73ffe8CaWSkrw20gsOX`.
+- Version 1.7.10 completes roadmap item 20. Contour settings application,
+  scheduled profile application, temporary room temperature, and return to the
+  active schedule now emit the same strict
+  `hausman-hub-climate-control-receipt` v1. Its action block contains a stable
+  action code plus Russian name and, only for room actions, the public room ID
+  and effective target temperature. Status and bounded reasons each include a
+  stable code and Russian explanation. No source/entity/device binding,
+  backend command, service, fingerprint, or bridge address is exposed. Request
+  idempotency now binds both desired-state fingerprint and exact action context.
+  The final staged tree passed 373 local tests and disposable Home Assistant
+  Core 2026.6.4/2026.7.0. Independent read-only review passed in OpenCode
+  session `ses_08137d64cffe1UgIfPWWcyU09Q`.
 - Workspace boundary: this thread may change only HausmanHub and its integration
   wrapper. The Android application is developed separately in
   `/home/ivsh/projects/УД-android`; it may be inspected only read-only for

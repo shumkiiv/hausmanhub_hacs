@@ -469,6 +469,16 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNotNone(receipt)
         self.assertEqual("confirmed", receipt.status.value)  # type: ignore[union-attr]
+        self.assertEqual(
+            {
+                "code": "apply_schedule_profile",
+                "name": "Переключить профиль по расписанию",
+                "room_id": None,
+                "target_temperature": None,
+                "profile": "night",
+            },
+            receipt.as_payload()["action"],  # type: ignore[union-attr]
+        )
         self.assertIsNone(repeated)
         self.assertEqual(
             "night",

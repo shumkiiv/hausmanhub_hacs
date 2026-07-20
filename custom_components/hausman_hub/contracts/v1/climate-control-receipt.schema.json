@@ -1,0 +1,213 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hausmanhub/contracts/v1/climate-control-receipt.schema.json",
+  "title": "Единое подтверждение управления климатом HausmanHub v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "operation_id",
+    "request_id",
+    "contour_id",
+    "action",
+    "status",
+    "status_name",
+    "room_count",
+    "command_count",
+    "accepted_count",
+    "confirmed_room_count",
+    "changes",
+    "reasons",
+    "reason_names",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-climate-control-receipt"},
+        "version": {"const": 1}
+      }
+    },
+    "operation_id": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+    "request_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"
+    },
+    "contour_id": {"const": "climate"},
+    "action": {"$ref": "#/$defs/action"},
+    "status": {
+      "enum": ["pending", "confirmed", "partial", "rejected", "unavailable"]
+    },
+    "status_name": {
+      "enum": [
+        "Проверяется",
+        "Выполнено",
+        "Выполнено частично",
+        "Отклонено",
+        "Результат неизвестен"
+      ]
+    },
+    "room_count": {"type": "integer", "minimum": 1, "maximum": 128},
+    "command_count": {"type": "integer", "minimum": 0, "maximum": 384},
+    "accepted_count": {"type": "integer", "minimum": 0, "maximum": 384},
+    "confirmed_room_count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 128
+    },
+    "changes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["temperature", "strategy", "automatic_mode"],
+      "properties": {
+        "temperature": {"type": "integer", "minimum": 0, "maximum": 128},
+        "strategy": {"type": "integer", "minimum": 0, "maximum": 128},
+        "automatic_mode": {"type": "integer", "minimum": 0, "maximum": 128}
+      }
+    },
+    "reasons": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/reason"}
+    },
+    "reason_names": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "Нужные настройки уже действуют.",
+          "Климатическая система отклонила команду.",
+          "Не удалось надёжно узнать результат команды.",
+          "Команда принята, но проверка результата пока недоступна.",
+          "Новое состояние пока не подтверждено."
+        ]
+      }
+    },
+    "created_at": {"type": "integer", "minimum": 0},
+    "updated_at": {"type": "integer", "minimum": 0}
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "status": {"const": "pending"},
+        "status_name": {"const": "Проверяется"}
+      }
+    },
+    {
+      "properties": {
+        "status": {"const": "confirmed"},
+        "status_name": {"const": "Выполнено"}
+      }
+    },
+    {
+      "properties": {
+        "status": {"const": "partial"},
+        "status_name": {"const": "Выполнено частично"}
+      }
+    },
+    {
+      "properties": {
+        "status": {"const": "rejected"},
+        "status_name": {"const": "Отклонено"}
+      }
+    },
+    {
+      "properties": {
+        "status": {"const": "unavailable"},
+        "status_name": {"const": "Результат неизвестен"}
+      }
+    }
+  ],
+  "$defs": {
+    "stable_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+    },
+    "temperature": {
+      "type": "number",
+      "minimum": 18,
+      "maximum": 28,
+      "multipleOf": 0.5
+    },
+    "reason": {
+      "enum": [
+        "already_in_sync",
+        "engine_rejected",
+        "command_result_unavailable",
+        "verification_unavailable",
+        "state_not_confirmed"
+      ]
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "name", "room_id", "target_temperature", "profile"],
+      "properties": {
+        "code": {
+          "enum": [
+            "apply_saved_settings",
+            "apply_schedule_profile",
+            "set_temporary_temperature",
+            "return_to_schedule"
+          ]
+        },
+        "name": {
+          "enum": [
+            "Применить настройки климата",
+            "Переключить профиль по расписанию",
+            "Временно изменить температуру",
+            "Вернуть температуру по расписанию"
+          ]
+        },
+        "room_id": {"type": ["string", "null"]},
+        "target_temperature": {"type": ["number", "null"]},
+        "profile": {
+          "type": ["string", "null"],
+          "enum": ["day", "night", null]
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "code": {"const": "apply_saved_settings"},
+            "name": {"const": "Применить настройки климата"},
+            "room_id": {"type": "null"},
+            "target_temperature": {"type": "null"},
+            "profile": {"type": "null"}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "apply_schedule_profile"},
+            "name": {"const": "Переключить профиль по расписанию"},
+            "room_id": {"type": "null"},
+            "target_temperature": {"type": "null"},
+            "profile": {"enum": ["day", "night"]}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "set_temporary_temperature"},
+            "name": {"const": "Временно изменить температуру"},
+            "room_id": {"$ref": "#/$defs/stable_id"},
+            "target_temperature": {"$ref": "#/$defs/temperature"},
+            "profile": {"type": "null"}
+          }
+        },
+        {
+          "properties": {
+            "code": {"const": "return_to_schedule"},
+            "name": {"const": "Вернуть температуру по расписанию"},
+            "room_id": {"$ref": "#/$defs/stable_id"},
+            "target_temperature": {"$ref": "#/$defs/temperature"},
+            "profile": {"type": "null"}
+          }
+        }
+      ]
+    }
+  }
+}

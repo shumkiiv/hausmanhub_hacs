@@ -2090,14 +2090,22 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
                     ),
                 )
         placeholders = self._temporary_temperature_placeholders(room)
-        placeholders["status"] = _RUSSIAN_CONTOUR_APPLY_STATUS_LABELS.get(
-            receipt.get("status"),
-            "результат неизвестен",
+        placeholders["status"] = str(
+            receipt.get("status_name")
+            or _RUSSIAN_CONTOUR_APPLY_STATUS_LABELS.get(
+                receipt.get("status"),
+                "результат неизвестен",
+            )
         )
-        placeholders["action"] = (
-            "возврат к расписанию"
-            if self._temporary_temperature_action == "clear"
-            else "временная температура"
+        raw_action = receipt.get("action")
+        action = raw_action if isinstance(raw_action, Mapping) else {}
+        placeholders["action"] = str(
+            action.get("name")
+            or (
+                "возврат к расписанию"
+                if self._temporary_temperature_action == "clear"
+                else "временная температура"
+            )
         )
         return self.async_show_form(
             step_id="temporary_temperature_result",
@@ -3866,22 +3874,35 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
         """Render one bounded application receipt in plain Russian."""
 
         payload = self._contour_apply_receipt or {}
-        raw_reasons = payload.get("reasons")
-        reasons = raw_reasons if isinstance(raw_reasons, list) else []
+        raw_reason_names = payload.get("reason_names")
+        reason_names = (
+            raw_reason_names if isinstance(raw_reason_names, list) else []
+        )
         reason_text = "; ".join(
             dict.fromkeys(
-                _RUSSIAN_CONTOUR_APPLY_REASON_LABELS.get(
-                    value,
-                    "неизвестная причина",
-                )
-                for value in reasons
-                if isinstance(value, str)
+                value for value in reason_names if isinstance(value, str)
             )
         )
+        if not reason_text:
+            raw_reasons = payload.get("reasons")
+            reasons = raw_reasons if isinstance(raw_reasons, list) else []
+            reason_text = "; ".join(
+                dict.fromkeys(
+                    _RUSSIAN_CONTOUR_APPLY_REASON_LABELS.get(
+                        value,
+                        "неизвестная причина",
+                    )
+                    for value in reasons
+                    if isinstance(value, str)
+                )
+            )
         return {
-            "status": _RUSSIAN_CONTOUR_APPLY_STATUS_LABELS.get(
-                payload.get("status"),
-                "неизвестно",
+            "status": str(
+                payload.get("status_name")
+                or _RUSSIAN_CONTOUR_APPLY_STATUS_LABELS.get(
+                    payload.get("status"),
+                    "неизвестно",
+                )
             ),
             "command_count": str(payload.get("command_count", 0)),
             "accepted_count": str(payload.get("accepted_count", 0)),

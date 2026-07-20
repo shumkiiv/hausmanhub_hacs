@@ -109,6 +109,10 @@ class ClimateContractSchemasTest(unittest.TestCase):
             "hausmanhub_contour_apply_v1/request.json": "v1/contour-apply-request.schema.json",
             "hausmanhub_contour_apply_v1/preview.json": "v1/contour-apply-preview.schema.json",
             "hausmanhub_contour_apply_v1/receipt.json": "v1/contour-apply-receipt.schema.json",
+            "hausmanhub_climate_control_receipt_v1/apply.json": "v1/climate-control-receipt.schema.json",
+            "hausmanhub_climate_control_receipt_v1/temporary.json": "v1/climate-control-receipt.schema.json",
+            "hausmanhub_climate_control_receipt_v1/return.json": "v1/climate-control-receipt.schema.json",
+            "hausmanhub_climate_control_receipt_v1/schedule.json": "v1/climate-control-receipt.schema.json",
             "hausmanhub_temporary_temperature_v1/request.json": "v1/temporary-temperature-request.schema.json",
         }
         for fixture_name, schema_name in pairs.items():

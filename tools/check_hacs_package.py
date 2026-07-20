@@ -47,6 +47,7 @@ CONTRACT_PATHS = tuple(
         "climate-canary-preflight-query.schema.json",
         "climate-canary-preflight.schema.json",
         "climate-current-setup.schema.json",
+        "climate-control-receipt.schema.json",
         "climate-device-candidates.schema.json",
         "climate-draft-request.schema.json",
         "climate-draft.schema.json",

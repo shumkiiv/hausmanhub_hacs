@@ -16,8 +16,9 @@ from .climate_operations import (
     OPERATION_QUERY_CONTRACT_NAME,
 )
 from .contour_apply import (
+    CLIMATE_CONTROL_RECEIPT_CONTRACT_NAME,
+    CLIMATE_CONTROL_RECEIPT_CONTRACT_VERSION,
     CONTOUR_APPLY_CONTRACT_VERSION,
-    CONTOUR_APPLY_RECEIPT_CONTRACT_NAME,
     CONTOUR_APPLY_REQUEST_CONTRACT_NAME,
 )
 from .contour_override import (
@@ -84,8 +85,8 @@ def api_capabilities_snapshot() -> dict[str, object]:
                     "version": CONTOUR_APPLY_CONTRACT_VERSION,
                 },
                 "response_contract": {
-                    "name": CONTOUR_APPLY_RECEIPT_CONTRACT_NAME,
-                    "version": CONTOUR_APPLY_CONTRACT_VERSION,
+                    "name": CLIMATE_CONTROL_RECEIPT_CONTRACT_NAME,
+                    "version": CLIMATE_CONTROL_RECEIPT_CONTRACT_VERSION,
                 },
             },
             "temporary_room_temperature": {
@@ -98,8 +99,8 @@ def api_capabilities_snapshot() -> dict[str, object]:
                     "version": TEMPORARY_TEMPERATURE_REQUEST_CONTRACT_VERSION,
                 },
                 "response_contract": {
-                    "name": CONTOUR_APPLY_RECEIPT_CONTRACT_NAME,
-                    "version": CONTOUR_APPLY_CONTRACT_VERSION,
+                    "name": CLIMATE_CONTROL_RECEIPT_CONTRACT_NAME,
+                    "version": CLIMATE_CONTROL_RECEIPT_CONTRACT_VERSION,
                 },
             },
             "climate_actions": {

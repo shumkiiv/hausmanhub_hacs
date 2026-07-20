@@ -57,6 +57,8 @@ from .contours import (
     without_climate_temporary_temperature,
 )
 from .contour_apply import (
+    ClimateControlAction,
+    ClimateControlContext,
     ContourApplyReceipt,
     ContourApplyStatus,
     ContourApplyViolation,
@@ -444,7 +446,13 @@ class ClimateRuntime:
 
         request_id, contour_id = parse_contour_apply_request(payload)
         async with self._lock:
-            return await self._async_apply_contour_unlocked(request_id, contour_id)
+            return await self._async_apply_contour_unlocked(
+                request_id,
+                contour_id,
+                context=ClimateControlContext(
+                    action=ClimateControlAction.APPLY_SAVED_SETTINGS,
+                ),
+            )
 
     async def async_run_climate_schedule(
         self,
@@ -490,6 +498,10 @@ class ClimateRuntime:
             return await self._async_apply_contour_unlocked(
                 request_id,
                 CLIMATE_CONTOUR_ID,
+                context=ClimateControlContext(
+                    action=ClimateControlAction.APPLY_SCHEDULE_PROFILE,
+                    profile=selected,
+                ),
             )
 
     async def async_temporary_temperature(
@@ -539,6 +551,20 @@ class ClimateRuntime:
                     "climate contour is not configured"
                 )
             room_scope = (request.room_id,)
+            updated_room = next(
+                room
+                for room in updated_contour.rooms
+                if room.room_id == request.room_id
+            )
+            context = ClimateControlContext(
+                action=(
+                    ClimateControlAction.SET_TEMPORARY_TEMPERATURE
+                    if request.action is TemporaryTemperatureAction.SET
+                    else ClimateControlAction.RETURN_TO_SCHEDULE
+                ),
+                room_id=request.room_id,
+                target_temperature=updated_room.target_temperature,
+            )
             fingerprint = contour_fingerprint(
                 updated_contour,
                 room_ids=room_scope,
@@ -547,12 +573,14 @@ class ClimateRuntime:
                 self._contour_applications.existing(
                     request.request_id,
                     fingerprint,
+                    context,
                 )
                 is not None
             ):
                 return await self._async_apply_contour_unlocked(
                     request.request_id,
                     CLIMATE_CONTOUR_ID,
+                    context=context,
                     room_ids=room_scope,
                 )
             snapshot = await self._async_refresh_unlocked(persist_evidence=False)
@@ -570,6 +598,7 @@ class ClimateRuntime:
             return await self._async_apply_contour_unlocked(
                 request.request_id,
                 CLIMATE_CONTOUR_ID,
+                context=context,
                 room_ids=room_scope,
             )
 
@@ -578,6 +607,7 @@ class ClimateRuntime:
         request_id: str,
         contour_id: str,
         *,
+        context: ClimateControlContext,
         room_ids: tuple[str, ...] | None = None,
     ) -> ContourApplyReceipt:
         """Apply one already validated request while the runtime lock is held."""
@@ -587,7 +617,11 @@ class ClimateRuntime:
         if contour.contour_id != contour_id:
             raise ContourApplyViolation("climate contour is not configured")
         fingerprint = contour_fingerprint(contour, room_ids=room_ids)
-        prior = self._contour_applications.existing(request_id, fingerprint)
+        prior = self._contour_applications.existing(
+            request_id,
+            fingerprint,
+            context,
+        )
         if prior is not None:
             if prior.receipt.status is ContourApplyStatus.PENDING:
                 try:
@@ -621,7 +655,7 @@ class ClimateRuntime:
             snapshot,
             room_ids=room_ids,
         )
-        record = self._contour_applications.begin(request_id, plan)
+        record = self._contour_applications.begin(request_id, plan, context)
         if not plan.commands:
             return record.receipt
 
