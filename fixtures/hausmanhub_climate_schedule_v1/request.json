@@ -1,0 +1,13 @@
+{
+  "contract": {
+    "name": "hausman-hub-climate-schedule-update-request",
+    "version": 1
+  },
+  "setup_revision": 1,
+  "schedule": {
+    "enabled": true,
+    "day_start": "07:00",
+    "night_start": "23:00"
+  },
+  "confirm_automatic_application": true
+}

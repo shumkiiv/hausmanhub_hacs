@@ -39,6 +39,19 @@ Last updated: 2026-07-20.
   read-only OpenCode reviews passed in sessions
   `ses_0816d871effeB7Q1hFv1K1D6DN` and `ses_081692737ffevvtAdFcTaAETTR`
   with no substantial findings.
+- Version 1.7.9 completes roadmap item 19. A local-admin POST at
+  `/api/hausman_hub/v1/admin/climate-schedule` configures the exact day/night
+  wall-clock times and either arms or disarms automatic profile switching.
+  Arming requires an automatic contour, managed bridge mode, explicit consent,
+  and a current full `setup_revision`; saving itself performs one contour-store
+  write and no bridge read or command. Disarming remains deliberately available
+  in disabled, shadow, and canary modes, while re-arming there is rejected.
+  Changed times or disarming clear temporary overrides because their former
+  schedule boundary is no longer valid; an unchanged armed schedule preserves
+  them and the applied-period marker. The final staged tree passed 370 local
+  tests and disposable Home Assistant Core 2026.6.4/2026.7.0. The independent
+  read-only review passed after this canary rule was made explicit and tested in
+  OpenCode session `ses_08147ba73ffe8CaWSkrw20gsOX`.
 - Workspace boundary: this thread may change only HausmanHub and its integration
   wrapper. The Android application is developed separately in
   `/home/ivsh/projects/УД-android`; it may be inspected only read-only for

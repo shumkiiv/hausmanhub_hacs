@@ -6,7 +6,7 @@ import hashlib
 import json
 
 from ..domain.climate import ClimateRegistry
-from ..domain.contours import ContourRegistry
+from ..domain.contours import ContourMode, ContourRegistry
 from .contours import (
     ContourRegistryViolation,
     build_climate_contour_setup,
@@ -15,6 +15,7 @@ from .contours import (
     contour_registry_to_payload,
     validate_contour_bindings,
     with_climate_room_profiles,
+    with_climate_schedule,
 )
 from .climate_import import ClimateImportSnapshot
 from .climate_registry_import import (
@@ -50,6 +51,12 @@ CLIMATE_PROFILE_UPDATE_REQUEST_CONTRACT_NAME = (
 CLIMATE_PROFILE_UPDATE_REQUEST_CONTRACT_VERSION = 1
 CLIMATE_PROFILE_UPDATE_CONTRACT_NAME = "hausman-hub-climate-profile-update"
 CLIMATE_PROFILE_UPDATE_CONTRACT_VERSION = 1
+CLIMATE_SCHEDULE_UPDATE_REQUEST_CONTRACT_NAME = (
+    "hausman-hub-climate-schedule-update-request"
+)
+CLIMATE_SCHEDULE_UPDATE_REQUEST_CONTRACT_VERSION = 1
+CLIMATE_SCHEDULE_UPDATE_CONTRACT_NAME = "hausman-hub-climate-schedule-update"
+CLIMATE_SCHEDULE_UPDATE_CONTRACT_VERSION = 1
 MAX_CLIMATE_DRAFT_NAME_LENGTH = 120
 MAX_CLIMATE_DRAFT_ROOMS = 128
 MAX_CLIMATE_DRAFT_DEVICES = 512
@@ -98,6 +105,18 @@ _CLIMATE_PROFILE_UPDATE_REQUEST_FIELDS = frozenset(
 )
 _CLIMATE_PROFILE_UPDATE_CONTRACT_FIELDS = frozenset({"name", "version"})
 _CLIMATE_PROFILE_UPDATE_ROOM_FIELDS = frozenset({"room_id", "profiles"})
+_CLIMATE_SCHEDULE_UPDATE_REQUEST_FIELDS = frozenset(
+    {
+        "contract",
+        "setup_revision",
+        "schedule",
+        "confirm_automatic_application",
+    }
+)
+_CLIMATE_SCHEDULE_UPDATE_CONTRACT_FIELDS = frozenset({"name", "version"})
+_CLIMATE_SCHEDULE_UPDATE_FIELDS = frozenset(
+    {"enabled", "day_start", "night_start"}
+)
 _ACTIVE_CLIMATE_DRAFT_TYPES = frozenset(
     {"air_conditioner", "radiator_thermostat", "humidifier", "floor_heating"}
 )
@@ -1010,6 +1029,155 @@ def update_climate_profiles(
             else "Профили сохранены. Команды устройствам не отправлялись."
         ),
         "rooms": receipt_rooms,
+    }
+    return updated, receipt
+
+
+def update_climate_schedule(
+    registry: ClimateRegistry,
+    contours: ContourRegistry,
+    payload: object,
+    *,
+    saved_at: int,
+    automatic_application_enabled: bool,
+) -> tuple[ContourRegistry, dict[str, object]]:
+    """Validate and save the day/night schedule without sending commands."""
+
+    if type(saved_at) is not int or saved_at < 0:
+        raise ClimateSetupViolation("climate schedule save time is invalid")
+    if type(automatic_application_enabled) is not bool:
+        raise ClimateSetupViolation("automatic climate application flag is invalid")
+    request = _exact_mapping(
+        payload,
+        _CLIMATE_SCHEDULE_UPDATE_REQUEST_FIELDS,
+        "climate schedule update request",
+    )
+    contract = _exact_mapping(
+        request["contract"],
+        _CLIMATE_SCHEDULE_UPDATE_CONTRACT_FIELDS,
+        "climate schedule update request contract",
+    )
+    if (
+        contract["name"] != CLIMATE_SCHEDULE_UPDATE_REQUEST_CONTRACT_NAME
+        or contract["version"]
+        != CLIMATE_SCHEDULE_UPDATE_REQUEST_CONTRACT_VERSION
+    ):
+        raise ClimateSetupViolation(
+            "climate schedule update request contract is unsupported"
+        )
+
+    expected_revision = climate_setup_revision(registry, contours)
+    supplied_revision = request["setup_revision"]
+    if (
+        type(supplied_revision) is not int
+        or not 0 <= supplied_revision <= JSON_SAFE_INTEGER_MAXIMUM
+    ):
+        raise ClimateSetupViolation("climate setup revision is invalid")
+    if supplied_revision != expected_revision:
+        raise ClimateSetupViolation(
+            "climate setup changed after it was opened",
+            code="setup_changed",
+        )
+
+    contour = contours.contour("climate")
+    if contour is None:
+        raise ClimateSetupViolation(
+            "climate contour is not configured",
+            code="not_configured",
+        )
+    schedule = _exact_mapping(
+        request["schedule"],
+        _CLIMATE_SCHEDULE_UPDATE_FIELDS,
+        "climate schedule",
+    )
+    enabled = schedule["enabled"]
+    confirmed = request["confirm_automatic_application"]
+    if type(enabled) is not bool:
+        raise ClimateSetupViolation("climate schedule enabled must be boolean")
+    if type(confirmed) is not bool:
+        raise ClimateSetupViolation(
+            "climate schedule automatic application confirmation must be boolean"
+        )
+    if enabled and not confirmed:
+        raise ClimateSetupViolation(
+            "automatic climate schedule needs explicit confirmation",
+            code="confirmation_required",
+        )
+    if not enabled and confirmed:
+        raise ClimateSetupViolation(
+            "disabled climate schedule cannot retain automatic confirmation"
+        )
+    if enabled and contour.mode is not ContourMode.AUTOMATIC:
+        raise ClimateSetupViolation(
+            "climate schedule requires automatic contour mode",
+            code="automatic_mode_required",
+        )
+    if enabled and not automatic_application_enabled:
+        raise ClimateSetupViolation(
+            "climate schedule requires managed climate control",
+            code="managed_control_required",
+        )
+
+    overrides_before = sum(
+        room.temporary_override is not None for room in contour.rooms
+    )
+    try:
+        updated = with_climate_schedule(
+            contours,
+            enabled=enabled,
+            day_start=schedule["day_start"],
+            night_start=schedule["night_start"],
+        )
+    except ContourRegistryViolation as error:
+        raise ClimateSetupViolation(str(error)) from error
+    updated_contour = updated.contour("climate")
+    if updated_contour is None:  # pragma: no cover - preserved by the use case
+        raise ClimateSetupViolation("updated climate contour is unavailable")
+    overrides_after = sum(
+        room.temporary_override is not None for room in updated_contour.rooms
+    )
+    overrides_cleared = overrides_before - overrides_after
+    automatic_application_pending = (
+        enabled
+        and automatic_application_enabled
+        and updated_contour.schedule.last_applied_profile is None
+    )
+    if automatic_application_pending:
+        message = (
+            "Расписание включено. Нужный профиль будет применён при ближайшей "
+            "проверке времени."
+        )
+    elif enabled:
+        message = (
+            "Расписание сохранено и уже соответствует выбранному времени. "
+            "Команды устройствам не отправлялись."
+        )
+    else:
+        message = (
+            "Расписание выключено. Автоматические переключения остановлены."
+        )
+    receipt = {
+        "contract": {
+            "name": CLIMATE_SCHEDULE_UPDATE_CONTRACT_NAME,
+            "version": CLIMATE_SCHEDULE_UPDATE_CONTRACT_VERSION,
+        },
+        "saved_at": saved_at,
+        "setup_revision": climate_setup_revision(registry, updated),
+        "status": "saved",
+        "commands_sent": False,
+        "automatic_application_pending": automatic_application_pending,
+        "temporary_overrides_cleared": overrides_cleared,
+        "schedule": {
+            "enabled": updated_contour.schedule.enabled,
+            "day_start": updated_contour.schedule.day_start,
+            "night_start": updated_contour.schedule.night_start,
+            "last_applied_profile": (
+                None
+                if updated_contour.schedule.last_applied_profile is None
+                else updated_contour.schedule.last_applied_profile.value
+            ),
+        },
+        "message": message,
     }
     return updated, receipt
 

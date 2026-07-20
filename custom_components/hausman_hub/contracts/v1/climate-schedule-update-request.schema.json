@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hausmanhub/contracts/v1/climate-schedule-update-request.schema.json",
+  "title": "Настройка расписания климата HausmanHub v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "setup_revision",
+    "schedule",
+    "confirm_automatic_application"
+  ],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-climate-schedule-update-request"},
+        "version": {"const": 1}
+      }
+    },
+    "setup_revision": {"$ref": "#/$defs/revision"},
+    "schedule": {"$ref": "#/$defs/schedule"},
+    "confirm_automatic_application": {"type": "boolean"}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "schedule": {
+            "properties": {"enabled": {"const": true}},
+            "required": ["enabled"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "confirm_automatic_application": {"const": true}
+        }
+      },
+      "else": {
+        "properties": {
+          "confirm_automatic_application": {"const": false}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "revision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "clock": {
+      "type": "string",
+      "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+    },
+    "schedule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "day_start", "night_start"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "day_start": {"$ref": "#/$defs/clock"},
+        "night_start": {"$ref": "#/$defs/clock"}
+      }
+    }
+  }
+}

@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hausmanhub/contracts/v1/climate-schedule-update.schema.json",
+  "title": "Подтверждение настройки расписания климата HausmanHub v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "saved_at",
+    "setup_revision",
+    "status",
+    "commands_sent",
+    "automatic_application_pending",
+    "temporary_overrides_cleared",
+    "schedule",
+    "message"
+  ],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-climate-schedule-update"},
+        "version": {"const": 1}
+      }
+    },
+    "saved_at": {"type": "integer", "minimum": 0},
+    "setup_revision": {"$ref": "#/$defs/revision"},
+    "status": {"const": "saved"},
+    "commands_sent": {"const": false},
+    "automatic_application_pending": {"type": "boolean"},
+    "temporary_overrides_cleared": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 128
+    },
+    "schedule": {"$ref": "#/$defs/schedule"},
+    "message": {
+      "enum": [
+        "Расписание включено. Нужный профиль будет применён при ближайшей проверке времени.",
+        "Расписание сохранено и уже соответствует выбранному времени. Команды устройствам не отправлялись.",
+        "Расписание выключено. Автоматические переключения остановлены."
+      ]
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "automatic_application_pending": {"const": true},
+        "schedule": {
+          "properties": {
+            "enabled": {"const": true},
+            "last_applied_profile": {"type": "null"}
+          }
+        },
+        "message": {
+          "const": "Расписание включено. Нужный профиль будет применён при ближайшей проверке времени."
+        }
+      }
+    },
+    {
+      "properties": {
+        "automatic_application_pending": {"const": false},
+        "schedule": {
+          "properties": {"enabled": {"const": true}}
+        },
+        "message": {
+          "const": "Расписание сохранено и уже соответствует выбранному времени. Команды устройствам не отправлялись."
+        }
+      }
+    },
+    {
+      "properties": {
+        "automatic_application_pending": {"const": false},
+        "schedule": {
+          "properties": {
+            "enabled": {"const": false},
+            "last_applied_profile": {"type": "null"}
+          }
+        },
+        "message": {
+          "const": "Расписание выключено. Автоматические переключения остановлены."
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "revision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "clock": {
+      "type": "string",
+      "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+    },
+    "schedule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "day_start",
+        "night_start",
+        "last_applied_profile"
+      ],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "day_start": {"$ref": "#/$defs/clock"},
+        "night_start": {"$ref": "#/$defs/clock"},
+        "last_applied_profile": {
+          "type": ["string", "null"],
+          "enum": ["day", "night", null]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "contract": {
+    "name": "hausman-hub-climate-schedule-update",
+    "version": 1
+  },
+  "saved_at": 1784512800000,
+  "setup_revision": 2,
+  "status": "saved",
+  "commands_sent": false,
+  "automatic_application_pending": true,
+  "temporary_overrides_cleared": 0,
+  "schedule": {
+    "enabled": true,
+    "day_start": "07:00",
+    "night_start": "23:00",
+    "last_applied_profile": null
+  },
+  "message": "Расписание включено. Нужный профиль будет применён при ближайшей проверке времени."
+}

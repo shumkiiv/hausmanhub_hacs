@@ -41,6 +41,7 @@ from .climate_setup import (
     create_climate_contour_draft,
     current_climate_contour_setup,
     update_climate_profiles,
+    update_climate_schedule,
     validate_climate_contour_draft,
 )
 from .contours import (
@@ -343,6 +344,33 @@ class ClimateRuntime:
             if self._contour_store is None:
                 raise ClimateRuntimeUnavailable("contour storage is unavailable")
             updated, receipt = update_climate_profiles(
+                self._registry,
+                self._contours,
+                payload,
+                saved_at=self._safe_now(),
+                automatic_application_enabled=(
+                    self.configuration.climate_bridge_mode
+                    is ClimateBridgeMode.MANAGED
+                ),
+            )
+            await self._contour_store.async_save(updated)
+            self._contours = updated
+            self.last_error = None
+            return receipt
+
+    async def async_update_climate_schedule(
+        self,
+        payload: object,
+    ) -> dict[str, object]:
+        """Atomically save the day/night schedule without sending commands."""
+
+        async with self._lock:
+            # Disarming must remain available even in canary, shadow, or disabled
+            # bridge modes. The strict use case below rejects every enabling
+            # request unless this runtime is explicitly managed.
+            if self._contour_store is None:
+                raise ClimateRuntimeUnavailable("contour storage is unavailable")
+            updated, receipt = update_climate_schedule(
                 self._registry,
                 self._contours,
                 payload,
