@@ -1,0 +1,1456 @@
+{
+  "contract": {
+    "name": "hausman-hub-climate-reference-suite",
+    "version": 1
+  },
+  "source": {
+    "name": "Работающий климатический модуль",
+    "repository_revision": "0bf681c4278f14f1ad7808b5fe0726b199bcdccc",
+    "captured_on": "2026-07-20",
+    "read_only": true,
+    "files": [
+      {
+        "path": "climate-core/decisions.mjs",
+        "git_blob": "3ee6b6b9ae6d0cbaff621373705d8bc200a5f07a"
+      },
+      {
+        "path": "climate-core/safety-invariants.mjs",
+        "git_blob": "40b9b7ffaabe7783a2b3970959aa5a466393ccca"
+      },
+      {
+        "path": "climate-scenarios/reference-scenarios.mjs",
+        "git_blob": "c0bd78d0ee8bf104308fec4713e906fe06237a61"
+      },
+      {
+        "path": "adapters/home-assistant/command-executor.mjs",
+        "git_blob": "823b213d26850068bf9fb9b2807e302a02de3a54"
+      },
+      {
+        "path": "adapters/simulation/test-executor.mjs",
+        "git_blob": "d3876247154e8b84ed66d415ceb3cb446318f9fa"
+      },
+      {
+        "path": "tests/climate-scenario-matrix.test.mjs",
+        "git_blob": "08931f4afdbf3e68b7830bb05b986bc29b1eca61"
+      },
+      {
+        "path": "tests/climate-core-decisions.test.mjs",
+        "git_blob": "a7c7dfbc3e607040097d586fc6a15e0ec743b7b4"
+      },
+      {
+        "path": "tests/climate-edge-cases.test.mjs",
+        "git_blob": "63dd25709f9249e51576b2d1a482308cc7ccd9f4"
+      },
+      {
+        "path": "tests/climate-safety-invariants.test.mjs",
+        "git_blob": "103d97f8653131704ecb8d7132fd71eff380f7a3"
+      }
+    ]
+  },
+  "execution": {
+    "mode": "reference_only",
+    "commands_enabled": false
+  },
+  "policy_priority": [
+    "away",
+    "safety_lockout",
+    "freshness_guard",
+    "forced_auto_only",
+    "manual",
+    "auto",
+    "direct_device_command"
+  ],
+  "protections": [
+    {
+      "code": "away",
+      "name": "Режим отсутствия имеет самый высокий приоритет.",
+      "source_file": "climate-core/decisions.mjs"
+    },
+    {
+      "code": "forced_auto_only",
+      "name": "Принудительная автоматика отклоняет запрос ручного режима.",
+      "source_file": "climate-core/decisions.mjs"
+    },
+    {
+      "code": "window",
+      "name": "Открытое или неподтверждённо закрытое окно блокирует климат.",
+      "source_file": "climate-core/decisions.mjs"
+    },
+    {
+      "code": "critical_sensor",
+      "name": "Без показания критического датчика команды блокируются.",
+      "source_file": "climate-core/decisions.mjs"
+    },
+    {
+      "code": "cooling_blocked",
+      "name": "Явный запрет охлаждения нельзя обойти автоматикой.",
+      "source_file": "climate-core/decisions.mjs"
+    },
+    {
+      "code": "heating_blocked",
+      "name": "Явный запрет нагрева нельзя обойти автоматикой.",
+      "source_file": "climate-core/decisions.mjs"
+    },
+    {
+      "code": "central_heating_off",
+      "name": "Термоголовка не меняется при выключенном центральном отоплении.",
+      "source_file": "climate-scenarios/reference-scenarios.mjs"
+    },
+    {
+      "code": "device_unavailable",
+      "name": "Недоступное устройство не подменяется выдуманным исполнителем.",
+      "source_file": "climate-scenarios/reference-scenarios.mjs"
+    },
+    {
+      "code": "stale_state",
+      "name": "Устаревшее состояние переводит комнату в наблюдение без команд.",
+      "source_file": "climate-core/decisions.mjs"
+    },
+    {
+      "code": "temperature_jump",
+      "name": "Подозрительный скачок температуры требует следующего подтверждения.",
+      "source_file": "climate-core/decisions.mjs"
+    },
+    {
+      "code": "stale_delayed_command",
+      "name": "Просроченная отложенная команда удаляется после смены режима.",
+      "source_file": "climate-core/decisions.mjs"
+    },
+    {
+      "code": "minimum_off_pause",
+      "name": "После остановки выдерживается минимальная пауза перед запуском.",
+      "source_file": "climate-core/decisions.mjs"
+    },
+    {
+      "code": "minimum_run_hold",
+      "name": "После запуска выдерживается минимальное время работы.",
+      "source_file": "climate-core/decisions.mjs"
+    },
+    {
+      "code": "execution_disabled",
+      "name": "Отключённое исполнение не пропускает ни одну команду.",
+      "source_file": "adapters/home-assistant/command-executor.mjs"
+    },
+    {
+      "code": "morning_approval_required",
+      "name": "Пробное исполнение требует отдельного постоянного разрешения.",
+      "source_file": "adapters/home-assistant/command-executor.mjs"
+    },
+    {
+      "code": "room_not_allowed",
+      "name": "Пробное исполнение ограничивается разрешённой комнатой.",
+      "source_file": "adapters/home-assistant/command-executor.mjs"
+    },
+    {
+      "code": "type_not_allowed",
+      "name": "Пробное исполнение ограничивается разрешёнными типами действий.",
+      "source_file": "adapters/home-assistant/command-executor.mjs"
+    },
+    {
+      "code": "entity_not_allowed",
+      "name": "Действие не может выйти за набор устройств выбранной комнаты.",
+      "source_file": "adapters/home-assistant/command-executor.mjs"
+    },
+    {
+      "code": "hvac_auto_forbidden",
+      "name": "Встроенный режим устройства Авто запрещён: решает сам контур.",
+      "source_file": "adapters/home-assistant/command-executor.mjs"
+    },
+    {
+      "code": "invalid_service_command",
+      "name": "Неизвестное действие устройства закрывается без исполнения.",
+      "source_file": "adapters/home-assistant/command-executor.mjs"
+    },
+    {
+      "code": "physical_feedback_unconfirmed",
+      "name": "Автоматическое изменение профиля требует физического подтверждения.",
+      "source_file": "adapters/home-assistant/command-executor.mjs"
+    },
+    {
+      "code": "cooldown",
+      "name": "Между действиями одного устройства выдерживается пауза.",
+      "source_file": "adapters/home-assistant/command-executor.mjs"
+    },
+    {
+      "code": "duplicate",
+      "name": "Повтор уже действующего профиля не отправляется устройству.",
+      "source_file": "adapters/home-assistant/command-executor.mjs"
+    },
+    {
+      "code": "awaiting_physical_transition",
+      "name": "Следующее действие ждёт подтверждения физического перехода.",
+      "source_file": "adapters/home-assistant/command-executor.mjs"
+    },
+    {
+      "code": "physical_transition_timeout",
+      "name": "Неподтверждённый физический переход ограничен тайм-аутом.",
+      "source_file": "adapters/home-assistant/command-executor.mjs"
+    },
+    {
+      "code": "authority_not_granted",
+      "name": "Действие блокируется без разрешения владельца комнаты.",
+      "source_file": "adapters/simulation/test-executor.mjs"
+    },
+    {
+      "code": "manual_no_automatic_plan",
+      "name": "Ручной режим не создаёт автоматический план управления.",
+      "source_file": "climate-core/safety-invariants.mjs"
+    },
+    {
+      "code": "blocked_policy_non_actuating",
+      "name": "Заблокированная политика допускает только наблюдение или остановку.",
+      "source_file": "climate-core/safety-invariants.mjs"
+    },
+    {
+      "code": "shadow_plan_not_executed",
+      "name": "Теневой план всегда помечается как неисполненный.",
+      "source_file": "climate-core/safety-invariants.mjs"
+    },
+    {
+      "code": "physical_shutter_edge_driven",
+      "name": "Физическое состояние заслонки действует до следующего события.",
+      "source_file": "climate-core/safety-invariants.mjs"
+    },
+    {
+      "code": "redundant_off_suppression",
+      "name": "Подтверждённо выключенный кондиционер не получает повторную остановку.",
+      "source_file": "climate-core/safety-invariants.mjs"
+    }
+  ],
+  "cases": [
+    {
+      "id": "stopped_ac_starts_at_default_gap",
+      "name": "Остановленный кондиционер запускается при разнице 0,7 градуса.",
+      "category": "cooling",
+      "source_reference": {
+        "file": "tests/climate-core-decisions.test.mjs",
+        "case": "default stopped-AC start waits for a 0.7°C gap"
+      },
+      "input": {
+        "period": "day",
+        "away": "home",
+        "room_mode": "auto",
+        "target_temperature": 25,
+        "target_humidity": 45,
+        "available_devices": ["air_conditioner"],
+        "observation": {
+          "temperature": 25.7,
+          "humidity": 45,
+          "state_fresh": true,
+          "temperature_quality": "normal",
+          "window": "closed",
+          "air_conditioner": "stopped",
+          "cooling_evidence_confirmed": false
+        }
+      },
+      "expected": {
+        "policy": "auto",
+        "action": "cool",
+        "reason": "room temperature is above target",
+        "setpoint": 26,
+        "fan_mode": "low",
+        "quiet": false,
+        "auxiliary_action": "none",
+        "auxiliary_target": null,
+        "planned_intents": [
+          "start_air_conditioner",
+          "set_air_conditioner_temperature",
+          "set_air_conditioner_fan"
+        ],
+        "blockers": [],
+        "active_protections": ["shadow_plan_not_executed"]
+      }
+    },
+    {
+      "id": "stopped_ac_waits_below_default_gap",
+      "name": "Остановленный кондиционер не запускается раньше порога.",
+      "category": "cooling",
+      "source_reference": {
+        "file": "tests/climate-core-decisions.test.mjs",
+        "case": "default stopped-AC start waits for a 0.7°C gap"
+      },
+      "input": {
+        "period": "day",
+        "away": "home",
+        "room_mode": "auto",
+        "target_temperature": 25,
+        "target_humidity": 45,
+        "available_devices": ["air_conditioner"],
+        "observation": {
+          "temperature": 25.6,
+          "humidity": 45,
+          "state_fresh": true,
+          "temperature_quality": "normal",
+          "window": "closed",
+          "air_conditioner": "stopped",
+          "cooling_evidence_confirmed": false
+        }
+      },
+      "expected": {
+        "policy": "auto",
+        "action": "off",
+        "reason": "room temperature is at or below target",
+        "setpoint": null,
+        "fan_mode": null,
+        "quiet": null,
+        "auxiliary_action": "none",
+        "auxiliary_target": null,
+        "planned_intents": [],
+        "blockers": [],
+        "active_protections": ["redundant_off_suppression", "shadow_plan_not_executed"]
+      }
+    },
+    {
+      "id": "running_ac_maintains_near_target",
+      "name": "Работающий кондиционер заранее переходит на мягкое поддержание.",
+      "category": "cooling",
+      "source_reference": {
+        "file": "tests/climate-scenario-matrix.test.mjs",
+        "case": "preemptive_maintain_for_confirmed_running"
+      },
+      "input": {
+        "period": "day",
+        "away": "home",
+        "room_mode": "auto",
+        "target_temperature": 25.5,
+        "target_humidity": 45,
+        "available_devices": ["air_conditioner"],
+        "observation": {
+          "temperature": 25.7,
+          "humidity": 45,
+          "state_fresh": true,
+          "temperature_quality": "normal",
+          "window": "closed",
+          "air_conditioner": "running",
+          "current_setpoint": 25,
+          "current_fan_mode": "low",
+          "current_quiet": false,
+          "cooling_evidence_confirmed": false
+        }
+      },
+      "expected": {
+        "policy": "auto",
+        "action": "maintain",
+        "reason": "running AC entered the preemptive maintain band before the room crosses the target",
+        "setpoint": 26,
+        "fan_mode": "low",
+        "quiet": false,
+        "auxiliary_action": "none",
+        "auxiliary_target": null,
+        "planned_intents": ["set_air_conditioner_temperature", "set_air_conditioner_fan"],
+        "blockers": [],
+        "active_protections": ["shadow_plan_not_executed"]
+      }
+    },
+    {
+      "id": "hard_off_threshold_stops_running_ac",
+      "name": "Жёсткий нижний порог останавливает работающий кондиционер.",
+      "category": "cooling",
+      "source_reference": {
+        "file": "tests/climate-scenario-matrix.test.mjs",
+        "case": "hard_off_below_room_threshold"
+      },
+      "input": {
+        "period": "day",
+        "away": "home",
+        "room_mode": "auto",
+        "target_temperature": 25.5,
+        "target_humidity": 45,
+        "hard_off_temperature": 25.4,
+        "available_devices": ["air_conditioner"],
+        "observation": {
+          "temperature": 25.4,
+          "humidity": 45,
+          "state_fresh": true,
+          "temperature_quality": "normal",
+          "window": "closed",
+          "air_conditioner": "running",
+          "cooling_evidence_confirmed": false
+        }
+      },
+      "expected": {
+        "policy": "auto",
+        "action": "off",
+        "reason": "room temperature is at or below AC hard-off threshold",
+        "setpoint": null,
+        "fan_mode": null,
+        "quiet": null,
+        "auxiliary_action": "none",
+        "auxiliary_target": null,
+        "planned_intents": ["stop_air_conditioner"],
+        "blockers": [],
+        "active_protections": ["shadow_plan_not_executed"]
+      }
+    },
+    {
+      "id": "running_ac_softens_before_stop",
+      "name": "Перед остановкой кондиционер сначала смягчает охлаждение.",
+      "category": "timing",
+      "source_reference": {
+        "file": "tests/climate-core-decisions.test.mjs",
+        "case": "running rooms soften below target before stopping"
+      },
+      "input": {
+        "period": "day",
+        "away": "home",
+        "room_mode": "auto",
+        "target_temperature": 25,
+        "target_humidity": 45,
+        "available_devices": ["air_conditioner"],
+        "observation": {
+          "temperature": 24.8,
+          "humidity": 45,
+          "state_fresh": true,
+          "temperature_quality": "normal",
+          "window": "closed",
+          "air_conditioner": "running",
+          "current_setpoint": 26,
+          "current_fan_mode": "low",
+          "current_quiet": false,
+          "minutes_since_start": 15,
+          "cooling_evidence_confirmed": false
+        }
+      },
+      "expected": {
+        "policy": "auto",
+        "action": "maintain",
+        "reason": "soften running cooling before stop",
+        "setpoint": 27,
+        "fan_mode": "low",
+        "quiet": false,
+        "auxiliary_action": "none",
+        "auxiliary_target": null,
+        "planned_intents": ["set_air_conditioner_temperature", "set_air_conditioner_fan"],
+        "blockers": [],
+        "active_protections": ["shadow_plan_not_executed"]
+      }
+    },
+    {
+      "id": "weak_cooling_raises_fan_first",
+      "name": "Подтверждённое слабое охлаждение сначала повышает скорость вентилятора.",
+      "category": "cooling",
+      "source_reference": {
+        "file": "tests/climate-core-decisions.test.mjs",
+        "case": "confirmed weak cooling escalates 26 low to medium"
+      },
+      "input": {
+        "period": "day",
+        "away": "home",
+        "room_mode": "auto",
+        "target_temperature": 25,
+        "target_humidity": 45,
+        "available_devices": ["air_conditioner"],
+        "observation": {
+          "temperature": 25.8,
+          "humidity": 45,
+          "state_fresh": true,
+          "temperature_quality": "normal",
+          "window": "closed",
+          "air_conditioner": "running",
+          "current_setpoint": 26,
+          "current_fan_mode": "low",
+          "current_quiet": false,
+          "minutes_since_start": 11,
+          "cooling_evidence_confirmed": true,
+          "cooling_rate_per_hour": 0.2,
+          "physical_feedback": "confirmed"
+        }
+      },
+      "expected": {
+        "policy": "auto",
+        "action": "maintain",
+        "reason": "confirmed weak cooling raises fan before setpoint",
+        "setpoint": 26,
+        "fan_mode": "medium",
+        "quiet": false,
+        "auxiliary_action": "none",
+        "auxiliary_target": null,
+        "planned_intents": ["set_air_conditioner_temperature", "set_air_conditioner_fan"],
+        "blockers": [],
+        "active_protections": ["shadow_plan_not_executed"]
+      }
+    },
+    {
+      "id": "weak_cooling_lowers_setpoint_second",
+      "name": "После повышения вентилятора слабое охлаждение понижает уставку.",
+      "category": "cooling",
+      "source_reference": {
+        "file": "tests/climate-core-decisions.test.mjs",
+        "case": "confirmed weak cooling escalates 26 low to medium"
+      },
+      "input": {
+        "period": "day",
+        "away": "home",
+        "room_mode": "auto",
+        "target_temperature": 25,
+        "target_humidity": 45,
+        "available_devices": ["air_conditioner"],
+        "observation": {
+          "temperature": 25.8,
+          "humidity": 45,
+          "state_fresh": true,
+          "temperature_quality": "normal",
+          "window": "closed",
+          "air_conditioner": "running",
+          "current_setpoint": 26,
+          "current_fan_mode": "medium",
+          "current_quiet": false,
+          "minutes_since_start": 11,
+          "cooling_evidence_confirmed": true,
+          "cooling_rate_per_hour": 0.2,
+          "physical_feedback": "confirmed"
+        }
+      },
+      "expected": {
+        "policy": "auto",
+        "action": "maintain",
+        "reason": "confirmed weak cooling lowers setpoint after fan escalation",
+        "setpoint": 25,
+        "fan_mode": "medium",
+        "quiet": false,
+        "auxiliary_action": "none",
+        "auxiliary_target": null,
+        "planned_intents": ["set_air_conditioner_temperature", "set_air_conditioner_fan"],
+        "blockers": [],
+        "active_protections": ["shadow_plan_not_executed"]
+      }
+    },
+    {
+      "id": "minimum_off_pause_blocks_restart",
+      "name": "Минимальная пауза не разрешает быстрый повторный запуск.",
+      "category": "timing",
+      "source_reference": {
+        "file": "tests/climate-core-decisions.test.mjs",
+        "case": "confirmed physical stop adds a bounded automatic restart pause"
+      },
+      "input": {
+        "period": "day",
+        "away": "home",
+        "room_mode": "auto",
+        "target_temperature": 25,
+        "target_humidity": 45,
+        "available_devices": ["air_conditioner"],
+        "observation": {
+          "temperature": 26,
+          "humidity": 45,
+          "state_fresh": true,
+          "temperature_quality": "normal",
+          "window": "closed",
+          "air_conditioner": "stopped",
+          "minutes_since_stop": 5,
+          "cooling_evidence_confirmed": false
+        }
+      },
+      "expected": {
+        "policy": "auto",
+        "action": "off",
+        "reason": "AC is inside its minimum off pause before an automatic restart",
+        "setpoint": null,
+        "fan_mode": null,
+        "quiet": null,
+        "auxiliary_action": "none",
+        "auxiliary_target": null,
+        "planned_intents": [],
+        "blockers": ["minimum_off_pause"],
+        "active_protections": ["minimum_off_pause", "redundant_off_suppression", "shadow_plan_not_executed"]
+      }
+    },
+    {
+      "id": "minimum_run_holds_slow_cycle",
+      "name": "Медленное охлаждение удерживает минимальное время работы.",
+      "category": "timing",
+      "source_reference": {
+        "file": "tests/climate-core-decisions.test.mjs",
+        "case": "confirmed cooling speed adapts automatic run and restart pauses"
+      },
+      "input": {
+        "period": "day",
+        "away": "home",
+        "room_mode": "auto",
+        "target_temperature": 25.5,
+        "target_humidity": 45,
+        "available_devices": ["air_conditioner"],
+        "observation": {
+          "temperature": 24.8,
+          "humidity": 45,
+          "state_fresh": true,
+          "temperature_quality": "normal",
+          "window": "closed",
+          "air_conditioner": "running",
+          "minutes_since_start": 9,
+          "cooling_evidence_confirmed": true,
+          "cooling_rate_per_hour": 0.3
+        }
+      },
+      "expected": {
+        "policy": "auto",
+        "action": "maintain",
+        "reason": "running AC is inside its minimum run window, maintain instead of turning off",
+        "setpoint": 27,
+        "fan_mode": "low",
+        "quiet": false,
+        "auxiliary_action": "none",
+        "auxiliary_target": null,
+        "planned_intents": ["set_air_conditioner_temperature", "set_air_conditioner_fan"],
+        "blockers": ["minimum_run_hold"],
+        "active_protections": ["minimum_run_hold", "shadow_plan_not_executed"]
+      }
+    },
+    {
+      "id": "manual_mode_observes",
+      "name": "Ручной режим только наблюдает и не создаёт автоматический план.",
+      "category": "priority",
+      "source_reference": {
+        "file": "tests/climate-scenario-matrix.test.mjs",
+        "case": "manual_physical_stop_observes_without_commands"
+      },
+      "input": {
+        "period": "day",
+        "away": "home",
+        "room_mode": "manual",
+        "target_temperature": 25.5,
+        "target_humidity": 45,
+        "available_devices": ["air_conditioner"],
+        "observation": {
+          "temperature": 26.5,
+          "humidity": 45,
+          "state_fresh": true,
+          "temperature_quality": "normal",
+          "window": "closed",
+          "air_conditioner": "stopped",
+          "cooling_evidence_confirmed": false
+        }
+      },
+      "expected": {
+        "policy": "manual",
+        "action": "observe",
+        "reason": "manual_observe",
+        "setpoint": null,
+        "fan_mode": null,
+        "quiet": null,
+        "auxiliary_action": "none",
+        "auxiliary_target": null,
+        "planned_intents": [],
+        "blockers": ["manual_no_automatic_plan"],
+        "active_protections": ["manual_no_automatic_plan", "shadow_plan_not_executed"]
+      }
+    },
+    {
+      "id": "away_safe_off_overrides_manual",
+      "name": "Режим отсутствия безопасно останавливает климат поверх ручного режима.",
+      "category": "priority",
+      "source_reference": {
+        "file": "tests/climate-scenario-matrix.test.mjs",
+        "case": "away_overrides_manual_and_blocks_execution"
+      },
+      "input": {
+        "period": "day",
+        "away": "safe_off",
+        "room_mode": "manual",
+        "target_temperature": 25.5,
+        "target_humidity": 45,
+        "available_devices": ["air_conditioner"],
+        "observation": {
+          "temperature": 26.5,
+          "humidity": 45,
+          "state_fresh": true,
+          "temperature_quality": "normal",
+          "window": "closed",
+          "air_conditioner": "running",
+          "cooling_evidence_confirmed": false
+        }
+      },
+      "expected": {
+        "policy": "away",
+        "action": "safe_off",
+        "reason": "away_safe_off",
+        "setpoint": null,
+        "fan_mode": null,
+        "quiet": null,
+        "auxiliary_action": "none",
+        "auxiliary_target": null,
+        "planned_intents": ["stop_air_conditioner"],
+        "blockers": ["away"],
+        "active_protections": ["away", "blocked_policy_non_actuating", "shadow_plan_not_executed"]
+      }
+    },
+    {
+      "id": "away_keep_observes_running_ac",
+      "name": "Режим отсутствия может оставить работающий кондиционер без новых действий.",
+      "category": "priority",
+      "source_reference": {
+        "file": "tests/climate-scenario-matrix.test.mjs",
+        "case": "away_keep_observes_running_ac_without_new_command"
+      },
+      "input": {
+        "period": "day",
+        "away": "keep",
+        "room_mode": "auto",
+        "target_temperature": 25.5,
+        "target_humidity": 45,
+        "available_devices": ["air_conditioner"],
+        "observation": {
+          "temperature": 26.5,
+          "humidity": 45,
+          "state_fresh": true,
+          "temperature_quality": "normal",
+          "window": "closed",
+          "air_conditioner": "running",
+          "cooling_evidence_confirmed": false
+        }
+      },
+      "expected": {
+        "policy": "away",
+        "action": "observe",
+        "reason": "away_keep_air_conditioners",
+        "setpoint": null,
+        "fan_mode": null,
+        "quiet": null,
+        "auxiliary_action": "none",
+        "auxiliary_target": null,
+        "planned_intents": [],
+        "blockers": ["away"],
+        "active_protections": ["away", "blocked_policy_non_actuating", "shadow_plan_not_executed"]
+      }
+    },
+    {
+      "id": "open_window_forces_safe_off",
+      "name": "Открытое окно безопасно останавливает работающий кондиционер.",
+      "category": "priority",
+      "source_reference": {
+        "file": "tests/climate-scenario-matrix.test.mjs",
+        "case": "open_window_blocks_and_previews_safe_stop"
+      },
+      "input": {
+        "period": "day",
+        "away": "home",
+        "room_mode": "auto",
+        "target_temperature": 25.5,
+        "target_humidity": 45,
+        "available_devices": ["air_conditioner"],
+        "observation": {
+          "temperature": 26.5,
+          "humidity": 45,
+          "state_fresh": true,
+          "temperature_quality": "normal",
+          "window": "open",
+          "air_conditioner": "running",
+          "cooling_evidence_confirmed": false
+        }
+      },
+      "expected": {
+        "policy": "safety_lockout",
+        "action": "safe_off",
+        "reason": "safety_lockout",
+        "setpoint": null,
+        "fan_mode": null,
+        "quiet": null,
+        "auxiliary_action": "none",
+        "auxiliary_target": null,
+        "planned_intents": ["stop_air_conditioner"],
+        "blockers": ["window"],
+        "active_protections": ["window", "blocked_policy_non_actuating", "shadow_plan_not_executed"]
+      }
+    },
+    {
+      "id": "missing_temperature_blocks_control",
+      "name": "Отсутствующая температура блокирует климатические действия.",
+      "category": "freshness",
+      "source_reference": {
+        "file": "climate-core/decisions.mjs",
+        "case": "critical_sensor safety lockout"
+      },
+      "input": {
+        "period": "day",
+        "away": "home",
+        "room_mode": "auto",
+        "target_temperature": 25.5,
+        "target_humidity": 45,
+        "available_devices": ["air_conditioner"],
+        "observation": {
+          "temperature": null,
+          "humidity": 45,
+          "state_fresh": true,
+          "temperature_quality": "normal",
+          "window": "closed",
+          "air_conditioner": "unknown",
+          "cooling_evidence_confirmed": false
+        }
+      },
+      "expected": {
+        "policy": "safety_lockout",
+        "action": "safe_off",
+        "reason": "safety_lockout",
+        "setpoint": null,
+        "fan_mode": null,
+        "quiet": null,
+        "auxiliary_action": "none",
+        "auxiliary_target": null,
+        "planned_intents": ["stop_air_conditioner"],
+        "blockers": ["critical_sensor"],
+        "active_protections": ["critical_sensor", "blocked_policy_non_actuating", "shadow_plan_not_executed"]
+      }
+    },
+    {
+      "id": "stale_state_pauses_control",
+      "name": "Устаревшие данные переводят комнату в наблюдение.",
+      "category": "freshness",
+      "source_reference": {
+        "file": "tests/climate-scenario-matrix.test.mjs",
+        "case": "stale_environment_pauses_without_command"
+      },
+      "input": {
+        "period": "day",
+        "away": "home",
+        "room_mode": "auto",
+        "target_temperature": 25.5,
+        "target_humidity": 45,
+        "available_devices": ["air_conditioner"],
+        "observation": {
+          "temperature": 26.5,
+          "humidity": 45,
+          "state_fresh": false,
+          "temperature_quality": "normal",
+          "window": "closed",
+          "air_conditioner": "stopped",
+          "cooling_evidence_confirmed": false
+        }
+      },
+      "expected": {
+        "policy": "freshness_guard",
+        "action": "observe",
+        "reason": "freshness_guard",
+        "setpoint": null,
+        "fan_mode": null,
+        "quiet": null,
+        "auxiliary_action": "none",
+        "auxiliary_target": null,
+        "planned_intents": [],
+        "blockers": ["stale_state"],
+        "active_protections": ["stale_state", "blocked_policy_non_actuating", "shadow_plan_not_executed"]
+      }
+    },
+    {
+      "id": "temperature_jump_pauses_control",
+      "name": "Подозрительный скачок температуры ждёт подтверждения.",
+      "category": "freshness",
+      "source_reference": {
+        "file": "tests/climate-core-decisions.test.mjs",
+        "case": "suspect room temperature jump pauses automatic climate commands"
+      },
+      "input": {
+        "period": "day",
+        "away": "home",
+        "room_mode": "auto",
+        "target_temperature": 25.5,
+        "target_humidity": 45,
+        "available_devices": ["air_conditioner"],
+        "observation": {
+          "temperature": 30,
+          "humidity": 45,
+          "state_fresh": true,
+          "temperature_quality": "suspect",
+          "window": "closed",
+          "air_conditioner": "stopped",
+          "cooling_evidence_confirmed": false
+        }
+      },
+      "expected": {
+        "policy": "freshness_guard",
+        "action": "observe",
+        "reason": "freshness_guard",
+        "setpoint": null,
+        "fan_mode": null,
+        "quiet": null,
+        "auxiliary_action": "none",
+        "auxiliary_target": null,
+        "planned_intents": [],
+        "blockers": ["temperature_jump"],
+        "active_protections": ["temperature_jump", "blocked_policy_non_actuating", "shadow_plan_not_executed"]
+      }
+    },
+    {
+      "id": "forced_auto_rejects_manual_request",
+      "name": "Принудительная автоматика отклоняет ручной запрос и продолжает расчёт.",
+      "category": "priority",
+      "source_reference": {
+        "file": "tests/climate-core-decisions.test.mjs",
+        "case": "forced_auto_only rejects manual requests while keeping auto planning active"
+      },
+      "input": {
+        "period": "day",
+        "away": "home",
+        "room_mode": "forced_auto_only",
+        "manual_request": true,
+        "target_temperature": 25,
+        "target_humidity": 45,
+        "available_devices": ["air_conditioner"],
+        "observation": {
+          "temperature": 26,
+          "humidity": 45,
+          "state_fresh": true,
+          "temperature_quality": "normal",
+          "window": "closed",
+          "air_conditioner": "stopped",
+          "cooling_evidence_confirmed": false
+        }
+      },
+      "expected": {
+        "policy": "forced_auto_only",
+        "action": "cool",
+        "reason": "room temperature is above target",
+        "setpoint": 26,
+        "fan_mode": "low",
+        "quiet": false,
+        "auxiliary_action": "none",
+        "auxiliary_target": null,
+        "planned_intents": [
+          "start_air_conditioner",
+          "set_air_conditioner_temperature",
+          "set_air_conditioner_fan"
+        ],
+        "blockers": ["forced_auto_only"],
+        "active_protections": ["forced_auto_only", "shadow_plan_not_executed"]
+      }
+    },
+    {
+      "id": "night_profile_is_quiet",
+      "name": "Ночью работающий кондиционер поддерживает температуру тихо.",
+      "category": "cooling",
+      "source_reference": {
+        "file": "tests/climate-scenario-matrix.test.mjs",
+        "case": "night_profile_keeps_running_unit_quiet"
+      },
+      "input": {
+        "period": "night",
+        "away": "home",
+        "room_mode": "auto",
+        "target_temperature": 25.5,
+        "target_humidity": 45,
+        "available_devices": ["air_conditioner"],
+        "observation": {
+          "temperature": 25.7,
+          "humidity": 45,
+          "state_fresh": true,
+          "temperature_quality": "normal",
+          "window": "closed",
+          "air_conditioner": "running",
+          "current_setpoint": 25,
+          "current_fan_mode": "low",
+          "current_quiet": true,
+          "cooling_evidence_confirmed": false
+        }
+      },
+      "expected": {
+        "policy": "auto",
+        "action": "maintain",
+        "reason": "running AC entered the preemptive maintain band before the room crosses the target",
+        "setpoint": 26,
+        "fan_mode": "low",
+        "quiet": true,
+        "auxiliary_action": "none",
+        "auxiliary_target": null,
+        "planned_intents": ["set_air_conditioner_temperature", "set_air_conditioner_fan"],
+        "blockers": [],
+        "active_protections": ["shadow_plan_not_executed"]
+      }
+    },
+    {
+      "id": "dry_closed_room_starts_humidifier",
+      "name": "Сухая комната с закрытым окном включает увлажнитель.",
+      "category": "humidity",
+      "source_reference": {
+        "file": "climate-scenarios/reference-scenarios.mjs",
+        "case": "humidifier-window-safe-thresholds"
+      },
+      "input": {
+        "period": "day",
+        "away": "home",
+        "room_mode": "auto",
+        "target_temperature": 25,
+        "target_humidity": 45,
+        "available_devices": ["humidifier"],
+        "observation": {
+          "temperature": 25,
+          "humidity": 39,
+          "state_fresh": true,
+          "temperature_quality": "normal",
+          "window": "closed",
+          "air_conditioner": "unknown",
+          "cooling_evidence_confirmed": false,
+          "humidifier_on": false
+        }
+      },
+      "expected": {
+        "policy": "auto",
+        "action": "off",
+        "reason": "room temperature is at or below target",
+        "setpoint": null,
+        "fan_mode": null,
+        "quiet": null,
+        "auxiliary_action": "humidifier_on",
+        "auxiliary_target": null,
+        "planned_intents": ["start_humidifier"],
+        "blockers": [],
+        "active_protections": ["shadow_plan_not_executed"]
+      }
+    },
+    {
+      "id": "open_window_stops_humidifier",
+      "name": "Открытое окно выключает увлажнитель даже без нового замера влажности.",
+      "category": "humidity",
+      "source_reference": {
+        "file": "tests/climate-edge-cases.test.mjs",
+        "case": "kids open window turns humidifier off even without new humidity sample"
+      },
+      "input": {
+        "period": "day",
+        "away": "home",
+        "room_mode": "auto",
+        "target_temperature": 25,
+        "target_humidity": 45,
+        "available_devices": ["humidifier"],
+        "observation": {
+          "temperature": 25,
+          "humidity": null,
+          "state_fresh": true,
+          "temperature_quality": "normal",
+          "window": "open",
+          "air_conditioner": "unknown",
+          "cooling_evidence_confirmed": false,
+          "humidifier_on": true
+        }
+      },
+      "expected": {
+        "policy": "safety_lockout",
+        "action": "safe_off",
+        "reason": "safety_lockout",
+        "setpoint": null,
+        "fan_mode": null,
+        "quiet": null,
+        "auxiliary_action": "humidifier_off",
+        "auxiliary_target": null,
+        "planned_intents": ["stop_humidifier"],
+        "blockers": ["window"],
+        "active_protections": ["window", "blocked_policy_non_actuating", "shadow_plan_not_executed"]
+      }
+    },
+    {
+      "id": "winter_trv_uses_cold_weather_target",
+      "name": "Зимой при работающем отоплении термоголовка получает 19,5 градуса.",
+      "category": "heating",
+      "source_reference": {
+        "file": "climate-scenarios/reference-scenarios.mjs",
+        "case": "living-trv-winter-and-heating-off: heating-on"
+      },
+      "input": {
+        "period": "day",
+        "away": "home",
+        "room_mode": "auto",
+        "season": "winter",
+        "outdoor_temperature": -12,
+        "target_temperature": 25,
+        "target_humidity": 45,
+        "available_devices": ["radiator_thermostat"],
+        "observation": {
+          "temperature": 24.8,
+          "humidity": 45,
+          "state_fresh": true,
+          "temperature_quality": "normal",
+          "window": "not_configured",
+          "air_conditioner": "unknown",
+          "cooling_evidence_confirmed": false,
+          "central_heating_on": true
+        }
+      },
+      "expected": {
+        "policy": "auto",
+        "action": "observe",
+        "reason": "heating_mode_observe",
+        "setpoint": null,
+        "fan_mode": null,
+        "quiet": null,
+        "auxiliary_action": "trv_set_temperature",
+        "auxiliary_target": 19.5,
+        "planned_intents": ["set_radiator_temperature"],
+        "blockers": [],
+        "active_protections": ["shadow_plan_not_executed"]
+      }
+    },
+    {
+      "id": "heating_off_leaves_trv_untouched",
+      "name": "При выключенном центральном отоплении термоголовка только наблюдается.",
+      "category": "heating",
+      "source_reference": {
+        "file": "climate-scenarios/reference-scenarios.mjs",
+        "case": "living-trv-winter-and-heating-off: heating-off"
+      },
+      "input": {
+        "period": "day",
+        "away": "home",
+        "room_mode": "auto",
+        "season": "winter",
+        "outdoor_temperature": -12,
+        "target_temperature": 25,
+        "target_humidity": 45,
+        "available_devices": ["radiator_thermostat"],
+        "observation": {
+          "temperature": 24.8,
+          "humidity": 45,
+          "state_fresh": true,
+          "temperature_quality": "normal",
+          "window": "not_configured",
+          "air_conditioner": "unknown",
+          "cooling_evidence_confirmed": false,
+          "central_heating_on": false
+        }
+      },
+      "expected": {
+        "policy": "auto",
+        "action": "observe",
+        "reason": "heating_mode_observe",
+        "setpoint": null,
+        "fan_mode": null,
+        "quiet": null,
+        "auxiliary_action": "trv_observe",
+        "auxiliary_target": null,
+        "planned_intents": [],
+        "blockers": [],
+        "active_protections": ["central_heating_off", "shadow_plan_not_executed"]
+      }
+    },
+    {
+      "id": "unavailable_ac_keeps_decision_without_plan",
+      "name": "Недоступный кондиционер не подменяется выдуманным устройством.",
+      "category": "availability",
+      "source_reference": {
+        "file": "climate-scenarios/reference-scenarios.mjs",
+        "case": "ac-capability-unavailable-is-explicit"
+      },
+      "input": {
+        "period": "day",
+        "away": "home",
+        "room_mode": "auto",
+        "target_temperature": 25,
+        "target_humidity": 45,
+        "available_devices": [],
+        "observation": {
+          "temperature": 27,
+          "humidity": 45,
+          "state_fresh": true,
+          "temperature_quality": "normal",
+          "window": "not_configured",
+          "air_conditioner": "stopped",
+          "cooling_evidence_confirmed": false
+        }
+      },
+      "expected": {
+        "policy": "auto",
+        "action": "cool",
+        "reason": "room temperature is above target",
+        "setpoint": 26,
+        "fan_mode": "low",
+        "quiet": false,
+        "auxiliary_action": "none",
+        "auxiliary_target": null,
+        "planned_intents": [],
+        "blockers": ["device_unavailable"],
+        "active_protections": ["device_unavailable", "shadow_plan_not_executed"]
+      }
+    },
+    {
+      "id": "cooldown_delays_repeated_intent",
+      "name": "Защитная пауза задерживает слишком быстрое повторное действие.",
+      "category": "execution_guard",
+      "source_reference": {
+        "file": "climate-scenarios/reference-scenarios.mjs",
+        "case": "cooldown-then-duplicate-suppression: cooldown"
+      },
+      "input": {
+        "period": "day",
+        "away": "home",
+        "room_mode": "auto",
+        "execution_guard": "cooldown_active",
+        "target_temperature": 25,
+        "target_humidity": 45,
+        "available_devices": ["air_conditioner"],
+        "observation": {
+          "temperature": 26.3,
+          "humidity": 45,
+          "state_fresh": true,
+          "temperature_quality": "normal",
+          "window": "closed",
+          "air_conditioner": "running",
+          "current_setpoint": 25,
+          "current_fan_mode": "low",
+          "current_quiet": false,
+          "cooling_evidence_confirmed": true,
+          "cooling_rate_per_hour": 0.2
+        }
+      },
+      "expected": {
+        "policy": "auto",
+        "action": "cool",
+        "reason": "sustained_measured_inefficient_cooling",
+        "setpoint": 26,
+        "fan_mode": "medium",
+        "quiet": false,
+        "auxiliary_action": "none",
+        "auxiliary_target": null,
+        "planned_intents": ["set_air_conditioner_temperature", "set_air_conditioner_fan"],
+        "blockers": ["cooldown"],
+        "active_protections": ["cooldown", "shadow_plan_not_executed"]
+      }
+    },
+    {
+      "id": "duplicate_intent_is_suppressed",
+      "name": "Повтор уже принятого действия не отправляется второй раз.",
+      "category": "execution_guard",
+      "source_reference": {
+        "file": "climate-scenarios/reference-scenarios.mjs",
+        "case": "cooldown-then-duplicate-suppression: duplicate"
+      },
+      "input": {
+        "period": "day",
+        "away": "home",
+        "room_mode": "auto",
+        "execution_guard": "duplicate",
+        "target_temperature": 25,
+        "target_humidity": 45,
+        "available_devices": ["air_conditioner"],
+        "observation": {
+          "temperature": 26.3,
+          "humidity": 45,
+          "state_fresh": true,
+          "temperature_quality": "normal",
+          "window": "closed",
+          "air_conditioner": "running",
+          "current_setpoint": 25,
+          "current_fan_mode": "medium",
+          "current_quiet": false,
+          "cooling_evidence_confirmed": true,
+          "cooling_rate_per_hour": 0.2
+        }
+      },
+      "expected": {
+        "policy": "auto",
+        "action": "cool",
+        "reason": "sustained_measured_inefficient_cooling",
+        "setpoint": 26,
+        "fan_mode": "medium",
+        "quiet": false,
+        "auxiliary_action": "none",
+        "auxiliary_target": null,
+        "planned_intents": ["set_air_conditioner_temperature", "set_air_conditioner_fan"],
+        "blockers": ["duplicate"],
+        "active_protections": ["duplicate", "shadow_plan_not_executed"]
+      }
+    },
+    {
+      "id": "missing_authority_blocks_execution",
+      "name": "Отсутствие разрешения владельца комнаты блокирует исполнение.",
+      "category": "execution_guard",
+      "source_reference": {
+        "file": "climate-scenarios/reference-scenarios.mjs",
+        "case": "authority-and-canary-constraints"
+      },
+      "input": {
+        "period": "day",
+        "away": "home",
+        "room_mode": "auto",
+        "execution_guard": "authority_missing",
+        "target_temperature": 25,
+        "target_humidity": 45,
+        "available_devices": ["air_conditioner"],
+        "observation": {
+          "temperature": 26.3,
+          "humidity": 45,
+          "state_fresh": true,
+          "temperature_quality": "normal",
+          "window": "closed",
+          "air_conditioner": "running",
+          "current_setpoint": 25,
+          "current_fan_mode": "low",
+          "current_quiet": false,
+          "cooling_evidence_confirmed": true,
+          "cooling_rate_per_hour": 0.2
+        }
+      },
+      "expected": {
+        "policy": "auto",
+        "action": "cool",
+        "reason": "sustained_measured_inefficient_cooling",
+        "setpoint": 26,
+        "fan_mode": "medium",
+        "quiet": false,
+        "auxiliary_action": "none",
+        "auxiliary_target": null,
+        "planned_intents": ["set_air_conditioner_temperature", "set_air_conditioner_fan"],
+        "blockers": ["authority_not_granted"],
+        "active_protections": ["authority_not_granted", "shadow_plan_not_executed"]
+      }
+    },
+    {
+      "id": "stale_physical_feedback_blocks_escalation",
+      "name": "Устаревшее физическое подтверждение запрещает усиление охлаждения.",
+      "category": "freshness",
+      "source_reference": {
+        "file": "climate-scenarios/reference-scenarios.mjs",
+        "case": "stale-physical-feedback-blocks-boost"
+      },
+      "input": {
+        "period": "day",
+        "away": "home",
+        "room_mode": "auto",
+        "target_temperature": 25,
+        "target_humidity": 45,
+        "available_devices": ["air_conditioner"],
+        "observation": {
+          "temperature": 26.3,
+          "humidity": 45,
+          "state_fresh": true,
+          "temperature_quality": "normal",
+          "window": "closed",
+          "air_conditioner": "running",
+          "current_setpoint": 25,
+          "current_fan_mode": "low",
+          "current_quiet": false,
+          "cooling_evidence_confirmed": true,
+          "cooling_rate_per_hour": 0.2,
+          "physical_feedback": "stale"
+        }
+      },
+      "expected": {
+        "policy": "auto",
+        "action": "cool",
+        "reason": "cooling_evidence_not_eligible",
+        "setpoint": 26,
+        "fan_mode": "low",
+        "quiet": false,
+        "auxiliary_action": "none",
+        "auxiliary_target": null,
+        "planned_intents": ["set_air_conditioner_temperature", "set_air_conditioner_fan"],
+        "blockers": ["physical_feedback_unconfirmed"],
+        "active_protections": ["physical_feedback_unconfirmed", "shadow_plan_not_executed"]
+      }
+    },
+    {
+      "id": "unknown_window_beats_stale_state",
+      "name": "Неизвестное состояние окна важнее устаревшего снимка комнаты.",
+      "category": "priority",
+      "source_reference": {
+        "file": "tests/climate-core-decisions.test.mjs",
+        "case": "safety lockout beats freshness guard for unknown windows"
+      },
+      "input": {
+        "period": "day",
+        "away": "home",
+        "room_mode": "auto",
+        "target_temperature": 25.5,
+        "target_humidity": 45,
+        "available_devices": ["air_conditioner"],
+        "observation": {
+          "temperature": 26.2,
+          "humidity": 45,
+          "state_fresh": false,
+          "temperature_quality": "normal",
+          "window": "unknown",
+          "air_conditioner": "stopped",
+          "cooling_evidence_confirmed": false
+        }
+      },
+      "expected": {
+        "policy": "safety_lockout",
+        "action": "safe_off",
+        "reason": "safety_lockout",
+        "setpoint": null,
+        "fan_mode": null,
+        "quiet": null,
+        "auxiliary_action": "none",
+        "auxiliary_target": null,
+        "planned_intents": [],
+        "blockers": ["window"],
+        "active_protections": ["window", "blocked_policy_non_actuating", "redundant_off_suppression", "shadow_plan_not_executed"]
+      }
+    },
+    {
+      "id": "stale_delayed_intent_is_dropped",
+      "name": "Отложенное действие удаляется после смены режима комнаты.",
+      "category": "freshness",
+      "source_reference": {
+        "file": "tests/climate-core-decisions.test.mjs",
+        "case": "stale delayed AC commands are dropped after control changes"
+      },
+      "input": {
+        "period": "day",
+        "away": "home",
+        "room_mode": "auto",
+        "target_temperature": 25.5,
+        "target_humidity": 45,
+        "available_devices": ["air_conditioner"],
+        "observation": {
+          "temperature": 26.2,
+          "humidity": 45,
+          "state_fresh": true,
+          "temperature_quality": "normal",
+          "window": "not_configured",
+          "air_conditioner": "stopped",
+          "cooling_evidence_confirmed": false,
+          "delayed_command": "stale_after_control_change"
+        }
+      },
+      "expected": {
+        "policy": "freshness_guard",
+        "action": "observe",
+        "reason": "freshness_guard",
+        "setpoint": null,
+        "fan_mode": null,
+        "quiet": null,
+        "auxiliary_action": "none",
+        "auxiliary_target": null,
+        "planned_intents": [],
+        "blockers": ["stale_delayed_command"],
+        "active_protections": ["stale_delayed_command", "blocked_policy_non_actuating", "shadow_plan_not_executed"]
+      }
+    },
+    {
+      "id": "curtains_remain_explicitly_unsupported",
+      "name": "Шторы явно отмечены как пока не поддерживаемые климатическим алгоритмом.",
+      "category": "limitation",
+      "source_reference": {
+        "file": "climate-scenarios/reference-scenarios.mjs",
+        "case": "curtains-are-explicitly-not-modeled"
+      },
+      "input": {
+        "period": "day",
+        "away": "home",
+        "room_mode": "auto",
+        "target_temperature": 25,
+        "target_humidity": 45,
+        "available_devices": ["curtains"],
+        "observation": {
+          "temperature": 25,
+          "humidity": 45,
+          "state_fresh": true,
+          "temperature_quality": "normal",
+          "window": "not_configured",
+          "air_conditioner": "unknown",
+          "cooling_evidence_confirmed": false
+        }
+      },
+      "expected": {
+        "policy": "auto",
+        "action": "off",
+        "reason": "room temperature is at or below target",
+        "setpoint": null,
+        "fan_mode": null,
+        "quiet": null,
+        "auxiliary_action": "not_supported",
+        "auxiliary_target": null,
+        "planned_intents": [],
+        "blockers": [],
+        "active_protections": ["shadow_plan_not_executed"]
+      }
+    }
+  ]
+}

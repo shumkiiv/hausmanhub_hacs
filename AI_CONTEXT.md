@@ -64,6 +64,23 @@ Last updated: 2026-07-20.
   The final staged tree passed 373 local tests and disposable Home Assistant
   Core 2026.6.4/2026.7.0. Independent read-only review passed in OpenCode
   session `ses_08137d64cffe1UgIfPWWcyU09Q`.
+- Version 1.8.0 completes roadmap item 21. HausmanHub packages a frozen,
+  redacted reference suite derived read-only from working climate revision
+  `0bf681c4278f14f1ad7808b5fe0726b199bcdccc`: 30 cases cover cooling,
+  heating, humidity, policy priority, freshness, timing, device availability,
+  execution guards, and explicit limitations; 31 protections preserve the
+  decision and executor safety boundaries. Each case contains normalized
+  observations, the expected decision, abstract device intents, blockers, and
+  exact source-test provenance, never live entity/source/device IDs, service
+  calls, or addresses. The packaged JSON is strict-schema validated, bound to
+  source Git blobs, and locked by a reviewed SHA-256. Its mode is permanently
+  `reference_only` with commands disabled. The source climate module and
+  Android repository were not changed. Roadmap item 22 must build HausmanHub's
+  internal observation model against this fixed corpus; it must not weaken or
+  rewrite the reference to fit a new implementation. The final staged tree
+  passed 378 local tests, HACS/package/boundary/Android checks, and disposable
+  Home Assistant Core 2026.6.4/2026.7.0. Independent read-only review passed
+  in OpenCode session `ses_0811f930fffeb7iYWFxEvPAST5`.
 - Workspace boundary: this thread may change only HausmanHub and its integration
   wrapper. The Android application is developed separately in
   `/home/ivsh/projects/УД-android`; it may be inspected only read-only for

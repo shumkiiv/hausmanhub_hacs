@@ -123,6 +123,17 @@ class ClimateContractSchemasTest(unittest.TestCase):
             with self.subTest(schema=schema_path.name):
                 Draft202012Validator.check_schema(load_json(schema_path))
 
+        validator("v1/climate-reference-suite.schema.json").validate(
+            load_json(
+                ROOT
+                / "custom_components"
+                / "hausman_hub"
+                / "reference"
+                / "v1"
+                / "climate-reference-suite.json"
+            )
+        )
+
     def test_generated_home_and_admin_import_match_their_contracts(self) -> None:
         capabilities = api_capabilities_snapshot()
         validator("v1/api-capabilities.schema.json").validate(capabilities)

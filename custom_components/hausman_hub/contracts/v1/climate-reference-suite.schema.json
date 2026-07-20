@@ -1,0 +1,406 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hausmanhub/contracts/v1/climate-reference-suite.schema.json",
+  "title": "Эталонные сценарии климатического алгоритма HausmanHub v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "source",
+    "execution",
+    "policy_priority",
+    "protections",
+    "cases"
+  ],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-climate-reference-suite"},
+        "version": {"const": 1}
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "repository_revision",
+        "captured_on",
+        "read_only",
+        "files"
+      ],
+      "properties": {
+        "name": {"const": "Работающий климатический модуль"},
+        "repository_revision": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}$"
+        },
+        "captured_on": {"type": "string", "format": "date"},
+        "read_only": {"const": true},
+        "files": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "git_blob"],
+            "properties": {
+              "path": {
+                "type": "string",
+                "pattern": "^[a-z0-9][A-Za-z0-9._/-]{0,159}$"
+              },
+              "git_blob": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{40}$"
+              }
+            }
+          }
+        }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "commands_enabled"],
+      "properties": {
+        "mode": {"const": "reference_only"},
+        "commands_enabled": {"const": false}
+      }
+    },
+    "policy_priority": {
+      "type": "array",
+      "prefixItems": [
+        {"const": "away"},
+        {"const": "safety_lockout"},
+        {"const": "freshness_guard"},
+        {"const": "forced_auto_only"},
+        {"const": "manual"},
+        {"const": "auto"},
+        {"const": "direct_device_command"}
+      ],
+      "items": false,
+      "minItems": 7,
+      "maxItems": 7
+    },
+    "protections": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {"$ref": "#/$defs/protection"}
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "items": {"$ref": "#/$defs/case"}
+    }
+  },
+  "$defs": {
+    "stable_code": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$"
+    },
+    "temperature": {
+      "type": "number",
+      "minimum": -50,
+      "maximum": 70
+    },
+    "percentage": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "nullable_temperature": {
+      "oneOf": [
+        {"$ref": "#/$defs/temperature"},
+        {"type": "null"}
+      ]
+    },
+    "nullable_percentage": {
+      "oneOf": [
+        {"$ref": "#/$defs/percentage"},
+        {"type": "null"}
+      ]
+    },
+    "protection_code": {
+      "enum": [
+        "away",
+        "forced_auto_only",
+        "window",
+        "critical_sensor",
+        "cooling_blocked",
+        "heating_blocked",
+        "central_heating_off",
+        "device_unavailable",
+        "stale_state",
+        "temperature_jump",
+        "stale_delayed_command",
+        "minimum_off_pause",
+        "minimum_run_hold",
+        "execution_disabled",
+        "morning_approval_required",
+        "room_not_allowed",
+        "type_not_allowed",
+        "entity_not_allowed",
+        "hvac_auto_forbidden",
+        "invalid_service_command",
+        "physical_feedback_unconfirmed",
+        "cooldown",
+        "duplicate",
+        "awaiting_physical_transition",
+        "physical_transition_timeout",
+        "authority_not_granted",
+        "manual_no_automatic_plan",
+        "blocked_policy_non_actuating",
+        "shadow_plan_not_executed",
+        "physical_shutter_edge_driven",
+        "redundant_off_suppression"
+      ]
+    },
+    "protection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "name", "source_file"],
+      "properties": {
+        "code": {"$ref": "#/$defs/protection_code"},
+        "name": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 180,
+          "pattern": "[А-Яа-яЁё]"
+        },
+        "source_file": {
+          "type": "string",
+          "pattern": "^[a-z0-9][A-Za-z0-9._/-]{0,159}$"
+        }
+      }
+    },
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "category",
+        "source_reference",
+        "input",
+        "expected"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/stable_code"},
+        "name": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 180,
+          "pattern": "[А-Яа-яЁё]"
+        },
+        "category": {
+          "enum": [
+            "cooling",
+            "heating",
+            "humidity",
+            "priority",
+            "freshness",
+            "timing",
+            "availability",
+            "execution_guard",
+            "limitation"
+          ]
+        },
+        "source_reference": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["file", "case"],
+          "properties": {
+            "file": {
+              "type": "string",
+              "pattern": "^[a-z0-9][A-Za-z0-9._/-]{0,159}$"
+            },
+            "case": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 180
+            }
+          }
+        },
+        "input": {"$ref": "#/$defs/input"},
+        "expected": {"$ref": "#/$defs/expected"}
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "period",
+        "away",
+        "room_mode",
+        "target_temperature",
+        "target_humidity",
+        "available_devices",
+        "observation"
+      ],
+      "properties": {
+        "period": {"enum": ["day", "night"]},
+        "away": {"enum": ["home", "safe_off", "keep"]},
+        "room_mode": {"enum": ["auto", "manual", "forced_auto_only"]},
+        "season": {"enum": ["summer", "winter"]},
+        "manual_request": {"type": "boolean"},
+        "outdoor_temperature": {"$ref": "#/$defs/temperature"},
+        "execution_guard": {
+          "enum": ["none", "cooldown_active", "duplicate", "authority_missing"]
+        },
+        "target_temperature": {"$ref": "#/$defs/nullable_temperature"},
+        "target_humidity": {"$ref": "#/$defs/nullable_percentage"},
+        "hard_off_temperature": {"$ref": "#/$defs/temperature"},
+        "cool_start_band": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 5
+        },
+        "available_devices": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 6,
+          "items": {
+            "enum": [
+              "air_conditioner",
+              "radiator_thermostat",
+              "floor_heating",
+              "humidifier",
+              "curtains"
+            ]
+          }
+        },
+        "observation": {"$ref": "#/$defs/observation"}
+      }
+    },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "temperature",
+        "humidity",
+        "state_fresh",
+        "temperature_quality",
+        "window",
+        "air_conditioner",
+        "cooling_evidence_confirmed"
+      ],
+      "properties": {
+        "temperature": {"$ref": "#/$defs/nullable_temperature"},
+        "humidity": {"$ref": "#/$defs/nullable_percentage"},
+        "state_fresh": {"type": "boolean"},
+        "temperature_quality": {"enum": ["normal", "suspect"]},
+        "window": {"enum": ["closed", "open", "unknown", "not_configured"]},
+        "air_conditioner": {"enum": ["running", "stopped", "unknown"]},
+        "current_setpoint": {"$ref": "#/$defs/nullable_temperature"},
+        "current_fan_mode": {
+          "type": ["string", "null"],
+          "enum": ["low", "medium", "high", "auto", null]
+        },
+        "current_quiet": {"type": ["boolean", "null"]},
+        "minutes_since_start": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "maximum": 10080
+        },
+        "minutes_since_stop": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "maximum": 10080
+        },
+        "cooling_evidence_confirmed": {"type": "boolean"},
+        "cooling_rate_per_hour": {
+          "type": ["number", "null"],
+          "minimum": -20,
+          "maximum": 20
+        },
+        "central_heating_on": {"type": ["boolean", "null"]},
+        "humidifier_on": {"type": ["boolean", "null"]},
+        "physical_feedback": {"enum": ["confirmed", "stale", "unknown"]},
+        "delayed_command": {"enum": ["none", "stale_after_control_change"]}
+      }
+    },
+    "expected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy",
+        "action",
+        "reason",
+        "setpoint",
+        "fan_mode",
+        "quiet",
+        "auxiliary_action",
+        "auxiliary_target",
+        "planned_intents",
+        "blockers",
+        "active_protections"
+      ],
+      "properties": {
+        "policy": {
+          "enum": [
+            "away",
+            "safety_lockout",
+            "freshness_guard",
+            "forced_auto_only",
+            "manual",
+            "auto"
+          ]
+        },
+        "action": {"enum": ["cool", "maintain", "off", "safe_off", "observe"]},
+        "reason": {"type": ["string", "null"], "maxLength": 120},
+        "setpoint": {"$ref": "#/$defs/nullable_temperature"},
+        "fan_mode": {
+          "type": ["string", "null"],
+          "enum": ["low", "medium", "high", "auto", null]
+        },
+        "quiet": {"type": ["boolean", "null"]},
+        "auxiliary_action": {
+          "enum": [
+            "none",
+            "humidifier_on",
+            "humidifier_off",
+            "trv_set_temperature",
+            "trv_observe",
+            "not_supported"
+          ]
+        },
+        "auxiliary_target": {"$ref": "#/$defs/nullable_temperature"},
+        "planned_intents": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 8,
+          "items": {
+            "enum": [
+              "start_air_conditioner",
+              "set_air_conditioner_temperature",
+              "set_air_conditioner_fan",
+              "stop_air_conditioner",
+              "start_humidifier",
+              "stop_humidifier",
+              "set_radiator_temperature"
+            ]
+          }
+        },
+        "blockers": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 16,
+          "items": {"$ref": "#/$defs/protection_code"}
+        },
+        "active_protections": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 16,
+          "items": {"$ref": "#/$defs/protection_code"}
+        }
+      }
+    }
+  }
+}
