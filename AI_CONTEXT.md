@@ -315,6 +315,29 @@ Last updated: 2026-07-20.
   remain unchanged. The final staged tree passed 491 local tests, the
   HACS/package/boundary/Android checks, and disposable Home Assistant Core
   2026.6.4/2026.7.0.
+- Version 1.9.2 completes roadmap item 33. Strict Home Assistant device
+  adapters now translate each proven final device plan into an exact call
+  list from a closed service whitelist: `climate.set_hvac_mode` (cool/heat/
+  off), `climate.set_temperature`, `climate.set_fan_mode`, and humidifier
+  power. Calls name one validated registry control entity and bounded values
+  (temperature 10–35, humidity 0–100, approved modes only); arbitrary fields
+  are impossible. Translation stops honestly with bounded limits: missing
+  control endpoint, missing capability, unsupported action, observe, hold,
+  nothing to translate, or the quiet setting that has no strict call. A
+  missing fan capability blocks the whole device translation rather than
+  silently dropping part of the plan. This is translation only:
+  `commands_enabled` is always `False` and nothing is executed. The source
+  climate module and Android repository remain unchanged. The final staged
+  tree passed 504 local tests, the HACS/package/boundary/Android checks, and
+  disposable Home Assistant Core 2026.6.4/2026.7.0. The independent Kimi
+  review initially stopped the set (FAIL) for an inconsistent floor-heating
+  hvac call and a missing `HVAC_MODE` capability requirement; one fix
+  iteration closed both with new tests. The same iteration fixed the
+  floor-heating policy: in the heating season it now yields a strict
+  set-temperature action instead of tripping the final-plan invariant and
+  failing the room (no frozen reference case covers floor heating, so frozen
+  parity is untouched). HVAC-mode calls now require the declared `HVAC_MODE`
+  capability.
 - Workspace boundary: this thread may change only HausmanHub and its integration
   wrapper. The Android application is developed separately in
   `/home/ivsh/projects/УД-android`; it may be inspected only read-only for
@@ -1860,5 +1883,5 @@ Engineering and review rules are in
 
 - Obsidian/context index: `LLM_WIKI/00_Index.md`.
 - Latest generated context: `LLM_WIKI/Context.md`.
-- Last sync: 2026-07-20T21:58:09+03:00.
+- Last sync: 2026-07-20T22:39:58+03:00.
 <!-- llm-wiki-sync:end -->

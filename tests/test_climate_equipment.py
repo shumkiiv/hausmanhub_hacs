@@ -330,7 +330,7 @@ class ClimateEquipmentTest(unittest.TestCase):
             observed_home,
         )
 
-        self.assertIs(heats.action, ClimateEquipmentAction.HEAT)
+        self.assertIs(heats.action, ClimateEquipmentAction.SET_TEMPERATURE)
         self.assertEqual(25.0, heats.target_temperature)
         self.assertIs(heats.reason, ClimateEquipmentReason.HEATING_REQUIRED)
         self.assertIs(holds.action, ClimateEquipmentAction.HOLD)

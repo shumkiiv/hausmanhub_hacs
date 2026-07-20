@@ -12,6 +12,7 @@ from ..domain.climate import ClimateRegistry
 from ..domain.climate_comparison import ClimateComparisonSnapshot
 from ..domain.climate_demand import ClimateDemandSnapshot
 from ..domain.climate_equipment import ClimateEquipmentSnapshot
+from ..domain.climate_ha_calls import ClimateHaCallPlanSnapshot
 from ..domain.climate_isolation import ClimateIsolationSnapshot
 from ..domain.climate_observation import (
     ClimateObservationSnapshot,
@@ -44,6 +45,7 @@ from .climate_evidence import (
     public_intent_context,
 )
 from .climate_equipment import build_climate_equipment_snapshot
+from .climate_ha_adapters import build_climate_ha_call_plan
 from .climate_import import ClimateImportSnapshot
 from .climate_isolation import build_isolated_climate_policy_snapshot
 from .climate_comparison import build_climate_comparison_snapshot
@@ -955,6 +957,19 @@ class ClimateRuntime:
             observation = await self._async_native_climate_observation_unlocked()
             isolation = build_isolated_climate_policy_snapshot(contour, observation)
             return build_climate_comparison_snapshot(isolation, observation)
+
+    async def async_native_climate_ha_calls(
+        self,
+    ) -> ClimateHaCallPlanSnapshot | None:
+        """Translate the isolated plan into strict HA call plans."""
+
+        async with self._lock:
+            contour = self._contours.contour(CLIMATE_CONTOUR_ID)
+            if contour is None:
+                return None
+            observation = await self._async_native_climate_observation_unlocked()
+            isolation = build_isolated_climate_policy_snapshot(contour, observation)
+            return build_climate_ha_call_plan(self._registry, isolation)
 
     async def _async_native_climate_observation_unlocked(
         self,

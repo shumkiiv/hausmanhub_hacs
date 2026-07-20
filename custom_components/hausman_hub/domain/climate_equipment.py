@@ -505,7 +505,7 @@ def _floor_output(
 ]:
     if thermal is ClimateThermalResolution.HEATING:
         return (
-            ClimateEquipmentAction.HEAT,
+            ClimateEquipmentAction.SET_TEMPERATURE,
             float(_decimal(comfort_temperature)),
             None,
             None,
