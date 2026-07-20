@@ -162,6 +162,19 @@ Last updated: 2026-07-20.
   value. Clients compare equality only; the value is not monotonic. OpenCode
   review again stopped before reading the change because token refresh returned
   `401`; the final Codex audit found no remaining issue.
+- Version 1.6.9 completed the tenth HASC-only roadmap item. A repository-local
+  compatibility check decodes the v12 home fixture into the scalar and
+  collection types audited read-only in the existing Android `HomeRoom`,
+  `HomeDevice`, and `HomeAction` models. It also constructs strict HASC action
+  requests, enforces Android `Long` and exact JSON-number limits, device-domain
+  mappings, and Russian blocked-reason labels. The check reads and changes only
+  HASC files in CI. It proves model-level compatibility, not that the current
+  Android application already has a live HASC v12 network decoder. The final
+  staged tree passed 314 local tests and both supported Home Assistant Core
+  checks. OpenCode stopped before review with token-refresh `401` in session
+  `ses_08227e465ffekdVIgv90Up8d7b`; the final Codex audit added exact coverage
+  between all HASC device kinds and Android domain mappings and found no
+  remaining issue.
 - The final architecture was clarified on 2026-07-20: HASC must ultimately
   contain the complete currently working climate algorithm. During migration,
   the existing module remains read-only and serves as a behavior oracle through

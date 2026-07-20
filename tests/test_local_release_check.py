@@ -28,6 +28,7 @@ class LocalReleaseCheckTest(unittest.TestCase):
                 "common synthetic fixture",
                 "shadow synthetic fixture",
                 "diagnostics synthetic fixture",
+                "Android model compatibility",
                 "staged release version",
                 "HACS installation package",
                 "published-file safety",

@@ -55,6 +55,10 @@ def local_checks(python_executable: str) -> tuple[Check, ...]:
             ),
         ),
         (
+            "Android model compatibility",
+            (python_executable, "tools/check_android_compatibility.py"),
+        ),
+        (
             "staged release version",
             (python_executable, "tools/check_staged_release_version.py"),
         ),
