@@ -6,8 +6,16 @@ import hashlib
 import json
 
 from ..domain.climate import ClimateRegistry
-from .contours import ContourRegistryViolation, climate_room_parameters
+from .contours import (
+    ContourRegistryViolation,
+    build_climate_contour_setup,
+    climate_room_parameters,
+)
 from .climate_import import ClimateImportSnapshot
+from .climate_registry_import import (
+    ClimateRegistryImportViolation,
+    import_managed_climate_selection,
+)
 from .public_climate_values import public_climate_display_names
 
 
@@ -24,6 +32,8 @@ CLIMATE_DRAFT_CONTRACT_NAME = "hausman-hasc-climate-draft"
 CLIMATE_DRAFT_CONTRACT_VERSION = 1
 CLIMATE_SETUP_OPTIONS_CONTRACT_NAME = "hausman-hasc-climate-setup-options"
 CLIMATE_SETUP_OPTIONS_CONTRACT_VERSION = 1
+CLIMATE_DRAFT_VALIDATION_CONTRACT_NAME = "hausman-hasc-climate-draft-validation"
+CLIMATE_DRAFT_VALIDATION_CONTRACT_VERSION = 1
 MAX_CLIMATE_DRAFT_NAME_LENGTH = 120
 MAX_CLIMATE_DRAFT_ROOMS = 128
 MAX_CLIMATE_DRAFT_DEVICES = 512
@@ -42,6 +52,42 @@ _CLIMATE_DRAFT_ROOM_FIELDS = frozenset(
     }
 )
 _CLIMATE_DRAFT_DEVICE_FIELDS = frozenset({"candidate_id", "type"})
+_CLIMATE_DRAFT_RESPONSE_FIELDS = frozenset(
+    {
+        "contract",
+        "generated_at",
+        "snapshot_revision",
+        "draft_revision",
+        "status",
+        "save_allowed",
+        "validation_required",
+        "display_names",
+        "name",
+        "mode",
+        "rooms",
+        "summary",
+    }
+)
+_CLIMATE_DRAFT_RESPONSE_ROOM_FIELDS = frozenset(
+    {"id", "name", "targets", "devices"}
+)
+_CLIMATE_DRAFT_TARGET_FIELDS = frozenset(
+    {"target_temperature", "target_humidity", "strategy"}
+)
+_CLIMATE_DRAFT_RESPONSE_DEVICE_FIELDS = frozenset(
+    {"candidate_id", "name", "type", "type_name"}
+)
+_ACTIVE_CLIMATE_DRAFT_TYPES = frozenset(
+    {"air_conditioner", "radiator_thermostat", "humidifier", "floor_heating"}
+)
+_VALIDATION_ISSUE_NAMES = {
+    "no_controllable_device": (
+        "В комнате нет устройства, которое может управлять климатом."
+    ),
+    "unsupported_device_set": (
+        "Выбранный набор устройств нельзя безопасно подготовить к сохранению."
+    ),
+}
 _DRAFT_MODE_NAMES = {
     "observe": "Только наблюдение",
     "automatic": "Автоматическое управление",
@@ -603,6 +649,179 @@ def climate_setup_options(
             for room in rooms_payload["rooms"]  # type: ignore[index]
         ],
         "devices": devices,
+    }
+
+
+def validate_climate_contour_draft(
+    registry: ClimateRegistry,
+    snapshot: ClimateImportSnapshot,
+    payload: object,
+) -> dict[str, object]:
+    """Validate one unchanged draft deeply without saving or commanding."""
+
+    draft = _exact_mapping(
+        payload,
+        _CLIMATE_DRAFT_RESPONSE_FIELDS,
+        "climate contour draft",
+    )
+    generated_at = draft["generated_at"]
+    if type(generated_at) is not int or generated_at < 0:
+        raise ClimateSetupViolation("climate draft generation time is invalid")
+    rooms = draft["rooms"]
+    if not isinstance(rooms, list):
+        raise ClimateSetupViolation("climate draft rooms are invalid")
+
+    request_rooms: list[dict[str, object]] = []
+    for room_value in rooms:
+        room = _exact_mapping(
+            room_value,
+            _CLIMATE_DRAFT_RESPONSE_ROOM_FIELDS,
+            "climate draft response room",
+        )
+        targets = _exact_mapping(
+            room["targets"],
+            _CLIMATE_DRAFT_TARGET_FIELDS,
+            "climate draft response targets",
+        )
+        devices = room["devices"]
+        if not isinstance(devices, list):
+            raise ClimateSetupViolation("climate draft response devices are invalid")
+        request_devices: list[dict[str, object]] = []
+        for device_value in devices:
+            device = _exact_mapping(
+                device_value,
+                _CLIMATE_DRAFT_RESPONSE_DEVICE_FIELDS,
+                "climate draft response device",
+            )
+            request_devices.append(
+                {
+                    "candidate_id": device["candidate_id"],
+                    "type": device["type"],
+                }
+            )
+        request_rooms.append(
+            {
+                "room_id": room["id"],
+                "target_temperature": targets["target_temperature"],
+                "target_humidity": targets["target_humidity"],
+                "strategy": targets["strategy"],
+                "devices": request_devices,
+            }
+        )
+
+    expected = create_climate_contour_draft(
+        registry,
+        snapshot,
+        {
+            "snapshot_revision": draft["snapshot_revision"],
+            "name": draft["name"],
+            "mode": draft["mode"],
+            "rooms": request_rooms,
+        },
+    )
+    comparable_draft = dict(draft)
+    comparable_draft["generated_at"] = expected["generated_at"]
+    if comparable_draft != expected:
+        raise ClimateSetupViolation("climate draft was changed after creation")
+
+    source_ids = _ordered_candidate_source_ids(registry, snapshot)
+    source_by_candidate = {
+        f"candidate_{index:04d}": source_id
+        for index, source_id in enumerate(source_ids, start=1)
+    }
+    selected_source_ids: list[str] = []
+    selected_source_kinds: dict[str, object] = {}
+    room_parameters: dict[str, object] = {}
+    issues: list[dict[str, object]] = []
+    for room in request_rooms:
+        room_id = room["room_id"]
+        devices = room["devices"]
+        active = False
+        for device in devices:  # type: ignore[union-attr]
+            candidate_id = device["candidate_id"]
+            source_id = source_by_candidate[candidate_id]
+            selected_source_ids.append(source_id)
+            selected_source_kinds[source_id] = device["type"]
+            if device["type"] in _ACTIVE_CLIMATE_DRAFT_TYPES:
+                active = True
+        if not active:
+            issues.append(
+                {
+                    "code": "no_controllable_device",
+                    "room_id": room_id,
+                    "message": _VALIDATION_ISSUE_NAMES["no_controllable_device"],
+                }
+            )
+        room_parameters[room_id] = {  # type: ignore[index]
+            "target_temperature": room["target_temperature"],
+            "target_humidity": room["target_humidity"],
+            "strategy": room["strategy"],
+        }
+
+    capabilities_supported = True
+    try:
+        import_managed_climate_selection(
+            snapshot,
+            room_ids=[room["room_id"] for room in request_rooms],
+            source_ids=selected_source_ids,
+            source_kinds=selected_source_kinds,
+        )
+    except ClimateRegistryImportViolation:
+        capabilities_supported = False
+        issues.append(
+            {
+                "code": "unsupported_device_set",
+                "room_id": None,
+                "message": _VALIDATION_ISSUE_NAMES["unsupported_device_set"],
+            }
+        )
+
+    if not issues:
+        try:
+            build_climate_contour_setup(
+                snapshot,
+                room_ids=[room["room_id"] for room in request_rooms],
+                source_ids=selected_source_ids,
+                source_kinds=selected_source_kinds,
+                name=draft["name"],
+                mode=draft["mode"],
+                room_parameters=room_parameters,
+            )
+        except ContourRegistryViolation:
+            capabilities_supported = False
+            issues.append(
+                {
+                    "code": "unsupported_device_set",
+                    "room_id": None,
+                    "message": _VALIDATION_ISSUE_NAMES["unsupported_device_set"],
+                }
+            )
+
+    ready = not issues
+    return {
+        "contract": {
+            "name": CLIMATE_DRAFT_VALIDATION_CONTRACT_NAME,
+            "version": CLIMATE_DRAFT_VALIDATION_CONTRACT_VERSION,
+        },
+        "generated_at": snapshot.generated_at,
+        "snapshot_revision": draft["snapshot_revision"],
+        "draft_revision": draft["draft_revision"],
+        "status": "ready" if ready else "blocked",
+        "save_allowed": ready,
+        "command_allowed": False,
+        "checks": {
+            "snapshot_current": True,
+            "draft_unchanged": True,
+            "rooms_have_controllable_devices": not any(
+                issue["code"] == "no_controllable_device" for issue in issues
+            ),
+            "device_capabilities_supported": capabilities_supported,
+        },
+        "issues": issues,
+        "summary": {
+            "room_count": len(request_rooms),
+            "device_count": len(selected_source_ids),
+        },
     }
 
 

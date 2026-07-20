@@ -1,0 +1,23 @@
+{
+  "contract": {
+    "name": "hausman-hasc-climate-draft-validation",
+    "version": 1
+  },
+  "generated_at": 1784280000000,
+  "snapshot_revision": 8115739542118920,
+  "draft_revision": 2766488448644126,
+  "status": "ready",
+  "save_allowed": true,
+  "command_allowed": false,
+  "checks": {
+    "snapshot_current": true,
+    "draft_unchanged": true,
+    "rooms_have_controllable_devices": true,
+    "device_capabilities_supported": true
+  },
+  "issues": [],
+  "summary": {
+    "room_count": 2,
+    "device_count": 2
+  }
+}

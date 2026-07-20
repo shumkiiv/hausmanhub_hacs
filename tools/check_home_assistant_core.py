@@ -119,6 +119,7 @@ TEMPORARY_TEMPERATURE_PATH = "/api/hausman_hub/v1/contours/temporary-temperature
 CLIMATE_ACTION_PATH = "/api/hausman_hub/v1/actions"
 CLIMATE_ADMIN_IMPORT_PATH = "/api/hausman_hub/v1/admin/climate-import"
 CLIMATE_ADMIN_DRAFT_PATH = "/api/hausman_hub/v1/admin/climate-drafts"
+CLIMATE_ADMIN_DRAFT_VALIDATION_PATH = "/api/hausman_hub/v1/admin/climate-drafts/validate"
 CLIMATE_ADMIN_REGISTRY_PATH = "/api/hausman_hub/v1/admin/climate-registry"
 CLIMATE_ADMIN_REGISTRY_PREVIEW_PATH = "/api/hausman_hub/v1/admin/climate-registry-preview"
 CLIMATE_ADMIN_READINESS_PATH = "/api/hausman_hub/v1/admin/climate-readiness"
@@ -135,6 +136,7 @@ CLIMATE_API_PATHS = (
     CLIMATE_ACTION_PATH,
     CLIMATE_ADMIN_IMPORT_PATH,
     CLIMATE_ADMIN_DRAFT_PATH,
+    CLIMATE_ADMIN_DRAFT_VALIDATION_PATH,
     CLIMATE_ADMIN_REGISTRY_PATH,
     CLIMATE_ADMIN_REGISTRY_PREVIEW_PATH,
     CLIMATE_ADMIN_READINESS_PATH,
@@ -2296,6 +2298,7 @@ def assert_disabled_climate_facade(hass: HomeAssistant, domain: str, entry_id: s
         CLIMATE_ACTION_PATH: {"POST", "OPTIONS"},
         CLIMATE_ADMIN_IMPORT_PATH: {"GET", "OPTIONS"},
         CLIMATE_ADMIN_DRAFT_PATH: {"GET", "POST", "OPTIONS"},
+        CLIMATE_ADMIN_DRAFT_VALIDATION_PATH: {"POST", "OPTIONS"},
         CLIMATE_ADMIN_REGISTRY_PATH: {"GET", "POST", "OPTIONS"},
         CLIMATE_ADMIN_REGISTRY_PREVIEW_PATH: {"POST", "OPTIONS"},
         CLIMATE_ADMIN_READINESS_PATH: {"GET", "OPTIONS"},
@@ -3096,6 +3099,26 @@ async def async_assert_disabled_climate_http_access(hass: HomeAssistant) -> None
             rejected_tablet_draft.status,
             HTTPStatus.FORBIDDEN,
             "climate draft must reject the ordinary tablet role",
+        )
+        disabled_draft_validation = await client.post(
+            CLIMATE_ADMIN_DRAFT_VALIDATION_PATH,
+            headers=owner_headers,
+            json={"status": "created"},
+        )
+        assert_result(
+            disabled_draft_validation.status,
+            HTTPStatus.SERVICE_UNAVAILABLE,
+            "disabled draft validation must not contact any bridge",
+        )
+        rejected_tablet_validation = await client.post(
+            CLIMATE_ADMIN_DRAFT_VALIDATION_PATH,
+            headers=tablet_headers,
+            json={"status": "created"},
+        )
+        assert_result(
+            rejected_tablet_validation.status,
+            HTTPStatus.FORBIDDEN,
+            "draft validation must reject the ordinary tablet role",
         )
 
         readiness = await client.get(

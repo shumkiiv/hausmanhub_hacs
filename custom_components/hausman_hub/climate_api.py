@@ -38,6 +38,7 @@ DATA_CLIMATE_RUNTIME = "climate_runtime"
 DATA_CLIMATE_VIEWS = "climate_views"
 ADMIN_IMPORT_PATH = "/api/hausman_hub/v1/admin/climate-import"
 ADMIN_DRAFT_PATH = "/api/hausman_hub/v1/admin/climate-drafts"
+ADMIN_DRAFT_VALIDATION_PATH = "/api/hausman_hub/v1/admin/climate-drafts/validate"
 ADMIN_REGISTRY_PATH = "/api/hausman_hub/v1/admin/climate-registry"
 ADMIN_REGISTRY_PREVIEW_PATH = "/api/hausman_hub/v1/admin/climate-registry-preview"
 ADMIN_READINESS_PATH = "/api/hausman_hub/v1/admin/climate-readiness"
@@ -45,6 +46,7 @@ ADMIN_SHADOW_EVIDENCE_PATH = "/api/hausman_hub/v1/admin/climate-shadow-evidence"
 ADMIN_CANARY_PREFLIGHT_PATH = "/api/hausman_hub/v1/admin/climate-canary-preflight"
 NO_STORE_HEADERS = {"Cache-Control": "no-store"}
 MAX_ACTION_BODY_BYTES = 16 * 1024
+MAX_CLIMATE_SETUP_BODY_BYTES = 256 * 1024
 TABLET_GROUP_ID = "system-users"
 HOME_IPV4_NETWORKS: Final[tuple[IPv4Network, ...]] = (
     IPv4Network("10.0.0.0/8"),
@@ -70,6 +72,7 @@ def register_climate_api(hass: HomeAssistant, runtime: ClimateRuntime) -> None:
             ClimateActionView(hass),
             ClimateAdminImportView(hass),
             ClimateAdminDraftView(hass),
+            ClimateAdminDraftValidationView(hass),
             ClimateAdminRegistryView(hass),
             ClimateAdminRegistryPreviewView(hass),
             ClimateAdminReadinessView(hass),
@@ -388,7 +391,10 @@ class ClimateAdminDraftView(_ClimateView):
         if runtime is None:
             return self._unavailable()
         try:
-            payload = await _request_json(request)
+            payload = await _request_json(
+                request,
+                maximum_bytes=MAX_CLIMATE_SETUP_BODY_BYTES,
+            )
             result = await runtime.async_create_contour_draft(payload)
         except ClimateSetupViolation as error:
             status = (
@@ -404,6 +410,50 @@ class ClimateAdminDraftView(_ClimateView):
         except ValueError:
             return self.json_message(
                 "Запрос черновика климатического контура заполнен неверно.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        except ClimateRuntimeUnavailable:
+            return self._unavailable()
+        except Exception:
+            return self._unavailable()
+        return self.json(result, headers=NO_STORE_HEADERS)
+
+
+class ClimateAdminDraftValidationView(_ClimateView):
+    """Validate an unchanged draft deeply without persistence or commands."""
+
+    url = ADMIN_DRAFT_VALIDATION_PATH
+    name = "api:hausman_hub:climate_admin_draft_validation"
+
+    async def post(self, request: Any) -> Any:
+        if not _is_exact_request(request, ADMIN_DRAFT_VALIDATION_PATH):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        runtime = self._runtime()
+        if runtime is None:
+            return self._unavailable()
+        try:
+            payload = await _request_json(
+                request,
+                maximum_bytes=MAX_CLIMATE_SETUP_BODY_BYTES,
+            )
+            result = await runtime.async_validate_contour_draft(payload)
+        except ClimateSetupViolation as error:
+            status = (
+                HTTPStatus.CONFLICT
+                if error.code in {"snapshot_changed", "data_stale"}
+                else HTTPStatus.BAD_REQUEST
+            )
+            return self.json_message(
+                "Не удалось проверить черновик климатического контура.",
+                status,
+                headers=NO_STORE_HEADERS,
+            )
+        except ValueError:
+            return self.json_message(
+                "Черновик климатического контура заполнен неверно.",
                 HTTPStatus.BAD_REQUEST,
                 headers=NO_STORE_HEADERS,
             )
@@ -565,9 +615,13 @@ class ClimateAdminCanaryPreflightView(_ClimateView):
         return self.json(result, headers=NO_STORE_HEADERS)
 
 
-async def _request_json(request: Any) -> object:
+async def _request_json(
+    request: Any,
+    *,
+    maximum_bytes: int = MAX_ACTION_BODY_BYTES,
+) -> object:
     length = getattr(request, "content_length", None)
-    if type(length) is not int or not 0 < length <= MAX_ACTION_BODY_BYTES:
+    if type(length) is not int or not 0 < length <= maximum_bytes:
         raise ValueError("request body size is invalid")
     if getattr(request, "content_type", None) != "application/json":
         raise ValueError("request body must be JSON")

@@ -292,6 +292,7 @@ def build_climate_contour_setup(
     *,
     room_ids: object,
     source_ids: object,
+    source_kinds: object = None,
     name: object,
     mode: object,
     target_temperature: object = None,
@@ -321,6 +322,7 @@ def build_climate_contour_setup(
             snapshot,
             room_ids=room_ids,
             source_ids=source_ids,
+            source_kinds=source_kinds,
         )
         parameters_by_room = _climate_parameters_by_room(
             registry,

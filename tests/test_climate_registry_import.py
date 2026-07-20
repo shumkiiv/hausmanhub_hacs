@@ -17,6 +17,7 @@ from custom_components.hausman_hub.application.climate_registry_import import (
     add_import_candidate_to_registry,
     candidate_control_domain,
     import_candidate_is_unchanged,
+    import_managed_climate_selection,
 )
 from custom_components.hausman_hub.domain.climate import ClimateRegistry
 from custom_components.hausman_hub.domain.climate_bridge import ClimateBridgeMode
@@ -24,6 +25,28 @@ from tests.test_climate_import import source_payload
 
 
 class ClimateRegistryImportTest(unittest.TestCase):
+    def test_managed_selection_keeps_an_explicit_supported_device_kind(self) -> None:
+        source = source_payload()
+        source["devices"][0]["category"] = "floor_heating"  # type: ignore[index]
+        snapshot = import_climate_state(source)
+        source_id = "synthetic-ac-source-living"
+
+        registry = import_managed_climate_selection(
+            snapshot,
+            room_ids=["living"],
+            source_ids=[source_id],
+            source_kinds={source_id: "floor_heating"},
+        )
+
+        self.assertEqual("floor_heating", registry.devices[0].kind.value)
+        with self.assertRaisesRegex(ClimateRegistryImportViolation, "exactly match"):
+            import_managed_climate_selection(
+                snapshot,
+                room_ids=["living"],
+                source_ids=[source_id],
+                source_kinds={},
+            )
+
     def test_explicit_candidate_adds_room_and_infers_only_supported_capabilities(
         self,
     ) -> None:

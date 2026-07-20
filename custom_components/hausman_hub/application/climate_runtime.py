@@ -34,7 +34,11 @@ from .climate_registry import (
     registry_from_payload,
     registry_to_payload,
 )
-from .climate_setup import climate_setup_options, create_climate_contour_draft
+from .climate_setup import (
+    climate_setup_options,
+    create_climate_contour_draft,
+    validate_climate_contour_draft,
+)
 from .contours import (
     CLIMATE_CONTOUR_ID,
     ContourRegistryViolation,
@@ -264,6 +268,23 @@ class ClimateRuntime:
                 record_evidence=False,
             )
             return climate_setup_options(self._registry, snapshot)
+
+    async def async_validate_contour_draft(
+        self,
+        payload: object,
+    ) -> dict[str, object]:
+        """Validate one draft without persistence, commands, or shadow evidence."""
+
+        async with self._lock:
+            snapshot = await self._async_refresh_unlocked(
+                persist_evidence=False,
+                record_evidence=False,
+            )
+            return validate_climate_contour_draft(
+                self._registry,
+                snapshot,
+                payload,
+            )
 
     async def async_registry_import_snapshot(self) -> ClimateImportSnapshot:
         """Refresh one typed read-only snapshot for the local options wizard."""

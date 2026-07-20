@@ -271,6 +271,11 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("created", draft["status"])
         self.assertEqual(fetches_before + 2, bridge.fetch_count)
+        validation = await runtime.async_validate_contour_draft(draft)
+        self.assertEqual("ready", validation["status"])
+        self.assertTrue(validation["save_allowed"])
+        self.assertFalse(validation["command_allowed"])
+        self.assertEqual(fetches_before + 3, bridge.fetch_count)
         self.assertEqual([], bridge.executed)
         self.assertEqual([], registry_store.saved)
         self.assertEqual([], contour_store.saved)

@@ -21,6 +21,7 @@ from custom_components.hausman_hub.application.climate_setup import (
     climate_device_candidates,
     climate_setup_options,
     create_climate_contour_draft,
+    validate_climate_contour_draft,
 )
 
 
@@ -54,6 +55,214 @@ class ClimateSetupDraftTest(unittest.TestCase):
         self.options_validator = Draft202012Validator(
             load_json(CONTRACTS / "climate-setup-options.schema.json")
         )
+        self.validation_validator = Draft202012Validator(
+            load_json(CONTRACTS / "climate-draft-validation.schema.json")
+        )
+
+    def test_ready_draft_is_validated_without_mutating_inputs(self) -> None:
+        draft = load_json(DRAFT_FIXTURES / "draft.json")
+        draft_before = copy.deepcopy(draft)
+        registry_before = registry_to_payload(self.registry)  # type: ignore[arg-type]
+        snapshot_before = copy.deepcopy(self.snapshot)
+
+        validation = validate_climate_contour_draft(
+            self.registry,  # type: ignore[arg-type]
+            self.snapshot,
+            draft,
+        )
+
+        self.validation_validator.validate(validation)
+        self.assertEqual(
+            load_json(DRAFT_FIXTURES / "validation.json"),
+            validation,
+        )
+        self.assertTrue(validation["save_allowed"])
+        self.assertFalse(validation["command_allowed"])
+        self.assertEqual(draft_before, draft)
+        self.assertEqual(
+            registry_before,
+            registry_to_payload(self.registry),  # type: ignore[arg-type]
+        )
+        self.assertEqual(snapshot_before, self.snapshot)
+
+    def test_sensor_only_room_is_blocked_with_plain_issue(self) -> None:
+        source = copy.deepcopy(load_json(SOURCE_FIXTURE))
+        source["rooms"] = [  # type: ignore[index]
+            room for room in source["rooms"] if room["id"] == "living"  # type: ignore[index]
+        ]
+        source["devices"] = [  # type: ignore[index]
+            {
+                "id": "private-temperature-sensor",
+                "name": "Датчик температуры",
+                "roomId": "living",
+                "domain": "sensor",
+                "category": "temperature",
+                "state": "25.0",
+                "unavailable": False,
+            }
+        ]
+        source["capabilities"] = []  # type: ignore[index]
+        source["authorityReadiness"]["rooms"] = [  # type: ignore[index]
+            room
+            for room in source["authorityReadiness"]["rooms"]  # type: ignore[index]
+            if room["roomId"] == "living"
+        ]
+        snapshot = import_climate_state(source)
+        options = climate_setup_options(
+            self.registry,  # type: ignore[arg-type]
+            snapshot,
+        )
+        draft = create_climate_contour_draft(
+            self.registry,  # type: ignore[arg-type]
+            snapshot,
+            {
+                "snapshot_revision": options["snapshot_revision"],
+                "name": "Климат",
+                "mode": "automatic",
+                "rooms": [
+                    {
+                        "room_id": "living",
+                        "target_temperature": 25.0,
+                        "target_humidity": 45,
+                        "strategy": "normal",
+                        "devices": [
+                            {
+                                "candidate_id": "candidate_0001",
+                                "type": "temperature_sensor",
+                            }
+                        ],
+                    }
+                ],
+            },
+        )
+
+        validation = validate_climate_contour_draft(
+            self.registry,  # type: ignore[arg-type]
+            snapshot,
+            draft,
+        )
+
+        self.validation_validator.validate(validation)
+        self.assertEqual("blocked", validation["status"])
+        self.assertFalse(validation["save_allowed"])
+        self.assertFalse(validation["command_allowed"])
+        self.assertEqual(
+            [
+                {
+                    "code": "no_controllable_device",
+                    "room_id": "living",
+                    "message": (
+                        "В комнате нет устройства, которое может управлять климатом."
+                    ),
+                }
+            ],
+            validation["issues"],
+        )
+        self.assertNotIn(
+            "private-temperature-sensor",
+            json.dumps(validation, ensure_ascii=True, sort_keys=True),
+        )
+
+    def test_changed_draft_or_candidate_snapshot_cannot_be_validated(self) -> None:
+        changed_draft = copy.deepcopy(load_json(DRAFT_FIXTURES / "draft.json"))
+        changed_draft["name"] = "Другой климат"  # type: ignore[index]
+        with self.assertRaisesRegex(ClimateSetupViolation, "changed"):
+            validate_climate_contour_draft(
+                self.registry,  # type: ignore[arg-type]
+                self.snapshot,
+                changed_draft,
+            )
+
+        stale_revision = copy.deepcopy(load_json(DRAFT_FIXTURES / "draft.json"))
+        stale_revision["snapshot_revision"] += 1  # type: ignore[index]
+        with self.assertRaises(ClimateSetupViolation) as mismatch:
+            validate_climate_contour_draft(
+                self.registry,  # type: ignore[arg-type]
+                self.snapshot,
+                stale_revision,
+            )
+        self.assertEqual("snapshot_changed", mismatch.exception.code)
+
+    def test_incomplete_device_capabilities_block_future_save(self) -> None:
+        source = copy.deepcopy(load_json(SOURCE_FIXTURE))
+        source["rooms"] = [  # type: ignore[index]
+            room for room in source["rooms"] if room["id"] == "living"  # type: ignore[index]
+        ]
+        source["devices"] = [  # type: ignore[index]
+            device
+            for device in source["devices"]  # type: ignore[index]
+            if device["roomId"] == "living"
+        ]
+        source["capabilities"] = [  # type: ignore[index]
+            {
+                "deviceId": "synthetic-ac-source-living",
+                "commandTypes": ["climate.set_temperature"],
+            }
+        ]
+        source["authorityReadiness"]["rooms"] = [  # type: ignore[index]
+            room
+            for room in source["authorityReadiness"]["rooms"]  # type: ignore[index]
+            if room["roomId"] == "living"
+        ]
+        snapshot = import_climate_state(source)
+        options = climate_setup_options(
+            self.registry,  # type: ignore[arg-type]
+            snapshot,
+        )
+        draft = create_climate_contour_draft(
+            self.registry,  # type: ignore[arg-type]
+            snapshot,
+            {
+                "snapshot_revision": options["snapshot_revision"],
+                "name": "Климат",
+                "mode": "automatic",
+                "rooms": [
+                    {
+                        "room_id": "living",
+                        "target_temperature": 25.0,
+                        "target_humidity": 45,
+                        "strategy": "normal",
+                        "devices": [
+                            {
+                                "candidate_id": "candidate_0001",
+                                "type": "air_conditioner",
+                            }
+                        ],
+                    }
+                ],
+            },
+        )
+
+        validation = validate_climate_contour_draft(
+            self.registry,  # type: ignore[arg-type]
+            snapshot,
+            draft,
+        )
+
+        self.validation_validator.validate(validation)
+        self.assertEqual("blocked", validation["status"])
+        self.assertTrue(validation["checks"]["rooms_have_controllable_devices"])
+        self.assertFalse(
+            validation["checks"]["device_capabilities_supported"]
+        )
+        self.assertEqual("unsupported_device_set", validation["issues"][0]["code"])
+
+    def test_validation_schema_rejects_blocked_result_with_passing_checks(self) -> None:
+        invalid = copy.deepcopy(load_json(DRAFT_FIXTURES / "validation.json"))
+        invalid["status"] = "blocked"  # type: ignore[index]
+        invalid["save_allowed"] = False  # type: ignore[index]
+        invalid["issues"] = [  # type: ignore[index]
+            {
+                "code": "no_controllable_device",
+                "room_id": "living",
+                "message": (
+                    "В комнате нет устройства, которое может управлять климатом."
+                ),
+            }
+        ]
+
+        with self.assertRaises(Exception):
+            self.validation_validator.validate(invalid)
 
     def test_setup_options_are_exact_understandable_and_private_id_free(self) -> None:
         options = climate_setup_options(

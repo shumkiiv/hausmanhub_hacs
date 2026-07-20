@@ -48,6 +48,7 @@ CONTRACT_PATHS = tuple(
         "climate-device-candidates.schema.json",
         "climate-draft-request.schema.json",
         "climate-draft.schema.json",
+        "climate-draft-validation.schema.json",
         "climate-setup-options.schema.json",
         "climate-home.schema.json",
         "climate-operation-query.schema.json",

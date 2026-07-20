@@ -1,0 +1,340 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hasc/contracts/v1/climate-draft-validation.schema.json",
+  "title": "Результат проверки черновика климатического контура HASC v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "generated_at",
+    "snapshot_revision",
+    "draft_revision",
+    "status",
+    "save_allowed",
+    "command_allowed",
+    "checks",
+    "issues",
+    "summary"
+  ],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "const": "hausman-hasc-climate-draft-validation"
+        },
+        "version": {
+          "const": 1
+        }
+      }
+    },
+    "generated_at": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "snapshot_revision": {
+      "$ref": "#/$defs/revision"
+    },
+    "draft_revision": {
+      "$ref": "#/$defs/revision"
+    },
+    "status": {
+      "enum": [
+        "ready",
+        "blocked"
+      ]
+    },
+    "save_allowed": {
+      "type": "boolean"
+    },
+    "command_allowed": {
+      "const": false
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "snapshot_current",
+        "draft_unchanged",
+        "rooms_have_controllable_devices",
+        "device_capabilities_supported"
+      ],
+      "properties": {
+        "snapshot_current": {
+          "const": true
+        },
+        "draft_unchanged": {
+          "const": true
+        },
+        "rooms_have_controllable_devices": {
+          "type": "boolean"
+        },
+        "device_capabilities_supported": {
+          "type": "boolean"
+        }
+      }
+    },
+    "issues": {
+      "type": "array",
+      "maxItems": 129,
+      "items": {
+        "$ref": "#/$defs/issue"
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "room_count",
+        "device_count"
+      ],
+      "properties": {
+        "room_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 128
+        },
+        "device_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 512
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "ready"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "save_allowed": {
+            "const": true
+          },
+          "checks": {
+            "properties": {
+              "rooms_have_controllable_devices": {
+                "const": true
+              },
+              "device_capabilities_supported": {
+                "const": true
+              }
+            }
+          },
+          "issues": {
+            "maxItems": 0
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "save_allowed": {
+            "const": false
+          },
+          "issues": {
+            "minItems": 1
+          }
+        },
+        "not": {
+          "properties": {
+            "checks": {
+              "properties": {
+                "rooms_have_controllable_devices": {
+                  "const": true
+                },
+                "device_capabilities_supported": {
+                  "const": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "checks": {
+            "properties": {
+              "rooms_have_controllable_devices": {
+                "const": false
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "issues": {
+            "contains": {
+              "type": "object",
+              "required": [
+                "code"
+              ],
+              "properties": {
+                "code": {
+                  "const": "no_controllable_device"
+                }
+              }
+            },
+            "minContains": 1
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "issues": {
+            "not": {
+              "contains": {
+                "type": "object",
+                "required": [
+                  "code"
+                ],
+                "properties": {
+                  "code": {
+                    "const": "no_controllable_device"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "checks": {
+            "properties": {
+              "device_capabilities_supported": {
+                "const": false
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "issues": {
+            "contains": {
+              "type": "object",
+              "required": [
+                "code"
+              ],
+              "properties": {
+                "code": {
+                  "const": "unsupported_device_set"
+                }
+              }
+            },
+            "minContains": 1
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "issues": {
+            "not": {
+              "contains": {
+                "type": "object",
+                "required": [
+                  "code"
+                ],
+                "properties": {
+                  "code": {
+                    "const": "unsupported_device_set"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "revision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "stable_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+    },
+    "issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "room_id",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "enum": [
+            "no_controllable_device",
+            "unsupported_device_set"
+          ]
+        },
+        "room_id": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/stable_id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "message": {
+          "enum": [
+            "В комнате нет устройства, которое может управлять климатом.",
+            "Выбранный набор устройств нельзя безопасно подготовить к сохранению."
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "no_controllable_device"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "room_id": {
+                "$ref": "#/$defs/stable_id"
+              },
+              "message": {
+                "const": "В комнате нет устройства, которое может управлять климатом."
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "room_id": {
+                "type": "null"
+              },
+              "message": {
+                "const": "Выбранный набор устройств нельзя безопасно подготовить к сохранению."
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

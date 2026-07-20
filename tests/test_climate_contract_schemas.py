@@ -29,6 +29,7 @@ from custom_components.hausman_hub.application.climate_setup import (
     climate_room_suggestions,
     climate_setup_options,
     create_climate_contour_draft,
+    validate_climate_contour_draft,
 )
 from custom_components.hausman_hub.application.contours import (
     build_climate_contour_setup,
@@ -77,6 +78,7 @@ class ClimateContractSchemasTest(unittest.TestCase):
             "hasc_climate_draft_v1/request.json": "v1/climate-draft-request.schema.json",
             "hasc_climate_draft_v1/draft.json": "v1/climate-draft.schema.json",
             "hasc_climate_draft_v1/options.json": "v1/climate-setup-options.schema.json",
+            "hasc_climate_draft_v1/validation.json": "v1/climate-draft-validation.schema.json",
             "hasc_climate_v2/home.json": "v2/climate-home.schema.json",
             "hasc_climate_v3/home.json": "v3/climate-home.schema.json",
             "hasc_climate_v4/home.json": "v4/climate-home.schema.json",
@@ -152,6 +154,11 @@ class ClimateContractSchemasTest(unittest.TestCase):
             draft_request,
         )
         setup_options = climate_setup_options(draft_registry, snapshot)
+        draft_validation = validate_climate_contour_draft(
+            draft_registry,
+            snapshot,
+            draft,
+        )
 
         validator("v12/climate-home.schema.json").validate(home)
         validator("v1/climate-admin-import.schema.json").validate(admin)
@@ -161,6 +168,9 @@ class ClimateContractSchemasTest(unittest.TestCase):
         validator("v1/climate-draft-request.schema.json").validate(draft_request)
         validator("v1/climate-draft.schema.json").validate(draft)
         validator("v1/climate-setup-options.schema.json").validate(setup_options)
+        validator("v1/climate-draft-validation.schema.json").validate(
+            draft_validation
+        )
         serialized_home = json.dumps(home, ensure_ascii=True, sort_keys=True)
         self.assertNotIn("source_id", serialized_home)
         self.assertNotIn("entity_id", serialized_home)

@@ -1159,6 +1159,52 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertEqual([], store.saved)
         self.assertEqual([], contour_store.saved)
         self.assertEqual([], bridge.executed)
+        oversized_draft = FakeJsonRequest(
+            "192.168.1.20",
+            owner,
+            path,
+            request,
+        )
+        oversized_draft.content_length = 256 * 1024 + 1
+        self.assertEqual(400, asyncio.run(view.post(oversized_draft)).status)
+        oversized_action = FakeJsonRequest(
+            "192.168.1.20",
+            reader_user("system-users"),
+            "/api/hausman_hub/v1/actions",
+            {
+                "request_id": "oversized-action",
+                "action": "set_room_target",
+                "room_id": "living",
+                "target_temperature": 24.5,
+            },
+        )
+        oversized_action.content_length = 16 * 1024 + 1
+        actions_view = {
+            item.url: item for item in self.hass.http.views
+        }["/api/hausman_hub/v1/actions"]
+        self.assertEqual(400, asyncio.run(actions_view.post(oversized_action)).status)
+        self.assertEqual([], bridge.executed)
+        validation_path = "/api/hausman_hub/v1/admin/climate-drafts/validate"
+        validation_view = {
+            item.url: item for item in self.hass.http.views
+        }[validation_path]
+        validation_response = asyncio.run(
+            validation_view.post(
+                FakeJsonRequest(
+                    "192.168.1.20",
+                    owner,
+                    validation_path,
+                    response.payload,
+                )
+            )
+        )
+        self.assertEqual(200, validation_response.status)
+        self.assertEqual("ready", validation_response.payload["status"])
+        self.assertTrue(validation_response.payload["save_allowed"])
+        self.assertFalse(validation_response.payload["command_allowed"])
+        self.assertEqual([], store.saved)
+        self.assertEqual([], contour_store.saved)
+        self.assertEqual([], bridge.executed)
         changed_request = dict(request)
         changed_request["snapshot_revision"] = revision + 1
         changed_response = asyncio.run(
@@ -1529,7 +1575,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertFalse(hasattr(self.view, method))
 
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
-        self.assertEqual(16, len(self.hass.http.views))
+        self.assertEqual(17, len(self.hass.http.views))
         self.assertEqual(
             1,
             sum(
@@ -1818,7 +1864,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             [(closed_entry, ("sensor", "switch"))],
             closed_hass.config_entries.forwarded,
         )
-        self.assertEqual(15, len(closed_hass.http.views))
+        self.assertEqual(16, len(closed_hass.http.views))
         self.assertEqual(
             {
                 "/api/hausman_hub/v1/capabilities",
@@ -1830,6 +1876,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 "/api/hausman_hub/v1/actions",
                 "/api/hausman_hub/v1/admin/climate-import",
                 "/api/hausman_hub/v1/admin/climate-drafts",
+                "/api/hausman_hub/v1/admin/climate-drafts/validate",
                 "/api/hausman_hub/v1/admin/climate-registry",
                 "/api/hausman_hub/v1/admin/climate-registry-preview",
                 "/api/hausman_hub/v1/admin/climate-readiness",

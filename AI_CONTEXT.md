@@ -235,6 +235,24 @@ Last updated: 2026-07-20.
   (`err_26c09fac`). The final Codex audit added the missing GET surface needed
   to obtain candidate references and prevented setup reads from changing
   shadow evidence; it found no remaining issue.
+- Version 1.7.4 completed the fifteenth HASC-only roadmap item. A local-admin
+  POST at `/api/hausman_hub/v1/admin/climate-drafts/validate` accepts the exact
+  draft response, re-creates it against one fresh discovery snapshot, rejects
+  stale candidate revisions and any material draft change, and resolves
+  private source bindings only after those checks. Deep validation preserves
+  an explicitly selected suggested device kind, requires a controllable device
+  in every room, and verifies that imported capabilities can construct the
+  existing HASC registry and contour model. Its strict Russian result is either
+  `ready` with future `save_allowed`, or `blocked` with bounded issue codes;
+  `command_allowed` is always false. Validation performs no persistence,
+  command, or shadow-evidence update. Setup bodies have a separate 256 KiB
+  bound while ordinary commands remain at 16 KiB. The final staged tree passed
+  346 local tests, package/boundary/Android checks, and Home Assistant Core
+  2026.6.4 and 2026.7.0. Kimi provider session
+  `ses_081e7a57fffegiNPU9QW3CfaTQ` failed before review with server reference
+  `err_6718dd9d`. The final Codex audit strengthened blocked-result schema
+  consistency and explicit request-size regression coverage and found no
+  remaining issue.
 - The final architecture was clarified on 2026-07-20: HASC must ultimately
   contain the complete currently working climate algorithm. During migration,
   the existing module remains read-only and serves as a behavior oracle through

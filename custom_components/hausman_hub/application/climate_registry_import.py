@@ -117,6 +117,7 @@ def import_managed_climate_selection(
     *,
     room_ids: object,
     source_ids: object,
+    source_kinds: object = None,
 ) -> ClimateRegistry:
     """Build an exact registry from devices already owned by climate-core.
 
@@ -142,6 +143,24 @@ def import_managed_climate_selection(
         raise ClimateRegistryImportViolation("selected rooms must be non-empty and unique")
     if not selected_sources or len(selected_sources) != len(source_ids):
         raise ClimateRegistryImportViolation("selected devices must be non-empty and unique")
+    if source_kinds is None:
+        selected_kinds: dict[str, ClimateDeviceKind] = {}
+    elif not isinstance(source_kinds, dict) or set(source_kinds) != set(
+        selected_sources
+    ):
+        raise ClimateRegistryImportViolation(
+            "selected device kinds must exactly match selected devices"
+        )
+    else:
+        try:
+            selected_kinds = {
+                source_id: ClimateDeviceKind(source_kinds[source_id])
+                for source_id in selected_sources
+            }
+        except (TypeError, ValueError) as error:
+            raise ClimateRegistryImportViolation(
+                "selected device kind is unsupported"
+            ) from error
 
     room_set = set(selected_rooms)
     rooms: list[ClimateRoom] = []
@@ -169,7 +188,11 @@ def import_managed_climate_selection(
     id_counts: dict[tuple[str, ClimateDeviceKind], int] = {}
     used_device_ids: set[str] = set()
     for candidate in candidates:
-        kind = candidate.suggested_kinds[0]
+        kind = selected_kinds.get(candidate.source_id, candidate.suggested_kinds[0])
+        if kind not in candidate.suggested_kinds:
+            raise ClimateRegistryImportViolation(
+                "selected device kind was not suggested by import"
+            )
         count_key = (candidate.room_id, kind)
         id_counts[count_key] = id_counts.get(count_key, 0) + 1
         ordinal = id_counts[count_key]
