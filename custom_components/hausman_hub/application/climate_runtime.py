@@ -14,6 +14,7 @@ from ..domain.climate_observation import (
     ClimateObservationSnapshot,
     ClimateObservationViolation,
 )
+from ..domain.climate_resolution import ClimateResolutionSnapshot
 from ..domain.climate_bridge import ClimateBridgeMode
 from ..domain.configuration import SafeConfiguration
 from ..domain.contours import ContourDefinition, ContourMode, ContourRegistry
@@ -40,6 +41,7 @@ from .climate_observations import (
     build_climate_observation_snapshot,
     unavailable_climate_observation_snapshot,
 )
+from .climate_resolutions import build_climate_resolution_snapshot
 from .climate_registry import (
     reconcile_climate_registry,
     registry_from_payload,
@@ -780,6 +782,20 @@ class ClimateRuntime:
             observation = await self._async_native_climate_observation_unlocked()
             targets = build_climate_target_snapshot(contour, observation)
             return build_climate_demand_snapshot(targets, observation)
+
+    async def async_native_climate_resolutions(
+        self,
+    ) -> ClimateResolutionSnapshot | None:
+        """Resolve thermal conflicts without choosing or commanding equipment."""
+
+        async with self._lock:
+            contour = self._contours.contour(CLIMATE_CONTOUR_ID)
+            if contour is None:
+                return None
+            observation = await self._async_native_climate_observation_unlocked()
+            targets = build_climate_target_snapshot(contour, observation)
+            demands = build_climate_demand_snapshot(targets, observation)
+            return build_climate_resolution_snapshot(demands, observation)
 
     async def _async_native_climate_observation_unlocked(
         self,

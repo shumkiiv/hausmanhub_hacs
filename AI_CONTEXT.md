@@ -141,6 +141,27 @@ Last updated: 2026-07-20.
   disposable Home Assistant Core 2026.6.4/2026.7.0. Independent read-only
   review passed with no substantial findings in OpenCode session
   `ses_080dc1768ffekUBX1A0v30rMvR`.
+- Version 1.8.4 completes roadmap item 25. A pure thermal-resolution layer
+  combines raw heating/cooling demand with the observed home season,
+  occupancy mode, and central-heating state. Away-safe-off has first priority,
+  away-keep observes, and invalid thermal data is unavailable at home. Winter
+  or explicitly active central heating blocks opposing cooling; summer blocks
+  heating; an unknown season preserves current-core compatibility by allowing
+  cooling but holding heating until a heating mode is known. The result is one
+  immutable heating/cooling/hold/observe/safe-off/unavailable state with a
+  stable reason. Humidity remains an independent raw demand. The layer has no
+  equipment, HA entity, intent, service, command, or execution authority. The
+  runtime derives observation, targets, demands, and resolution through one
+  non-evidence-mutating read and ignores retained state while disabled. All 30
+  frozen cases resolve deterministically, while device policy remains roadmap
+  item 26. The source climate module and Android repository remain unchanged.
+  The final staged tree passed 412 local tests, HACS/package/boundary/Android
+  checks, and disposable Home Assistant Core 2026.6.4/2026.7.0. Independent
+  read-only review passed with no substantial findings in OpenCode session
+  `ses_080cb528cffeu1SP2f12E7oY4I`. Its nonblocking source-normalization note is
+  carried into item 26: the future native adapter must explicitly map the old
+  `hvacMode == heating` and active-heating facts into HausmanHub's normalized
+  heating-mode observation before external-source removal.
 - Workspace boundary: this thread may change only HausmanHub and its integration
   wrapper. The Android application is developed separately in
   `/home/ivsh/projects/УД-android`; it may be inspected only read-only for
