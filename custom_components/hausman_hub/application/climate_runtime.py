@@ -12,7 +12,7 @@ from ..domain.climate import ClimateRegistry
 from ..domain.climate_comparison import ClimateComparisonSnapshot
 from ..domain.climate_demand import ClimateDemandSnapshot
 from ..domain.climate_equipment import ClimateEquipmentSnapshot
-from ..domain.climate_ha_calls import ClimateHaCallPlanSnapshot
+from ..domain.climate_ha_calls import ClimateHaCallPlanSnapshot, ClimateHaServiceCall
 from ..domain.climate_isolation import ClimateIsolationSnapshot
 from ..domain.climate_observation import (
     ClimateObservationSnapshot,
@@ -26,6 +26,7 @@ from ..domain.climate_protection import (
 from ..domain.climate_resolution import ClimateResolutionSnapshot
 from ..domain.climate_stability import ClimateStabilitySnapshot
 from ..domain.climate_bridge import ClimateBridgeMode
+from ..domain.climate_trial import ClimateTrialReceipt, ClimateTrialReason
 from ..domain.configuration import SafeConfiguration
 from ..domain.contours import ContourDefinition, ContourMode, ContourRegistry
 from ..domain.native_climate import NativeClimatePolicy, preview_native_climate
@@ -62,6 +63,12 @@ from .climate_protection import (
 )
 from .climate_resolutions import build_climate_resolution_snapshot
 from .climate_stability import build_climate_stability_snapshot
+from .climate_trial_control import (
+    climate_trial_applied_receipt,
+    climate_trial_failure_receipt,
+    climate_trial_skip_receipt,
+    plan_climate_trial,
+)
 from .climate_registry import (
     reconcile_climate_registry,
     registry_from_payload,
@@ -163,6 +170,13 @@ class ClimateProtectionStorage(Protocol):
         """Atomically save one complete protection memory."""
 
 
+class ClimateTrialCallExecutor(Protocol):
+    """Minimal execution boundary for one permitted trial batch."""
+
+    async def async_execute(self, calls: tuple[ClimateHaServiceCall, ...]) -> int:
+        """Execute strict calls in order; return the completed count."""
+
+
 class ClimateRuntime:
     """One loaded HausmanHub entry's climate facade and rollout state."""
 
@@ -176,6 +190,7 @@ class ClimateRuntime:
         evidence_store: ClimateEvidenceStorage | None = None,
         contour_store: ContourStorage | None = None,
         protection_store: ClimateProtectionStorage | None = None,
+        trial_executor: ClimateTrialCallExecutor | None = None,
         operation_id_factory: Callable[[], str] | None = None,
         now_ms: Callable[[], int] | None = None,
         local_now: Callable[[], datetime] | None = None,
@@ -187,6 +202,7 @@ class ClimateRuntime:
         self._evidence_store = evidence_store
         self._contour_store = contour_store
         self._protection_store = protection_store
+        self._trial_executor = trial_executor
         self._now_ms = now_ms or (lambda: int(time.time() * 1000))
         self._local_now = local_now or (lambda: datetime.now().astimezone())
         self._registry = ClimateRegistry()
@@ -970,6 +986,55 @@ class ClimateRuntime:
             observation = await self._async_native_climate_observation_unlocked()
             isolation = build_isolated_climate_policy_snapshot(contour, observation)
             return build_climate_ha_call_plan(self._registry, isolation)
+
+    async def async_run_climate_trial(
+        self,
+    ) -> ClimateTrialReceipt | None:
+        """Run one gated internal-control check for the single trial room."""
+
+        async with self._lock:
+            contour = self._contours.contour(CLIMATE_CONTOUR_ID)
+            trial_room_id = self.configuration.climate_canary_room_id
+            if contour is None or trial_room_id is None:
+                return None
+            observation = await self._async_native_climate_observation_unlocked()
+            isolation = build_isolated_climate_policy_snapshot(contour, observation)
+            comparison = build_climate_comparison_snapshot(isolation, observation)
+            call_plan = build_climate_ha_call_plan(self._registry, isolation)
+            decision = plan_climate_trial(
+                trial_room_id,
+                bridge_mode=self.configuration.climate_bridge_mode,
+                contour_mode=contour.mode,
+                isolation=isolation,
+                comparison=comparison,
+                call_plan=call_plan,
+                registry=self._registry,
+            )
+            if not decision.permitted:
+                return climate_trial_skip_receipt(decision)
+            if self._trial_executor is None:
+                return climate_trial_failure_receipt(
+                    decision,
+                    reason=ClimateTrialReason.EXECUTOR_UNAVAILABLE,
+                    executed_count=0,
+                )
+            try:
+                executed = await self._trial_executor.async_execute(decision.calls)
+            except Exception as error:
+                self.last_error = type(error).__name__
+                return climate_trial_failure_receipt(
+                    decision,
+                    reason=ClimateTrialReason.SERVICE_ERROR,
+                    executed_count=getattr(error, "completed", 0),
+                )
+            if executed != len(decision.calls):
+                self.last_error = "ClimateTrialShortExecution"
+                return climate_trial_failure_receipt(
+                    decision,
+                    reason=ClimateTrialReason.SERVICE_ERROR,
+                    executed_count=executed,
+                )
+            return climate_trial_applied_receipt(decision)
 
     async def _async_native_climate_observation_unlocked(
         self,

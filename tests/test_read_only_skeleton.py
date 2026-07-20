@@ -61,7 +61,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         self.assertEqual("hausman_hub", manifest["domain"])
         self.assertTrue(manifest["config_flow"])
         self.assertTrue(manifest["single_config_entry"])
-        self.assertEqual("1.9.2", manifest["version"])
+        self.assertEqual("1.9.3", manifest["version"])
 
     def test_current_manifest_version_has_a_plain_change_note(self) -> None:
         manifest = json.loads((INTEGRATION / "manifest.json").read_text(encoding="utf-8"))
@@ -2216,10 +2216,11 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             "requests",
             "websocket",
         )
+        executor_modules = {"switch.py", "climate_ha_executor.py"}
         source = "\n".join(
             path.read_text(encoding="utf-8").lower()
             for path in INTEGRATION.rglob("*.py")
-            if path.name != "switch.py"
+            if path.name not in executor_modules
         )
         for fragment in forbidden_fragments:
             self.assertNotIn(fragment, source)
@@ -2245,6 +2246,21 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             "websocket",
         ):
             self.assertNotIn(forbidden_surface, switch_source.lower())
+
+        executor_source = (INTEGRATION / "climate_ha_executor.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(1, executor_source.count("hass.services.async_call("))
+        self.assertIn("blocking=True", executor_source)
+        self.assertIn("ClimateHaExecutionError", executor_source)
+        for forbidden_surface in (
+            "async_register_entity_service",
+            "async_register(",
+            "requests",
+            "websocket",
+            "async_fire(",
+        ):
+            self.assertNotIn(forbidden_surface, executor_source.lower())
 
         bridge_source = (INTEGRATION / "climate_bridge.py").read_text(
             encoding="utf-8"

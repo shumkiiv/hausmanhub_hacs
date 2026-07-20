@@ -44,6 +44,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .application.climate_runtime import ClimateRuntime
     from .climate_api import register_climate_api
     from .climate_evidence_storage import HomeAssistantClimateEvidenceStore
+    from .climate_ha_executor import HomeAssistantClimateCallExecutor
     from .climate_protection_storage import HomeAssistantClimateProtectionStore
     from .climate_storage import HomeAssistantClimateRegistryStore
     from .contour_storage import HomeAssistantContourStore
@@ -68,12 +69,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         evidence_store=HomeAssistantClimateEvidenceStore(hass, entry.entry_id),
         contour_store=HomeAssistantContourStore(hass, entry.entry_id),
         protection_store=HomeAssistantClimateProtectionStore(hass, entry.entry_id),
+        trial_executor=HomeAssistantClimateCallExecutor(hass),
         local_now=dt_util.now,
     )
     await climate_runtime.async_start()
     from .climate_schedule import async_start_climate_schedule
+    from .climate_trial import async_start_climate_trial
 
     await async_start_climate_schedule(hass, entry, climate_runtime)
+    await async_start_climate_trial(hass, entry, climate_runtime)
     register_climate_api(hass, climate_runtime)
     entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
     return True

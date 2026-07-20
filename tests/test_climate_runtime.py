@@ -30,7 +30,13 @@ from custom_components.hausman_hub.application.contours import (
     with_climate_schedule,
 )
 from custom_components.hausman_hub.application.climate_registry import registry_to_payload
-from custom_components.hausman_hub.domain.climate import ClimateRegistry
+from custom_components.hausman_hub.domain.climate import (
+    ClimateCapability,
+    ClimateControlScope,
+    ClimateEndpoint,
+    ClimateEndpointRole,
+    ClimateRegistry,
+)
 from custom_components.hausman_hub.domain.climate_bridge import (
     ClimateBridgeMode,
     climate_bridge_target,
@@ -63,6 +69,12 @@ from custom_components.hausman_hub.domain.climate_comparison import (
 )
 from custom_components.hausman_hub.domain.climate_ha_calls import (
     ClimateHaCallLimit,
+    ClimateHaHvacMode,
+    ClimateHaService,
+)
+from custom_components.hausman_hub.domain.climate_trial import (
+    ClimateTrialReason,
+    ClimateTrialStatus,
 )
 from custom_components.hausman_hub.domain.configuration import SafeConfiguration
 from custom_components.hausman_hub.domain.native_climate import native_climate_policy
@@ -150,6 +162,18 @@ class FailingProtectionStore(MemoryProtectionStore):
         if self.fail:
             raise RuntimeError("synthetic protection persistence failure")
         await super().async_save(memory)
+
+
+class RecordingTrialExecutor:
+    def __init__(self, fail: bool = False) -> None:
+        self.batches: list[tuple[object, ...]] = []
+        self.fail = fail
+
+    async def async_execute(self, calls):
+        self.batches.append(calls)
+        if self.fail:
+            raise RuntimeError("synthetic trial execution failure")
+        return len(calls)
 
 
 class ContourRollbackFailingStore(MemoryContourStore):
@@ -2042,6 +2066,288 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             (ClimateHaCallLimit.MISSING_CONTROL_ENDPOINT,),
             room.devices[0].limits,
+        )
+        self.assertEqual([], bridge.executed)
+
+    async def test_trial_applies_only_the_diverged_canary_room(self) -> None:
+        bridge = MemoryBridge()
+        registry, contours = build_climate_contour_setup(
+            bridge.snapshot,
+            room_ids=["living"],
+            source_ids=["synthetic-ac-source-living"],
+            name="Климат",
+            mode="automatic",
+            target_temperature=25.0,
+            target_humidity=45,
+            strategy="normal",
+        )
+        registry = ClimateRegistry(
+            rooms=registry.rooms,
+            devices=(
+                replace(
+                    registry.devices[0],
+                    control_scope=ClimateControlScope.CANARY,
+                    capabilities=(
+                        ClimateCapability.POWER,
+                        ClimateCapability.TARGET_TEMPERATURE,
+                        ClimateCapability.HVAC_MODE,
+                        ClimateCapability.FAN_MODE,
+                    ),
+                    endpoints=(
+                        ClimateEndpoint(
+                            ClimateEndpointRole.CONTROL,
+                            "climate.living_ac",
+                        ),
+                    ),
+                ),
+            ),
+        )
+        executor = RecordingTrialExecutor()
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateBridgeMode.CANARY),
+            registry_store=MemoryStore(registry),
+            contour_store=MemoryContourStore(contours),
+            bridge_client=bridge,
+            trial_executor=executor,
+            now_ms=lambda: 1784280005000,
+        )
+        await runtime.async_start()
+
+        receipt = await runtime.async_run_climate_trial()
+
+        self.assertIsNotNone(receipt)
+        self.assertIs(receipt.status, ClimateTrialStatus.APPLIED)  # type: ignore[union-attr]
+        self.assertEqual((), receipt.reasons)  # type: ignore[union-attr]
+        self.assertEqual(1, receipt.call_count)  # type: ignore[union-attr]
+        self.assertEqual(1, receipt.executed_count)  # type: ignore[union-attr]
+        self.assertEqual(1, len(executor.batches))
+        (call,) = executor.batches[0]
+        self.assertIs(call.service, ClimateHaService.CLIMATE_SET_HVAC_MODE)
+        self.assertIs(call.hvac_mode, ClimateHaHvacMode.OFF)
+        self.assertEqual("climate.living_ac", call.entity_id)
+        self.assertEqual([], bridge.executed)
+
+    async def test_trial_reports_up_to_date_without_executing(self) -> None:
+        bridge = MemoryBridge()
+        bridge.snapshot = replace(
+            bridge.snapshot,
+            devices=tuple(
+                replace(device, state="off")
+                for device in bridge.snapshot.devices
+            ),
+        )
+        registry, contours = build_climate_contour_setup(
+            bridge.snapshot,
+            room_ids=["living"],
+            source_ids=["synthetic-ac-source-living"],
+            name="Климат",
+            mode="automatic",
+            target_temperature=25.0,
+            target_humidity=45,
+            strategy="normal",
+        )
+        registry = ClimateRegistry(
+            rooms=registry.rooms,
+            devices=(
+                replace(
+                    registry.devices[0],
+                    control_scope=ClimateControlScope.CANARY,
+                    capabilities=(
+                        ClimateCapability.POWER,
+                        ClimateCapability.TARGET_TEMPERATURE,
+                        ClimateCapability.HVAC_MODE,
+                        ClimateCapability.FAN_MODE,
+                    ),
+                    endpoints=(
+                        ClimateEndpoint(
+                            ClimateEndpointRole.CONTROL,
+                            "climate.living_ac",
+                        ),
+                    ),
+                ),
+            ),
+        )
+        executor = RecordingTrialExecutor()
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateBridgeMode.CANARY),
+            registry_store=MemoryStore(registry),
+            contour_store=MemoryContourStore(contours),
+            bridge_client=bridge,
+            trial_executor=executor,
+            now_ms=lambda: 1784280005000,
+        )
+        await runtime.async_start()
+
+        receipt = await runtime.async_run_climate_trial()
+
+        self.assertIs(receipt.status, ClimateTrialStatus.UP_TO_DATE)  # type: ignore[union-attr]
+        self.assertEqual(
+            (ClimateTrialReason.UP_TO_DATE,),
+            receipt.reasons,  # type: ignore[union-attr]
+        )
+        self.assertEqual([], executor.batches)
+        self.assertEqual([], bridge.executed)
+
+    async def test_trial_denies_outside_canary_mode_scope_and_capability(
+        self,
+    ) -> None:
+        bridge = MemoryBridge()
+        registry, contours = build_climate_contour_setup(
+            bridge.snapshot,
+            room_ids=["living"],
+            source_ids=["synthetic-ac-source-living"],
+            name="Климат",
+            mode="automatic",
+            target_temperature=25.0,
+            target_humidity=45,
+            strategy="normal",
+        )
+        executor = RecordingTrialExecutor()
+        shadow_runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateBridgeMode.SHADOW),
+            registry_store=MemoryStore(registry),
+            contour_store=MemoryContourStore(contours),
+            bridge_client=bridge,
+            trial_executor=executor,
+            now_ms=lambda: 1784280005000,
+        )
+        await shadow_runtime.async_start()
+
+        denied = await shadow_runtime.async_run_climate_trial()
+        self.assertIsNone(denied)
+
+        scoped_registry = ClimateRegistry(
+            rooms=registry.rooms,
+            devices=(
+                replace(
+                    registry.devices[0],
+                    control_scope=ClimateControlScope.CANARY,
+                    capabilities=(
+                        ClimateCapability.POWER,
+                        ClimateCapability.TARGET_TEMPERATURE,
+                    ),
+                    endpoints=(
+                        ClimateEndpoint(
+                            ClimateEndpointRole.CONTROL,
+                            "climate.living_ac",
+                        ),
+                    ),
+                ),
+            ),
+        )
+        canary_runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateBridgeMode.CANARY),
+            registry_store=MemoryStore(scoped_registry),
+            contour_store=MemoryContourStore(contours),
+            bridge_client=bridge,
+            trial_executor=executor,
+            now_ms=lambda: 1784280005000,
+        )
+        await canary_runtime.async_start()
+
+        incomplete = await canary_runtime.async_run_climate_trial()
+        self.assertIs(incomplete.status, ClimateTrialStatus.DENIED)  # type: ignore[union-attr]
+        self.assertEqual(
+            (ClimateTrialReason.TRANSLATION_INCOMPLETE,),
+            incomplete.reasons,  # type: ignore[union-attr]
+        )
+
+        managed_runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateBridgeMode.CANARY),
+            registry_store=MemoryStore(registry),
+            contour_store=MemoryContourStore(contours),
+            bridge_client=bridge,
+            trial_executor=executor,
+            now_ms=lambda: 1784280005000,
+        )
+        await managed_runtime.async_start()
+
+        out_of_scope = await managed_runtime.async_run_climate_trial()
+        self.assertIs(out_of_scope.status, ClimateTrialStatus.DENIED)  # type: ignore[union-attr]
+        self.assertEqual(
+            (ClimateTrialReason.DEVICE_NOT_TRIAL_SCOPE,),
+            out_of_scope.reasons,  # type: ignore[union-attr]
+        )
+        self.assertEqual([], executor.batches)
+        self.assertEqual([], bridge.executed)
+
+    async def test_trial_executor_failure_and_unavailability_fail_closed(
+        self,
+    ) -> None:
+        bridge = MemoryBridge()
+        registry, contours = build_climate_contour_setup(
+            bridge.snapshot,
+            room_ids=["living"],
+            source_ids=["synthetic-ac-source-living"],
+            name="Климат",
+            mode="automatic",
+            target_temperature=25.0,
+            target_humidity=45,
+            strategy="normal",
+        )
+        registry = ClimateRegistry(
+            rooms=registry.rooms,
+            devices=(
+                replace(
+                    registry.devices[0],
+                    control_scope=ClimateControlScope.CANARY,
+                    capabilities=(
+                        ClimateCapability.POWER,
+                        ClimateCapability.TARGET_TEMPERATURE,
+                        ClimateCapability.HVAC_MODE,
+                        ClimateCapability.FAN_MODE,
+                    ),
+                    endpoints=(
+                        ClimateEndpoint(
+                            ClimateEndpointRole.CONTROL,
+                            "climate.living_ac",
+                        ),
+                    ),
+                ),
+            ),
+        )
+        failing = RecordingTrialExecutor(fail=True)
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateBridgeMode.CANARY),
+            registry_store=MemoryStore(registry),
+            contour_store=MemoryContourStore(contours),
+            bridge_client=bridge,
+            trial_executor=failing,
+            now_ms=lambda: 1784280005000,
+        )
+        await runtime.async_start()
+
+        failed = await runtime.async_run_climate_trial()
+
+        self.assertIs(failed.status, ClimateTrialStatus.FAILED)  # type: ignore[union-attr]
+        self.assertEqual(
+            (ClimateTrialReason.SERVICE_ERROR,),
+            failed.reasons,  # type: ignore[union-attr]
+        )
+        self.assertEqual(1, failed.call_count)  # type: ignore[union-attr]
+        self.assertEqual(0, failed.executed_count)  # type: ignore[union-attr]
+
+        executorless = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateBridgeMode.CANARY),
+            registry_store=MemoryStore(registry),
+            contour_store=MemoryContourStore(contours),
+            bridge_client=bridge,
+            now_ms=lambda: 1784280005000,
+        )
+        await executorless.async_start()
+
+        unavailable = await executorless.async_run_climate_trial()
+        self.assertIs(unavailable.status, ClimateTrialStatus.FAILED)  # type: ignore[union-attr]
+        self.assertEqual(
+            (ClimateTrialReason.EXECUTOR_UNAVAILABLE,),
+            unavailable.reasons,  # type: ignore[union-attr]
         )
         self.assertEqual([], bridge.executed)
 

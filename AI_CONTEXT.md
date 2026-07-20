@@ -338,6 +338,24 @@ Last updated: 2026-07-20.
   failing the room (no frozen reference case covers floor heating, so frozen
   parity is untouched). HVAC-mode calls now require the declared `HVAC_MODE`
   capability.
+- Version 1.9.3 completes roadmap item 34. HausmanHub can now physically
+  control the climate itself — exactly one explicitly configured trial room
+  and only with every guard agreeing. A one-minute tick requires CANARY
+  bridge mode, an automatic contour, a fresh observation, a ready room, a
+  decisive comparison, trial-scoped devices with HausmanHub control
+  endpoints, and a complete translation. It acts only when the native plan
+  diverges from the observed state; alignment is honestly skipped as
+  up-to-date, uncertainty denies without a single call. Execution uses only
+  the strict adapter whitelist in order and stops at the first error. The
+  redacted receipt keeps only the stable room id, a bounded status
+  (applied/up_to_date/denied/failed), bounded reasons, and call counts. The
+  enforced execution boundary now allows HA service calls only in the trial
+  executor module and the legacy canary switch; the skeleton test locks
+  this. The operator must remove the trial room from the external module's
+  rooms to avoid double control. The source climate module and Android
+  repository remain unchanged. The final staged tree passed 513 local tests,
+  the HACS/package/boundary/Android checks, and disposable Home Assistant
+  Core 2026.6.4/2026.7.0.
 - Workspace boundary: this thread may change only HausmanHub and its integration
   wrapper. The Android application is developed separately in
   `/home/ivsh/projects/УД-android`; it may be inspected only read-only for
@@ -1883,5 +1901,5 @@ Engineering and review rules are in
 
 - Obsidian/context index: `LLM_WIKI/00_Index.md`.
 - Latest generated context: `LLM_WIKI/Context.md`.
-- Last sync: 2026-07-20T22:39:58+03:00.
+- Last sync: 2026-07-20T23:11:20+03:00.
 <!-- llm-wiki-sync:end -->
