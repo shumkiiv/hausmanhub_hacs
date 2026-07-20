@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hausmanhub/contracts/v1/climate-profile-update-request.schema.json",
+  "title": "Изменение профилей климата HausmanHub v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "setup_revision", "rooms"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-climate-profile-update-request"},
+        "version": {"const": 1}
+      }
+    },
+    "setup_revision": {"$ref": "#/$defs/revision"},
+    "rooms": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "items": {"$ref": "#/$defs/room"}
+    }
+  },
+  "$defs": {
+    "revision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "stable_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+    },
+    "strategy": {"enum": ["soft", "normal", "aggressive"]},
+    "comfort": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target_temperature", "target_humidity", "strategy"],
+      "properties": {
+        "target_temperature": {
+          "type": "number",
+          "minimum": 18,
+          "maximum": 28,
+          "multipleOf": 0.5
+        },
+        "target_humidity": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 70,
+          "multipleOf": 5
+        },
+        "strategy": {"$ref": "#/$defs/strategy"}
+      }
+    },
+    "profiles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["day", "night"],
+      "properties": {
+        "day": {"$ref": "#/$defs/comfort"},
+        "night": {"$ref": "#/$defs/comfort"}
+      }
+    },
+    "room": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["room_id", "profiles"],
+      "properties": {
+        "room_id": {"$ref": "#/$defs/stable_id"},
+        "profiles": {"$ref": "#/$defs/profiles"}
+      }
+    }
+  }
+}

@@ -1393,6 +1393,139 @@ class LocalSummaryAccessTest(unittest.TestCase):
                     ).status,
                 )
 
+    def test_local_admin_updates_profiles_without_sending_device_commands(self) -> None:
+        """The strict profile route saves only current configured room profiles."""
+
+        from custom_components.hausman_hub.application.climate_import import (
+            import_climate_state,
+        )
+        from custom_components.hausman_hub.application.climate_runtime import ClimateRuntime
+        from custom_components.hausman_hub.application.contours import (
+            build_climate_contour_setup,
+        )
+        from custom_components.hausman_hub.domain.climate_bridge import ClimateBridgeMode
+        from custom_components.hausman_hub.domain.configuration import SafeConfiguration
+        from tests.test_climate_import import source_payload
+
+        snapshot = import_climate_state(source_payload())
+        registry, contours = build_climate_contour_setup(
+            snapshot,
+            room_ids=["living"],
+            source_ids=["synthetic-ac-source-living"],
+            name="Климат",
+            mode="automatic",
+            target_temperature=25.0,
+            target_humidity=45,
+            strategy="normal",
+        )
+
+        class Store:
+            def __init__(self, value: object) -> None:
+                self.value = value
+                self.saved: list[object] = []
+
+            async def async_load(self):
+                return self.value
+
+            async def async_save(self, value):
+                self.value = value
+                self.saved.append(value)
+
+        class Bridge:
+            def __init__(self) -> None:
+                self.fetch_count = 0
+                self.executed: list[object] = []
+
+            async def async_fetch_state(self):
+                self.fetch_count += 1
+                return snapshot
+
+            async def async_execute(self, plan):
+                self.executed.append(plan)
+                return {"ok": True}
+
+        registry_store = Store(registry)
+        contour_store = Store(contours)
+        bridge = Bridge()
+        runtime = ClimateRuntime(
+            entry_id=self.entry.entry_id,
+            configuration=SafeConfiguration(
+                mode="shadow",
+                climate_bridge_mode=ClimateBridgeMode.SHADOW,
+            ),
+            registry_store=registry_store,
+            contour_store=contour_store,
+            bridge_client=bridge,
+            now_ms=lambda: 1784512800000,
+        )
+        asyncio.run(runtime.async_start())
+        current = asyncio.run(runtime.async_current_contour_setup())
+        fetches_before = bridge.fetch_count
+        self.hass.data["hausman_hub"]["climate_runtime"] = runtime
+        path = "/api/hausman_hub/v1/admin/climate-profiles"
+        view = {item.url: item for item in self.hass.http.views}[path]
+        owner = reader_user("system-admin", admin=True)
+        request = {
+            "contract": {
+                "name": "hausman-hub-climate-profile-update-request",
+                "version": 1,
+            },
+            "setup_revision": current["setup_revision"],
+            "rooms": [
+                {
+                    "room_id": "living",
+                    "profiles": {
+                        "day": {
+                            "target_temperature": 24.5,
+                            "target_humidity": 50,
+                            "strategy": "soft",
+                        },
+                        "night": {
+                            "target_temperature": 21.5,
+                            "target_humidity": 45,
+                            "strategy": "normal",
+                        },
+                    },
+                }
+            ],
+        }
+
+        response = asyncio.run(
+            view.post(FakeJsonRequest("192.168.1.20", owner, path, request))
+        )
+
+        self.assertEqual(200, response.status)
+        self.assertEqual("saved", response.payload["status"])
+        self.assertFalse(response.payload["commands_sent"])
+        self.assertEqual(fetches_before, bridge.fetch_count)
+        self.assertEqual([], bridge.executed)
+        self.assertEqual(1, len(contour_store.saved))
+        self.assertEqual("no-store", response.headers.get("Cache-Control"))
+        self.assertEqual(
+            409,
+            asyncio.run(
+                view.post(FakeJsonRequest("192.168.1.20", owner, path, request))
+            ).status,
+        )
+        self.assertEqual(1, len(contour_store.saved))
+        self.assertEqual(
+            403,
+            asyncio.run(
+                view.post(
+                    FakeJsonRequest(
+                        "192.168.1.20",
+                        reader_user("system-users"),
+                        path,
+                        request,
+                    )
+                )
+            ).status,
+        )
+        oversized = FakeJsonRequest("192.168.1.20", owner, path, request)
+        oversized.content_length = 256 * 1024 + 1
+        self.assertEqual(400, asyncio.run(view.post(oversized)).status)
+        self.assertEqual([], bridge.executed)
+
     def test_managed_contour_routes_apply_once_and_confirm_engine_state(self) -> None:
         """The tablet may apply only saved settings through the managed contour."""
 
@@ -1735,7 +1868,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertFalse(hasattr(self.view, method))
 
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
-        self.assertEqual(19, len(self.hass.http.views))
+        self.assertEqual(20, len(self.hass.http.views))
         self.assertEqual(
             1,
             sum(
@@ -2024,7 +2157,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             [(closed_entry, ("sensor", "switch"))],
             closed_hass.config_entries.forwarded,
         )
-        self.assertEqual(18, len(closed_hass.http.views))
+        self.assertEqual(19, len(closed_hass.http.views))
         self.assertEqual(
             {
                 "/api/hausman_hub/v1/capabilities",
@@ -2039,6 +2172,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 "/api/hausman_hub/v1/admin/climate-drafts/current",
                 "/api/hausman_hub/v1/admin/climate-drafts/validate",
                 "/api/hausman_hub/v1/admin/climate-drafts/save",
+                "/api/hausman_hub/v1/admin/climate-profiles",
                 "/api/hausman_hub/v1/admin/climate-registry",
                 "/api/hausman_hub/v1/admin/climate-registry-preview",
                 "/api/hausman_hub/v1/admin/climate-readiness",

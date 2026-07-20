@@ -40,6 +40,7 @@ from .climate_setup import (
     climate_setup_options,
     create_climate_contour_draft,
     current_climate_contour_setup,
+    update_climate_profiles,
     validate_climate_contour_draft,
 )
 from .contours import (
@@ -327,6 +328,34 @@ class ClimateRuntime:
             )
             await self._async_persist_contour_setup_unlocked(registry, contours)
             return climate_draft_save_receipt(payload, validation)
+
+    async def async_update_climate_profiles(
+        self,
+        payload: object,
+    ) -> dict[str, object]:
+        """Atomically save day/night profiles without sending commands."""
+
+        async with self._lock:
+            if self.configuration.climate_bridge_mode is ClimateBridgeMode.CANARY:
+                raise ClimateRuntimeUnavailable(
+                    "climate profile changes require non-canary mode"
+                )
+            if self._contour_store is None:
+                raise ClimateRuntimeUnavailable("contour storage is unavailable")
+            updated, receipt = update_climate_profiles(
+                self._registry,
+                self._contours,
+                payload,
+                saved_at=self._safe_now(),
+                automatic_application_enabled=(
+                    self.configuration.climate_bridge_mode
+                    is ClimateBridgeMode.MANAGED
+                ),
+            )
+            await self._contour_store.async_save(updated)
+            self._contours = updated
+            self.last_error = None
+            return receipt
 
     async def async_registry_import_snapshot(self) -> ClimateImportSnapshot:
         """Refresh one typed read-only snapshot for the local options wizard."""

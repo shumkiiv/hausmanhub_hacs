@@ -1,0 +1,31 @@
+{
+  "contract": {
+    "name": "hausman-hub-climate-profile-update",
+    "version": 1
+  },
+  "saved_at": 1784512800000,
+  "setup_revision": 2,
+  "status": "saved",
+  "commands_sent": false,
+  "schedule_enabled": false,
+  "automatic_application_pending": false,
+  "message": "Профили сохранены. Команды устройствам не отправлялись.",
+  "rooms": [
+    {
+      "room_id": "living",
+      "profiles": {
+        "day": {
+          "target_temperature": 24.5,
+          "target_humidity": 50,
+          "strategy": "soft"
+        },
+        "night": {
+          "target_temperature": 21.5,
+          "target_humidity": 45,
+          "strategy": "normal"
+        }
+      },
+      "active_profile": "day"
+    }
+  ]
+}

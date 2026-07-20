@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hausmanhub/contracts/v1/climate-profile-update.schema.json",
+  "title": "Подтверждение изменения профилей климата HausmanHub v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "saved_at",
+    "setup_revision",
+    "status",
+    "commands_sent",
+    "schedule_enabled",
+    "automatic_application_pending",
+    "message",
+    "rooms"
+  ],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-climate-profile-update"},
+        "version": {"const": 1}
+      }
+    },
+    "saved_at": {"type": "integer", "minimum": 0},
+    "setup_revision": {"$ref": "#/$defs/revision"},
+    "status": {"const": "saved"},
+    "commands_sent": {"const": false},
+    "schedule_enabled": {"type": "boolean"},
+    "automatic_application_pending": {"type": "boolean"},
+    "message": {
+      "enum": [
+        "Профили сохранены. Команды устройствам не отправлялись.",
+        "Профили сохранены. Включённое расписание применит нужный профиль при ближайшей проверке."
+      ]
+    },
+    "rooms": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "items": {"$ref": "#/$defs/room"}
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"automatic_application_pending": {"const": true}}
+      },
+      "then": {
+        "properties": {
+          "schedule_enabled": {"const": true},
+          "automatic_application_pending": {"const": true},
+          "message": {
+            "const": "Профили сохранены. Включённое расписание применит нужный профиль при ближайшей проверке."
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "automatic_application_pending": {"const": false},
+          "message": {
+            "const": "Профили сохранены. Команды устройствам не отправлялись."
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "revision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "stable_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+    },
+    "strategy": {"enum": ["soft", "normal", "aggressive"]},
+    "comfort": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target_temperature", "target_humidity", "strategy"],
+      "properties": {
+        "target_temperature": {
+          "type": "number",
+          "minimum": 18,
+          "maximum": 28,
+          "multipleOf": 0.5
+        },
+        "target_humidity": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 70,
+          "multipleOf": 5
+        },
+        "strategy": {"$ref": "#/$defs/strategy"}
+      }
+    },
+    "profiles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["day", "night"],
+      "properties": {
+        "day": {"$ref": "#/$defs/comfort"},
+        "night": {"$ref": "#/$defs/comfort"}
+      }
+    },
+    "room": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["room_id", "profiles", "active_profile"],
+      "properties": {
+        "room_id": {"$ref": "#/$defs/stable_id"},
+        "profiles": {"$ref": "#/$defs/profiles"},
+        "active_profile": {"enum": ["day", "night"]}
+      }
+    }
+  }
+}

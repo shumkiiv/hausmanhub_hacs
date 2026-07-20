@@ -24,6 +24,21 @@ Last updated: 2026-07-20.
   failed before review (`ses_08191e6cdffeZFO3U7kFPu1jNi`, `err_7c5c5f07`)
   and Kimi k3 timed out; the independent fallback review passed in OpenCode
   session `ses_0818e4910ffeNoKwAj0QEiB030`.
+- Version 1.7.8 completes roadmap item 18. A local-admin POST at
+  `/api/hausman_hub/v1/admin/climate-profiles` accepts an exact versioned list
+  of day/night profiles for every configured room. It uses the full saved
+  `setup_revision` as an optimistic lock and rejects stale forms with HTTP 409
+  before persistence. The operation cannot change rooms, device bindings,
+  contour mode, active profile, or temporary temperature. It performs one
+  contour-store write and no bridge read or command. If the existing schedule
+  is enabled, its last-applied marker is cleared so the normal next schedule
+  check can apply the edited active profile when managed control is enabled;
+  the strict receipt exposes that pending automatic effect explicitly and does
+  not claim it in disabled or shadow mode. The final staged tree passed 361 local
+  tests and disposable Home Assistant Core 2026.6.4/2026.7.0. The independent
+  read-only OpenCode reviews passed in sessions
+  `ses_0816d871effeB7Q1hFv1K1D6DN` and `ses_081692737ffevvtAdFcTaAETTR`
+  with no substantial findings.
 - Workspace boundary: this thread may change only HausmanHub and its integration
   wrapper. The Android application is developed separately in
   `/home/ivsh/projects/УД-android`; it may be inspected only read-only for

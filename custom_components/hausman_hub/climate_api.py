@@ -41,6 +41,7 @@ ADMIN_DRAFT_PATH = "/api/hausman_hub/v1/admin/climate-drafts"
 ADMIN_DRAFT_CURRENT_PATH = "/api/hausman_hub/v1/admin/climate-drafts/current"
 ADMIN_DRAFT_VALIDATION_PATH = "/api/hausman_hub/v1/admin/climate-drafts/validate"
 ADMIN_DRAFT_SAVE_PATH = "/api/hausman_hub/v1/admin/climate-drafts/save"
+ADMIN_PROFILE_UPDATE_PATH = "/api/hausman_hub/v1/admin/climate-profiles"
 ADMIN_REGISTRY_PATH = "/api/hausman_hub/v1/admin/climate-registry"
 ADMIN_REGISTRY_PREVIEW_PATH = "/api/hausman_hub/v1/admin/climate-registry-preview"
 ADMIN_READINESS_PATH = "/api/hausman_hub/v1/admin/climate-readiness"
@@ -77,6 +78,7 @@ def register_climate_api(hass: HomeAssistant, runtime: ClimateRuntime) -> None:
             ClimateAdminDraftCurrentView(hass),
             ClimateAdminDraftValidationView(hass),
             ClimateAdminDraftSaveView(hass),
+            ClimateAdminProfileUpdateView(hass),
             ClimateAdminRegistryView(hass),
             ClimateAdminRegistryPreviewView(hass),
             ClimateAdminReadinessView(hass),
@@ -526,6 +528,50 @@ class ClimateAdminDraftSaveView(_ClimateView):
         except ValueError:
             return self.json_message(
                 "Черновик климатического контура заполнен неверно.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        except ClimateRuntimeUnavailable:
+            return self._unavailable()
+        except Exception:
+            return self._unavailable()
+        return self.json(result, headers=NO_STORE_HEADERS)
+
+
+class ClimateAdminProfileUpdateView(_ClimateView):
+    """Replace saved day/night profiles for all configured climate rooms."""
+
+    url = ADMIN_PROFILE_UPDATE_PATH
+    name = "api:hausman_hub:climate_admin_profile_update"
+
+    async def post(self, request: Any) -> Any:
+        if not _is_exact_request(request, ADMIN_PROFILE_UPDATE_PATH):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        runtime = self._runtime()
+        if runtime is None:
+            return self._unavailable()
+        try:
+            payload = await _request_json(
+                request,
+                maximum_bytes=MAX_CLIMATE_SETUP_BODY_BYTES,
+            )
+            result = await runtime.async_update_climate_profiles(payload)
+        except ClimateSetupViolation as error:
+            status = (
+                HTTPStatus.CONFLICT
+                if error.code in {"setup_changed", "not_configured"}
+                else HTTPStatus.BAD_REQUEST
+            )
+            return self.json_message(
+                "Не удалось сохранить профили «День» и «Ночь».",
+                status,
+                headers=NO_STORE_HEADERS,
+            )
+        except ValueError:
+            return self.json_message(
+                "Профили «День» и «Ночь» заполнены неверно.",
                 HTTPStatus.BAD_REQUEST,
                 headers=NO_STORE_HEADERS,
             )

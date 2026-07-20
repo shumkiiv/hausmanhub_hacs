@@ -1,0 +1,24 @@
+{
+  "contract": {
+    "name": "hausman-hub-climate-profile-update-request",
+    "version": 1
+  },
+  "setup_revision": 1,
+  "rooms": [
+    {
+      "room_id": "living",
+      "profiles": {
+        "day": {
+          "target_temperature": 24.5,
+          "target_humidity": 50,
+          "strategy": "soft"
+        },
+        "night": {
+          "target_temperature": 21.5,
+          "target_humidity": 45,
+          "strategy": "normal"
+        }
+      }
+    }
+  ]
+}

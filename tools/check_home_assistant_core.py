@@ -122,6 +122,7 @@ CLIMATE_ADMIN_DRAFT_PATH = "/api/hausman_hub/v1/admin/climate-drafts"
 CLIMATE_ADMIN_DRAFT_CURRENT_PATH = "/api/hausman_hub/v1/admin/climate-drafts/current"
 CLIMATE_ADMIN_DRAFT_VALIDATION_PATH = "/api/hausman_hub/v1/admin/climate-drafts/validate"
 CLIMATE_ADMIN_DRAFT_SAVE_PATH = "/api/hausman_hub/v1/admin/climate-drafts/save"
+CLIMATE_ADMIN_PROFILE_UPDATE_PATH = "/api/hausman_hub/v1/admin/climate-profiles"
 CLIMATE_ADMIN_REGISTRY_PATH = "/api/hausman_hub/v1/admin/climate-registry"
 CLIMATE_ADMIN_REGISTRY_PREVIEW_PATH = "/api/hausman_hub/v1/admin/climate-registry-preview"
 CLIMATE_ADMIN_READINESS_PATH = "/api/hausman_hub/v1/admin/climate-readiness"
@@ -141,6 +142,7 @@ CLIMATE_API_PATHS = (
     CLIMATE_ADMIN_DRAFT_CURRENT_PATH,
     CLIMATE_ADMIN_DRAFT_VALIDATION_PATH,
     CLIMATE_ADMIN_DRAFT_SAVE_PATH,
+    CLIMATE_ADMIN_PROFILE_UPDATE_PATH,
     CLIMATE_ADMIN_REGISTRY_PATH,
     CLIMATE_ADMIN_REGISTRY_PREVIEW_PATH,
     CLIMATE_ADMIN_READINESS_PATH,
@@ -2305,6 +2307,7 @@ def assert_disabled_climate_facade(hass: HomeAssistant, domain: str, entry_id: s
         CLIMATE_ADMIN_DRAFT_CURRENT_PATH: {"GET", "OPTIONS"},
         CLIMATE_ADMIN_DRAFT_VALIDATION_PATH: {"POST", "OPTIONS"},
         CLIMATE_ADMIN_DRAFT_SAVE_PATH: {"POST", "OPTIONS"},
+        CLIMATE_ADMIN_PROFILE_UPDATE_PATH: {"POST", "OPTIONS"},
         CLIMATE_ADMIN_REGISTRY_PATH: {"GET", "POST", "OPTIONS"},
         CLIMATE_ADMIN_REGISTRY_PREVIEW_PATH: {"POST", "OPTIONS"},
         CLIMATE_ADMIN_READINESS_PATH: {"GET", "OPTIONS"},

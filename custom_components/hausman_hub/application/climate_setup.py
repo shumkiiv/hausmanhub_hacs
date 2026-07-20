@@ -11,8 +11,10 @@ from .contours import (
     ContourRegistryViolation,
     build_climate_contour_setup,
     climate_room_parameters,
+    climate_room_profiles,
     contour_registry_to_payload,
     validate_contour_bindings,
+    with_climate_room_profiles,
 )
 from .climate_import import ClimateImportSnapshot
 from .climate_registry_import import (
@@ -42,6 +44,12 @@ CLIMATE_DRAFT_SAVE_CONTRACT_NAME = "hausman-hub-climate-draft-save"
 CLIMATE_DRAFT_SAVE_CONTRACT_VERSION = 1
 CLIMATE_CURRENT_SETUP_CONTRACT_NAME = "hausman-hub-climate-current-setup"
 CLIMATE_CURRENT_SETUP_CONTRACT_VERSION = 1
+CLIMATE_PROFILE_UPDATE_REQUEST_CONTRACT_NAME = (
+    "hausman-hub-climate-profile-update-request"
+)
+CLIMATE_PROFILE_UPDATE_REQUEST_CONTRACT_VERSION = 1
+CLIMATE_PROFILE_UPDATE_CONTRACT_NAME = "hausman-hub-climate-profile-update"
+CLIMATE_PROFILE_UPDATE_CONTRACT_VERSION = 1
 MAX_CLIMATE_DRAFT_NAME_LENGTH = 120
 MAX_CLIMATE_DRAFT_ROOMS = 128
 MAX_CLIMATE_DRAFT_DEVICES = 512
@@ -85,6 +93,11 @@ _CLIMATE_DRAFT_TARGET_FIELDS = frozenset(
 _CLIMATE_DRAFT_RESPONSE_DEVICE_FIELDS = frozenset(
     {"candidate_id", "name", "type", "type_name"}
 )
+_CLIMATE_PROFILE_UPDATE_REQUEST_FIELDS = frozenset(
+    {"contract", "setup_revision", "rooms"}
+)
+_CLIMATE_PROFILE_UPDATE_CONTRACT_FIELDS = frozenset({"name", "version"})
+_CLIMATE_PROFILE_UPDATE_ROOM_FIELDS = frozenset({"room_id", "profiles"})
 _ACTIVE_CLIMATE_DRAFT_TYPES = frozenset(
     {"air_conditioner", "radiator_thermostat", "humidifier", "floor_heating"}
 )
@@ -703,12 +716,7 @@ def current_climate_contour_setup(
         if isinstance(candidate, dict)
         and isinstance(candidate.get("candidate_id"), str)
     }
-    setup_revision = _json_safe_revision(
-        {
-            "registry": registry_to_payload(registry),
-            "contours": contour_registry_to_payload(contours),
-        }
-    )
+    setup_revision = climate_setup_revision(registry, contours)
     display_names = {
         "statuses": dict(_CURRENT_SETUP_STATUS_NAMES),
         "modes": {
@@ -861,6 +869,149 @@ def current_climate_contour_setup(
             "device_count": device_count,
         },
     }
+
+
+def climate_setup_revision(
+    registry: ClimateRegistry,
+    contours: ContourRegistry,
+) -> int:
+    """Return one stable optimistic-lock revision for the saved setup."""
+
+    if not isinstance(registry, ClimateRegistry):
+        raise ClimateSetupViolation("current climate registry must be valid")
+    if not isinstance(contours, ContourRegistry):
+        raise ClimateSetupViolation("current contour registry must be valid")
+    validate_contour_bindings(contours, registry)
+    return _json_safe_revision(
+        {
+            "registry": registry_to_payload(registry),
+            "contours": contour_registry_to_payload(contours),
+        }
+    )
+
+
+def update_climate_profiles(
+    registry: ClimateRegistry,
+    contours: ContourRegistry,
+    payload: object,
+    *,
+    saved_at: int,
+    automatic_application_enabled: bool,
+) -> tuple[ContourRegistry, dict[str, object]]:
+    """Validate and replace every saved day/night profile atomically."""
+
+    if type(saved_at) is not int or saved_at < 0:
+        raise ClimateSetupViolation("climate profile save time is invalid")
+    if type(automatic_application_enabled) is not bool:
+        raise ClimateSetupViolation("automatic climate application flag is invalid")
+    request = _exact_mapping(
+        payload,
+        _CLIMATE_PROFILE_UPDATE_REQUEST_FIELDS,
+        "climate profile update request",
+    )
+    contract = _exact_mapping(
+        request["contract"],
+        _CLIMATE_PROFILE_UPDATE_CONTRACT_FIELDS,
+        "climate profile update request contract",
+    )
+    if (
+        contract["name"] != CLIMATE_PROFILE_UPDATE_REQUEST_CONTRACT_NAME
+        or contract["version"] != CLIMATE_PROFILE_UPDATE_REQUEST_CONTRACT_VERSION
+    ):
+        raise ClimateSetupViolation(
+            "climate profile update request contract is unsupported"
+        )
+
+    expected_revision = climate_setup_revision(registry, contours)
+    supplied_revision = request["setup_revision"]
+    if (
+        type(supplied_revision) is not int
+        or not 0 <= supplied_revision <= JSON_SAFE_INTEGER_MAXIMUM
+    ):
+        raise ClimateSetupViolation("climate setup revision is invalid")
+    if supplied_revision != expected_revision:
+        raise ClimateSetupViolation(
+            "climate setup changed after it was opened",
+            code="setup_changed",
+        )
+
+    contour = contours.contour("climate")
+    if contour is None:
+        raise ClimateSetupViolation(
+            "climate contour is not configured",
+            code="not_configured",
+        )
+    raw_rooms = request["rooms"]
+    if (
+        not isinstance(raw_rooms, list)
+        or not 1 <= len(raw_rooms) <= MAX_CLIMATE_DRAFT_ROOMS
+    ):
+        raise ClimateSetupViolation("climate profile rooms are invalid")
+
+    existing_rooms = {room.room_id: room for room in contour.rooms}
+    profiles_by_room: dict[str, dict[str, object]] = {}
+    for raw_room in raw_rooms:
+        room = _exact_mapping(
+            raw_room,
+            _CLIMATE_PROFILE_UPDATE_ROOM_FIELDS,
+            "climate profile room",
+        )
+        room_id = room["room_id"]
+        if not isinstance(room_id, str) or room_id not in existing_rooms:
+            raise ClimateSetupViolation("climate profile room is not configured")
+        if room_id in profiles_by_room:
+            raise ClimateSetupViolation("climate profile room is duplicated")
+        profiles_by_room[room_id] = {
+            "profiles": room["profiles"],
+            "active_profile": existing_rooms[room_id].active_profile.value,
+        }
+    if set(profiles_by_room) != set(existing_rooms):
+        raise ClimateSetupViolation(
+            "climate profile rooms must exactly match configured rooms"
+        )
+
+    try:
+        updated = with_climate_room_profiles(contours, profiles_by_room)
+    except ContourRegistryViolation as error:
+        raise ClimateSetupViolation(str(error)) from error
+    updated_contour = updated.contour("climate")
+    if updated_contour is None:  # pragma: no cover - preserved by the use case
+        raise ClimateSetupViolation("updated climate contour is unavailable")
+    schedule_enabled = updated_contour.schedule.enabled
+    automatic_application_pending = (
+        schedule_enabled and automatic_application_enabled
+    )
+    receipt_rooms = []
+    for room in updated_contour.rooms:
+        values = climate_room_profiles(room)
+        receipt_rooms.append(
+            {
+                "room_id": room.room_id,
+                "profiles": values["profiles"],
+                "active_profile": values["active_profile"],
+            }
+        )
+    receipt_rooms.sort(key=lambda room: room["room_id"])  # type: ignore[arg-type]
+    receipt = {
+        "contract": {
+            "name": CLIMATE_PROFILE_UPDATE_CONTRACT_NAME,
+            "version": CLIMATE_PROFILE_UPDATE_CONTRACT_VERSION,
+        },
+        "saved_at": saved_at,
+        "setup_revision": climate_setup_revision(registry, updated),
+        "status": "saved",
+        "commands_sent": False,
+        "schedule_enabled": schedule_enabled,
+        "automatic_application_pending": automatic_application_pending,
+        "message": (
+            "Профили сохранены. Включённое расписание применит нужный профиль "
+            "при ближайшей проверке."
+            if automatic_application_pending
+            else "Профили сохранены. Команды устройствам не отправлялись."
+        ),
+        "rooms": receipt_rooms,
+    }
+    return updated, receipt
 
 
 def validate_climate_contour_draft(

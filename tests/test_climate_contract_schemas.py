@@ -82,6 +82,8 @@ class ClimateContractSchemasTest(unittest.TestCase):
             "hausmanhub_climate_draft_v1/draft.json": "v1/climate-draft.schema.json",
             "hausmanhub_climate_draft_v1/save.json": "v1/climate-draft-save.schema.json",
             "hausmanhub_climate_current_setup_v1/current.json": "v1/climate-current-setup.schema.json",
+            "hausmanhub_climate_profiles_v1/request.json": "v1/climate-profile-update-request.schema.json",
+            "hausmanhub_climate_profiles_v1/receipt.json": "v1/climate-profile-update.schema.json",
             "hausmanhub_climate_draft_v1/options.json": "v1/climate-setup-options.schema.json",
             "hausmanhub_climate_draft_v1/validation.json": "v1/climate-draft-validation.schema.json",
             "hausmanhub_climate_v2/home.json": "v2/climate-home.schema.json",
