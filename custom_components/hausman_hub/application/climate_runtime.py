@@ -16,6 +16,7 @@ from ..domain.climate_observation import (
     ClimateObservationViolation,
 )
 from ..domain.climate_resolution import ClimateResolutionSnapshot
+from ..domain.climate_stability import ClimateStabilitySnapshot
 from ..domain.climate_bridge import ClimateBridgeMode
 from ..domain.configuration import SafeConfiguration
 from ..domain.contours import ContourDefinition, ContourMode, ContourRegistry
@@ -44,6 +45,7 @@ from .climate_observations import (
     unavailable_climate_observation_snapshot,
 )
 from .climate_resolutions import build_climate_resolution_snapshot
+from .climate_stability import build_climate_stability_snapshot
 from .climate_registry import (
     reconcile_climate_registry,
     registry_from_payload,
@@ -816,6 +818,32 @@ class ClimateRuntime:
                 contour,
                 targets,
                 resolutions,
+                observation,
+            )
+
+    async def async_native_climate_stability(
+        self,
+    ) -> ClimateStabilitySnapshot | None:
+        """Protect selected devices from oscillation without creating commands."""
+
+        async with self._lock:
+            contour = self._contours.contour(CLIMATE_CONTOUR_ID)
+            if contour is None:
+                return None
+            observation = await self._async_native_climate_observation_unlocked()
+            targets = build_climate_target_snapshot(contour, observation)
+            demands = build_climate_demand_snapshot(targets, observation)
+            resolutions = build_climate_resolution_snapshot(demands, observation)
+            equipment = build_climate_equipment_snapshot(
+                contour,
+                targets,
+                resolutions,
+                observation,
+            )
+            return build_climate_stability_snapshot(
+                contour,
+                targets,
+                equipment,
                 observation,
             )
 

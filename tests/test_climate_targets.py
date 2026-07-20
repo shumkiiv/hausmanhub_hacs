@@ -169,6 +169,7 @@ class ClimateTargetsTest(unittest.TestCase):
                 active_profile=room.active_profile,
             ),
             None,
+            observed_at=1_784_280_005_000,
         )
         snapshot = ClimateTargetSnapshot(
             contour_id=contour.contour_id,  # type: ignore[union-attr]
@@ -222,6 +223,7 @@ class ClimateTargetsTest(unittest.TestCase):
                     name="Спальня",
                     data_status=ClimateDataStatus.UNAVAILABLE,
                 ),
+                observed_at=observation.observed_at,
             )
 
     def test_all_frozen_reference_cases_keep_exact_room_targets(self) -> None:

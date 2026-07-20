@@ -63,6 +63,10 @@ def build_climate_equipment_snapshot(
         raise ClimateEquipmentViolation(
             "contour, targets, and thermal resolutions must match"
         )
+    if targets.observed_at != observation.observed_at:
+        raise ClimateEquipmentViolation(
+            "equipment targets and observation must use one observation time"
+        )
     target_room_ids = {room.room_id for room in targets.rooms}
     resolution_room_ids = {room.room_id for room in resolutions.rooms}
     observation_room_ids = {room.room_id for room in observation.rooms}

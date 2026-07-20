@@ -98,6 +98,7 @@ class ClimateDevicePlan:
     heat_load_temperature: float | None
     comfort_temperature: float
     strategy: ClimateStrategy
+    observed_at: int
     action: ClimateEquipmentAction
     target_temperature: float | None
     fan_mode: ClimateFanMode | None
@@ -126,6 +127,7 @@ class ClimateDevicePlan:
         )
         _number(self.comfort_temperature, 10, 35, "comfort temperature")
         _enum(self.strategy, ClimateStrategy, "climate strategy")
+        _timestamp(self.observed_at, "equipment observation time")
         _enum(self.action, ClimateEquipmentAction, "equipment action")
         _optional_number(
             self.target_temperature,
@@ -303,6 +305,7 @@ def resolve_climate_device_plan(
         heat_load_temperature=home.heat_load_temperature,
         comfort_temperature=target.target_temperature,
         strategy=target.strategy,
+        observed_at=target.observation_observed_at,
         action=action,
         target_temperature=equipment_target,
         fan_mode=fan_mode,
@@ -570,6 +573,11 @@ def _optional_number(
 def _optional_bool(value: object, label: str) -> None:
     if value is not None and type(value) is not bool:
         raise ClimateEquipmentViolation(f"{label} must be boolean or unavailable")
+
+
+def _timestamp(value: object, label: str) -> None:
+    if type(value) is not int or not 0 <= value <= 9_999_999_999_999:
+        raise ClimateEquipmentViolation(f"{label} must be bounded milliseconds")
 
 
 def _decimal(value: float | int) -> Decimal:

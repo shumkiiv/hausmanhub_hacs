@@ -40,6 +40,7 @@ def build_climate_target_snapshot(
                 temporary_override=room.temporary_override,
             ),
             observation.room(room.room_id),
+            observed_at=observation.observed_at,
         )
         for room in contour.rooms
     )
@@ -80,4 +81,5 @@ def climate_reference_target(case_id: str) -> ClimateRoomTarget:
             active_profile=active_profile,
         ),
         room,
+        observed_at=observation.observed_at,
     )

@@ -187,6 +187,45 @@ Last updated: 2026-07-20.
   staged tree and frozen source but returned no terminal report, so neither is
   counted as PASS: `ses_080b2d8a4ffeFX0o9wFoBmaVH0` and
   `ses_080aa6566ffelElJG2iyoowP71`.
+- Version 1.8.6 completes roadmap item 27. A pure stability layer applies the
+  frozen working-core start boundary, running hysteresis, gradual 27 C/low-fan
+  softening, hard-off override, minimum run/off windows, and humidifier
+  hysteresis only to devices selected in each contour room. Default AC timing
+  is 8 minutes running and 6 minutes off; confirmed fast cooling uses 5/8,
+  confirmed slow cooling uses 10/5, and confirmed short cycles add at most two
+  off minutes up to a 10-minute ceiling. Exact interval boundaries release the
+  protection, while an active window exposes bounded remaining seconds.
+  Confirmed weak cooling escalates only after the preserved day/night dwell,
+  first from low to medium fan and then from 26 C to the room target; stale or
+  unconfirmed physical feedback cannot authorize escalation. The
+  humidifier thresholds are expressed relative to the configured target so
+  the frozen 45 percent target gives 39/44 normally and 40/45 during active
+  cooling or heat load at least 26 C. An unconfirmed-closed window selects
+  humidifier off before missing humidity is considered. The immutable result
+  rejects forged actions, thresholds, remaining times, contradictory inputs,
+  differing observation timestamps, and mutable collections; it has stable
+  HausmanHub IDs only and
+  `commands_enabled=False`. Runtime derives the protected plan through one
+  non-evidence-mutating read and never posts. All 30 frozen cases are
+  deterministic, with exact anchors for timing and humidity. The transitional
+  Climate API still does not supply physical transition timestamps, confirmed
+  short-cycle history, or reliable window state; the policy accepts these
+  facts but does not invent them. Native acquisition and restart restoration
+  remain items 33 and 30, so this result must not be wired directly to an
+  executor yet. Item 28 owns manual mode, final priority ordering, and safe
+  stop. The source climate module and Android repository remain unchanged.
+  A read-only OpenCode/Kimi k3 audit inspected the staged implementation in
+  session `ses_0808c1139ffeGfZVhX1YG2h6Um` but was interrupted before a final
+  top-level PASS/FAIL and is not counted as PASS. Its completed research branch
+  correctly identified that deterministic execution alone was weaker than
+  direct reference comparison and that observation provenance needed an
+  explicit boundary. Before commit, HausmanHub therefore binds target and base
+  equipment plans to the exact observation timestamp, rejects a timestamp
+  mismatch, compares all 11 timing/cooling reference anchors directly with
+  frozen expected action/setpoint/fan/quiet fields, and adds direct night-dwell,
+  stale-feedback, heat-load-boundary, unknown-window, and forged-humidity tests.
+  The final staged tree passed 441 local tests, HACS/package/boundary/Android
+  checks, and disposable Home Assistant Core 2026.6.4/2026.7.0.
 - Workspace boundary: this thread may change only HausmanHub and its integration
   wrapper. The Android application is developed separately in
   `/home/ivsh/projects/УД-android`; it may be inspected only read-only for

@@ -82,6 +82,7 @@ def target(
         strategy=strategy,
         temperature_origin=ClimateTemperatureTargetOrigin.PROFILE,
         observation_status=status,
+        observation_observed_at=1_800_000_000_000,
     )
 
 

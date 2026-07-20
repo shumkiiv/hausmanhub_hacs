@@ -43,6 +43,9 @@ from custom_components.hausman_hub.domain.climate_resolution import (
 from custom_components.hausman_hub.domain.climate_equipment import (
     ClimateEquipmentAction,
 )
+from custom_components.hausman_hub.domain.climate_stability import (
+    ClimateStabilityAction,
+)
 from custom_components.hausman_hub.domain.configuration import SafeConfiguration
 from custom_components.hausman_hub.domain.native_climate import native_climate_policy
 from custom_components.hausman_hub.domain.contours import ClimateProfile, ContourRegistry
@@ -1610,6 +1613,84 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertIs(
             result.room("living").device("living_air_conditioner").action,  # type: ignore[union-attr]
             ClimateEquipmentAction.UNAVAILABLE,
+        )
+        self.assertEqual(0, bridge.fetch_count)
+        self.assertEqual([], bridge.executed)
+
+    async def test_native_climate_stability_reads_once_without_evidence_or_posts(
+        self,
+    ) -> None:
+        bridge = MemoryBridge()
+        evidence_store = ready_evidence_store()
+        registry, contours = build_climate_contour_setup(
+            bridge.snapshot,
+            room_ids=["living"],
+            source_ids=["synthetic-ac-source-living"],
+            name="Климат",
+            mode="automatic",
+            target_temperature=25.0,
+            target_humidity=45,
+            strategy="normal",
+        )
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateBridgeMode.SHADOW),
+            registry_store=MemoryStore(registry),
+            contour_store=MemoryContourStore(contours),
+            bridge_client=bridge,
+            evidence_store=evidence_store,
+            now_ms=lambda: 1784280005000,
+        )
+        await runtime.async_start()
+        fetches_before = bridge.fetch_count
+        evidence_before = evidence_store.evidence.as_storage_payload()  # type: ignore[union-attr]
+
+        result = await runtime.async_native_climate_stability()
+
+        self.assertIsNotNone(result)
+        self.assertIs(
+            result.room("living").device("living_air_conditioner").action,  # type: ignore[union-attr]
+            ClimateStabilityAction.COOL,
+        )
+        self.assertEqual(fetches_before + 1, bridge.fetch_count)
+        self.assertEqual(
+            evidence_before,
+            evidence_store.evidence.as_storage_payload(),  # type: ignore[union-attr]
+        )
+        self.assertFalse(result.commands_enabled)  # type: ignore[union-attr]
+        self.assertEqual([], bridge.executed)
+
+    async def test_disabled_native_climate_stability_ignores_retained_state(
+        self,
+    ) -> None:
+        bridge = MemoryBridge()
+        registry, contours = build_climate_contour_setup(
+            bridge.snapshot,
+            room_ids=["living"],
+            source_ids=["synthetic-ac-source-living"],
+            name="Климат",
+            mode="automatic",
+            target_temperature=25.0,
+            target_humidity=45,
+            strategy="normal",
+        )
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateBridgeMode.DISABLED),
+            registry_store=MemoryStore(registry),
+            contour_store=MemoryContourStore(contours),
+            bridge_client=bridge,
+            now_ms=lambda: 1784280005000,
+        )
+        await runtime.async_start()
+        runtime._snapshot = bridge.snapshot
+
+        result = await runtime.async_native_climate_stability()
+
+        self.assertIsNotNone(result)
+        self.assertIs(
+            result.room("living").device("living_air_conditioner").action,  # type: ignore[union-attr]
+            ClimateStabilityAction.UNAVAILABLE,
         )
         self.assertEqual(0, bridge.fetch_count)
         self.assertEqual([], bridge.executed)
