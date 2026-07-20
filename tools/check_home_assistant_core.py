@@ -2884,14 +2884,14 @@ async def async_assert_disabled_climate_http_access(hass: HomeAssistant) -> None
             capabilities_payload.get("capabilities", {})
             .get("climate_home", {})
             .get("response_contract"),
-            {"name": "hausman-hasc-home", "version": 8},
+            {"name": "hausman-hasc-home", "version": 9},
             "HASC capabilities must advertise the current home contract",
         )
         assert_result(
             capabilities_payload.get("capabilities", {})
             .get("automatic_contours", {})
             .get("response_contract"),
-            {"name": "hausman-hasc-contours", "version": 6},
+            {"name": "hausman-hasc-contours", "version": 7},
             "HASC capabilities must advertise the current contour contract",
         )
         assert_local_summary_response_is_not_stored(
@@ -2952,7 +2952,7 @@ async def async_assert_disabled_climate_http_access(hass: HomeAssistant) -> None
                 .get("automatic"),
             ),
             (
-                {"name": "hausman-hasc-contours", "version": 6},
+                {"name": "hausman-hasc-contours", "version": 7},
                 [],
                 "Автоматически",
             ),
@@ -3492,8 +3492,8 @@ async def async_assert_shadow_climate_end_to_end(
             raise RuntimeError("tablet home contract must not expose private climate bindings")
         assert_result(
             home_payload.get("contract"),
-            {"name": "hausman-hasc-home", "version": 8},
-            "tablet must receive the combined v8 home contract",
+            {"name": "hausman-hasc-home", "version": 9},
+            "tablet must receive the combined v9 home contract",
         )
         combined_contours = home_payload.get("contours", [])
         assert_result(

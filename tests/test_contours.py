@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import copy
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import unittest
+from zoneinfo import ZoneInfo
 
 from custom_components.hausman_hub.application.climate_import import (
     import_climate_state,
@@ -30,10 +32,15 @@ from custom_components.hausman_hub.domain.climate import (
     ClimateControlOwner,
     ClimateControlScope,
 )
-from custom_components.hausman_hub.domain.contours import ClimateProfile, ContourMode
+from custom_components.hausman_hub.domain.contours import (
+    ClimateProfile,
+    ContourMode,
+    ContourViolation,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
+LOCAL_NOW = datetime(2026, 7, 19, 12, 0, tzinfo=timezone(timedelta(hours=3)))
 
 
 def source_payload() -> dict[str, object]:
@@ -96,10 +103,20 @@ class ContoursTest(unittest.TestCase):
         result = contour_snapshot(contours, climate_registry, source_snapshot())
 
         contour = result["contours"][0]  # type: ignore[index]
-        self.assertEqual(6, result["contract"]["version"])  # type: ignore[index]
+        self.assertEqual(7, result["contract"]["version"])  # type: ignore[index]
         self.assertEqual("hausman-climate", contour["engine"]["name"])
         self.assertTrue(contour["execution"]["automatic_active"])
         self.assertFalse(contour["execution"]["hasc_direct_commands"])
+        self.assertEqual(
+            {
+                "enabled": False,
+                "day_start": "07:00",
+                "night_start": "23:00",
+                "next_profile": None,
+                "next_change_at": None,
+            },
+            contour["schedule"],
+        )
         serialized = json.dumps(result, ensure_ascii=False)
         self.assertNotIn("synthetic-ac-source-living", serialized)
         self.assertNotIn("entity_id", serialized)
@@ -254,9 +271,26 @@ class ContoursTest(unittest.TestCase):
         self.assertEqual("night", schedule.profile_at(hour=6, minute=59).value)
         self.assertEqual("day", schedule.profile_at(hour=7, minute=0).value)
         self.assertEqual("night", schedule.profile_at(hour=23, minute=0).value)
-        public = contour_snapshot(scheduled, climate_registry, source_snapshot())
+        profile, transition = schedule.next_transition_after(LOCAL_NOW)
+        self.assertEqual("night", profile.value)
+        self.assertEqual("2026-07-19T23:00:00+03:00", transition.isoformat())
+        with self.assertRaises(ContourViolation):
+            schedule.next_transition_after(datetime(2026, 7, 19, 12, 0))
+
+        public = contour_snapshot(
+            scheduled,
+            climate_registry,
+            source_snapshot(),
+            local_now=LOCAL_NOW,
+        )
         self.assertEqual(
-            {"enabled": True, "day_start": "07:00", "night_start": "23:00"},
+            {
+                "enabled": True,
+                "day_start": "07:00",
+                "night_start": "23:00",
+                "next_profile": "night",
+                "next_change_at": "2026-07-19T23:00:00+03:00",
+            },
             public["contours"][0]["schedule"],  # type: ignore[index]
         )
 
@@ -276,6 +310,21 @@ class ContoursTest(unittest.TestCase):
                     day_start=day_start,
                     night_start=night_start,
                 )
+
+    def test_next_schedule_transition_follows_real_timezone_minutes(self) -> None:
+        schedule = with_climate_schedule(
+            setup()[1],
+            enabled=True,
+            day_start="02:30",
+            night_start="23:00",
+        ).contour("climate").schedule  # type: ignore[union-attr]
+
+        profile, transition = schedule.next_transition_after(
+            datetime(2026, 3, 29, 1, 59, tzinfo=ZoneInfo("Europe/Berlin"))
+        )
+
+        self.assertEqual("day", profile.value)
+        self.assertEqual("2026-03-29T03:00:00+02:00", transition.isoformat())
 
     def test_temporary_temperature_changes_only_effective_target(self) -> None:
         climate_registry, contours = setup()
@@ -306,6 +355,7 @@ class ContoursTest(unittest.TestCase):
             climate_registry,
             source_snapshot(),
             settings_apply_enabled=True,
+            local_now=LOCAL_NOW,
         )
         public_room = public["contours"][0]["rooms"][0]  # type: ignore[index]
         self.assertEqual(23.5, public_room["targets"]["temperature"])
@@ -315,6 +365,7 @@ class ContoursTest(unittest.TestCase):
                 "active": True,
                 "temperature": 23.5,
                 "ends": "next_schedule_change",
+                "ends_at": "2026-07-19T23:00:00+03:00",
                 "available": True,
             },
             public_room["temporary_temperature"],

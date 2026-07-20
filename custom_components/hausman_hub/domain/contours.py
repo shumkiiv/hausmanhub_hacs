@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 import re
@@ -31,6 +32,7 @@ CLIMATE_NIGHT_START_DEFAULT = "23:00"
 
 _STABLE_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _CLOCK_TIME = re.compile(r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$")
+_MAX_SCHEDULE_LOOKAHEAD_MINUTES = 26 * 60
 
 
 class ContourViolation(ValueError):
@@ -115,6 +117,34 @@ class ClimateSchedule:
             if current >= day or current < night
             else ClimateProfile.NIGHT
         )
+
+    def next_transition_after(
+        self,
+        now: datetime,
+    ) -> tuple[ClimateProfile, datetime]:
+        """Return the next real local minute whose selected profile changes."""
+
+        if (
+            not isinstance(now, datetime)
+            or now.tzinfo is None
+            or now.utcoffset() is None
+        ):
+            raise ContourViolation("climate schedule needs timezone-aware local time")
+        current = self.profile_at(hour=now.hour, minute=now.minute)
+        utc_now = now.astimezone(timezone.utc)
+        candidate = utc_now.replace(second=0, microsecond=0)
+        if candidate <= utc_now:
+            candidate += timedelta(minutes=1)
+        for _ in range(_MAX_SCHEDULE_LOOKAHEAD_MINUTES):
+            local_candidate = candidate.astimezone(now.tzinfo)
+            selected = self.profile_at(
+                hour=local_candidate.hour,
+                minute=local_candidate.minute,
+            )
+            if selected is not current:
+                return selected, local_candidate
+            candidate += timedelta(minutes=1)
+        raise ContourViolation("next climate schedule transition is unavailable")
 
 
 @dataclass(frozen=True, slots=True)

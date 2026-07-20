@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import replace
+from datetime import datetime
 from typing import Any
 
 from ..domain.climate import (
@@ -46,7 +47,7 @@ from .public_climate_values import (
 
 CLIMATE_CONTOUR_ID = "climate"
 CONTOUR_CONTRACT_NAME = "hausman-hasc-contours"
-CONTOUR_CONTRACT_VERSION = 6
+CONTOUR_CONTRACT_VERSION = 7
 LEGACY_CONTOUR_REGISTRY_VERSION = 1
 PROFILE_CONTOUR_REGISTRY_VERSION = 2
 SCHEDULE_CONTOUR_REGISTRY_VERSION = 3
@@ -851,10 +852,12 @@ def contour_snapshot(
     snapshot: ClimateImportSnapshot | None,
     *,
     settings_apply_enabled: bool = False,
+    local_now: datetime | None = None,
 ) -> dict[str, object]:
     """Project public contour status without private source or entity ids."""
 
     validate_contour_bindings(contours, climate_registry)
+    projection_time = local_now or datetime.now().astimezone()
     return {
         "contract": {
             "name": CONTOUR_CONTRACT_NAME,
@@ -869,6 +872,7 @@ def contour_snapshot(
                 climate_registry,
                 snapshot,
                 settings_apply_enabled=settings_apply_enabled,
+                local_now=projection_time,
             )
             for contour in contours.contours
         ],
@@ -881,7 +885,9 @@ def _contour_status(
     snapshot: ClimateImportSnapshot | None,
     *,
     settings_apply_enabled: bool,
+    local_now: datetime,
 ) -> dict[str, object]:
+    schedule = _public_schedule(contour.schedule, local_now)
     schedule_profile = contour.schedule.last_applied_profile
     schedule_ready = (
         contour.mode is ContourMode.AUTOMATIC
@@ -907,6 +913,7 @@ def _contour_status(
             temporary_temperature_available=(
                 temporary_temperature_available_by_room[room.room_id]
             ),
+            next_schedule_change_at=schedule["next_change_at"],
         )
         for room in contour.rooms
     ]
@@ -954,11 +961,7 @@ def _contour_status(
             "name": "hausman-climate",
             "version": 1,
         },
-        "schedule": {
-            "enabled": contour.schedule.enabled,
-            "day_start": contour.schedule.day_start,
-            "night_start": contour.schedule.night_start,
-        },
+        "schedule": schedule,
         "rooms": room_results,
         "execution": {
             "owner": contour.engine.value,
@@ -992,6 +995,7 @@ def _room_status(
     snapshot: ClimateImportSnapshot | None,
     *,
     temporary_temperature_available: bool,
+    next_schedule_change_at: object,
 ) -> dict[str, object]:
     room = climate_registry.room(assignment.room_id)
     imported_room = None if snapshot is None else snapshot.room(assignment.room_id)
@@ -1084,6 +1088,11 @@ def _room_status(
                 if assignment.temporary_override is None
                 else "next_schedule_change"
             ),
+            "ends_at": (
+                None
+                if assignment.temporary_override is None
+                else next_schedule_change_at
+            ),
             "available": temporary_temperature_available,
         },
         "device_count": len(assignment.device_ids),
@@ -1099,6 +1108,27 @@ def _room_status(
             engine_automatic and authority_ready and available and targets_in_sync
         ),
         "reasons": reasons,
+    }
+
+
+def _public_schedule(
+    schedule: ClimateSchedule,
+    local_now: datetime,
+) -> dict[str, object]:
+    """Expose the next scheduled profile and its exact local timestamp."""
+
+    next_profile: str | None = None
+    next_change_at: str | None = None
+    if schedule.enabled:
+        profile, transition = schedule.next_transition_after(local_now)
+        next_profile = profile.value
+        next_change_at = transition.isoformat(timespec="seconds")
+    return {
+        "enabled": schedule.enabled,
+        "day_start": schedule.day_start,
+        "night_start": schedule.night_start,
+        "next_profile": next_profile,
+        "next_change_at": next_change_at,
     }
 
 

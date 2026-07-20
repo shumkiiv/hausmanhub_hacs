@@ -1,0 +1,907 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hasc/contracts/v7/contours.schema.json",
+  "title": "HASC automatic contours with exact next schedule transition v7",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "display_names",
+    "contours"
+  ],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "const": "hausman-hasc-contours"
+        },
+        "version": {
+          "const": 7
+        }
+      }
+    },
+    "contours": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "$ref": "#/$defs/contour"
+      }
+    },
+    "display_names": {
+      "$ref": "#/$defs/display_names"
+    }
+  },
+  "$defs": {
+    "stableId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+    },
+    "nullableNumber": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "reason": {
+      "enum": [
+        "room_state_unavailable",
+        "state_stale",
+        "device_unavailable",
+        "engine_not_automatic",
+        "authority_not_ready",
+        "target_temperature_differs",
+        "target_humidity_differs",
+        "target_strategy_unavailable",
+        "target_strategy_differs"
+      ]
+    },
+    "comfortValues": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "temperature",
+        "humidity",
+        "strategy"
+      ],
+      "properties": {
+        "temperature": {
+          "type": "number",
+          "minimum": 18,
+          "maximum": 28,
+          "multipleOf": 0.5
+        },
+        "humidity": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 70,
+          "multipleOf": 5
+        },
+        "strategy": {
+          "enum": [
+            "soft",
+            "normal",
+            "aggressive"
+          ]
+        }
+      }
+    },
+    "contour": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "kind",
+        "mode",
+        "status",
+        "engine",
+        "schedule",
+        "rooms",
+        "execution",
+        "reasons"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/stableId"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "kind": {
+          "const": "climate"
+        },
+        "mode": {
+          "enum": [
+            "disabled",
+            "observe",
+            "automatic"
+          ]
+        },
+        "status": {
+          "enum": [
+            "disabled",
+            "ready",
+            "attention",
+            "unavailable",
+            "stale"
+          ]
+        },
+        "engine": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "version"
+          ],
+          "properties": {
+            "name": {
+              "const": "hausman-climate"
+            },
+            "version": {
+              "const": 1
+            }
+          }
+        },
+        "schedule": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "day_start",
+            "night_start",
+            "next_profile",
+            "next_change_at"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "day_start": {
+              "type": "string",
+              "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+            },
+            "night_start": {
+              "type": "string",
+              "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+            },
+            "next_profile": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "day",
+                "night",
+                null
+              ]
+            },
+            "next_change_at": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])$"
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "enabled": {
+                    "const": true
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "next_profile": {
+                    "type": "string"
+                  },
+                  "next_change_at": {
+                    "type": "string"
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "next_profile": {
+                    "type": "null"
+                  },
+                  "next_change_at": {
+                    "type": "null"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "rooms": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/room"
+          }
+        },
+        "execution": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "owner",
+            "automatic_active",
+            "hasc_direct_commands",
+            "settings_apply",
+            "temporary_temperature"
+          ],
+          "properties": {
+            "owner": {
+              "const": "existing_climate_core"
+            },
+            "automatic_active": {
+              "type": "boolean"
+            },
+            "hasc_direct_commands": {
+              "const": false
+            },
+            "settings_apply": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "available",
+                "requires_confirmation",
+                "parameters"
+              ],
+              "properties": {
+                "available": {
+                  "type": "boolean"
+                },
+                "requires_confirmation": {
+                  "const": true
+                },
+                "parameters": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "temperature",
+                    "strategy",
+                    "automatic_mode",
+                    "humidity"
+                  ],
+                  "properties": {
+                    "temperature": {
+                      "const": true
+                    },
+                    "strategy": {
+                      "const": true
+                    },
+                    "automatic_mode": {
+                      "const": true
+                    },
+                    "humidity": {
+                      "const": false
+                    }
+                  }
+                }
+              }
+            },
+            "temporary_temperature": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "available",
+                "requires_confirmation",
+                "minimum",
+                "maximum",
+                "step"
+              ],
+              "properties": {
+                "available": {
+                  "type": "boolean"
+                },
+                "requires_confirmation": {
+                  "const": true
+                },
+                "minimum": {
+                  "const": 18
+                },
+                "maximum": {
+                  "const": 28
+                },
+                "step": {
+                  "const": 0.5
+                }
+              }
+            }
+          }
+        },
+        "reasons": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/reason"
+          }
+        }
+      }
+    },
+    "room": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "status",
+        "current",
+        "targets",
+        "comfort_profiles",
+        "temporary_temperature",
+        "device_count",
+        "engine_mode",
+        "engine_strategy",
+        "authority_ready",
+        "targets_in_sync",
+        "automatic_active",
+        "reasons"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/stableId"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "status": {
+          "enum": [
+            "ready",
+            "unavailable"
+          ]
+        },
+        "current": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "temperature",
+            "humidity"
+          ],
+          "properties": {
+            "temperature": {
+              "$ref": "#/$defs/nullableNumber"
+            },
+            "humidity": {
+              "$ref": "#/$defs/nullableNumber"
+            }
+          }
+        },
+        "targets": {
+          "$ref": "#/$defs/comfortValues"
+        },
+        "comfort_profiles": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "active",
+            "day",
+            "night"
+          ],
+          "properties": {
+            "active": {
+              "enum": [
+                "day",
+                "night"
+              ]
+            },
+            "day": {
+              "$ref": "#/$defs/comfortValues"
+            },
+            "night": {
+              "$ref": "#/$defs/comfortValues"
+            }
+          }
+        },
+        "temporary_temperature": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "active",
+            "temperature",
+            "ends",
+            "ends_at",
+            "available"
+          ],
+          "properties": {
+            "active": {
+              "type": "boolean"
+            },
+            "temperature": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 18,
+              "maximum": 28,
+              "multipleOf": 0.5
+            },
+            "ends": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "next_schedule_change",
+                null
+              ]
+            },
+            "ends_at": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])$"
+            },
+            "available": {
+              "type": "boolean"
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "active": {
+                    "const": true
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "temperature": {
+                    "type": "number"
+                  },
+                  "ends": {
+                    "const": "next_schedule_change"
+                  },
+                  "ends_at": {
+                    "type": "string"
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "temperature": {
+                    "type": "null"
+                  },
+                  "ends": {
+                    "type": "null"
+                  },
+                  "ends_at": {
+                    "type": "null"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "device_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 512
+        },
+        "engine_mode": {
+          "enum": [
+            "automatic",
+            "manual",
+            "unknown"
+          ]
+        },
+        "engine_strategy": {
+          "enum": [
+            "soft",
+            "normal",
+            "aggressive",
+            "unknown"
+          ]
+        },
+        "authority_ready": {
+          "type": "boolean"
+        },
+        "targets_in_sync": {
+          "type": "boolean"
+        },
+        "automatic_active": {
+          "type": "boolean"
+        },
+        "reasons": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/reason"
+          }
+        }
+      }
+    },
+    "display_names": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "room_modes",
+        "device_kinds",
+        "control_scopes",
+        "device_capabilities",
+        "device_states",
+        "blocked_reasons",
+        "contour_reasons",
+        "contour_kinds",
+        "contour_modes",
+        "contour_statuses",
+        "room_statuses",
+        "strategies",
+        "profiles"
+      ],
+      "properties": {
+        "room_modes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "automatic",
+            "manual",
+            "unknown"
+          ],
+          "properties": {
+            "automatic": {
+              "const": "Автоматически"
+            },
+            "manual": {
+              "const": "Вручную"
+            },
+            "unknown": {
+              "const": "Режим неизвестен"
+            }
+          }
+        },
+        "device_kinds": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "air_conditioner",
+            "radiator_thermostat",
+            "humidifier",
+            "floor_heating",
+            "temperature_sensor",
+            "humidity_sensor"
+          ],
+          "properties": {
+            "air_conditioner": {
+              "const": "Кондиционер"
+            },
+            "radiator_thermostat": {
+              "const": "Термоголовка радиатора"
+            },
+            "humidifier": {
+              "const": "Увлажнитель"
+            },
+            "floor_heating": {
+              "const": "Тёплый пол"
+            },
+            "temperature_sensor": {
+              "const": "Датчик температуры"
+            },
+            "humidity_sensor": {
+              "const": "Датчик влажности"
+            }
+          }
+        },
+        "control_scopes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "observed",
+            "canary",
+            "managed"
+          ],
+          "properties": {
+            "observed": {
+              "const": "Только наблюдение"
+            },
+            "canary": {
+              "const": "Пробное управление"
+            },
+            "managed": {
+              "const": "Управление HASC"
+            }
+          }
+        },
+        "device_capabilities": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "power",
+            "target_temperature",
+            "target_humidity",
+            "hvac_mode",
+            "fan_mode",
+            "auto_manual",
+            "target_strategy",
+            "cooldown",
+            "physical_feedback"
+          ],
+          "properties": {
+            "power": {
+              "const": "Включение и выключение"
+            },
+            "target_temperature": {
+              "const": "Установка температуры"
+            },
+            "target_humidity": {
+              "const": "Установка влажности"
+            },
+            "hvac_mode": {
+              "const": "Режим обогрева и охлаждения"
+            },
+            "fan_mode": {
+              "const": "Скорость вентилятора"
+            },
+            "auto_manual": {
+              "const": "Автоматический и ручной режим"
+            },
+            "target_strategy": {
+              "const": "Характер работы"
+            },
+            "cooldown": {
+              "const": "Защита от частых переключений"
+            },
+            "physical_feedback": {
+              "const": "Подтверждение работы устройства"
+            }
+          }
+        },
+        "device_states": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "working",
+            "idle",
+            "off",
+            "unavailable",
+            "unknown"
+          ],
+          "properties": {
+            "working": {
+              "const": "Работает"
+            },
+            "idle": {
+              "const": "Ожидание"
+            },
+            "off": {
+              "const": "Выключено"
+            },
+            "unavailable": {
+              "const": "Недоступно"
+            },
+            "unknown": {
+              "const": "Состояние неизвестно"
+            }
+          }
+        },
+        "blocked_reasons": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "bridge_disabled",
+            "shadow_only",
+            "room_not_selected",
+            "state_stale",
+            "registry_mismatch",
+            "authority_not_ready",
+            "device_unavailable",
+            "actions_unsupported",
+            "evidence_not_ready",
+            "operation_pending"
+          ],
+          "properties": {
+            "bridge_disabled": {
+              "const": "Управление климатом выключено"
+            },
+            "shadow_only": {
+              "const": "Включена только проверка без команд"
+            },
+            "room_not_selected": {
+              "const": "Комната не выбрана для управления"
+            },
+            "state_stale": {
+              "const": "Данные о климате устарели"
+            },
+            "registry_mismatch": {
+              "const": "Настройка устройств не совпадает"
+            },
+            "authority_not_ready": {
+              "const": "Климатический модуль не готов к управлению"
+            },
+            "device_unavailable": {
+              "const": "Устройство недоступно"
+            },
+            "actions_unsupported": {
+              "const": "Устройство не поддерживает нужные действия"
+            },
+            "evidence_not_ready": {
+              "const": "Проверка безопасности ещё не завершена"
+            },
+            "operation_pending": {
+              "const": "Предыдущее действие ещё проверяется"
+            }
+          }
+        },
+        "contour_reasons": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "room_state_unavailable",
+            "state_stale",
+            "device_unavailable",
+            "engine_not_automatic",
+            "authority_not_ready",
+            "target_temperature_differs",
+            "target_humidity_differs",
+            "target_strategy_unavailable",
+            "target_strategy_differs"
+          ],
+          "properties": {
+            "room_state_unavailable": {
+              "const": "Нет данных о комнате"
+            },
+            "state_stale": {
+              "const": "Данные о климате устарели"
+            },
+            "device_unavailable": {
+              "const": "Устройство недоступно"
+            },
+            "engine_not_automatic": {
+              "const": "В климатическом модуле выключена автоматика"
+            },
+            "authority_not_ready": {
+              "const": "Климатический модуль не готов к управлению"
+            },
+            "target_temperature_differs": {
+              "const": "Заданная температура ещё не применена"
+            },
+            "target_humidity_differs": {
+              "const": "Заданная влажность ещё не применена"
+            },
+            "target_strategy_unavailable": {
+              "const": "Характер работы не поддерживается"
+            },
+            "target_strategy_differs": {
+              "const": "Характер работы ещё не применён"
+            }
+          }
+        },
+
+        "contour_kinds": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "climate"
+          ],
+          "properties": {
+            "climate": {
+              "const": "Климат"
+            }
+          }
+        },
+        "contour_modes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "disabled",
+            "observe",
+            "automatic"
+          ],
+          "properties": {
+            "disabled": {
+              "const": "Выключен в HASC"
+            },
+            "observe": {
+              "const": "Наблюдение"
+            },
+            "automatic": {
+              "const": "Автоматически"
+            }
+          }
+        },
+        "contour_statuses": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "disabled",
+            "ready",
+            "attention",
+            "unavailable",
+            "stale"
+          ],
+          "properties": {
+            "disabled": {
+              "const": "Выключен"
+            },
+            "ready": {
+              "const": "Работает"
+            },
+            "attention": {
+              "const": "Требует внимания"
+            },
+            "unavailable": {
+              "const": "Недоступен"
+            },
+            "stale": {
+              "const": "Данные устарели"
+            }
+          }
+        },
+        "room_statuses": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "ready",
+            "unavailable"
+          ],
+          "properties": {
+            "ready": {
+              "const": "Доступна"
+            },
+            "unavailable": {
+              "const": "Недоступна"
+            }
+          }
+        },
+        "strategies": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "soft",
+            "normal",
+            "aggressive",
+            "unknown"
+          ],
+          "properties": {
+            "soft": {
+              "const": "Мягко и тихо"
+            },
+            "normal": {
+              "const": "Обычно"
+            },
+            "aggressive": {
+              "const": "Быстро"
+            },
+            "unknown": {
+              "const": "Неизвестно"
+            }
+          }
+        },
+        "profiles": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "day",
+            "night"
+          ],
+          "properties": {
+            "day": {
+              "const": "День"
+            },
+            "night": {
+              "const": "Ночь"
+            }
+          }
+        }
+      }
+    }
+  }
+}

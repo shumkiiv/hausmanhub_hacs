@@ -31,7 +31,7 @@ class AndroidClimateTest(unittest.TestCase):
         )
 
         self.assertEqual("hausman-hasc-home", result["contract"]["name"])
-        self.assertEqual(8, result["contract"]["version"])
+        self.assertEqual(9, result["contract"]["version"])
         self.assertEqual(
             "Автоматически",
             result["display_names"]["room_modes"]["automatic"],

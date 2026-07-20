@@ -121,6 +121,7 @@ class ClimateRuntime:
         contour_store: ContourStorage | None = None,
         operation_id_factory: Callable[[], str] | None = None,
         now_ms: Callable[[], int] | None = None,
+        local_now: Callable[[], datetime] | None = None,
     ) -> None:
         self.entry_id = entry_id
         self.configuration = configuration
@@ -129,6 +130,7 @@ class ClimateRuntime:
         self._evidence_store = evidence_store
         self._contour_store = contour_store
         self._now_ms = now_ms or (lambda: int(time.time() * 1000))
+        self._local_now = local_now or (lambda: datetime.now().astimezone())
         self._registry = ClimateRegistry()
         self._snapshot: ClimateImportSnapshot | None = None
         self._evidence: ClimateShadowEvidence | None = None
@@ -229,6 +231,7 @@ class ClimateRuntime:
                     for room in self._registry.rooms
                     if self._operations.room_has_pending(room.room_id)
                 ),
+                local_now=self._local_now(),
             )
 
     async def async_admin_import_snapshot(self) -> dict[str, object]:
@@ -276,6 +279,7 @@ class ClimateRuntime:
                     self.configuration.climate_bridge_mode
                     is ClimateBridgeMode.MANAGED
                 ),
+                local_now=self._local_now(),
             )
 
     async def async_contour_apply_preview(self) -> dict[str, object]:

@@ -814,6 +814,12 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             target_humidity=45,
             strategy="normal",
         )
+        contours = with_climate_schedule(
+            contours,
+            enabled=True,
+            day_start="07:00",
+            night_start="23:00",
+        )
         runtime = ClimateRuntime(
             entry_id="entry",
             configuration=configuration(ClimateBridgeMode.SHADOW),
@@ -821,6 +827,9 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             contour_store=MemoryContourStore(contours),
             bridge_client=bridge,
             now_ms=lambda: 1784280005000,
+            local_now=lambda: datetime.fromisoformat(
+                "2026-07-19T12:00:00+03:00"
+            ),
         )
         await runtime.async_start()
         fetches_before = bridge.fetch_count
@@ -828,8 +837,18 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
         result = await runtime.async_public_snapshot()
 
         self.assertEqual(fetches_before + 1, bridge.fetch_count)
-        self.assertEqual(8, result["contract"]["version"])  # type: ignore[index]
+        self.assertEqual(9, result["contract"]["version"])  # type: ignore[index]
         self.assertEqual("climate", result["contours"][0]["id"])  # type: ignore[index]
+        self.assertEqual(
+            {
+                "enabled": True,
+                "day_start": "07:00",
+                "night_start": "23:00",
+                "next_profile": "night",
+                "next_change_at": "2026-07-19T23:00:00+03:00",
+            },
+            result["contours"][0]["schedule"],  # type: ignore[index]
+        )
         self.assertEqual(
             result["rooms"][0]["temperature"],  # type: ignore[index]
             result["contours"][0]["rooms"][0]["current"]["temperature"],  # type: ignore[index]
@@ -1245,7 +1264,7 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertFalse(snapshot["climate"]["commands_enabled"])  # type: ignore[index]
-        self.assertEqual(8, snapshot["contract"]["version"])  # type: ignore[index]
+        self.assertEqual(9, snapshot["contract"]["version"])  # type: ignore[index]
         self.assertIn(
             "evidence_not_ready",
             snapshot["rooms"][0]["control"]["blocked_reasons"],  # type: ignore[index]

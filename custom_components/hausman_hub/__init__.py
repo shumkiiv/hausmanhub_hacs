@@ -39,6 +39,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Imports stay at the outer boundary so framework-independent tests can run
     # without Home Assistant itself.
     from homeassistant.const import Platform
+    from homeassistant.util import dt as dt_util
 
     from .application.climate_runtime import ClimateRuntime
     from .climate_api import register_climate_api
@@ -65,6 +66,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         bridge_client=climate_client,
         evidence_store=HomeAssistantClimateEvidenceStore(hass, entry.entry_id),
         contour_store=HomeAssistantContourStore(hass, entry.entry_id),
+        local_now=dt_util.now,
     )
     await climate_runtime.async_start()
     from .climate_schedule import async_start_climate_schedule

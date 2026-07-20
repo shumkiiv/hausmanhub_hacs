@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import unittest
@@ -33,6 +34,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCHEMAS = ROOT / "custom_components" / "hausman_hub" / "contracts"
 FIXTURES = ROOT / "fixtures" / "hasc_climate_v1"
 SOURCE_FIXTURE = ROOT / "fixtures" / "climate_bridge" / "valid_state.json"
+LOCAL_NOW = datetime(2026, 7, 19, 12, 0, tzinfo=timezone(timedelta(hours=3)))
 
 
 def load_json(path: Path) -> object:
@@ -68,12 +70,14 @@ class ClimateContractSchemasTest(unittest.TestCase):
             "hasc_climate_v6/home.json": "v6/climate-home.schema.json",
             "hasc_climate_v7/home.json": "v7/climate-home.schema.json",
             "hasc_climate_v8/home.json": "v8/climate-home.schema.json",
+            "hasc_climate_v9/home.json": "v9/climate-home.schema.json",
             "hasc_contours_v1/contours.json": "v1/contours.schema.json",
             "hasc_contours_v2/contours.json": "v2/contours.schema.json",
             "hasc_contours_v3/contours.json": "v3/contours.schema.json",
             "hasc_contours_v4/contours.json": "v4/contours.schema.json",
             "hasc_contours_v5/contours.json": "v5/contours.schema.json",
             "hasc_contours_v6/contours.json": "v6/contours.schema.json",
+            "hasc_contours_v7/contours.json": "v7/contours.schema.json",
             "hasc_contour_apply_v1/request.json": "v1/contour-apply-request.schema.json",
             "hasc_contour_apply_v1/preview.json": "v1/contour-apply-preview.schema.json",
             "hasc_contour_apply_v1/receipt.json": "v1/contour-apply-receipt.schema.json",
@@ -113,10 +117,11 @@ class ClimateContractSchemasTest(unittest.TestCase):
             snapshot,
             contours=contours,
             bridge_mode=ClimateBridgeMode.SHADOW,
+            local_now=LOCAL_NOW,
         )
         admin = admin_climate_import_snapshot(registry, snapshot)
 
-        validator("v8/climate-home.schema.json").validate(home)
+        validator("v9/climate-home.schema.json").validate(home)
         validator("v1/climate-admin-import.schema.json").validate(admin)
         serialized_home = json.dumps(home, ensure_ascii=True, sort_keys=True)
         self.assertNotIn("source_id", serialized_home)
@@ -129,8 +134,9 @@ class ClimateContractSchemasTest(unittest.TestCase):
             import_climate_state(stale_source),
             contours=contours,
             bridge_mode=ClimateBridgeMode.SHADOW,
+            local_now=LOCAL_NOW,
         )
-        validator("v8/climate-home.schema.json").validate(stale_home)
+        validator("v9/climate-home.schema.json").validate(stale_home)
         self.assertEqual(
             "stale",
             stale_home["rooms"][0]["actual"]["data_status"],  # type: ignore[index]
@@ -146,8 +152,9 @@ class ClimateContractSchemasTest(unittest.TestCase):
             import_climate_state(missing_source),
             contours=contours,
             bridge_mode=ClimateBridgeMode.SHADOW,
+            local_now=LOCAL_NOW,
         )
-        validator("v8/climate-home.schema.json").validate(missing_home)
+        validator("v9/climate-home.schema.json").validate(missing_home)
         self.assertEqual(
             {
                 "data_status": "unavailable",
@@ -193,8 +200,9 @@ class ClimateContractSchemasTest(unittest.TestCase):
             contours,
             contour_climate_registry,
             snapshot,
+            local_now=LOCAL_NOW,
         )
-        validator("v6/contours.schema.json").validate(generated_contours)
+        validator("v7/contours.schema.json").validate(generated_contours)
         contour_json = json.dumps(generated_contours, ensure_ascii=True, sort_keys=True)
         self.assertNotIn("synthetic-ac-source-living", contour_json)
         self.assertNotIn("entity_id", contour_json)
@@ -416,6 +424,30 @@ class ClimateContractSchemasTest(unittest.TestCase):
         private_strategy["rooms"][0]["active_target"]["strategy"] = "vendor"  # type: ignore[index]
         with self.assertRaises(Exception):
             validator("v8/climate-home.schema.json").validate(private_strategy)
+
+    def test_v9_next_schedule_change_is_exact_and_strict(self) -> None:
+        home = load_json(ROOT / "fixtures" / "hasc_climate_v9" / "home.json")
+        schedule = home["contours"][0]["schedule"]  # type: ignore[index]
+
+        self.assertEqual("night", schedule["next_profile"])
+        self.assertEqual(
+            "2026-07-17T23:00:00+03:00",
+            schedule["next_change_at"],
+        )
+
+        missing_offset = copy.deepcopy(home)
+        missing_offset["contours"][0]["schedule"]["next_change_at"] = (  # type: ignore[index]
+            "2026-07-17T23:00:00"
+        )
+        with self.assertRaises(Exception):
+            validator("v9/climate-home.schema.json").validate(missing_offset)
+
+        disabled_with_transition = copy.deepcopy(home)
+        disabled_with_transition["contours"][0]["schedule"]["enabled"] = False  # type: ignore[index]
+        with self.assertRaises(Exception):
+            validator("v9/climate-home.schema.json").validate(
+                disabled_with_transition
+            )
 
 
 if __name__ == "__main__":

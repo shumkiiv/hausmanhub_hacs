@@ -8,6 +8,7 @@ available only through the separate administrator projection.
 from __future__ import annotations
 
 from collections.abc import Collection
+from datetime import datetime
 
 from ..domain.climate import (
     ClimateControlOwner,
@@ -35,7 +36,7 @@ from .public_climate_values import (
 
 
 ANDROID_CLIMATE_CONTRACT_NAME = "hausman-hasc-home"
-ANDROID_CLIMATE_CONTRACT_VERSION = 8
+ANDROID_CLIMATE_CONTRACT_VERSION = 9
 ANDROID_ROOM_CONTROL_ACTIONS = (
     "set_room_target",
     "turn_room_off",
@@ -55,6 +56,7 @@ def android_climate_snapshot(
     canary_room_id: str | None = None,
     candidate_ready: bool = False,
     pending_room_ids: Collection[str] = (),
+    local_now: datetime | None = None,
 ) -> dict[str, object]:
     """Build the fixed tablet contract without any private source binding."""
 
@@ -91,6 +93,7 @@ def android_climate_snapshot(
         registry,
         snapshot,
         settings_apply_enabled=(bridge_mode is ClimateBridgeMode.MANAGED),
+        local_now=local_now,
     )["contours"]
     saved_profiles_by_room = _saved_profiles_by_room(public_contours)
 

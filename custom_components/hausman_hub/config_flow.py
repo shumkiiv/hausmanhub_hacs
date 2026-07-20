@@ -2588,7 +2588,12 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
                         ),
                         schedule=self._contour_saved_schedule,
                     )
-                    preview = contour_snapshot(contours, registry, snapshot)
+                    preview = contour_snapshot(
+                        contours,
+                        registry,
+                        snapshot,
+                        local_now=dt_util.now(),
+                    )
                 except ContourRegistryViolation:
                     errors["base"] = "invalid_contour_setup"
                 else:

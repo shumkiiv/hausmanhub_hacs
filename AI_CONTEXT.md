@@ -1,6 +1,6 @@
 # HASC AI Context
 
-Last updated: 2026-07-19.
+Last updated: 2026-07-20.
 
 ## Project state
 
@@ -12,20 +12,23 @@ Last updated: 2026-07-19.
   contract compatibility. Never edit, format, generate files, build, commit,
   push, or otherwise mutate that directory or its repository from this thread.
 - The existing climate contour/module is also strictly read-only for this
-  thread. HASC may read and call only its already available fixed Climate API;
-  never edit its source, Node-RED flows, configuration, repository, or live
-  runtime. New behavior must be implemented entirely inside HASC and must fail
-  closed when the existing climate contract cannot provide it.
+  thread: never edit its source, Node-RED flows, configuration, repository, or
+  live runtime. The current bridge may call only its fixed Climate API. The
+  final product must reimplement the proven climate behavior and device
+  adapters entirely inside HASC, verify parity without double commands, and
+  then remove the external module as an installation requirement.
 - Home Assistant baseline: Core 2026.6.4 or newer.
 - Version 1.0.0 established the product as a platform of automatic contours.
   Climate is the first contour. The ordinary Russian options flow chooses
   several rooms/devices; old registry/bridge/native-preview and helper-canary
   tools are hidden under advanced settings.
-- The 1.x climate contour deliberately reuses the existing `hausman-climate`
-  algorithm and executor instead of reimplementing its profiles, cooldown,
-  safety, manual override, authority, and physical feedback. Selected
-  source-managed devices need no duplicate HA control endpoint. Private
-  registry plus public contour storage save atomically.
+- The current 1.6 climate contour deliberately reuses the existing
+  `hausman-climate` algorithm and executor while the public HASC surface is
+  stabilized. This is a migration bridge, not the final architecture. Roadmap
+  points 21–40 capture the behavior, build the internal engine and strict Home
+  Assistant device adapters, compare both implementations, transfer control
+  room by room, and finally remove the external API dependency. Private
+  registry plus public contour storage already save atomically.
 - Public `GET /api/hausman_hub/v1/contours` returns strict
   `hausman-hasc-contours` v1 state without source/entity IDs. Automatic status
   requires fresh engine state, auto mode, authority, device availability, and
@@ -131,6 +134,17 @@ Last updated: 2026-07-19.
   day and night. An unconfigured contour keeps all saved profile values null
   instead of copying the current engine target. The final read-only Kimi review
   passed (session `ses_0847a2b90ffe5Z4brgW45Gy2m2`).
+- Version 1.6.5 completed the sixth HASC-only roadmap item. Home contract v9
+  and contour contract v7 expose the exact next real local schedule transition
+  and the exact end of an active temporary temperature. Production projection
+  uses Home Assistant local time, and the schedule calculation follows real UTC
+  minutes across daylight-saving changes. The final read-only Kimi review
+  passed (session `ses_0824c7fa7ffe02CSROzGL3CO5h`).
+- The final architecture was clarified on 2026-07-20: HASC must ultimately
+  contain the complete currently working climate algorithm. During migration,
+  the existing module remains read-only and serves as a behavior oracle through
+  its fixed API. After parity, HASC must work from its own selected Home
+  Assistant devices and the separate climate module must no longer be required.
   Progress is tracked in the
   [50-item HASC roadmap](LLM_WIKI/Manual/2026-07-19-hasc-50-point-roadmap.md).
 - Version 0.4.0 was committed as `2e8cda3` and pushed to `origin/main` after
