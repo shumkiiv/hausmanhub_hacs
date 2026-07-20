@@ -188,6 +188,22 @@ Last updated: 2026-07-20.
   with token-refresh `401` in session `ses_0821dbbf9ffe3R4Ym2RCx1eFzu`; the
   final Codex audit added a schema rule forbidding stale per-room status inside
   a current snapshot and found no remaining issue.
+- Version 1.7.1 completed the twelfth HASC-only roadmap item. The strict
+  `hausman-hasc-climate-device-candidates` v1 contract projects discovered and
+  configured devices without source IDs, entity IDs, backend commands, or
+  bridge details. It carries bounded HASC kind codes with Russian names,
+  response-local `candidate_0001` references, and an opaque JSON-safe snapshot
+  revision that changes when private candidate bindings change. Freshness,
+  current availability, already-configured, unsupported, missing-source, and
+  registry-mismatch states fail closed. Configured-but-missing devices remain
+  visible. This is still an application contract only; item 14 will expose the
+  administrative draft route. The candidate revision ignores read time alone
+  but changes with private binding or candidate state. The final staged tree
+  passed 326 local tests and both supported Home Assistant Core checks.
+  OpenCode stopped before review with token-refresh `401` in session
+  `ses_082149289ffetmVMUsPAlvHXps`; the final Codex audit corrected unavailable
+  configured-device status and timestamp-only revision churn and found no
+  remaining issue.
 - The final architecture was clarified on 2026-07-20: HASC must ultimately
   contain the complete currently working climate algorithm. During migration,
   the existing module remains read-only and serves as a behavior oracle through

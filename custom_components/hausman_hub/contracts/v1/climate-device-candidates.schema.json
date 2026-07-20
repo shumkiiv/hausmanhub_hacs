@@ -1,0 +1,367 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hasc/contracts/v1/climate-device-candidates.schema.json",
+  "title": "HASC climate device candidates v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "generated_at",
+    "snapshot_revision",
+    "data_status",
+    "selection_allowed",
+    "display_names",
+    "candidates"
+  ],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hasc-climate-device-candidates"},
+        "version": {"const": 1}
+      }
+    },
+    "generated_at": {"type": "integer", "minimum": 0},
+    "snapshot_revision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "data_status": {"enum": ["current", "stale"]},
+    "selection_allowed": {"type": "boolean"},
+    "display_names": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["device_types", "candidate_status"],
+      "properties": {
+        "device_types": {"$ref": "#/$defs/device_type_names"},
+        "candidate_status": {"$ref": "#/$defs/candidate_status_names"}
+      }
+    },
+    "candidates": {
+      "type": "array",
+      "maxItems": 1024,
+      "items": {"$ref": "#/$defs/candidate"}
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"data_status": {"const": "stale"}}},
+      "then": {
+        "properties": {
+          "selection_allowed": {"const": false},
+          "candidates": {
+            "items": {
+              "allOf": [
+                {"$ref": "#/$defs/candidate"},
+                {
+                  "properties": {
+                    "available": {"const": false},
+                    "selectable": {"const": false},
+                    "status": {"const": "data_stale"}
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "candidates": {
+            "items": {
+              "allOf": [
+                {"$ref": "#/$defs/candidate"},
+                {
+                  "properties": {
+                    "status": {
+                      "enum": [
+                        "available",
+                        "already_configured",
+                        "unavailable",
+                        "unsupported",
+                        "source_missing",
+                        "registry_mismatch"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"selection_allowed": {"const": true}}},
+      "then": {
+        "properties": {
+          "candidates": {
+            "contains": {
+              "type": "object",
+              "required": ["selectable"],
+              "properties": {"selectable": {"const": true}}
+            },
+            "minContains": 1
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "candidates": {
+            "not": {
+              "contains": {
+                "type": "object",
+                "required": ["selectable"],
+                "properties": {"selectable": {"const": true}}
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "stable_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "pattern": "^\\S(?:.*\\S)?$"
+    },
+    "device_type": {
+      "enum": [
+        "air_conditioner",
+        "radiator_thermostat",
+        "humidifier",
+        "floor_heating",
+        "temperature_sensor",
+        "humidity_sensor"
+      ]
+    },
+    "nullable_device_type": {
+      "oneOf": [{"$ref": "#/$defs/device_type"}, {"type": "null"}]
+    },
+    "candidate_status": {
+      "enum": [
+        "available",
+        "already_configured",
+        "unavailable",
+        "unsupported",
+        "data_stale",
+        "source_missing",
+        "registry_mismatch"
+      ]
+    },
+    "device_type_names": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "air_conditioner",
+        "radiator_thermostat",
+        "humidifier",
+        "floor_heating",
+        "temperature_sensor",
+        "humidity_sensor"
+      ],
+      "properties": {
+        "air_conditioner": {"const": "Кондиционер"},
+        "radiator_thermostat": {"const": "Термоголовка радиатора"},
+        "humidifier": {"const": "Увлажнитель"},
+        "floor_heating": {"const": "Тёплый пол"},
+        "temperature_sensor": {"const": "Датчик температуры"},
+        "humidity_sensor": {"const": "Датчик влажности"}
+      }
+    },
+    "candidate_status_names": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "available",
+        "already_configured",
+        "unavailable",
+        "unsupported",
+        "data_stale",
+        "source_missing",
+        "registry_mismatch"
+      ],
+      "properties": {
+        "available": {"const": "Можно добавить"},
+        "already_configured": {"const": "Уже добавлено"},
+        "unavailable": {"const": "Устройство недоступно"},
+        "unsupported": {"const": "Тип устройства не поддерживается"},
+        "data_stale": {"const": "Нужно обновить данные"},
+        "source_missing": {"const": "Устройство больше не найдено"},
+        "registry_mismatch": {"const": "Нужно проверить привязку устройства"}
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidate_id",
+        "name",
+        "room_id",
+        "available",
+        "configured",
+        "configured_device_id",
+        "configured_room_id",
+        "configured_type",
+        "suggested_types",
+        "recommended_type",
+        "selectable",
+        "status"
+      ],
+      "properties": {
+        "candidate_id": {"type": "string", "pattern": "^candidate_[0-9]{4}$"},
+        "name": {"$ref": "#/$defs/name"},
+        "room_id": {"$ref": "#/$defs/stable_id"},
+        "available": {"type": "boolean"},
+        "configured": {"type": "boolean"},
+        "configured_device_id": {
+          "oneOf": [{"$ref": "#/$defs/stable_id"}, {"type": "null"}]
+        },
+        "configured_room_id": {
+          "oneOf": [{"$ref": "#/$defs/stable_id"}, {"type": "null"}]
+        },
+        "configured_type": {"$ref": "#/$defs/nullable_device_type"},
+        "suggested_types": {
+          "type": "array",
+          "maxItems": 6,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/device_type"}
+        },
+        "recommended_type": {"$ref": "#/$defs/nullable_device_type"},
+        "selectable": {"type": "boolean"},
+        "status": {"$ref": "#/$defs/candidate_status"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"configured": {"const": true}}},
+          "then": {
+            "properties": {
+              "configured_device_id": {"$ref": "#/$defs/stable_id"},
+              "configured_room_id": {"$ref": "#/$defs/stable_id"},
+              "configured_type": {"$ref": "#/$defs/device_type"}
+            }
+          },
+          "else": {
+            "properties": {
+              "configured_device_id": {"type": "null"},
+              "configured_room_id": {"type": "null"},
+              "configured_type": {"type": "null"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"suggested_types": {"maxItems": 0}}},
+          "then": {"properties": {"recommended_type": {"type": "null"}}},
+          "else": {
+            "properties": {
+              "recommended_type": {"$ref": "#/$defs/device_type"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"recommended_type": {"const": "air_conditioner"}}},
+          "then": {"properties": {"suggested_types": {"contains": {"const": "air_conditioner"}}}}
+        },
+        {
+          "if": {"properties": {"recommended_type": {"const": "radiator_thermostat"}}},
+          "then": {"properties": {"suggested_types": {"contains": {"const": "radiator_thermostat"}}}}
+        },
+        {
+          "if": {"properties": {"recommended_type": {"const": "humidifier"}}},
+          "then": {"properties": {"suggested_types": {"contains": {"const": "humidifier"}}}}
+        },
+        {
+          "if": {"properties": {"recommended_type": {"const": "floor_heating"}}},
+          "then": {"properties": {"suggested_types": {"contains": {"const": "floor_heating"}}}}
+        },
+        {
+          "if": {"properties": {"recommended_type": {"const": "temperature_sensor"}}},
+          "then": {"properties": {"suggested_types": {"contains": {"const": "temperature_sensor"}}}}
+        },
+        {
+          "if": {"properties": {"recommended_type": {"const": "humidity_sensor"}}},
+          "then": {"properties": {"suggested_types": {"contains": {"const": "humidity_sensor"}}}}
+        },
+        {
+          "if": {"properties": {"status": {"const": "available"}}},
+          "then": {
+            "properties": {
+              "available": {"const": true},
+              "configured": {"const": false},
+              "selectable": {"const": true},
+              "suggested_types": {"minItems": 1},
+              "recommended_type": {"$ref": "#/$defs/device_type"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"status": {"const": "already_configured"}}},
+          "then": {
+            "properties": {
+              "configured": {"const": true},
+              "selectable": {"const": false},
+              "suggested_types": {"minItems": 1}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"status": {"const": "unavailable"}}},
+          "then": {
+            "properties": {
+              "available": {"const": false},
+              "selectable": {"const": false},
+              "suggested_types": {"minItems": 1}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"status": {"const": "unsupported"}}},
+          "then": {
+            "properties": {
+              "configured": {"const": false},
+              "selectable": {"const": false},
+              "suggested_types": {"maxItems": 0},
+              "recommended_type": {"type": "null"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"status": {"const": "data_stale"}}},
+          "then": {
+            "properties": {
+              "available": {"const": false},
+              "selectable": {"const": false}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"status": {"const": "source_missing"}}},
+          "then": {
+            "properties": {
+              "available": {"const": false},
+              "configured": {"const": true},
+              "selectable": {"const": false},
+              "suggested_types": {"maxItems": 0},
+              "recommended_type": {"type": "null"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"status": {"const": "registry_mismatch"}}},
+          "then": {
+            "properties": {
+              "configured": {"const": true},
+              "selectable": {"const": false}
+            }
+          }
+        }
+      ]
+    }
+  }
+}

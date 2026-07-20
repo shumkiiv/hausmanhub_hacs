@@ -1,0 +1,63 @@
+{
+  "contract": {
+    "name": "hausman-hasc-climate-device-candidates",
+    "version": 1
+  },
+  "generated_at": 1784280000000,
+  "snapshot_revision": 4815781905896336,
+  "data_status": "current",
+  "selection_allowed": true,
+  "display_names": {
+    "device_types": {
+      "air_conditioner": "Кондиционер",
+      "radiator_thermostat": "Термоголовка радиатора",
+      "humidifier": "Увлажнитель",
+      "floor_heating": "Тёплый пол",
+      "temperature_sensor": "Датчик температуры",
+      "humidity_sensor": "Датчик влажности"
+    },
+    "candidate_status": {
+      "available": "Можно добавить",
+      "already_configured": "Уже добавлено",
+      "unavailable": "Устройство недоступно",
+      "unsupported": "Тип устройства не поддерживается",
+      "data_stale": "Нужно обновить данные",
+      "source_missing": "Устройство больше не найдено",
+      "registry_mismatch": "Нужно проверить привязку устройства"
+    }
+  },
+  "candidates": [
+    {
+      "candidate_id": "candidate_0001",
+      "name": "Kids humidifier",
+      "room_id": "kids",
+      "available": true,
+      "configured": false,
+      "configured_device_id": null,
+      "configured_room_id": null,
+      "configured_type": null,
+      "suggested_types": [
+        "humidifier"
+      ],
+      "recommended_type": "humidifier",
+      "selectable": true,
+      "status": "available"
+    },
+    {
+      "candidate_id": "candidate_0002",
+      "name": "Living AC",
+      "room_id": "living",
+      "available": true,
+      "configured": true,
+      "configured_device_id": "living_ac",
+      "configured_room_id": "living",
+      "configured_type": "air_conditioner",
+      "suggested_types": [
+        "air_conditioner"
+      ],
+      "recommended_type": "air_conditioner",
+      "selectable": false,
+      "status": "already_configured"
+    }
+  ]
+}
