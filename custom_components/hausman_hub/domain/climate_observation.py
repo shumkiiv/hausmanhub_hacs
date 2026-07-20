@@ -179,22 +179,44 @@ class ClimateControlObservation:
     """Controller facts that affect priority or safe intent acceptance."""
 
     manual_request: bool = False
+    manual_request_room_id: str | None = None
     delayed_intent: ClimateDelayedIntentState = ClimateDelayedIntentState.NONE
+    delayed_intent_room_id: str | None = None
     execution_guard: ClimateExecutionGuardState = ClimateExecutionGuardState.NONE
+    execution_guard_room_id: str | None = None
 
     def __post_init__(self) -> None:
         if type(self.manual_request) is not bool:
             raise ClimateObservationViolation("manual request must be boolean")
+        _optional_stable_id(self.manual_request_room_id, "manual request room")
         _require_enum(
             self.delayed_intent,
             ClimateDelayedIntentState,
             "delayed intent state",
         )
+        _optional_stable_id(self.delayed_intent_room_id, "delayed intent room")
         _require_enum(
             self.execution_guard,
             ClimateExecutionGuardState,
             "execution guard state",
         )
+        _optional_stable_id(self.execution_guard_room_id, "execution guard room")
+        if self.manual_request is not (self.manual_request_room_id is not None):
+            raise ClimateObservationViolation(
+                "manual request and its room must be present together"
+            )
+        if (
+            self.delayed_intent is not ClimateDelayedIntentState.NONE
+        ) is not (self.delayed_intent_room_id is not None):
+            raise ClimateObservationViolation(
+                "delayed intent and its room must be present together"
+            )
+        if (
+            self.execution_guard is not ClimateExecutionGuardState.NONE
+        ) is not (self.execution_guard_room_id is not None):
+            raise ClimateObservationViolation(
+                "execution guard and its room must be present together"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,6 +236,8 @@ class ClimateRoomObservation:
     observed_target_humidity: float | None = None
     observed_target_strategy: str | None = None
     authority_eligible: bool = False
+    cooling_allowed: bool | None = None
+    heating_allowed: bool | None = None
 
     def __post_init__(self) -> None:
         _stable_room(self.room_id, self.name)
@@ -251,6 +275,8 @@ class ClimateRoomObservation:
             )
         if type(self.authority_eligible) is not bool:
             raise ClimateObservationViolation("room authority must be boolean")
+        _optional_bool(self.cooling_allowed, "cooling permission")
+        _optional_bool(self.heating_allowed, "heating permission")
         if self.data_status is ClimateDataStatus.UNAVAILABLE and any(
             value is not None
             for value in (
@@ -270,6 +296,8 @@ class ClimateRoomObservation:
             or self.window is not ClimateWindowState.UNKNOWN
             or self.mode is not ClimateRoomMode.UNKNOWN
             or self.authority_eligible
+            or self.cooling_allowed is not None
+            or self.heating_allowed is not None
         ):
             raise ClimateObservationViolation(
                 "unavailable room must retain only unknown safe states"
@@ -427,6 +455,17 @@ class ClimateObservationSnapshot:
             "observation device ids",
         )
         room_ids = {room.room_id for room in self.rooms}
+        if any(
+            room_id is not None and room_id not in room_ids
+            for room_id in (
+                self.control.manual_request_room_id,
+                self.control.delayed_intent_room_id,
+                self.control.execution_guard_room_id,
+            )
+        ):
+            raise ClimateObservationViolation(
+                "control state must reference an observed room"
+            )
         if any(device.room_id not in room_ids for device in self.devices):
             raise ClimateObservationViolation(
                 "observed devices must reference observed rooms"
@@ -486,6 +525,15 @@ def _stable_room(stable_id: object, name: object) -> None:
         ClimateRoom(stable_id, name)  # type: ignore[arg-type]
     except ClimateModelViolation as error:
         raise ClimateObservationViolation("observation id or name is invalid") from error
+
+
+def _optional_stable_id(value: object, label: str) -> None:
+    if value is None:
+        return
+    try:
+        ClimateRoom(value, "Room")  # type: ignore[arg-type]
+    except ClimateModelViolation as error:
+        raise ClimateObservationViolation(f"{label} must be stable") from error
 
 
 def _require_enum(value: object, expected: type[StrEnum], label: str) -> None:

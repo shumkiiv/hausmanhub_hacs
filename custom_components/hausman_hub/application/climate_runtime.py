@@ -15,6 +15,7 @@ from ..domain.climate_observation import (
     ClimateObservationSnapshot,
     ClimateObservationViolation,
 )
+from ..domain.climate_policy import ClimatePolicySnapshot
 from ..domain.climate_resolution import ClimateResolutionSnapshot
 from ..domain.climate_stability import ClimateStabilitySnapshot
 from ..domain.climate_bridge import ClimateBridgeMode
@@ -44,6 +45,7 @@ from .climate_observations import (
     build_climate_observation_snapshot,
     unavailable_climate_observation_snapshot,
 )
+from .climate_policy import build_climate_policy_snapshot
 from .climate_resolutions import build_climate_resolution_snapshot
 from .climate_stability import build_climate_stability_snapshot
 from .climate_registry import (
@@ -844,6 +846,39 @@ class ClimateRuntime:
                 contour,
                 targets,
                 equipment,
+                observation,
+            )
+
+    async def async_native_climate_policy(
+        self,
+    ) -> ClimatePolicySnapshot | None:
+        """Apply the complete command-free policy ladder to one observation."""
+
+        async with self._lock:
+            contour = self._contours.contour(CLIMATE_CONTOUR_ID)
+            if contour is None:
+                return None
+            observation = await self._async_native_climate_observation_unlocked()
+            targets = build_climate_target_snapshot(contour, observation)
+            demands = build_climate_demand_snapshot(targets, observation)
+            resolutions = build_climate_resolution_snapshot(demands, observation)
+            equipment = build_climate_equipment_snapshot(
+                contour,
+                targets,
+                resolutions,
+                observation,
+            )
+            stability = build_climate_stability_snapshot(
+                contour,
+                targets,
+                equipment,
+                observation,
+            )
+            return build_climate_policy_snapshot(
+                contour,
+                resolutions,
+                equipment,
+                stability,
                 observation,
             )
 

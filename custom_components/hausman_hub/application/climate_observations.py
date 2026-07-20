@@ -235,6 +235,14 @@ def climate_reference_observation(
             and values.get("execution_guard") != "authority_missing"
             and temperature is not None
         ),
+        cooling_allowed=_optional_bool(
+            observation.get("cooling_allowed"),
+            "cooling permission",
+        ),
+        heating_allowed=_optional_bool(
+            observation.get("heating_allowed"),
+            "heating permission",
+        ),
     )
     available_values = _sequence(
         values.get("available_devices"),
@@ -287,25 +295,36 @@ def climate_reference_observation(
             ),
         ),
         control=ClimateControlObservation(
-            manual_request=_bool(
+            manual_request=(manual_request := _bool(
                 values.get("manual_request", False),
                 "manual request",
-            ),
-            delayed_intent=_enum(
+            )),
+            manual_request_room_id=(REFERENCE_ROOM_ID if manual_request else None),
+            delayed_intent=(delayed_intent := _enum(
                 ClimateDelayedIntentState,
                 observation.get(
                     "delayed_command",
                     ClimateDelayedIntentState.NONE.value,
                 ),
                 "delayed intent",
+            )),
+            delayed_intent_room_id=(
+                REFERENCE_ROOM_ID
+                if delayed_intent is not ClimateDelayedIntentState.NONE
+                else None
             ),
-            execution_guard=_enum(
+            execution_guard=(execution_guard := _enum(
                 ClimateExecutionGuardState,
                 values.get(
                     "execution_guard",
                     ClimateExecutionGuardState.NONE.value,
                 ),
                 "execution guard",
+            )),
+            execution_guard_room_id=(
+                REFERENCE_ROOM_ID
+                if execution_guard is not ClimateExecutionGuardState.NONE
+                else None
             ),
         ),
         rooms=(room,),

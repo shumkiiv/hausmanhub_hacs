@@ -226,6 +226,29 @@ Last updated: 2026-07-20.
   stale-feedback, heat-load-boundary, unknown-window, and forged-humidity tests.
   The final staged tree passed 441 local tests, HACS/package/boundary/Android
   checks, and disposable Home Assistant Core 2026.6.4/2026.7.0.
+- Version 1.8.7 completes roadmap item 28. A pure final policy layer preserves
+  the frozen priority ladder: away, safety lockout, freshness guard,
+  forced-auto-only, manual, auto, then direct-device requests as an external
+  last fallback which is not admitted to the internal plan. Manual mode and a
+  room-scoped manual request produce observation with no automatic device
+  plans; forced automation rejects that request and keeps the automatic plan.
+  Away-safe-off, open or unknown windows, missing temperature, and explicit
+  cooling/heating denial produce a selected-device-only safe-stop result.
+  Running or unknown AC/humidifier/floor activity needs a safe stop, confirmed
+  stopped devices suppress the redundant stop, unavailable devices remain
+  explicit, and radiator thermostats stay observe-only rather than receiving
+  an invented safety setpoint. Stale state, suspect temperature, and stale
+  delayed work observe with an empty device plan. All 30 frozen cases match
+  expected policy, room action, and ordered blockers exactly. Control requests
+  and execution guards are scoped to one stable room id. The immutable result
+  rejects forged output, mutable collections, mixed device plans, and
+  observation-time mismatches; it has `commands_enabled=False` and no HA
+  entity, service, transport, or private source binding. Runtime derives the
+  final policy from one non-evidence-mutating read and never posts. Item 29
+  owns failure isolation between rooms and devices. The source climate module
+  and Android repository remain unchanged. The final staged tree passed 454
+  local tests, HACS/package/boundary/Android checks, and disposable Home
+  Assistant Core 2026.6.4/2026.7.0.
 - Workspace boundary: this thread may change only HausmanHub and its integration
   wrapper. The Android application is developed separately in
   `/home/ivsh/projects/УД-android`; it may be inspected only read-only for
