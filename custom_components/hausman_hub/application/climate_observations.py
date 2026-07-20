@@ -8,6 +8,7 @@ service names, transport data, or executable commands.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 
 from ..domain.climate import ClimateDeviceKind, ClimateRegistry
 from ..domain.climate_observation import (
@@ -179,13 +180,7 @@ def unavailable_climate_observation_snapshot(
     )
 
 
-def climate_reference_observation(
-    case_id: str,
-    *,
-    observed_at: int = REFERENCE_OBSERVED_AT,
-) -> ClimateObservationSnapshot:
-    """Express one frozen migration case through the new internal model."""
-
+def _reference_case(case_id: str) -> Mapping[str, object]:
     if not isinstance(case_id, str) or not case_id:
         raise ClimateObservationViolation("reference case id is required")
     suite = load_climate_reference_suite()
@@ -200,6 +195,91 @@ def climate_reference_observation(
     )
     if case is None:
         raise ClimateObservationViolation("reference case is unknown")
+    return case
+
+
+# The frozen suite only maintains through summer cooling; a winter maintain
+# case must revisit this fixed post-decision activity mapping.
+_MODULE_RUNNING_ACTIONS = {
+    "cool": ClimateDeviceActivity.COOLING,
+    "heat": ClimateDeviceActivity.HEATING,
+    "maintain": ClimateDeviceActivity.COOLING,
+}
+_MODULE_STOP_ACTIONS = frozenset({"off", "safe_off"})
+
+
+def climate_reference_module_observation(
+    case_id: str,
+    *,
+    observed_at: int = REFERENCE_OBSERVED_AT,
+) -> ClimateObservationSnapshot:
+    """Express the frozen module decision as its post-decision observed state."""
+
+    case = _reference_case(case_id)
+    expected = _mapping(case.get("expected"), "reference expected")
+    base = climate_reference_observation(case_id, observed_at=observed_at)
+    devices = tuple(
+        _module_decision_device(
+            device,
+            action=expected.get("action"),
+            auxiliary=expected.get("auxiliary_action"),
+            setpoint=_optional_number(expected.get("setpoint"), "expected setpoint"),
+            fan_mode=_optional_enum(
+                ClimateFanMode,
+                expected.get("fan_mode"),
+                "expected fan mode",
+            ),
+            quiet=_optional_bool(expected.get("quiet"), "expected quiet"),
+        )
+        for device in base.devices
+    )
+    return replace(base, devices=devices)
+
+
+def _module_decision_device(
+    device: ClimateDeviceObservation,
+    *,
+    action: object,
+    auxiliary: object,
+    setpoint: float | None,
+    fan_mode: ClimateFanMode | None,
+    quiet: bool | None,
+) -> ClimateDeviceObservation:
+    if device.kind is ClimateObservationDeviceKind.AIR_CONDITIONER:
+        activity = _MODULE_RUNNING_ACTIONS.get(action)
+        if activity is None:
+            activity = (
+                ClimateDeviceActivity.STOPPED
+                if action in _MODULE_STOP_ACTIONS
+                else device.activity
+            )
+        return replace(
+            device,
+            activity=activity,
+            current_target_temperature=setpoint,
+            fan_mode=fan_mode,
+            quiet=quiet,
+        )
+    if device.kind is ClimateObservationDeviceKind.HUMIDIFIER:
+        return replace(
+            device,
+            activity=(
+                ClimateDeviceActivity.HUMIDIFYING
+                if auxiliary == "humidifier_on"
+                else ClimateDeviceActivity.STOPPED
+            ),
+        )
+    return device
+
+
+def climate_reference_observation(
+    case_id: str,
+    *,
+    observed_at: int = REFERENCE_OBSERVED_AT,
+) -> ClimateObservationSnapshot:
+    """Express one frozen migration case through the new internal model."""
+
+    case = _reference_case(case_id)
     values = _mapping(case.get("input"), "reference input")
     observation = _mapping(values.get("observation"), "reference observation")
     fresh = _bool(observation.get("state_fresh"), "reference state freshness")

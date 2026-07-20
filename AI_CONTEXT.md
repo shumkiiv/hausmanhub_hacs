@@ -298,6 +298,23 @@ Last updated: 2026-07-20.
   remain unchanged. The final staged tree passed 485 local tests, the
   HACS/package/boundary/Android checks, and disposable Home Assistant Core
   2026.6.4/2026.7.0.
+- Version 1.9.1 completes roadmap item 32. Decision comparison is now proven
+  on all 30 frozen reference scenarios: for each case the module's frozen
+  decision is expressed as its post-decision observed state and the comparison
+  verdict is locked in an exact table. 19 scenarios align exactly; 8 are
+  honestly not comparable (manual mode, deliberate observe, stale data, and
+  the thermostat activity the module never exposes); 3 execution-guard
+  scenarios confirm a bounded fan-stage divergence — the frozen module
+  escalates to medium while the ported stability layer does not escalate
+  without confirmed feedback and elapsed run time. The divergence is frozen
+  as the expected verdict, not hidden. Automatic rooms with no room-level
+  action (for example a thermostat-only adjustment) now compare per-device
+  plans instead of a blanket not-comparable. The comparison still creates no
+  commands, carries no private bindings, and always has
+  `commands_enabled=False`. The source climate module and Android repository
+  remain unchanged. The final staged tree passed 491 local tests, the
+  HACS/package/boundary/Android checks, and disposable Home Assistant Core
+  2026.6.4/2026.7.0.
 - Workspace boundary: this thread may change only HausmanHub and its integration
   wrapper. The Android application is developed separately in
   `/home/ivsh/projects/УД-android`; it may be inspected only read-only for
@@ -1843,5 +1860,5 @@ Engineering and review rules are in
 
 - Obsidian/context index: `LLM_WIKI/00_Index.md`.
 - Latest generated context: `LLM_WIKI/Context.md`.
-- Last sync: 2026-07-20T21:37:14+03:00.
+- Last sync: 2026-07-20T21:58:09+03:00.
 <!-- llm-wiki-sync:end -->

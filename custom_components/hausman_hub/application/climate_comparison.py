@@ -29,6 +29,13 @@ from ..domain.climate_policy import (
     ClimatePolicyAction,
     ClimatePolicyReason,
 )
+from ..domain.contours import ContourMode
+from .climate_observations import (
+    climate_reference_module_observation,
+    climate_reference_observation,
+)
+from .climate_policy import climate_reference_policy
+from .contours import CLIMATE_CONTOUR_ID
 
 
 _ACTIVE = frozenset(
@@ -106,6 +113,28 @@ def build_climate_comparison_snapshot(
     )
 
 
+def climate_reference_comparison(case_id: str) -> ClimateComparisonSnapshot:
+    """Compare the native plan with the frozen module decision of one case."""
+
+    observation = climate_reference_observation(case_id)
+    module_observation = climate_reference_module_observation(case_id)
+    isolation = ClimateIsolationSnapshot(
+        contour_id=CLIMATE_CONTOUR_ID,
+        contour_mode=ContourMode.AUTOMATIC,
+        observed_at=observation.observed_at,
+        rooms=(
+            ClimateIsolatedRoomResult(
+                room_id=observation.rooms[0].room_id,
+                status=ClimateRoomIsolationStatus.READY,
+                reasons=(),
+                failed_device_ids=(),
+                policy=climate_reference_policy(case_id),
+            ),
+        ),
+    )
+    return build_climate_comparison_snapshot(isolation, module_observation)
+
+
 def _compare_room(
     result: ClimateIsolatedRoomResult,
     observation: ClimateObservationSnapshot,
@@ -147,7 +176,10 @@ def _compare_room(
             observed_mode=observed_mode,
             devices=(),
         )
-    if policy.action is ClimatePolicyAction.OBSERVE:
+    if (
+        policy.action is ClimatePolicyAction.OBSERVE
+        and policy.reason is not ClimatePolicyReason.AUTOMATIC
+    ):
         reason = (
             ClimateComparisonReason.MANUAL_OBSERVE
             if policy.reason is ClimatePolicyReason.MANUAL_OBSERVE

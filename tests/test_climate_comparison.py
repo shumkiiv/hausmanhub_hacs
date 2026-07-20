@@ -8,6 +8,7 @@ import unittest
 
 from custom_components.hausman_hub.application.climate_comparison import (
     build_climate_comparison_snapshot,
+    climate_reference_comparison,
 )
 from custom_components.hausman_hub.application.climate_import import (
     import_climate_state,
@@ -17,6 +18,7 @@ from custom_components.hausman_hub.application.climate_isolation import (
 )
 from custom_components.hausman_hub.application.climate_observations import (
     build_climate_observation_snapshot,
+    climate_reference_module_observation,
 )
 from custom_components.hausman_hub.application.contours import (
     build_climate_contour_setup,
@@ -34,6 +36,7 @@ from custom_components.hausman_hub.domain.climate_isolation import (
 )
 from custom_components.hausman_hub.domain.climate_observation import (
     ClimateDeviceActivity,
+    ClimateFanMode,
     ClimateObservationDeviceKind,
     ClimateRoomMode,
     ClimateWindowState,
@@ -42,6 +45,9 @@ from custom_components.hausman_hub.domain.climate_policy import (
     ClimateFinalDeviceAction,
     ClimatePolicyAction,
     ClimateRoomPolicy,
+)
+from custom_components.hausman_hub.domain.climate_reference import (
+    load_climate_reference_suite,
 )
 from custom_components.hausman_hub.domain.contours import ContourMode
 from tests.test_contours import source_payload
@@ -307,6 +313,109 @@ class ClimateComparisonBuilderTest(unittest.TestCase):
 
         with self.assertRaises(ClimateComparisonViolation):
             build_climate_comparison_snapshot(isolation, other)
+
+
+_REFERENCE_VERDICTS = {
+    "stopped_ac_starts_at_default_gap": ("aligned", ()),
+    "stopped_ac_waits_below_default_gap": ("aligned", ()),
+    "running_ac_maintains_near_target": ("aligned", ()),
+    "hard_off_threshold_stops_running_ac": ("aligned", ()),
+    "running_ac_softens_before_stop": ("aligned", ()),
+    "weak_cooling_raises_fan_first": ("aligned", ()),
+    "weak_cooling_lowers_setpoint_second": ("aligned", ()),
+    "minimum_off_pause_blocks_restart": ("aligned", ()),
+    "minimum_run_holds_slow_cycle": ("aligned", ()),
+    "manual_mode_observes": ("not_comparable", ("manual_observe",)),
+    "away_safe_off_overrides_manual": ("aligned", ()),
+    "away_keep_observes_running_ac": ("not_comparable", ("planned_observe",)),
+    "open_window_forces_safe_off": ("aligned", ()),
+    "missing_temperature_blocks_control": ("aligned", ()),
+    "stale_state_pauses_control": ("not_comparable", ("observation_stale",)),
+    "temperature_jump_pauses_control": ("not_comparable", ("planned_observe",)),
+    "forced_auto_rejects_manual_request": ("aligned", ()),
+    "night_profile_is_quiet": ("aligned", ()),
+    "dry_closed_room_starts_humidifier": ("aligned", ()),
+    "open_window_stops_humidifier": ("aligned", ()),
+    "winter_trv_uses_cold_weather_target": (
+        "not_comparable",
+        ("device_activity_unknown",),
+    ),
+    "heating_off_leaves_trv_untouched": (
+        "not_comparable",
+        ("device_activity_unknown",),
+    ),
+    "unavailable_ac_keeps_decision_without_plan": ("aligned", ()),
+    "cooldown_delays_repeated_intent": ("diverged", ("device_setting_mismatch",)),
+    "duplicate_intent_is_suppressed": ("diverged", ("device_setting_mismatch",)),
+    "missing_authority_blocks_execution": (
+        "diverged",
+        ("device_setting_mismatch",),
+    ),
+    "stale_physical_feedback_blocks_escalation": ("aligned", ()),
+    "unknown_window_beats_stale_state": ("not_comparable", ("observation_stale",)),
+    "stale_delayed_intent_is_dropped": ("not_comparable", ("planned_observe",)),
+    "curtains_remain_explicitly_unsupported": ("aligned", ()),
+}
+
+
+class ClimateReferenceComparisonTest(unittest.TestCase):
+    def test_frozen_verdicts_cover_every_reference_case_exactly(self) -> None:
+        cases = load_climate_reference_suite()["cases"]
+
+        self.assertEqual(
+            {case["id"] for case in cases},  # type: ignore[misc]
+            set(_REFERENCE_VERDICTS),
+        )
+
+    def test_all_reference_cases_produce_the_frozen_verdict(self) -> None:
+        for case in load_climate_reference_suite()["cases"]:
+            case_id = case["id"]  # type: ignore[index]
+            comparison = climate_reference_comparison(case_id)  # type: ignore[arg-type]
+            room = comparison.rooms[0]
+            expected_status, expected_reasons = _REFERENCE_VERDICTS[case_id]  # type: ignore[index]
+
+            self.assertFalse(comparison.commands_enabled)
+            self.assertEqual(expected_status, room.status.value, case_id)
+            self.assertEqual(
+                expected_reasons,
+                tuple(reason.value for reason in room.reasons),
+                case_id,
+            )
+
+    def test_reference_alignment_is_exact_not_vacuous(self) -> None:
+        comparison = climate_reference_comparison("stopped_ac_starts_at_default_gap")
+        room = comparison.rooms[0]
+        (device,) = room.devices
+
+        self.assertIs(device.status, ClimateComparisonStatus.ALIGNED)
+        self.assertIs(device.planned_action, ClimateFinalDeviceAction.COOL)
+        self.assertIs(device.observed_activity, ClimateDeviceActivity.COOLING)
+
+    def test_module_observation_mirrors_the_frozen_decision(self) -> None:
+        observation = climate_reference_module_observation(
+            "stopped_ac_starts_at_default_gap"
+        )
+        device = observation.devices[0]
+
+        self.assertIs(device.activity, ClimateDeviceActivity.COOLING)
+        self.assertEqual(26.0, device.current_target_temperature)
+        self.assertIs(device.fan_mode, ClimateFanMode.LOW)
+        self.assertIs(device.quiet, False)
+
+    def test_confirmed_divergence_records_only_bounded_reasons(self) -> None:
+        for case_id in (
+            "cooldown_delays_repeated_intent",
+            "duplicate_intent_is_suppressed",
+            "missing_authority_blocks_execution",
+        ):
+            comparison = climate_reference_comparison(case_id)
+            room = comparison.rooms[0]
+
+            self.assertIs(room.status, ClimateComparisonStatus.DIVERGED)
+            self.assertEqual(
+                (ClimateComparisonReason.DEVICE_SETTING_MISMATCH,),
+                room.reasons,
+            )
 
 
 class ClimateComparisonModelTest(unittest.TestCase):
