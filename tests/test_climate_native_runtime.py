@@ -2032,3 +2032,129 @@ class NativeProjectionSwitchTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("living_air_conditioner", device.device_id)
         self.assertEqual(fetches_after_start, bridge.fetch_count)
         self.assertEqual(0, bridge.execute_count)
+
+
+class NativeStartupLifecycleTest(unittest.IsolatedAsyncioTestCase):
+    """36f3: managed and disabled start and run without any bridge."""
+
+    async def test_managed_starts_with_a_missing_bridge_and_never_reads_it(
+        self,
+    ) -> None:
+        view = MutableStateView(safe_stop_states())
+        instance = native_application_runtime(
+            ClimateBridgeMode.MANAGED,
+            view,
+            ReflectingStrictExecutor(view),
+            bridge_client=None,
+        )
+        await instance.async_start()
+
+        home = await instance.async_public_snapshot()
+        contours = await instance.async_contours_snapshot()
+        readiness = await instance.async_readiness()
+
+        self.assertEqual("hausman-hub-home", home["contract"]["name"])
+        self.assertEqual("hausman-hub-contours", contours["contract"]["name"])
+        self.assertEqual("managed", readiness["bridge_mode"])
+
+    async def test_managed_with_a_poison_bridge_target_never_builds_a_call(
+        self,
+    ) -> None:
+        bridge = PoisonBridge()
+        view = MutableStateView(safe_stop_states())
+        instance = native_application_runtime(
+            ClimateBridgeMode.MANAGED,
+            view,
+            ReflectingStrictExecutor(view),
+            bridge_client=bridge,
+        )
+        await instance.async_start()
+
+        await instance.async_public_snapshot()
+        await instance.async_readiness()
+
+        self.assertEqual(0, bridge.fetch_count)
+        self.assertEqual(0, bridge.execute_count)
+
+    async def test_shadow_still_requires_the_bridge_at_startup(self) -> None:
+        bridge = PoisonBridge()
+        view = CountingStateView(healthy_states(ac_state="cool"))
+        instance = runtime(
+            ClimateBridgeMode.SHADOW,
+            view,
+            bridge,
+            scope=ClimateControlScope.CANARY,
+        )
+        await instance.async_start()
+
+        self.assertGreater(bridge.fetch_count, 0)
+
+    async def test_disabled_wizard_observes_natively_without_the_bridge(
+        self,
+    ) -> None:
+        bridge = PoisonBridge()
+        view = MutableStateView(safe_stop_states())
+        instance = native_application_runtime(
+            ClimateBridgeMode.DISABLED,
+            view,
+            ReflectingStrictExecutor(view),
+            bridge_client=bridge,
+        )
+        await instance.async_start()
+
+        options = await instance.async_climate_setup_options()
+        snapshot = await instance.async_registry_import_snapshot()
+
+        self.assertTrue(options["data_status"] in {"current", "stale"})
+        self.assertEqual(1, len(snapshot.rooms))
+        self.assertEqual("living", snapshot.rooms[0].room_id)
+        self.assertEqual(0, bridge.fetch_count)
+        self.assertEqual(0, bridge.execute_count)
+
+    async def test_legacy_bridge_routes_are_rejected_in_managed(self) -> None:
+        bridge = PoisonBridge()
+        view = MutableStateView(safe_stop_states())
+        instance = native_application_runtime(
+            ClimateBridgeMode.MANAGED,
+            view,
+            ReflectingStrictExecutor(view),
+            bridge_client=bridge,
+        )
+        await instance.async_start()
+
+        calls = (
+            (instance.async_shadow_evidence, ({"room_id": "living"},)),
+            (instance.async_canary_preflight, ({"room_id": "living"},)),
+        )
+        for call, args in calls:
+            with self.subTest(call=call.__name__):
+                try:
+                    await call(*args)
+                except ClimateRuntimeUnavailable:
+                    pass
+
+        self.assertEqual(0, bridge.fetch_count)
+        self.assertEqual(0, bridge.execute_count)
+
+    async def test_legacy_canary_action_is_rejected_in_managed(self) -> None:
+        bridge = PoisonBridge()
+        view = MutableStateView(safe_stop_states())
+        instance = native_application_runtime(
+            ClimateBridgeMode.MANAGED,
+            view,
+            ReflectingStrictExecutor(view),
+            bridge_client=bridge,
+        )
+        await instance.async_start()
+
+        with self.assertRaises(ClimateRuntimeUnavailable):
+            await instance.async_action(
+                {
+                    "action": "set_room_target",
+                    "room_id": "living",
+                    "target_temperature": 23.0,
+                }
+            )
+
+        self.assertEqual(0, bridge.fetch_count)
+        self.assertEqual(0, bridge.execute_count)

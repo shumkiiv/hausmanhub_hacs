@@ -3079,7 +3079,7 @@ async def async_assert_disabled_climate_http_access(hass: HomeAssistant) -> None
         assert_result(
             disabled_import.status,
             HTTPStatus.SERVICE_UNAVAILABLE,
-            "disabled climate import must not contact any bridge",
+            "disabled climate import must fail closed without any bridge read",
         )
 
         disabled_draft = await client.post(
@@ -3094,8 +3094,8 @@ async def async_assert_disabled_climate_http_access(hass: HomeAssistant) -> None
         )
         assert_result(
             disabled_draft.status,
-            HTTPStatus.SERVICE_UNAVAILABLE,
-            "disabled climate draft must not contact any bridge",
+            HTTPStatus.CONFLICT,
+            "disabled native draft must reject invalid input without a bridge",
         )
         disabled_draft_options = await client.get(
             CLIMATE_ADMIN_DRAFT_PATH,
@@ -3103,8 +3103,8 @@ async def async_assert_disabled_climate_http_access(hass: HomeAssistant) -> None
         )
         assert_result(
             disabled_draft_options.status,
-            HTTPStatus.SERVICE_UNAVAILABLE,
-            "disabled climate setup options must not contact any bridge",
+            HTTPStatus.OK,
+            "disabled climate setup options must answer natively",
         )
         rejected_tablet_draft = await client.post(
             CLIMATE_ADMIN_DRAFT_PATH,
@@ -3127,8 +3127,8 @@ async def async_assert_disabled_climate_http_access(hass: HomeAssistant) -> None
         )
         assert_result(
             disabled_current_setup.status,
-            HTTPStatus.SERVICE_UNAVAILABLE,
-            "disabled current setup must not contact any bridge",
+            HTTPStatus.OK,
+            "disabled current setup must answer natively",
         )
         rejected_tablet_current_setup = await client.get(
             CLIMATE_ADMIN_DRAFT_CURRENT_PATH,
@@ -3146,8 +3146,8 @@ async def async_assert_disabled_climate_http_access(hass: HomeAssistant) -> None
         )
         assert_result(
             disabled_draft_validation.status,
-            HTTPStatus.SERVICE_UNAVAILABLE,
-            "disabled draft validation must not contact any bridge",
+            HTTPStatus.BAD_REQUEST,
+            "disabled draft validation must reject invalid input natively",
         )
         rejected_tablet_validation = await client.post(
             CLIMATE_ADMIN_DRAFT_VALIDATION_PATH,
@@ -3166,8 +3166,8 @@ async def async_assert_disabled_climate_http_access(hass: HomeAssistant) -> None
         )
         assert_result(
             disabled_draft_save.status,
-            HTTPStatus.SERVICE_UNAVAILABLE,
-            "disabled draft save must not contact any bridge",
+            HTTPStatus.BAD_REQUEST,
+            "disabled draft save must reject invalid input natively",
         )
         rejected_tablet_save = await client.post(
             CLIMATE_ADMIN_DRAFT_SAVE_PATH,
