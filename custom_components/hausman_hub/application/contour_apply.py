@@ -1,10 +1,3 @@
-"""Explicitly apply one HausmanHub climate contour to the existing climate engine.
-
-The existing ``hausman-climate`` runtime remains the algorithm and execution
-owner.  This module only builds a bounded set of its already supported typed
-configuration commands.  No caller can provide a backend command or payload.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
@@ -15,10 +8,9 @@ import json
 import re
 import secrets
 import time
-from typing import Any
-
 from ..domain.climate import ClimateRegistry
 from ..domain.climate_bridge import ClimateBridgeMode
+from ..domain.climate_observation import ClimateObservationSnapshot
 from ..domain.contours import (
     ClimateContourRoom,
     ClimateProfile,
@@ -26,12 +18,12 @@ from ..domain.contours import (
     ContourMode,
     climate_target_temperature,
 )
-from .climate_commands import (
-    ClimateCommandPlan,
-    ClimateCommandViolation,
-    plan_climate_command,
+from .climate_application import (
+    ClimateApplicationPlan,
+    ClimateApplicationViolation,
+    ClimateDesiredStateChanges,
+    build_climate_application_plan,
 )
-from .climate_import import ClimateImportSnapshot
 
 
 CONTOUR_APPLY_REQUEST_CONTRACT_NAME = "hausman-hub-contour-apply-request"
@@ -156,44 +148,50 @@ class ClimateControlContext:
 
 
 @dataclass(frozen=True, slots=True)
-class ContourApplyRoomExpectation:
-    """Values that must be visible after climate-core accepts the commands."""
-
-    room_id: str
-    target_temperature: float
-    target_strategy: str
-    automatic: bool
-
-
-@dataclass(frozen=True, slots=True)
 class ContourApplyPlan:
-    """One immutable, bounded application of a saved contour."""
+    native_plan: ClimateApplicationPlan
 
-    contour_id: str
-    fingerprint: str
-    rooms: tuple[ContourApplyRoomExpectation, ...]
-    commands: tuple[ClimateCommandPlan, ...]
-    temperature_changes: int
-    strategy_changes: int
-    automatic_mode_changes: int
+    def __post_init__(self) -> None:
+        if not isinstance(self.native_plan, ClimateApplicationPlan):
+            raise ContourApplyViolation("native climate application plan is invalid")
+
+    @property
+    def contour_id(self) -> str:
+        return self.native_plan.contour_id
+
+    @property
+    def fingerprint(self) -> str:
+        return self.native_plan.fingerprint
+
+    @property
+    def target_room_ids(self) -> tuple[str, ...]:
+        return self.native_plan.target_room_ids
+
+    @property
+    def strict_calls(self):
+        return self.native_plan.strict_calls
+
+    @property
+    def desired_state_changes(self) -> ClimateDesiredStateChanges:
+        return self.native_plan.desired_state_changes
 
     def preview_payload(self) -> dict[str, object]:
-        """Return a public summary without private bindings or payloads."""
-
         return {
             "contract": {
                 "name": CONTOUR_APPLY_PREVIEW_CONTRACT_NAME,
                 "version": CONTOUR_APPLY_CONTRACT_VERSION,
             },
             "contour_id": self.contour_id,
-            "status": "in_sync" if not self.commands else "ready",
-            "ready": True,
-            "room_count": len(self.rooms),
-            "command_count": len(self.commands),
+            "status": "unavailable" if not self.native_plan.preflight_permitted else (
+                "in_sync" if not self.strict_calls else "ready"
+            ),
+            "ready": self.native_plan.preflight_permitted,
+            "room_count": len(self.target_room_ids),
+            "command_count": len(self.strict_calls),
             "changes": {
-                "temperature": self.temperature_changes,
-                "strategy": self.strategy_changes,
-                "automatic_mode": self.automatic_mode_changes,
+                "temperature": self.desired_state_changes.temperature,
+                "strategy": self.desired_state_changes.strategy,
+                "automatic_mode": self.desired_state_changes.automatic_mode,
             },
             "requires_confirmation": True,
             "parameters": {
@@ -330,18 +328,26 @@ class _ContourApplyLedger:
             contour_id=plan.contour_id,
             context=context,
             status=(
-                ContourApplyStatus.CONFIRMED
-                if not plan.commands
-                else ContourApplyStatus.PENDING
+                ContourApplyStatus.UNAVAILABLE
+                if not plan.native_plan.preflight_permitted
+                else (
+                    ContourApplyStatus.CONFIRMED
+                    if not plan.strict_calls
+                    else ContourApplyStatus.PENDING
+                )
             ),
-            room_count=len(plan.rooms),
-            command_count=len(plan.commands),
+            room_count=len(plan.target_room_ids),
+            command_count=len(plan.strict_calls),
             accepted_count=0,
-            confirmed_room_count=(len(plan.rooms) if not plan.commands else 0),
-            temperature_changes=plan.temperature_changes,
-            strategy_changes=plan.strategy_changes,
-            automatic_mode_changes=plan.automatic_mode_changes,
-            reasons=(() if plan.commands else ("already_in_sync",)),
+            confirmed_room_count=len(plan.native_plan.initially_aligned_room_ids),
+            temperature_changes=plan.desired_state_changes.temperature,
+            strategy_changes=plan.desired_state_changes.strategy,
+            automatic_mode_changes=plan.desired_state_changes.automatic_mode,
+            reasons=(
+                ("engine_rejected",)
+                if not plan.native_plan.preflight_permitted
+                else (() if plan.strict_calls else ("already_in_sync",))
+            ),
             created_at=now,
             updated_at=now,
         )
@@ -363,9 +369,9 @@ class _ContourApplyLedger:
         record = self._records.get(request_id)
         if record is None:
             raise RuntimeError("contour apply record is unavailable")
-        if not 0 <= accepted_count <= len(record.plan.commands):
+        if not 0 <= accepted_count <= len(record.plan.strict_calls):
             raise RuntimeError("accepted contour command count is invalid")
-        if not 0 <= confirmed_room_count <= len(record.plan.rooms):
+        if not 0 <= confirmed_room_count <= len(record.plan.target_room_ids):
             raise RuntimeError("confirmed contour room count is invalid")
         receipt = replace(
             record.receipt,
@@ -409,128 +415,60 @@ def parse_contour_apply_request(payload: object) -> tuple[str, str]:
 def build_contour_apply_plan(
     contour: ContourDefinition,
     registry: ClimateRegistry,
-    snapshot: ClimateImportSnapshot,
+    bridge_mode: ClimateBridgeMode,
+    observation: ClimateObservationSnapshot,
     *,
     room_ids: tuple[str, ...] | None = None,
+    desired_state_changes: ClimateDesiredStateChanges,
 ) -> ContourApplyPlan:
-    """Build supported changes from saved public settings and fresh state."""
-
-    if not isinstance(contour, ContourDefinition) or contour.contour_id != "climate":
-        raise ContourApplyViolation("climate contour is not configured")
-    if contour.mode is not ContourMode.AUTOMATIC:
-        raise ContourApplyViolation("climate contour is not in automatic mode")
-    if not isinstance(registry, ClimateRegistry):
-        raise ContourApplyViolation("climate registry is unavailable")
-    if not isinstance(snapshot, ClimateImportSnapshot) or not snapshot.runtime_fresh:
-        raise ContourApplyViolation("climate engine state is stale")
-
     assignments = _selected_assignments(contour, room_ids)
-    commands: list[ClimateCommandPlan] = []
-    rooms: list[ContourApplyRoomExpectation] = []
+    try:
+        native_plan = build_climate_application_plan(
+            contour,
+            registry,
+            bridge_mode,
+            observation,
+            fingerprint=_contour_fingerprint(contour, room_ids=room_ids),
+            target_room_ids=tuple(assignment.room_id for assignment in assignments),
+            desired_state_changes=desired_state_changes,
+        )
+    except ClimateApplicationViolation as error:
+        raise ContourApplyViolation(str(error)) from error
+    if len(native_plan.strict_calls) > MAX_CONTOUR_APPLY_COMMANDS:
+        raise ContourApplyViolation("contour apply has too many strict calls")
+    return ContourApplyPlan(native_plan=native_plan)
+
+
+def local_desired_state_changes(
+    previous: ContourDefinition,
+    current: ContourDefinition,
+    *,
+    target_room_ids: tuple[str, ...] | None = None,
+) -> ClimateDesiredStateChanges:
+    if (
+        not isinstance(previous, ContourDefinition)
+        or not isinstance(current, ContourDefinition)
+        or previous.contour_id != "climate"
+        or current.contour_id != "climate"
+    ):
+        raise ContourApplyViolation("climate contours are unavailable")
+    assignments = _selected_assignments(current, target_room_ids)
+    previous_rooms = {room.room_id: room for room in previous.rooms}
     temperature_changes = 0
     strategy_changes = 0
-    automatic_mode_changes = 0
     for assignment in assignments:
-        imported_room = snapshot.room(assignment.room_id)
-        if imported_room is None:
-            raise ContourApplyViolation("contour room state is unavailable")
-        for device_id in assignment.device_ids:
-            device = registry.device(device_id)
-            imported_device = (
-                None if device is None else snapshot.device(device.source_id)
-            )
-            if (
-                device is None
-                or device.room_id != assignment.room_id
-                or imported_device is None
-                or imported_device.room_id != assignment.room_id
-                or not imported_device.available
-            ):
-                raise ContourApplyViolation("contour device is unavailable")
-
-        rooms.append(
-            ContourApplyRoomExpectation(
-                room_id=assignment.room_id,
-                target_temperature=assignment.target_temperature,
-                target_strategy=assignment.strategy.value,
-                automatic=True,
-            )
-        )
-        # Apply the strategy first, then the comfort target, and switch the
-        # existing engine to automatic only after those values are accepted.
-        if imported_room.target_strategy != assignment.strategy.value:
-            commands.append(
-                _configuration_command(
-                    {
-                        "action": "set_room_target_strategy",
-                        "room_id": assignment.room_id,
-                        "target_strategy": assignment.strategy.value,
-                    },
-                    registry,
-                    snapshot,
-                )
-            )
-            strategy_changes += 1
-        if not _same_number(
-            imported_room.target_temperature,
-            assignment.target_temperature,
-        ):
-            commands.append(
-                _configuration_command(
-                    {
-                        "action": "set_room_target",
-                        "room_id": assignment.room_id,
-                        "target_temperature": assignment.target_temperature,
-                    },
-                    registry,
-                    snapshot,
-                )
-            )
+        prior = previous_rooms.get(assignment.room_id)
+        if prior is None:
+            raise ContourApplyViolation("previous climate room is unavailable")
+        if not _same_number(prior.target_temperature, assignment.target_temperature):
             temperature_changes += 1
-        if imported_room.mode not in {"auto", "forced_auto_only"}:
-            commands.append(
-                _configuration_command(
-                    {
-                        "action": "set_room_mode",
-                        "room_id": assignment.room_id,
-                        "mode": "auto",
-                    },
-                    registry,
-                    snapshot,
-                )
-            )
-            automatic_mode_changes += 1
-
-    if len(commands) > MAX_CONTOUR_APPLY_COMMANDS:
-        raise ContourApplyViolation("contour apply has too many commands")
-    return ContourApplyPlan(
-        contour_id=contour.contour_id,
-        fingerprint=_contour_fingerprint(contour, room_ids=room_ids),
-        rooms=tuple(rooms),
-        commands=tuple(commands),
-        temperature_changes=temperature_changes,
-        strategy_changes=strategy_changes,
-        automatic_mode_changes=automatic_mode_changes,
+        if prior.strategy is not assignment.strategy:
+            strategy_changes += 1
+    return ClimateDesiredStateChanges(
+        temperature=temperature_changes,
+        strategy=strategy_changes,
+        automatic_mode=0,
     )
-
-
-def confirmed_contour_room_count(
-    plan: ContourApplyPlan,
-    snapshot: ClimateImportSnapshot,
-) -> int:
-    """Count only rooms whose three supported settings are observable."""
-
-    count = 0
-    for expected in plan.rooms:
-        room = snapshot.room(expected.room_id)
-        if (
-            room is not None
-            and _same_number(room.target_temperature, expected.target_temperature)
-            and room.target_strategy == expected.target_strategy
-            and room.mode in {"auto", "forced_auto_only"}
-        ):
-            count += 1
-    return count
 
 
 def contour_fingerprint(
@@ -543,25 +481,6 @@ def contour_fingerprint(
     if not isinstance(contour, ContourDefinition):
         raise ContourApplyViolation("contour definition is unavailable")
     return _contour_fingerprint(contour, room_ids=room_ids)
-
-
-def _configuration_command(
-    request: Mapping[str, Any],
-    registry: ClimateRegistry,
-    snapshot: ClimateImportSnapshot,
-) -> ClimateCommandPlan:
-    """Reuse the typed translator while bypassing the legacy one-room canary."""
-
-    try:
-        plan = plan_climate_command(
-            request,
-            registry,
-            snapshot,
-            bridge_mode=ClimateBridgeMode.SHADOW,
-        )
-    except ClimateCommandViolation as error:
-        raise ContourApplyViolation(str(error)) from error
-    return replace(plan, execute=True)
 
 
 def _selected_assignments(
