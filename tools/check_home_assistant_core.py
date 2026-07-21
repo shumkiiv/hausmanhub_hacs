@@ -3341,6 +3341,22 @@ async def async_assert_shadow_climate_end_to_end(
         await hass.async_block_till_done()
         await home_client.start_server()
 
+        # Native discovery reads Home Assistant entities, so the disposable
+        # instance first receives the two synthetic climate devices as states.
+        hass.states.async_set(
+            "climate.synthetic_living_ac",
+            "cool",
+            {
+                "friendly_name": "Living AC",
+                "supported_features": 137,
+                "current_temperature": 25.8,
+            },
+        )
+        hass.states.async_set(
+            "humidifier.synthetic_kids",
+            "off",
+            {"friendly_name": "Kids humidifier"},
+        )
         registry_form = await async_open_options_section(
             hass,
             entry,
@@ -3351,6 +3367,27 @@ async def async_assert_shadow_climate_end_to_end(
             (registry_menu["type"], registry_menu["step_id"]),
             ("form", "climate_registry"),
             "real options flow must open the separate climate registry wizard",
+        )
+        living_room_added = await hass.config_entries.options.async_configure(
+            registry_form["flow_id"],
+            {"climate_registry_action": "add_room"},
+        )
+        assert_result(
+            living_room_added["step_id"],
+            "climate_registry_room",
+            "registry wizard must open the room form before native import",
+        )
+        await hass.config_entries.options.async_configure(
+            registry_form["flow_id"],
+            {"climate_room_id": "living", "climate_room_name": "Living room"},
+        )
+        await hass.config_entries.options.async_configure(
+            registry_form["flow_id"],
+            {"climate_registry_action": "add_room"},
+        )
+        await hass.config_entries.options.async_configure(
+            registry_form["flow_id"],
+            {"climate_room_id": "kids", "climate_room_name": "Kids"},
         )
         ac_candidate_form = await hass.config_entries.options.async_configure(
             registry_form["flow_id"],
@@ -3382,6 +3419,7 @@ async def async_assert_shadow_climate_end_to_end(
                 "climate_device_id": "living_ac",
                 "climate_device_name": "Living AC",
                 "climate_device_kind": "air_conditioner",
+                "climate_device_room": "living",
                 "climate_device_control_scope": "canary",
                 "climate_device_control_owner": "climate_core",
                 "climate_device_control_entity": "climate.synthetic_living_ac",
@@ -3414,6 +3452,7 @@ async def async_assert_shadow_climate_end_to_end(
                 "climate_device_id": "kids_humidifier",
                 "climate_device_name": "Kids humidifier",
                 "climate_device_kind": "humidifier",
+                "climate_device_room": "kids",
                 "climate_device_control_scope": "observed",
                 "climate_device_control_owner": "observed",
                 "climate_device_control_entity": "humidifier.synthetic_kids",
@@ -3453,11 +3492,23 @@ async def async_assert_shadow_climate_end_to_end(
             HTTPStatus.OK,
             "owner must be able to read the explicitly imported private registry",
         )
+        imported_payload = await imported_registry.json()
+        native_registry = json.loads(json.dumps(climate_registry))
+        for device in native_registry["devices"]:
+            device["source_id"] = f"hausmanhub-native-{device['endpoints'][0]['entity_id']}"
         assert_result(
-            await imported_registry.json(),
-            climate_registry,
-            "candidate wizard must produce the exact explicit registry fixture",
+            imported_payload,
+            native_registry,
+            "candidate wizard must produce the exact explicit native registry",
         )
+        for device in imported_payload["devices"]:
+            if device["source_id"] in {
+                "synthetic-ac-source-living",
+                "synthetic-humidifier-source-kids",
+            }:
+                raise RuntimeError(
+                    "native import must never copy an entity id into source_id"
+                )
 
         contour_flow = await async_open_options_section(hass, entry, "contours")
         contour_setup = await hass.config_entries.options.async_configure(
@@ -3583,6 +3634,17 @@ async def async_assert_shadow_climate_end_to_end(
             "opening and reviewing contour settings must issue zero command POSTs",
         )
         hass.config_entries.options.async_abort(contour_flow["flow_id"])
+
+        replaced = await home_client.post(
+            CLIMATE_ADMIN_REGISTRY_PATH,
+            headers=owner_headers,
+            json=climate_registry,
+        )
+        assert_result(
+            replaced.status,
+            HTTPStatus.OK,
+            "admin must restore the bridge-bound registry for shadow comparison",
+        )
 
         preview = await home_client.post(
             CLIMATE_ADMIN_REGISTRY_PREVIEW_PATH,

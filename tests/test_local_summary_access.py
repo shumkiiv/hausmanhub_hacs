@@ -1199,7 +1199,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         from custom_components.hausman_hub.domain.contours import ContourRegistry
         from tests.test_climate_import import source_payload
 
-        registry = registry_from_payload({"version": 2, "home": {"outdoor_temperature_entity_id": None, "presence_entity_id": None, "central_heating_entity_id": None}, "rooms": [], "devices": []})
+        registry = registry_from_payload({"version": 2, "home": {"outdoor_temperature_entity_id": None, "presence_entity_id": None, "central_heating_entity_id": None}, "rooms": [{"id": "living", "name": "Living room", "window_entity_id": None}, {"id": "kids", "name": "Kids", "window_entity_id": None}], "devices": []})
 
         class Store:
             def __init__(self) -> None:
@@ -1224,13 +1224,16 @@ class LocalSummaryAccessTest(unittest.TestCase):
         class Bridge:
             def __init__(self) -> None:
                 self.executed = []
+                self.snapshot = import_climate_state(source_payload())
 
             async def async_fetch_state(self):
-                return import_climate_state(source_payload())
+                return self.snapshot
 
             async def async_execute(self, plan):
                 self.executed.append(plan)
                 return {"ok": True}
+
+        from tests.test_climate_runtime import SnapshotStateView
 
         store = Store()
         contour_store = ContourStore()
@@ -1244,6 +1247,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             registry_store=store,
             contour_store=contour_store,
             bridge_client=bridge,
+            ha_state_view=SnapshotStateView(registry, bridge),
         )
         asyncio.run(runtime.async_start())
         self.hass.data["hausman_hub"]["climate_runtime"] = runtime

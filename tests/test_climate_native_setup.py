@@ -414,3 +414,118 @@ class NativeSetupWizardChainTest(unittest.TestCase):
         self.assertEqual(
             3, len(snapshot.devices)
         )
+
+
+class NativeReimportPreservationTest(unittest.TestCase):
+    """Re-saving a contour must never strip native HA bindings (review 36f2)."""
+
+    def test_second_import_preserves_bound_device_endpoints(self) -> None:
+        from custom_components.hausman_hub.application.climate_registry_import import (
+            import_managed_climate_selection,
+        )
+
+        registry, contours, _ = _setup()
+        bound_registry, observation = _native_observation(registry, contours)
+        catalog = _bound_catalog()
+        snapshot = build_native_climate_setup_snapshot(
+            bound_registry,
+            observation,
+            catalog,
+        )
+        first = import_managed_climate_selection(
+            snapshot,
+            room_ids=["living"],
+            source_ids=["synthetic-ac-source-living"],
+        )
+        second = import_managed_climate_selection(
+            snapshot,
+            room_ids=["living"],
+            source_ids=["synthetic-ac-source-living"],
+        )
+
+        ac = second.device("living_air_conditioner")
+        self.assertEqual(1, len(ac.endpoints))
+        self.assertEqual("control", ac.endpoints[0].role.value)
+        self.assertEqual(
+            "climate.living_air_conditioner", ac.endpoints[0].entity_id
+        )
+        self.assertEqual(first, second)
+
+    def test_overrides_are_rejected_for_bound_candidates(self) -> None:
+        from custom_components.hausman_hub.application.climate_registry_import import (
+            ClimateRegistryImportViolation,
+            add_import_candidate_to_registry,
+        )
+        from custom_components.hausman_hub.domain.climate import ClimateRegistry
+
+        registry, contours, _ = _setup()
+        bound_registry, observation = _native_observation(registry, contours)
+        snapshot = build_native_climate_setup_snapshot(
+            bound_registry,
+            observation,
+            _bound_catalog(),
+        )
+
+        with self.assertRaises(ClimateRegistryImportViolation):
+            add_import_candidate_to_registry(
+                ClimateRegistry(rooms=bound_registry.rooms),
+                snapshot,
+                source_id="synthetic-ac-source-living",
+                device_id="other_ac",
+                device_name="Other AC",
+                kind="air_conditioner",
+                control_scope="managed",
+                control_owner="climate_core",
+                room_id_override="living",
+            )
+        with self.assertRaises(ClimateRegistryImportViolation):
+            add_import_candidate_to_registry(
+                ClimateRegistry(rooms=bound_registry.rooms),
+                snapshot,
+                source_id="synthetic-ac-source-living",
+                device_id="other_ac",
+                device_name="Other AC",
+                kind="air_conditioner",
+                control_scope="managed",
+                control_owner="climate_core",
+                registry_source_id="attacker-chosen-id",
+            )
+
+    def test_native_candidate_receives_derived_private_source_id(self) -> None:
+        from custom_components.hausman_hub.application.climate_registry_import import (
+            add_import_candidate_to_registry,
+        )
+        from custom_components.hausman_hub.domain.climate import (
+            ClimateRegistry,
+            ClimateRoom,
+        )
+
+        registry, contours, _ = _setup()
+        _, observation = _native_observation(registry, contours)
+        catalog = _catalog(
+            [_entry("climate.guest_ac", supported_features=137)]
+        )
+        snapshot = build_native_climate_setup_snapshot(
+            ClimateRegistry(rooms=(ClimateRoom("guest", "Guest"),)),
+            observation,
+            catalog,
+        )
+
+        result = add_import_candidate_to_registry(
+            ClimateRegistry(rooms=(ClimateRoom("guest", "Guest"),)),
+            snapshot,
+            source_id="climate.guest_ac",
+            device_id="guest_ac",
+            device_name="Guest AC",
+            kind="air_conditioner",
+            control_scope="managed",
+            control_owner="climate_core",
+            room_id_override="guest",
+        )
+
+        device = result.devices[0]
+        self.assertEqual(
+            "hausmanhub-native-climate.guest_ac", device.source_id
+        )
+        self.assertEqual("guest", device.room_id)
+        self.assertEqual("climate.guest_ac", device.endpoints[0].entity_id)

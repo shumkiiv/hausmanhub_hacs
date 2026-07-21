@@ -238,9 +238,15 @@ class MemoryBridge:
 
 
 class SnapshotStateView:
-    def __init__(self, registry: ClimateRegistry, bridge: MemoryBridge) -> None:
+    def __init__(
+        self,
+        registry: ClimateRegistry,
+        bridge: MemoryBridge,
+        extra_catalog_entries: tuple = (),
+    ) -> None:
         self._registry = registry
         self._bridge = bridge
+        self.extra_catalog_entries = extra_catalog_entries
         self.reads = 0
 
     def entity_state(self, entity_id: str) -> ClimateHaEntityState | None:
@@ -276,6 +282,75 @@ class SnapshotStateView:
                 last_updated_ms=snapshot.generated_at,
             )
         return None
+
+    def entity_catalog(self):
+        from custom_components.hausman_hub.application.climate_native_setup import (
+            ClimateHaCatalogEntry,
+            ClimateHaEntityCatalog,
+        )
+
+        entries = []
+        for device in self._registry.devices:
+            for endpoint in device.endpoints:
+                imported = self._bridge.snapshot.device(device.source_id)
+                domain = endpoint.entity_id.split(".", 1)[0]
+                entries.append(
+                    ClimateHaCatalogEntry(
+                        entity_id=endpoint.entity_id,
+                        domain=domain,
+                        state=(
+                            imported.state
+                            if imported is not None and imported.available
+                            else "unavailable"
+                        ),
+                        device_class=(
+                            "temperature"
+                            if endpoint.role is ClimateEndpointRole.TEMPERATURE
+                            else (
+                                "humidity"
+                                if endpoint.role is ClimateEndpointRole.HUMIDITY
+                                else None
+                            )
+                        ),
+                        supported_features=0,
+                        friendly_name=device.name,
+                        available=imported is not None and imported.available,
+                        last_updated_ms=self._bridge.snapshot.generated_at,
+                    )
+                )
+        bound_entities = {
+            endpoint.entity_id
+            for device in self._registry.devices
+            for endpoint in device.endpoints
+        }
+        for imported in self._bridge.snapshot.devices:
+            entity_id = f"{imported.domain}.{imported.source_id.replace('-', '_')}"
+            if entity_id in bound_entities:
+                continue
+            features = 0
+            if imported.domain == "climate":
+                if "climate.set_temperature" in imported.command_types:
+                    features |= 1
+                if "climate.set_fan_mode" in imported.command_types:
+                    features |= 8
+                if "climate.turn_off" in imported.command_types:
+                    features |= 128
+            entries.append(
+                ClimateHaCatalogEntry(
+                    entity_id=entity_id,
+                    domain=imported.domain,
+                    state=imported.state if imported.available else "unavailable",
+                    device_class=None,
+                    supported_features=features,
+                    friendly_name=imported.name,
+                    available=imported.available,
+                    last_updated_ms=self._bridge.snapshot.generated_at,
+                )
+            )
+        entries.extend(self.extra_catalog_entries)
+        return ClimateHaEntityCatalog(
+            entries=tuple(sorted(entries, key=lambda entry: entry.entity_id))
+        )
 
     @staticmethod
     def _sensor_state(
@@ -406,6 +481,30 @@ class ReflectingNativeStateView:
     def entity_state(self, entity_id: str) -> ClimateHaEntityState | None:
         self.read_count += 1
         return self.states.get(entity_id)
+
+    def entity_catalog(self):
+        from custom_components.hausman_hub.application.climate_native_setup import (
+            ClimateHaCatalogEntry,
+            ClimateHaEntityCatalog,
+        )
+
+        return ClimateHaEntityCatalog(
+            entries=tuple(
+                ClimateHaCatalogEntry(
+                    entity_id=state.entity_id,
+                    domain=state.entity_id.split(".", 1)[0],
+                    state=state.state,
+                    device_class=state.attributes.get("device_class"),
+                    supported_features=state.attributes.get("supported_features", 0),
+                    friendly_name=state.attributes.get("friendly_name"),
+                    available=state.state not in {"", "unavailable", "unknown"},
+                    last_updated_ms=state.last_updated_ms,
+                )
+                for state in sorted(
+                    self.states.values(), key=lambda state: state.entity_id
+                )
+            )
+        )
 
 
 class PersistedScheduleStateView(ReflectingNativeStateView):
@@ -559,7 +658,9 @@ def ready_evidence_store(
 class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
     async def test_setup_options_do_not_advance_or_save_shadow_evidence(self) -> None:
         bridge = MemoryBridge()
-        registry = registry_from_payload(registry_payload())
+        registry = with_native_observation_bindings(
+            registry_from_payload(registry_payload())
+        )
         evidence_store = ready_evidence_store()
         runtime = ClimateRuntime(
             entry_id="entry",
@@ -567,6 +668,7 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             registry_store=MemoryStore(registry),
             bridge_client=bridge,
             evidence_store=evidence_store,
+            ha_state_view=SnapshotStateView(registry, bridge),
         )
         await runtime.async_start()
         evidence_before = evidence_store.evidence.as_storage_payload()  # type: ignore[union-attr]
@@ -583,7 +685,7 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_contour_draft_reads_once_without_saving_or_commanding(self) -> None:
         bridge = MemoryBridge()
-        registry = registry_from_payload({"version": 2, "home": {"outdoor_temperature_entity_id": None, "presence_entity_id": None, "central_heating_entity_id": None}, "rooms": [], "devices": []})
+        registry = registry_from_payload({"version": 2, "home": {"outdoor_temperature_entity_id": None, "presence_entity_id": None, "central_heating_entity_id": None}, "rooms": [{"id": "living", "name": "Living room", "window_entity_id": None}, {"id": "kids", "name": "Kids", "window_entity_id": None}], "devices": []})
         registry_store = MemoryStore(registry)
         contour_store = MemoryContourStore()
         runtime = ClimateRuntime(
@@ -592,12 +694,13 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             registry_store=registry_store,
             contour_store=contour_store,
             bridge_client=bridge,
+            ha_state_view=SnapshotStateView(registry, bridge),
         )
         await runtime.async_start()
         fetches_before = bridge.fetch_count
         options = await runtime.async_climate_setup_options()
         revision = options["snapshot_revision"]
-        self.assertEqual(fetches_before + 1, bridge.fetch_count)
+        self.assertEqual(fetches_before, bridge.fetch_count)
 
         draft = await runtime.async_create_contour_draft(
             {
@@ -622,12 +725,12 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual("created", draft["status"])
-        self.assertEqual(fetches_before + 2, bridge.fetch_count)
+        self.assertEqual(fetches_before, bridge.fetch_count)
         validation = await runtime.async_validate_contour_draft(draft)
         self.assertEqual("ready", validation["status"])
         self.assertTrue(validation["save_allowed"])
         self.assertFalse(validation["command_allowed"])
-        self.assertEqual(fetches_before + 3, bridge.fetch_count)
+        self.assertEqual(fetches_before, bridge.fetch_count)
         self.assertEqual([], bridge.executed)
         self.assertEqual([], registry_store.saved)
         self.assertEqual([], contour_store.saved)
@@ -637,7 +740,16 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         bridge = MemoryBridge()
         original_registry = ClimateRegistry()
-        registry_store = MemoryStore(original_registry)
+        setup_registry = registry_from_payload({
+            "version": 2,
+            "home": {"outdoor_temperature_entity_id": None, "presence_entity_id": None, "central_heating_entity_id": None},
+            "rooms": [
+                {"id": "living", "name": "Living room", "window_entity_id": None},
+                {"id": "kids", "name": "Kids", "window_entity_id": None},
+            ],
+            "devices": [],
+        })
+        registry_store = MemoryStore(setup_registry)
         contour_store = MemoryContourStore()
         runtime = ClimateRuntime(
             entry_id="entry",
@@ -645,6 +757,7 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             registry_store=registry_store,
             contour_store=contour_store,
             bridge_client=bridge,
+            ha_state_view=SnapshotStateView(setup_registry, bridge),
             now_ms=lambda: 1784280005000,
         )
         await runtime.async_start()
@@ -718,7 +831,13 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
         bridge = MemoryBridge()
         original_registry = ClimateRegistry()
         original_contours = ContourRegistry()
-        registry_store = MemoryStore(original_registry)
+        setup_registry = registry_from_payload({
+            "version": 2,
+            "home": {"outdoor_temperature_entity_id": None, "presence_entity_id": None, "central_heating_entity_id": None},
+            "rooms": [{"id": "living", "name": "Living room", "window_entity_id": None}],
+            "devices": [],
+        })
+        registry_store = MemoryStore(setup_registry)
         contour_store = MemoryContourStore(original_contours)
         runtime = ClimateRuntime(
             entry_id="entry",
@@ -726,6 +845,7 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             registry_store=registry_store,
             contour_store=contour_store,
             bridge_client=bridge,
+            ha_state_view=SnapshotStateView(setup_registry, bridge),
             now_ms=lambda: 1784280005000,
         )
         await runtime.async_start()
@@ -756,7 +876,7 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(RuntimeError, "contour persistence"):
             await runtime.async_save_contour_draft(draft)
 
-        self.assertEqual(original_registry, registry_store.registry)
+        self.assertEqual(setup_registry, registry_store.registry)
         self.assertEqual(original_contours, contour_store.registry)
         self.assertEqual([], bridge.executed)
 

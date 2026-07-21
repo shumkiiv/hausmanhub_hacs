@@ -217,7 +217,8 @@
         "data_stale",
         "device_missing",
         "registry_mismatch",
-        "room_unavailable"
+        "room_unavailable",
+        "unassigned_room"
       ]
     },
     "nullable_stable_id": {
@@ -396,9 +397,15 @@
             "source_missing"
           ],
           "properties": {
-            "available": {"const": "Можно выбрать"},
-            "data_stale": {"const": "Нужно обновить данные"},
-            "source_missing": {"const": "Комната больше не найдена"}
+            "available": {
+              "const": "Можно выбрать"
+            },
+            "data_stale": {
+              "const": "Нужно обновить данные"
+            },
+            "source_missing": {
+              "const": "Комната больше не найдена"
+            }
           }
         },
         "device_types": {
@@ -413,12 +420,24 @@
             "humidity_sensor"
           ],
           "properties": {
-            "air_conditioner": {"const": "Кондиционер"},
-            "radiator_thermostat": {"const": "Термоголовка радиатора"},
-            "humidifier": {"const": "Увлажнитель"},
-            "floor_heating": {"const": "Тёплый пол"},
-            "temperature_sensor": {"const": "Датчик температуры"},
-            "humidity_sensor": {"const": "Датчик влажности"}
+            "air_conditioner": {
+              "const": "Кондиционер"
+            },
+            "radiator_thermostat": {
+              "const": "Термоголовка радиатора"
+            },
+            "humidifier": {
+              "const": "Увлажнитель"
+            },
+            "floor_heating": {
+              "const": "Тёплый пол"
+            },
+            "temperature_sensor": {
+              "const": "Датчик температуры"
+            },
+            "humidity_sensor": {
+              "const": "Датчик влажности"
+            }
           }
         },
         "device_status": {
@@ -434,13 +453,27 @@
             "registry_mismatch"
           ],
           "properties": {
-            "available": {"const": "Можно добавить"},
-            "already_configured": {"const": "Уже добавлено"},
-            "unavailable": {"const": "Устройство недоступно"},
-            "unsupported": {"const": "Тип устройства не поддерживается"},
-            "data_stale": {"const": "Нужно обновить данные"},
-            "source_missing": {"const": "Устройство больше не найдено"},
-            "registry_mismatch": {"const": "Нужно проверить привязку устройства"}
+            "available": {
+              "const": "Можно добавить"
+            },
+            "already_configured": {
+              "const": "Уже добавлено"
+            },
+            "unavailable": {
+              "const": "Устройство недоступно"
+            },
+            "unsupported": {
+              "const": "Тип устройства не поддерживается"
+            },
+            "data_stale": {
+              "const": "Нужно обновить данные"
+            },
+            "source_missing": {
+              "const": "Устройство больше не найдено"
+            },
+            "registry_mismatch": {
+              "const": "Нужно проверить привязку устройства"
+            }
           }
         },
         "suggestion_reasons": {
@@ -454,17 +487,37 @@
             "data_stale",
             "device_missing",
             "registry_mismatch",
-            "room_unavailable"
+            "room_unavailable",
+            "unassigned_room"
           ],
           "properties": {
-            "detected_room": {"const": "Устройство найдено в этой комнате"},
-            "already_configured": {"const": "Устройство уже назначено этой комнате"},
-            "device_unavailable": {"const": "Устройство сейчас недоступно"},
-            "unsupported_device": {"const": "Тип устройства не поддерживается"},
-            "data_stale": {"const": "Нужно обновить данные"},
-            "device_missing": {"const": "Настроенное устройство больше не найдено"},
-            "registry_mismatch": {"const": "Текущая привязка не совпадает с настройкой HausmanHub"},
-            "room_unavailable": {"const": "Комната сейчас недоступна для выбора"}
+            "detected_room": {
+              "const": "Устройство найдено в этой комнате"
+            },
+            "already_configured": {
+              "const": "Устройство уже назначено этой комнате"
+            },
+            "device_unavailable": {
+              "const": "Устройство сейчас недоступно"
+            },
+            "unsupported_device": {
+              "const": "Тип устройства не поддерживается"
+            },
+            "data_stale": {
+              "const": "Нужно обновить данные"
+            },
+            "device_missing": {
+              "const": "Настроенное устройство больше не найдено"
+            },
+            "registry_mismatch": {
+              "const": "Текущая привязка не совпадает с настройкой HausmanHub"
+            },
+            "room_unavailable": {
+              "const": "Комната сейчас недоступна для выбора"
+            },
+            "unassigned_room": {
+              "const": "Комнату нужно выбрать вручную"
+            }
           }
         },
         "modes": {
@@ -475,8 +528,12 @@
             "automatic"
           ],
           "properties": {
-            "observe": {"const": "Только наблюдение"},
-            "automatic": {"const": "Автоматическое управление"}
+            "observe": {
+              "const": "Только наблюдение"
+            },
+            "automatic": {
+              "const": "Автоматическое управление"
+            }
           }
         },
         "strategies": {
@@ -488,9 +545,15 @@
             "aggressive"
           ],
           "properties": {
-            "soft": {"const": "Плавно"},
-            "normal": {"const": "Обычно"},
-            "aggressive": {"const": "Быстро"}
+            "soft": {
+              "const": "Плавно"
+            },
+            "normal": {
+              "const": "Обычно"
+            },
+            "aggressive": {
+              "const": "Быстро"
+            }
           }
         }
       }

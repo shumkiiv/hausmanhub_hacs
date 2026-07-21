@@ -993,7 +993,10 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
             import_climate_state,
         )
         from custom_components.hausman_hub.application.climate_runtime import ClimateRuntime
-        from custom_components.hausman_hub.domain.climate import ClimateRegistry
+        from custom_components.hausman_hub.domain.climate import (
+            ClimateRegistry,
+            ClimateRoom,
+        )
         from custom_components.hausman_hub.domain.climate_bridge import (
             ClimateBridgeMode,
             climate_bridge_target,
@@ -1048,9 +1051,27 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
                 elif plan.action == "set_room_mode":
                     room["mode"] = plan.backend_payload["mode"]
 
+        from tests.test_climate_runtime import SnapshotStateView
+
         climate_store = ClimateStore()
         contour_store = ContourStore()
         bridge = Bridge()
+
+        class BridgeView:
+            def __init__(self, owner: object) -> None:
+                self._owner = owner
+
+            @property
+            def snapshot(self):
+                return import_climate_state(self._owner.payload)
+
+        climate_store.registry = ClimateRegistry(
+            rooms=(
+                ClimateRoom("living", "Living room"),
+                ClimateRoom("kids", "Kids"),
+            ),
+            devices=(),
+        )
         runtime = ClimateRuntime(
             entry_id="entry",
             configuration=SafeConfiguration(
@@ -1063,6 +1084,9 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
             registry_store=climate_store,
             contour_store=contour_store,
             bridge_client=bridge,
+            ha_state_view=SnapshotStateView(
+                climate_store.registry, BridgeView(bridge)
+            ),
             now_ms=lambda: 1784280005000,
         )
         await runtime.async_start()
@@ -1124,11 +1148,13 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual("1", room_form["description_placeholders"]["room_number"])
         self.assertEqual("1", room_form["description_placeholders"]["room_count"])
+        # Unassigned native candidates are assigned to the room on this step.
         self.assertEqual(
             {
                 "contour_target_temperature",
                 "contour_target_humidity",
                 "contour_strategy",
+                "contour_room_devices",
             },
             {marker.key for marker in room_form["schema"].fields},
         )
@@ -1137,11 +1163,14 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
                 "contour_target_temperature": "25.0",
                 "contour_target_humidity": "45",
                 "contour_strategy": "normal",
+                "contour_room_devices": ["climate.synthetic_ac_source_living"],
             }
         )
 
         self.assertEqual("climate_contour_confirm", preview["step_id"])
-        self.assertEqual("да", preview["description_placeholders"]["automatic"])
+        # The honest native preview: HausmanHub's own automatic control is
+        # not active until the contour is saved and HA state confirms it.
+        self.assertEqual("нет", preview["description_placeholders"]["automatic"])
         self.assertEqual("День", preview["description_placeholders"]["active_profile"])
         self.assertIn(
             "Living room: 25 °C, 45 %, обычно",
@@ -1753,8 +1782,29 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
             async def async_execute(self, plan):
                 self.executed.append(plan)
 
+        from tests.test_climate_runtime import SnapshotStateView
+
         store = Store()
         bridge = Bridge()
+
+        class BridgeView:
+            def __init__(self) -> None:
+                self.snapshot = import_climate_state(source_payload())
+
+        store.registry = ClimateRegistry(
+            rooms=(
+                __import__(
+                    "custom_components.hausman_hub.domain.climate",
+                    fromlist=["ClimateRoom"],
+                ).ClimateRoom("living", "Living room"),
+                __import__(
+                    "custom_components.hausman_hub.domain.climate",
+                    fromlist=["ClimateRoom"],
+                ).ClimateRoom("kids", "Kids"),
+            ),
+            devices=(),
+        )
+        state_view = SnapshotStateView(store.registry, BridgeView())
         runtime = ClimateRuntime(
             entry_id="entry",
             configuration=SafeConfiguration(
@@ -1763,6 +1813,7 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
             ),
             registry_store=store,
             bridge_client=bridge,
+            ha_state_view=state_view,
         )
         await runtime.async_start()
         options_flow = self.config_flow.HausmanHubOptionsFlow()
@@ -1800,7 +1851,8 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
             field.key: selector for field, selector in ac_form["schema"].fields.items()
         }
         self.assertNotIn("climate_device_source_id", ac_fields)
-        self.assertNotIn("climate_device_room", ac_fields)
+        # Native candidates are unassigned: the wizard must ask for the room.
+        self.assertIn("climate_device_room", ac_fields)
         self.assertEqual(
             "climate",
             ac_fields["climate_device_control_entity"].config.domain,
@@ -1810,9 +1862,10 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
                 "climate_device_id": "living_ac",
                 "climate_device_name": "Living AC",
                 "climate_device_kind": "air_conditioner",
+                "climate_device_room": "living",
                 "climate_device_control_scope": "canary",
                 "climate_device_control_owner": "climate_core",
-                "climate_device_control_entity": "climate.synthetic_living_ac",
+                "climate_device_control_entity": "climate.synthetic_ac_source_living",
                 "climate_device_source_id": "attacker-cannot-override-selection",
             }
         )
@@ -1843,9 +1896,10 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
                 "climate_device_id": "kids_humidifier",
                 "climate_device_name": "Kids humidifier",
                 "climate_device_kind": "humidifier",
+                "climate_device_room": "kids",
                 "climate_device_control_scope": "observed",
                 "climate_device_control_owner": "observed",
-                "climate_device_control_entity": "humidifier.synthetic_kids",
+                "climate_device_control_entity": "humidifier.synthetic_humidifier_source_kids",
             }
         )
         preview = await options_flow.async_step_climate_registry(
@@ -1863,9 +1917,22 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
             ["living", "kids"],
             [room.room_id for room in store.saved[0].rooms],
         )
+        # Native candidates receive a fresh private source id on import;
+        # the entity id itself is never copied into the registry binding.
         self.assertEqual(
-            ["synthetic-ac-source-living", "synthetic-humidifier-source-kids"],
+            [
+                "hausmanhub-native-climate.synthetic_ac_source_living",
+                "hausmanhub-native-humidifier.synthetic_humidifier_source_kids",
+            ],
             [device.source_id for device in store.saved[0].devices],
+        )
+        self.assertEqual(
+            ["climate.synthetic_ac_source_living",
+             "humidifier.synthetic_humidifier_source_kids"],
+            [
+                device.endpoints[0].entity_id
+                for device in store.saved[0].devices
+            ],
         )
         self.assertEqual([], bridge.executed)
 

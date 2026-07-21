@@ -107,6 +107,30 @@ class CountingStateView:
         self.reads += 1
         return self._states.get(entity_id)
 
+    def entity_catalog(self):
+        from custom_components.hausman_hub.application.climate_native_setup import (
+            ClimateHaCatalogEntry,
+            ClimateHaEntityCatalog,
+        )
+
+        return ClimateHaEntityCatalog(
+            entries=tuple(
+                ClimateHaCatalogEntry(
+                    entity_id=state.entity_id,
+                    domain=state.entity_id.split(".", 1)[0],
+                    state=state.state,
+                    device_class=None,
+                    supported_features=137,
+                    friendly_name=state.entity_id,
+                    available=state.state not in {"", "unavailable", "unknown"},
+                    last_updated_ms=state.last_updated_ms,
+                )
+                for state in sorted(
+                    self._states.values(), key=lambda state: state.entity_id
+                )
+            )
+        )
+
 
 class RecordingTrialExecutor:
     def __init__(self) -> None:
@@ -1875,5 +1899,136 @@ class NativeProjectionSwitchTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("unavailable", contours["contours"][0]["status"])  # type: ignore[index]
         self.assertEqual("unavailable", readiness["status"])
         self.assertEqual(["climate_state_unavailable"], readiness["reasons"])
+        self.assertEqual(fetches_after_start, bridge.fetch_count)
+        self.assertEqual(0, bridge.execute_count)
+
+    async def test_wizards_never_touch_the_bridge_in_any_mode(self) -> None:
+        for mode in (
+            ClimateBridgeMode.MANAGED,
+            ClimateBridgeMode.SHADOW,
+            ClimateBridgeMode.CANARY,
+        ):
+            with self.subTest(mode=mode):
+                bridge = PoisonBridge()
+                view = MutableStateView(safe_stop_states())
+                instance = native_application_runtime(
+                    mode,
+                    view,
+                    ReflectingStrictExecutor(view),
+                    bridge_client=bridge,
+                )
+                await instance.async_start()
+                fetches_after_start = bridge.fetch_count
+
+                await instance.async_registry_import_snapshot()
+                await instance.async_climate_setup_options()
+                await instance.async_current_contour_setup()
+
+                self.assertEqual(fetches_after_start, bridge.fetch_count)
+                self.assertEqual(0, bridge.execute_count)
+
+    async def test_wizards_fail_closed_without_a_state_view(self) -> None:
+        bridge = PoisonBridge()
+        instance = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateBridgeMode.MANAGED),
+            registry_store=MemoryStore(
+                native_registry(ClimateControlScope.MANAGED)
+            ),
+            contour_store=MemoryStore(native_contours()),
+            bridge_client=bridge,
+            ha_state_view=None,
+            now_ms=lambda: NOW,
+        )
+        await instance.async_start()
+        fetches_after_start = bridge.fetch_count
+
+        calls = (
+            (instance.async_registry_import_snapshot, ()),
+            (instance.async_climate_setup_options, ()),
+            (instance.async_current_contour_setup, ()),
+            (instance.async_create_contour_draft, ({},)),
+            (instance.async_validate_contour_draft, ({},)),
+        )
+        for call, args in calls:
+            with self.subTest(call=call.__name__):
+                try:
+                    await call(*args)
+                except ClimateRuntimeUnavailable:
+                    pass
+                except Exception as error:
+                    raise AssertionError(
+                        f"{call.__name__} raised {type(error).__name__}"
+                    ) from error
+
+        self.assertEqual(fetches_after_start, bridge.fetch_count)
+        self.assertEqual(0, bridge.execute_count)
+
+    async def test_managed_draft_save_binds_native_candidate_without_bridge(
+        self,
+    ) -> None:
+        bridge = PoisonBridge()
+        view = MutableStateView(safe_stop_states())
+        contour_store = MemoryStore(ContourRegistry())
+        registry_store = MemoryStore(
+            ClimateRegistry(
+                rooms=(
+                    ClimateRoom(
+                        "living",
+                        "Living room",
+                        window_entity_id="binary_sensor.living_window",
+                    ),
+                ),
+                devices=(),
+            )
+        )
+        instance = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateBridgeMode.MANAGED),
+            registry_store=registry_store,
+            contour_store=contour_store,
+            bridge_client=bridge,
+            strict_ha_call_executor=ReflectingStrictExecutor(view),
+            ha_state_view=view,
+            now_ms=lambda: NOW,
+            local_now=lambda: datetime(2026, 7, 19, 12, 0),
+        )
+        await instance.async_start()
+        fetches_after_start = bridge.fetch_count
+
+        options = await instance.async_climate_setup_options()
+        draft = await instance.async_create_contour_draft(
+            {
+                "snapshot_revision": options["snapshot_revision"],
+                "name": "Климат",
+                "mode": "automatic",
+                "rooms": [
+                    {
+                        "room_id": "living",
+                        "target_temperature": 24.0,
+                        "target_humidity": 45,
+                        "strategy": "normal",
+                        "devices": [
+                            {
+                                "candidate_id": "candidate_0002",
+                                "type": "air_conditioner",
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+        validation = await instance.async_validate_contour_draft(draft)
+        receipt = await instance.async_save_contour_draft(draft)
+
+        self.assertTrue(validation["save_allowed"])
+        self.assertEqual("saved", receipt["status"])
+        saved_registry = registry_store.saved[-1]
+        device = saved_registry.devices[0]
+        self.assertEqual(
+            "hausmanhub-native-climate.living_ac", device.source_id
+        )
+        self.assertEqual("living", device.room_id)
+        self.assertEqual("living_air_conditioner", device.device_id)
         self.assertEqual(fetches_after_start, bridge.fetch_count)
         self.assertEqual(0, bridge.execute_count)
