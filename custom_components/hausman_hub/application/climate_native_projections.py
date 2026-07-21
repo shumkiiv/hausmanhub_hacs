@@ -1,10 +1,11 @@
 """Native Home Assistant climate projections with legacy payload parity.
 
-Roadmap item 36 sub-step 36e1. These pure builders produce the exact external
-payload shapes previously derived from the external Climate API bridge, but
-read only the native Home Assistant observation and the version-2 registry.
-Production consumers switch to these builders in sub-step 36e2; until then the
-module is exercised by golden and parity tests only.
+Roadmap item 36 sub-steps 36e1/36e2. These pure builders produce the exact
+external payload shapes previously derived from the external Climate API
+bridge, but read only the native Home Assistant observation and the version-2
+registry. The managed runtime serves all five projections through this module;
+the shadow and canary modes deliberately keep the bridge-backed legacy paths
+until their migration tooling is retired (36g).
 
 Unknown or missing native facts always project to the same fail-closed values
 the legacy builders produced for missing bridge facts: ``None``, ``unknown``,
@@ -43,16 +44,16 @@ from ..domain.contours import (
     ContourMode,
     ContourRegistry,
 )
-from .android_climate import (
-    _ROOM_ACTION_COMMAND_TYPES,
+from .android_climate_values import (
     ANDROID_CLIMATE_CONTRACT_NAME,
     ANDROID_CLIMATE_CONTRACT_VERSION,
     ANDROID_ROOM_CONTROL_ACTIONS,
-    _public_state_revision,
-    _room_action_availability,
-    _room_action_inputs,
-    _room_action_presentations,
-    _saved_profiles_by_room,
+    ROOM_ACTION_COMMAND_TYPES,
+    public_state_revision,
+    room_action_availability,
+    room_action_inputs,
+    room_action_presentations,
+    saved_profiles_by_room,
 )
 from .climate_application import build_climate_application_plan
 from .climate_application_models import ClimateDesiredStateChanges
@@ -766,7 +767,7 @@ def native_android_climate_snapshot(
         settings_apply_enabled=(bridge_mode is ClimateBridgeMode.MANAGED),
         local_now=local_now,
     )["contours"]
-    saved_profiles_by_room = _saved_profiles_by_room(public_contours)
+    room_saved_profiles = saved_profiles_by_room(public_contours)
 
     rooms: list[dict[str, object]] = []
     room_control_enabled = False
@@ -817,7 +818,7 @@ def native_android_climate_snapshot(
                         else observed_room.observed_target_strategy
                     ),
                 },
-                "saved_profiles": saved_profiles_by_room.get(
+                "saved_profiles": room_saved_profiles.get(
                     room.room_id,
                     {
                         "active": None,
@@ -869,7 +870,7 @@ def native_android_climate_snapshot(
             ),
         },
     }
-    result["state_revision"] = _public_state_revision(result)
+    result["state_revision"] = public_state_revision(result)
     return result
 
 
@@ -921,7 +922,7 @@ def _native_room_control_projection(
             actions = [
                 action
                 for action in ANDROID_ROOM_CONTROL_ACTIONS
-                if _ROOM_ACTION_COMMAND_TYPES[action] in command_types
+                if ROOM_ACTION_COMMAND_TYPES[action] in command_types
             ]
             if observed_device.availability is not ClimateDeviceAvailability.AVAILABLE:
                 reasons.append("device_unavailable")
@@ -943,13 +944,13 @@ def _native_room_control_projection(
         "enabled": bool(allowed_actions),
         "actions": actions,
         "allowed_actions": allowed_actions,
-        "action_availability": _room_action_availability(
+        "action_availability": room_action_availability(
             actions,
             allowed_actions,
             blocked_reasons,
         ),
-        "action_inputs": _room_action_inputs(actions),
-        "action_presentations": _room_action_presentations(actions),
+        "action_inputs": room_action_inputs(actions),
+        "action_presentations": room_action_presentations(actions),
         "blocked_reasons": blocked_reasons,
     }
 
