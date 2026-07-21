@@ -4,7 +4,8 @@ It always creates the nine diagnostic count sensors. An explicitly armed
 legacy canary may additionally control one ``input_boolean`` helper. The
 separate climate facade persists logical bindings and can use only two fixed
 Climate API paths in shadow or one-room canary mode. HausmanHub registers no service
-and never calls a Home Assistant climate entity directly.
+and never calls a Home Assistant climate entity directly except through the single
+strict climate-call executor used by trial, managed ticks, and settings application.
 """
 
 from __future__ import annotations
@@ -70,7 +71,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         evidence_store=HomeAssistantClimateEvidenceStore(hass, entry.entry_id),
         contour_store=HomeAssistantContourStore(hass, entry.entry_id),
         protection_store=HomeAssistantClimateProtectionStore(hass, entry.entry_id),
-        trial_executor=HomeAssistantClimateCallExecutor(hass),
+        strict_ha_call_executor=HomeAssistantClimateCallExecutor(hass),
         ha_state_view=HomeAssistantClimateStateView(hass),
         local_now=dt_util.now,
     )

@@ -1,4 +1,4 @@
-"""Home Assistant executor for strict trial calls, fail-closed in order."""
+"""Single strict climate-call executor for trial, managed ticks, and settings application."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ class ClimateHaExecutionError(RuntimeError):
 
 
 class HomeAssistantClimateCallExecutor:
-    """Execute strict climate calls through Home Assistant services only."""
+    """Execute the single strict climate call boundary through Home Assistant services only."""
 
     def __init__(self, hass: HomeAssistant) -> None:
         self._hass = hass
