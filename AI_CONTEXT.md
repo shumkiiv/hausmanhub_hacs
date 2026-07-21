@@ -356,6 +356,28 @@ Last updated: 2026-07-21.
   repository remain unchanged. The final staged tree passed 513 local tests,
   the HACS/package/boundary/Android checks, and disposable Home Assistant
   Core   2026.6.4/2026.7.0.
+- Version 1.10.0 completes roadmap item 37. HausmanHub now has its own
+  admin page in the Home Assistant sidebar (`panel_custom` registration,
+  `require_admin=True`, `config_panel_domain` for the settings gear).
+  The plain-JS webcomponent
+  `custom_components/hausman_hub/frontend/hausman-hub-panel.js` (no
+  build step, no external URLs, Russian UI, 30-second polling) reads a
+  combined admin payload and offers the everyday actions: apply saved
+  contour settings and set/clear per-room temporary temperature. Three
+  new admin-gated routes serve it:
+  `GET /api/hausman_hub/v1/admin/panel`,
+  `POST .../admin/panel/apply`, `POST .../admin/panel/temporary-temperature`;
+  tablet and read-only users get 403, malformed bodies get 400, and
+  unexpected exceptions propagate instead of masquerading as 503.
+  Registration in `panel.py` is idempotent (static paths once per
+  server lifetime under a separate `hass.data` key, panel skipped when
+  already present) and the panel is removed on entry unload. Registry
+  and setup editing deliberately stay in the config-flow wizards.
+  Independent review initially returned FAIL (non-idempotent
+  registration, exception mapping, missing lifecycle tests); one fix
+  iteration resolved all three and the follow-up passed. The final
+  tree passed 610 local tests, the full release gate, and disposable
+  Home Assistant Core 2026.6.4 and 2026.7.0 including the new routes.
 - Version 1.9.10 completes roadmap item 36 sub-step 36e2. In MANAGED
   mode all five read projections (Android public snapshot, contours
   snapshot, apply preview, readiness, administrator snapshot) are
@@ -2052,5 +2074,5 @@ Engineering and review rules are in
 
 - Obsidian/context index: `LLM_WIKI/00_Index.md`.
 - Latest generated context: `LLM_WIKI/Context.md`.
-- Last sync: 2026-07-21T14:26:58+03:00.
+- Last sync: 2026-07-21T15:20:09+03:00.
 <!-- llm-wiki-sync:end -->
