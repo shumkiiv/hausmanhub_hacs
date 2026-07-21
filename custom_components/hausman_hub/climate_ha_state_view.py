@@ -8,6 +8,12 @@ from .application.climate_ha_observations import (
     MAX_STATE_LENGTH,
     ClimateHaEntityState,
 )
+from .application.climate_native_setup import (
+    CLIMATE_HA_CATALOG_DOMAINS,
+    CLIMATE_HA_SENSOR_DEVICE_CLASSES,
+    ClimateHaCatalogEntry,
+    ClimateHaEntityCatalog,
+)
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -46,4 +52,49 @@ class HomeAssistantClimateStateView:
             state=state.state,
             attributes=attributes,
             last_updated_ms=int(state.last_updated.timestamp() * 1000),
+        )
+
+    def entity_catalog(self) -> ClimateHaEntityCatalog:
+        """Enumerate climate-relevant entities for native setup discovery."""
+
+        entries: list[ClimateHaCatalogEntry] = []
+        for state in self._hass.states.async_all():
+            domain = state.entity_id.split(".", 1)[0]
+            if domain not in CLIMATE_HA_CATALOG_DOMAINS:
+                continue
+            device_class = state.attributes.get("device_class")
+            if (
+                domain == "sensor"
+                and device_class not in CLIMATE_HA_SENSOR_DEVICE_CLASSES
+            ):
+                continue
+            if len(state.state) > MAX_STATE_LENGTH:
+                continue
+            supported_features = state.attributes.get("supported_features")
+            friendly_name = state.attributes.get("friendly_name")
+            entries.append(
+                ClimateHaCatalogEntry(
+                    entity_id=state.entity_id,
+                    domain=domain,
+                    state=state.state,
+                    device_class=(
+                        device_class if isinstance(device_class, str) else None
+                    ),
+                    supported_features=(
+                        supported_features
+                        if type(supported_features) is int
+                        and supported_features >= 0
+                        else 0
+                    ),
+                    friendly_name=(
+                        friendly_name if isinstance(friendly_name, str) else None
+                    ),
+                    available=state.state not in {"", "unavailable", "unknown"},
+                    last_updated_ms=int(state.last_updated.timestamp() * 1000),
+                )
+            )
+        return ClimateHaEntityCatalog(
+            entries=tuple(
+                sorted(entries, key=lambda entry: entry.entity_id)
+            )
         )
