@@ -356,6 +356,27 @@ Last updated: 2026-07-21.
   repository remain unchanged. The final staged tree passed 513 local tests,
   the HACS/package/boundary/Android checks, and disposable Home Assistant
   Core   2026.6.4/2026.7.0.
+- Version 1.9.10 completes roadmap item 36 sub-step 36e2. In MANAGED
+  mode all five read projections (Android public snapshot, contours
+  snapshot, apply preview, readiness, administrator snapshot) are
+  served by the native builders from 1.9.9; the runtime never touches
+  the bridge for them, locked by poison-bridge acceptance tests
+  (`NativeProjectionSwitchTest`: zero bridge calls in managed and
+  disabled, fail-closed mapping without a state view, shadow still
+  reads the bridge deliberately). SHADOW and CANARY projections keep
+  bridge reads because their purpose is migration evidence and canary
+  comparison (36g). DISABLED keeps its no-observe behavior. The apply
+  preview now reports the native strict HA plan call count instead of
+  legacy bridge command counts (three legacy tests updated to the new
+  number). Presentation helpers moved to the neutral
+  `application/android_climate_values.py` shared by both builders,
+  resolving the 36e1 review finding. Independent review passed with
+  three LOW findings: the module docstring was updated, the
+  no-state-view fail-closed test was added, and a shadow/canary
+  projection matrix remains assigned to 36g. The final tree passed 601
+  local tests and the full release gate. Remaining bridge usage:
+  startup refresh (36f), registry import and setup/discovery wizards
+  (36f), shadow evidence and the legacy canary route (36g).
 - Version 1.9.9 completes roadmap item 36 sub-step 36e1. The new pure
   module `application/climate_native_projections.py` builds the five
   external projection payloads (Android tablet contract v12, contour
@@ -2031,5 +2052,5 @@ Engineering and review rules are in
 
 - Obsidian/context index: `LLM_WIKI/00_Index.md`.
 - Latest generated context: `LLM_WIKI/Context.md`.
-- Last sync: 2026-07-21T13:32:51+03:00.
+- Last sync: 2026-07-21T14:18:59+03:00.
 <!-- llm-wiki-sync:end -->
