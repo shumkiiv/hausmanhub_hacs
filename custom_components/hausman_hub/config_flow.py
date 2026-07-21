@@ -2352,16 +2352,13 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
         except ConfigurationViolation:
             return await self.async_step_climate_contour_source()
         target = configuration.climate_bridge_target
-        if (
-            target is None
-            or configuration.climate_bridge_mode is ClimateBridgeMode.DISABLED
-        ):
-            return await self.async_step_climate_contour_source()
         try:
             snapshot = await runtime.async_registry_import_snapshot()
         except Exception:
+            # Native discovery is unavailable; the one-time bridge address
+            # remains the migration fallback for the old external module.
             return await self.async_step_climate_contour_source()
-        self._contour_source_target = target.origin
+        self._contour_source_target = None if target is None else target.origin
         self._set_contour_source_snapshot(snapshot)
         await self._async_load_saved_contour(runtime)
         return await self.async_step_climate_contour_setup()
@@ -2774,7 +2771,6 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
             or self._contour_registry_draft is None
             or self._contour_definition_draft is None
             or self._contour_preview is None
-            or self._contour_source_target is None
         ):
             return await self.async_step_contours()
         errors: dict[str, str] = {}

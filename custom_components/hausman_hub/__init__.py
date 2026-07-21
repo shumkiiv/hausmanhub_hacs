@@ -61,8 +61,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     climate_client = None
     if configuration.climate_bridge_target is not None:
         from .climate_bridge import ClimateApiClient
+        from .domain.climate_bridge import ClimateBridgeMode
 
-        climate_client = ClimateApiClient(hass, configuration.climate_bridge_target)
+        if configuration.climate_bridge_mode in {
+            ClimateBridgeMode.SHADOW,
+            ClimateBridgeMode.CANARY,
+        }:
+            climate_client = ClimateApiClient(
+                hass, configuration.climate_bridge_target
+            )
     climate_runtime = ClimateRuntime(
         entry_id=entry.entry_id,
         configuration=configuration,

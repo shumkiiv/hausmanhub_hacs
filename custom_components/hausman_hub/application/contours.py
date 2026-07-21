@@ -296,6 +296,7 @@ def build_climate_contour_setup(
     room_ids: object,
     source_ids: object,
     source_kinds: object = None,
+    source_room_assignments: object = None,
     name: object,
     mode: object,
     target_temperature: object = None,
@@ -326,6 +327,7 @@ def build_climate_contour_setup(
             room_ids=room_ids,
             source_ids=source_ids,
             source_kinds=source_kinds,
+            source_room_assignments=source_room_assignments,
         )
         parameters_by_room = _climate_parameters_by_room(
             registry,

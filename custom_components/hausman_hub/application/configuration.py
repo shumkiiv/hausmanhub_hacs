@@ -272,10 +272,21 @@ def _configuration_for(
                 "disabled climate bridge must not retain a target or canary room"
             )
     else:
-        try:
-            bridge_target = climate_bridge_target(climate_bridge_target_value)
-        except UnsafeClimateBridgeTarget as error:
-            raise ConfigurationViolation(str(error)) from error
+        if (
+            climate_bridge_target_value is None
+            and bridge_mode in {ClimateBridgeMode.SHADOW, ClimateBridgeMode.CANARY}
+        ):
+            # Shadow evidence and canary comparison still read the external
+            # module; managed mode runs fully native and accepts a missing or
+            # legacy target without using it.
+            raise ConfigurationViolation(
+                "shadow and canary climate modes require a bridge target"
+            )
+        if climate_bridge_target_value is not None:
+            try:
+                bridge_target = climate_bridge_target(climate_bridge_target_value)
+            except UnsafeClimateBridgeTarget as error:
+                raise ConfigurationViolation(str(error)) from error
         if bridge_mode is ClimateBridgeMode.CANARY:
             try:
                 canary_room_id = ClimateRoom(

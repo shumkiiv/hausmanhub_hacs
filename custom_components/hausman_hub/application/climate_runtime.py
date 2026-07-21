@@ -335,7 +335,13 @@ class ClimateRuntime:
                 )
                 if changed:
                     await self._async_save_evidence()
-                if self.configuration.climate_bridge_mode is not ClimateBridgeMode.DISABLED:
+                if self.configuration.climate_bridge_mode in {
+                    ClimateBridgeMode.SHADOW,
+                    ClimateBridgeMode.CANARY,
+                }:
+                    # Shadow evidence and canary comparison still need one
+                    # bridge read at startup; managed and disabled modes are
+                    # fully native and never contact the external module.
                     await self._async_refresh_unlocked()
                 else:
                     self.last_error = None
@@ -1859,7 +1865,23 @@ class ClimateRuntime:
             raise ClimateRuntimeUnavailable("climate state is unavailable")
         observation = self._native_ha_observation(self._safe_now())
         if observation is None:
-            raise ClimateRuntimeUnavailable("climate state is unavailable")
+            # The disabled control pipeline never observes, but an explicit
+            # admin wizard may read Home Assistant for discovery only.
+            observed_at = self._safe_now()
+            try:
+                local = self._local_now()
+                observation = build_native_ha_climate_observation(
+                    self._registry,
+                    self._contours.contour(CLIMATE_CONTOUR_ID),
+                    self._ha_state_view,
+                    observed_at=observed_at,
+                    protection=self._protection_memory,
+                    local_time=(local.hour, local.minute),
+                )
+            except Exception:
+                raise ClimateRuntimeUnavailable(
+                    "climate state is unavailable"
+                ) from None
         catalog = self._ha_state_view.entity_catalog()
         return build_native_climate_setup_snapshot(
             self._registry,
@@ -1869,10 +1891,13 @@ class ClimateRuntime:
 
     def _require_client(self) -> ClimateBridgeClient:
         if (
-            self.configuration.climate_bridge_mode is ClimateBridgeMode.DISABLED
+            self.configuration.climate_bridge_mode
+            not in {ClimateBridgeMode.SHADOW, ClimateBridgeMode.CANARY}
             or self._bridge_client is None
         ):
-            raise ClimateRuntimeUnavailable("climate bridge is disabled")
+            raise ClimateRuntimeUnavailable(
+                "climate bridge requires shadow or canary mode"
+            )
         return self._bridge_client
 
     def _require_native_contour_apply_mode(self) -> None:
