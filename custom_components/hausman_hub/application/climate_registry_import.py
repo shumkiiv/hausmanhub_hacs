@@ -49,6 +49,9 @@ def add_import_candidate_to_registry(
     control_owner: object,
     control_entity_id: object = None,
     source_engine_binding: bool = False,
+    room_id_override: object = None,
+    registry_source_id: object = None,
+    observation_entity_id: object = None,
 ) -> ClimateRegistry:
     """Return a new draft after one explicit fresh candidate selection."""
 
@@ -63,10 +66,32 @@ def add_import_candidate_to_registry(
     imported = snapshot.device(source_id)
     if imported is None:
         raise ClimateRegistryImportViolation("import candidate is unavailable")
-    if any(device.source_id == imported.source_id for device in registry.devices):
+    if imported.room_id and (
+        room_id_override is not None or registry_source_id is not None
+    ):
+        raise ClimateRegistryImportViolation(
+            "candidate overrides are only valid for unassigned candidates"
+        )
+    if registry_source_id is None:
+        selected_source_id = (
+            imported.source_id
+            if imported.room_id
+            else f"hausmanhub-native-{imported.source_id}"
+        )
+    elif isinstance(registry_source_id, str) and registry_source_id:
+        selected_source_id = registry_source_id
+    else:
+        raise ClimateRegistryImportViolation("registry source id is invalid")
+    if any(device.source_id == selected_source_id for device in registry.devices):
         raise ClimateRegistryImportViolation("import candidate is already registered")
     if any(device.device_id == device_id for device in registry.devices):
         raise ClimateRegistryImportViolation("public device id is already registered")
+    if room_id_override is None:
+        selected_room_id = imported.room_id
+    elif isinstance(room_id_override, str) and room_id_override:
+        selected_room_id = room_id_override
+    else:
+        raise ClimateRegistryImportViolation("import room override is invalid")
 
     try:
         selected_kind = ClimateDeviceKind(kind)
@@ -77,7 +102,8 @@ def add_import_candidate_to_registry(
     if selected_kind not in imported.suggested_kinds:
         raise ClimateRegistryImportViolation("device kind was not suggested by import")
 
-    room = snapshot.room(imported.room_id)
+    draft_room = registry.room(selected_room_id)
+    room = draft_room or snapshot.room(selected_room_id)
     if room is None:
         raise ClimateRegistryImportViolation("import candidate room is unavailable")
     rooms = registry.rooms
@@ -88,19 +114,40 @@ def add_import_candidate_to_registry(
             raise ClimateRegistryImportViolation("imported room is invalid") from error
 
     try:
+        native = not imported.room_id
         device = ClimateDevice(
             device_id=device_id,  # type: ignore[arg-type]
             name=device_name,  # type: ignore[arg-type]
-            room_id=imported.room_id,
+            room_id=selected_room_id,
             kind=selected_kind,
-            source_id=imported.source_id,
+            source_id=selected_source_id,
             control_scope=selected_scope,
             control_owner=selected_owner,
             capabilities=_candidate_capabilities(imported, selected_kind),
-            endpoints=_candidate_endpoints(
-                selected_kind,
-                control_entity_id,
-                source_engine_binding=source_engine_binding,
+            endpoints=(
+                tuple(imported.endpoints)
+                if imported.endpoints
+                and control_entity_id in {None, ""}
+                and not source_engine_binding
+                and observation_entity_id in {None, ""}
+                else _candidate_endpoints(
+                    selected_kind,
+                    (
+                        imported.source_id
+                        if native
+                        and selected_kind in _ACTIVE_KINDS
+                        and control_entity_id in {None, ""}
+                        else control_entity_id
+                    ),
+                    source_engine_binding=source_engine_binding,
+                    observation_entity_id=(
+                        imported.source_id
+                        if native
+                        and selected_kind not in _ACTIVE_KINDS
+                        and observation_entity_id in {None, ""}
+                        else observation_entity_id
+                    ),
+                )
             ),
         )
         return ClimateRegistry(
@@ -118,6 +165,7 @@ def import_managed_climate_selection(
     room_ids: object,
     source_ids: object,
     source_kinds: object = None,
+    source_room_assignments: object = None,
 ) -> ClimateRegistry:
     """Build an exact registry from devices already owned by climate-core.
 
@@ -139,6 +187,17 @@ def import_managed_climate_selection(
         raise ClimateRegistryImportViolation("selected devices must be strings")
     selected_rooms = tuple(dict.fromkeys(room_ids))
     selected_sources = tuple(dict.fromkeys(source_ids))
+    if source_room_assignments is None:
+        assignments: dict[str, str] = {}
+    elif not isinstance(source_room_assignments, dict) or any(
+        not isinstance(key, str) or not isinstance(value, str)
+        for key, value in source_room_assignments.items()
+    ):
+        raise ClimateRegistryImportViolation(
+            "source room assignments must be a string map"
+        )
+    else:
+        assignments = dict(source_room_assignments)
     if not selected_rooms or len(selected_rooms) != len(room_ids):
         raise ClimateRegistryImportViolation("selected rooms must be non-empty and unique")
     if not selected_sources or len(selected_sources) != len(source_ids):
@@ -174,16 +233,23 @@ def import_managed_climate_selection(
     candidates: list[ImportedClimateDevice] = []
     for source_id in selected_sources:
         candidate = snapshot.device(source_id)
-        if (
-            candidate is None
-            or candidate.room_id not in room_set
-            or not candidate.suggested_kinds
-        ):
+        if candidate is None or not candidate.suggested_kinds:
+            raise ClimateRegistryImportViolation(
+                "selected device is unavailable or outside selected rooms"
+            )
+        effective_room = candidate.room_id or assignments.get(source_id)
+        if effective_room is None or effective_room not in room_set:
             raise ClimateRegistryImportViolation(
                 "selected device is unavailable or outside selected rooms"
             )
         candidates.append(candidate)
-    candidates.sort(key=lambda item: (item.room_id, item.name.casefold(), item.source_id))
+    candidates.sort(
+        key=lambda item: (
+            item.room_id or assignments.get(item.source_id, ""),
+            item.name.casefold(),
+            item.source_id,
+        )
+    )
 
     id_counts: dict[tuple[str, ClimateDeviceKind], int] = {}
     used_device_ids: set[str] = set()
@@ -193,7 +259,8 @@ def import_managed_climate_selection(
             raise ClimateRegistryImportViolation(
                 "selected device kind was not suggested by import"
             )
-        count_key = (candidate.room_id, kind)
+        room_id = candidate.room_id or assignments[candidate.source_id]
+        count_key = (room_id, kind)
         id_counts[count_key] = id_counts.get(count_key, 0) + 1
         ordinal = id_counts[count_key]
         while True:
@@ -204,7 +271,7 @@ def import_managed_climate_selection(
                 raise ClimateRegistryImportViolation(
                     "selected devices cannot receive unique public ids"
                 )
-            device_id = f"{candidate.room_id[:prefix_length]}{suffix}"
+            device_id = f"{room_id[:prefix_length]}{suffix}"
             if device_id not in used_device_ids:
                 used_device_ids.add(device_id)
                 id_counts[count_key] = ordinal
@@ -214,6 +281,7 @@ def import_managed_climate_selection(
             ClimateDeviceKind.TEMPERATURE_SENSOR,
             ClimateDeviceKind.HUMIDITY_SENSOR,
         }
+        native = candidate.room_id == ""
         registry = add_import_candidate_to_registry(
             registry,
             snapshot,
@@ -231,7 +299,19 @@ def import_managed_climate_selection(
                 if passive
                 else ClimateControlOwner.CLIMATE_CORE
             ),
-            source_engine_binding=not passive,
+            control_entity_id=(
+                candidate.source_id if native and not passive else None
+            ),
+            source_engine_binding=(
+                not passive and not native and not candidate.endpoints
+            ),
+            room_id_override=room_id if native else None,
+            registry_source_id=(
+                f"hausmanhub-native-{candidate.source_id}" if native else None
+            ),
+            observation_entity_id=(
+                candidate.source_id if native and passive else None
+            ),
         )
     return registry
 
@@ -268,10 +348,17 @@ def import_candidate_is_unchanged(
     after = current.device(source_id)
     if before is None or after is None:
         return False
-    before_room = previous.room(before.room_id)
-    after_room = current.room(after.room_id)
-    if before_room is None or after_room is None:
-        return False
+    if before.room_id == "" and after.room_id == "":
+        rooms_match = True
+    else:
+        before_room = previous.room(before.room_id)
+        after_room = current.room(after.room_id)
+        if before_room is None or after_room is None:
+            return False
+        rooms_match = (before_room.room_id, before_room.name) == (
+            after_room.room_id,
+            after_room.name,
+        )
     return (
         (
             before.source_id,
@@ -291,8 +378,7 @@ def import_candidate_is_unchanged(
             after.command_types,
             after.suggested_kinds,
         )
-        and (before_room.room_id, before_room.name)
-        == (after_room.room_id, after_room.name)
+        and rooms_match
     )
 
 
@@ -346,18 +432,40 @@ def _candidate_capabilities(
     return tuple(values)
 
 
+_OBSERVATION_ROLES = {
+    ClimateDeviceKind.TEMPERATURE_SENSOR: ClimateEndpointRole.TEMPERATURE,
+    ClimateDeviceKind.HUMIDITY_SENSOR: ClimateEndpointRole.HUMIDITY,
+}
+
+
 def _candidate_endpoints(
     kind: ClimateDeviceKind,
     control_entity_id: object,
     *,
     source_engine_binding: bool = False,
+    observation_entity_id: object = None,
 ) -> tuple[ClimateEndpoint, ...]:
     if kind not in _ACTIVE_KINDS:
         if control_entity_id is not None and control_entity_id != "":
             raise ClimateRegistryImportViolation(
                 "passive import candidate cannot receive a control entity"
             )
-        return ()
+        if observation_entity_id in {None, ""}:
+            return ()
+        if not isinstance(observation_entity_id, str):
+            raise ClimateRegistryImportViolation(
+                "passive import candidate observation entity is invalid"
+            )
+        if observation_entity_id.partition(".")[0] != "sensor":
+            raise ClimateRegistryImportViolation(
+                "passive import candidate observation entity must be a sensor"
+            )
+        return (
+            ClimateEndpoint(
+                role=_OBSERVATION_ROLES[kind],
+                entity_id=observation_entity_id,
+            ),
+        )
     if source_engine_binding:
         if control_entity_id not in {None, ""}:
             raise ClimateRegistryImportViolation(

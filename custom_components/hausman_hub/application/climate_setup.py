@@ -18,6 +18,7 @@ from .contours import (
     with_climate_schedule,
 )
 from .climate_import import ClimateImportSnapshot
+from .climate_native_setup import UNASSIGNED_CANDIDATE_ROOM
 from .climate_registry_import import (
     ClimateRegistryImportViolation,
     import_managed_climate_selection,
@@ -178,6 +179,7 @@ _SUGGESTION_REASON_NAMES = {
     "device_missing": "Настроенное устройство больше не найдено",
     "registry_mismatch": "Текущая привязка не совпадает с настройкой HausmanHub",
     "room_unavailable": "Комната сейчас недоступна для выбора",
+    "unassigned_room": "Комнату нужно выбрать вручную",
 }
 
 
@@ -415,13 +417,29 @@ def climate_room_suggestions(
             suggested_room_name = proposal_room["name"]
             confidence = "high"
 
+        unassigned = (
+            candidate_status in {"available", "unavailable", "unsupported"}
+            and candidate["room_id"] == UNASSIGNED_CANDIDATE_ROOM
+        )
+        any_room_selectable = any(
+            room["selectable"] is True
+            for room in rooms_payload["rooms"]  # type: ignore[index]
+        )
         can_accept = bool(
             candidate_status == "available"
-            and proposal_room is not None
-            and proposal_room["selectable"] is True
+            and (
+                (
+                    proposal_room is not None
+                    and proposal_room["selectable"] is True
+                )
+                or (unassigned and any_room_selectable)
+            )
         )
         if candidate_status == "available":
-            reason = "detected_room" if can_accept else "room_unavailable"
+            if can_accept and unassigned and proposal_room is None:
+                reason = "unassigned_room"
+            else:
+                reason = "detected_room" if can_accept else "room_unavailable"
         elif candidate_status == "already_configured":
             reason = "already_configured"
         elif candidate_status == "unavailable":
@@ -581,7 +599,7 @@ def create_climate_contour_draft(
             candidate = candidate_by_id.get(candidate_id)
             if candidate is None or candidate["selectable"] is not True:
                 raise ClimateSetupViolation("climate draft candidate is unavailable")
-            if candidate["room_id"] != room_id:
+            if candidate["room_id"] not in {room_id, UNASSIGNED_CANDIDATE_ROOM}:
                 raise ClimateSetupViolation("climate draft candidate room differs")
             if (
                 not isinstance(selected_type, str)
@@ -1295,6 +1313,11 @@ def validate_climate_contour_draft(
             room_ids=[room["room_id"] for room in request_rooms],
             source_ids=selected_source_ids,
             source_kinds=selected_source_kinds,
+            source_room_assignments={
+                source_by_candidate[device["candidate_id"]]: room["room_id"]
+                for room in request_rooms
+                for device in room["devices"]  # type: ignore[union-attr]
+            },
         )
     except ClimateRegistryImportViolation:
         capabilities_supported = False
@@ -1313,6 +1336,11 @@ def validate_climate_contour_draft(
                 room_ids=[room["room_id"] for room in request_rooms],
                 source_ids=selected_source_ids,
                 source_kinds=selected_source_kinds,
+                source_room_assignments={
+                    source_by_candidate[device["candidate_id"]]: room["room_id"]
+                    for room in request_rooms
+                    for device in room["devices"]  # type: ignore[union-attr]
+                },
                 name=draft["name"],
                 mode=draft["mode"],
                 room_parameters=room_parameters,
@@ -1409,11 +1437,19 @@ def build_climate_contour_draft_setup(
             selected_source_ids.append(source_id)
             selected_source_kinds[source_id] = device["type"]
 
+    source_room_assignments: dict[str, str] = {}
+    for room in rooms:
+        room_id = room["id"]
+        for device in room["devices"]:
+            source_room_assignments[
+                source_by_candidate[device["candidate_id"]]
+            ] = room_id
     climate_registry, contours = build_climate_contour_setup(
         snapshot,
         room_ids=room_ids,
         source_ids=selected_source_ids,
         source_kinds=selected_source_kinds,
+        source_room_assignments=source_room_assignments,
         name=draft["name"],
         mode=draft["mode"],
         room_parameters=room_parameters,

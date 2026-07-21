@@ -123,6 +123,7 @@ CONTOUR_DEVICES_FIELD = "contour_devices"
 CONTOUR_TARGET_TEMPERATURE_FIELD = "contour_target_temperature"
 CONTOUR_TARGET_HUMIDITY_FIELD = "contour_target_humidity"
 CONTOUR_STRATEGY_FIELD = "contour_strategy"
+CONTOUR_ROOM_DEVICES_FIELD = "contour_room_devices"
 CONTOUR_CONFIRM_FIELD = "confirm_contour_save"
 CONTOUR_STATUS_CLOSE_FIELD = "close_contour_status"
 CONTOUR_APPLY_CONFIRM_FIELD = "confirm_contour_apply"
@@ -610,23 +611,27 @@ def _climate_contour_room_schema(
     temperature_default: float,
     humidity_default: int,
     strategy_default: str,
+    unassigned_devices: list[dict[str, str]] | None = None,
 ) -> vol.Schema:
-    return vol.Schema(
-        {
-            vol.Required(
-                CONTOUR_TARGET_TEMPERATURE_FIELD,
-                default=f"{temperature_default:.1f}",
-            ): NATIVE_TARGET_TEMPERATURE_SELECTOR,
-            vol.Required(
-                CONTOUR_TARGET_HUMIDITY_FIELD,
-                default=str(humidity_default),
-            ): NATIVE_TARGET_HUMIDITY_SELECTOR,
-            vol.Required(
-                CONTOUR_STRATEGY_FIELD,
-                default=strategy_default,
-            ): CONTOUR_STRATEGY_SELECTOR,
-        }
-    )
+    fields: dict[vol.Marker, object] = {
+        vol.Required(
+            CONTOUR_TARGET_TEMPERATURE_FIELD,
+            default=f"{temperature_default:.1f}",
+        ): NATIVE_TARGET_TEMPERATURE_SELECTOR,
+        vol.Required(
+            CONTOUR_TARGET_HUMIDITY_FIELD,
+            default=str(humidity_default),
+        ): NATIVE_TARGET_HUMIDITY_SELECTOR,
+        vol.Required(
+            CONTOUR_STRATEGY_FIELD,
+            default=strategy_default,
+        ): CONTOUR_STRATEGY_SELECTOR,
+    }
+    if unassigned_devices:
+        fields[vol.Required(CONTOUR_ROOM_DEVICES_FIELD)] = SelectSelector(
+            SelectSelectorConfig(options=unassigned_devices, multiple=True)
+        )
+    return vol.Schema(fields)
 
 
 def _contour_confirm_schema() -> vol.Schema:
@@ -943,7 +948,10 @@ def _climate_import_candidate_schema(
     )
 
 
-def _climate_import_device_schema(candidate: ImportedClimateDevice) -> vol.Schema:
+def _climate_import_device_schema(
+    candidate: ImportedClimateDevice,
+    draft_rooms: list[SelectOptionDict] | None = None,
+) -> vol.Schema:
     from .application.climate_registry_import import candidate_control_domain
 
     kinds = [value.value for value in candidate.suggested_kinds]
@@ -965,6 +973,13 @@ def _climate_import_device_schema(candidate: ImportedClimateDevice) -> vol.Schem
             default="observed",
         ): CLIMATE_DEVICE_OWNER_SELECTOR,
     }
+    if not candidate.room_id and draft_rooms:
+        fields[vol.Required(CLIMATE_DEVICE_ROOM_FIELD)] = SelectSelector(
+            SelectSelectorConfig(
+                options=draft_rooms,
+                translation_key="climate_device_room",
+            )
+        )
     domains: set[str] = set()
     for value in kinds:
         domain = candidate_control_domain(value)
@@ -979,9 +994,19 @@ def _climate_import_device_schema(candidate: ImportedClimateDevice) -> vol.Schem
             selector_domain = (
                 next(iter(domains)) if len(domains) == 1 else sorted(domains)
             )
-        fields[vol.Required(CLIMATE_DEVICE_CONTROL_ENTITY_FIELD)] = EntitySelector(
-            EntitySelectorConfig(domain=selector_domain, multiple=False)
-        )
+        if candidate.room_id:
+            fields[vol.Required(CLIMATE_DEVICE_CONTROL_ENTITY_FIELD)] = EntitySelector(
+                EntitySelectorConfig(domain=selector_domain, multiple=False)
+            )
+        else:
+            fields[
+                vol.Required(
+                    CLIMATE_DEVICE_CONTROL_ENTITY_FIELD,
+                    default=candidate.source_id,
+                )
+            ] = EntitySelector(
+                EntitySelectorConfig(domain=selector_domain, multiple=False)
+            )
     return vol.Schema(fields)
 
 
@@ -1317,6 +1342,7 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
     _contour_source_ids_draft: tuple[str, ...] = ()
     _contour_room_index: int = 0
     _contour_room_parameters_draft: dict[str, dict[str, object]] | None = None
+    _contour_room_devices_draft: dict[str, tuple[str, ...]] | None = None
     _contour_registry_draft: Mapping[str, object] | None = None
     _contour_definition_draft: Mapping[str, object] | None = None
     _contour_preview: Mapping[str, Any] | None = None
@@ -2397,14 +2423,14 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
         device_options: list[dict[str, str]] = []
         for token, device in tokens.items():
             device_room = snapshot.room(device.room_id)
-            if device_room is None:
+            if device.room_id and device_room is None:
                 continue
-            device_options.append(
-                SelectOptionDict(
-                    value=token,
-                    label=f"{device_room.name} — {device.name}",
-                )
+            label = (
+                f"{device_room.name} — {device.name}"
+                if device_room is not None
+                else device.name
             )
+            device_options.append(SelectOptionDict(value=token, label=label))
         saved_parameters = self._contour_saved_room_parameters or {}
         room_defaults = [
             room.room_id
@@ -2486,16 +2512,33 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
             ):
                 selected_rooms = set(room_ids)
                 if any(
-                    value is not None and value.room_id not in selected_rooms
+                    value is not None
+                    and value.room_id
+                    and value.room_id not in selected_rooms
                     for value in selected
                 ):
                     errors[CONTOUR_DEVICES_FIELD] = "device_outside_contour_rooms"
-                elif any(
+                elif not any(
+                    value is not None and not value.room_id for value in selected
+                ) and any(
                     not any(
                         device is not None and device.room_id == room_id
                         for device in selected
                     )
                     for room_id in selected_rooms
+                ):
+                    errors[CONTOUR_DEVICES_FIELD] = "contour_room_device_required"
+                elif sum(
+                    1
+                    for value in selected
+                    if value is not None and not value.room_id
+                ) < sum(
+                    1
+                    for room_id in selected_rooms
+                    if not any(
+                        device is not None and device.room_id == room_id
+                        for device in selected
+                    )
                 ):
                     errors[CONTOUR_DEVICES_FIELD] = "contour_room_device_required"
             if not errors:
@@ -2515,6 +2558,15 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
                 )
                 self._contour_room_index = 0
                 self._contour_room_parameters_draft = {}
+                self._contour_room_devices_draft = {
+                    room.room_id: tuple(
+                        device.source_id
+                        for device in selected
+                        if device is not None and device.room_id == room.room_id
+                    )
+                    for room in snapshot.rooms
+                    if room.room_id in selected_room_ids
+                }
                 return await self.async_step_climate_contour_room()
         return self.async_show_form(
             step_id="climate_contour_setup",
@@ -2560,6 +2612,25 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
             temperature_default = float(saved["target_temperature"])
             humidity_default = int(saved["target_humidity"])
             strategy_default = str(saved["strategy"])
+        tokens = self._contour_device_tokens or {}
+        assigned_elsewhere = {
+            source_id
+            for other_room, source_ids in (self._contour_room_devices_draft or {}).items()
+            if other_room != room_id
+            for source_id in source_ids
+        }
+        unassigned_options = [
+            SelectOptionDict(value=device.source_id, label=device.name)
+            for device in tokens.values()
+            if not device.room_id and device.source_id not in assigned_elsewhere
+        ]
+        expected_fields = {
+            CONTOUR_TARGET_TEMPERATURE_FIELD,
+            CONTOUR_TARGET_HUMIDITY_FIELD,
+            CONTOUR_STRATEGY_FIELD,
+        }
+        if unassigned_options:
+            expected_fields.add(CONTOUR_ROOM_DEVICES_FIELD)
         errors: dict[str, str] = {}
         if user_input is not None:
             try:
@@ -2574,28 +2645,75 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
                         "strategy": user_input.get(CONTOUR_STRATEGY_FIELD),
                     }
                 )
-                if set(user_input) != {
-                    CONTOUR_TARGET_TEMPERATURE_FIELD,
-                    CONTOUR_TARGET_HUMIDITY_FIELD,
-                    CONTOUR_STRATEGY_FIELD,
-                }:
+                if set(user_input) != expected_fields:
                     raise ContourRegistryViolation(
                         "room parameter form has unsupported fields"
+                    )
+                room_device_ids: tuple[str, ...] = ()
+                if unassigned_options:
+                    raw_devices = user_input.get(CONTOUR_ROOM_DEVICES_FIELD)
+                    valid_ids = {
+                        option["value"] for option in unassigned_options
+                    }
+                    if (
+                        not isinstance(raw_devices, list)
+                        or any(
+                            not isinstance(value, str) or value not in valid_ids
+                            for value in raw_devices
+                        )
+                    ):
+                        raise ContourRegistryViolation(
+                            "room device assignment is invalid"
+                        )
+                    room_device_ids = tuple(dict.fromkeys(raw_devices))
+                    remaining_rooms = [
+                        later_room
+                        for later_room in self._contour_room_ids_draft[
+                            self._contour_room_index + 1 :
+                        ]
+                        if not (self._contour_room_devices_draft or {}).get(
+                            later_room
+                        )
+                    ]
+                    if len(unassigned_options) - len(room_device_ids) < len(
+                        remaining_rooms
+                    ):
+                        raise ContourRegistryViolation(
+                            "later rooms also need devices"
+                        )
+                already_assigned = (self._contour_room_devices_draft or {}).get(
+                    room_id, ()
+                )
+                if not already_assigned and not room_device_ids:
+                    raise ContourRegistryViolation(
+                        "room needs at least one device"
                     )
             except ContourRegistryViolation:
                 errors["base"] = "invalid_contour_room_parameters"
             else:
                 parameters[room_id] = normalized
+                if self._contour_room_devices_draft is not None:
+                    self._contour_room_devices_draft[room_id] = (
+                        tuple(already_assigned) + room_device_ids
+                    )
                 if self._contour_room_index + 1 < len(
                     self._contour_room_ids_draft
                 ):
                     self._contour_room_index += 1
                     return await self.async_step_climate_contour_room()
+                assignments = {
+                    source_id: assigned_room
+                    for assigned_room, source_ids in (
+                        self._contour_room_devices_draft or {}
+                    ).items()
+                    for source_id in source_ids
+                }
                 try:
                     registry, contours = build_climate_contour_setup(
                         snapshot,
                         room_ids=list(self._contour_room_ids_draft),
                         source_ids=list(self._contour_source_ids_draft),
+                        source_room_assignments=assignments,
                         name=self._contour_name_draft,
                         mode=self._contour_mode_draft,
                         room_parameters=parameters,
@@ -2634,6 +2752,7 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
                 temperature_default=temperature_default,
                 humidity_default=humidity_default,
                 strategy_default=strategy_default,
+                unassigned_devices=unassigned_options,
             ),
             errors=errors,
             description_placeholders={
@@ -3181,6 +3300,7 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
                     ):
                         raise ValueError("import candidate changed")
                     registry = registry_from_payload(self._copy_registry_draft())
+                    native_candidate = not selected.room_id
                     imported = add_import_candidate_to_registry(
                         registry,
                         current,
@@ -3193,6 +3313,19 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
                         control_entity_id=user_input.get(
                             CLIMATE_DEVICE_CONTROL_ENTITY_FIELD
                         ),
+                        room_id_override=(
+                            user_input.get(CLIMATE_DEVICE_ROOM_FIELD)
+                            if native_candidate
+                            else None
+                        ),
+                        registry_source_id=(
+                            f"hausmanhub-native-{source_id}"
+                            if native_candidate
+                            else None
+                        ),
+                        observation_entity_id=(
+                            source_id if native_candidate else None
+                        ),
                     )
                 except ValueError:
                     errors["base"] = "invalid_climate_candidate"
@@ -3204,7 +3337,7 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
                     return await self.async_step_climate_registry()
         return self.async_show_form(
             step_id="climate_import_device",
-            data_schema=_climate_import_device_schema(selected),
+            data_schema=_climate_import_device_schema(selected, self._draft_rooms()),
             errors=errors,
         )
 
@@ -3592,23 +3725,33 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
 
         registry = registry_from_payload(self._copy_registry_draft())
         registered_sources = {device.source_id for device in registry.devices}
+        registered_entities = {
+            endpoint.entity_id
+            for device in registry.devices
+            for endpoint in device.endpoints
+        }
         candidates: dict[str, ImportedClimateDevice] = {}
         options: list[dict[str, str]] = []
         for index, candidate in enumerate(snapshot.devices, start=1):
             if (
                 candidate.source_id in registered_sources
+                or candidate.source_id in registered_entities
                 or not candidate.suggested_kinds
             ):
                 continue
             room = snapshot.room(candidate.room_id)
-            if room is None:
-                continue
+            if candidate.room_id:
+                if room is None:
+                    continue
+                label = f"{room.name} — {candidate.name}"
+            else:
+                label = candidate.name
             token = f"candidate_{index:03d}"
             candidates[token] = candidate
             options.append(
                 SelectOptionDict(
                     value=token,
-                    label=f"{room.name} — {candidate.name}",
+                    label=label,
                 )
             )
         self._import_snapshot = snapshot
@@ -3643,6 +3786,7 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
         self._contour_source_ids_draft = ()
         self._contour_room_index = 0
         self._contour_room_parameters_draft = None
+        self._contour_room_devices_draft = None
         self._contour_registry_draft = None
         self._contour_definition_draft = None
         self._contour_preview = None

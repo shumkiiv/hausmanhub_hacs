@@ -183,6 +183,7 @@ def _bound_device(
         available=bool(entry is not None and entry.available),
         command_types=native_device_command_types(device),
         suggested_kinds=(device.kind,),
+        endpoints=device.endpoints,
     )
 
 

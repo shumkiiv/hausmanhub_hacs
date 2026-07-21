@@ -69,6 +69,7 @@ from .climate_native_projections import (
     native_contour_apply_preview,
     native_contour_snapshot,
 )
+from .climate_native_setup import build_native_climate_setup_snapshot
 from .climate_comparison import build_climate_comparison_snapshot
 from .climate_demands import build_climate_demand_snapshot
 from .climate_operations import _ClimateOperationLedger, ClimateOperationReceipt
@@ -410,30 +411,21 @@ class ClimateRuntime:
         """Create an unsaved draft after one read-only discovery refresh."""
 
         async with self._lock:
-            snapshot = await self._async_refresh_unlocked(
-                persist_evidence=False,
-                record_evidence=False,
-            )
+            snapshot = await self._async_native_setup_snapshot_unlocked()
             return create_climate_contour_draft(self._registry, snapshot, payload)
 
     async def async_climate_setup_options(self) -> dict[str, object]:
         """Return current safe choices for the local climate setup form."""
 
         async with self._lock:
-            snapshot = await self._async_refresh_unlocked(
-                persist_evidence=False,
-                record_evidence=False,
-            )
+            snapshot = await self._async_native_setup_snapshot_unlocked()
             return climate_setup_options(self._registry, snapshot)
 
     async def async_current_contour_setup(self) -> dict[str, object]:
         """Return saved editor values without persistence or commands."""
 
         async with self._lock:
-            snapshot = await self._async_refresh_unlocked(
-                persist_evidence=False,
-                record_evidence=False,
-            )
+            snapshot = await self._async_native_setup_snapshot_unlocked()
             return current_climate_contour_setup(
                 self._registry,
                 self._contours,
@@ -447,10 +439,7 @@ class ClimateRuntime:
         """Validate one draft without persistence, commands, or shadow evidence."""
 
         async with self._lock:
-            snapshot = await self._async_refresh_unlocked(
-                persist_evidence=False,
-                record_evidence=False,
-            )
+            snapshot = await self._async_native_setup_snapshot_unlocked()
             return validate_climate_contour_draft(
                 self._registry,
                 snapshot,
@@ -470,10 +459,7 @@ class ClimateRuntime:
                 )
             if self._contour_store is None:
                 raise ClimateRuntimeUnavailable("contour storage is unavailable")
-            snapshot = await self._async_refresh_unlocked(
-                persist_evidence=False,
-                record_evidence=False,
-            )
+            snapshot = await self._async_native_setup_snapshot_unlocked()
             registry, contours, validation = build_climate_contour_draft_setup(
                 self._registry,
                 snapshot,
@@ -541,7 +527,7 @@ class ClimateRuntime:
         """Refresh one typed read-only snapshot for the local options wizard."""
 
         async with self._lock:
-            return await self._async_refresh_unlocked()
+            return await self._async_native_setup_snapshot_unlocked()
 
     async def async_registry_payload(self) -> dict[str, object]:
         """Return the exact private registry shape to a local admin."""
@@ -1865,6 +1851,21 @@ class ClimateRuntime:
         if type(value) is not int or value < 0:
             raise RuntimeError("climate runtime clock returned an unsafe timestamp")
         return value
+
+    async def _async_native_setup_snapshot_unlocked(self) -> ClimateImportSnapshot:
+        """Build the wizard discovery snapshot without any bridge contact."""
+
+        if self._ha_state_view is None:
+            raise ClimateRuntimeUnavailable("climate state is unavailable")
+        observation = self._native_ha_observation(self._safe_now())
+        if observation is None:
+            raise ClimateRuntimeUnavailable("climate state is unavailable")
+        catalog = self._ha_state_view.entity_catalog()
+        return build_native_climate_setup_snapshot(
+            self._registry,
+            observation,
+            catalog,
+        )
 
     def _require_client(self) -> ClimateBridgeClient:
         if (

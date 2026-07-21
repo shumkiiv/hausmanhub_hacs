@@ -63,6 +63,7 @@ class ImportedClimateDevice:
     available: bool
     command_types: tuple[str, ...]
     suggested_kinds: tuple[ClimateDeviceKind, ...]
+    endpoints: tuple = ()
 
 
 @dataclass(frozen=True, slots=True)
