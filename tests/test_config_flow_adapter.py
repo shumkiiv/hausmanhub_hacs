@@ -1001,6 +1001,10 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         from custom_components.hausman_hub.domain.configuration import SafeConfiguration
         from custom_components.hausman_hub.domain.contours import ContourRegistry
         from tests.test_climate_import import source_payload
+        from tests.test_climate_runtime import (
+            ReflectingStrictExecutor,
+            native_application_inputs,
+        )
 
         class ClimateStore:
             def __init__(self) -> None:
@@ -1059,6 +1063,7 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
             registry_store=climate_store,
             contour_store=contour_store,
             bridge_client=bridge,
+            now_ms=lambda: 1784280005000,
         )
         await runtime.async_start()
         options_flow = self.config_flow.HausmanHubOptionsFlow()
@@ -1153,6 +1158,14 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(1, len(climate_store.registry.rooms))
         self.assertEqual(1, len(climate_store.registry.devices))
         self.assertEqual([], bridge.executed)
+        native_registry, state_view = native_application_inputs(
+            climate_store.registry
+        )
+        climate_store.registry = native_registry
+        runtime._registry = native_registry
+        runtime._ha_state_view = state_view
+        executor = ReflectingStrictExecutor(state_view)
+        runtime._strict_ha_call_executor = executor
 
         options_flow.config_entry.options = dict(saved["data"])
         bridge.payload["rooms"][0]["mode"] = "manual"
@@ -1279,7 +1292,9 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
             "Выполнено",
             result["description_placeholders"]["status"],
         )
-        self.assertEqual(2, len(bridge.executed))
+        self.assertEqual([], bridge.executed)
+        self.assertEqual(1, len(executor.batches))
+        self.assertGreater(state_view.read_count, 0)
         closed = await options_flow.async_step_climate_contour_apply_result(
             {"close_contour_apply_result": True}
         )
@@ -1337,9 +1352,12 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("create_entry", schedule_saved["type"])
         self.assertTrue(contour_store.registry.contours[0].schedule.enabled)
         self.assertEqual("07:00", contour_store.registry.contours[0].schedule.day_start)
-        self.assertEqual([], bridge.executed[2:])
+        self.assertEqual(1, len(executor.batches))
 
+        reads_before_schedule = state_view.read_count
         await runtime.async_run_climate_schedule(datetime(2026, 7, 19, 12, 0))
+        self.assertGreater(state_view.read_count, reads_before_schedule)
+        self.assertEqual(1, len(executor.batches))
         temporary_flow = self.config_flow.HausmanHubOptionsFlow()
         temporary_flow.config_entry = schedule_flow.config_entry
         temporary_flow.hass = options_flow.hass
@@ -1355,6 +1373,7 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
             "Living room",
             temperature_form["description_placeholders"]["room_name"],
         )
+        reads_before_temporary = state_view.read_count
         temporary_result = await temporary_flow.async_step_temporary_temperature(
             {
                 "temporary_temperature": 23.5,
@@ -1374,6 +1393,8 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
             "Выполнено",
             temporary_result["description_placeholders"]["status"],
         )
+        self.assertGreater(state_view.read_count, reads_before_temporary)
+        self.assertEqual(1, len(executor.batches))
         room_policy = contour_store.registry.contours[0].rooms[0]
         self.assertEqual(23.5, room_policy.target_temperature)
         self.assertEqual(24.5, room_policy.profile_settings.target_temperature)
@@ -1392,6 +1413,7 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
             {"temporary_temperature_room": "living"}
         )
         self.assertEqual("temporary_temperature_clear", return_form["step_id"])
+        reads_before_return = state_view.read_count
         return_result = await return_flow.async_step_temporary_temperature_clear(
             {"confirm_temporary_temperature_clear": True}
         )
@@ -1408,6 +1430,8 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
             "Выполнено",
             return_result["description_placeholders"]["status"],
         )
+        self.assertGreater(state_view.read_count, reads_before_return)
+        self.assertEqual(1, len(executor.batches))
         self.assertIsNone(contour_store.registry.contours[0].rooms[0].temporary_override)
 
         blocked_manual_flow = self.config_flow.HausmanHubOptionsFlow()
@@ -1426,7 +1450,8 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("disabled", disabled["data"]["climate_bridge_mode"])
         self.assertNotIn("climate_bridge_target", disabled["data"])
         self.assertEqual("disabled", contour_store.registry.contours[0].mode.value)
-        self.assertEqual(6, len(bridge.executed))
+        self.assertEqual([], bridge.executed)
+        self.assertEqual(1, len(executor.batches))
 
     async def test_contour_wizard_collects_each_room_parameters_separately(
         self,

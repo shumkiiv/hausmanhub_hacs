@@ -477,6 +477,26 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
         self.view = self.hass.http.views[0]
 
+    def assert_climate_route_payload_redacted(self, payload: object) -> None:
+        serialized = json.dumps(payload, ensure_ascii=True, sort_keys=True)
+        for forbidden in (
+            '"entity_id"',
+            '"entityId"',
+            '"source_id"',
+            '"sourceId"',
+            '"service"',
+            '"services"',
+            '"call"',
+            '"calls"',
+            '"backend_payload"',
+            '"backendPayload"',
+            "synthetic-ac-source-living",
+            "climate.synthetic_living_ac",
+            "127.0.0.1:1880",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, serialized)
+
     def test_view_returns_exactly_nine_counts_for_a_local_read_only_user(self) -> None:
         response = asyncio.run(
             self.view.get(FakeRequest("127.0.0.1", reader_user("system-read-only")))
@@ -1405,8 +1425,12 @@ class LocalSummaryAccessTest(unittest.TestCase):
             build_climate_contour_setup,
         )
         from custom_components.hausman_hub.domain.climate_bridge import ClimateBridgeMode
-        from custom_components.hausman_hub.domain.configuration import SafeConfiguration
         from tests.test_climate_import import source_payload
+        from tests.test_climate_runtime import (
+            ReflectingStrictExecutor,
+            configuration,
+            native_application_inputs,
+        )
 
         snapshot = import_climate_state(source_payload())
         registry, contours = build_climate_contour_setup(
@@ -1419,6 +1443,8 @@ class LocalSummaryAccessTest(unittest.TestCase):
             target_humidity=45,
             strategy="normal",
         )
+        registry, state_view = native_application_inputs(registry)
+        executor = ReflectingStrictExecutor(state_view)
 
         class Store:
             def __init__(self, value: object) -> None:
@@ -1450,13 +1476,12 @@ class LocalSummaryAccessTest(unittest.TestCase):
         bridge = Bridge()
         runtime = ClimateRuntime(
             entry_id=self.entry.entry_id,
-            configuration=SafeConfiguration(
-                mode="shadow",
-                climate_bridge_mode=ClimateBridgeMode.SHADOW,
-            ),
+            configuration=configuration(ClimateBridgeMode.MANAGED),
             registry_store=registry_store,
             contour_store=contour_store,
             bridge_client=bridge,
+            strict_ha_call_executor=executor,
+            ha_state_view=state_view,
             now_ms=lambda: 1784512800000,
         )
         asyncio.run(runtime.async_start())
@@ -1500,8 +1525,10 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertFalse(response.payload["commands_sent"])
         self.assertEqual(fetches_before, bridge.fetch_count)
         self.assertEqual([], bridge.executed)
+        self.assertEqual([], executor.batches)
         self.assertEqual(1, len(contour_store.saved))
         self.assertEqual("no-store", response.headers.get("Cache-Control"))
+        self.assert_climate_route_payload_redacted(response.payload)
         self.assertEqual(
             409,
             asyncio.run(
@@ -1526,6 +1553,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         oversized.content_length = 256 * 1024 + 1
         self.assertEqual(400, asyncio.run(view.post(oversized)).status)
         self.assertEqual([], bridge.executed)
+        self.assertEqual([], executor.batches)
 
     def test_local_admin_enables_schedule_without_sending_device_commands(self) -> None:
         """The strict schedule route needs consent and only persists the timer."""
@@ -1538,8 +1566,12 @@ class LocalSummaryAccessTest(unittest.TestCase):
             build_climate_contour_setup,
         )
         from custom_components.hausman_hub.domain.climate_bridge import ClimateBridgeMode
-        from custom_components.hausman_hub.domain.configuration import SafeConfiguration
         from tests.test_climate_import import source_payload
+        from tests.test_climate_runtime import (
+            ReflectingStrictExecutor,
+            configuration,
+            native_application_inputs,
+        )
 
         snapshot = import_climate_state(source_payload())
         registry, contours = build_climate_contour_setup(
@@ -1552,6 +1584,8 @@ class LocalSummaryAccessTest(unittest.TestCase):
             target_humidity=45,
             strategy="normal",
         )
+        registry, state_view = native_application_inputs(registry)
+        executor = ReflectingStrictExecutor(state_view)
 
         class Store:
             def __init__(self, value: object) -> None:
@@ -1582,13 +1616,12 @@ class LocalSummaryAccessTest(unittest.TestCase):
         bridge = Bridge()
         runtime = ClimateRuntime(
             entry_id=self.entry.entry_id,
-            configuration=SafeConfiguration(
-                mode="shadow",
-                climate_bridge_mode=ClimateBridgeMode.MANAGED,
-            ),
+            configuration=configuration(ClimateBridgeMode.MANAGED),
             registry_store=Store(registry),
             contour_store=contour_store,
             bridge_client=bridge,
+            strict_ha_call_executor=executor,
+            ha_state_view=state_view,
             now_ms=lambda: 1784512800000,
         )
         asyncio.run(runtime.async_start())
@@ -1623,8 +1656,10 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertFalse(response.payload["commands_sent"])
         self.assertEqual(fetches_before, bridge.fetch_count)
         self.assertEqual([], bridge.executed)
+        self.assertEqual([], executor.batches)
         self.assertEqual(1, len(contour_store.saved))
         self.assertEqual("no-store", response.headers.get("Cache-Control"))
+        self.assert_climate_route_payload_redacted(response.payload)
         self.assertEqual(
             409,
             asyncio.run(
@@ -1658,6 +1693,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertEqual(400, asyncio.run(view.post(oversized)).status)
         self.assertEqual(1, len(contour_store.saved))
         self.assertEqual([], bridge.executed)
+        self.assertEqual([], executor.batches)
 
     def test_managed_contour_routes_apply_once_and_confirm_engine_state(self) -> None:
         """The tablet may apply only saved settings through the managed contour."""
@@ -1672,9 +1708,13 @@ class LocalSummaryAccessTest(unittest.TestCase):
             with_climate_schedule,
         )
         from custom_components.hausman_hub.domain.climate_bridge import ClimateBridgeMode
-        from custom_components.hausman_hub.domain.configuration import SafeConfiguration
         from custom_components.hausman_hub.domain.contours import ClimateProfile
         from tests.test_climate_import import source_payload
+        from tests.test_climate_runtime import (
+            ReflectingStrictExecutor,
+            configuration,
+            native_application_inputs,
+        )
 
         source = source_payload()
         initial = import_climate_state(source)
@@ -1701,6 +1741,8 @@ class LocalSummaryAccessTest(unittest.TestCase):
         source["rooms"][0]["mode"] = "manual"
         source["rooms"][0]["targets"]["temperature"] = 26
         source["rooms"][0]["targets"]["targetStrategy"] = "soft"
+        registry, state_view = native_application_inputs(registry)
+        executor = ReflectingStrictExecutor(state_view)
 
         class Store:
             async def async_load(self):
@@ -1741,14 +1783,13 @@ class LocalSummaryAccessTest(unittest.TestCase):
         bridge = Bridge()
         runtime = ClimateRuntime(
             entry_id=self.entry.entry_id,
-            configuration=SafeConfiguration(
-                mode="shadow",
-                climate_bridge_mode=ClimateBridgeMode.MANAGED,
-            ),
+            configuration=configuration(ClimateBridgeMode.MANAGED),
             registry_store=Store(),
             contour_store=ContourStore(),
             bridge_client=bridge,
-            operation_id_factory=iter(("4" * 32, "5" * 32)).__next__,
+            strict_ha_call_executor=executor,
+            ha_state_view=state_view,
+            operation_id_factory=iter(("4" * 32,)).__next__,
             now_ms=lambda: 1784280005000,
         )
         asyncio.run(runtime.async_start())
@@ -1796,11 +1837,25 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
         self.assertEqual("Выполнено", first.payload["status_name"])
         self.assertEqual(first.payload, duplicate.payload)
-        self.assertEqual(3, len(bridge.executed))
-        serialized = json.dumps(first.payload, sort_keys=True)
-        self.assertNotIn("synthetic-ac-source-living", serialized)
-        self.assertNotIn("backend_payload", serialized)
+        self.assertEqual([], bridge.executed)
+        self.assertEqual(1, len(executor.batches))
+        self.assert_climate_route_payload_redacted(first.payload)
 
+        registry, temporary_state_view = native_application_inputs(registry)
+        temporary_executor = ReflectingStrictExecutor(temporary_state_view)
+        temporary_runtime = ClimateRuntime(
+            entry_id=self.entry.entry_id,
+            configuration=configuration(ClimateBridgeMode.MANAGED),
+            registry_store=Store(),
+            contour_store=ContourStore(),
+            bridge_client=bridge,
+            strict_ha_call_executor=temporary_executor,
+            ha_state_view=temporary_state_view,
+            operation_id_factory=iter(("5" * 32,)).__next__,
+            now_ms=lambda: 1784280005000,
+        )
+        asyncio.run(temporary_runtime.async_start())
+        self.hass.data["hausman_hub"]["climate_runtime"] = temporary_runtime
         temporary_path = "/api/hausman_hub/v1/contours/temporary-temperature"
         invalid_temporary = asyncio.run(
             views[temporary_path].post(
@@ -1849,7 +1904,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                         "contour_id": "climate",
                         "room_id": "living",
                         "action": "set",
-                        "target_temperature": 23.5,
+                        "target_temperature": 22.5,
                         "confirm": True,
                     },
                 )
@@ -1867,10 +1922,13 @@ class LocalSummaryAccessTest(unittest.TestCase):
             temporary_response.payload["action"]["room_id"],
         )
         self.assertEqual(
-            23.5,
+            22.5,
             temporary_response.payload["action"]["target_temperature"],
         )
-        self.assertEqual(4, len(bridge.executed))
+        self.assertEqual([], bridge.executed)
+        self.assertEqual(1, len(executor.batches))
+        self.assertEqual(1, len(temporary_executor.batches))
+        self.assert_climate_route_payload_redacted(temporary_response.payload)
 
     def test_view_rejects_admin_mixed_group_system_and_public_requests(self) -> None:
         rejected_requests = (
