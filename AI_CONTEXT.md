@@ -356,6 +356,34 @@ Last updated: 2026-07-21.
   repository remain unchanged. The final staged tree passed 513 local tests,
   the HACS/package/boundary/Android checks, and disposable Home Assistant
   Core   2026.6.4/2026.7.0.
+- Version 1.9.9 completes roadmap item 36 sub-step 36e1. The new pure
+  module `application/climate_native_projections.py` builds the five
+  external projection payloads (Android tablet contract v12, contour
+  snapshot, contour apply preview, readiness, administrator snapshot)
+  from the native `ClimateObservationSnapshot` and the version-2
+  registry only, with no bridge contact possible by construction.
+  Production consumers are NOT switched yet; that is sub-step 36e2,
+  which will also need a neutral home for the presentation helpers the
+  module currently imports from `android_climate.py` (review finding,
+  deliberately deferred). Golden and parity tests
+  (`tests/test_climate_native_projections.py`) lock byte-identical
+  payloads against the legacy builders for the same physical situation
+  plus the documented semantic differences: native reconciliation
+  covers configured devices only (bridge-only devices no longer count
+  as unregistered), the native apply preview reports the real strict
+  HA plan call count instead of legacy bridge command counts, and
+  integral floats versus JSON ints are normalized in comparison.
+  Independent review initially returned FAIL; one fix iteration added
+  readiness hardening (full room-observation coverage and device
+  availability required), room-mismatch checks in the contour room
+  status, an authority gate for settings apply availability, a positive
+  CANARY control-gate baseline with single-mutation closures, and
+  serialization stability goldens. The follow-up review passed. The
+  final tree passed 599 local tests, the HACS/package/boundary/Android
+  checks, and the staged-version check; the disposable Core smoke was
+  skipped because no runtime path changed. The external module still
+  serves the registry import and setup/discovery wizards (36f) and the
+  shadow evidence and legacy canary route (36g).
 - Version 1.9.8 completes roadmap item 36 sub-step 36d. Settings
   application no longer uses the external Climate API: manual contour
   apply, scheduled day/night switching, temporary temperature, and return
@@ -2003,5 +2031,5 @@ Engineering and review rules are in
 
 - Obsidian/context index: `LLM_WIKI/00_Index.md`.
 - Latest generated context: `LLM_WIKI/Context.md`.
-- Last sync: 2026-07-21T12:16:29+03:00.
+- Last sync: 2026-07-21T13:27:59+03:00.
 <!-- llm-wiki-sync:end -->
