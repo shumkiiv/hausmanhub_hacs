@@ -356,6 +356,29 @@ Last updated: 2026-07-21.
   repository remain unchanged. The final staged tree passed 513 local tests,
   the HACS/package/boundary/Android checks, and disposable Home Assistant
   Core   2026.6.4/2026.7.0.
+- Version 1.9.7 completes roadmap item 36 sub-step 36c. The whole internal
+  climate pipeline (preview, targets, demands, resolutions, equipment,
+  stability, policy, isolation, comparison, call translation, trial and
+  managed rooms) now reads only the native Home Assistant observation from
+  1.9.6; the external Climate API is no longer touched by the internal
+  contour. The new `HomeAssistantClimateStateView` boundary exposes bounded
+  immutable states with a strict attribute whitelist; a broken state source
+  fails the observation closed with no bridge fallback and no cross-system
+  fact mixing. Disabled mode still does not observe. Comparison now checks
+  the native plan against actual HA state: alignment suppresses redundant
+  calls, divergence permits action, incomparability denies. The external
+  module still serves the Android public snapshot, settings application,
+  readiness, and setup wizards (sub-steps 36d-36f). The final staged tree
+  passed 549 local tests, the HACS/package/boundary/Android checks, and
+  disposable Home Assistant Core 2026.6.4/2026.7.0. The independent
+  read-only review initially stopped the staged tree (FAIL): an absent
+  native state view still fell back to the external bridge in the preview
+  and shared observation paths, and preview/managed coverage was missing.
+  One fix iteration removed the fallback (no state view now yields an
+  unavailable observation, never a bridge read), added poison-bridge
+  preview/managed tests, and migrated 22 legacy tests to the native
+  observation path. The follow-up review passed in OpenCode session
+  `ses_07cd1c3ffffeM9Isuzx4UKkMk7`; the suite now has 551 local tests.
 - Version 1.9.6 completes roadmap item 36 sub-step 36b. The pure
   `application/climate_ha_observations.py` adapter builds the internal
   observation snapshot directly from Home Assistant states through the
@@ -1954,5 +1977,5 @@ Engineering and review rules are in
 
 - Obsidian/context index: `LLM_WIKI/00_Index.md`.
 - Latest generated context: `LLM_WIKI/Context.md`.
-- Last sync: 2026-07-21T07:51:13+03:00.
+- Last sync: 2026-07-21T09:23:20+03:00.
 <!-- llm-wiki-sync:end -->

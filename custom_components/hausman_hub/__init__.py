@@ -45,6 +45,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .climate_api import register_climate_api
     from .climate_evidence_storage import HomeAssistantClimateEvidenceStore
     from .climate_ha_executor import HomeAssistantClimateCallExecutor
+    from .climate_ha_state_view import HomeAssistantClimateStateView
     from .climate_protection_storage import HomeAssistantClimateProtectionStore
     from .climate_storage import HomeAssistantClimateRegistryStore
     from .contour_storage import HomeAssistantContourStore
@@ -70,6 +71,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         contour_store=HomeAssistantContourStore(hass, entry.entry_id),
         protection_store=HomeAssistantClimateProtectionStore(hass, entry.entry_id),
         trial_executor=HomeAssistantClimateCallExecutor(hass),
+        ha_state_view=HomeAssistantClimateStateView(hass),
         local_now=dt_util.now,
     )
     await climate_runtime.async_start()

@@ -846,6 +846,9 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         from custom_components.hausman_hub.application.climate_import import (
             import_climate_state,
         )
+        from custom_components.hausman_hub.application.climate_ha_observations import (
+            ClimateHaEntityState,
+        )
         from custom_components.hausman_hub.application.climate_registry import (
             registry_from_payload,
         )
@@ -854,9 +857,11 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         from custom_components.hausman_hub.domain.configuration import SafeConfiguration
         from tests.test_climate_import import registry_payload, source_payload
 
+        registry = registry_from_payload(registry_payload())
+
         class Store:
             async def async_load(self):
-                return registry_from_payload(registry_payload())
+                return registry
 
             async def async_save(self, registry):
                 raise AssertionError("native policy must not rewrite the registry")
@@ -864,14 +869,35 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         class Bridge:
             def __init__(self) -> None:
                 self.executed = []
+                self.fetch_count = 0
 
             async def async_fetch_state(self):
+                self.fetch_count += 1
                 return import_climate_state(source_payload())
 
             async def async_execute(self, plan):
                 self.executed.append(plan)
 
+        class StateView:
+            def __init__(self) -> None:
+                self.reads = 0
+
+            def entity_state(
+                self,
+                entity_id: str,
+            ) -> ClimateHaEntityState | None:
+                self.reads += 1
+                if entity_id != "climate.synthetic_living_ac":
+                    return None
+                return ClimateHaEntityState(
+                    entity_id=entity_id,
+                    state="cool",
+                    attributes={"current_temperature": 25.8},
+                    last_updated_ms=1784280000000,
+                )
+
         bridge = Bridge()
+        state_view = StateView()
         runtime = ClimateRuntime(
             entry_id="entry",
             configuration=SafeConfiguration(
@@ -880,8 +906,11 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
             ),
             registry_store=Store(),
             bridge_client=bridge,
+            ha_state_view=state_view,
+            now_ms=lambda: 1784280005000,
         )
         await runtime.async_start()
+        fetches_after_start = bridge.fetch_count
         options_flow = self.config_flow.HausmanHubOptionsFlow()
         options_flow.config_entry = FakeConfigEntry(
             {"mode": "read-only", "direct_execution_status": "direct_execution_blocked"},
@@ -920,6 +949,8 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
             preview_form["description_placeholders"]["temperature_decision"],
         )
         self.assertEqual("нет", preview_form["description_placeholders"]["commands"])
+        self.assertGreater(state_view.reads, 0)
+        self.assertEqual(fetches_after_start, bridge.fetch_count)
         self.assertEqual([], bridge.executed)
 
         saved = await options_flow.async_step_native_climate_confirm(

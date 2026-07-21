@@ -53,13 +53,17 @@ from .climate_evidence import (
 )
 from .climate_equipment import build_climate_equipment_snapshot
 from .climate_ha_adapters import build_climate_ha_call_plan
+from .climate_ha_observations import (
+    ClimateHaObservationViolation,
+    ClimateHaStateView,
+    build_native_ha_climate_observation,
+)
 from .climate_import import ClimateImportSnapshot
 from .climate_isolation import build_isolated_climate_policy_snapshot
 from .climate_comparison import build_climate_comparison_snapshot
 from .climate_demands import build_climate_demand_snapshot
 from .climate_operations import _ClimateOperationLedger, ClimateOperationReceipt
 from .climate_observations import (
-    build_climate_observation_snapshot,
     unavailable_climate_observation_snapshot,
 )
 from .climate_policy import build_climate_policy_snapshot
@@ -211,6 +215,7 @@ class ClimateRuntime:
         contour_store: ContourStorage | None = None,
         protection_store: ClimateProtectionStorage | None = None,
         trial_executor: ClimateTrialCallExecutor | None = None,
+        ha_state_view: ClimateHaStateView | None = None,
         operation_id_factory: Callable[[], str] | None = None,
         now_ms: Callable[[], int] | None = None,
         local_now: Callable[[], datetime] | None = None,
@@ -223,6 +228,7 @@ class ClimateRuntime:
         self._contour_store = contour_store
         self._protection_store = protection_store
         self._trial_executor = trial_executor
+        self._ha_state_view = ha_state_view
         self._now_ms = now_ms or (lambda: int(time.time() * 1000))
         self._local_now = local_now or (lambda: datetime.now().astimezone())
         self._registry = ClimateRegistry()
@@ -832,26 +838,7 @@ class ClimateRuntime:
         """Calculate HausmanHub's one-room decision without enabling any command."""
 
         async with self._lock:
-            snapshot = self._snapshot
-            if self.configuration.climate_bridge_mode is not ClimateBridgeMode.DISABLED:
-                try:
-                    snapshot = await self._async_refresh_unlocked(
-                        persist_evidence=False
-                    )
-                except ClimateRuntimeUnavailable:
-                    snapshot = None
-            try:
-                observation = (
-                    None
-                    if snapshot is None
-                    else build_climate_observation_snapshot(
-                        self._registry,
-                        snapshot,
-                        observed_at=self._safe_now(),
-                    )
-                )
-            except ClimateObservationViolation:
-                observation = None
+            observation = self._native_ha_observation(self._safe_now())
             decision = preview_native_climate(policy, self._registry, observation)
             return decision.as_payload()
 
@@ -1173,30 +1160,11 @@ class ClimateRuntime:
     ) -> ClimateObservationSnapshot:
         """Read one observation without saving evidence or creating commands."""
 
-        snapshot = None
-        if self.configuration.climate_bridge_mode is not ClimateBridgeMode.DISABLED:
-            try:
-                snapshot = await self._async_refresh_unlocked(
-                    persist_evidence=False,
-                    record_evidence=False,
-                )
-            except ClimateRuntimeUnavailable:
-                snapshot = None
         observed_at = self._safe_now()
-        try:
-            observation = (
-                unavailable_climate_observation_snapshot(
-                    self._registry,
-                    observed_at=observed_at,
-                )
-                if snapshot is None
-                else build_climate_observation_snapshot(
-                    self._registry,
-                    snapshot,
-                    observed_at=observed_at,
-                )
-            )
-        except ClimateObservationViolation:
+        observation = self._native_ha_observation(observed_at)
+        if observation is None:
+            # Without a native state view the internal pipeline must not
+            # observe at all: the external bridge is never a fallback.
             observation = unavailable_climate_observation_snapshot(
                 self._registry,
                 observed_at=observed_at,
@@ -1219,6 +1187,48 @@ class ClimateRuntime:
             raise ClimateRuntimeUnavailable(
                 "climate protection memory is unavailable"
             ) from error
+
+    def _native_ha_observation(
+        self,
+        observed_at: int,
+    ) -> ClimateObservationSnapshot | None:
+        """Build the native observation, or None when observation is absent.
+
+        A present state view makes the native Home Assistant observation the
+        only input of the internal pipeline; facts are never mixed with the
+        external module. A build failure fails closed to an unavailable
+        observation instead of falling back to the bridge.
+        """
+
+        if (
+            self._ha_state_view is None
+            or self.configuration.climate_bridge_mode is ClimateBridgeMode.DISABLED
+        ):
+            return None
+        try:
+            local = self._local_now()
+            return build_native_ha_climate_observation(
+                self._registry,
+                self._contours.contour(CLIMATE_CONTOUR_ID),
+                self._ha_state_view,
+                observed_at=observed_at,
+                protection=self._protection_memory,
+                local_time=(local.hour, local.minute),
+            )
+        except (ClimateHaObservationViolation, ClimateObservationViolation) as error:
+            self.last_error = type(error).__name__
+            return unavailable_climate_observation_snapshot(
+                self._registry,
+                observed_at=observed_at,
+            )
+        except Exception as error:
+            # A broken state view must fail the observation closed exactly
+            # like a broken bridge read; it must never reach the pipeline.
+            self.last_error = type(error).__name__
+            return unavailable_climate_observation_snapshot(
+                self._registry,
+                observed_at=observed_at,
+            )
 
     async def async_readiness(self) -> dict[str, object]:
         """Return redacted bridge and registry readiness to a local admin."""

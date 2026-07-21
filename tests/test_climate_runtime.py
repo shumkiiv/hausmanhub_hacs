@@ -15,6 +15,9 @@ from custom_components.hausman_hub.application.climate_import import import_clim
 from custom_components.hausman_hub.application.climate_evidence import (
     ClimateShadowEvidence,
 )
+from custom_components.hausman_hub.application.climate_ha_observations import (
+    ClimateHaEntityState,
+)
 from custom_components.hausman_hub.application.climate_registry import registry_from_payload
 from custom_components.hausman_hub.application.contour_apply import ContourApplyViolation
 from custom_components.hausman_hub.application.climate_runtime import (
@@ -32,7 +35,9 @@ from custom_components.hausman_hub.application.contours import (
 from custom_components.hausman_hub.application.climate_registry import registry_to_payload
 from custom_components.hausman_hub.domain.climate import (
     ClimateCapability,
+    ClimateControlOwner,
     ClimateControlScope,
+    ClimateDevice,
     ClimateDeviceKind,
     ClimateEndpoint,
     ClimateEndpointRole,
@@ -228,6 +233,129 @@ class MemoryBridge:
     async def async_execute(self, plan):
         self.executed.append(plan)
         return {"ok": True}
+
+
+class SnapshotStateView:
+    def __init__(self, registry: ClimateRegistry, bridge: MemoryBridge) -> None:
+        self._registry = registry
+        self._bridge = bridge
+        self.reads = 0
+
+    def entity_state(self, entity_id: str) -> ClimateHaEntityState | None:
+        self.reads += 1
+        snapshot = self._bridge.snapshot
+        for device in self._registry.devices:
+            endpoint = next(
+                (item for item in device.endpoints if item.entity_id == entity_id),
+                None,
+            )
+            if endpoint is None:
+                continue
+            room = snapshot.room(device.room_id)
+            if endpoint.role is ClimateEndpointRole.TEMPERATURE:
+                value = None if room is None else room.temperature
+                return self._sensor_state(entity_id, value, snapshot.generated_at)
+            if endpoint.role is ClimateEndpointRole.HUMIDITY:
+                value = None if room is None else room.humidity
+                return self._sensor_state(entity_id, value, snapshot.generated_at)
+            if endpoint.role is not ClimateEndpointRole.CONTROL:
+                return None
+            imported = snapshot.device(device.source_id)
+            if imported is None:
+                return None
+            return ClimateHaEntityState(
+                entity_id=entity_id,
+                state=imported.state if imported.available else "unavailable",
+                attributes=(
+                    {}
+                    if room is None or room.temperature is None
+                    else {"current_temperature": room.temperature}
+                ),
+                last_updated_ms=snapshot.generated_at,
+            )
+        return None
+
+    @staticmethod
+    def _sensor_state(
+        entity_id: str,
+        value: float | None,
+        observed_at: int,
+    ) -> ClimateHaEntityState | None:
+        if value is None:
+            return None
+        return ClimateHaEntityState(
+            entity_id=entity_id,
+            state=str(value),
+            attributes={},
+            last_updated_ms=observed_at,
+        )
+
+
+def with_native_observation_bindings(
+    registry: ClimateRegistry,
+    *,
+    keep_unbound: tuple[str, ...] = (),
+) -> ClimateRegistry:
+    devices: list[ClimateDevice] = []
+    for device in registry.devices:
+        endpoints = device.endpoints
+        if not endpoints and device.device_id not in keep_unbound:
+            if device.kind is ClimateDeviceKind.TEMPERATURE_SENSOR:
+                role = ClimateEndpointRole.TEMPERATURE
+                domain = "sensor"
+            elif device.kind is ClimateDeviceKind.HUMIDITY_SENSOR:
+                role = ClimateEndpointRole.HUMIDITY
+                domain = "sensor"
+            else:
+                role = ClimateEndpointRole.CONTROL
+                domain = (
+                    "humidifier"
+                    if device.kind is ClimateDeviceKind.HUMIDIFIER
+                    else "climate"
+                )
+            endpoints = (ClimateEndpoint(role, f"{domain}.{device.device_id}"),)
+        devices.append(replace(device, endpoints=endpoints))
+
+    for room in registry.rooms:
+        for kind, role, suffix in (
+            (
+                ClimateDeviceKind.TEMPERATURE_SENSOR,
+                ClimateEndpointRole.TEMPERATURE,
+                "temperature_observation",
+            ),
+            (
+                ClimateDeviceKind.HUMIDITY_SENSOR,
+                ClimateEndpointRole.HUMIDITY,
+                "humidity_observation",
+            ),
+        ):
+            if any(
+                device.room_id == room.room_id and device.kind is kind
+                for device in devices
+            ):
+                continue
+            device_id = f"{room.room_id}_{suffix}"
+            devices.append(
+                ClimateDevice(
+                    device_id=device_id,
+                    name=f"{room.name} {suffix.replace('_', ' ')}",
+                    room_id=room.room_id,
+                    kind=kind,
+                    source_id=f"synthetic-{device_id}",
+                    control_scope=ClimateControlScope.OBSERVED,
+                    control_owner=ClimateControlOwner.OBSERVED,
+                    capabilities=(),
+                    endpoints=(
+                        ClimateEndpoint(role, f"sensor.{device_id}"),
+                    ),
+                )
+            )
+    return ClimateRegistry(
+        rooms=registry.rooms,
+        devices=tuple(devices),
+        home=registry.home,
+        version=registry.version,
+    )
 
 
 class RejectingBridge(MemoryBridge):
@@ -1323,14 +1451,20 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_native_preview_reads_state_but_never_posts(self) -> None:
         bridge = MemoryBridge()
+        registry = with_native_observation_bindings(
+            registry_from_payload(registry_payload())
+        )
+        state_view = SnapshotStateView(registry, bridge)
         runtime = ClimateRuntime(
             entry_id="entry",
             configuration=configuration(ClimateBridgeMode.SHADOW),
-            registry_store=MemoryStore(registry_from_payload(registry_payload())),
+            registry_store=MemoryStore(registry),
             bridge_client=bridge,
+            ha_state_view=state_view,
             now_ms=lambda: 1784280005000,
         )
         await runtime.async_start()
+        fetches_after_start = bridge.fetch_count
 
         result = await runtime.async_native_climate_preview(
             native_climate_policy("preview", "living", 22.0, 45)
@@ -1339,6 +1473,8 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("ready", result["status"])
         self.assertEqual("cooling", result["decision"]["temperature"])  # type: ignore[index]
         self.assertFalse(result["execution"]["commands_enabled"])  # type: ignore[index]
+        self.assertGreater(state_view.reads, 0)
+        self.assertEqual(fetches_after_start, bridge.fetch_count)
         self.assertEqual([], bridge.executed)
 
     async def test_native_preview_with_disabled_bridge_performs_no_io(self) -> None:
@@ -1373,6 +1509,8 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             target_humidity=45,
             strategy="normal",
         )
+        registry = with_native_observation_bindings(registry)
+        state_view = SnapshotStateView(registry, bridge)
         runtime = ClimateRuntime(
             entry_id="entry",
             configuration=configuration(ClimateBridgeMode.SHADOW),
@@ -1380,9 +1518,11 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             contour_store=MemoryContourStore(contours),
             bridge_client=bridge,
             evidence_store=evidence_store,
+            ha_state_view=state_view,
             now_ms=lambda: 1784280005000,
         )
         await runtime.async_start()
+        fetches_after_start = bridge.fetch_count
         evidence_before = evidence_store.evidence.as_storage_payload()  # type: ignore[union-attr]
         saves_before = list(evidence_store.saved)
 
@@ -1400,6 +1540,8 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             evidence_store.evidence.as_storage_payload(),  # type: ignore[union-attr]
         )
         self.assertEqual(saves_before, evidence_store.saved)
+        self.assertGreater(state_view.reads, 0)
+        self.assertEqual(fetches_after_start, bridge.fetch_count)
         self.assertEqual([], bridge.executed)
 
     async def test_native_contour_targets_keep_stale_status_without_posting(self) -> None:
@@ -1419,15 +1561,19 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             payload,
             now_ms=payload["generatedAt"] + 5 * 60 * 1000 + 1,  # type: ignore[operator]
         )
+        registry = with_native_observation_bindings(registry)
+        state_view = SnapshotStateView(registry, bridge)
         runtime = ClimateRuntime(
             entry_id="entry",
             configuration=configuration(ClimateBridgeMode.SHADOW),
             registry_store=MemoryStore(registry),
             contour_store=MemoryContourStore(contours),
             bridge_client=bridge,
+            ha_state_view=state_view,
             now_ms=lambda: 1784280300001,
         )
         await runtime.async_start()
+        fetches_after_start = bridge.fetch_count
 
         result = await runtime.async_native_climate_targets()
 
@@ -1437,6 +1583,8 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             ClimateDataStatus.STALE,
         )
         self.assertEqual(25.0, result.room("living").target_temperature)  # type: ignore[union-attr]
+        self.assertGreater(state_view.reads, 0)
+        self.assertEqual(fetches_after_start, bridge.fetch_count)
         self.assertEqual([], bridge.executed)
 
     async def test_disabled_native_contour_targets_do_not_read_or_post(self) -> None:
@@ -1488,6 +1636,8 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             target_humidity=45,
             strategy="normal",
         )
+        registry = with_native_observation_bindings(registry)
+        state_view = SnapshotStateView(registry, bridge)
         runtime = ClimateRuntime(
             entry_id="entry",
             configuration=configuration(ClimateBridgeMode.SHADOW),
@@ -1495,17 +1645,20 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             contour_store=MemoryContourStore(contours),
             bridge_client=bridge,
             evidence_store=evidence_store,
+            ha_state_view=state_view,
             now_ms=lambda: 1784280005000,
         )
         await runtime.async_start()
         fetches_before = bridge.fetch_count
+        reads_before = state_view.reads
         evidence_before = evidence_store.evidence.as_storage_payload()  # type: ignore[union-attr]
 
         result = await runtime.async_native_climate_demands()
 
         self.assertIsNotNone(result)
         self.assertEqual("required", result.room("living").cooling.value)  # type: ignore[union-attr]
-        self.assertEqual(fetches_before + 1, bridge.fetch_count)
+        self.assertGreater(state_view.reads, reads_before)
+        self.assertEqual(fetches_before, bridge.fetch_count)
         self.assertEqual(
             evidence_before,
             evidence_store.evidence.as_storage_payload(),  # type: ignore[union-attr]
@@ -1558,6 +1711,8 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             target_humidity=45,
             strategy="normal",
         )
+        registry = with_native_observation_bindings(registry)
+        state_view = SnapshotStateView(registry, bridge)
         runtime = ClimateRuntime(
             entry_id="entry",
             configuration=configuration(ClimateBridgeMode.SHADOW),
@@ -1565,10 +1720,12 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             contour_store=MemoryContourStore(contours),
             bridge_client=bridge,
             evidence_store=evidence_store,
+            ha_state_view=state_view,
             now_ms=lambda: 1784280005000,
         )
         await runtime.async_start()
         fetches_before = bridge.fetch_count
+        reads_before = state_view.reads
         evidence_before = evidence_store.evidence.as_storage_payload()  # type: ignore[union-attr]
 
         result = await runtime.async_native_climate_resolutions()
@@ -1578,7 +1735,8 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             result.room("living").thermal,  # type: ignore[union-attr]
             ClimateThermalResolution.COOLING,
         )
-        self.assertEqual(fetches_before + 1, bridge.fetch_count)
+        self.assertGreater(state_view.reads, reads_before)
+        self.assertEqual(fetches_before, bridge.fetch_count)
         self.assertEqual(
             evidence_before,
             evidence_store.evidence.as_storage_payload(),  # type: ignore[union-attr]
@@ -1636,6 +1794,8 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             target_humidity=45,
             strategy="normal",
         )
+        registry = with_native_observation_bindings(registry)
+        state_view = SnapshotStateView(registry, bridge)
         runtime = ClimateRuntime(
             entry_id="entry",
             configuration=configuration(ClimateBridgeMode.SHADOW),
@@ -1643,10 +1803,12 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             contour_store=MemoryContourStore(contours),
             bridge_client=bridge,
             evidence_store=evidence_store,
+            ha_state_view=state_view,
             now_ms=lambda: 1784280005000,
         )
         await runtime.async_start()
         fetches_before = bridge.fetch_count
+        reads_before = state_view.reads
         evidence_before = evidence_store.evidence.as_storage_payload()  # type: ignore[union-attr]
 
         result = await runtime.async_native_climate_equipment()
@@ -1656,7 +1818,8 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             result.room("living").device("living_air_conditioner").action,  # type: ignore[union-attr]
             ClimateEquipmentAction.COOL,
         )
-        self.assertEqual(fetches_before + 1, bridge.fetch_count)
+        self.assertGreater(state_view.reads, reads_before)
+        self.assertEqual(fetches_before, bridge.fetch_count)
         self.assertEqual(
             evidence_before,
             evidence_store.evidence.as_storage_payload(),  # type: ignore[union-attr]
@@ -1714,6 +1877,8 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             target_humidity=45,
             strategy="normal",
         )
+        registry = with_native_observation_bindings(registry)
+        state_view = SnapshotStateView(registry, bridge)
         runtime = ClimateRuntime(
             entry_id="entry",
             configuration=configuration(ClimateBridgeMode.SHADOW),
@@ -1721,10 +1886,12 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             contour_store=MemoryContourStore(contours),
             bridge_client=bridge,
             evidence_store=evidence_store,
+            ha_state_view=state_view,
             now_ms=lambda: 1784280005000,
         )
         await runtime.async_start()
         fetches_before = bridge.fetch_count
+        reads_before = state_view.reads
         evidence_before = evidence_store.evidence.as_storage_payload()  # type: ignore[union-attr]
 
         result = await runtime.async_native_climate_stability()
@@ -1734,7 +1901,8 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             result.room("living").device("living_air_conditioner").action,  # type: ignore[union-attr]
             ClimateStabilityAction.COOL,
         )
-        self.assertEqual(fetches_before + 1, bridge.fetch_count)
+        self.assertGreater(state_view.reads, reads_before)
+        self.assertEqual(fetches_before, bridge.fetch_count)
         self.assertEqual(
             evidence_before,
             evidence_store.evidence.as_storage_payload(),  # type: ignore[union-attr]
@@ -1800,6 +1968,8 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             target_humidity=45,
             strategy="normal",
         )
+        registry = with_native_observation_bindings(registry)
+        state_view = SnapshotStateView(registry, bridge)
         protection_store = MemoryProtectionStore()
         clock = [1784280005000]
         first_runtime = ClimateRuntime(
@@ -1809,6 +1979,7 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             contour_store=MemoryContourStore(contours),
             protection_store=protection_store,
             bridge_client=bridge,
+            ha_state_view=state_view,
             now_ms=lambda: clock[0],
         )
         await first_runtime.async_start()
@@ -1830,6 +2001,7 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             contour_store=MemoryContourStore(contours),
             protection_store=protection_store,
             bridge_client=bridge,
+            ha_state_view=state_view,
             now_ms=lambda: clock[0],
         )
         await restarted_runtime.async_start()
@@ -1839,13 +2011,13 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
         continued = await restarted_runtime.async_native_climate_stability()
 
         self.assertEqual(
-            480,
+            360,
             rearmed.room("living")  # type: ignore[union-attr]
             .device("living_air_conditioner")
             .remaining_seconds,
         )
         self.assertEqual(
-            420,
+            300,
             continued.room("living")  # type: ignore[union-attr]
             .device("living_air_conditioner")
             .remaining_seconds,
@@ -1867,6 +2039,8 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             target_humidity=45,
             strategy="normal",
         )
+        registry = with_native_observation_bindings(registry)
+        state_view = SnapshotStateView(registry, bridge)
         protection_store = FailingProtectionStore()
         runtime = ClimateRuntime(
             entry_id="entry",
@@ -1875,6 +2049,7 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             contour_store=MemoryContourStore(contours),
             protection_store=protection_store,
             bridge_client=bridge,
+            ha_state_view=state_view,
             now_ms=lambda: 1784280005000,
         )
         await runtime.async_start()
@@ -1901,6 +2076,8 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             target_humidity=45,
             strategy="normal",
         )
+        registry = with_native_observation_bindings(registry)
+        state_view = SnapshotStateView(registry, bridge)
         runtime = ClimateRuntime(
             entry_id="entry",
             configuration=configuration(ClimateBridgeMode.SHADOW),
@@ -1908,10 +2085,12 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             contour_store=MemoryContourStore(contours),
             bridge_client=bridge,
             evidence_store=evidence_store,
+            ha_state_view=state_view,
             now_ms=lambda: 1784280005000,
         )
         await runtime.async_start()
         fetches_before = bridge.fetch_count
+        reads_before = state_view.reads
         evidence_before = evidence_store.evidence.as_storage_payload()  # type: ignore[union-attr]
 
         result = await runtime.async_native_climate_policy()
@@ -1923,7 +2102,8 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             ("living_air_conditioner",),
             room.safe_stop_device_ids,  # type: ignore[union-attr]
         )
-        self.assertEqual(fetches_before + 1, bridge.fetch_count)
+        self.assertGreater(state_view.reads, reads_before)
+        self.assertEqual(fetches_before, bridge.fetch_count)
         self.assertEqual(
             evidence_before,
             evidence_store.evidence.as_storage_payload(),  # type: ignore[union-attr]
@@ -1985,21 +2165,26 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             target_humidity=45,
             strategy="normal",
         )
+        registry = with_native_observation_bindings(registry)
+        state_view = SnapshotStateView(registry, bridge)
         runtime = ClimateRuntime(
             entry_id="entry",
             configuration=configuration(ClimateBridgeMode.SHADOW),
             registry_store=MemoryStore(registry),
             contour_store=MemoryContourStore(contours),
             bridge_client=bridge,
+            ha_state_view=state_view,
             now_ms=lambda: 1784280005000,
         )
         await runtime.async_start()
         fetches_before = bridge.fetch_count
+        reads_before = state_view.reads
 
         result = await runtime.async_native_climate_isolation()
 
         self.assertIsNotNone(result)
-        self.assertEqual(fetches_before + 1, bridge.fetch_count)
+        self.assertGreater(state_view.reads, reads_before)
+        self.assertEqual(fetches_before, bridge.fetch_count)
         self.assertEqual(2, result.available_policy_count)  # type: ignore[union-attr]
         self.assertTrue(
             all(
@@ -2024,21 +2209,26 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             target_humidity=45,
             strategy="normal",
         )
+        registry = with_native_observation_bindings(registry)
+        state_view = SnapshotStateView(registry, bridge)
         runtime = ClimateRuntime(
             entry_id="entry",
             configuration=configuration(ClimateBridgeMode.SHADOW),
             registry_store=MemoryStore(registry),
             contour_store=MemoryContourStore(contours),
             bridge_client=bridge,
+            ha_state_view=state_view,
             now_ms=lambda: 1784280005000,
         )
         await runtime.async_start()
         fetches_before = bridge.fetch_count
+        reads_before = state_view.reads
 
         result = await runtime.async_native_climate_comparison()
 
         self.assertIsNotNone(result)
-        self.assertEqual(fetches_before + 1, bridge.fetch_count)
+        self.assertGreater(state_view.reads, reads_before)
+        self.assertEqual(fetches_before, bridge.fetch_count)
         self.assertFalse(result.commands_enabled)  # type: ignore[union-attr]
         room = result.room("living")  # type: ignore[union-attr]
         self.assertIs(room.status, ClimateComparisonStatus.DIVERGED)
@@ -2061,26 +2251,34 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             target_humidity=45,
             strategy="normal",
         )
+        registry = with_native_observation_bindings(
+            registry,
+            keep_unbound=("living_air_conditioner",),
+        )
+        state_view = SnapshotStateView(registry, bridge)
         runtime = ClimateRuntime(
             entry_id="entry",
             configuration=configuration(ClimateBridgeMode.SHADOW),
             registry_store=MemoryStore(registry),
             contour_store=MemoryContourStore(contours),
             bridge_client=bridge,
+            ha_state_view=state_view,
             now_ms=lambda: 1784280005000,
         )
         await runtime.async_start()
         fetches_before = bridge.fetch_count
+        reads_before = state_view.reads
 
         result = await runtime.async_native_climate_ha_calls()
 
         self.assertIsNotNone(result)
-        self.assertEqual(fetches_before + 1, bridge.fetch_count)
+        self.assertGreater(state_view.reads, reads_before)
+        self.assertEqual(fetches_before, bridge.fetch_count)
         self.assertFalse(result.commands_enabled)  # type: ignore[union-attr]
         self.assertEqual(0, result.call_count)  # type: ignore[union-attr]
         room = result.room("living")  # type: ignore[union-attr]
         self.assertEqual(
-            (ClimateHaCallLimit.MISSING_CONTROL_ENDPOINT,),
+            (ClimateHaCallLimit.OBSERVE_ONLY,),
             room.devices[0].limits,
         )
         self.assertEqual([], bridge.executed)
@@ -2118,6 +2316,8 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
                 ),
             ),
         )
+        registry = with_native_observation_bindings(registry)
+        state_view = SnapshotStateView(registry, bridge)
         executor = RecordingTrialExecutor()
         runtime = ClimateRuntime(
             entry_id="entry",
@@ -2126,6 +2326,7 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             contour_store=MemoryContourStore(contours),
             bridge_client=bridge,
             trial_executor=executor,
+            ha_state_view=state_view,
             now_ms=lambda: 1784280005000,
         )
         await runtime.async_start()
@@ -2185,6 +2386,8 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
                 ),
             ),
         )
+        registry = with_native_observation_bindings(registry)
+        state_view = SnapshotStateView(registry, bridge)
         executor = RecordingTrialExecutor()
         runtime = ClimateRuntime(
             entry_id="entry",
@@ -2193,6 +2396,7 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             contour_store=MemoryContourStore(contours),
             bridge_client=bridge,
             trial_executor=executor,
+            ha_state_view=state_view,
             now_ms=lambda: 1784280005000,
         )
         await runtime.async_start()
@@ -2221,6 +2425,8 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             target_humidity=45,
             strategy="normal",
         )
+        registry = with_native_observation_bindings(registry)
+        state_view = SnapshotStateView(registry, bridge)
         executor = RecordingTrialExecutor()
         shadow_runtime = ClimateRuntime(
             entry_id="entry",
@@ -2229,6 +2435,7 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             contour_store=MemoryContourStore(contours),
             bridge_client=bridge,
             trial_executor=executor,
+            ha_state_view=state_view,
             now_ms=lambda: 1784280005000,
         )
         await shadow_runtime.async_start()
@@ -2255,6 +2462,8 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
                 ),
             ),
         )
+        scoped_registry = with_native_observation_bindings(scoped_registry)
+        scoped_state_view = SnapshotStateView(scoped_registry, bridge)
         canary_runtime = ClimateRuntime(
             entry_id="entry",
             configuration=configuration(ClimateBridgeMode.CANARY),
@@ -2262,6 +2471,7 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             contour_store=MemoryContourStore(contours),
             bridge_client=bridge,
             trial_executor=executor,
+            ha_state_view=scoped_state_view,
             now_ms=lambda: 1784280005000,
         )
         await canary_runtime.async_start()
@@ -2280,6 +2490,7 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             contour_store=MemoryContourStore(contours),
             bridge_client=bridge,
             trial_executor=executor,
+            ha_state_view=state_view,
             now_ms=lambda: 1784280005000,
         )
         await managed_runtime.async_start()
@@ -2328,6 +2539,8 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
                 ),
             ),
         )
+        registry = with_native_observation_bindings(registry)
+        state_view = SnapshotStateView(registry, bridge)
         failing = RecordingTrialExecutor(fail=True)
         runtime = ClimateRuntime(
             entry_id="entry",
@@ -2336,6 +2549,7 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             contour_store=MemoryContourStore(contours),
             bridge_client=bridge,
             trial_executor=failing,
+            ha_state_view=state_view,
             now_ms=lambda: 1784280005000,
         )
         await runtime.async_start()
@@ -2356,6 +2570,7 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             registry_store=MemoryStore(registry),
             contour_store=MemoryContourStore(contours),
             bridge_client=bridge,
+            ha_state_view=state_view,
             now_ms=lambda: 1784280005000,
         )
         await executorless.async_start()
@@ -2405,6 +2620,8 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
                 registry.devices[1],
             ),
         )
+        registry = with_native_observation_bindings(registry)
+        state_view = SnapshotStateView(registry, bridge)
         executor = RecordingTrialExecutor()
         runtime = ClimateRuntime(
             entry_id="entry",
@@ -2413,6 +2630,7 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             contour_store=MemoryContourStore(contours),
             bridge_client=bridge,
             trial_executor=executor,
+            ha_state_view=state_view,
             now_ms=lambda: 1784280005000,
         )
         await runtime.async_start()
@@ -2467,12 +2685,18 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             target_humidity=45,
             strategy="normal",
         )
+        registry = with_native_observation_bindings(
+            registry,
+            keep_unbound=("kids_humidifier",),
+        )
+        state_view = SnapshotStateView(registry, bridge)
         runtime = ClimateRuntime(
             entry_id="entry",
             configuration=configuration(ClimateBridgeMode.CANARY),
             registry_store=MemoryStore(registry),
             contour_store=MemoryContourStore(contours),
             bridge_client=bridge,
+            ha_state_view=state_view,
             now_ms=lambda: 1784280005000,
         )
         await runtime.async_start()
@@ -2492,7 +2716,7 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
 
         unbound = await runtime.async_climate_promote_room("kids")
         self.assertEqual(
-            (ClimateOwnershipReason.DEVICE_BINDING_MISSING,),
+            (ClimateOwnershipReason.ROOM_NOT_READY,),
             unbound.reasons,  # type: ignore[union-attr]
         )
 
@@ -2502,6 +2726,7 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             registry_store=MemoryStore(registry),
             contour_store=MemoryContourStore(contours),
             bridge_client=bridge,
+            ha_state_view=state_view,
             now_ms=lambda: 1784280005000,
         )
         await shadow_runtime.async_start()
@@ -2568,18 +2793,21 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
                 for device in registry.devices
             ),
         )
+        registry = with_native_observation_bindings(registry)
         sensor = next(
             device for device in registry.devices if device.room_id == "kids"
             and device.kind is ClimateDeviceKind.TEMPERATURE_SENSOR
         )
         bridge = MemoryBridge()
         bridge.snapshot = import_climate_state(payload)
+        state_view = SnapshotStateView(registry, bridge)
         runtime = ClimateRuntime(
             entry_id="entry",
             configuration=configuration(ClimateBridgeMode.CANARY),
             registry_store=MemoryStore(registry),
             contour_store=MemoryContourStore(contours),
             bridge_client=bridge,
+            ha_state_view=state_view,
             now_ms=lambda: 1784280005000,
         )
         await runtime.async_start()
@@ -2625,6 +2853,8 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
                 ),
             ),
         )
+        registry = with_native_observation_bindings(registry)
+        state_view = SnapshotStateView(registry, bridge)
         store = FailingRegistryStore(registry)
         runtime = ClimateRuntime(
             entry_id="entry",
@@ -2632,6 +2862,7 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             registry_store=store,
             contour_store=MemoryContourStore(contours),
             bridge_client=bridge,
+            ha_state_view=state_view,
             now_ms=lambda: 1784280005000,
         )
         await runtime.async_start()
