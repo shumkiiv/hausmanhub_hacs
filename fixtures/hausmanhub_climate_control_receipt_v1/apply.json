@@ -16,16 +16,16 @@
   "status": "confirmed",
   "status_name": "Выполнено",
   "room_count": 1,
-  "command_count": 3,
-  "accepted_count": 3,
+  "command_count": 1,
+  "accepted_count": 1,
   "confirmed_room_count": 1,
   "changes": {
-    "temperature": 1,
-    "strategy": 1,
-    "automatic_mode": 1
+    "temperature": 0,
+    "strategy": 0,
+    "automatic_mode": 0
   },
   "reasons": [],
   "reason_names": [],
-  "created_at": 1784280000000,
-  "updated_at": 1784280001000
+  "created_at": 1800000000000,
+  "updated_at": 1800000000000
 }
