@@ -356,6 +356,29 @@ Last updated: 2026-07-21.
   repository remain unchanged. The final staged tree passed 513 local tests,
   the HACS/package/boundary/Android checks, and disposable Home Assistant
   Core   2026.6.4/2026.7.0.
+- Version 1.11.0 completes roadmap item 36 sub-step 36f1 (the Oracle
+  split of 36f is 36f1 native discovery, 36f2 wizard cutover, 36f3
+  mode/bridge lifecycle). The new pure
+  `application/climate_native_setup.py` enumerates climate-relevant Home
+  Assistant entities (climate, humidifier, temperature/humidity
+  sensors) through `HomeAssistantClimateStateView.entity_catalog()` and
+  builds the existing `ClimateImportSnapshot` wizard shape natively:
+  rooms come from the registry plus native observation, bound devices
+  keep their private `source_id` (matched via `endpoints[].entity_id`,
+  all endpoints excluded from unbound candidates), unbound entities
+  become candidates with `source_id = entity_id` and the locked
+  unassigned sentinel `room_id = ""`. Classification is conservative
+  (domain + device_class + supported_features intersected with the
+  strict vocabulary). Identity option A was locked: the setup payload
+  keeps its current contract version, and a native candidate's
+  `source_id` never migrates into the private registry `source_id`.
+  Wizard cutover (including accepting unassigned candidates with an
+  explicit room choice and allowing draft save in MANAGED with atomic
+  rebuild) is 36f2; startup/bridge lifecycle is 36f3. Independent
+  review returned FAIL (multi-endpoint duplication, negative
+  supported_features, empty-state availability, wizard-chain test
+  gaps); one fix iteration resolved all four and the follow-up passed.
+  The final tree passed 615 local tests and the full release gate.
 - Version 1.10.0 completes roadmap item 37. HausmanHub now has its own
   admin page in the Home Assistant sidebar (`panel_custom` registration,
   `require_admin=True`, `config_panel_domain` for the settings gear).
@@ -2074,5 +2097,5 @@ Engineering and review rules are in
 
 - Obsidian/context index: `LLM_WIKI/00_Index.md`.
 - Latest generated context: `LLM_WIKI/Context.md`.
-- Last sync: 2026-07-21T15:21:22+03:00.
+- Last sync: 2026-07-21T19:35:32+03:00.
 <!-- llm-wiki-sync:end -->
