@@ -356,6 +356,26 @@ Last updated: 2026-07-21.
   repository remain unchanged. The final staged tree passed 513 local tests,
   the HACS/package/boundary/Android checks, and disposable Home Assistant
   Core   2026.6.4/2026.7.0.
+- Version 1.12.0 completes roadmap item 36 sub-step 36f2. All climate
+  setup wizards (setup options, current setup, contour draft
+  create/validate/save, registry import snapshot) now build their
+  discovery snapshot from the native Home Assistant catalog in every
+  mode; the bridge is never touched, locked by poison tests. Unassigned
+  entities are honestly roomless: the contour wizard assigns them on
+  the room step, the import wizard asks for a room, and saving requires
+  an explicit assignment. New devices receive a fresh private
+  `hausmanhub-native-<entity_id>` source id (never the entity id) plus
+  control/observation endpoints, so a saved contour runs natively at
+  once; bound devices keep their private source id and endpoints
+  through re-imports. Draft save stays forbidden in CANARY and is
+  atomic elsewhere. Review returned FAIL (endpoint loss on re-import,
+  duplicate room assignment, multi-room assignment dead-end, loose
+  override parameters); one fix iteration resolved all four with
+  regression tests and the follow-up passed. The final tree passed 624
+  local tests, the full release gate, and disposable Core 2026.6.4 and
+  2026.7.0 with a migrated end-to-end wizard scenario. Remaining
+  sub-steps: 36f3 (startup and bridge lifecycle semantics) and 36g
+  (shadow/canary retirement with the legacy actions route).
 - Version 1.11.0 completes roadmap item 36 sub-step 36f1 (the Oracle
   split of 36f is 36f1 native discovery, 36f2 wizard cutover, 36f3
   mode/bridge lifecycle). The new pure
@@ -2097,5 +2117,5 @@ Engineering and review rules are in
 
 - Obsidian/context index: `LLM_WIKI/00_Index.md`.
 - Latest generated context: `LLM_WIKI/Context.md`.
-- Last sync: 2026-07-21T20:36:29+03:00.
+- Last sync: 2026-07-21T22:08:19+03:00.
 <!-- llm-wiki-sync:end -->
