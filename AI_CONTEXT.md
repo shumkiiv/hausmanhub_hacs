@@ -356,6 +356,31 @@ Last updated: 2026-07-21.
   repository remain unchanged. The final staged tree passed 513 local tests,
   the HACS/package/boundary/Android checks, and disposable Home Assistant
   Core   2026.6.4/2026.7.0.
+- Version 1.15.0 completes roadmap item 37. A safe migration wizard
+  imports existing legacy climate settings into an empty native
+  contour: a one-shot GET-only read of the old API with private-address
+  validation (address never persisted), an explicit per-device entity
+  mapping confirmed from the native HA catalog (ordinal form tokens,
+  skip only for passive sensors), and one atomic write with a stored
+  receipt. Rooms and day/night comfort profiles are copied (targets
+  into both), `auto`/`forced_auto_only` become `managed`, `manual`
+  becomes `disabled`; schedule, live state, authority, history, and the
+  API address are never moved. The safe rollback removes exactly the
+  migrated setup only when the full registry+contour fingerprint still
+  matches, and is blocked after any manual change. The confirm step
+  rebuilds the draft against a fresh catalog before writing, and the
+  receipt is saved before the setup write with compensation on failure.
+  Independent review returned FAIL (rollback compared only ID sets,
+  orphaned import on receipt failure, stale catalog at confirm, unbounded
+  GET, loose receipt schema, skip on active devices, raw private ids in
+  form fields); one fix iteration resolved all seven with regression
+  tests, and the follow-up self-review confirmed the exact-fingerprint
+  rollback and receipt-first ordering. The final tree passed 591 local
+  tests, the full release gate, and disposable Core 2026.6.4 and
+  2026.7.0 with a real migration import plus rollback on a blank Core.
+  Remaining roadmap: 38 (windows/presence/outdoor/sensor quality), 39
+  (per-room schedules and profiles), 40 (standalone climate release),
+  then 41-50 (HausmanHub 2.0 platform).
 - Version 1.14.0 completes roadmap item 36 entirely. The external
   climate module is retired: `ClimateControlMode` is now only
   `disabled` or fully native `managed`; legacy shadow/canary entries
@@ -2164,5 +2189,5 @@ Engineering and review rules are in
 
 - Obsidian/context index: `LLM_WIKI/00_Index.md`.
 - Latest generated context: `LLM_WIKI/Context.md`.
-- Last sync: 2026-07-22T17:58:59+03:00.
+- Last sync: 2026-07-22T20:33:59+03:00.
 <!-- llm-wiki-sync:end -->
