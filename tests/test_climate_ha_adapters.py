@@ -199,6 +199,7 @@ def _floor_heating_policy():
                 period=observation.home.period,
                 occupancy=resolution.occupancy,
                 central_heating_on=True,
+                central_heating_configured=True,
                 outdoor_temperature=observation.home.outdoor_temperature,
                 heat_load_temperature=observation.home.heat_load_temperature,
                 comfort_temperature=19.5,

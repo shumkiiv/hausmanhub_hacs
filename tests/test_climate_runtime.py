@@ -429,8 +429,14 @@ def with_native_observation_bindings(
                     ),
                 )
             )
+    bound_rooms = tuple(
+        replace(room, window_entity_id=f"binary_sensor.{room.room_id}_window")
+        if room.window_entity_id is None
+        else room
+        for room in registry.rooms
+    )
     return ClimateRegistry(
-        rooms=registry.rooms,
+        rooms=bound_rooms,
         devices=tuple(devices),
         home=registry.home,
         version=registry.version,

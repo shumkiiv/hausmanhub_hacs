@@ -142,6 +142,8 @@ class ClimateHomeEnvironment:
     outdoor_temperature_entity_id: str | None = None
     presence_entity_id: str | None = None
     central_heating_entity_id: str | None = None
+    heating_lockout_high: float = 18.0
+    heating_lockout_low: float = 16.0
 
     def __post_init__(self) -> None:
         _optional_entity_domain(
@@ -159,6 +161,18 @@ class ClimateHomeEnvironment:
             _CENTRAL_HEATING_ENTITY_DOMAINS,
             "central heating entity",
         )
+        _lockout_threshold(
+            self.heating_lockout_high,
+            "heating lockout high threshold",
+        )
+        _lockout_threshold(
+            self.heating_lockout_low,
+            "heating lockout low threshold",
+        )
+        if self.heating_lockout_low >= self.heating_lockout_high:
+            raise ClimateModelViolation(
+                "heating lockout low threshold must stay below the high threshold"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -321,6 +335,18 @@ def _require_entity_domain(
         raise ClimateModelViolation(f"{label} must be one Home Assistant entity")
     if value.partition(".")[0] not in domains:
         raise ClimateModelViolation(f"{label} has an unsupported entity domain")
+
+
+def _lockout_threshold(value: object, label: str) -> float:
+    if isinstance(value, bool):
+        raise ClimateModelViolation(f"{label} must be numeric")
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError) as error:
+        raise ClimateModelViolation(f"{label} must be numeric") from error
+    if not -40.0 <= number <= 60.0:
+        raise ClimateModelViolation(f"{label} must stay within -40..60")
+    return number
 
 
 def _optional_entity_domain(

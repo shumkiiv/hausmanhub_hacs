@@ -111,6 +111,7 @@ def home(
     period: ClimateDayPeriod = ClimateDayPeriod.DAY,
     occupancy: ClimateOccupancyMode = ClimateOccupancyMode.HOME,
     central_heating_on: bool | None = None,
+    central_heating_configured: bool = True,
     outdoor_temperature: float | None = None,
     heat_load_temperature: float | None = None,
 ) -> ClimateHomeObservation:
@@ -119,6 +120,7 @@ def home(
         period=period,
         occupancy=occupancy,
         central_heating_on=central_heating_on,
+        central_heating_configured=central_heating_configured,
         outdoor_temperature=outdoor_temperature,
         heat_load_temperature=heat_load_temperature,
     )
@@ -262,7 +264,6 @@ class ClimateEquipmentTest(unittest.TestCase):
     def test_radiator_observes_without_heat_period_or_safe_home_mode(self) -> None:
         radiator = device(ClimateObservationDeviceKind.RADIATOR_THERMOSTAT)
         cases = (
-            home(season=ClimateSeason.WINTER, central_heating_on=False),
             home(season=ClimateSeason.SUMMER, central_heating_on=True),
             home(
                 season=ClimateSeason.WINTER,
@@ -283,6 +284,38 @@ class ClimateEquipmentTest(unittest.TestCase):
                 )
                 self.assertIs(result.action, ClimateEquipmentAction.OBSERVE)
                 self.assertIsNone(result.target_temperature)
+
+    def test_radiator_safe_offs_when_configured_central_heating_is_not_on(self) -> None:
+        radiator = device(ClimateObservationDeviceKind.RADIATOR_THERMOSTAT)
+        for central_on in (False, None):
+            observed_home = home(
+                season=ClimateSeason.WINTER,
+                central_heating_on=central_on,
+            )
+            with self.subTest(central_heating_on=central_on):
+                result = resolve_climate_device_plan(
+                    radiator,
+                    target(),
+                    resolution(25.0, observed_home),
+                    observed_home,
+                )
+                self.assertIs(result.action, ClimateEquipmentAction.SAFE_OFF)
+                self.assertIs(result.reason, ClimateEquipmentReason.CENTRAL_HEATING_OFF)
+
+    def test_radiator_ignores_unconfigured_central_heating(self) -> None:
+        radiator = device(ClimateObservationDeviceKind.RADIATOR_THERMOSTAT)
+        observed_home = home(
+            season=ClimateSeason.WINTER,
+            central_heating_configured=False,
+        )
+        result = resolve_climate_device_plan(
+            radiator,
+            target(),
+            resolution(25.0, observed_home),
+            observed_home,
+        )
+        self.assertIs(result.action, ClimateEquipmentAction.SET_TEMPERATURE)
+        self.assertIs(result.reason, ClimateEquipmentReason.HEATING_SCHEDULE)
 
     def test_stale_room_never_creates_a_thermal_device_setting(self) -> None:
         observed_home = home(
@@ -519,7 +552,8 @@ class ClimateEquipmentTest(unittest.TestCase):
         )
         self.assertEqual(19.5, winter_trv.target_temperature)
         heating_off = results["heating_off_leaves_trv_untouched"].devices[0]
-        self.assertIs(heating_off.action, ClimateEquipmentAction.OBSERVE)
+        self.assertIs(heating_off.action, ClimateEquipmentAction.SAFE_OFF)
+        self.assertIs(heating_off.reason, ClimateEquipmentReason.CENTRAL_HEATING_OFF)
         self.assertEqual(
             (),
             results["unavailable_ac_keeps_decision_without_plan"].devices,

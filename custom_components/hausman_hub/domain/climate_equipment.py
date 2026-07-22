@@ -94,6 +94,7 @@ class ClimateDevicePlan:
     period: ClimateDayPeriod
     occupancy: ClimateOccupancyMode
     central_heating_on: bool | None
+    central_heating_configured: bool
     outdoor_temperature: float | None
     heat_load_temperature: float | None
     comfort_temperature: float
@@ -118,6 +119,14 @@ class ClimateDevicePlan:
         _enum(self.period, ClimateDayPeriod, "day period")
         _enum(self.occupancy, ClimateOccupancyMode, "home occupancy mode")
         _optional_bool(self.central_heating_on, "central heating state")
+        if type(self.central_heating_configured) is not bool:
+            raise ClimateEquipmentViolation(
+                "central heating configured flag must be boolean"
+            )
+        if not self.central_heating_configured and self.central_heating_on is not None:
+            raise ClimateEquipmentViolation(
+                "unconfigured central heating cannot report a state"
+            )
         _optional_number(self.outdoor_temperature, -80, 80, "outdoor temperature")
         _optional_number(
             self.heat_load_temperature,
@@ -148,6 +157,7 @@ class ClimateDevicePlan:
             period=self.period,
             occupancy=self.occupancy,
             central_heating_on=self.central_heating_on,
+            central_heating_configured=self.central_heating_configured,
             outdoor_temperature=self.outdoor_temperature,
             heat_load_temperature=self.heat_load_temperature,
             comfort_temperature=self.comfort_temperature,
@@ -283,6 +293,7 @@ def resolve_climate_device_plan(
         period=home.period,
         occupancy=home.occupancy,
         central_heating_on=home.central_heating_on,
+        central_heating_configured=home.central_heating_configured,
         outdoor_temperature=home.outdoor_temperature,
         heat_load_temperature=home.heat_load_temperature,
         comfort_temperature=target.target_temperature,
@@ -301,6 +312,7 @@ def resolve_climate_device_plan(
         period=home.period,
         occupancy=home.occupancy,
         central_heating_on=home.central_heating_on,
+        central_heating_configured=home.central_heating_configured,
         outdoor_temperature=home.outdoor_temperature,
         heat_load_temperature=home.heat_load_temperature,
         comfort_temperature=target.target_temperature,
@@ -324,6 +336,7 @@ def _expected_device_output(
     period: ClimateDayPeriod,
     occupancy: ClimateOccupancyMode,
     central_heating_on: bool | None,
+    central_heating_configured: bool,
     outdoor_temperature: float | None,
     heat_load_temperature: float | None,
     comfort_temperature: float,
@@ -353,6 +366,7 @@ def _expected_device_output(
             period=period,
             occupancy=occupancy,
             central_heating_on=central_heating_on,
+            central_heating_configured=central_heating_configured,
             outdoor_temperature=outdoor_temperature,
             heat_load_temperature=heat_load_temperature,
         )
@@ -429,6 +443,7 @@ def _radiator_output(
     period: ClimateDayPeriod,
     occupancy: ClimateOccupancyMode,
     central_heating_on: bool | None,
+    central_heating_configured: bool,
     outdoor_temperature: float | None,
     heat_load_temperature: float | None,
 ) -> tuple[
@@ -446,7 +461,11 @@ def _radiator_output(
             ClimateThermalResolution.OBSERVE,
             ClimateThermalResolution.UNAVAILABLE,
         }
-        or occupancy is not ClimateOccupancyMode.HOME
+        or occupancy
+        in {
+            ClimateOccupancyMode.AWAY_SAFE_OFF,
+            ClimateOccupancyMode.AWAY_KEEP,
+        }
     ):
         return (
             ClimateEquipmentAction.OBSERVE,
@@ -455,7 +474,15 @@ def _radiator_output(
             None,
             ClimateEquipmentReason.THERMAL_OBSERVE,
         )
-    if central_heating_on is not True or season is ClimateSeason.SUMMER:
+    if central_heating_configured and central_heating_on is not True:
+        return (
+            ClimateEquipmentAction.SAFE_OFF,
+            None,
+            None,
+            None,
+            ClimateEquipmentReason.CENTRAL_HEATING_OFF,
+        )
+    if season is ClimateSeason.SUMMER:
         return (
             ClimateEquipmentAction.OBSERVE,
             None,

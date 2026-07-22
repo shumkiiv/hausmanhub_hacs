@@ -22,6 +22,8 @@ from custom_components.hausman_hub.application.contours import (
 )
 from custom_components.hausman_hub.domain.climate_observation import (
     ClimateDataStatus,
+    ClimateOccupancyMode,
+    ClimateRoomMode,
     ClimateRoomObservation,
 )
 from custom_components.hausman_hub.domain.climate_reference import (
@@ -35,11 +37,15 @@ from custom_components.hausman_hub.domain.climate_targets import (
     resolve_climate_room_target,
 )
 from custom_components.hausman_hub.domain.contours import (
+    ClimateComfortSettings,
     ClimateProfile,
     ClimateStrategy,
     ClimateTemporaryOverride,
 )
 from tests.test_contours import setup, source_snapshot
+
+
+NOW = 1_800_000_000_000
 
 
 class ClimateTargetsTest(unittest.TestCase):
@@ -243,6 +249,137 @@ class ClimateTargetsTest(unittest.TestCase):
                     target.temperature_origin,
                     ClimateTemperatureTargetOrigin.PROFILE,
                 )
+
+    def test_away_setback_lowers_heating_target_by_exactly_two(self) -> None:
+        target = resolve_climate_room_target(
+            _setback_policy(22.0),
+            _setback_observation(19.0),
+            observed_at=NOW,
+            occupancy=ClimateOccupancyMode.AWAY_SETBACK,
+        )
+
+        self.assertEqual(20.0, target.target_temperature)
+        self.assertEqual(22.0, target.profile_temperature)
+        self.assertIs(
+            target.temperature_origin,
+            ClimateTemperatureTargetOrigin.AWAY_SETBACK,
+        )
+
+    def test_away_setback_raises_cooling_target_by_exactly_two(self) -> None:
+        target = resolve_climate_room_target(
+            _setback_policy(22.0),
+            _setback_observation(26.0),
+            observed_at=NOW,
+            occupancy=ClimateOccupancyMode.AWAY_SETBACK,
+        )
+
+        self.assertEqual(24.0, target.target_temperature)
+        self.assertIs(
+            target.temperature_origin,
+            ClimateTemperatureTargetOrigin.AWAY_SETBACK,
+        )
+
+    def test_away_setback_never_inverts_demand(self) -> None:
+        heating = resolve_climate_room_target(
+            _setback_policy(20.0),
+            _setback_observation(19.0),
+            observed_at=NOW,
+            occupancy=ClimateOccupancyMode.AWAY_SETBACK,
+        )
+        cooling = resolve_climate_room_target(
+            _setback_policy(22.0),
+            _setback_observation(23.0),
+            observed_at=NOW,
+            occupancy=ClimateOccupancyMode.AWAY_SETBACK,
+        )
+
+        self.assertEqual(19.0, heating.target_temperature)
+        self.assertEqual(23.0, cooling.target_temperature)
+
+    def test_away_setback_respects_temperature_bounds(self) -> None:
+        target = resolve_climate_room_target(
+            _setback_policy(18.5),
+            _setback_observation(17.0),
+            observed_at=NOW,
+            occupancy=ClimateOccupancyMode.AWAY_SETBACK,
+        )
+
+        self.assertEqual(18.0, target.target_temperature)
+
+    def test_away_setback_skips_temporary_override(self) -> None:
+        policy = _setback_policy(22.0)
+        policy = replace(
+            policy,
+            temporary_override=ClimateTemporaryOverride(target_temperature=24.0),
+        )
+        target = resolve_climate_room_target(
+            policy,
+            _setback_observation(19.0),
+            observed_at=NOW,
+            occupancy=ClimateOccupancyMode.AWAY_SETBACK,
+        )
+
+        self.assertEqual(24.0, target.target_temperature)
+        self.assertIs(
+            target.temperature_origin,
+            ClimateTemperatureTargetOrigin.TEMPORARY_OVERRIDE,
+        )
+
+    def test_away_setback_skips_manual_room_mode(self) -> None:
+        target = resolve_climate_room_target(
+            _setback_policy(22.0),
+            _setback_observation(19.0, mode=ClimateRoomMode.MANUAL),
+            observed_at=NOW,
+            occupancy=ClimateOccupancyMode.AWAY_SETBACK,
+        )
+
+        self.assertEqual(22.0, target.target_temperature)
+        self.assertIs(
+            target.temperature_origin,
+            ClimateTemperatureTargetOrigin.PROFILE,
+        )
+
+    def test_unknown_occupancy_keeps_target_unchanged(self) -> None:
+        target = resolve_climate_room_target(
+            _setback_policy(22.0),
+            _setback_observation(19.0),
+            observed_at=NOW,
+            occupancy=ClimateOccupancyMode.UNKNOWN,
+        )
+
+        self.assertEqual(22.0, target.target_temperature)
+        self.assertIs(
+            target.temperature_origin,
+            ClimateTemperatureTargetOrigin.PROFILE,
+        )
+
+
+def _setback_policy(target_temperature: float) -> ClimateRoomTargetPolicy:
+    settings = ClimateComfortSettings(
+        target_temperature=target_temperature,
+        target_humidity=45,
+        strategy=ClimateStrategy.NORMAL,
+    )
+    return ClimateRoomTargetPolicy(
+        room_id="living",
+        day_profile=settings,
+        night_profile=settings,
+        active_profile=ClimateProfile.DAY,
+    )
+
+
+def _setback_observation(
+    temperature: float,
+    *,
+    mode: ClimateRoomMode = ClimateRoomMode.AUTO,
+) -> ClimateRoomObservation:
+    return ClimateRoomObservation(
+        room_id="living",
+        name="Living",
+        data_status=ClimateDataStatus.FRESH,
+        temperature=temperature,
+        mode=mode,
+    )
 
 
 if __name__ == "__main__":

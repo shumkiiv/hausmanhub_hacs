@@ -368,7 +368,113 @@ class NativeHaObservationTest(unittest.TestCase):
         self.assertEqual(25.5, room.temperature)
         self.assertFalse(room.authority_eligible)
 
-    def test_unbound_window_and_absent_bindings_stay_unknown(self) -> None:
+    def test_weather_lockout_first_observation_in_band_fails_closed(self) -> None:
+        observation = self.build(
+            registry=self._weather_registry(),
+            states=self._weather_states("17.0"),
+        )
+
+        self.assertTrue(observation.home.weather_heating_lockout)
+
+    def test_weather_lockout_engages_at_high_threshold(self) -> None:
+        observation = self.build(
+            registry=self._weather_registry(),
+            states=self._weather_states("18.0"),
+        )
+
+        self.assertTrue(observation.home.weather_heating_lockout)
+
+    def test_weather_lockout_releases_at_low_threshold(self) -> None:
+        observation = self.build(
+            registry=self._weather_registry(),
+            states=self._weather_states("16.0"),
+        )
+
+        self.assertFalse(observation.home.weather_heating_lockout)
+
+    def test_weather_lockout_hysteresis_holds_previous_permission(self) -> None:
+        observation = self.build(
+            registry=self._weather_registry(),
+            states=self._weather_states("17.0"),
+            previous_weather_lockout=False,
+        )
+
+        self.assertFalse(observation.home.weather_heating_lockout)
+
+    def test_weather_lockout_hysteresis_holds_previous_denial(self) -> None:
+        observation = self.build(
+            registry=self._weather_registry(),
+            states=self._weather_states("17.0"),
+            previous_weather_lockout=True,
+        )
+
+        self.assertTrue(observation.home.weather_heating_lockout)
+
+    def test_weather_lockout_after_unlock_stays_unlocked_in_band(self) -> None:
+        unlocked = self.build(
+            registry=self._weather_registry(),
+            states=self._weather_states("15.0"),
+        )
+        observation = self.build(
+            registry=self._weather_registry(),
+            states=self._weather_states("17.0"),
+            previous_weather_lockout=unlocked.home.weather_heating_lockout,
+        )
+
+        self.assertFalse(unlocked.home.weather_heating_lockout)
+        self.assertFalse(observation.home.weather_heating_lockout)
+
+    def test_weather_lockout_after_lock_stays_locked_in_band(self) -> None:
+        locked = self.build(
+            registry=self._weather_registry(),
+            states=self._weather_states("19.0"),
+        )
+        observation = self.build(
+            registry=self._weather_registry(),
+            states=self._weather_states("17.0"),
+            previous_weather_lockout=locked.home.weather_heating_lockout,
+        )
+
+        self.assertTrue(locked.home.weather_heating_lockout)
+        self.assertTrue(observation.home.weather_heating_lockout)
+
+    def test_weather_lockout_thresholds_are_options(self) -> None:
+        relaxed = self.build(
+            registry=self._weather_registry(high=22.0),
+            states=self._weather_states("19.0"),
+            previous_weather_lockout=False,
+        )
+        strict = self.build(
+            registry=self._weather_registry(high=18.0),
+            states=self._weather_states("19.0"),
+            previous_weather_lockout=False,
+        )
+
+        self.assertFalse(relaxed.home.weather_heating_lockout)
+        self.assertTrue(strict.home.weather_heating_lockout)
+
+    def test_weather_lockout_ignores_hydraulic_activity(self) -> None:
+        observation = self.build(
+            registry=self._weather_registry(),
+            states=self._weather_states("17.0"),
+            previous_weather_lockout=False,
+        )
+
+        self.assertFalse(observation.home.weather_heating_lockout)
+
+    def _weather_registry(self, *, high: float = 18.0, low: float = 16.0) -> ClimateRegistry:
+        return registry(
+            (),
+            home=ClimateHomeEnvironment(
+                outdoor_temperature_entity_id="sensor.outdoor_temperature",
+                heating_lockout_high=high,
+                heating_lockout_low=low,
+            ),
+        )
+
+    def _weather_states(self, value: str) -> dict[str, ClimateHaEntityState]:
+        return {"sensor.outdoor_temperature": ha_state("sensor.outdoor_temperature", value)}
+
         observation = self.build(registry=full_registry().__class__(
             rooms=(ClimateRoom("living", "Living room"),),
             devices=full_registry().devices,
@@ -377,13 +483,14 @@ class NativeHaObservationTest(unittest.TestCase):
         room = observation.room("living")
         self.assertIsNotNone(room)
         assert room is not None
-        self.assertIs(room.window, ClimateWindowState.UNKNOWN)
+        self.assertIs(room.window, ClimateWindowState.NOT_CONFIGURED)
         self.assertIsNone(observation.home.outdoor_temperature)
         self.assertIsNone(observation.home.central_heating_on)
+        self.assertFalse(observation.home.central_heating_configured)
         self.assertIs(observation.home.occupancy, ClimateOccupancyMode.HOME)
         self.assertIs(observation.home.period, ClimateDayPeriod.UNKNOWN)
 
-    def test_away_presence_selects_safe_off_and_unknown_presence_stays_home(
+    def test_away_presence_selects_setback_and_lost_presence_stays_unknown(
         self,
     ) -> None:
         states = full_states()
@@ -391,12 +498,12 @@ class NativeHaObservationTest(unittest.TestCase):
         away = self.build(states=states)
         self.assertIs(
             away.home.occupancy,
-            ClimateOccupancyMode.AWAY_SAFE_OFF,
+            ClimateOccupancyMode.AWAY_SETBACK,
         )
 
         states["person.ivan"] = ha_state("person.ivan", "unavailable")
         unknown = self.build(states=states)
-        self.assertIs(unknown.home.occupancy, ClimateOccupancyMode.HOME)
+        self.assertIs(unknown.home.occupancy, ClimateOccupancyMode.UNKNOWN)
 
     def test_room_temperature_falls_back_to_climate_current_temperature(
         self,

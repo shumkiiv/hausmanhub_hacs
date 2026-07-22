@@ -368,6 +368,13 @@ def climate_reference_observation(
                 observation.get("central_heating_on"),
                 "central heating",
             ),
+            central_heating_configured="central_heating_on" in observation,
+            weather_heating_lockout=_reference_weather_heating_lockout(
+                _optional_number(
+                    values.get("heat_load_temperature"),
+                    "outdoor heat-load temperature",
+                ),
+            ),
             occupancy=_enum(
                 ClimateOccupancyMode,
                 values.get("away", ClimateOccupancyMode.HOME.value),
@@ -471,6 +478,17 @@ def _device_activity(
             else ClimateDeviceActivity.RUNNING
         )
     return ClimateDeviceActivity.UNKNOWN
+
+
+def _reference_weather_heating_lockout(heat_load_temperature: float | None) -> bool:
+    if heat_load_temperature is None:
+        return False
+    if heat_load_temperature >= 18.0:
+        return True
+    if heat_load_temperature <= 16.0:
+        return False
+    # A single-tick reference observation fails closed inside the band.
+    return True
 
 
 def _reference_device(

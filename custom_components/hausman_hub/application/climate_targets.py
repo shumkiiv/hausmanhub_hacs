@@ -41,6 +41,7 @@ def build_climate_target_snapshot(
             ),
             observation.room(room.room_id),
             observed_at=observation.observed_at,
+            occupancy=observation.home.occupancy,
         )
         for room in contour.rooms
     )

@@ -107,6 +107,7 @@ def build_native_ha_climate_observation(
     observed_at: int,
     protection: ClimateProtectionMemory,
     local_time: tuple[int, int] | None = None,
+    previous_weather_lockout: bool | None = None,
 ) -> ClimateObservationSnapshot:
     """Build one complete observation from registry bindings and HA states."""
 
@@ -137,7 +138,14 @@ def build_native_ha_climate_observation(
         observed_at=observed_at,
         source_generated_at=observed_at,
         data_status=ClimateDataStatus.FRESH,
-        home=_home_observation(registry, contour, states, observed_at, local_time),
+        home=_home_observation(
+            registry,
+            contour,
+            states,
+            observed_at,
+            local_time,
+            previous_weather_lockout,
+        ),
         control=ClimateControlObservation(),
         rooms=rooms,
         devices=devices,
@@ -312,7 +320,7 @@ def _window_state(
     states: ClimateHaStateView,
 ) -> ClimateWindowState:
     if window_entity_id is None:
-        return ClimateWindowState.UNKNOWN
+        return ClimateWindowState.NOT_CONFIGURED
     state = states.entity_state(window_entity_id)
     if state is None or state.state in _UNAVAILABLE_STATES:
         return ClimateWindowState.UNKNOWN
@@ -335,19 +343,51 @@ def _home_observation(
     states: ClimateHaStateView,
     observed_at: int,
     local_time: tuple[int, int] | None,
+    previous_weather_lockout: bool | None,
 ) -> ClimateHomeObservation:
-    del observed_at
     home = registry.home
     outdoor = _home_number(home.outdoor_temperature_entity_id, states)
+    heat_load = _heat_load_temperature(
+        home.outdoor_temperature_entity_id,
+        states,
+        observed_at,
+    )
     return ClimateHomeObservation(
         season=ClimateSeason.UNKNOWN,
         period=_day_period(contour, local_time),
         outdoor_temperature=outdoor,
-        # The single outdoor reading also feeds the frozen heat-load rule.
-        heat_load_temperature=outdoor,
+        # The heat-load rule accepts the outdoor reading only when the
+        # configured sensor is fresh, numeric, and inside a plausible range.
+        heat_load_temperature=heat_load,
+        heating_lockout_high=home.heating_lockout_high,
+        heating_lockout_low=home.heating_lockout_low,
         central_heating_on=_home_switch(home.central_heating_entity_id, states),
+        central_heating_configured=home.central_heating_entity_id is not None,
+        weather_heating_lockout=_weather_heating_lockout(
+            heat_load,
+            home.heating_lockout_high,
+            home.heating_lockout_low,
+            previous_weather_lockout,
+        ),
         occupancy=_occupancy(home.presence_entity_id, states),
     )
+
+
+def _weather_heating_lockout(
+    heat_load_temperature: float | None,
+    high: float,
+    low: float,
+    previous: bool | None,
+) -> bool:
+    if heat_load_temperature is None:
+        return False
+    if heat_load_temperature >= high:
+        return True
+    if heat_load_temperature <= low:
+        return False
+    # Inside the hysteresis band the previous explicit permission wins;
+    # a first observation there fails closed instead of inventing permission.
+    return previous if previous is not None else True
 
 
 def _day_period(
@@ -371,7 +411,29 @@ def _home_number(
     state = states.entity_state(entity_id)
     if state is None or state.state in _UNAVAILABLE_STATES:
         return None
-    return _number(state.state)
+    value = _number(state.state)
+    # An implausible outdoor reading is unusable, never a crash or a default.
+    if value is None or not -80.0 <= value <= 80.0:
+        return None
+    return value
+
+
+def _heat_load_temperature(
+    entity_id: str | None,
+    states: ClimateHaStateView,
+    observed_at: int,
+) -> float | None:
+    if entity_id is None:
+        return None
+    state = states.entity_state(entity_id)
+    if state is None or state.state in _UNAVAILABLE_STATES:
+        return None
+    if not _is_fresh(state, observed_at):
+        return None
+    value = _number(state.state)
+    if value is None or not -80.0 <= value <= 100.0:
+        return None
+    return value
 
 
 def _home_switch(
@@ -398,10 +460,11 @@ def _occupancy(
         return ClimateOccupancyMode.HOME
     state = states.entity_state(entity_id)
     if state is None or state.state in _UNAVAILABLE_STATES:
-        # An unobserved presence never invents an away policy.
-        return ClimateOccupancyMode.HOME
+        # A configured but unobserved presence forbids auto-humidifying
+        # without inventing an away setback.
+        return ClimateOccupancyMode.UNKNOWN
     if state.state in {"off", "not_home"}:
-        return ClimateOccupancyMode.AWAY_SAFE_OFF
+        return ClimateOccupancyMode.AWAY_SETBACK
     if state.state in {"on", "home"}:
         return ClimateOccupancyMode.HOME
     # A custom person/device_tracker zone is deliberately treated as home:

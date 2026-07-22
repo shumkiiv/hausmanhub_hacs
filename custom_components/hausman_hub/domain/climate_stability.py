@@ -23,6 +23,7 @@ from .climate_observation import (
     ClimateFanMode,
     ClimateHomeObservation,
     ClimateObservationDeviceKind,
+    ClimateOccupancyMode,
     ClimatePhysicalFeedback,
     ClimateRoomObservation,
     ClimateTemperatureQuality,
@@ -100,6 +101,7 @@ class ClimateStabilityReason(StrEnum):
     HUMIDITY_HIGH = "humidity_high"
     HUMIDITY_HYSTERESIS = "humidity_hysteresis"
     WINDOW_NOT_CLOSED = "window_not_closed"
+    OCCUPANCY_NOT_HOME = "occupancy_not_home"
 
 
 class ClimateStabilityProtection(StrEnum):
@@ -839,6 +841,22 @@ def _humidifier_output(
             None,
             ClimateStabilityProtection.WINDOW,
             ClimateStabilityReason.WINDOW_NOT_CLOSED,
+        )
+    if home.occupancy in {
+        ClimateOccupancyMode.AWAY_SETBACK,
+        ClimateOccupancyMode.UNKNOWN,
+    }:
+        return (
+            ClimateStabilityAction.OBSERVE,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            ClimateStabilityProtection.NONE,
+            ClimateStabilityReason.OCCUPANCY_NOT_HOME,
         )
     if room.data_status is not ClimateDataStatus.FRESH or room.humidity is None:
         return (

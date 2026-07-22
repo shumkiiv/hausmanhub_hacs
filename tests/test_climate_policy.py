@@ -29,15 +29,35 @@ from custom_components.hausman_hub.application.climate_stability import (
 from custom_components.hausman_hub.application.climate_targets import (
     build_climate_target_snapshot,
 )
+from custom_components.hausman_hub.domain.climate_demand import ClimateDemandState
+from custom_components.hausman_hub.domain.climate_equipment import (
+    ClimateDevicePlan,
+    ClimateEquipmentAction,
+    ClimateEquipmentReason,
+    ClimateRoomEquipmentPlan,
+    _expected_device_output,
+)
 from custom_components.hausman_hub.domain.climate_observation import (
     ClimateControlObservation,
+    ClimateDataStatus,
     ClimateDelayedIntentState,
+    ClimateDeviceActivity,
+    ClimateDeviceAvailability,
+    ClimateDeviceObservation,
     ClimateExecutionGuardState,
+    ClimateHomeObservation,
+    ClimateObservationDeviceKind,
+    ClimateOccupancyMode,
     ClimateRoomMode,
+    ClimateRoomObservation,
+    ClimateSeason,
+    ClimateTemperatureQuality,
+    ClimateWindowState,
 )
 from custom_components.hausman_hub.domain.climate_policy import (
     CLIMATE_POLICY_PRIORITY,
     ClimateFinalDeviceAction,
+    ClimateFinalDeviceReason,
     ClimatePolicyAction,
     ClimatePolicyBlocker,
     ClimatePolicySnapshot,
@@ -45,10 +65,32 @@ from custom_components.hausman_hub.domain.climate_policy import (
     ClimateRoomPolicy,
     resolve_climate_room_policy,
 )
+from custom_components.hausman_hub.domain.climate_resolution import (
+    ClimateRoomThermalResolution,
+    ClimateThermalReason,
+    ClimateThermalResolution,
+)
+from custom_components.hausman_hub.domain.climate_stability import (
+    ClimateCycleTiming,
+    ClimateCycleTimingReason,
+    ClimateRoomStabilityPlan,
+    ClimateStableDevicePlan,
+    ClimateStabilityAction,
+    ClimateStabilityProtection,
+    ClimateStabilityReason,
+)
+from custom_components.hausman_hub.domain.climate_targets import (
+    ClimateRoomTarget,
+    ClimateTemperatureTargetOrigin,
+)
 from custom_components.hausman_hub.domain.climate_reference import (
     load_climate_reference_suite,
 )
-from custom_components.hausman_hub.domain.contours import ContourMode
+from custom_components.hausman_hub.domain.contours import (
+    ClimateProfile,
+    ClimateStrategy,
+    ContourMode,
+)
 from tests.test_contours import setup, source_snapshot
 
 
@@ -204,10 +246,6 @@ class ClimatePolicyTest(unittest.TestCase):
         for case_id, blocker in (
             ("stale_state_pauses_control", ClimatePolicyBlocker.STALE_STATE),
             (
-                "temperature_jump_pauses_control",
-                ClimatePolicyBlocker.TEMPERATURE_JUMP,
-            ),
-            (
                 "stale_delayed_intent_is_dropped",
                 ClimatePolicyBlocker.STALE_DELAYED_COMMAND,
             ),
@@ -308,6 +346,347 @@ class ClimatePolicyTest(unittest.TestCase):
             replace(snapshot, observed_at=valid.observed_at + 1)
         with self.assertRaises(ClimatePolicyViolation):
             replace(snapshot, contour_mode=ContourMode.OBSERVE)
+
+    def test_weather_lockout_blocks_automatic_heating_at_high_threshold(self) -> None:
+        result = resolve_climate_room_policy(
+            *_weather_inputs(weather_heating_lockout=True),
+            observed_at=NOW,
+        )
+
+        self.assertIs(result.action, ClimatePolicyAction.OBSERVE)
+        self.assertIn(ClimatePolicyBlocker.WEATHER_LOCKOUT, result.blockers)
+
+    def test_weather_lockout_releases_heating_at_low_threshold(self) -> None:
+        result = resolve_climate_room_policy(
+            *_weather_inputs(weather_heating_lockout=False),
+            observed_at=NOW,
+        )
+
+        self.assertNotIn(ClimatePolicyBlocker.WEATHER_LOCKOUT, result.blockers)
+
+    def test_weather_lockout_hysteresis_holds_lockout_without_activity(self) -> None:
+        result = resolve_climate_room_policy(
+            *_weather_inputs(weather_heating_lockout=True),
+            observed_at=NOW,
+        )
+
+        self.assertIn(ClimatePolicyBlocker.WEATHER_LOCKOUT, result.blockers)
+
+    def test_weather_lockout_hysteresis_keeps_permission_with_active_hydraulic(
+        self,
+    ) -> None:
+        result = resolve_climate_room_policy(
+            *_weather_inputs(
+                weather_heating_lockout=False,
+                radiator_activity=ClimateDeviceActivity.HEATING,
+            ),
+            observed_at=NOW,
+        )
+
+        self.assertNotIn(ClimatePolicyBlocker.WEATHER_LOCKOUT, result.blockers)
+
+    def test_weather_lockout_does_not_affect_cooling(self) -> None:
+        result = resolve_climate_room_policy(
+            *_weather_inputs(
+                weather_heating_lockout=True,
+                thermal=ClimateThermalResolution.COOLING,
+            ),
+            observed_at=NOW,
+        )
+
+        self.assertNotIn(ClimatePolicyBlocker.WEATHER_LOCKOUT, result.blockers)
+
+    def test_weather_lockout_bypassed_by_temporary_override(self) -> None:
+        result = resolve_climate_room_policy(
+            *_weather_inputs(
+                weather_heating_lockout=True,
+                origin=ClimateTemperatureTargetOrigin.TEMPORARY_OVERRIDE,
+            ),
+            observed_at=NOW,
+        )
+
+        self.assertNotIn(ClimatePolicyBlocker.WEATHER_LOCKOUT, result.blockers)
+
+    def test_weather_lockout_bypassed_by_manual_request(self) -> None:
+        result = resolve_climate_room_policy(
+            *_weather_inputs(
+                weather_heating_lockout=True,
+                manual_request=True,
+            ),
+            observed_at=NOW,
+        )
+
+        self.assertIs(result.policy, ClimateRoomPolicy.MANUAL)
+        self.assertNotIn(ClimatePolicyBlocker.WEATHER_LOCKOUT, result.blockers)
+
+    def test_weather_lockout_thresholds_are_options(self) -> None:
+        result = resolve_climate_room_policy(
+            *_weather_inputs(
+                weather_heating_lockout=False,
+                high=22.0,
+                radiator_activity=ClimateDeviceActivity.HEATING,
+            ),
+            observed_at=NOW,
+        )
+
+        self.assertNotIn(ClimatePolicyBlocker.WEATHER_LOCKOUT, result.blockers)
+
+    def test_force_safe_off_bypasses_stability_debounce(self) -> None:
+        result = resolve_climate_room_policy(
+            *_force_safe_off_inputs(),
+            observed_at=NOW,
+        )
+
+        self.assertIs(result.policy, ClimateRoomPolicy.SAFETY_LOCKOUT)
+        self.assertIs(result.action, ClimatePolicyAction.SAFE_OFF)
+        self.assertEqual(("living_ac",), result.safe_stop_device_ids)
+
+    def test_force_safe_off_skips_redundant_turn_off_for_stopped_devices(
+        self,
+    ) -> None:
+        result = resolve_climate_room_policy(
+            *_force_safe_off_inputs(ac_activity=ClimateDeviceActivity.STOPPED),
+            observed_at=NOW,
+        )
+
+        self.assertIs(result.action, ClimatePolicyAction.SAFE_OFF)
+        self.assertEqual((), result.safe_stop_device_ids)
+        self.assertEqual(
+            (ClimateFinalDeviceReason.ALREADY_OFF,),
+            tuple(device.reason for device in result.devices),
+        )
+
+
+def _weather_inputs(
+    heat_load: float = 20.0,
+    *,
+    high: float = 18.0,
+    low: float = 16.0,
+    weather_heating_lockout: bool = True,
+    origin: ClimateTemperatureTargetOrigin = ClimateTemperatureTargetOrigin.PROFILE,
+    thermal: ClimateThermalResolution = ClimateThermalResolution.HEATING,
+    radiator_activity: ClimateDeviceActivity = ClimateDeviceActivity.STOPPED,
+    manual_request: bool = False,
+):
+    room = ClimateRoomObservation(
+        room_id="living",
+        name="Living",
+        data_status=ClimateDataStatus.FRESH,
+        temperature=20.0,
+        temperature_quality=ClimateTemperatureQuality.NORMAL,
+        window=ClimateWindowState.CLOSED,
+        mode=ClimateRoomMode.AUTO,
+    )
+    home = ClimateHomeObservation(
+        season=(
+            ClimateSeason.WINTER
+            if thermal is ClimateThermalResolution.HEATING
+            else ClimateSeason.SUMMER
+        ),
+        heat_load_temperature=heat_load,
+        heating_lockout_high=high,
+        heating_lockout_low=low,
+        central_heating_on=thermal is ClimateThermalResolution.HEATING,
+        weather_heating_lockout=weather_heating_lockout,
+    )
+    control = ClimateControlObservation(
+        manual_request=manual_request,
+        manual_request_room_id="living" if manual_request else None,
+    )
+    if thermal is ClimateThermalResolution.HEATING:
+        resolution = ClimateRoomThermalResolution(
+            room_id="living",
+            season=ClimateSeason.WINTER,
+            occupancy=ClimateOccupancyMode.HOME,
+            central_heating_on=True,
+            heating_demand=ClimateDemandState.REQUIRED,
+            cooling_demand=ClimateDemandState.NOT_REQUIRED,
+            thermal=ClimateThermalResolution.HEATING,
+            reason=ClimateThermalReason.HEATING_REQUIRED,
+            temperature_origin=origin,
+        )
+    else:
+        resolution = ClimateRoomThermalResolution(
+            room_id="living",
+            season=ClimateSeason.SUMMER,
+            occupancy=ClimateOccupancyMode.HOME,
+            central_heating_on=False,
+            heating_demand=ClimateDemandState.NOT_REQUIRED,
+            cooling_demand=ClimateDemandState.REQUIRED,
+            thermal=ClimateThermalResolution.COOLING,
+            reason=ClimateThermalReason.COOLING_REQUIRED,
+            temperature_origin=origin,
+        )
+    radiator = ClimateDeviceObservation(
+        device_id="living_radiator",
+        name="Radiator",
+        room_id="living",
+        kind=ClimateObservationDeviceKind.RADIATOR_THERMOSTAT,
+        availability=ClimateDeviceAvailability.AVAILABLE,
+        activity=radiator_activity,
+    )
+    equipment = ClimateRoomEquipmentPlan(
+        room_id="living",
+        thermal=resolution.thermal,
+        devices=(
+            ClimateDevicePlan(
+                device_id=radiator.device_id,
+                room_id=radiator.room_id,
+                kind=radiator.kind,
+                availability=radiator.availability,
+                activity=radiator.activity,
+                room_data_status=room.data_status,
+                thermal=resolution.thermal,
+                season=home.season,
+                period=home.period,
+                occupancy=home.occupancy,
+                central_heating_on=home.central_heating_on,
+                central_heating_configured=home.central_heating_configured,
+                outdoor_temperature=home.outdoor_temperature,
+                heat_load_temperature=home.heat_load_temperature,
+                comfort_temperature=22.0,
+                strategy=ClimateStrategy.NORMAL,
+                observed_at=NOW,
+                action=(
+                    ClimateEquipmentAction.OBSERVE
+                    if home.season is ClimateSeason.WINTER
+                    else ClimateEquipmentAction.SAFE_OFF
+                ),
+                target_temperature=None,
+                fan_mode=None,
+                quiet=None,
+                reason=(
+                    ClimateEquipmentReason.PERIOD_UNAVAILABLE
+                    if home.season is ClimateSeason.WINTER
+                    else ClimateEquipmentReason.CENTRAL_HEATING_OFF
+                ),
+            ),
+        ),
+    )
+    stability = ClimateRoomStabilityPlan(room_id="living", devices=())
+    return room, home, control, resolution, equipment, stability, (radiator,)
+
+
+def _force_safe_off_inputs(
+    *,
+    ac_activity: ClimateDeviceActivity = ClimateDeviceActivity.RUNNING,
+):
+    room = ClimateRoomObservation(
+        room_id="living",
+        name="Living",
+        data_status=ClimateDataStatus.FRESH,
+        temperature=30.0,
+        temperature_quality=ClimateTemperatureQuality.NORMAL,
+        window=ClimateWindowState.OPEN,
+        mode=ClimateRoomMode.AUTO,
+    )
+    home = ClimateHomeObservation(
+        season=ClimateSeason.SUMMER,
+        central_heating_on=False,
+    )
+    control = ClimateControlObservation()
+    resolution = ClimateRoomThermalResolution(
+        room_id="living",
+        season=ClimateSeason.SUMMER,
+        occupancy=ClimateOccupancyMode.HOME,
+        central_heating_on=False,
+        heating_demand=ClimateDemandState.NOT_REQUIRED,
+        cooling_demand=ClimateDemandState.REQUIRED,
+        thermal=ClimateThermalResolution.COOLING,
+        reason=ClimateThermalReason.COOLING_REQUIRED,
+    )
+    ac = ClimateDeviceObservation(
+        device_id="living_ac",
+        name="AC",
+        room_id="living",
+        kind=ClimateObservationDeviceKind.AIR_CONDITIONER,
+        availability=ClimateDeviceAvailability.AVAILABLE,
+        activity=ac_activity,
+    )
+    action, target, fan, quiet, reason = _expected_device_output(
+        kind=ac.kind,
+        availability=ac.availability,
+        room_data_status=room.data_status,
+        thermal=resolution.thermal,
+        season=home.season,
+        period=home.period,
+        occupancy=home.occupancy,
+        central_heating_on=home.central_heating_on,
+        central_heating_configured=home.central_heating_configured,
+        outdoor_temperature=home.outdoor_temperature,
+        heat_load_temperature=home.heat_load_temperature,
+        comfort_temperature=22.0,
+        strategy=ClimateStrategy.NORMAL,
+    )
+    base = ClimateDevicePlan(
+        device_id=ac.device_id,
+        room_id=ac.room_id,
+        kind=ac.kind,
+        availability=ac.availability,
+        activity=ac.activity,
+        room_data_status=room.data_status,
+        thermal=resolution.thermal,
+        season=home.season,
+        period=home.period,
+        occupancy=home.occupancy,
+        central_heating_on=home.central_heating_on,
+        central_heating_configured=home.central_heating_configured,
+        outdoor_temperature=home.outdoor_temperature,
+        heat_load_temperature=home.heat_load_temperature,
+        comfort_temperature=22.0,
+        strategy=ClimateStrategy.NORMAL,
+        observed_at=NOW,
+        action=action,
+        target_temperature=target,
+        fan_mode=fan,
+        quiet=quiet,
+        reason=reason,
+    )
+    target_object = ClimateRoomTarget(
+        room_id="living",
+        active_profile=ClimateProfile.DAY,
+        profile_temperature=22.0,
+        target_temperature=22.0,
+        target_humidity=45,
+        strategy=ClimateStrategy.NORMAL,
+        temperature_origin=ClimateTemperatureTargetOrigin.PROFILE,
+        observation_status=room.data_status,
+        observation_observed_at=NOW,
+    )
+    equipment = ClimateRoomEquipmentPlan(
+        room_id="living",
+        thermal=resolution.thermal,
+        devices=(base,),
+    )
+    stability = ClimateRoomStabilityPlan(
+        room_id="living",
+        devices=(
+            ClimateStableDevicePlan(
+                device=ac,
+                room=room,
+                target=target_object,
+                home=home,
+                observed_at=NOW,
+                base=base,
+                cooling_active=True,
+                action=ClimateStabilityAction.COOL,
+                target_temperature=base.target_temperature,
+                fan_mode=base.fan_mode,
+                quiet=base.quiet,
+                humidity_on_threshold=None,
+                humidity_off_threshold=None,
+                cycle_timing=ClimateCycleTiming(
+                    minimum_run_minutes=8,
+                    minimum_off_minutes=6,
+                    reason=ClimateCycleTimingReason.DEFAULT,
+                ),
+                remaining_seconds=None,
+                protection=ClimateStabilityProtection.NONE,
+                reason=ClimateStabilityReason.COOLING_REQUIRED,
+            ),
+        ),
+    )
+    return room, home, control, resolution, equipment, stability, (ac,)
 
 
 if __name__ == "__main__":

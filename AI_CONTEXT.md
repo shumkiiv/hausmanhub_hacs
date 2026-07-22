@@ -1,6 +1,6 @@
 # HausmanHub AI Context
 
-Last updated: 2026-07-21.
+Last updated: 2026-07-23.
 
 ## Project state
 
@@ -356,6 +356,31 @@ Last updated: 2026-07-21.
   repository remain unchanged. The final staged tree passed 513 local tests,
   the HACS/package/boundary/Android checks, and disposable Home Assistant
   Core   2026.6.4/2026.7.0.
+- Version 1.16.0 completes roadmap item 38. Windows, presence,
+  outdoor temperature, and sensor quality now shape climate decisions.
+  An open or unreadable configured window hard-locks its room into
+  safe-off on the next tick, bypassing stability debounce, while an
+  unbound window stays neutral; suspect or unknown room temperature
+  also forces safe-off with computed targets kept for diagnostics.
+  Absence applies a soft setback of minus two degrees heating and plus
+  two degrees cooling, clamped to limits and never inverting demand,
+  only in automatic modes and never on temporary or manual targets;
+  unreadable presence changes no target, and auto-humidifying is
+  denied for both absent and unknown presence. A weather lockout
+  blocks automatic heating from 18 degrees outdoor and re-enables it
+  from 16, keeping the previous permission inside the band from
+  hydraulic activity; cooling is untouched, manual and temporary
+  targets bypass it, and both thresholds are registry options (16/18
+  defaults). Central heating now distinguishes unbound (neutral) from
+  bound-but-off-or-unavailable (hydraulic radiators blocked and driven
+  to safe-off); electric floors, heat pumps, and air conditioners are
+  unaffected. The frozen reference suite was re-fingerprinted for the
+  suspect-temperature and central-heating behavior changes, and 17 new
+  acceptance tests cover the setback, lockout hysteresis, gates, and
+  force safe-off semantics. The final tree passed 610 local tests, the
+  full release gate, and disposable Core 2026.6.4 and 2026.7.0.
+  Remaining roadmap: 39 (per-room schedules and profiles), 40
+  (standalone climate release), then 41-50 (HausmanHub 2.0 platform).
 - Version 1.15.0 completes roadmap item 37. A safe migration wizard
   imports existing legacy climate settings into an empty native
   contour: a one-shot GET-only read of the old API with private-address
@@ -2189,5 +2214,5 @@ Engineering and review rules are in
 
 - Obsidian/context index: `LLM_WIKI/00_Index.md`.
 - Latest generated context: `LLM_WIKI/Context.md`.
-- Last sync: 2026-07-22T20:33:59+03:00.
+- Last sync: 2026-07-23T02:24:19+03:00.
 <!-- llm-wiki-sync:end -->

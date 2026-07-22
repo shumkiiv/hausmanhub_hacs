@@ -12,9 +12,13 @@ from enum import StrEnum
 from .climate import ClimateModelViolation, ClimateRoom
 from .climate_observation import (
     ClimateDataStatus,
+    ClimateOccupancyMode,
+    ClimateRoomMode,
     ClimateRoomObservation,
 )
 from .contours import (
+    CLIMATE_TARGET_TEMPERATURE_MAXIMUM,
+    CLIMATE_TARGET_TEMPERATURE_MINIMUM,
     ClimateComfortSettings,
     ClimateProfile,
     ClimateStrategy,
@@ -24,6 +28,7 @@ from .contours import (
 
 
 CLIMATE_TARGET_MODEL_VERSION = 1
+CLIMATE_AWAY_SETBACK_CELSIUS = 2.0
 
 
 class ClimateTargetViolation(ValueError):
@@ -35,6 +40,7 @@ class ClimateTemperatureTargetOrigin(StrEnum):
 
     PROFILE = "profile"
     TEMPORARY_OVERRIDE = "temporary_override"
+    AWAY_SETBACK = "away_setback"
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,6 +123,12 @@ class ClimateRoomTarget:
             raise ClimateTargetViolation(
                 "profile target must equal the selected saved temperature"
             )
+        if self.temperature_origin is ClimateTemperatureTargetOrigin.AWAY_SETBACK:
+            setback = abs(self.target_temperature - self.profile_temperature)
+            if setback > CLIMATE_AWAY_SETBACK_CELSIUS:
+                raise ClimateTargetViolation(
+                    "away setback target must stay within the bounded setback"
+                )
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,12 +184,15 @@ def resolve_climate_room_target(
     observation: ClimateRoomObservation | None,
     *,
     observed_at: int,
+    occupancy: ClimateOccupancyMode = ClimateOccupancyMode.HOME,
 ) -> ClimateRoomTarget:
     """Select one profile and apply only an explicit temperature override."""
 
     if not isinstance(policy, ClimateRoomTargetPolicy):
         raise ClimateTargetViolation("a validated room target policy is required")
     _timestamp(observed_at)
+    if not isinstance(occupancy, ClimateOccupancyMode):
+        raise ClimateTargetViolation("a validated home occupancy mode is required")
     if observation is not None:
         if not isinstance(observation, ClimateRoomObservation):
             raise ClimateTargetViolation("a validated room observation is required")
@@ -190,24 +205,54 @@ def resolve_climate_room_target(
         observation_status = ClimateDataStatus.UNAVAILABLE
     profile = policy.active_settings
     override = policy.temporary_override
+    automatic_mode = (
+        observation is not None
+        and observation.mode
+        in {ClimateRoomMode.AUTO, ClimateRoomMode.FORCED_AUTO_ONLY}
+    )
+    if override is not None:
+        target_temperature = override.target_temperature
+        temperature_origin = ClimateTemperatureTargetOrigin.TEMPORARY_OVERRIDE
+    elif occupancy is ClimateOccupancyMode.AWAY_SETBACK and automatic_mode:
+        target_temperature = _away_setback_temperature(
+            profile.target_temperature,
+            None if observation is None else observation.temperature,
+        )
+        temperature_origin = ClimateTemperatureTargetOrigin.AWAY_SETBACK
+    else:
+        target_temperature = profile.target_temperature
+        temperature_origin = ClimateTemperatureTargetOrigin.PROFILE
     return ClimateRoomTarget(
         room_id=policy.room_id,
         active_profile=policy.active_profile,
         profile_temperature=profile.target_temperature,
-        target_temperature=(
-            profile.target_temperature
-            if override is None
-            else override.target_temperature
-        ),
+        target_temperature=target_temperature,
         target_humidity=profile.target_humidity,
         strategy=profile.strategy,
-        temperature_origin=(
-            ClimateTemperatureTargetOrigin.PROFILE
-            if override is None
-            else ClimateTemperatureTargetOrigin.TEMPORARY_OVERRIDE
-        ),
+        temperature_origin=temperature_origin,
         observation_status=observation_status,
         observation_observed_at=observed_at,
+    )
+
+
+def _away_setback_temperature(
+    target: float,
+    current: float | None,
+) -> float:
+    if current is None or current == target:
+        return target
+    if current < target:
+        # Heating setback lowers the target but never crosses the current
+        # temperature: crossing it would invent a cooling demand while away.
+        return max(
+            target - CLIMATE_AWAY_SETBACK_CELSIUS,
+            current,
+            CLIMATE_TARGET_TEMPERATURE_MINIMUM,
+        )
+    return min(
+        target + CLIMATE_AWAY_SETBACK_CELSIUS,
+        current,
+        CLIMATE_TARGET_TEMPERATURE_MAXIMUM,
     )
 
 

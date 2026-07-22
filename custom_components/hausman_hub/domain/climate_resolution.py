@@ -19,6 +19,7 @@ from .climate_observation import (
     ClimateOccupancyMode,
     ClimateSeason,
 )
+from .climate_targets import ClimateTemperatureTargetOrigin
 from .contours import ContourMode
 
 
@@ -66,6 +67,9 @@ class ClimateRoomThermalResolution:
     cooling_demand: ClimateDemandState
     thermal: ClimateThermalResolution
     reason: ClimateThermalReason
+    temperature_origin: ClimateTemperatureTargetOrigin = (
+        ClimateTemperatureTargetOrigin.PROFILE
+    )
 
     def __post_init__(self) -> None:
         _stable_room_id(self.room_id)
@@ -86,6 +90,10 @@ class ClimateRoomThermalResolution:
             raise ClimateResolutionViolation("thermal resolution must be approved")
         if not isinstance(self.reason, ClimateThermalReason):
             raise ClimateResolutionViolation("thermal reason must be approved")
+        if not isinstance(self.temperature_origin, ClimateTemperatureTargetOrigin):
+            raise ClimateResolutionViolation(
+                "thermal temperature origin must be approved"
+            )
         expected = _resolve_thermal_fields(
             heating=self.heating_demand,
             cooling=self.cooling_demand,
@@ -176,6 +184,7 @@ def resolve_climate_room_thermal(
         cooling_demand=demand.cooling,
         thermal=thermal,
         reason=reason,
+        temperature_origin=demand.temperature_origin,
     )
 
 

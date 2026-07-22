@@ -126,6 +126,8 @@ class ClimateOccupancyMode(StrEnum):
     HOME = "home"
     AWAY_SAFE_OFF = "safe_off"
     AWAY_KEEP = "keep"
+    AWAY_SETBACK = "setback"
+    UNKNOWN = "unknown"
 
 
 class ClimateDelayedIntentState(StrEnum):
@@ -152,7 +154,11 @@ class ClimateHomeObservation:
     period: ClimateDayPeriod = ClimateDayPeriod.UNKNOWN
     outdoor_temperature: float | None = None
     heat_load_temperature: float | None = None
+    heating_lockout_high: float = 18.0
+    heating_lockout_low: float = 16.0
     central_heating_on: bool | None = None
+    central_heating_configured: bool = True
+    weather_heating_lockout: bool = False
     occupancy: ClimateOccupancyMode = ClimateOccupancyMode.HOME
 
     def __post_init__(self) -> None:
@@ -170,7 +176,34 @@ class ClimateHomeObservation:
             100,
             "outdoor heat-load temperature",
         )
+        _lockout_threshold(
+            self.heating_lockout_high,
+            "heating lockout high threshold",
+        )
+        _lockout_threshold(
+            self.heating_lockout_low,
+            "heating lockout low threshold",
+        )
+        if self.heating_lockout_low >= self.heating_lockout_high:
+            raise ClimateObservationViolation(
+                "heating lockout low threshold must stay below the high threshold"
+            )
         _optional_bool(self.central_heating_on, "central heating state")
+        if type(self.central_heating_configured) is not bool:
+            raise ClimateObservationViolation(
+                "central heating configured flag must be boolean"
+            )
+        if (
+            not self.central_heating_configured
+            and self.central_heating_on is not None
+        ):
+            raise ClimateObservationViolation(
+                "unconfigured central heating cannot report a state"
+            )
+        if type(self.weather_heating_lockout) is not bool:
+            raise ClimateObservationViolation(
+                "weather heating lockout must be boolean"
+            )
         _require_enum(self.occupancy, ClimateOccupancyMode, "occupancy")
 
 
@@ -561,6 +594,18 @@ def _optional_number(
 def _optional_bool(value: object, label: str) -> None:
     if value is not None and type(value) is not bool:
         raise ClimateObservationViolation(f"{label} must be boolean or unavailable")
+
+
+def _lockout_threshold(value: object, label: str) -> float:
+    if isinstance(value, bool):
+        raise ClimateObservationViolation(f"{label} must be numeric")
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError) as error:
+        raise ClimateObservationViolation(f"{label} must be numeric") from error
+    if not math.isfinite(number) or not -40.0 <= number <= 60.0:
+        raise ClimateObservationViolation(f"{label} must stay within -40..60")
+    return number
 
 
 def _timestamp(value: object, label: str) -> None:

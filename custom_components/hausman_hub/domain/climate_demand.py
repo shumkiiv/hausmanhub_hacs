@@ -18,7 +18,7 @@ from .climate_observation import (
     ClimateRoomObservation,
     ClimateTemperatureQuality,
 )
-from .climate_targets import ClimateRoomTarget
+from .climate_targets import ClimateRoomTarget, ClimateTemperatureTargetOrigin
 from .contours import ClimateComfortSettings, ClimateStrategy, ContourMode
 
 
@@ -58,6 +58,9 @@ class ClimateRoomDemand:
     heating: ClimateDemandState
     cooling: ClimateDemandState
     humidifying: ClimateDemandState
+    temperature_origin: ClimateTemperatureTargetOrigin = (
+        ClimateTemperatureTargetOrigin.PROFILE
+    )
 
     def __post_init__(self) -> None:
         _stable_room_id(self.room_id)
@@ -71,6 +74,10 @@ class ClimateRoomDemand:
         for state in (self.heating, self.cooling, self.humidifying):
             if not isinstance(state, ClimateDemandState):
                 raise ClimateDemandViolation("demand state must be approved")
+        if not isinstance(self.temperature_origin, ClimateTemperatureTargetOrigin):
+            raise ClimateDemandViolation(
+                "demand temperature origin must be approved"
+            )
         _optional_gap(self.heating_gap, "heating gap")
         _optional_gap(self.cooling_gap, "cooling gap")
         _optional_gap(self.humidifying_gap, "humidifying gap")
@@ -323,6 +330,7 @@ def resolve_climate_room_demand(
         heating=heating,
         cooling=cooling,
         humidifying=humidifying,
+        temperature_origin=target.temperature_origin,
     )
 
 

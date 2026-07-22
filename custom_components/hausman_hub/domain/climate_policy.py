@@ -33,6 +33,8 @@ from .climate_observation import (
     ClimateRoomObservation,
     ClimateTemperatureQuality,
     ClimateWindowState,
+    ClimateDeviceActivity,
+    ClimateDeviceObservation,
 )
 from .climate_resolution import (
     ClimateRoomThermalResolution,
@@ -43,6 +45,7 @@ from .climate_stability import (
     ClimateStabilityAction,
     ClimateStabilityProtection,
 )
+from .climate_targets import ClimateTemperatureTargetOrigin
 from .contours import ContourMode
 
 
@@ -118,6 +121,7 @@ class ClimatePolicyBlocker(StrEnum):
     MINIMUM_OFF_PAUSE = "minimum_off_pause"
     MINIMUM_RUN_HOLD = "minimum_run_hold"
     DEVICE_UNAVAILABLE = "device_unavailable"
+    WEATHER_LOCKOUT = "weather_lockout"
 
 
 class ClimateFinalDeviceAction(StrEnum):
@@ -482,15 +486,15 @@ def _expected_policy_output(
     ):
         raise ClimatePolicyViolation("validated policy inputs are required")
 
-    if home.occupancy is not ClimateOccupancyMode.HOME:
-        if home.occupancy is ClimateOccupancyMode.AWAY_KEEP:
-            return (
-                ClimateRoomPolicy.AWAY,
-                ClimatePolicyAction.OBSERVE,
-                ClimatePolicyReason.AWAY_KEEP,
-                (ClimatePolicyBlocker.AWAY,),
-                (),
-            )
+    if home.occupancy is ClimateOccupancyMode.AWAY_KEEP:
+        return (
+            ClimateRoomPolicy.AWAY,
+            ClimatePolicyAction.OBSERVE,
+            ClimatePolicyReason.AWAY_KEEP,
+            (ClimatePolicyBlocker.AWAY,),
+            (),
+        )
+    if home.occupancy is ClimateOccupancyMode.AWAY_SAFE_OFF:
         return (
             ClimateRoomPolicy.AWAY,
             ClimatePolicyAction.SAFE_OFF,
@@ -522,6 +526,12 @@ def _expected_policy_output(
     manual_request = (
         control.manual_request and control.manual_request_room_id == room.room_id
     )
+    weather_lockout = (
+        resolution.thermal is ClimateThermalResolution.HEATING
+        and resolution.temperature_origin
+        is not ClimateTemperatureTargetOrigin.TEMPORARY_OVERRIDE
+        and home.weather_heating_lockout
+    )
     if room.mode is ClimateRoomMode.FORCED_AUTO_ONLY:
         blockers = (
             (ClimatePolicyBlocker.FORCED_AUTO_ONLY,) if manual_request else ()
@@ -532,9 +542,13 @@ def _expected_policy_output(
             stability,
             resolution,
         )
+        action = _automatic_room_action(resolution, equipment, stability)
+        if weather_lockout:
+            action = ClimatePolicyAction.OBSERVE
+            blockers = blockers + (ClimatePolicyBlocker.WEATHER_LOCKOUT,)
         return (
             ClimateRoomPolicy.FORCED_AUTO_ONLY,
-            _automatic_room_action(resolution, equipment, stability),
+            action,
             ClimatePolicyReason.FORCED_AUTOMATION,
             blockers,
             _automatic_devices(selected_devices, equipment, stability),
@@ -547,17 +561,22 @@ def _expected_policy_output(
             (ClimatePolicyBlocker.MANUAL_NO_AUTOMATIC_PLAN,),
             (),
         )
+    blockers = _automatic_blockers(
+        room.room_id,
+        control,
+        selected_devices,
+        stability,
+        resolution,
+    )
+    action = _automatic_room_action(resolution, equipment, stability)
+    if weather_lockout:
+        action = ClimatePolicyAction.OBSERVE
+        blockers = blockers + (ClimatePolicyBlocker.WEATHER_LOCKOUT,)
     return (
         ClimateRoomPolicy.AUTO,
-        _automatic_room_action(resolution, equipment, stability),
+        action,
         ClimatePolicyReason.AUTOMATIC,
-        _automatic_blockers(
-            room.room_id,
-            control,
-            selected_devices,
-            stability,
-            resolution,
-        ),
+        blockers,
         _automatic_devices(selected_devices, equipment, stability),
     )
 
@@ -570,6 +589,8 @@ def _safety_blockers(
         blockers.append(ClimatePolicyBlocker.WINDOW)
     if room.temperature is None:
         blockers.append(ClimatePolicyBlocker.CRITICAL_SENSOR)
+    if room.temperature_quality is ClimateTemperatureQuality.SUSPECT:
+        blockers.append(ClimatePolicyBlocker.TEMPERATURE_JUMP)
     if room.cooling_allowed is False:
         blockers.append(ClimatePolicyBlocker.COOLING_BLOCKED)
     if room.heating_allowed is False:
@@ -584,8 +605,6 @@ def _freshness_blockers(
     blockers: list[ClimatePolicyBlocker] = []
     if room.data_status is not ClimateDataStatus.FRESH:
         blockers.append(ClimatePolicyBlocker.STALE_STATE)
-    if room.temperature_quality is ClimateTemperatureQuality.SUSPECT:
-        blockers.append(ClimatePolicyBlocker.TEMPERATURE_JUMP)
     if (
         control.delayed_intent is ClimateDelayedIntentState.STALE_AFTER_CONTROL_CHANGE
         and control.delayed_intent_room_id == room.room_id

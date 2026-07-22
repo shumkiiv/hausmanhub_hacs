@@ -51,15 +51,20 @@ class ClimateRegistryReconciliation:
 def registry_to_payload(registry: ClimateRegistry) -> dict[str, object]:
     """Serialize only the fixed versioned registry shape."""
 
+    home: dict[str, object] = {
+        "outdoor_temperature_entity_id": (
+            registry.home.outdoor_temperature_entity_id
+        ),
+        "presence_entity_id": registry.home.presence_entity_id,
+        "central_heating_entity_id": registry.home.central_heating_entity_id,
+    }
+    if registry.home.heating_lockout_high != 18.0:
+        home["heating_lockout_high"] = registry.home.heating_lockout_high
+    if registry.home.heating_lockout_low != 16.0:
+        home["heating_lockout_low"] = registry.home.heating_lockout_low
     return {
         "version": registry.version,
-        "home": {
-            "outdoor_temperature_entity_id": (
-                registry.home.outdoor_temperature_entity_id
-            ),
-            "presence_entity_id": registry.home.presence_entity_id,
-            "central_heating_entity_id": registry.home.central_heating_entity_id,
-        },
+        "home": home,
         "rooms": [
             {
                 "id": room.room_id,
@@ -104,8 +109,11 @@ def registry_from_payload(payload: object) -> ClimateRegistry:
             "outdoor_temperature_entity_id",
             "presence_entity_id",
             "central_heating_entity_id",
+            "heating_lockout_high",
+            "heating_lockout_low",
         },
         "registry home",
+        optional={"heating_lockout_high", "heating_lockout_low"},
     )
     rooms = _bounded_list(root["rooms"], "registry rooms", 128)
     devices = _bounded_list(root["devices"], "registry devices", 512)
@@ -124,6 +132,16 @@ def registry_from_payload(payload: object) -> ClimateRegistry:
                 central_heating_entity_id=_optional_entity(
                     home["central_heating_entity_id"],
                     "central heating entity",
+                ),
+                heating_lockout_high=_optional_threshold(
+                    home.get("heating_lockout_high"),
+                    18.0,
+                    "heating lockout high threshold",
+                ),
+                heating_lockout_low=_optional_threshold(
+                    home.get("heating_lockout_low"),
+                    16.0,
+                    "heating lockout low threshold",
                 ),
             ),
             rooms=tuple(_room(value, index) for index, value in enumerate(rooms)),
@@ -228,6 +246,14 @@ def _optional_entity(value: object, label: str) -> str | None:
     return value
 
 
+def _optional_threshold(value: object, default: float, label: str) -> float:
+    if value is None:
+        return default
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ClimateRegistryViolation(f"{label} must be numeric")
+    return float(value)
+
+
 def _device(value: object, index: int) -> ClimateDevice:
     item = _exact_mapping(
         value,
@@ -271,10 +297,13 @@ def _exact_mapping(
     value: object,
     keys: set[str],
     label: str,
+    optional: set[str] | None = None,
 ) -> Mapping[str, Any]:
     if not isinstance(value, Mapping) or any(not isinstance(key, str) for key in value):
         raise ClimateRegistryViolation(f"{label} must be an object")
-    if set(value) != keys:
+    optional_keys = optional or set()
+    present = set(value)
+    if not (keys - optional_keys) <= present <= keys:
         raise ClimateRegistryViolation(f"{label} must contain only its fixed fields")
     return value
 

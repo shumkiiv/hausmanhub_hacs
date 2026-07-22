@@ -214,6 +214,7 @@ class ClimateRuntime:
         self._contours = ContourRegistry()
         self._protection_memory = empty_climate_protection_memory(updated_at=0)
         self._protection_restart_after: int | None = None
+        self._weather_heating_lockout: bool | None = None
         self._lock = asyncio.Lock()
         self._contour_applications = _ContourApplyLedger(
             operation_id_factory=operation_id_factory,
@@ -1275,14 +1276,17 @@ class ClimateRuntime:
             return None
         try:
             local = self._local_now()
-            return build_native_ha_climate_observation(
+            observation = build_native_ha_climate_observation(
                 self._registry,
                 self._contours.contour(CLIMATE_CONTOUR_ID),
                 self._ha_state_view,
                 observed_at=observed_at,
                 protection=self._protection_memory,
                 local_time=(local.hour, local.minute),
+                previous_weather_lockout=self._weather_heating_lockout,
             )
+            self._weather_heating_lockout = observation.home.weather_heating_lockout
+            return observation
         except (ClimateHaObservationViolation, ClimateObservationViolation) as error:
             self.last_error = type(error).__name__
             return unavailable_climate_observation_snapshot(

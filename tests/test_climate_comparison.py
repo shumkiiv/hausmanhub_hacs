@@ -331,7 +331,7 @@ _REFERENCE_VERDICTS = {
     "open_window_forces_safe_off": ("aligned", ()),
     "missing_temperature_blocks_control": ("aligned", ()),
     "stale_state_pauses_control": ("not_comparable", ("observation_stale",)),
-    "temperature_jump_pauses_control": ("not_comparable", ("planned_observe",)),
+    "temperature_jump_pauses_control": ("aligned", ()),
     "forced_auto_rejects_manual_request": ("aligned", ()),
     "night_profile_is_quiet": ("aligned", ()),
     "dry_closed_room_starts_humidifier": ("aligned", ()),

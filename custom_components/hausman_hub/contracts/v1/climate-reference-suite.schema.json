@@ -368,6 +368,7 @@
             "humidifier_off",
             "trv_set_temperature",
             "trv_observe",
+            "trv_safe_off",
             "not_supported"
           ]
         },
