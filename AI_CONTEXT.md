@@ -356,6 +356,34 @@ Last updated: 2026-07-21.
   repository remain unchanged. The final staged tree passed 513 local tests,
   the HACS/package/boundary/Android checks, and disposable Home Assistant
   Core   2026.6.4/2026.7.0.
+- Version 1.14.0 completes roadmap item 36 entirely. The external
+  climate module is retired: `ClimateControlMode` is now only
+  `disabled` or fully native `managed`; legacy shadow/canary entries
+  migrate once via `async_migrate_entry` (config entry version 2) to
+  disabled with contours switched to `ContourMode.OBSERVE`, saved
+  bridge target and canary room fields removed, and the old evidence
+  store key deleted best-effort. The legacy routes
+  (`/actions`, `/operations`, admin shadow-evidence and
+  canary-preflight) now answer 404, and all bridge code is deleted
+  (`climate_bridge.py`, `climate_commands.py`, `climate_evidence.py`,
+  `climate_evidence_storage.py`, `climate_canary_preflight.py`,
+  `android_climate.py`, `climate_operations.py`, and the
+  `climate_import.py` parser, whose dataclasses live in the neutral
+  `application/climate_discovery.py` while the parser itself survives
+  only as `tests/climate_bridge_fixture.py`). Bridge-bound devices
+  without a CONTROL endpoint are quarantined: excluded from
+  observation, projections, ownership, trial, and apply, and surfaced
+  as the `needs_reimport` readiness reason. The Android room-control
+  block honestly advertises no executable action with bounded reasons.
+  Independent review returned FAIL (migration not persisted, duplicate
+  panel views, parser left in production); one fix iteration resolved
+  all three and the follow-up passed. The final tree passed 578 local
+  tests, the full release gate, and disposable Core 2026.6.4 and
+  2026.7.0 with a managed end-to-end scenario that performs zero
+  bridge reads. Remaining roadmap: 37 (safe migration wizard for
+  existing settings), 38 (windows/presence/outdoor/sensor quality),
+  39 (per-room schedules and profiles), 40 (standalone climate
+  release), then 41-50 (HausmanHub 2.0 platform).
 - Version 1.13.0 completes roadmap item 36 sub-step 36f3. Startup in
   MANAGED and DISABLED never reads the external module; the bridge
   client is constructed only for SHADOW and CANARY (their evidence
@@ -2136,5 +2164,5 @@ Engineering and review rules are in
 
 - Obsidian/context index: `LLM_WIKI/00_Index.md`.
 - Latest generated context: `LLM_WIKI/Context.md`.
-- Last sync: 2026-07-21T22:38:49+03:00.
+- Last sync: 2026-07-22T17:58:59+03:00.
 <!-- llm-wiki-sync:end -->
