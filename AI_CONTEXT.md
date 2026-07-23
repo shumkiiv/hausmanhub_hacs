@@ -365,6 +365,33 @@ Last updated: 2026-07-23.
   repository remain unchanged. The final staged tree passed 513 local tests,
   the HACS/package/boundary/Android checks, and disposable Home Assistant
   Core   2026.6.4/2026.7.0.
+- Version 1.19.0 completes the second step of the full-panel phase: the
+  sidebar page is now the full climate configuration UI. The plain-JS panel
+  grew from status-only to sections for the control mode switch
+  (disabled/managed with the 1.18.0 API and a double-control warning),
+  day/night profile editing per room, the schedule editor (arm + HH:MM),
+  home signals with candidate dropdowns, and per-room window bindings, while
+  preserving the existing readiness/rooms/apply/temporary-temperature
+  behavior and the combined panel contract v2 (sections use separate strict
+  GETs). Per-section dirty flags stop the 30-second refresh from clobbering
+  edited inputs, including across temporary panel GET failures; the window
+  save has a busy guard; blank numeric fields are rejected client-side
+  before any POST. Twelve executed-JavaScript tests pin exact POST payloads
+  and the disabled, not-configured, configured, conflict-409, dirty-refresh,
+  GET-failure-recovery, double-click, and blank-field states. Oracle review
+  returned FAIL (dirty forms destroyed by a transient GET failure, missing
+  busy guard on window save, `Number("")` becoming 0); one fix iteration
+  resolved all three with regression tests. The final staged gate passes
+  654 local tests and all package checks. Release commit `56f4a45` was
+  pushed, GitHub Actions run `30031179629` passed, and stable release
+  `v1.19.0` is published; its remote tag resolves exactly to
+  `56f4a45ff4d602af3c0a9dea89a0a1a42d11ff71`. No live HA change occurred.
+  Live read-only diagnostics confirmed HACS installed `v1.18.0` serving the
+  old panel and the 1.18.0 `climate-mode` API healthy, with
+  `contour_configured: false`. Next: 1.20.0 page contour wizard, then
+  roadmap 39/40; the live contour still needs initial setup before managed
+  mode can be enabled.
+
 - Version 1.18.0 is a fully gated local release candidate (first step of the
   user-approved "full panel configuration" phase, plan
   `.omo/plans/2026-07-23-full-panel-configuration.md`). Three strict local
@@ -385,9 +412,12 @@ Last updated: 2026-07-23.
   expected_mode race, unhandled float overflow, missing POST guard tests);
   one fix iteration resolved all three, including a real options-corruption
   bug the new race test exposed (naive data+options merge wrote disallowed
-  keys). The final staged gate passes 642 local tests and all package,
-  version, naming, and repository-safety checks. Not committed, not pushed:
-  publication waits for an explicit user request. Next: 1.19.0 panel page
+  keys).   The final staged gate passes 642 local tests and all package,
+  version, naming, and repository-safety checks. Release commit `525ac40`
+  was pushed, GitHub Actions run `30026297975` passed, stable release
+  `v1.18.0` is published, and its remote tag resolves exactly to
+  `525ac40e4bfe32a45de8c482f3f0a5fcadd1dff8`. Publication context commit
+  `7fcdca5` passed check run `30026542474`. Next: 1.19.0 panel page
   settings sections consuming these APIs, then 1.20.0 page contour wizard.
 
 - Version 1.17.0 local release candidate complete (settings page rework, user request
@@ -2431,5 +2461,5 @@ Engineering and review rules are in
 
 - Obsidian/context index: `LLM_WIKI/00_Index.md`.
 - Latest generated context: `LLM_WIKI/Context.md`.
-- Last sync: 2026-07-23T19:46:06+03:00.
+- Last sync: 2026-07-23T20:51:52+03:00.
 <!-- llm-wiki-sync:end -->

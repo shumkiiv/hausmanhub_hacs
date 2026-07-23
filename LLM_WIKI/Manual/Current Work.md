@@ -1,5 +1,28 @@
 # Current Work
 
+## 2026-07-23 - HausmanHub 1.19.0 published
+
+- The sidebar page is now the full climate configuration UI: mode switch,
+  day/night profiles, schedule, home signals, and room window bindings via
+  the strict 1.18.0 and pre-existing profile/schedule APIs. Combined panel
+  contract stays v2; sections fetch separate GETs.
+- Per-section dirty flags protect edited inputs from the 30-second refresh
+  and from transient panel GET failures; window saves are busy-guarded;
+  blank numeric fields are rejected before any POST.
+- Twelve executed-JS tests pin exact payloads and key states. Oracle review
+  returned FAIL (three reproducible defects); one fix iteration resolved
+  them. The staged gate passed 654 local tests plus all package checks.
+- Release code commit `56f4a45` was pushed; GitHub Actions run
+  `30031179629` passed. Stable release `v1.19.0` is published at
+  https://github.com/shumkiiv/hausmanhub_hacs/releases/tag/v1.19.0, and its
+  remote tag resolves exactly to `56f4a45ff4d602af3c0a9dea89a0a1a42d11ff71`.
+- Live read-only diagnostics: HACS reported installed/latest `v1.18.0`
+  serving the old panel; the 1.18.0 `climate-mode` API returns 200 with
+  `contour_configured: false`. No live HA state was changed.
+- Next: refresh HACS, install `1.19.0`, restart Home Assistant,
+  hard-refresh the browser. Then 1.20.0 page contour wizard (QA scenario in
+  the plan), then roadmap 39/40.
+
 ## 2026-07-23 - HausmanHub 1.18.0 published
 
 - Three strict local admin APIs for full page configuration:
