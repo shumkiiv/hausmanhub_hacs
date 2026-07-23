@@ -377,9 +377,15 @@ Last updated: 2026-07-23.
    It contains only `custom_components/hausman_hub`, includes the sidebar panel,
    passes `unzip -t`, and has SHA-256
    `82f5f8d4a5dc43d642be3d6e4fa9339970ff91e30478890fcb78053153f56b45`.
-   The user explicitly authorized commit, push, tag, and GitHub Release
-   publication on 2026-07-23; publication is the next operation. After
-   publication, test the HACS release in Home Assistant and provision disposable
+   The release code was committed as `909ae3d`, pushed to `origin/main`, and
+   published as the latest GitHub Release `v1.17.0`:
+   https://github.com/shumkiiv/hausmanhub_hacs/releases/tag/v1.17.0. The remote
+   tag resolves exactly to `909ae3d`; its manifest declares `1.17.0` and the
+   sidebar panel asset is present. The only GitHub check job concluded
+   successfully:
+   https://github.com/shumkiiv/hausmanhub_hacs/actions/runs/29991423859/job/89154943431.
+   No live Home Assistant action occurred. Next: refresh the custom repository
+   in HACS, install `1.17.0`, restart Home Assistant, and provision disposable
    Core environments for the deferred smoke check.
 - Version 1.16.0 completes roadmap item 38. Windows, presence,
   outdoor temperature, and sensor quality now shape climate decisions.
@@ -2245,5 +2251,5 @@ Engineering and review rules are in
 
 - Obsidian/context index: `LLM_WIKI/00_Index.md`.
 - Latest generated context: `LLM_WIKI/Context.md`.
-- Last sync: 2026-07-23T11:29:32+03:00.
+- Last sync: 2026-07-23T11:35:14+03:00.
 <!-- llm-wiki-sync:end -->

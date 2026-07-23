@@ -18,6 +18,13 @@
 - Disposable Home Assistant Core checks remain blocked because the expected
   Python environments under `/tmp/hausmanhub-core-2026.6.4` and `2026.7.0`
   are absent.
-- The user explicitly authorized commit, push, tag, and GitHub Release
-  publication on 2026-07-23. Publication is the next operation; no live Home
-  Assistant action is authorized.
+- Release code commit `909ae3d` was pushed to `origin/main`.
+- The latest GitHub Release is `v1.17.0`:
+  https://github.com/shumkiiv/hausmanhub_hacs/releases/tag/v1.17.0.
+  Its remote tag resolves exactly to `909ae3d`, the manifest declares `1.17.0`,
+  and the sidebar panel asset is present.
+- The only GitHub check job concluded successfully:
+  https://github.com/shumkiiv/hausmanhub_hacs/actions/runs/29991423859/job/89154943431.
+- No live Home Assistant action occurred. Next: refresh the custom repository
+  in HACS, install `1.17.0`, restart Home Assistant, and run the deferred
+  disposable Core smoke check when its environments are provisioned.
