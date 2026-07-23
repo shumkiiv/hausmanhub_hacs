@@ -91,9 +91,10 @@ class PanelRegistrationTest(unittest.TestCase):
         self.registered_panels: list[dict[str, object]] = []
         self.removed_panels: list[tuple[str, bool]] = []
         self.existing_panels: set[str] = set()
-        panel_custom.async_register_panel = (  # type: ignore[attr-defined]
-            lambda hass, **kwargs: self._register_panel(kwargs)
-        )
+        async def register_panel(hass, **kwargs):
+            self._register_panel(kwargs)
+
+        panel_custom.async_register_panel = register_panel  # type: ignore[attr-defined]
 
         def remove_panel(hass, url_path, *, warn_if_unknown=True):
             self.removed_panels.append((url_path, warn_if_unknown))

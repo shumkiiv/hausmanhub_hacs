@@ -41,7 +41,7 @@ async def async_register_hausmanhub_panel(hass: HomeAssistant) -> None:
         data[_DATA_STATIC_REGISTERED] = True
     if frontend.async_panel_exists(hass, PANEL_URL_PATH):
         return
-    async_register_panel(
+    await async_register_panel(
         hass,
         frontend_url_path=PANEL_URL_PATH,
         webcomponent_name=PANEL_WEBCOMPONENT_NAME,

@@ -341,7 +341,10 @@ def fake_home_assistant_modules() -> dict[str, ModuleType]:
     frontend.async_remove_panel = lambda hass, url_path, *, warn_if_unknown=True: None  # type: ignore[attr-defined]
     frontend.async_panel_exists = lambda hass, url_path: False  # type: ignore[attr-defined]
     panel_custom = ModuleType("homeassistant.components.panel_custom")
-    panel_custom.async_register_panel = lambda hass, **kwargs: None  # type: ignore[attr-defined]
+    async def async_register_panel(hass, **kwargs):
+        return None
+
+    panel_custom.async_register_panel = async_register_panel  # type: ignore[attr-defined]
     const = ModuleType("homeassistant.const")
     const.STATE_UNAVAILABLE = "unavailable"  # type: ignore[attr-defined]
     const.STATE_UNKNOWN = "unknown"  # type: ignore[attr-defined]

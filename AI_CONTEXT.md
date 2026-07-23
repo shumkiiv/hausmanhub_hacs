@@ -387,6 +387,31 @@ Last updated: 2026-07-23.
    No live Home Assistant action occurred. Next: refresh the custom repository
    in HACS, install `1.17.0`, restart Home Assistant, and provision disposable
    Core environments for the deferred smoke check.
+   Post-install read-only diagnostics against Home Assistant Core 2026.7.3
+   confirmed that `hausman_hub` is loaded, the panel JavaScript returns HTTP
+   200 and exactly matches the `v1.17.0` Git blob (SHA-256
+   `4f796a24e4147a73ee3673a6568401dc0425feeafe61aad5b7cdb37acdb59a3f`), and
+   the admin panel API exists (HTTP 403 for the intentionally read-only
+   diagnostic token). WebSocket `get_panels` succeeds but omits
+   `hausman-hub` for that non-admin user. This proved only that the static asset
+   and authorization boundary were active; the later administrator screenshot
+   proved that the panel itself had never been registered. No live state was
+   changed.
+- Version 1.17.1 is the sidebar registration hotfix. The administrator's
+  sidebar editor screenshot proved that `hausman-hub` was absent rather than
+  merely hidden. Home Assistant Core 2026.7.3 defines
+  `panel_custom.async_register_panel` as an async function, but HausmanHub
+  called it without `await`; the static asset registered first, explaining the
+  live HTTP 200, while the panel coroutine never executed. `panel.py` now
+  awaits registration, and the panel tests use an async mock so the former bug
+  fails deterministically. The final staged package passed 618 local tests,
+  HACS/package checks, version checks, and repository-safety checks. All three
+  configured Kimi profiles stopped before review with the same monthly-quota
+  HTTP 403 (`ses_071c8bf52ffeCp7AD0sQb6RwH1`,
+  `ses_071c86d9cffe2MGwrMXqnx7l3d`, and
+  `ses_071c827f4ffeQHSh5t41p627GO`); this is not a Kimi PASS. The direct
+  read-only OpenAI fallback review passed with no substantial findings in
+  OpenCode session `ses_071c619cfffeCD4QTUh6eD5vsI`. Publication is pending.
 - Version 1.16.0 completes roadmap item 38. Windows, presence,
   outdoor temperature, and sensor quality now shape climate decisions.
   An open or unreadable configured window hard-locks its room into
@@ -2251,5 +2276,5 @@ Engineering and review rules are in
 
 - Obsidian/context index: `LLM_WIKI/00_Index.md`.
 - Latest generated context: `LLM_WIKI/Context.md`.
-- Last sync: 2026-07-23T11:35:14+03:00.
+- Last sync: 2026-07-23T12:09:17+03:00.
 <!-- llm-wiki-sync:end -->

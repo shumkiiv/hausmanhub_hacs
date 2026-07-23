@@ -28,3 +28,39 @@
 - No live Home Assistant action occurred. Next: refresh the custom repository
   in HACS, install `1.17.0`, restart Home Assistant, and run the deferred
   disposable Core smoke check when its environments are provisioned.
+
+## 2026-07-23 - Sidebar panel diagnosis
+
+- A read-only check against Home Assistant Core 2026.7.3 confirmed that the
+  `hausman_hub` component is loaded.
+- The live panel JavaScript returns HTTP 200 and exactly matches the
+  `v1.17.0` Git blob (SHA-256
+  `4f796a24e4147a73ee3673a6568401dc0425feeafe61aad5b7cdb37acdb59a3f`).
+- The admin panel API exists and correctly returns HTTP 403 to the read-only
+  diagnostic token.
+- WebSocket `get_panels` succeeds but omits `hausman-hub` for the read-only
+  user, matching the intentional `require_admin=True` registration.
+- This initially proved only that the installation asset and authorization
+  boundary were active. The later administrator screenshot proved that the
+  panel itself had never been registered. No live Home Assistant state was
+  changed.
+
+## 2026-07-23 - HausmanHub 1.17.1 sidebar hotfix
+
+- The administrator's sidebar editor screenshot proved that `hausman-hub` was
+  absent, not hidden.
+- Home Assistant Core 2026.7.3 defines
+  `panel_custom.async_register_panel` as an async function. HausmanHub called
+  it without `await`, so the static file route registered but the panel
+  coroutine never ran.
+- `panel.py` now awaits registration. The test double is async as well, making
+  the old bug fail deterministically.
+- The final staged package passed 618 local tests, HACS/package checks, version
+  checks, and repository-safety checks.
+- All three configured Kimi profiles failed before review with the same
+  monthly-quota HTTP 403 (`ses_071c8bf52ffeCp7AD0sQb6RwH1`,
+  `ses_071c86d9cffe2MGwrMXqnx7l3d`, and
+  `ses_071c827f4ffeQHSh5t41p627GO`), so no Kimi PASS is claimed.
+- The direct read-only OpenAI fallback review returned PASS with no substantial
+  findings in OpenCode session `ses_071c619cfffeCD4QTUh6eD5vsI`.
+- Manifest and release notes are prepared for `1.17.1`; publication is pending.
