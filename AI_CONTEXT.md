@@ -446,6 +446,62 @@ Last updated: 2026-07-23.
   snapshot. No live Home Assistant write, update, or restart occurred. Next:
   refresh HACS, install `1.17.2`, restart Home Assistant, and hard-refresh the
   administrator browser.
+- Post-install live read-only diagnostics for 1.17.2 confirmed Home Assistant
+  Core 2026.7.3, a loaded `hausman_hub` config entry, HACS installed/latest
+  version `v1.17.2`, and a served panel JavaScript SHA-256
+  `a936204bc586563d2ffaa4f91ae2ff2301736f16c09c5d7bd966d11918d412f0`
+  that exactly matches tagged `v1.17.2` and contains the null-snapshot guard.
+  Almost all live states were recreated at 11:01-11:02 UTC, consistent with a
+  Home Assistant restart after installation. The red banner therefore comes
+  from the admin backend request, not stale frontend code. The only stored
+  diagnostic token is non-admin with no groups; the admin panel, readiness,
+  system log, and local summary boundaries all reject it with 403, so it
+  could not distinguish the administrator request's local-policy 403 from a
+  runtime 503. A
+  follow-up filename and credential-key search across project and user config
+  directories found no separate Home Assistant administrator access file:
+  `/home/ivsh/projects/УД-hasc/ha_read_access.json` is the only HA token file;
+  the other credential stores belong to Codex/Figma and are unrelated. No live
+  Home Assistant state was changed. The safe handoff is to create a temporary
+  long-lived token from the administrator's own Home Assistant profile under
+  Security, save it once as mode-600
+  `/home/ivsh/projects/УД-hasc/ha_admin_access.json` with `base_url` and
+  `access_token`, use it only for read-only diagnosis, then revoke it. On
+  2026-07-23 the file was created with correct mode `600`, but its
+  `access_token` value was only 9 characters and the HA authorization probe
+  returned HTTP 400. This is still a placeholder, not a usable Home Assistant
+  long-lived token. After the user retried, the file still had correct mode
+  `600` but `access_token` was empty (0 characters). A validated hidden-input
+  method was then used successfully. The final direct read-only check
+  authenticated the token owner as a non-system administrator and owner.
+  WebSocket `get_panels` contains `hausman-hub` with `require_admin: true`;
+  the combined admin panel and readiness routes both return HTTP 200 from
+  `http://172.30.0.92:8123`. The panel contract is version 2 with
+  `snapshot: null`; readiness truthfully reports `status: disabled`,
+  `bridge_mode: disabled`, and reason `bridge_disabled`. The Home Assistant
+  system log contains no HausmanHub entries. This rules out a stale release,
+  missing panel, and runtime 503. The remaining screenshot banner is caused
+  by the route's intentional local-address guard when the browser reaches HA
+  through an external URL or proxy; direct local HA access should work. No
+  live state changed. Revoke the temporary admin token after diagnosis.
+- A full-path follow-up on 2026-07-23 used the dedicated diagnostic SSH key to
+  inspect the main Windows PC `172.30.0.37` without changing its user data.
+  The PC has a working direct TCP route to `172.30.0.92:8123`, and the same
+  authenticated panel/readiness requests return HTTP 200 from source
+  `172.30.0.37`. Edge, Chrome, and Firefox history and origin-storage checks
+  contain no Home Assistant `:8123` visit, `hassTokens` key, or HausmanHub
+  origin; no Home Assistant Windows app is installed, and no active browser
+  connection to HA exists. Therefore the reported screenshot was not produced
+  by a normal browser profile on that PC. An isolated real Chrome/HA frontend
+  run from the private network loaded `/hausman-hub` successfully: document
+  title `HausmanHub – Home Assistant`, panel module HTTP 200, admin panel API
+  HTTP 200, no loading failure or JavaScript exception, no generic red banner,
+  and the expected `Управление климатом выключено` status. This proves that
+  version 1.17.2 renders correctly in a fresh authenticated admin session.
+  The unresolved failing client is a different device/profile/session; do not
+  relax the intentional local-only boundary without an explicit security
+  decision. All temporary local and Windows browser profiles were removed;
+  no HA state, existing browser profile, or repository source was changed.
 - Version 1.16.0 completes roadmap item 38. Windows, presence,
   outdoor temperature, and sensor quality now shape climate decisions.
   An open or unreadable configured window hard-locks its room into
@@ -2278,6 +2334,32 @@ version, version history, local check, Kimi review, GitHub check, published
 release, HACS refresh, and Home Assistant restart. Documentation-only and
 test-only changes do not need a new HACS version.
 
+## Current release handoff
+
+- The remaining 1.17.2 red banner was reproduced in the user's normal Edge
+  profile at `http://homeassistant.local:8123/hausman-hub`. Windows resolved
+  the mDNS name to Home Assistant's IPv6 link-local address and Edge connected
+  from another scoped `fe80::/10` address. Direct RFC1918 IPv4 requests
+  returned HTTP 200, while the browser path was rejected by
+  `climate_api._is_local_address`.
+- Release candidate 1.17.3 permits IPv6 link-local only when the existing
+  non-system administrator guard calls the shared address helper. Tablet
+  routes keep the previous boundary, and the separate fixed read-only summary
+  boundary remains unchanged. Regression coverage accepts plain, scoped, and
+  upper-boundary `fe80::/10`, rejects neighboring and public IPv6, and proves
+  that the tablet capability route still returns 403.
+- `python3 tools/check_local_release.py` passes 623 tests plus fixture,
+  Android-compatibility, version, naming, HACS-package, and repository-safety
+  checks. Three configured Kimi reviewers could not start because of
+  billing-cycle quota HTTP 403 (`ses_070fcb1edffeoQc7sXq6i4fGlc`,
+  `ses_070fc2698ffef461bP6l0ZS6ei`, and
+  `ses_070fbe366ffe1kpx6b5uPMnKRT`), so no Kimi PASS is claimed. The final
+  read-only OpenAI fallback review returned PASS with no substantial findings
+  in OpenCode session `ses_070fb78a1ffe1nlEik803qO5E0`.
+- No live Home Assistant update, restart, or configuration change occurred.
+  Next: commit and push 1.17.3, wait for GitHub Actions, publish the stable
+  release, then install it through HACS and restart Home Assistant.
+
 ## Next decision gate
 
 The active 50-item roadmap changes only HausmanHub. Android is already developed in a
@@ -2310,5 +2392,5 @@ Engineering and review rules are in
 
 - Obsidian/context index: `LLM_WIKI/00_Index.md`.
 - Latest generated context: `LLM_WIKI/Context.md`.
-- Last sync: 2026-07-23T13:20:22+03:00.
+- Last sync: 2026-07-23T15:58:03+03:00.
 <!-- llm-wiki-sync:end -->

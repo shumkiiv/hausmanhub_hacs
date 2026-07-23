@@ -1690,6 +1690,50 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
         self.assertEqual("no-store", panel.headers.get("Cache-Control"))
 
+    def test_admin_panel_accepts_ipv6_link_local_admin_from_mdns(self) -> None:
+        """A local admin may open the panel when mDNS selects IPv6 link-local."""
+
+        views = {view.url: view for view in self.hass.http.views}
+        admin = reader_user("system-admin", admin=True)
+        panel_path = "/api/hausman_hub/v1/admin/panel"
+
+        for remote in (
+            "fe80::1",
+            "fe80::1%9",
+            "febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+        ):
+            with self.subTest(remote=remote):
+                panel = asyncio.run(
+                    views[panel_path].get(
+                        FakeRequest(remote, admin, path=panel_path)
+                    )
+                )
+                self.assertEqual(200, panel.status)
+                self.assertEqual(
+                    {"name": "hausman-hub-admin-panel", "version": 2},
+                    panel.payload["contract"],
+                )
+
+        for remote in ("fec0::1", "2001:db8::1"):
+            with self.subTest(remote=remote):
+                panel = asyncio.run(
+                    views[panel_path].get(
+                        FakeRequest(remote, admin, path=panel_path)
+                    )
+                )
+                self.assertEqual(403, panel.status)
+                self.assertEqual({"message"}, set(panel.payload))
+
+        tablet = reader_user("system-users")
+        tablet_path = "/api/hausman_hub/v1/capabilities"
+        tablet_response = asyncio.run(
+            views[tablet_path].get(
+                FakeRequest("fe80::1%9", tablet, path=tablet_path)
+            )
+        )
+        self.assertEqual(403, tablet_response.status)
+        self.assertEqual({"message"}, set(tablet_response.payload))
+
     def test_admin_panel_shows_managed_unavailable_readiness_without_snapshot(
         self,
     ) -> None:

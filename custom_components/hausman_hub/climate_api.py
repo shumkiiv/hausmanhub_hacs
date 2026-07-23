@@ -816,7 +816,10 @@ def _is_local_tablet_request(request: Any) -> bool:
 def _is_local_admin_request(request: Any) -> bool:
     user = _request_user(request)
     return (
-        _is_local_address(getattr(request, "remote", None))
+        _is_local_address(
+            getattr(request, "remote", None),
+            allow_ipv6_link_local=True,
+        )
         and user is not None
         and getattr(user, "is_admin", False) is True
         and getattr(user, "system_generated", True) is False
@@ -830,7 +833,11 @@ def _request_user(request: Any) -> object | None:
         return None
 
 
-def _is_local_address(remote: object) -> bool:
+def _is_local_address(
+    remote: object,
+    *,
+    allow_ipv6_link_local: bool = False,
+) -> bool:
     if not isinstance(remote, str):
         return False
     try:
@@ -846,7 +853,11 @@ def _is_local_address(remote: object) -> bool:
         return mapped.is_loopback or any(
             mapped in network for network in HOME_IPV4_NETWORKS
         )
-    return address.is_loopback or address in HOME_IPV6_NETWORK
+    return (
+        address.is_loopback
+        or (allow_ipv6_link_local and address.is_link_local)
+        or address in HOME_IPV6_NETWORK
+    )
 
 
 def _not_found(view: HomeAssistantView) -> Any:

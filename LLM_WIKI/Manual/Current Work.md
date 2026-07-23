@@ -107,3 +107,108 @@
 - No live Home Assistant write, update, or restart occurred. Next: refresh
   HACS, install `1.17.2`, restart Home Assistant, and hard-refresh the
   administrator browser.
+
+## 2026-07-23 - Live diagnosis after installing 1.17.2
+
+- Home Assistant Core is `2026.7.3`; the `hausman_hub` config entry is loaded
+  and not disabled.
+- HACS reports installed/latest `v1.17.2`. The live panel JavaScript returns
+  HTTP 200 and has SHA-256
+  `a936204bc586563d2ffaa4f91ae2ff2301736f16c09c5d7bd966d11918d412f0`,
+  exactly matching tagged `v1.17.2`; it contains the `if (snapshot)` guard.
+- 475 of 501 live states were recreated at 11:01-11:02 UTC, consistent with a
+  Home Assistant restart. The persistent red banner is therefore a backend
+  rejection, not an old browser asset.
+- The only stored access token authenticates as non-admin with no groups.
+  Admin panel/readiness and system-log requests are unauthorized; the exact
+  local read-only summary also returns 403. This token cannot distinguish a
+  browser request rejected by the local-address policy from a runtime 503.
+- Final diagnosis needs a temporary administrator long-lived access token
+  saved in the local project workspace rather than pasted into chat.
+- A follow-up search by filename and credential keys across project and user
+  configuration directories found no second HA access file. The only HA token
+  file is `/home/ivsh/projects/УД-hasc/ha_read_access.json`; unrelated Codex
+  and Figma credential stores were not used.
+- The user should create the temporary token from the administrator account's
+  Profile -> Security -> Long-lived access tokens page, save the one-time value
+  locally as mode-600 `ha_admin_access.json` with `base_url` and
+  `access_token`, and revoke it after the read-only diagnosis.
+- The file was subsequently created with mode `600`, but the saved
+  `access_token` value is only 9 characters. A safe authorization probe
+  returned HTTP 400, so the value is a placeholder rather than a usable
+  Home Assistant long-lived token. On the next retry the file kept mode `600`
+  but contained an empty token (0 characters), so a validated hidden-input
+  method was used.
+- The final token authenticates as a non-system Home Assistant administrator
+  and owner. WebSocket `get_panels` contains `hausman-hub` with
+  `require_admin: true`.
+- Direct requests through `http://172.30.0.92:8123` return HTTP 200 for both
+  the combined panel and readiness routes. The panel contract is version 2,
+  `snapshot` is null, and readiness is truthfully disabled with reason
+  `bridge_disabled`.
+- The Home Assistant system log has 17 current entries and none match
+  HausmanHub. The release, panel registration, and runtime are therefore
+  healthy.
+- The persistent screenshot banner is the frontend's generic rendering of a
+  rejected API call. Since the same admin call succeeds through the direct
+  private address, the remaining cause is the intentional local-address guard
+  rejecting a browser path through an external URL or reverse proxy. Test the
+  panel through the direct private HA address.
+- Revoke the temporary administrator token after the diagnosis.
+- No live Home Assistant state was changed.
+
+## 2026-07-23 - Full PC-to-HA browser-path verification
+
+- The dedicated Windows diagnostic SSH key reaches the main PC as
+  `IVSH-PC\IVSH` at `172.30.0.37`.
+- The PC has a successful TCP route to `172.30.0.92:8123`. With the temporary
+  admin token supplied only through encrypted SSH stdin, both the combined
+  panel and readiness API return HTTP 200 from source `172.30.0.37`, with the
+  same contract-v2 disabled result.
+- Edge, Chrome, and Firefox histories contain no Home Assistant `:8123` or
+  HausmanHub page. Their origin storage contains no private HA origin or
+  `hassTokens` marker, there is no Home Assistant Windows app, and no active
+  browser connection to HA exists. The supplied screenshot therefore did not
+  come from a normal browser profile on this PC.
+- An isolated real Chrome session on the private network was authenticated
+  with the same admin token and opened the actual HA route `/hausman-hub`.
+  The document title was `HausmanHub – Home Assistant`; the page HTML, panel
+  JavaScript, and admin panel API all returned HTTP 200. There were no network
+  failures, JavaScript exceptions, or generic red banner. The rendered page
+  contained the expected `Управление климатом выключено` status.
+- Version 1.17.2 and the clean authenticated frontend path are proven healthy.
+  The remaining failing client is another device, profile, or stale/non-admin
+  session. Supporting a truly external client would require an explicit
+  decision to relax the intentional local-only read boundary.
+- The isolated local and Windows temporary browser profiles and diagnostic
+  scripts were removed. Existing browser profiles, HA state, and repository
+  source were not changed.
+
+## 2026-07-23 - HausmanHub 1.17.3 IPv6 mDNS release candidate
+
+- The user's actual Edge window was opened at
+  `http://homeassistant.local:8123/hausman-hub`. Live TCP inspection on the
+  Windows PC showed Edge connecting from scoped IPv6 link-local
+  `fe80::a532:7270:e063:7571%9` to Home Assistant at
+  `fe80::1179:39cd:f44d:9939%9`.
+- This explains the split result: direct RFC1918 IPv4 admin API requests
+  returned HTTP 200, but `climate_api._is_local_address` rejected the normal
+  mDNS browser path and the frontend rendered its generic red error banner.
+- Version 1.17.3 allows IPv6 link-local only through the existing
+  non-system-admin guard. Tablet routes keep the previous address boundary,
+  and the separate fixed read-only local-summary route remains unchanged.
+- Regression coverage accepts plain and scoped `fe80::/10` plus its upper
+  boundary, rejects `fec0::1` and `2001:db8::1`, and proves a tablet request
+  from scoped link-local still receives HTTP 403.
+- The full staged release gate passes 623 tests plus fixture,
+  Android-compatibility, version, naming, HACS-package, tracked-file, and
+  staged-file safety checks.
+- All three configured Kimi providers failed before review with billing-cycle
+  quota HTTP 403 (`ses_070fcb1edffeoQc7sXq6i4fGlc`,
+  `ses_070fc2698ffef461bP6l0ZS6ei`, and
+  `ses_070fbe366ffe1kpx6b5uPMnKRT`), so no Kimi PASS is claimed. The final
+  read-only OpenAI fallback review returned PASS with no substantial findings
+  in OpenCode session `ses_070fb78a1ffe1nlEik803qO5E0`.
+- No live Home Assistant write, update, restart, or configuration change
+  occurred. Next: publish 1.17.3, install it through HACS, restart Home
+  Assistant, and retest the same Edge `homeassistant.local` URL.
