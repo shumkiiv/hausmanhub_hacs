@@ -1,5 +1,43 @@
 # Current Work
 
+## 2026-07-23 - HausmanHub 1.18.0 published
+
+- Three strict local admin APIs for full page configuration:
+  `climate-mode` (disabled/managed with consent, configured contour, and a
+  saved-options optimistic lock), `home-environment` (home signals and
+  lockout thresholds with candidate catalogs), and `climate-room-signals`
+  (per-room window binding). Pure validation lives in
+  `application/climate_signal_settings.py`.
+- Oracle review returned FAIL (stale-runtime `expected_mode` race, float
+  overflow, missing POST guard tests); one fix iteration resolved all three
+  and fixed a real options-corruption bug found by the new race test.
+- The staged gate passed 642 local tests plus all package, version, naming,
+  and repository-safety checks. Disposable Core environments remain absent.
+- Release code commit `525ac40` was pushed to `origin/main`; GitHub Actions
+  run `30026297975` concluded successfully on that commit.
+- Stable release `v1.18.0` is published at
+  https://github.com/shumkiiv/hausmanhub_hacs/releases/tag/v1.18.0, and its
+  remote tag resolves exactly to `525ac40e4bfe32a45de8c482f3f0a5fcadd1dff8`.
+- No live Home Assistant change occurred. Next: 1.19.0 panel settings
+  sections consuming these APIs (plan
+  `.omo/plans/2026-07-23-full-panel-configuration.md`).
+
+## 2026-07-23 - Full panel configuration plan review
+
+- Reviewed `.omo/plans/2026-07-23-full-panel-configuration.md` against the
+  current repository.
+- The referenced panel, runtime, API, contracts, translations, documentation,
+  frozen 30-case suite, and release-check script exist and match the claimed
+  implementation patterns.
+- The plan is not executable as written because `tests/test_climate_api*.py`
+  does not exist. Current admin HTTP API tests are in
+  `tests/test_local_summary_access.py`.
+- The 1.20.0 task has only a generic full gate and no concrete QA scenario for
+  the draft editor or import flow. Add a named tool, steps, and expected result
+  for both workflows.
+- No source code or plan content was changed. Next: fix those two plan issues
+  and review the current on-disk plan again.
+
 ## 2026-07-23 - HausmanHub 1.17.0 local release candidate
 
 - Completed the Home Environment settings step and native options menus.

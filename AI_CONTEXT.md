@@ -4,6 +4,15 @@ Last updated: 2026-07-23.
 
 ## Project state
 
+- The work plan `.omo/plans/2026-07-23-full-panel-configuration.md` was reviewed
+  for executability on 2026-07-23 and rejected pending two corrections. It
+  points to nonexistent `tests/test_climate_api*.py`; the existing admin API
+  coverage is in `tests/test_local_summary_access.py`. The 1.20.0 release task
+  also needs concrete QA scenarios for the draft editor and import flow, with a
+  named tool, steps, and expected outcomes. No source code or plan content was
+  changed. Next: correct the test reference and add the missing 1.20.0 QA
+  scenarios, then re-run the plan review against the on-disk file.
+
 - Product and Home Assistant integration name: **HausmanHub**. **HACS** is only
   the installation/update mechanism and is never the product name. The old
   temporary four-letter product label must not return to UI, contracts, docs,
@@ -356,6 +365,31 @@ Last updated: 2026-07-23.
   repository remain unchanged. The final staged tree passed 513 local tests,
   the HACS/package/boundary/Android checks, and disposable Home Assistant
   Core   2026.6.4/2026.7.0.
+- Version 1.18.0 is a fully gated local release candidate (first step of the
+  user-approved "full panel configuration" phase, plan
+  `.omo/plans/2026-07-23-full-panel-configuration.md`). Three strict local
+  admin APIs close the setup gaps that required config-flow wizards or raw
+  JSON: `GET/POST /api/hausman_hub/v1/admin/climate-mode` (disabled/managed
+  switch with explicit consent, configured-contour requirement, and an
+  authoritative saved-options optimistic lock written through the normalized
+  `create_options` path), `GET/POST /admin/home-environment` (home signals
+  and lockout thresholds with the 1.17.0 selector domain rules plus bounded
+  candidate catalogs), and `GET/POST /admin/climate-room-signals` (per-room
+  window binding, previously unreachable in any wizard). The pure validation
+  module `application/climate_signal_settings.py` rejects malformed shapes,
+  wrong domains, unknown entities, bad thresholds (incl. OverflowError/NaN),
+  and stale mode expectations; runtime gained `async_update_room_window`,
+  `async_climate_mode_status`, `signal_entity_known`, and
+  `async_signal_catalog`, and the HA state view gained
+  `signal_entity_catalog`. Oracle review returned FAIL (stale-runtime
+  expected_mode race, unhandled float overflow, missing POST guard tests);
+  one fix iteration resolved all three, including a real options-corruption
+  bug the new race test exposed (naive data+options merge wrote disallowed
+  keys). The final staged gate passes 642 local tests and all package,
+  version, naming, and repository-safety checks. Not committed, not pushed:
+  publication waits for an explicit user request. Next: 1.19.0 panel page
+  settings sections consuming these APIs, then 1.20.0 page contour wizard.
+
 - Version 1.17.0 local release candidate complete (settings page rework, user request
   2026-07-23: best-practice design, reorganize, push, release). Plan:
   `.omo/plans/2026-07-23-settings-page-home-environment.md`. Scope:
@@ -2397,5 +2431,5 @@ Engineering and review rules are in
 
 - Obsidian/context index: `LLM_WIKI/00_Index.md`.
 - Latest generated context: `LLM_WIKI/Context.md`.
-- Last sync: 2026-07-23T16:01:14+03:00.
+- Last sync: 2026-07-23T19:46:06+03:00.
 <!-- llm-wiki-sync:end -->
