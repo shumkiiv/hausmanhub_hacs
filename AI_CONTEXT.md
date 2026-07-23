@@ -411,7 +411,14 @@ Last updated: 2026-07-23.
   `ses_071c86d9cffe2MGwrMXqnx7l3d`, and
   `ses_071c827f4ffeQHSh5t41p627GO`); this is not a Kimi PASS. The direct
   read-only OpenAI fallback review passed with no substantial findings in
-  OpenCode session `ses_071c619cfffeCD4QTUh6eD5vsI`. Publication is pending.
+  OpenCode session `ses_071c619cfffeCD4QTUh6eD5vsI`. Release commit
+  `d0efbd4` was pushed to `origin/main`; GitHub Actions run `29994143599`
+  passed. Stable release `v1.17.1` was published at
+  https://github.com/shumkiiv/hausmanhub_hacs/releases/tag/v1.17.1, and its
+  remote tag resolves exactly to `d0efbd4`. No live Home Assistant write,
+  update, or restart occurred. Next: refresh the custom repository in HACS,
+  install `1.17.1`, restart Home Assistant, and hard-refresh the administrator
+  browser.
 - Version 1.16.0 completes roadmap item 38. Windows, presence,
   outdoor temperature, and sensor quality now shape climate decisions.
   An open or unreadable configured window hard-locks its room into
@@ -2276,5 +2283,5 @@ Engineering and review rules are in
 
 - Obsidian/context index: `LLM_WIKI/00_Index.md`.
 - Latest generated context: `LLM_WIKI/Context.md`.
-- Last sync: 2026-07-23T12:09:17+03:00.
+- Last sync: 2026-07-23T12:11:39+03:00.
 <!-- llm-wiki-sync:end -->

@@ -63,4 +63,12 @@
   `ses_071c827f4ffeQHSh5t41p627GO`), so no Kimi PASS is claimed.
 - The direct read-only OpenAI fallback review returned PASS with no substantial
   findings in OpenCode session `ses_071c619cfffeCD4QTUh6eD5vsI`.
-- Manifest and release notes are prepared for `1.17.1`; publication is pending.
+- Release commit `d0efbd4` was pushed to `origin/main`; GitHub Actions run
+  `29994143599` passed.
+- Stable release `v1.17.1` was published at
+  https://github.com/shumkiiv/hausmanhub_hacs/releases/tag/v1.17.1. The remote
+  tag resolves exactly to `d0efbd4`, its manifest version is `1.17.1`, and the
+  tagged `panel.py` awaits `async_register_panel`.
+- No live Home Assistant write, update, or restart occurred. Next: refresh the
+  custom repository in HACS, install `1.17.1`, restart Home Assistant, and
+  hard-refresh the administrator browser.
