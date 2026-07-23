@@ -21,7 +21,11 @@ from .application.api_capabilities import (
 from .application.contour_apply import ContourApplyViolation
 from .application.contour_override import TemporaryTemperatureViolation
 from .application.climate_registry import ClimateRegistryViolation
-from .application.climate_runtime import ClimateRuntime, ClimateRuntimeUnavailable
+from .application.climate_runtime import (
+    ClimateRuntime,
+    ClimateRuntimeUnavailable,
+    ClimateSnapshotUnavailable,
+)
 from .application.climate_setup import ClimateSetupViolation
 
 if TYPE_CHECKING:
@@ -673,15 +677,21 @@ class ClimateAdminPanelView(_ClimateView):
         if runtime is None:
             return self._unavailable()
         try:
-            snapshot = await runtime.async_public_snapshot()
             readiness = await runtime.async_readiness()
+            try:
+                snapshot = await runtime.async_public_snapshot()
+            except ClimateSnapshotUnavailable:
+                # A disabled or not-yet-observable climate contour is a valid
+                # panel state. Keep the page available so it can explain that
+                # status while exposing no rooms, actions, or invented data.
+                snapshot = None
         except Exception:
             return self._unavailable()
         return self.json(
             {
                 "contract": {
                     "name": "hausman-hub-admin-panel",
-                    "version": 1,
+                    "version": 2,
                 },
                 "snapshot": snapshot,
                 "readiness": readiness,

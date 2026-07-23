@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 from pathlib import Path
+import subprocess
 from types import ModuleType, SimpleNamespace
 import sys
 import unittest
@@ -55,6 +56,91 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn('`${PANEL_API}/temporary-temperature`', content)
         self.assertNotIn("/api/hausman_hub/v1/actions", content)
         self.assertNotIn("climate-drafts", content)
+
+    def test_panel_script_tolerates_an_unavailable_climate_snapshot(self) -> None:
+        script = f"""
+          const fs = require("fs");
+          const vm = require("vm");
+
+          class FakeElement {{
+            constructor(tag = "element") {{
+              this.tagName = tag.toUpperCase();
+              this.children = [];
+              this.className = "";
+              this.textContent = "";
+              this.disabled = false;
+            }}
+            appendChild(child) {{
+              this.children.push(child);
+              return child;
+            }}
+            addEventListener() {{}}
+            set innerHTML(value) {{
+              if (value === "") this.children = [];
+            }}
+          }}
+
+          global.document = {{
+            hidden: false,
+            createElement: (tag) => new FakeElement(tag),
+            addEventListener() {{}},
+            removeEventListener() {{}},
+          }};
+          global.HTMLElement = class {{
+            attachShadow() {{
+              this.shadowRoot = new FakeElement("shadow-root");
+              return this.shadowRoot;
+            }}
+          }};
+          const registry = new Map();
+          global.customElements = {{
+            define: (name, value) => registry.set(name, value),
+          }};
+          vm.runInThisContext(
+            fs.readFileSync({str(PANEL_JS)!r}, "utf8"),
+            {{ filename: {str(PANEL_JS)!r} }}
+          );
+
+          const Panel = registry.get("hausman-hub-panel");
+          const panel = new Panel();
+          panel._data = {{
+            contract: {{ name: "hausman-hub-admin-panel", version: 2 }},
+            snapshot: null,
+            readiness: {{
+              status: "disabled",
+              bridge_mode: "disabled",
+              reasons: ["bridge_disabled"],
+            }},
+          }};
+          panel._render();
+
+          const nodes = [];
+          const visit = (node) => {{
+            nodes.push(node);
+            node.children.forEach(visit);
+          }};
+          visit(panel.shadowRoot);
+          const text = nodes.map((node) => node.textContent).join("\\n");
+          if (!text.includes("Состояние")) throw new Error("readiness heading missing");
+          if (!text.includes("Управление климатом выключено")) {{
+            throw new Error("disabled readiness missing");
+          }}
+          if (text.includes("Комнаты")) throw new Error("rooms rendered without snapshot");
+          if (text.includes("Климатический контур")) {{
+            throw new Error("contour rendered without snapshot");
+          }}
+          if (nodes.some((node) => node.tagName === "BUTTON")) {{
+            throw new Error("action rendered without snapshot");
+          }}
+        """
+        completed = subprocess.run(
+            ("node", "--input-type=commonjs", "--eval", script),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(0, completed.returncode, completed.stderr)
 
 
 class PanelRegistrationTest(unittest.TestCase):

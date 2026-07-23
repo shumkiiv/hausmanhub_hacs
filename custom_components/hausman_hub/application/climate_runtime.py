@@ -139,6 +139,10 @@ class ClimateRuntimeUnavailable(RuntimeError):
     """The climate surface cannot provide a safe complete result."""
 
 
+class ClimateSnapshotUnavailable(ClimateRuntimeUnavailable):
+    """The public snapshot is safely absent because climate is not observable."""
+
+
 class ClimateRegistryStorage(Protocol):
     """Minimal versioned registry persistence boundary."""
 
@@ -295,7 +299,7 @@ class ClimateRuntime:
             if self.configuration.climate_bridge_mode is ClimateControlMode.MANAGED:
                 observation = await self._async_native_climate_observation_unlocked()
                 if observation.data_status is ClimateDataStatus.UNAVAILABLE:
-                    raise ClimateRuntimeUnavailable("climate state is unavailable")
+                    raise ClimateSnapshotUnavailable("climate state is unavailable")
                 return native_android_climate_snapshot(
                     self._registry,
                     observation,
@@ -304,7 +308,7 @@ class ClimateRuntime:
                     pending_room_ids=(),
                     local_now=self._local_now(),
                 )
-            raise ClimateRuntimeUnavailable("climate bridge is disabled")
+            raise ClimateSnapshotUnavailable("climate bridge is disabled")
 
     async def async_admin_import_snapshot(self) -> dict[str, object]:
         """Refresh and return private discovery data for a local admin."""

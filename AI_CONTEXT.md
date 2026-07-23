@@ -419,6 +419,26 @@ Last updated: 2026-07-23.
   update, or restart occurred. Next: refresh the custom repository in HACS,
   install `1.17.1`, restart Home Assistant, and hard-refresh the administrator
   browser.
+- Version 1.17.2 fixes the next administrator-visible panel failure found
+  after installing 1.17.1: the page registered and loaded, but its combined
+  API returned HTTP 503 whenever climate control was still disabled because
+  `async_public_snapshot()` treated that default state as unavailable. The
+  combined panel contract is now version 2 and may return `snapshot: null`
+  only for the narrow `ClimateSnapshotUnavailable` condition while still
+  returning readiness. The frontend then renders the truthful disabled or
+  temporarily unobservable status without rooms, contours, or action buttons.
+  Other `ClimateRuntimeUnavailable` failures, including protection-memory
+  faults, remain HTTP 503. Disabled, managed-unobservable, internal-failure,
+  and executed JavaScript render regressions are covered. The staged release
+  gate passed 622 tests plus HACS/package, version, naming, and repository
+  safety checks. Kimi could not start its review because the provider returned
+  monthly-quota HTTP 403 in session `ses_0718c6a51ffeOEOqbCDUJoHS0M`; no Kimi
+  PASS is claimed. A first fallback review found the exception-width,
+  contract-version, and test-depth gaps in session
+  `ses_0718c1edaffeElMNdo58oqRoi3`; after all three were fixed, the final
+  direct read-only OpenAI fallback review returned PASS in OpenCode session
+  `ses_071864f04ffe3MwHXRFVF4Mm5X`. Publication is pending. No live Home
+  Assistant write, update, or restart occurred.
 - Version 1.16.0 completes roadmap item 38. Windows, presence,
   outdoor temperature, and sensor quality now shape climate decisions.
   An open or unreadable configured window hard-locks its room into
@@ -2283,5 +2303,5 @@ Engineering and review rules are in
 
 - Obsidian/context index: `LLM_WIKI/00_Index.md`.
 - Latest generated context: `LLM_WIKI/Context.md`.
-- Last sync: 2026-07-23T12:14:20+03:00.
+- Last sync: 2026-07-23T13:17:53+03:00.
 <!-- llm-wiki-sync:end -->

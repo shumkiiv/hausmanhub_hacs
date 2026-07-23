@@ -1664,6 +1664,98 @@ class LocalSummaryAccessTest(unittest.TestCase):
             contours,
         )
 
+    def test_admin_panel_shows_disabled_readiness_without_a_snapshot(self) -> None:
+        """The page remains useful before the climate contour is enabled."""
+
+        views = {view.url: view for view in self.hass.http.views}
+        admin = reader_user("system-admin", admin=True)
+        panel_path = "/api/hausman_hub/v1/admin/panel"
+
+        panel = asyncio.run(
+            views[panel_path].get(
+                FakeRequest("192.168.1.20", admin, path=panel_path)
+            )
+        )
+
+        self.assertEqual(200, panel.status)
+        self.assertEqual(
+            {"name": "hausman-hub-admin-panel", "version": 2},
+            panel.payload["contract"],
+        )
+        self.assertIsNone(panel.payload["snapshot"])
+        self.assertEqual("disabled", panel.payload["readiness"]["status"])
+        self.assertEqual(
+            ["bridge_disabled"],
+            panel.payload["readiness"]["reasons"],
+        )
+        self.assertEqual("no-store", panel.headers.get("Cache-Control"))
+
+    def test_admin_panel_shows_managed_unavailable_readiness_without_snapshot(
+        self,
+    ) -> None:
+        """A safely unobservable managed contour remains an explainable state."""
+
+        from dataclasses import replace
+
+        from custom_components.hausman_hub.domain.climate_bridge import (
+            ClimateControlMode,
+        )
+
+        runtime = self.hass.data["hausman_hub"]["climate_runtime"]
+        runtime.configuration = replace(
+            runtime.configuration,
+            climate_bridge_mode=ClimateControlMode.MANAGED,
+        )
+        runtime._ha_state_view = None
+        views = {view.url: view for view in self.hass.http.views}
+        admin = reader_user("system-admin", admin=True)
+        panel_path = "/api/hausman_hub/v1/admin/panel"
+
+        panel = asyncio.run(
+            views[panel_path].get(
+                FakeRequest("192.168.1.20", admin, path=panel_path)
+            )
+        )
+
+        self.assertEqual(200, panel.status)
+        self.assertIsNone(panel.payload["snapshot"])
+        self.assertEqual("unavailable", panel.payload["readiness"]["status"])
+
+    def test_admin_panel_keeps_internal_runtime_failures_unavailable(self) -> None:
+        """An internal runtime fault must not look like a normal empty panel."""
+
+        from custom_components.hausman_hub.application.climate_runtime import (
+            ClimateRuntimeUnavailable,
+        )
+
+        runtime = self.hass.data["hausman_hub"]["climate_runtime"]
+
+        async def unavailable_readiness():
+            return {
+                "status": "unavailable",
+                "bridge_mode": "managed",
+                "reasons": [],
+            }
+
+        async def broken_snapshot():
+            raise ClimateRuntimeUnavailable(
+                "climate protection memory is unavailable"
+            )
+
+        runtime.async_readiness = unavailable_readiness
+        runtime.async_public_snapshot = broken_snapshot
+        views = {view.url: view for view in self.hass.http.views}
+        admin = reader_user("system-admin", admin=True)
+        panel_path = "/api/hausman_hub/v1/admin/panel"
+
+        panel = asyncio.run(
+            views[panel_path].get(
+                FakeRequest("192.168.1.20", admin, path=panel_path)
+            )
+        )
+
+        self.assertEqual(503, panel.status)
+
     def test_admin_panel_routes_serve_and_apply_for_a_local_admin(self) -> None:
         """The sidebar panel endpoints answer only to a local administrator."""
 
@@ -1677,7 +1769,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
         self.assertEqual(200, panel.status)
         self.assertEqual(
-            {"name": "hausman-hub-admin-panel", "version": 1},
+            {"name": "hausman-hub-admin-panel", "version": 2},
             panel.payload["contract"],
         )
         self.assertEqual(

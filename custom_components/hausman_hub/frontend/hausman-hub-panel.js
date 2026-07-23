@@ -156,8 +156,10 @@ class HausmanHubPanel extends HTMLElement {
     const { snapshot, readiness } = this._data;
     if (this._notice) container.appendChild(el("div", "notice", this._notice));
     this._renderReadiness(container, readiness);
-    this._renderRooms(container, snapshot);
-    this._renderContours(container, snapshot);
+    if (snapshot) {
+      this._renderRooms(container, snapshot);
+      this._renderContours(container, snapshot);
+    }
   }
 
   _renderReadiness(container, readiness) {

@@ -72,3 +72,30 @@
 - No live Home Assistant write, update, or restart occurred. Next: refresh the
   custom repository in HACS, install `1.17.1`, restart Home Assistant, and
   hard-refresh the administrator browser.
+
+## 2026-07-23 - HausmanHub 1.17.2 panel readiness hotfix
+
+- The administrator screenshot after installing 1.17.1 showed that the sidebar
+  page now exists, but displayed the red generic data-unavailable banner.
+- Root cause: the combined admin-panel route asked for the public climate
+  snapshot even in the default disabled climate mode. The runtime raised
+  `ClimateRuntimeUnavailable`, and the route converted this normal startup
+  state into HTTP 503.
+- The response contract is now `hausman-hub-admin-panel` version 2. A narrow
+  `ClimateSnapshotUnavailable` condition returns HTTP 200 with truthful
+  readiness and `snapshot: null`; the frontend renders no rooms, contours, or
+  actions without that snapshot. Internal runtime failures still return 503.
+- Regression coverage includes disabled mode, an actual managed runtime without
+  an observable state view, an internal runtime fault, and a Node-executed DOM
+  render proving that no room, contour, or button is created.
+- The full staged release gate passes 622 tests plus HACS/package, version,
+  naming, and repository-safety checks.
+- Kimi failed before review with monthly-quota HTTP 403 in session
+  `ses_0718c6a51ffeOEOqbCDUJoHS0M`; no Kimi PASS is claimed.
+- A fallback review initially returned FAIL in OpenCode session
+  `ses_0718c1edaffeElMNdo58oqRoi3` for an overbroad exception, unchanged
+  response version, and shallow tests. All findings were fixed. The final
+  direct read-only OpenAI fallback review returned PASS in session
+  `ses_071864f04ffe3MwHXRFVF4Mm5X`.
+- Publication of 1.17.2 is pending. No live Home Assistant write, update, or
+  restart occurred.
