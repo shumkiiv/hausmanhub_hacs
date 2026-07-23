@@ -87,6 +87,7 @@ from .climate_ownership import (
     plan_room_promotion,
 )
 from .climate_registry import (
+    ClimateRegistryViolation,
     reconcile_climate_registry,
     registry_from_payload,
     registry_to_payload,
@@ -1401,6 +1402,79 @@ class ClimateRuntime:
             self._registry = registry
             self.last_error = None
             return registry_to_payload(registry)
+
+    async def async_update_room_window(
+        self,
+        room_id: str,
+        window_entity_id: str | None,
+    ) -> dict[str, object]:
+        """Atomically replace only one saved room window binding."""
+
+        async with self._lock:
+            payload = registry_to_payload(self._registry)
+            rooms = payload.get("rooms")
+            if not isinstance(rooms, list):
+                raise ClimateRegistryViolation("climate registry rooms are invalid")
+            target = next(
+                (
+                    room
+                    for room in rooms
+                    if isinstance(room, dict) and room.get("id") == room_id
+                ),
+                None,
+            )
+            if target is None:
+                raise ClimateRegistryViolation("climate registry room is unknown")
+            target["window_entity_id"] = window_entity_id
+            registry = registry_from_payload(payload)
+            validate_contour_bindings(self._contours, registry)
+            await self._registry_store.async_save(registry)
+            self._registry = registry
+            self.last_error = None
+            return registry_to_payload(registry)
+
+    async def async_climate_mode_status(self) -> dict[str, object]:
+        """Report the saved climate control mode and contour configuration."""
+
+        async with self._lock:
+            contour = self._contours.contour(CLIMATE_CONTOUR_ID)
+            return {
+                "mode": self.configuration.climate_bridge_mode.value,
+                "contour_configured": contour is not None and bool(contour.rooms),
+            }
+
+    def signal_entity_known(self, entity_id: str) -> bool:
+        """Answer whether one entity currently has any readable local state."""
+
+        view = self._ha_state_view
+        if view is None:
+            return False
+        try:
+            return view.entity_state(entity_id) is not None
+        except Exception:
+            return False
+
+    async def async_signal_catalog(
+        self,
+        allowed_domains: frozenset[str],
+    ) -> list[dict[str, object]]:
+        """List bounded local candidates for one signal binding selection."""
+
+        view = self._ha_state_view
+        catalog = getattr(view, "signal_entity_catalog", None)
+        if view is None or catalog is None:
+            raise ClimateRuntimeUnavailable(
+                "the local signal entity catalog is unavailable"
+            )
+        entries = catalog(allowed_domains).entries
+        return [
+            {
+                "entity_id": entry.entity_id,
+                "name": entry.friendly_name or entry.entity_id,
+                "available": entry.available,
+            }
+            for entry in entries
+        ]
 
     async def async_replace_contours(self, payload: object) -> dict[str, object]:
         """Replace contour definitions while keeping their bindings exact."""

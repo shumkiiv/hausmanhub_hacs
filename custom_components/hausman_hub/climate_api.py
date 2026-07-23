@@ -18,6 +18,20 @@ from .application.api_capabilities import (
     TEMPORARY_TEMPERATURE_PATH,
     api_capabilities_snapshot,
 )
+from .application.configuration import (
+    create_options,
+    effective_configuration,
+)
+from .application.climate_signal_settings import (
+    CENTRAL_HEATING_DOMAINS,
+    OUTDOOR_TEMPERATURE_DOMAINS,
+    PRESENCE_DOMAINS,
+    WINDOW_DOMAINS,
+    ClimateSignalSettingsViolation,
+    validate_climate_mode_update,
+    validate_home_environment_update,
+    validate_room_window_update,
+)
 from .application.contour_apply import ContourApplyViolation
 from .application.contour_override import TemporaryTemperatureViolation
 from .application.climate_registry import ClimateRegistryViolation
@@ -50,6 +64,9 @@ ADMIN_CANARY_PREFLIGHT_PATH = "/api/hausman_hub/v1/admin/climate-canary-prefligh
 ADMIN_PANEL_PATH = "/api/hausman_hub/v1/admin/panel"
 ADMIN_PANEL_APPLY_PATH = "/api/hausman_hub/v1/admin/panel/apply"
 ADMIN_PANEL_TEMPORARY_PATH = "/api/hausman_hub/v1/admin/panel/temporary-temperature"
+ADMIN_CLIMATE_MODE_PATH = "/api/hausman_hub/v1/admin/climate-mode"
+ADMIN_HOME_ENVIRONMENT_PATH = "/api/hausman_hub/v1/admin/home-environment"
+ADMIN_ROOM_SIGNALS_PATH = "/api/hausman_hub/v1/admin/climate-room-signals"
 NO_STORE_HEADERS = {"Cache-Control": "no-store"}
 MAX_ACTION_BODY_BYTES = 16 * 1024
 MAX_CLIMATE_SETUP_BODY_BYTES = 256 * 1024
@@ -88,6 +105,9 @@ def register_climate_api(hass: HomeAssistant, runtime: ClimateRuntime) -> None:
             ClimateAdminPanelView(hass),
             ClimateAdminPanelApplyView(hass),
             ClimateAdminPanelTemporaryView(hass),
+            ClimateAdminClimateModeView(hass),
+            ClimateAdminHomeEnvironmentView(hass),
+            ClimateAdminRoomSignalsView(hass),
         )
         for view in views:
             hass.http.register_view(view)
@@ -779,6 +799,274 @@ class ClimateAdminPanelTemporaryView(_ClimateView):
         return self.json(receipt.as_payload(), headers=NO_STORE_HEADERS)
 
 
+class ClimateAdminClimateModeView(_ClimateView):
+    """Read or explicitly switch the saved climate control mode."""
+
+    url = ADMIN_CLIMATE_MODE_PATH
+    name = "api:hausman_hub:climate_admin_mode"
+
+    async def get(self, request: Any) -> Any:
+        if not _is_exact_request(request, ADMIN_CLIMATE_MODE_PATH):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        runtime = self._runtime()
+        if runtime is None:
+            return self._unavailable()
+        try:
+            status = await runtime.async_climate_mode_status()
+        except Exception:
+            return self._unavailable()
+        return self.json(status, headers=NO_STORE_HEADERS)
+
+    async def post(self, request: Any) -> Any:
+        if not _is_exact_request(request, ADMIN_CLIMATE_MODE_PATH):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        runtime = self._runtime()
+        if runtime is None:
+            return self._unavailable()
+        try:
+            payload = await _request_json(request)
+        except ValueError:
+            return self.json_message(
+                "Тело запроса смены режима климатического управления неверно.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        try:
+            status = await runtime.async_climate_mode_status()
+            mode = validate_climate_mode_update(status["mode"], payload)
+        except ClimateSignalSettingsViolation as error:
+            return self.json_message(
+                "Не удалось изменить режим климатического управления.",
+                (
+                    HTTPStatus.CONFLICT
+                    if error.code == "mode_changed"
+                    else HTTPStatus.BAD_REQUEST
+                ),
+                headers=NO_STORE_HEADERS,
+            )
+        except Exception:
+            return self._unavailable()
+        if mode == "managed" and status["contour_configured"] is not True:
+            return self.json_message(
+                "Управляемый режим требует настроенного климатического контура.",
+                HTTPStatus.CONFLICT,
+                headers=NO_STORE_HEADERS,
+            )
+        entries = self._hass.config_entries.async_entries(DOMAIN)
+        if len(entries) != 1:
+            return self._unavailable()
+        entry = entries[0]
+        try:
+            current = effective_configuration(
+                entry.data,
+                entry.options,
+            )
+        except Exception:
+            return self._unavailable()
+        # The authoritative optimistic lock reads the saved options again
+        # immediately before the write: a concurrent mode change must lose
+        # with HTTP 409 instead of silently overwriting the first request.
+        if payload["expected_mode"] != current.climate_bridge_mode.value:
+            return self.json_message(
+                "Не удалось изменить режим климатического управления.",
+                HTTPStatus.CONFLICT,
+                headers=NO_STORE_HEADERS,
+            )
+        options = create_options(
+            mode_value=current.mode,
+            local_summary_enabled_value=current.local_summary_enabled,
+            summary_update_interval_value=current.summary_update_interval,
+            canary_control_enabled_value=current.canary_control_enabled,
+            canary_control_target_value=(
+                None
+                if current.canary_control_target is None
+                else current.canary_control_target.entity_id
+            ),
+            climate_bridge_mode_value=mode,
+            climate_bridge_target_value=None,
+            climate_canary_room_id_value=None,
+            native_climate_mode_value=current.native_climate_policy.mode.value,
+            native_climate_room_id_value=current.native_climate_policy.room_id,
+            native_target_temperature_value=(
+                current.native_climate_policy.target_temperature
+            ),
+            native_target_humidity_value=current.native_climate_policy.target_humidity,
+        )
+        self._hass.config_entries.async_update_entry(entry, options=options)
+        return self.json(
+            {
+                "mode": mode,
+                "contour_configured": status["contour_configured"],
+            },
+            headers=NO_STORE_HEADERS,
+        )
+
+
+class ClimateAdminHomeEnvironmentView(_ClimateView):
+    """Read or atomically replace the home climate signal bindings."""
+
+    url = ADMIN_HOME_ENVIRONMENT_PATH
+    name = "api:hausman_hub:climate_admin_home_environment"
+
+    async def get(self, request: Any) -> Any:
+        if not _is_exact_request(request, ADMIN_HOME_ENVIRONMENT_PATH):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        runtime = self._runtime()
+        if runtime is None:
+            return self._unavailable()
+        try:
+            payload = await runtime.async_registry_payload()
+            candidates = {
+                "outdoor_temperature": await runtime.async_signal_catalog(
+                    OUTDOOR_TEMPERATURE_DOMAINS
+                ),
+                "presence": await runtime.async_signal_catalog(PRESENCE_DOMAINS),
+                "central_heating": await runtime.async_signal_catalog(
+                    CENTRAL_HEATING_DOMAINS
+                ),
+            }
+        except Exception:
+            return self._unavailable()
+        return self.json(
+            {
+                "home": payload.get("home"),
+                "candidates": candidates,
+            },
+            headers=NO_STORE_HEADERS,
+        )
+
+    async def post(self, request: Any) -> Any:
+        if not _is_exact_request(request, ADMIN_HOME_ENVIRONMENT_PATH):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        runtime = self._runtime()
+        if runtime is None:
+            return self._unavailable()
+        try:
+            payload = await _request_json(request)
+        except ValueError:
+            return self.json_message(
+                "Тело настроек сигналов дома заполнено неверно.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        try:
+            home = validate_home_environment_update(
+                payload,
+                entity_known=runtime.signal_entity_known,
+            )
+        except ClimateSignalSettingsViolation:
+            return self.json_message(
+                "Настройки сигналов дома заполнены неверно.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        try:
+            result = await runtime.async_update_home_environment(home)
+        except Exception:
+            return self._unavailable()
+        return self.json({"home": result.get("home")}, headers=NO_STORE_HEADERS)
+
+
+class ClimateAdminRoomSignalsView(_ClimateView):
+    """Read or atomically replace one room window signal binding."""
+
+    url = ADMIN_ROOM_SIGNALS_PATH
+    name = "api:hausman_hub:climate_admin_room_signals"
+
+    async def get(self, request: Any) -> Any:
+        if not _is_exact_request(request, ADMIN_ROOM_SIGNALS_PATH):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        runtime = self._runtime()
+        if runtime is None:
+            return self._unavailable()
+        try:
+            payload = await runtime.async_registry_payload()
+            candidates = await runtime.async_signal_catalog(WINDOW_DOMAINS)
+        except Exception:
+            return self._unavailable()
+        return self.json(
+            {
+                "rooms": _room_signal_payloads(payload),
+                "candidates": candidates,
+            },
+            headers=NO_STORE_HEADERS,
+        )
+
+    async def post(self, request: Any) -> Any:
+        if not _is_exact_request(request, ADMIN_ROOM_SIGNALS_PATH):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        runtime = self._runtime()
+        if runtime is None:
+            return self._unavailable()
+        try:
+            payload = await _request_json(request)
+        except ValueError:
+            return self.json_message(
+                "Тело привязки окна комнаты заполнено неверно.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        try:
+            registry = await runtime.async_registry_payload()
+            room_ids = frozenset(
+                room["id"] for room in _room_signal_payloads(registry)
+            )
+            room_id, entity_id = validate_room_window_update(
+                payload,
+                room_ids=room_ids,
+                entity_known=runtime.signal_entity_known,
+            )
+        except ClimateSignalSettingsViolation:
+            return self.json_message(
+                "Привязка окна комнаты заполнена неверно.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        except Exception:
+            return self._unavailable()
+        try:
+            result = await runtime.async_update_room_window(room_id, entity_id)
+        except ClimateRegistryViolation:
+            return self.json_message(
+                "Привязка окна комнаты заполнена неверно.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        except Exception:
+            return self._unavailable()
+        return self.json(
+            {"rooms": _room_signal_payloads(result)},
+            headers=NO_STORE_HEADERS,
+        )
+
+
+def _room_signal_payloads(registry_payload: dict[str, object]) -> list[dict[str, object]]:
+    """Reduce a registry payload to the bounded per-room window bindings."""
+
+    rooms = registry_payload.get("rooms")
+    if not isinstance(rooms, list):
+        return []
+    return [
+        {
+            "id": room.get("id"),
+            "name": room.get("name"),
+            "window_entity_id": room.get("window_entity_id"),
+        }
+        for room in rooms
+        if isinstance(room, dict)
+    ]
 
 
 async def _request_json(

@@ -2226,7 +2226,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertFalse(hasattr(self.view, method))
 
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
-        self.assertEqual(20, len(self.hass.http.views))
+        self.assertEqual(23, len(self.hass.http.views))
         self.assertEqual(
             1,
             sum(
@@ -2515,7 +2515,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             [(closed_entry, ("sensor", "switch"))],
             closed_hass.config_entries.forwarded,
         )
-        self.assertEqual(19, len(closed_hass.http.views))
+        self.assertEqual(22, len(closed_hass.http.views))
         self.assertEqual(
             {
                 "/api/hausman_hub/v1/capabilities",
@@ -2537,6 +2537,9 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 "/api/hausman_hub/v1/admin/panel",
                 "/api/hausman_hub/v1/admin/panel/apply",
                 "/api/hausman_hub/v1/admin/panel/temporary-temperature",
+                "/api/hausman_hub/v1/admin/climate-mode",
+                "/api/hausman_hub/v1/admin/home-environment",
+                "/api/hausman_hub/v1/admin/climate-room-signals",
             },
             {view.url for view in closed_hass.http.views},
         )

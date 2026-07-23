@@ -98,3 +98,37 @@ class HomeAssistantClimateStateView:
                 sorted(entries, key=lambda entry: entry.entity_id)
             )
         )
+
+    def signal_entity_catalog(
+        self,
+        allowed_domains: frozenset[str],
+    ) -> ClimateHaEntityCatalog:
+        """Enumerate only entities usable for one signal binding selection."""
+
+        entries: list[ClimateHaCatalogEntry] = []
+        for state in self._hass.states.async_all():
+            domain = state.entity_id.split(".", 1)[0]
+            if domain not in allowed_domains:
+                continue
+            if len(state.state) > MAX_STATE_LENGTH:
+                continue
+            friendly_name = state.attributes.get("friendly_name")
+            entries.append(
+                ClimateHaCatalogEntry(
+                    entity_id=state.entity_id,
+                    domain=domain,
+                    state=state.state,
+                    device_class=None,
+                    supported_features=0,
+                    friendly_name=(
+                        friendly_name if isinstance(friendly_name, str) else None
+                    ),
+                    available=state.state not in {"", "unavailable", "unknown"},
+                    last_updated_ms=int(state.last_updated.timestamp() * 1000),
+                )
+            )
+        return ClimateHaEntityCatalog(
+            entries=tuple(
+                sorted(entries, key=lambda entry: entry.entity_id)
+            )
+        )
