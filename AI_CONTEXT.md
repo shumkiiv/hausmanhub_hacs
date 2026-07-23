@@ -2356,9 +2356,14 @@ test-only changes do not need a new HACS version.
   `ses_070fbe366ffe1kpx6b5uPMnKRT`), so no Kimi PASS is claimed. The final
   read-only OpenAI fallback review returned PASS with no substantial findings
   in OpenCode session `ses_070fb78a1ffe1nlEik803qO5E0`.
+- Release commit `38cf6c5` was pushed to `origin/main`; GitHub Actions run
+  `30009265197` passed. Stable release `v1.17.3` was published at
+  https://github.com/shumkiiv/hausmanhub_hacs/releases/tag/v1.17.3. The remote
+  tag resolves exactly to `38cf6c5`, and the tagged manifest declares
+  `1.17.3`.
 - No live Home Assistant update, restart, or configuration change occurred.
-  Next: commit and push 1.17.3, wait for GitHub Actions, publish the stable
-  release, then install it through HACS and restart Home Assistant.
+  Next: refresh HACS, install 1.17.3, restart Home Assistant, and retest the
+  same Edge `homeassistant.local` URL.
 
 ## Next decision gate
 
@@ -2392,5 +2397,5 @@ Engineering and review rules are in
 
 - Obsidian/context index: `LLM_WIKI/00_Index.md`.
 - Latest generated context: `LLM_WIKI/Context.md`.
-- Last sync: 2026-07-23T15:58:03+03:00.
+- Last sync: 2026-07-23T16:01:14+03:00.
 <!-- llm-wiki-sync:end -->

@@ -209,6 +209,12 @@
   `ses_070fbe366ffe1kpx6b5uPMnKRT`), so no Kimi PASS is claimed. The final
   read-only OpenAI fallback review returned PASS with no substantial findings
   in OpenCode session `ses_070fb78a1ffe1nlEik803qO5E0`.
+- Release commit `38cf6c5` was pushed to `origin/main`; GitHub Actions run
+  `30009265197`, job `89212887371`, passed.
+- Stable release `v1.17.3` was published at
+  https://github.com/shumkiiv/hausmanhub_hacs/releases/tag/v1.17.3. The remote
+  tag resolves exactly to `38cf6c5`, and the tagged manifest declares
+  `1.17.3`.
 - No live Home Assistant write, update, restart, or configuration change
-  occurred. Next: publish 1.17.3, install it through HACS, restart Home
-  Assistant, and retest the same Edge `homeassistant.local` URL.
+  occurred. Next: refresh HACS, install 1.17.3, restart Home Assistant, and
+  retest the same Edge `homeassistant.local` URL.
