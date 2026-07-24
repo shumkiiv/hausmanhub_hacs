@@ -4,7 +4,7 @@ Last updated: 2026-07-24.
 
 ## Project state
 
-- Version 1.20.0 is a fully checked local release candidate, not published.
+- Version 1.20.0 is published as the latest stable GitHub release.
   The HausmanHub page now creates and edits the climate contour, explicitly
   assigns multiple temperature/humidity sensors to each room, and aggregates
   fresh same-kind readings by median. Draft editing requires both snapshot and
@@ -17,9 +17,13 @@ Last updated: 2026-07-24.
   `ses_06d2bd4bfffemV5aBst01z8SFG`; OpenAI fallback review first found and
   reproduced two revision races in `ses_06d2b5149ffeS2TLwe5BIXroYF`. One fix
   iteration closed both, and final read-only review passed in
-  `ses_06d1aaeceffeott73dPiL0oZhk`. No commit, push, release, or live Home
-  Assistant change occurred. Next: commit/push/release only on an explicit user
-  request.
+  `ses_06d1aaeceffeott73dPiL0oZhk`. Release commit `2e7a6e0` passed GitHub
+  Actions run `30074063964`; stable release `v1.20.0` is published at
+  https://github.com/shumkiiv/hausmanhub_hacs/releases/tag/v1.20.0, and the
+  remote tag resolves exactly to
+  `2e7a6e0bd2bb5f5b720094bd3027324c10a6b349`. No live Home Assistant change
+  occurred. Next: refresh HACS, install `1.20.0`, restart Home Assistant, and
+  hard-refresh the browser.
 
 - Product and Home Assistant integration name: **HausmanHub**. **HACS** is only
   the installation/update mechanism and is never the product name. The old
@@ -2469,5 +2473,5 @@ Engineering and review rules are in
 
 - Obsidian/context index: `LLM_WIKI/00_Index.md`.
 - Latest generated context: `LLM_WIKI/Context.md`.
-- Last sync: 2026-07-24T09:56:42+03:00.
+- Last sync: 2026-07-24T10:04:02+03:00.
 <!-- llm-wiki-sync:end -->

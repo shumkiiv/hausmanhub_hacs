@@ -1,6 +1,6 @@
 # Current Work
 
-## 2026-07-24 - HausmanHub 1.20.0 local release candidate
+## 2026-07-24 - HausmanHub 1.20.0 published
 
 - The page-owned contour wizard now supports initial creation and safe editing,
   per-room comfort targets, and explicit multi-selection of temperature and
@@ -19,8 +19,13 @@
   review `ses_06d2b5149ffeS2TLwe5BIXroYF` returned FAIL for two reproducible
   revision races; one bounded fix iteration resolved both. Final read-only
   review `ses_06d1aaeceffeott73dPiL0oZhk` returned PASS.
-- Nothing was committed, pushed, published, or changed in live Home Assistant.
-  Next: perform commit/push/release only after an explicit user request.
+- Release commit `2e7a6e0` was pushed to `origin/main`; GitHub Actions run
+  `30074063964` completed successfully. Stable release `v1.20.0` is published
+  at https://github.com/shumkiiv/hausmanhub_hacs/releases/tag/v1.20.0, and its
+  remote tag resolves exactly to
+  `2e7a6e0bd2bb5f5b720094bd3027324c10a6b349`.
+- No live Home Assistant change occurred. Next: refresh HACS, install `1.20.0`,
+  restart Home Assistant, and hard-refresh the browser.
 
 ## 2026-07-23 - HausmanHub 1.19.0 published
 
