@@ -9,6 +9,9 @@ const DRAFT_VALIDATE_API = `${DRAFT_API}/validate`;
 const DRAFT_SAVE_API = `${DRAFT_API}/save`;
 const PROFILES_API = "hausman_hub/v1/admin/climate-profiles";
 const SCHEDULE_API = "hausman_hub/v1/admin/climate-schedule";
+const AI_ASSISTANT_API = "hausman_hub/v1/admin/ai-assistant";
+const AI_ASSISTANT_SETTINGS_API = `${AI_ASSISTANT_API}/settings`;
+const AI_ASSISTANT_REFRESH_API = `${AI_ASSISTANT_API}/refresh`;
 const REFRESH_MS = 30000;
 
 const PROFILE_CONTRACT = { name: "hausman-hub-climate-profile-update-request", version: 1 };
@@ -38,6 +41,7 @@ const PANEL_SECTIONS = [
   { id: "schedule", label: "Расписание" },
   { id: "home", label: "Дом" },
   { id: "windows", label: "Сигналы комнат" },
+  { id: "assistant", label: "Помощник" },
 ];
 const READINESS_LABELS = {
   ready: "Система готова к управлению",
@@ -101,6 +105,9 @@ class HausmanHubPanel extends HTMLElement {
     this._hass = null;
     this._data = null;
     this._settings = { mode: null, home: null, windows: null, setup: null };
+    this._assistant = {
+      data: null, error: false, fields: null, loaded: false, loading: false,
+    };
     this._error = false;
     this._busy = false;
     this._notice = "";
@@ -110,6 +117,7 @@ class HausmanHubPanel extends HTMLElement {
     this._expandedWizardRooms = new Set();
     this._dirty = {
       wizard: false, home: false, windows: false, profiles: false, schedule: false, mode: false,
+      assistant: false,
     };
     this._wizard = {
       open: false,
@@ -312,6 +320,7 @@ class HausmanHubPanel extends HTMLElement {
     if (!this._dirty.schedule) this._renderSchedule(shell.schedule, this._settings);
     if (!this._dirty.home) this._renderHome(shell.home, this._settings.home);
     if (!this._dirty.windows) this._renderWindows(shell.windows, this._settings.windows);
+    if (this._activeSection === "assistant") this._renderAssistant(shell.assistant);
     this._syncSectionVisibility();
   }
 
@@ -499,9 +508,21 @@ class HausmanHubPanel extends HTMLElement {
       .profile-columns { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin-top:14px; }
       .profile-block { min-width:0; padding:14px; border-radius:14px; background:var(--secondary-background-color,#f2f4f5); }
       .profile-block h4 { margin-top:0; color:var(--primary-text-color,#212121); }
-      .signal-room { margin-bottom:16px; }
-      .empty-state { padding:22px; text-align:center; }
-      @media (max-width:640px) {
+       .signal-room { margin-bottom:16px; }
+       .empty-state { padding:22px; text-align:center; }
+       .assistant-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:12px; }
+       .assistant-stat { min-width:0; padding:14px; border-radius:14px;
+         background:var(--secondary-background-color,#f2f4f5); }
+       .assistant-stat strong { display:block; margin-top:4px; font-size:20px; overflow-wrap:anywhere; }
+       .assistant-list { display:grid; gap:8px; margin:12px 0 0; }
+       .assistant-call { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px;
+         padding:10px 0; border-top:1px solid var(--divider-color,#ddd); font-size:13px; }
+       .assistant-call:first-child { border-top:0; }
+       .assistant-call time { color:var(--secondary-text-color,#727272); }
+       .assistant-call-status { text-align:right; font-weight:650; }
+       .advisory-list { margin:8px 0 0; padding-left:20px; }
+       .advisory-list li { margin:7px 0; line-height:1.4; }
+       @media (max-width:640px) {
         :host { padding:16px 16px 36px; }
         .tab-bar { margin-right:-16px; padding-right:16px; }
         .overview-summary { grid-template-columns:minmax(0,1fr); }
@@ -515,9 +536,11 @@ class HausmanHubPanel extends HTMLElement {
         .room-expander { margin-left:auto; }
         .room-editor { padding:8px 14px 18px; }
         .entity-groups, .signal-type-groups { grid-template-columns:minmax(0,1fr); }
-        .first-run-room-list { grid-template-columns:minmax(0,1fr); }
-        .actions { flex-direction:column; }
-        .actions button { width:100%; margin-right:0; }
+         .first-run-room-list { grid-template-columns:minmax(0,1fr); }
+         .actions { flex-direction:column; }
+         .actions button { width:100%; margin-right:0; }
+         .assistant-call { grid-template-columns:minmax(0,1fr); }
+         .assistant-call-status { text-align:left; }
       }
       @media (max-width:380px) {
         :host { padding-left:14px; padding-right:14px; }
@@ -560,11 +583,14 @@ class HausmanHubPanel extends HTMLElement {
     container.appendChild(wizard);
     const nav = el("nav", "tab-bar");
     setAttr(nav, "aria-label", "Разделы HausmanHub");
+    setAttr(nav, "role", "tablist");
     const tabs = {};
     PANEL_SECTIONS.forEach((section, index) => {
       const button = el("button", "tab", section.label);
       button.type = "button";
+      button.id = `hausman-tab-${section.id}`;
       setAttr(button, "data-section", section.id);
+      setAttr(button, "role", "tab");
       setAttr(button, "aria-controls", `hausman-${section.id}`);
       button.addEventListener("click", () => this._activateSection(section.id));
       button.addEventListener("keydown", (event) => this._handleTabKey(event, index));
@@ -576,7 +602,9 @@ class HausmanHubPanel extends HTMLElement {
     PANEL_SECTIONS.forEach((section) => {
       const node = el("section");
       node.id = `hausman-${section.id}`;
+      setAttr(node, "role", "tabpanel");
       setAttr(node, "aria-label", section.label);
+      setAttr(node, "aria-labelledby", `hausman-tab-${section.id}`);
       container.appendChild(node);
       sectionNodes[section.id] = node;
     });
@@ -592,8 +620,9 @@ class HausmanHubPanel extends HTMLElement {
       contour: sectionNodes.contour,
       profiles: sectionNodes.profiles,
       schedule: sectionNodes.schedule,
-      home: sectionNodes.home,
-      windows: sectionNodes.windows,
+       home: sectionNodes.home,
+       windows: sectionNodes.windows,
+       assistant: sectionNodes.assistant,
     };
   }
 
@@ -602,7 +631,7 @@ class HausmanHubPanel extends HTMLElement {
       this._shell[name].innerHTML = "";
     });
     if (!this._dirty.wizard) this._shell.contour.innerHTML = "";
-    ["profiles", "schedule", "home", "windows"].forEach((name) => {
+    ["profiles", "schedule", "home", "windows", "assistant"].forEach((name) => {
       if (!this._dirty[name]) this._shell[name].innerHTML = "";
     });
   }
@@ -617,6 +646,10 @@ class HausmanHubPanel extends HTMLElement {
     if (!PANEL_SECTIONS.some((item) => item.id === section)) return;
     this._activeSection = section;
     this._syncSectionVisibility();
+    if (section === "assistant") {
+      this._renderAssistant(this._shell.assistant);
+      this._loadAssistant();
+    }
     if (focus) focusNode(this._shell && this._shell.tabs[section]);
   }
 
@@ -640,12 +673,15 @@ class HausmanHubPanel extends HTMLElement {
       schedule: this._dirty.schedule,
       home: this._dirty.home,
       windows: this._dirty.windows,
+      assistant: this._dirty.assistant,
     };
     PANEL_SECTIONS.forEach((section) => {
       const active = section.id === this._activeSection;
       this._shell.sectionNodes[section.id].hidden = !active;
       const tab = this._shell.tabs[section.id];
       setAttr(tab, "aria-current", active ? "page" : "false");
+      setAttr(tab, "aria-selected", active ? "true" : "false");
+      setAttr(tab, "tabindex", active ? "0" : "-1");
       tab.className = `tab${dirtyBySection[section.id] ? " is-dirty" : ""}`;
       tab.title = dirtyBySection[section.id] ? "Есть несохранённые изменения" : "";
     });
@@ -722,6 +758,361 @@ class HausmanHubPanel extends HTMLElement {
       suspect: "Данные требуют проверки",
     };
     return labels[code] || "Нет данных";
+  }
+
+  _assistantFields(settings) {
+    const source = settings || {};
+    return {
+      enabled: Boolean(source.enabled),
+      preset: source.preset || "custom",
+      base_url: source.base_url || "",
+      model: source.model || "",
+      api_key: "",
+      clear_key: false,
+    };
+  }
+
+  async _loadAssistant(reload = false) {
+    if (!this._hass || this._assistant.loading || (this._assistant.loaded && !reload)) return;
+    this._assistant.loading = true;
+    this._assistant.error = false;
+    this._render();
+    try {
+      const data = await this._hass.callApi("GET", AI_ASSISTANT_API);
+      this._assistant.data = data || null;
+      this._assistant.fields = this._assistantFields(data && data.settings);
+      this._assistant.loaded = true;
+      this._dirty.assistant = false;
+    } catch (error) {
+      this._assistant.error = true;
+      this._assistant.loaded = false;
+    } finally {
+      this._assistant.loading = false;
+      this._render();
+    }
+  }
+
+  _assistantStatusName(code) {
+    const labels = {
+      ready: "Готово",
+      provider_unavailable: "Поставщик недоступен",
+      provider_timeout: "Таймаут",
+      provider_error: "Ошибка поставщика",
+      provider_output_invalid: "Некорректный ответ поставщика",
+      disabled: "Выключен",
+      unconfigured: "Не настроен",
+    };
+    return labels[code] || "Статус неизвестен";
+  }
+
+  _assistantErrorName(code) {
+    const labels = {
+      auth: "Ошибка авторизации",
+      http: "Ошибка HTTP",
+      timeout: "Таймаут",
+      invalid: "Некорректный ответ",
+    };
+    return labels[code] || this._assistantStatusName(code);
+  }
+
+  _assistantRecommendationName(code) {
+    const labels = {
+      use_deterministic_evidence: "Используйте проверенные данные",
+      review_temperature_gap: "Проверьте расхождение температур",
+      refresh_evidence: "Обновите данные",
+      verify_physical_feedback: "Проверьте физическую обратную связь",
+      verify_window_state: "Проверьте состояние окна",
+      inspect_state_mismatch: "Проверьте расхождение состояния",
+    };
+    return labels[code] || "Рекомендация недоступна";
+  }
+
+  _assistantRiskName(code) {
+    const labels = {
+      provider_unavailable: "Поставщик недоступен",
+      provider_timeout: "Таймаут поставщика",
+      provider_error: "Ошибка поставщика",
+      provider_output_invalid: "Некорректный ответ поставщика",
+      temperature_outside_comfort_band: "Превышение комфортного диапазона",
+      stale_state: "Данные устарели",
+      physical_feedback_unconfirmed: "Физическая обратная связь не подтверждена",
+      window_not_confirmed_closed: "Окно не подтверждено закрытым",
+      state_mismatch: "Расхождение состояния",
+    };
+    return labels[code] || "Риск не определён";
+  }
+
+  _assistantDate(value) {
+    const timestamp = Number(value);
+    return Number.isFinite(timestamp) && timestamp > 0
+      ? new Date(timestamp).toLocaleString("ru-RU")
+      : "Время неизвестно";
+  }
+
+  async _saveAssistant() {
+    const fields = this._assistant.fields;
+    if (!fields || this._busy) return;
+    const baseUrl = fields.base_url.trim();
+    const model = fields.model.trim();
+    if (!baseUrl || !model) {
+      this._notice = "Введите адрес API и модель.";
+      this._render();
+      return;
+    }
+    const payload = {
+      enabled: fields.enabled,
+      preset: fields.preset,
+      base_url: baseUrl,
+      model,
+    };
+    if (fields.api_key.trim()) payload.api_key = fields.api_key.trim();
+    else if (fields.clear_key) payload.clear_key = true;
+    this._busy = true;
+    this._notice = "";
+    this._render();
+    try {
+      const result = await this._hass.callApi("POST", AI_ASSISTANT_SETTINGS_API, payload);
+      this._assistant.data = {
+        ...(this._assistant.data || {}),
+        settings: result && result.settings ? result.settings : { ...fields, key_set: !fields.clear_key },
+      };
+      this._assistant.fields = this._assistantFields(this._assistant.data.settings);
+      this._dirty.assistant = false;
+      this._notice = "Настройки помощника сохранены.";
+    } catch (error) {
+      this._notice = "Сохранить настройки помощника не удалось. Проверьте значения.";
+    } finally {
+      this._busy = false;
+      this._render();
+    }
+  }
+
+  async _refreshAssistant() {
+    if (this._busy || !this._assistant.loaded) return;
+    this._busy = true;
+    this._notice = "";
+    this._render();
+    try {
+      const result = await this._hass.callApi("POST", AI_ASSISTANT_REFRESH_API, {});
+      if (result && result.advisory) {
+        this._assistant.data = { ...this._assistant.data, last_advisory: result.advisory };
+      }
+      try {
+        const data = await this._hass.callApi("GET", AI_ASSISTANT_API);
+        if (data) {
+          this._assistant.data = data;
+          if (!this._dirty.assistant) this._assistant.fields = this._assistantFields(data.settings);
+        }
+      } catch {}
+      this._notice = "Совет обновлён.";
+    } catch (error) {
+      this._notice = error && error.status === 422
+        ? "Ошибка авторизации у поставщика. Проверьте ключ API."
+        : "Обновить совет не удалось. Повторите позже.";
+    } finally {
+      this._busy = false;
+      this._render();
+    }
+  }
+
+  _renderAssistant(container) {
+    if (!container) return;
+    container.innerHTML = "";
+    container.appendChild(el("h2", null, "Помощник AI"));
+    container.appendChild(el("p", "section-intro", "Настройте поставщика и получайте советы по климату."));
+    if (this._assistant.loading) {
+      container.appendChild(el("div", "card muted", "Загрузка настроек помощника…"));
+      return;
+    }
+    if (this._assistant.error || !this._assistant.loaded || !this._assistant.data) {
+      const card = el("div", "card");
+      card.appendChild(el("p", null, "Настройки помощника недоступны."));
+      const retry = el("button", "secondary", "Повторить");
+      retry.type = "button";
+      retry.disabled = this._busy;
+      retry.addEventListener("click", () => this._loadAssistant(true));
+      card.appendChild(retry);
+      container.appendChild(card);
+      return;
+    }
+    const fields = this._assistant.fields || this._assistantFields(this._assistant.data.settings);
+    this._assistant.fields = fields;
+    const settings = this._assistant.data.settings || {};
+    const connection = el("div", "card");
+    connection.appendChild(el("h3", null, "Подключение"));
+    const enabledLabel = el("label", "checkbox-field");
+    const enabled = el("input");
+    enabled.type = "checkbox";
+    enabled.checked = fields.enabled;
+    enabled.addEventListener("change", () => {
+      fields.enabled = enabled.checked;
+      this._markDirty("assistant");
+    });
+    enabledLabel.appendChild(enabled);
+    enabledLabel.appendChild(el("span", null, "Включить помощник"));
+    connection.appendChild(enabledLabel);
+    let baseUrl;
+    let model;
+    const presetLabel = el("label", "form-field");
+    presetLabel.appendChild(el("span", null, "Поставщик AI"));
+    const preset = selectField([
+      { value: "deepseek", label: "DeepSeek" },
+      { value: "openai", label: "OpenAI compatible" },
+      { value: "custom", label: "Свой поставщик" },
+    ], fields.preset, () => {
+      fields.preset = preset.value;
+      this._markDirty("assistant");
+    });
+    presetLabel.appendChild(preset);
+    connection.appendChild(presetLabel);
+    const baseLabel = el("label", "form-field");
+    baseLabel.appendChild(el("span", null, "Базовый URL"));
+    baseUrl = el("input");
+    baseUrl.type = "text";
+    baseUrl.value = fields.base_url;
+    baseUrl.addEventListener("input", () => {
+      fields.base_url = baseUrl.value;
+      this._markDirty("assistant");
+    });
+    baseLabel.appendChild(baseUrl);
+    connection.appendChild(baseLabel);
+    const modelLabel = el("label", "form-field");
+    modelLabel.appendChild(el("span", null, "Модель"));
+    model = el("input");
+    model.type = "text";
+    model.value = fields.model;
+    model.addEventListener("input", () => {
+      fields.model = model.value;
+      this._markDirty("assistant");
+    });
+    modelLabel.appendChild(model);
+    connection.appendChild(modelLabel);
+    const keyLabel = el("label", "form-field");
+    keyLabel.appendChild(el("span", null, "Новый ключ API"));
+    const apiKey = el("input");
+    apiKey.type = "password";
+    apiKey.value = "";
+    apiKey.addEventListener("input", () => {
+      fields.api_key = apiKey.value;
+      if (apiKey.value) fields.clear_key = false;
+      this._markDirty("assistant");
+    });
+    keyLabel.appendChild(apiKey);
+    connection.appendChild(keyLabel);
+    connection.appendChild(el(
+      "p",
+      "muted",
+      fields.clear_key ? "Ключ будет удалён после сохранения." : (settings.key_set ? "Ключ сохранён" : "Ключ не задан")
+    ));
+    if (settings.key_set || fields.clear_key) {
+      const clear = el("button", "secondary", fields.clear_key ? "Не удалять ключ" : "Удалить сохранённый ключ");
+      clear.type = "button";
+      clear.disabled = this._busy;
+      clear.addEventListener("click", () => {
+        fields.clear_key = !fields.clear_key;
+        fields.api_key = "";
+        this._markDirty("assistant");
+        this._render();
+      });
+      connection.appendChild(clear);
+    }
+    const save = el("button", null, "Сохранить настройки");
+    save.type = "button";
+    save.disabled = this._busy;
+    save.addEventListener("click", () => this._saveAssistant());
+    connection.appendChild(save);
+    container.appendChild(connection);
+    this._renderAssistantStats(container, this._assistant.data.stats || {});
+    this._renderAssistantAdvisory(container, this._assistant.data.last_advisory);
+  }
+
+  _renderAssistantStats(container, stats) {
+    const card = el("div", "card");
+    card.appendChild(el("h3", null, "Статистика вызовов"));
+    const aggregates = Array.isArray(stats.aggregates) ? stats.aggregates : [];
+    const total = aggregates.reduce((sum, item) => ({
+      calls: sum.calls + Number(item.calls || 0),
+      successes: sum.successes + Number(item.successes || 0),
+      prompt: sum.prompt + Number(item.prompt_tokens || 0),
+      completion: sum.completion + Number(item.completion_tokens || 0),
+      latency: sum.latency + Number(item.latency_ms || 0),
+    }), { calls: 0, successes: 0, prompt: 0, completion: 0, latency: 0 });
+    const grid = el("div", "assistant-grid");
+    [
+      ["Вызовы", total.calls],
+      ["Успешно", total.successes],
+      ["Prompt tokens", total.prompt],
+      ["Completion tokens", total.completion],
+      ["Средняя задержка", total.calls ? `${Math.round(total.latency / total.calls)} мс` : "Нет данных"],
+    ].forEach(([label, value]) => {
+      const item = el("div", "assistant-stat");
+      item.appendChild(el("span", "muted", label));
+      item.appendChild(el("strong", null, value));
+      grid.appendChild(item);
+    });
+    card.appendChild(grid);
+    const calls = Array.isArray(stats.recent_calls) ? stats.recent_calls : [];
+    card.appendChild(el("h4", null, "Последние вызовы"));
+    if (!calls.length) {
+      card.appendChild(el("p", "muted", "Вызовов пока нет."));
+    } else {
+      const list = el("div", "assistant-list");
+      calls.slice(-10).reverse().forEach((call) => {
+        const row = el("div", "assistant-call");
+        const details = el("div");
+        const timestamp = el("time", null, this._assistantDate(call.ts));
+        details.appendChild(timestamp);
+        details.appendChild(el("div", "muted", `${call.preset || "Поставщик"}: ${call.model || "Модель"}`));
+        row.appendChild(details);
+        row.appendChild(el("div", "assistant-call-status", call.error_class
+          ? this._assistantErrorName(call.error_class)
+          : this._assistantStatusName(call.status)));
+        list.appendChild(row);
+      });
+      card.appendChild(list);
+    }
+    container.appendChild(card);
+  }
+
+  _renderAssistantAdvisory(container, advisory) {
+    const card = el("div", "card");
+    card.appendChild(el("h3", null, "Последний совет"));
+    if (!advisory) {
+      card.appendChild(el("p", "muted", "Советов пока нет."));
+    } else {
+      card.appendChild(el("span", "status-badge", this._assistantStatusName(advisory.status)));
+      card.appendChild(el("p", "muted", `Сформирован: ${this._assistantDate(advisory.generated_at)}`));
+      const recommendations = Array.isArray(advisory.recommendations) ? advisory.recommendations : [];
+      const risks = Array.isArray(advisory.risk_flags) ? advisory.risk_flags : [];
+      card.appendChild(el("h4", null, "Рекомендации"));
+      if (recommendations.length) {
+        const list = el("ul", "advisory-list");
+        recommendations.forEach((item) => {
+          const room = item.room_id ? ` (${item.room_id})` : "";
+          list.appendChild(el("li", null, `${this._assistantRecommendationName(item.code)}${room}`));
+        });
+        card.appendChild(list);
+      } else {
+        card.appendChild(el("p", "muted", "Рекомендаций нет."));
+      }
+      card.appendChild(el("h4", null, "Риски"));
+      if (risks.length) {
+        const list = el("ul", "advisory-list");
+        risks.forEach((item) => {
+          const room = item.room_id ? ` (${item.room_id})` : "";
+          list.appendChild(el("li", null, `${this._assistantRiskName(item.code)}${room}`));
+        });
+        card.appendChild(list);
+      } else {
+        card.appendChild(el("p", "muted", "Рисков нет."));
+      }
+    }
+    const refresh = el("button", "secondary", "Обновить совет");
+    refresh.type = "button";
+    refresh.disabled = this._busy;
+    refresh.addEventListener("click", () => this._refreshAssistant());
+    card.appendChild(refresh);
+    container.appendChild(card);
   }
 
   _renderReadiness(container, readiness) {

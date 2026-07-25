@@ -174,6 +174,71 @@ GET_PATHS = {
     "hausman_hub/v1/admin/climate-room-signals": WINDOWS_PAYLOAD,
     "hausman_hub/v1/admin/climate-drafts/current": CONFIGURED_SETUP,
 }
+AI_ASSISTANT_PATH = "hausman_hub/v1/admin/ai-assistant"
+AI_ASSISTANT_SETTINGS_PATH = f"{AI_ASSISTANT_PATH}/settings"
+AI_ASSISTANT_REFRESH_PATH = f"{AI_ASSISTANT_PATH}/refresh"
+AI_ASSISTANT_PAYLOAD = {
+    "settings": {
+        "enabled": True,
+        "preset": "deepseek",
+        "base_url": "https://api.deepseek.com",
+        "model": "deepseek-chat",
+        "key_set": True,
+    },
+    "stats": {
+        "aggregates": [
+            {
+                "preset": "deepseek",
+                "model": "deepseek-chat",
+                "calls": 3,
+                "successes": 2,
+                "auth_errors": 0,
+                "http_errors": 0,
+                "timeout_errors": 1,
+                "invalid_errors": 0,
+                "prompt_tokens": 120,
+                "completion_tokens": 48,
+                "latency_ms": 1500,
+            }
+        ],
+        "recent_calls": [
+            {
+                "ts": 1784280000000,
+                "preset": "deepseek",
+                "model": "deepseek-chat",
+                "status": "provider_timeout",
+                "summary_code": "evidence_limited",
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "latency_ms": 500,
+                "error_class": "timeout",
+            }
+        ],
+    },
+    "last_advisory": {
+        "version": 1,
+        "source": "provider",
+        "generated_at": 1784280000000,
+        "status": "ready",
+        "summary": "advisory_available",
+        "recommendations": [
+            {
+                "code": "review_temperature_gap",
+                "priority": "warning",
+                "evidence": ["temperature_above_comfort"],
+                "room_id": "living",
+            }
+        ],
+        "risk_flags": [
+            {
+                "code": "temperature_outside_comfort_band",
+                "priority": "warning",
+                "evidence": ["temperature_above_comfort"],
+                "room_id": "living",
+            }
+        ],
+    },
+}
 
 
 def panel_script(get_payloads: dict, post_table: dict, assertions: str) -> str:
@@ -334,7 +399,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
-    def test_six_tabs_switch_locally_keep_dirty_values_and_support_keyboard(self) -> None:
+    def test_seven_tabs_switch_locally_keep_dirty_values_and_support_keyboard(self) -> None:
         script = panel_script(
             GET_PATHS,
             {},
@@ -342,7 +407,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const tabs = findAll(panel.shadowRoot, (node) =>
           node.tagName === "BUTTON" && String(node.className).split(" ").includes("tab"));
         const labels = tabs.map((node) => node.textContent);
-        const expected = ["Обзор", "Контур", "Профили", "Расписание", "Дом", "Сигналы комнат"];
+        const expected = ["Обзор", "Контур", "Профили", "Расписание", "Дом", "Сигналы комнат", "Помощник"];
         if (JSON.stringify(labels) !== JSON.stringify(expected)) {
           throw new Error("tab labels mismatch: " + JSON.stringify(labels));
         }
@@ -350,6 +415,11 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("configured setup did not default to overview");
         }
         if (tabs[0]["aria-current"] !== "page") throw new Error("overview aria-current missing");
+        if (tabs[0].role !== "tab" || tabs[0]["aria-selected"] !== "true"
+          || panel._shell.nav.role !== "tablist"
+          || panel._shell.sectionNodes.overview.role !== "tabpanel") {
+          throw new Error("tab accessibility semantics missing");
+        }
         const getCount = calls.filter((call) => call.method === "GET").length;
         tabs[2].fire("click");
         const dayTemperature = findAll(panel.shadowRoot, (node) => node.type === "number")
@@ -374,6 +444,99 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         });
         if (!prevented || panel._activeSection !== "schedule" || !tabs[3].focused) {
           throw new Error("keyboard tab navigation failed");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_assistant_loads_lazily_saves_settings_and_refreshes_advisory(self) -> None:
+        script = panel_script(
+            GET_PATHS | {AI_ASSISTANT_PATH: AI_ASSISTANT_PAYLOAD},
+            {
+                AI_ASSISTANT_SETTINGS_PATH: {
+                    "settings": {
+                        "enabled": True,
+                        "preset": "openai",
+                        "base_url": "https://api.openai.com/v1",
+                        "model": "gpt-4o-mini",
+                        "key_set": True,
+                    }
+                },
+                AI_ASSISTANT_REFRESH_PATH: {
+                    "advisory": AI_ASSISTANT_PAYLOAD["last_advisory"]
+                },
+            },
+            """
+        const tabs = findAll(panel.shadowRoot, (node) =>
+          node.tagName === "BUTTON" && String(node.className).split(" ").includes("tab"));
+        const labels = tabs.map((node) => node.textContent);
+        if (labels[6] !== "Помощник") throw new Error("assistant tab missing");
+        if (calls.some((call) => call.method === "GET" && call.path === "hausman_hub/v1/admin/ai-assistant")) {
+          throw new Error("assistant loaded eagerly");
+        }
+        tabs[6].fire("click");
+        await tick();
+        const assistantGets = calls.filter((call) =>
+          call.method === "GET" && call.path === "hausman_hub/v1/admin/ai-assistant");
+        if (assistantGets.length !== 1) throw new Error("assistant lazy GET missing");
+        const assistant = panel._shell.assistant;
+        const text = textOf(assistant);
+        for (const label of [
+          "Поставщик AI", "Ключ сохранён", "Последний совет", "Статистика вызовов",
+          "Проверьте расхождение температур", "Превышение комфортного диапазона",
+          "Таймаут", "Готово",
+        ]) {
+          if (!text.includes(label)) throw new Error("assistant text missing: " + label);
+        }
+        const inputs = findAll(assistant, (node) => node.tagName === "INPUT");
+        const enabled = inputs.find((node) => node.type === "checkbox");
+        const baseUrl = inputs.find((node) => node.type === "text" && node.value === "https://api.deepseek.com");
+        const model = inputs.find((node) => node.type === "text" && node.value === "deepseek-chat");
+        const apiKey = inputs.find((node) => node.type === "password");
+        const preset = findAll(assistant, (node) => node.tagName === "SELECT")[0];
+        if (!enabled || !baseUrl || !model || !apiKey || !preset || apiKey.value !== "") {
+          throw new Error("assistant settings controls missing or key exposed");
+        }
+        preset.value = "openai";
+        preset.fire("change");
+        baseUrl.value = "https://api.openai.com/v1";
+        baseUrl.fire("input");
+        model.value = "gpt-4o-mini";
+        model.fire("input");
+        apiKey.value = "new-secret";
+        apiKey.fire("input");
+        const save = findAll(assistant, (node) => node.tagName === "BUTTON")
+          .find((node) => node.textContent === "Сохранить настройки");
+        save.fire("click");
+        await tick();
+        const savePost = calls.find((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/admin/ai-assistant/settings");
+        const expectedSettings = {
+          enabled: true,
+          preset: "openai",
+          base_url: "https://api.openai.com/v1",
+          model: "gpt-4o-mini",
+          api_key: "new-secret",
+        };
+        if (!savePost || JSON.stringify(savePost.payload) !== JSON.stringify(expectedSettings)) {
+          throw new Error("assistant settings payload mismatch: " + JSON.stringify(savePost && savePost.payload));
+        }
+        const refresh = findAll(assistant, (node) => node.tagName === "BUTTON")
+          .find((node) => node.textContent === "Обновить совет");
+        refresh.fire("click");
+        await tick();
+        const refreshPost = calls.find((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/admin/ai-assistant/refresh");
+        if (!refreshPost || JSON.stringify(refreshPost.payload) !== JSON.stringify({})) {
+          throw new Error("assistant refresh payload mismatch");
+        }
+        if (calls.filter((call) => call.method === "GET"
+          && call.path === "hausman_hub/v1/admin/ai-assistant").length !== 2) {
+          throw new Error("assistant state did not refresh after advisory update");
+        }
+        if (!textOf(panel.shadowRoot).includes("Совет обновлён.")) {
+          throw new Error("assistant refresh success notice missing");
         }
             """,
         )

@@ -18,7 +18,7 @@ PANEL_JS = (
     / "frontend"
     / "hausman-hub-panel.js"
 )
-MAX_PANEL_JS_BYTES = 176 * 1024
+MAX_PANEL_JS_BYTES = 178 * 1024
 
 
 class PanelJavaScriptContractTest(unittest.TestCase):
@@ -60,11 +60,14 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             '"hausman_hub/v1/admin/climate-drafts/current"',
             '"hausman_hub/v1/admin/climate-profiles"',
             '"hausman_hub/v1/admin/climate-schedule"',
+            '"hausman_hub/v1/admin/ai-assistant"',
         ):
             with self.subTest(approved=approved):
                 self.assertIn(approved, content)
         self.assertIn('`${PANEL_API}/apply`', content)
         self.assertIn('`${PANEL_API}/temporary-temperature`', content)
+        self.assertIn('`${AI_ASSISTANT_API}/settings`', content)
+        self.assertIn('`${AI_ASSISTANT_API}/refresh`', content)
         for retired in (
             "/api/hausman_hub/v1/actions",
             "climate-shadow-evidence",
@@ -124,7 +127,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
           const panel = new Panel();
           panel._data = {{
             contract: {{ name: "hausman-hub-admin-panel", version: 2 }},
-            integration_version: "1.22.2",
+            integration_version: "1.23.0",
             snapshot: null,
             readiness: {{
               status: "disabled",
@@ -145,14 +148,14 @@ class PanelJavaScriptContractTest(unittest.TestCase):
           if (!text.includes("Управление климатом выключено")) {{
             throw new Error("disabled readiness missing");
           }}
-          if (!text.includes("Версия 1.22.2")) {{
+          if (!text.includes("Версия 1.23.0")) {{
             throw new Error("integration version badge missing");
           }}
           if (text.includes("Климатический контур")) {{
             throw new Error("contour rendered without snapshot");
           }}
           const tabs = nodes.filter((node) => String(node.className).split(" ").includes("tab"));
-          if (tabs.length !== 6) throw new Error("six persistent tabs missing");
+          if (tabs.length !== 7) throw new Error("seven persistent tabs missing");
           if (nodes.some((node) => (
             node.tagName === "BUTTON" && !String(node.className).split(" ").includes("tab")
           ))) {{
@@ -277,7 +280,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.22.2",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.23.0",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },
