@@ -30,6 +30,12 @@ from ..domain.native_climate import (
     NativeClimateViolation,
     native_climate_policy,
 )
+from .ai_assistant_config import (
+    AI_ASSISTANT_API_KEY_FIELD,
+    AI_ASSISTANT_SETTINGS_FIELD,
+    ai_assistant_binding_from_entry_data,
+)
+from ..domain.ai_assistant import AiAssistantViolation
 
 
 MODE_FIELD = "mode"
@@ -139,11 +145,22 @@ def effective_configuration(
 ) -> SafeConfiguration:
     """Validate persisted values and return their safe effective meaning."""
 
-    _require_exact_keys(
+    _require_allowed_keys(
         entry_data,
-        {MODE_FIELD, DIRECT_EXECUTION_STATUS_FIELD},
+        {
+            MODE_FIELD,
+            DIRECT_EXECUTION_STATUS_FIELD,
+            AI_ASSISTANT_SETTINGS_FIELD,
+            AI_ASSISTANT_API_KEY_FIELD,
+        },
         "entry data",
     )
+    if not {MODE_FIELD, DIRECT_EXECUTION_STATUS_FIELD}.issubset(entry_data):
+        raise ConfigurationViolation("entry data is incomplete")
+    try:
+        ai_assistant_binding_from_entry_data(entry_data)
+    except AiAssistantViolation as error:
+        raise ConfigurationViolation("AI assistant binding is invalid") from error
     _require_allowed_keys(
         options,
         {

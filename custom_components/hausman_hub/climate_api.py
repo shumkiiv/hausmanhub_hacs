@@ -21,6 +21,15 @@ from .application.api_capabilities import (
     TEMPORARY_TEMPERATURE_PATH,
     api_capabilities_snapshot,
 )
+from .application.ai_assistant import AiAssistantService
+from .application.ai_assistant_config import (
+    AiAssistantBinding,
+    ai_assistant_binding_from_entry_data,
+    ai_assistant_binding_update,
+    ai_assistant_entry_data,
+    ai_assistant_public_settings,
+)
+from .application.ai_assistant_storage import ai_assistant_state_to_payload
 from .application.configuration import (
     create_options,
     effective_configuration,
@@ -47,6 +56,7 @@ from .application.climate_runtime import (
     ClimateSnapshotUnavailable,
 )
 from .application.climate_setup import ClimateSetupViolation
+from .domain.ai_assistant import AiAdvisoryStatus, AiAssistantViolation
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -55,6 +65,7 @@ if TYPE_CHECKING:
 DOMAIN = "hausman_hub"
 DATA_CLIMATE_RUNTIME = "climate_runtime"
 DATA_CLIMATE_VIEWS = "climate_views"
+DATA_AI_ASSISTANT = "ai_assistant"
 
 
 def _integration_version() -> str | None:
@@ -90,6 +101,9 @@ ADMIN_PANEL_TEMPORARY_PATH = "/api/hausman_hub/v1/admin/panel/temporary-temperat
 ADMIN_CLIMATE_MODE_PATH = "/api/hausman_hub/v1/admin/climate-mode"
 ADMIN_HOME_ENVIRONMENT_PATH = "/api/hausman_hub/v1/admin/home-environment"
 ADMIN_ROOM_SIGNALS_PATH = "/api/hausman_hub/v1/admin/climate-room-signals"
+ADMIN_AI_ASSISTANT_PATH = "/api/hausman_hub/v1/admin/ai-assistant"
+ADMIN_AI_ASSISTANT_SETTINGS_PATH = f"{ADMIN_AI_ASSISTANT_PATH}/settings"
+ADMIN_AI_ASSISTANT_REFRESH_PATH = f"{ADMIN_AI_ASSISTANT_PATH}/refresh"
 NO_STORE_HEADERS = {"Cache-Control": "no-store"}
 MAX_ACTION_BODY_BYTES = 16 * 1024
 MAX_CLIMATE_SETUP_BODY_BYTES = 256 * 1024
@@ -105,11 +119,17 @@ HOME_IPV4_NETWORKS: Final[tuple[IPv4Network, ...]] = (
 HOME_IPV6_NETWORK: Final[IPv6Network] = IPv6Network("fc00::/7")
 
 
-def register_climate_api(hass: HomeAssistant, runtime: ClimateRuntime) -> None:
+def register_climate_api(
+    hass: HomeAssistant,
+    runtime: ClimateRuntime,
+    ai_assistant: AiAssistantService | None = None,
+) -> None:
     """Register fixed routes once and point them at the loaded HausmanHub runtime."""
 
     data = hass.data.setdefault(DOMAIN, {})
     data[DATA_CLIMATE_RUNTIME] = runtime
+    if ai_assistant is not None:
+        data[DATA_AI_ASSISTANT] = ai_assistant
     if DATA_CLIMATE_VIEWS not in data:
         views = (
             ClimateCapabilitiesView(hass),
@@ -134,6 +154,9 @@ def register_climate_api(hass: HomeAssistant, runtime: ClimateRuntime) -> None:
             ClimateAdminClimateModeView(hass),
             ClimateAdminHomeEnvironmentView(hass),
             ClimateAdminRoomSignalsView(hass),
+            ClimateAdminAiAssistantView(hass),
+            ClimateAdminAiAssistantSettingsView(hass),
+            ClimateAdminAiAssistantRefreshView(hass),
         )
         for view in views:
             hass.http.register_view(view)
@@ -149,6 +172,7 @@ def clear_climate_api(hass: HomeAssistant, entry_id: str) -> None:
     runtime = data.get(DATA_CLIMATE_RUNTIME)
     if runtime is not None and runtime.entry_id == entry_id:
         data.pop(DATA_CLIMATE_RUNTIME, None)
+        data.pop(DATA_AI_ASSISTANT, None)
 
 
 class _ClimateView(HomeAssistantView):
@@ -180,6 +204,12 @@ class _ClimateView(HomeAssistantView):
             HTTPStatus.SERVICE_UNAVAILABLE,
             headers=NO_STORE_HEADERS,
         )
+
+    def _ai_assistant(self) -> AiAssistantService | None:
+        if self._runtime() is None:
+            return None
+        candidate = self._hass.data.get(DOMAIN, {}).get(DATA_AI_ASSISTANT)
+        return candidate if isinstance(candidate, AiAssistantService) else None
 
 
 class ClimateCapabilitiesView(_ClimateView):
@@ -1136,6 +1166,123 @@ class ClimateAdminRoomSignalsView(_ClimateView):
             {"rooms": _room_signal_payloads(result)},
             headers=NO_STORE_HEADERS,
         )
+
+
+class ClimateAdminAiAssistantView(_ClimateView):
+    url = ADMIN_AI_ASSISTANT_PATH
+    name = "api:hausman_hub:climate_admin_ai_assistant"
+
+    async def get(self, request: Any) -> Any:
+        if not _is_exact_request(request, ADMIN_AI_ASSISTANT_PATH):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        assistant = self._ai_assistant()
+        if assistant is None:
+            return self._unavailable()
+        state = ai_assistant_state_to_payload(await assistant.async_state())
+        return self.json(
+            {
+                "settings": ai_assistant_public_settings(
+                    _ai_assistant_binding(self._hass)
+                ),
+                "stats": state["stats"],
+                "last_advisory": state["last_advisory"],
+            },
+            headers=NO_STORE_HEADERS,
+        )
+
+
+class ClimateAdminAiAssistantSettingsView(_ClimateView):
+    url = ADMIN_AI_ASSISTANT_SETTINGS_PATH
+    name = "api:hausman_hub:climate_admin_ai_assistant_settings"
+
+    async def post(self, request: Any) -> Any:
+        if not _is_exact_request(request, ADMIN_AI_ASSISTANT_SETTINGS_PATH):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        if self._ai_assistant() is None:
+            return self._unavailable()
+        try:
+            payload = await _request_json(request)
+            binding = ai_assistant_binding_update(
+                payload,
+                _ai_assistant_binding(self._hass),
+            )
+        except (AiAssistantViolation, ValueError) as error:
+            code = error.code if isinstance(error, AiAssistantViolation) else "invalid_request"
+            return self.json(
+                {"error": code},
+                status_code=HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        entry = _single_hausmanhub_entry(self._hass)
+        if entry is None:
+            return self._unavailable()
+        self._hass.config_entries.async_update_entry(
+            entry,
+            data=ai_assistant_entry_data(entry.data, binding),
+        )
+        return self.json(
+            {"settings": ai_assistant_public_settings(binding)},
+            headers=NO_STORE_HEADERS,
+        )
+
+
+class ClimateAdminAiAssistantRefreshView(_ClimateView):
+    url = ADMIN_AI_ASSISTANT_REFRESH_PATH
+    name = "api:hausman_hub:climate_admin_ai_assistant_refresh"
+
+    async def post(self, request: Any) -> Any:
+        if not _is_exact_request(request, ADMIN_AI_ASSISTANT_REFRESH_PATH):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        assistant = self._ai_assistant()
+        if assistant is None:
+            return self._unavailable()
+        try:
+            await _request_json(request)
+            advisory = await assistant.async_refresh()
+            state = ai_assistant_state_to_payload(await assistant.async_state())
+        except ValueError:
+            return self.json(
+                {"error": "invalid_request"},
+                status_code=HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        except AiAssistantViolation:
+            return self._unavailable()
+        payload = {"advisory": state["last_advisory"]}
+        latest = state["stats"]["recent_calls"]
+        if (
+            advisory.status is AiAdvisoryStatus.PROVIDER_ERROR
+            and latest
+            and latest[-1]["error_class"] == "auth"
+        ):
+            payload["error"] = "provider_auth"
+            return self.json(
+                payload,
+                status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                headers=NO_STORE_HEADERS,
+            )
+        return self.json(payload, headers=NO_STORE_HEADERS)
+
+
+def _single_hausmanhub_entry(hass: HomeAssistant) -> Any | None:
+    entries = hass.config_entries.async_entries(DOMAIN)
+    return entries[0] if len(entries) == 1 else None
+
+
+def _ai_assistant_binding(hass: HomeAssistant) -> AiAssistantBinding:
+    entry = _single_hausmanhub_entry(hass)
+    if entry is None:
+        return AiAssistantBinding(None, None)
+    try:
+        return ai_assistant_binding_from_entry_data(entry.data)
+    except AiAssistantViolation:
+        return AiAssistantBinding(None, None)
 
 
 def _room_signal_payloads(registry_payload: dict[str, object]) -> list[dict[str, object]]:

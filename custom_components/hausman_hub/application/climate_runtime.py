@@ -14,6 +14,7 @@ from ..domain.climate import (
     ClimateEndpointRole,
     ClimateRegistry,
 )
+from ..domain.ai_assistant_json import AiJsonObject
 from ..domain.climate_comparison import ClimateComparisonSnapshot
 from ..domain.climate_demand import ClimateDemandSnapshot
 from ..domain.climate_equipment import ClimateEquipmentSnapshot
@@ -40,6 +41,7 @@ from ..domain.native_climate import NativeClimatePolicy, preview_native_climate
 from ..domain.climate_targets import ClimateTargetSnapshot
 from .climate_application import ClimateDesiredStateChanges
 from .climate_equipment import build_climate_equipment_snapshot
+from .ai_assistant_evidence import ai_evidence_from_observation
 from .climate_ha_adapters import build_climate_ha_call_plan
 from .climate_ha_observations import (
     ClimateHaObservationViolation,
@@ -491,6 +493,11 @@ class ClimateRuntime:
                 settings_apply_enabled=False,
                 local_now=self._local_now(),
             )
+
+    async def async_ai_evidence_snapshot(self) -> AiJsonObject:
+        async with self._lock:
+            observation = await self._async_native_climate_observation_unlocked()
+            return ai_evidence_from_observation(observation, self._contours)
 
     async def async_contour_apply_preview(self) -> dict[str, object]:
         """Preview supported saved-contour changes without posting commands."""

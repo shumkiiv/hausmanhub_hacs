@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -15,6 +16,23 @@ PANEL_JS_URL = f"{PANEL_STATIC_URL}/hausman-hub-panel.js"
 PANEL_FILES = Path(__file__).parent / "frontend"
 _DATA_KEY = "hausman_hub_panel"
 _DATA_STATIC_REGISTERED = "static_registered"
+
+
+def _panel_module_url() -> str:
+    """Bust the browser module cache by pinning the URL to the release."""
+
+    try:
+        manifest = json.loads(
+            (Path(__file__).resolve().parent / "manifest.json").read_text(
+                encoding="utf-8"
+            )
+        )
+    except (OSError, ValueError):
+        return PANEL_JS_URL
+    version = manifest.get("version")
+    if type(version) is not str or not version:
+        return PANEL_JS_URL
+    return f"{PANEL_JS_URL}?v={version}"
 
 
 async def async_register_hausmanhub_panel(hass: HomeAssistant) -> None:
@@ -47,7 +65,7 @@ async def async_register_hausmanhub_panel(hass: HomeAssistant) -> None:
         webcomponent_name=PANEL_WEBCOMPONENT_NAME,
         sidebar_title="HausmanHub",
         sidebar_icon="mdi:thermostat",
-        module_url=PANEL_JS_URL,
+        module_url=_panel_module_url(),
         require_admin=True,
         config_panel_domain="hausman_hub",
     )

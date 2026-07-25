@@ -69,12 +69,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         local_now=dt_util.now,
     )
     await climate_runtime.async_start()
+    from .ai_assistant_setup import async_start_ai_assistant
     from .climate_schedule import async_start_climate_schedule
     from .climate_trial import async_start_climate_trial
 
+    ai_assistant = await async_start_ai_assistant(hass, entry, climate_runtime)
     await async_start_climate_schedule(hass, entry, climate_runtime)
     await async_start_climate_trial(hass, entry, climate_runtime)
-    register_climate_api(hass, climate_runtime)
+    register_climate_api(hass, climate_runtime, ai_assistant)
     from .panel import async_register_hausmanhub_panel
 
     await async_register_hausmanhub_panel(hass)
