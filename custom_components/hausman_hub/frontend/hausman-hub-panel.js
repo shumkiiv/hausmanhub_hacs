@@ -339,6 +339,9 @@ class HausmanHubPanel extends HTMLElement {
         background:var(--warning-color,#ff9800); }
       .status-pill[data-status="ready"]::before { background:var(--success-color,#43a047); }
       .status-pill[data-status="unavailable"]::before { background:var(--error-color,#db4437); }
+      .version-badge { display:inline-flex; align-items:center; min-height:32px; margin-left:8px;
+        padding:6px 12px; border-radius:999px; font-size:13px;
+        background:var(--secondary-background-color,#eceff1); color:var(--secondary-text-color,#727272); }
       .tab-bar { display:flex; gap:6px; margin:0 -4px 22px; padding:4px; overflow-x:auto;
         overscroll-behavior-inline:contain; scrollbar-width:thin; border-bottom:1px solid var(--divider-color,#ddd); }
       .tab { flex:0 0 auto; min-height:42px; margin:0; padding:9px 15px; border-radius:11px 11px 0 0;
@@ -535,6 +538,9 @@ class HausmanHubPanel extends HTMLElement {
     const statusPill = el("div", "status-pill", "Загрузка состояния…");
     setAttr(statusPill, "role", "status");
     header.appendChild(statusPill);
+    const versionBadge = el("div", "version-badge muted", "");
+    versionBadge.style.display = "none";
+    header.appendChild(versionBadge);
     container.appendChild(header);
     const banner = el("div", "banner", "Данные HausmanHub недоступны. Проверьте интеграцию и повторите.");
     setAttr(banner, "role", "alert");
@@ -581,7 +587,7 @@ class HausmanHubPanel extends HTMLElement {
     sectionNodes.overview.appendChild(summary);
     sectionNodes.overview.appendChild(rooms);
     this._shell = {
-      banner, notice, loading, statusPill, tabs, nav, sectionNodes, wizard,
+      banner, notice, loading, statusPill, versionBadge, tabs, nav, sectionNodes, wizard,
       readiness, summary, rooms,
       contour: sectionNodes.contour,
       profiles: sectionNodes.profiles,
@@ -649,6 +655,9 @@ class HausmanHubPanel extends HTMLElement {
     const status = readiness && readiness.status;
     this._shell.statusPill.textContent = READINESS_LABELS[status] || "Состояние уточняется";
     setAttr(this._shell.statusPill, "data-status", status || "unknown");
+    const version = this._data && this._data.integration_version;
+    this._shell.versionBadge.textContent = version ? `Версия ${version}` : "";
+    this._shell.versionBadge.style.display = version ? "" : "none";
   }
 
   _renderOverviewSummary(container, setup, snapshot) {

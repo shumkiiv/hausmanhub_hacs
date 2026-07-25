@@ -1726,6 +1726,22 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
         self.assertEqual("no-store", panel.headers.get("Cache-Control"))
 
+    def test_admin_panel_reports_the_installed_integration_version(self) -> None:
+        """The header badge reads the version from the live panel payload."""
+
+        views = {view.url: view for view in self.hass.http.views}
+        admin = reader_user("system-admin", admin=True)
+        panel_path = "/api/hausman_hub/v1/admin/panel"
+
+        panel = asyncio.run(
+            views[panel_path].get(
+                FakeRequest("192.168.1.20", admin, path=panel_path)
+            )
+        )
+
+        self.assertEqual(200, panel.status)
+        self.assertEqual("1.22.1", panel.payload["integration_version"])
+
     def test_admin_panel_accepts_ipv6_link_local_admin_from_mdns(self) -> None:
         """A local admin may open the panel when mDNS selects IPv6 link-local."""
 

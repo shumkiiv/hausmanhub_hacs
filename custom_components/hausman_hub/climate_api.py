@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from http import HTTPStatus
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network, ip_address
+import json
+import pathlib
 from typing import TYPE_CHECKING, Any, Final
 
 from homeassistant.components.http import HomeAssistantView
@@ -53,6 +55,23 @@ if TYPE_CHECKING:
 DOMAIN = "hausman_hub"
 DATA_CLIMATE_RUNTIME = "climate_runtime"
 DATA_CLIMATE_VIEWS = "climate_views"
+
+
+def _integration_version() -> str | None:
+    """Read the installed integration version from its own manifest."""
+
+    try:
+        manifest = json.loads(
+            (pathlib.Path(__file__).resolve().parent / "manifest.json").read_text(
+                encoding="utf-8"
+            )
+        )
+    except (OSError, ValueError):
+        return None
+    version = manifest.get("version")
+    return version if type(version) is str and version else None
+
+
 ADMIN_IMPORT_PATH = "/api/hausman_hub/v1/admin/climate-import"
 ADMIN_DRAFT_PATH = "/api/hausman_hub/v1/admin/climate-drafts"
 ADMIN_DRAFT_CURRENT_PATH = "/api/hausman_hub/v1/admin/climate-drafts/current"
@@ -714,12 +733,14 @@ class ClimateAdminPanelView(_ClimateView):
                 snapshot = None
         except Exception:
             return self._unavailable()
+        integration_version = _integration_version()
         return self.json(
             {
                 "contract": {
                     "name": "hausman-hub-admin-panel",
                     "version": 2,
                 },
+                "integration_version": integration_version,
                 "snapshot": snapshot,
                 "readiness": readiness,
             },

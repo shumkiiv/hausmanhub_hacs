@@ -124,6 +124,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
           const panel = new Panel();
           panel._data = {{
             contract: {{ name: "hausman-hub-admin-panel", version: 2 }},
+            integration_version: "1.22.1",
             snapshot: null,
             readiness: {{
               status: "disabled",
@@ -143,6 +144,9 @@ class PanelJavaScriptContractTest(unittest.TestCase):
           if (!text.includes("Обзор")) throw new Error("overview heading missing");
           if (!text.includes("Управление климатом выключено")) {{
             throw new Error("disabled readiness missing");
+          }}
+          if (!text.includes("Версия 1.22.1")) {{
+            throw new Error("integration version badge missing");
           }}
           if (text.includes("Климатический контур")) {{
             throw new Error("contour rendered without snapshot");
