@@ -76,7 +76,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     ai_assistant = await async_start_ai_assistant(hass, entry, climate_runtime)
     await async_start_climate_schedule(hass, entry, climate_runtime)
     await async_start_climate_trial(hass, entry, climate_runtime)
-    register_climate_api(hass, climate_runtime, ai_assistant)
+
+    from .application.scenario_catalog import async_build_scenario_catalog
+    from .application.scenario_executor import ScenarioExecutor
+    from .application.scenario_service import ScenarioService
+    from .scenario_storage import HomeAssistantScenarioStore
+
+    scenario_store = HomeAssistantScenarioStore(hass, entry.entry_id)
+    scenario_catalog = await async_build_scenario_catalog(hass)
+    scenario_service = ScenarioService(hass, scenario_store, scenario_catalog)
+    await scenario_service.async_load()
+    scenario_executor = ScenarioExecutor(
+        hass, scenario_catalog, scenario_service.async_run_scenario
+    )
+    scenario_service.set_executor(scenario_executor)
+
+    register_climate_api(hass, climate_runtime, ai_assistant, scenario_service)
     from .panel import async_register_hausmanhub_panel
 
     await async_register_hausmanhub_panel(hass)

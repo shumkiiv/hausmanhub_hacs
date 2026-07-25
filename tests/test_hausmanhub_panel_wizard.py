@@ -902,7 +902,7 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         if (!textOf(panel.shadowRoot).includes("18-28 °C")) {
           throw new Error("temperature contract hint missing");
         }
-        if (panel._activeSection !== "contour" || living.editor.hidden || !living.temperature.focused) {
+        if (panel._activeSection !== "climate" || living.editor.hidden || !living.temperature.focused) {
           throw new Error("temperature error did not reveal and focus its room");
         }
         living.temperature.value = "22";
@@ -948,11 +948,11 @@ class PanelFirstRunWizardTest(unittest.TestCase):
           throw new Error("configured summary fetched options eagerly");
         }
         const initial = textOf(panel.shadowRoot);
-        const order = ["Обзор", "Контур", "Профили", "Расписание", "Дом", "Сигналы комнат"];
+        const order = ["Главная", "Сценарии", "Климат", "Свет", "Комнаты", "Медиа", "Безопасность", "Устройства", "Настройки"];
         let cursor = -1;
         order.forEach((heading) => {
           const next = initial.indexOf(heading, cursor + 1);
-          if (next <= cursor) throw new Error("section order broken at " + heading);
+          if (next <= cursor) throw new Error("tab order broken at " + heading);
           cursor = next;
         });
         if (panel._activeSection !== "overview") throw new Error("configured default tab mismatch");

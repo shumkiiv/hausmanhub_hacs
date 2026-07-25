@@ -44,6 +44,43 @@ class SafeConfiguration:
     climate_bridge_target: ClimateBridgeTarget | None = None
     climate_canary_room_id: str | None = None
     native_climate_policy: NativeClimatePolicy = NativeClimatePolicy()
+    connection_mode: str = "center"
+    smart_home_center_url: str | None = None
+    home_assistant_url: str | None = None
+
+
+_CONNECTION_MODE_CENTER = "center"
+_CONNECTION_MODE_HOME_ASSISTANT = "home_assistant"
+APPROVED_CONNECTION_MODES = (_CONNECTION_MODE_CENTER, _CONNECTION_MODE_HOME_ASSISTANT)
+
+
+def _connection_mode(value: object) -> str:
+    """Return a validated connection mode or raise UnsafeModeError."""
+
+    if not isinstance(value, str) or value not in APPROVED_CONNECTION_MODES:
+        allowed = ", ".join(APPROVED_CONNECTION_MODES)
+        raise UnsafeModeError(f"connection mode must be one of: {allowed}")
+    return value
+
+
+_connection_url_schemes = frozenset({"http", "https"})
+
+
+def _connection_url(value: object) -> str | None:
+    """Return a validated connection URL or None."""
+
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise UnsafeModeError("connection URL must be a string")
+    from urllib.parse import urlparse
+
+    parsed = urlparse(value)
+    if parsed.scheme not in _connection_url_schemes:
+        raise UnsafeModeError("connection URL must use http or https")
+    if not parsed.hostname:
+        raise UnsafeModeError("connection URL must contain a host")
+    return value
 
 
 def configuration_for_mode(value: object) -> SafeConfiguration:

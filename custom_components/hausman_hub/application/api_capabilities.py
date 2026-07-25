@@ -30,6 +30,12 @@ CONTOURS_PATH = f"{API_BASE_PATH}/contours"
 CONTOUR_APPLY_PREVIEW_PATH = f"{CONTOURS_PATH}/apply-preview"
 CONTOUR_APPLY_PATH = f"{CONTOURS_PATH}/apply"
 TEMPORARY_TEMPERATURE_PATH = f"{CONTOURS_PATH}/temporary-temperature"
+SCENARIOS_PATH = f"{API_BASE_PATH}/scenarios"
+SCENARIOS_CATALOG_PATH = f"{SCENARIOS_PATH}/catalog"
+SCENARIOS_TEST_PATH = f"{SCENARIOS_PATH}/test"
+SCENARIOS_DELETE_PATH = f"{SCENARIOS_PATH}/delete"
+SCENARIOS_RUN_PATH = f"{SCENARIOS_PATH}/run"
+SCENARIOS_ACTION_PATH = f"{SCENARIOS_PATH}/action"
 
 
 def api_capabilities_snapshot() -> dict[str, object]:
@@ -90,6 +96,23 @@ def api_capabilities_snapshot() -> dict[str, object]:
                 "response_contract": {
                     "name": CLIMATE_CONTROL_RECEIPT_CONTRACT_NAME,
                     "version": CLIMATE_CONTROL_RECEIPT_CONTRACT_VERSION,
+                },
+            },
+            "scenarios": {
+                "available": True,
+                "read": True,
+                "write": True,
+                "test": True,
+                "delete": True,
+                "run": True,
+                "definitionVersions": [1],
+                "paths": {
+                    "list": SCENARIOS_PATH,
+                    "catalog": SCENARIOS_CATALOG_PATH,
+                    "test": SCENARIOS_TEST_PATH,
+                    "delete": SCENARIOS_DELETE_PATH,
+                    "run": SCENARIOS_RUN_PATH,
+                    "action": SCENARIOS_ACTION_PATH,
                 },
             },
         },

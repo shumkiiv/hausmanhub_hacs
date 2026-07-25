@@ -18,7 +18,7 @@ PANEL_JS = (
     / "frontend"
     / "hausman-hub-panel.js"
 )
-MAX_PANEL_JS_BYTES = 178 * 1024
+MAX_PANEL_JS_BYTES = 200 * 1024
 
 
 class PanelJavaScriptContractTest(unittest.TestCase):
@@ -61,6 +61,12 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             '"hausman_hub/v1/admin/climate-profiles"',
             '"hausman_hub/v1/admin/climate-schedule"',
             '"hausman_hub/v1/admin/ai-assistant"',
+            '"hausman_hub/v1/admin/scenarios"',
+            '"hausman_hub/v1/admin/scenarios/catalog"',
+            '"hausman_hub/v1/admin/scenarios/test"',
+            '"hausman_hub/v1/admin/scenarios/delete"',
+            '"hausman_hub/v1/admin/scenarios/run"',
+            '"hausman_hub/v1/admin/connection-settings"',
         ):
             with self.subTest(approved=approved):
                 self.assertIn(approved, content)
@@ -127,7 +133,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
           const panel = new Panel();
           panel._data = {{
             contract: {{ name: "hausman-hub-admin-panel", version: 2 }},
-            integration_version: "1.23.0",
+            integration_version: "1.24.0",
             snapshot: null,
             readiness: {{
               status: "disabled",
@@ -143,20 +149,27 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             node.children.forEach(visit);
           }};
           visit(panel.shadowRoot);
-          const text = nodes.map((node) => node.textContent).join("\\n");
-          if (!text.includes("Обзор")) throw new Error("overview heading missing");
+          const visible = [];
+          const visitVisible = (node) => {{
+            if (node.hidden) return;
+            visible.push(node);
+            node.children.forEach(visitVisible);
+          }};
+          visitVisible(panel.shadowRoot);
+          const text = visible.map((node) => node.textContent).join("\\n");
+          if (!text.includes("Главная")) throw new Error("home heading missing");
           if (!text.includes("Управление климатом выключено")) {{
             throw new Error("disabled readiness missing");
           }}
-          if (!text.includes("Версия 1.23.0")) {{
+          if (!text.includes("Версия 1.24.0")) {{
             throw new Error("integration version badge missing");
           }}
           if (text.includes("Климатический контур")) {{
             throw new Error("contour rendered without snapshot");
           }}
-          const tabs = nodes.filter((node) => String(node.className).split(" ").includes("tab"));
-          if (tabs.length !== 7) throw new Error("seven persistent tabs missing");
-          if (nodes.some((node) => (
+          const tabs = visible.filter((node) => String(node.className).split(" ").includes("tab"));
+          if (tabs.length !== 9) throw new Error("nine persistent tabs missing");
+          if (visible.some((node) => (
             node.tagName === "BUTTON" && !String(node.className).split(" ").includes("tab")
           ))) {{
             throw new Error("climate action rendered without settings");
@@ -280,7 +293,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.23.0",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.24.0",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },

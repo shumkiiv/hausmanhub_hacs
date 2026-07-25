@@ -54,6 +54,23 @@
         "name": "hausman-hub-climate-control-receipt",
         "version": 1
       }
+    },
+    "scenarios": {
+      "available": true,
+      "read": true,
+      "write": true,
+      "test": true,
+      "delete": true,
+      "run": true,
+      "definitionVersions": [1],
+      "paths": {
+        "list": "/api/hausman_hub/v1/scenarios",
+        "catalog": "/api/hausman_hub/v1/scenarios/catalog",
+        "test": "/api/hausman_hub/v1/scenarios/test",
+        "delete": "/api/hausman_hub/v1/scenarios/delete",
+        "run": "/api/hausman_hub/v1/scenarios/run",
+        "action": "/api/hausman_hub/v1/scenarios/action"
+      }
     }
   }
 }

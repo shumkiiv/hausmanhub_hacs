@@ -44,7 +44,10 @@ from .application.configuration import (
     CLIMATE_BRIDGE_MODE_FIELD,
     CLIMATE_BRIDGE_TARGET_FIELD,
     CLIMATE_CANARY_ROOM_ID_FIELD,
+    CONNECTION_MODE_DEFAULT,
+    CONNECTION_MODE_FIELD,
     ConfigurationViolation,
+    HOME_ASSISTANT_URL_FIELD,
     LOCAL_SUMMARY_ENABLED_DEFAULT,
     LOCAL_SUMMARY_ENABLED_FIELD,
     MODE_FIELD,
@@ -53,6 +56,7 @@ from .application.configuration import (
     NATIVE_CLIMATE_ROOM_ID_FIELD,
     NATIVE_TARGET_HUMIDITY_FIELD,
     NATIVE_TARGET_TEMPERATURE_FIELD,
+    SMART_HOME_CENTER_URL_FIELD,
     SUMMARY_UPDATE_INTERVAL_FIELD,
     create_initial_entry,
     create_options,
@@ -94,6 +98,7 @@ from .application.contour_override import TemporaryTemperatureViolation
 from .const import DOMAIN, ENTRY_TITLE, ENTRY_UNIQUE_ID
 from .domain.configuration import (
     APPROVED_MODES,
+    APPROVED_CONNECTION_MODES,
     APPROVED_SUMMARY_UPDATE_INTERVALS,
     READ_ONLY_MODE,
     SUMMARY_UPDATE_INTERVAL_DEFAULT,
@@ -819,8 +824,11 @@ def _general_settings_schema(
     mode_default: str,
     local_summary_enabled_default: bool,
     summary_update_interval_default: str,
+    connection_mode_default: str,
+    smart_home_center_url_default: str | None,
+    home_assistant_url_default: str | None,
 ) -> vol.Schema:
-    """Show only settings for HausmanHub's aggregate informational display."""
+    """Show settings for HausmanHub's aggregate display and connection addresses."""
 
     return vol.Schema(
         {
@@ -833,6 +841,23 @@ def _general_settings_schema(
                 SUMMARY_UPDATE_INTERVAL_FIELD,
                 default=summary_update_interval_default,
             ): SUMMARY_UPDATE_INTERVAL_SELECTOR,
+            vol.Required(
+                CONNECTION_MODE_FIELD,
+                default=connection_mode_default,
+            ): SelectSelector(
+                SelectSelectorConfig(
+                    options=list(APPROVED_CONNECTION_MODES),
+                    translation_key="connection_mode",
+                )
+            ),
+            vol.Optional(
+                SMART_HOME_CENTER_URL_FIELD,
+                default=smart_home_center_url_default or "",
+            ): TextSelector(TextSelectorConfig(multiline=False, type=TextSelectorType.TEXT)),
+            vol.Optional(
+                HOME_ASSISTANT_URL_FIELD,
+                default=home_assistant_url_default or "",
+            ): TextSelector(TextSelectorConfig(multiline=False, type=TextSelectorType.TEXT)),
         }
     )
 
@@ -1177,6 +1202,39 @@ def _safe_summary_update_interval_default(
         return SUMMARY_UPDATE_INTERVAL_DEFAULT
 
 
+def _safe_connection_mode_default(
+    entry_data: Mapping[str, Any], options: Mapping[str, Any]
+) -> str:
+    """Return a safe connection-mode default even after damaged settings."""
+
+    try:
+        return effective_configuration(entry_data, options).connection_mode
+    except ConfigurationViolation:
+        return CONNECTION_MODE_DEFAULT
+
+
+def _safe_smart_home_center_url_default(
+    entry_data: Mapping[str, Any], options: Mapping[str, Any]
+) -> str | None:
+    """Return a safe legacy Smart Home Center address default."""
+
+    try:
+        return effective_configuration(entry_data, options).smart_home_center_url
+    except ConfigurationViolation:
+        return None
+
+
+def _safe_home_assistant_url_default(
+    entry_data: Mapping[str, Any], options: Mapping[str, Any]
+) -> str | None:
+    """Return a safe Home Assistant address default."""
+
+    try:
+        return effective_configuration(entry_data, options).home_assistant_url
+    except ConfigurationViolation:
+        return None
+
+
 def _safe_canary_control_enabled_default(
     entry_data: Mapping[str, Any], options: Mapping[str, Any]
 ) -> bool:
@@ -1262,6 +1320,9 @@ def _merged_safe_options(
             NATIVE_CLIMATE_ROOM_ID_FIELD: None,
             NATIVE_TARGET_TEMPERATURE_FIELD: None,
             NATIVE_TARGET_HUMIDITY_FIELD: None,
+            CONNECTION_MODE_FIELD: CONNECTION_MODE_DEFAULT,
+            SMART_HOME_CENTER_URL_FIELD: None,
+            HOME_ASSISTANT_URL_FIELD: None,
         }
     else:
         values = {
@@ -1283,6 +1344,9 @@ def _merged_safe_options(
                 current.native_climate_policy.target_temperature
             ),
             NATIVE_TARGET_HUMIDITY_FIELD: current.native_climate_policy.target_humidity,
+            CONNECTION_MODE_FIELD: current.connection_mode,
+            SMART_HOME_CENTER_URL_FIELD: current.smart_home_center_url,
+            HOME_ASSISTANT_URL_FIELD: current.home_assistant_url,
         }
     values.update(updates)
     return create_options(
@@ -1298,6 +1362,9 @@ def _merged_safe_options(
         native_climate_room_id_value=values[NATIVE_CLIMATE_ROOM_ID_FIELD],
         native_target_temperature_value=values[NATIVE_TARGET_TEMPERATURE_FIELD],
         native_target_humidity_value=values[NATIVE_TARGET_HUMIDITY_FIELD],
+        connection_mode_value=values[CONNECTION_MODE_FIELD],
+        smart_home_center_url_value=values[SMART_HOME_CENTER_URL_FIELD],
+        home_assistant_url_value=values[HOME_ASSISTANT_URL_FIELD],
     )
 
 
@@ -2820,7 +2887,7 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
         self,
         user_input: dict[str, Any] | None = None,
     ) -> FlowResult:
-        """Configure only aggregate informational reads and their display."""
+        """Configure aggregate informational reads and connection addresses."""
 
         mode_default = _safe_mode_default(self.config_entry.data, self.config_entry.options)
         local_page_default = _safe_local_summary_default(
@@ -2831,28 +2898,59 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
             self.config_entry.data,
             self.config_entry.options,
         )
+        connection_mode_default = _safe_connection_mode_default(
+            self.config_entry.data,
+            self.config_entry.options,
+        )
+        smart_home_center_url_default = _safe_smart_home_center_url_default(
+            self.config_entry.data,
+            self.config_entry.options,
+        )
+        home_assistant_url_default = _safe_home_assistant_url_default(
+            self.config_entry.data,
+            self.config_entry.options,
+        )
         errors: dict[str, str] = {}
         if user_input is not None:
             mode = user_input.get(MODE_FIELD, mode_default)
             local_page = user_input.get(LOCAL_SUMMARY_ENABLED_FIELD, local_page_default)
             interval = user_input.get(SUMMARY_UPDATE_INTERVAL_FIELD, interval_default)
+            connection_mode = user_input.get(CONNECTION_MODE_FIELD, connection_mode_default)
+            smart_home_center_url = user_input.get(SMART_HOME_CENTER_URL_FIELD, smart_home_center_url_default or "")
+            home_assistant_url = user_input.get(HOME_ASSISTANT_URL_FIELD, home_assistant_url_default or "")
             if mode not in APPROVED_MODES:
                 errors[MODE_FIELD] = "unsafe_mode"
             elif type(local_page) is not bool:
                 errors[LOCAL_SUMMARY_ENABLED_FIELD] = "unsafe_local_summary_setting"
             elif interval not in APPROVED_SUMMARY_UPDATE_INTERVALS:
                 errors[SUMMARY_UPDATE_INTERVAL_FIELD] = "unsafe_summary_update_interval"
+            elif connection_mode not in APPROVED_CONNECTION_MODES:
+                errors[CONNECTION_MODE_FIELD] = "unsafe_connection_mode"
             else:
-                options = _merged_safe_options(
-                    self.config_entry.data,
-                    self.config_entry.options,
-                    {
-                        MODE_FIELD: mode,
-                        LOCAL_SUMMARY_ENABLED_FIELD: local_page,
-                        SUMMARY_UPDATE_INTERVAL_FIELD: interval,
-                    },
-                )
-                return self.async_create_entry(title="", data=options)
+                updates: dict[str, object] = {
+                    MODE_FIELD: mode,
+                    LOCAL_SUMMARY_ENABLED_FIELD: local_page,
+                    SUMMARY_UPDATE_INTERVAL_FIELD: interval,
+                    CONNECTION_MODE_FIELD: connection_mode,
+                }
+                if smart_home_center_url:
+                    updates[SMART_HOME_CENTER_URL_FIELD] = smart_home_center_url
+                else:
+                    updates[SMART_HOME_CENTER_URL_FIELD] = None
+                if home_assistant_url:
+                    updates[HOME_ASSISTANT_URL_FIELD] = home_assistant_url
+                else:
+                    updates[HOME_ASSISTANT_URL_FIELD] = None
+                try:
+                    options = _merged_safe_options(
+                        self.config_entry.data,
+                        self.config_entry.options,
+                        updates,
+                    )
+                except ConfigurationViolation as error:
+                    errors["base"] = str(error)
+                else:
+                    return self.async_create_entry(title="", data=options)
 
         return self.async_show_form(
             step_id="general_settings",
@@ -2860,6 +2958,9 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
                 mode_default,
                 local_page_default,
                 interval_default,
+                connection_mode_default,
+                smart_home_center_url_default,
+                home_assistant_url_default,
             ),
             errors=errors,
         )

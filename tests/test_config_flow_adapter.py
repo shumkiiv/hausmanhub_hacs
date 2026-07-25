@@ -455,14 +455,20 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         expected_mode_default: str,
         expected_local_page_default: bool,
         expected_summary_update_interval_default: str,
+        expected_connection_mode_default: str = "center",
+        expected_smart_home_center_url_default: str | None = None,
+        expected_home_assistant_url_default: str | None = None,
     ) -> FakeSelectSelector:
-        """Verify the three fields used only for aggregate information."""
+        """Verify aggregate display fields plus connection address settings."""
 
-        self.assertEqual(3, len(schema.fields))
+        self.assertEqual(6, len(schema.fields))
         fields = list(schema.fields.items())
         mode_field, mode_selector = fields[0]
         page_field, page_selector = fields[1]
         interval_field, interval_selector = fields[2]
+        connection_mode_field, connection_mode_selector = fields[3]
+        center_url_field, center_url_selector = fields[4]
+        ha_url_field, ha_url_selector = fields[5]
         self.assertIsInstance(mode_field, FakeRequired)
         self.assertEqual("mode", mode_field.key)
         self.assertEqual(expected_mode_default, mode_field.default)
@@ -487,6 +493,28 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
             "summary_update_interval",
             interval_selector.config.translation_key,
         )
+        self.assertIsInstance(connection_mode_field, FakeRequired)
+        self.assertEqual("connection_mode", connection_mode_field.key)
+        self.assertEqual(expected_connection_mode_default, connection_mode_field.default)
+        self.assertIsInstance(connection_mode_selector, FakeSelectSelector)
+        self.assertEqual(
+            ["center", "home_assistant"],
+            connection_mode_selector.config.options,
+        )
+        self.assertIsInstance(center_url_field, FakeOptional)
+        self.assertEqual("smart_home_center_url", center_url_field.key)
+        self.assertEqual(
+            expected_smart_home_center_url_default or "",
+            center_url_field.default,
+        )
+        self.assertIsInstance(center_url_selector, FakeTextSelector)
+        self.assertIsInstance(ha_url_field, FakeOptional)
+        self.assertEqual("home_assistant_url", ha_url_field.key)
+        self.assertEqual(
+            expected_home_assistant_url_default or "",
+            ha_url_field.default,
+        )
+        self.assertIsInstance(ha_url_selector, FakeTextSelector)
         return mode_selector
 
     def assert_test_switch_fields(

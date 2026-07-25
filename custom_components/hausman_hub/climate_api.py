@@ -31,6 +31,10 @@ from .application.ai_assistant_config import (
 )
 from .application.ai_assistant_storage import ai_assistant_state_to_payload
 from .application.configuration import (
+    CONNECTION_MODE_DEFAULT,
+    CONNECTION_MODE_FIELD,
+    HOME_ASSISTANT_URL_FIELD,
+    SMART_HOME_CENTER_URL_FIELD,
     create_options,
     effective_configuration,
 )
@@ -60,6 +64,8 @@ from .domain.ai_assistant import AiAdvisoryStatus, AiAssistantViolation
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
+
+    from .application.scenario_service import ScenarioService
 
 
 DOMAIN = "hausman_hub"
@@ -104,6 +110,7 @@ ADMIN_ROOM_SIGNALS_PATH = "/api/hausman_hub/v1/admin/climate-room-signals"
 ADMIN_AI_ASSISTANT_PATH = "/api/hausman_hub/v1/admin/ai-assistant"
 ADMIN_AI_ASSISTANT_SETTINGS_PATH = f"{ADMIN_AI_ASSISTANT_PATH}/settings"
 ADMIN_AI_ASSISTANT_REFRESH_PATH = f"{ADMIN_AI_ASSISTANT_PATH}/refresh"
+ADMIN_CONNECTION_SETTINGS_PATH = "/api/hausman_hub/v1/admin/connection-settings"
 NO_STORE_HEADERS = {"Cache-Control": "no-store"}
 MAX_ACTION_BODY_BYTES = 16 * 1024
 MAX_CLIMATE_SETUP_BODY_BYTES = 256 * 1024
@@ -123,6 +130,7 @@ def register_climate_api(
     hass: HomeAssistant,
     runtime: ClimateRuntime,
     ai_assistant: AiAssistantService | None = None,
+    scenario_service: ScenarioService | None = None,
 ) -> None:
     """Register fixed routes once and point them at the loaded HausmanHub runtime."""
 
@@ -130,8 +138,10 @@ def register_climate_api(
     data[DATA_CLIMATE_RUNTIME] = runtime
     if ai_assistant is not None:
         data[DATA_AI_ASSISTANT] = ai_assistant
+    if scenario_service is not None:
+        data["scenario_service"] = scenario_service
     if DATA_CLIMATE_VIEWS not in data:
-        views = (
+        views = [
             ClimateCapabilitiesView(hass),
             ClimateHomeView(hass),
             ContoursView(hass),
@@ -157,7 +167,12 @@ def register_climate_api(
             ClimateAdminAiAssistantView(hass),
             ClimateAdminAiAssistantSettingsView(hass),
             ClimateAdminAiAssistantRefreshView(hass),
-        )
+            ClimateAdminConnectionSettingsView(hass),
+        ]
+        if scenario_service is not None:
+            from .scenario_api import scenario_api_views
+
+            views.extend(scenario_api_views(hass, scenario_service))
         for view in views:
             hass.http.register_view(view)
         data[DATA_CLIMATE_VIEWS] = views
@@ -173,6 +188,7 @@ def clear_climate_api(hass: HomeAssistant, entry_id: str) -> None:
     if runtime is not None and runtime.entry_id == entry_id:
         data.pop(DATA_CLIMATE_RUNTIME, None)
         data.pop(DATA_AI_ASSISTANT, None)
+        data.pop("scenario_service", None)
 
 
 class _ClimateView(HomeAssistantView):
@@ -953,6 +969,9 @@ class ClimateAdminClimateModeView(_ClimateView):
                 current.native_climate_policy.target_temperature
             ),
             native_target_humidity_value=current.native_climate_policy.target_humidity,
+            connection_mode_value=current.connection_mode,
+            smart_home_center_url_value=current.smart_home_center_url,
+            home_assistant_url_value=current.home_assistant_url,
         )
         self._hass.config_entries.async_update_entry(entry, options=options)
         return self.json(
@@ -1268,6 +1287,111 @@ class ClimateAdminAiAssistantRefreshView(_ClimateView):
                 headers=NO_STORE_HEADERS,
             )
         return self.json(payload, headers=NO_STORE_HEADERS)
+
+
+class ClimateAdminConnectionSettingsView(_ClimateView):
+    """Read or update the two connection addresses used by the app."""
+
+    url = ADMIN_CONNECTION_SETTINGS_PATH
+    name = "api:hausman_hub:climate_admin_connection_settings"
+
+    async def get(self, request: Any) -> Any:
+        if not _is_exact_request(request, ADMIN_CONNECTION_SETTINGS_PATH):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        entry = _single_hausmanhub_entry(self._hass)
+        if entry is None:
+            return self._unavailable()
+        try:
+            current = effective_configuration(entry.data, entry.options)
+        except Exception:
+            return self._unavailable()
+        return self.json(
+            {
+                "connection_mode": current.connection_mode,
+                "smart_home_center_url": current.smart_home_center_url,
+                "home_assistant_url": current.home_assistant_url,
+            },
+            headers=NO_STORE_HEADERS,
+        )
+
+    async def post(self, request: Any) -> Any:
+        if not _is_exact_request(request, ADMIN_CONNECTION_SETTINGS_PATH):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        entry = _single_hausmanhub_entry(self._hass)
+        if entry is None:
+            return self._unavailable()
+        try:
+            payload = await _request_json(request)
+        except ValueError:
+            return self.json_message(
+                "The connection settings body is invalid.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        if not isinstance(payload, Mapping):
+            return self.json_message(
+                "The connection settings body must be an object.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        try:
+            current = effective_configuration(entry.data, entry.options)
+        except Exception:
+            return self._unavailable()
+        connection_mode = payload.get(
+            CONNECTION_MODE_FIELD, current.connection_mode
+        )
+        smart_home_center_url = payload.get(
+            SMART_HOME_CENTER_URL_FIELD, current.smart_home_center_url
+        )
+        home_assistant_url = payload.get(
+            HOME_ASSISTANT_URL_FIELD, current.home_assistant_url
+        )
+        try:
+            options = create_options(
+                mode_value=current.mode,
+                local_summary_enabled_value=current.local_summary_enabled,
+                summary_update_interval_value=current.summary_update_interval,
+                canary_control_enabled_value=current.canary_control_enabled,
+                canary_control_target_value=(
+                    None
+                    if current.canary_control_target is None
+                    else current.canary_control_target.entity_id
+                ),
+                climate_bridge_mode_value=current.climate_bridge_mode.value,
+                climate_bridge_target_value=None,
+                climate_canary_room_id_value=None,
+                native_climate_mode_value=current.native_climate_policy.mode.value,
+                native_climate_room_id_value=current.native_climate_policy.room_id,
+                native_target_temperature_value=(
+                    current.native_climate_policy.target_temperature
+                ),
+                native_target_humidity_value=current.native_climate_policy.target_humidity,
+                connection_mode_value=connection_mode,
+                smart_home_center_url_value=smart_home_center_url,
+                home_assistant_url_value=home_assistant_url,
+            )
+        except ConfigurationViolation as error:
+            return self.json_message(
+                str(error),
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        self._hass.config_entries.async_update_entry(entry, options=options)
+        return self.json(
+            {
+                "connection_mode": options.get(
+                    CONNECTION_MODE_FIELD, CONNECTION_MODE_DEFAULT
+                ),
+                "smart_home_center_url": options.get(SMART_HOME_CENTER_URL_FIELD),
+                "home_assistant_url": options.get(HOME_ASSISTANT_URL_FIELD),
+            },
+            headers=NO_STORE_HEADERS,
+        )
 
 
 def _single_hausmanhub_entry(hass: HomeAssistant) -> Any | None:

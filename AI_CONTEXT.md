@@ -1,6 +1,23 @@
 # HausmanHub AI Context
 
-Last updated: 2026-07-24.
+Last updated: 2026-07-25.
+
+## Current work (in progress)
+
+- Phase 3: 9-tab panel + scenario engine per
+  `/home/ivsh/projects/УД-android/SCENARIO_EDITOR_API_CONTRACT.md` v1.
+- Backend scenario engine blockers closed: `ScenarioService` now holds `asyncio.Lock`
+  through save+swap, payloads accept both `id` and `scenarioId`, the executor
+  propagates a `visited` recursion context to nested `run_scenario` calls, device
+  action values are normalized before HA calls, and a minimal condition evaluator
+  plus dry-run plan was added to the executor. Full suite remains at 808 tests
+  OK (4 skipped without HA).
+- Scenario admin API views (`scenario_api.py`) and the connection-settings admin
+  view are wired; capabilities contract and fixture were updated to include
+  `scenarios`.
+- Remaining before 1.24.0: refactor the admin panel JavaScript from 7 to 9 tabs,
+  add Scenarios and Settings tab UIs consuming the new admin APIs, bump the
+  manifest, and run the release gate.
 
 ## Project state
 
@@ -2473,5 +2490,5 @@ Engineering and review rules are in
 
 - Obsidian/context index: `LLM_WIKI/00_Index.md`.
 - Latest generated context: `LLM_WIKI/Context.md`.
-- Last sync: 2026-07-25T19:26:34+03:00.
+- Last sync: 2026-07-26T00:07:33+03:00.
 <!-- llm-wiki-sync:end -->

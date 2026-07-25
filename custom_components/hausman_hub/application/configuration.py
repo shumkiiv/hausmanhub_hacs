@@ -12,11 +12,14 @@ from collections.abc import Mapping
 from typing import Any
 
 from ..domain.configuration import (
+    APPROVED_CONNECTION_MODES,
     APPROVED_SUMMARY_UPDATE_INTERVALS,
     DIRECT_EXECUTION_BLOCKED,
     SafeConfiguration,
     SUMMARY_UPDATE_INTERVAL_DEFAULT,
     UnsafeModeError,
+    _connection_mode,
+    _connection_url,
     configuration_for_mode,
 )
 from ..domain.climate import ClimateModelViolation, ClimateRoom
@@ -56,6 +59,11 @@ NATIVE_CLIMATE_ROOM_ID_FIELD = "native_climate_room_id"
 NATIVE_TARGET_TEMPERATURE_FIELD = "native_target_temperature"
 NATIVE_TARGET_HUMIDITY_FIELD = "native_target_humidity"
 
+CONNECTION_MODE_FIELD = "connection_mode"
+CONNECTION_MODE_DEFAULT = "center"
+SMART_HOME_CENTER_URL_FIELD = "smart_home_center_url"
+HOME_ASSISTANT_URL_FIELD = "home_assistant_url"
+
 
 class ConfigurationViolation(ValueError):
     """A config-entry value does not satisfy the safety contract."""
@@ -84,6 +92,9 @@ def create_options(
     native_climate_room_id_value: object = None,
     native_target_temperature_value: object = None,
     native_target_humidity_value: object = None,
+    connection_mode_value: object = CONNECTION_MODE_DEFAULT,
+    smart_home_center_url_value: object = None,
+    home_assistant_url_value: object = None,
 ) -> dict[str, str | bool | float | int]:
     """Return only validated observation and canary-control choices."""
 
@@ -113,6 +124,9 @@ def create_options(
         native_climate_room_id_value,
         native_target_temperature_value,
         native_target_humidity_value,
+        connection_mode_value,
+        smart_home_center_url_value,
+        home_assistant_url_value,
     )
     options: dict[str, str | bool | float | int] = {
         MODE_FIELD: configuration.mode,
@@ -137,6 +151,12 @@ def create_options(
         options[NATIVE_CLIMATE_ROOM_ID_FIELD] = native_policy.room_id
         options[NATIVE_TARGET_TEMPERATURE_FIELD] = native_policy.target_temperature
         options[NATIVE_TARGET_HUMIDITY_FIELD] = native_policy.target_humidity
+    if configuration.connection_mode != CONNECTION_MODE_DEFAULT:
+        options[CONNECTION_MODE_FIELD] = configuration.connection_mode
+    if configuration.smart_home_center_url is not None:
+        options[SMART_HOME_CENTER_URL_FIELD] = configuration.smart_home_center_url
+    if configuration.home_assistant_url is not None:
+        options[HOME_ASSISTANT_URL_FIELD] = configuration.home_assistant_url
     return options
 
 
@@ -176,6 +196,9 @@ def effective_configuration(
             NATIVE_CLIMATE_ROOM_ID_FIELD,
             NATIVE_TARGET_TEMPERATURE_FIELD,
             NATIVE_TARGET_HUMIDITY_FIELD,
+            CONNECTION_MODE_FIELD,
+            SMART_HOME_CENTER_URL_FIELD,
+            HOME_ASSISTANT_URL_FIELD,
         },
         "options",
     )
@@ -210,6 +233,9 @@ def effective_configuration(
     native_climate_room_id_value = options.get(NATIVE_CLIMATE_ROOM_ID_FIELD)
     native_target_temperature_value = options.get(NATIVE_TARGET_TEMPERATURE_FIELD)
     native_target_humidity_value = options.get(NATIVE_TARGET_HUMIDITY_FIELD)
+    connection_mode_value = options.get(CONNECTION_MODE_FIELD, CONNECTION_MODE_DEFAULT)
+    smart_home_center_url_value = options.get(SMART_HOME_CENTER_URL_FIELD)
+    home_assistant_url_value = options.get(HOME_ASSISTANT_URL_FIELD)
     return _configuration_for(
         mode_value,
         local_summary_enabled_value,
@@ -223,6 +249,9 @@ def effective_configuration(
         native_climate_room_id_value,
         native_target_temperature_value,
         native_target_humidity_value,
+        connection_mode_value,
+        smart_home_center_url_value,
+        home_assistant_url_value,
     )
 
 
@@ -239,6 +268,9 @@ def _configuration_for(
     native_climate_room_id_value: object = None,
     native_target_temperature_value: object = None,
     native_target_humidity_value: object = None,
+    connection_mode_value: object = CONNECTION_MODE_DEFAULT,
+    smart_home_center_url_value: object = None,
+    home_assistant_url_value: object = None,
 ) -> SafeConfiguration:
     """Build the configuration after checking every optional choice."""
 
@@ -291,6 +323,13 @@ def _configuration_for(
         raise ConfigurationViolation(str(error)) from error
 
     try:
+        connection_mode = _connection_mode(connection_mode_value)
+        smart_home_center_url = _connection_url(smart_home_center_url_value)
+        home_assistant_url = _connection_url(home_assistant_url_value)
+    except UnsafeModeError as error:
+        raise ConfigurationViolation(str(error)) from error
+
+    try:
         mode_configuration = configuration_for_mode(mode_value)
     except UnsafeModeError as error:
         raise ConfigurationViolation(str(error)) from error
@@ -305,6 +344,9 @@ def _configuration_for(
         climate_bridge_target=bridge_target,
         climate_canary_room_id=canary_room_id,
         native_climate_policy=native_policy,
+        connection_mode=connection_mode,
+        smart_home_center_url=smart_home_center_url,
+        home_assistant_url=home_assistant_url,
     )
 
 

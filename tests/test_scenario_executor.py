@@ -1,0 +1,241 @@
+"""Tests for the HausmanHub scenario executor."""
+
+from __future__ import annotations
+
+import unittest
+from typing import Any
+from unittest.mock import AsyncMock
+
+from custom_components.hausman_hub.application.scenario_executor import ScenarioExecutor
+from custom_components.hausman_hub.application.scenarios import (
+    ScenarioDeviceAction,
+    ScenarioDeviceEntry,
+)
+from custom_components.hausman_hub.domain.scenarios import (
+    ScenarioAction,
+    ScenarioActionType,
+    ScenarioDefinition,
+    ScenarioDeviceCommand,
+    ScenarioExecutionMode,
+    ScenarioTrigger,
+    ScenarioTriggerType,
+)
+
+
+class _FakeHass:
+    def __init__(self) -> None:
+        self.services = AsyncMock()
+
+
+class _FakeCatalog:
+    def __init__(self) -> None:
+        self._devices = {
+            "device_1": ScenarioDeviceEntry(
+                target_id="device_1",
+                name="Light",
+                entity_id="light.living_room",
+                actions=(
+                    ScenarioDeviceAction(
+                        action_id="turn_on",
+                        title="On",
+                        domain="light",
+                        service="turn_on",
+                        allowed_fields=frozenset(),
+                    ),
+                    ScenarioDeviceAction(
+                        action_id="set_brightness",
+                        title="Brightness",
+                        domain="light",
+                        service="turn_on",
+                        allowed_fields=frozenset({"value"}),
+                    ),
+                ),
+            ),
+            "climate_1": ScenarioDeviceEntry(
+                target_id="climate_1",
+                name="Living room AC",
+                entity_id="climate.living_room",
+                actions=(
+                    ScenarioDeviceAction(
+                        action_id="turn_on",
+                        title="On",
+                        domain="climate",
+                        service="turn_on",
+                        allowed_fields=frozenset(),
+                    ),
+                    ScenarioDeviceAction(
+                        action_id="set_temperature",
+                        title="Temperature",
+                        domain="climate",
+                        service="set_temperature",
+                        allowed_fields=frozenset({"value"}),
+                    ),
+                ),
+            ),
+        }
+
+    def device(self, target_id: str) -> Any | None:
+        return self._devices.get(target_id)
+
+
+def _definition(actions: tuple[ScenarioAction, ...]) -> ScenarioDefinition:
+    return ScenarioDefinition(
+        version=1,
+        execution_mode=ScenarioExecutionMode.SINGLE,
+        triggers=(
+            ScenarioTrigger(id="t1", type=ScenarioTriggerType.MANUAL),
+        ),
+        conditions=(),
+        actions=actions,
+    )
+
+
+class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.hass = _FakeHass()
+        self.catalog = _FakeCatalog()
+        self.nested_runs: list[str] = []
+
+        async def run_callback(
+            scenario_id: str, visited: frozenset[str] | None = None
+        ) -> dict[str, Any]:
+            self.nested_runs.append(scenario_id)
+            return {
+                "run_id": f"nested-{scenario_id}",
+                "scenario_id": scenario_id,
+                "status": "completed",
+                "receipts": [],
+            }
+
+        self.executor = ScenarioExecutor(
+            self.hass,
+            self.catalog,
+            run_callback,
+            notify_target="notify.mobile_app_tablet",
+        )
+
+    async def test_device_action_calls_service(self) -> None:
+        definition = _definition((
+            ScenarioAction(
+                id="a1",
+                type=ScenarioActionType.DEVICE_ACTION,
+                target_id="device_1",
+                action_id="turn_on",
+            ),
+        ))
+        result = await self.executor.async_execute(definition, "run-1", scenario_id="sc-1")
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(len(result["receipts"]), 1)
+        self.hass.services.async_call.assert_awaited_once_with(
+            "light", "turn_on", {"entity_id": "light.living_room"}, blocking=True
+        )
+
+    async def test_climate_action_uses_temperature_parameter(self) -> None:
+        definition = _definition((
+            ScenarioAction(
+                id="a1",
+                type=ScenarioActionType.DEVICE_ACTION,
+                target_id="climate_1",
+                action_id="set_temperature",
+                value=22,
+            ),
+        ))
+        await self.executor.async_execute(definition, "run-1", scenario_id="sc-1")
+        self.hass.services.async_call.assert_awaited_once_with(
+            "climate", "set_temperature", {"entity_id": "climate.living_room", "temperature": 22}, blocking=True
+        )
+
+    async def test_action_with_value_uses_brightness_parameter(self) -> None:
+        definition = _definition((
+            ScenarioAction(
+                id="a1",
+                type=ScenarioActionType.DEVICE_ACTION,
+                target_id="device_1",
+                action_id="set_brightness",
+                value=128,
+            ),
+        ))
+        await self.executor.async_execute(definition, "run-1", scenario_id="sc-1")
+        self.hass.services.async_call.assert_awaited_once_with(
+            "light", "turn_on", {"entity_id": "light.living_room", "brightness": 128}, blocking=True
+        )
+
+    async def test_delay_action_receipt(self) -> None:
+        definition = _definition((
+            ScenarioAction(
+                id="a1",
+                type=ScenarioActionType.DELAY,
+                delay_seconds=1,
+            ),
+        ))
+        result = await self.executor.async_execute(definition, "run-1", scenario_id="sc-1")
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["receipts"][0]["status"], "completed")
+        self.assertEqual(result["receipts"][0]["delay_seconds"], 1)
+
+    async def test_run_scenario_action_calls_callback(self) -> None:
+        definition = _definition((
+            ScenarioAction(
+                id="a1",
+                type=ScenarioActionType.RUN_SCENARIO,
+                scenario_id="other",
+            ),
+        ))
+        result = await self.executor.async_execute(definition, "run-1", scenario_id="sc-1")
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(self.nested_runs, ["other"])
+        self.assertEqual(result["receipts"][0]["nested_run_id"], "nested-other")
+
+    async def test_notification_action_targets_configured_entity(self) -> None:
+        definition = _definition((
+            ScenarioAction(
+                id="a1",
+                type=ScenarioActionType.NOTIFICATION,
+                message="Hello",
+            ),
+        ))
+        result = await self.executor.async_execute(definition, "run-1", scenario_id="sc-1")
+        self.assertEqual(result["status"], "completed")
+        self.hass.services.async_call.assert_awaited_once_with(
+            "notify", "mobile_app_tablet", {"message": "Hello"}, blocking=True
+        )
+
+    async def test_notification_fails_without_target(self) -> None:
+        executor = ScenarioExecutor(self.hass, self.catalog, self.executor._run_callback)
+        definition = _definition((
+            ScenarioAction(
+                id="a1",
+                type=ScenarioActionType.NOTIFICATION,
+                message="Hello",
+            ),
+        ))
+        result = await executor.async_execute(definition, "run-1", scenario_id="sc-1")
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("notification target is not configured", result["receipts"][0]["error"])
+
+    async def test_failed_service_stops_execution(self) -> None:
+        self.hass.services.async_call.side_effect = RuntimeError("boom")
+        definition = _definition((
+            ScenarioAction(
+                id="a1",
+                type=ScenarioActionType.DEVICE_ACTION,
+                target_id="device_1",
+                action_id="turn_on",
+            ),
+            ScenarioAction(id="a2", type=ScenarioActionType.NOTIFICATION, message="x"),
+        ))
+        result = await self.executor.async_execute(definition, "run-1", scenario_id="sc-1")
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(len(result["receipts"]), 1)
+        self.assertEqual(result["receipts"][0]["status"], "failed")
+        self.assertIn("boom", result["receipts"][0]["error"])
+
+    async def test_new_run_id_unique(self) -> None:
+        run_id_1 = self.executor.new_run_id()
+        run_id_2 = self.executor.new_run_id()
+        self.assertNotEqual(run_id_1, run_id_2)
+        self.assertEqual(len(run_id_1), 32)
+
+
+if __name__ == "__main__":
+    unittest.main()

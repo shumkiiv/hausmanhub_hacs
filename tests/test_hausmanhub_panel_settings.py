@@ -399,7 +399,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
-    def test_seven_tabs_switch_locally_keep_dirty_values_and_support_keyboard(self) -> None:
+    def test_nine_tabs_switch_locally_keep_dirty_values_and_support_keyboard(self) -> None:
         script = panel_script(
             GET_PATHS,
             {},
@@ -407,7 +407,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const tabs = findAll(panel.shadowRoot, (node) =>
           node.tagName === "BUTTON" && String(node.className).split(" ").includes("tab"));
         const labels = tabs.map((node) => node.textContent);
-        const expected = ["Обзор", "Контур", "Профили", "Расписание", "Дом", "Сигналы комнат", "Помощник"];
+        const expected = ["Главная", "Сценарии", "Климат", "Свет", "Комнаты", "Медиа", "Безопасность", "Устройства", "Настройки"];
         if (JSON.stringify(labels) !== JSON.stringify(expected)) {
           throw new Error("tab labels mismatch: " + JSON.stringify(labels));
         }
@@ -422,6 +422,8 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         }
         const getCount = calls.filter((call) => call.method === "GET").length;
         tabs[2].fire("click");
+        await tick();
+        const climateLoadedCount = calls.filter((call) => call.method === "GET").length;
         const dayTemperature = findAll(panel.shadowRoot, (node) => node.type === "number")
           .find((node) => String(node.value) === "23");
         dayTemperature.value = "24.5";
@@ -434,7 +436,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         if (!String(tabs[2].className).includes("is-dirty")) {
           throw new Error("dirty tab indicator missing");
         }
-        if (calls.filter((call) => call.method === "GET").length !== getCount) {
+        if (calls.filter((call) => call.method === "GET").length !== climateLoadedCount) {
           throw new Error("tab switch called an API");
         }
         let prevented = false;
@@ -442,7 +444,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           key: "ArrowRight",
           preventDefault: () => { prevented = true; },
         });
-        if (!prevented || panel._activeSection !== "schedule" || !tabs[3].focused) {
+        if (!prevented || panel._activeSection !== "lights" || !tabs[3].focused) {
           throw new Error("keyboard tab navigation failed");
         }
             """,
@@ -470,12 +472,12 @@ class PanelSettingsSectionsTest(unittest.TestCase):
             """
         const tabs = findAll(panel.shadowRoot, (node) =>
           node.tagName === "BUTTON" && String(node.className).split(" ").includes("tab"));
-        const labels = tabs.map((node) => node.textContent);
-        if (labels[6] !== "Помощник") throw new Error("assistant tab missing");
+        const climateTab = tabs.find((node) => node.textContent === "Климат");
+        if (!climateTab) throw new Error("climate tab missing");
         if (calls.some((call) => call.method === "GET" && call.path === "hausman_hub/v1/admin/ai-assistant")) {
           throw new Error("assistant loaded eagerly");
         }
-        tabs[6].fire("click");
+        climateTab.fire("click");
         await tick();
         const assistantGets = calls.filter((call) =>
           call.method === "GET" && call.path === "hausman_hub/v1/admin/ai-assistant");

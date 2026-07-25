@@ -49,7 +49,8 @@
         "climate_home",
         "automatic_contours",
         "contour_settings_apply",
-        "temporary_room_temperature"
+        "temporary_room_temperature",
+        "scenarios"
       ],
       "properties": {
         "climate_home": {
@@ -165,6 +166,80 @@
             },
             "response_contract": {
               "$ref": "#/$defs/climate_control_receipt_contract"
+            }
+          }
+        },
+        "scenarios": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available",
+            "read",
+            "write",
+            "test",
+            "delete",
+            "run",
+            "definitionVersions",
+            "paths"
+          ],
+          "properties": {
+            "available": {
+              "const": true
+            },
+            "read": {
+              "const": true
+            },
+            "write": {
+              "const": true
+            },
+            "test": {
+              "const": true
+            },
+            "delete": {
+              "const": true
+            },
+            "run": {
+              "const": true
+            },
+            "definitionVersions": {
+              "type": "array",
+              "items": {
+                "const": 1
+              },
+              "minItems": 1,
+              "maxItems": 1
+            },
+            "paths": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "list",
+                "catalog",
+                "test",
+                "delete",
+                "run",
+                "action"
+              ],
+              "properties": {
+                "list": {
+                  "const": "/api/hausman_hub/v1/scenarios"
+                },
+                "catalog": {
+                  "const": "/api/hausman_hub/v1/scenarios/catalog"
+                },
+                "test": {
+                  "const": "/api/hausman_hub/v1/scenarios/test"
+                },
+                "delete": {
+                  "const": "/api/hausman_hub/v1/scenarios/delete"
+                },
+                "run": {
+                  "const": "/api/hausman_hub/v1/scenarios/run"
+                },
+                "action": {
+                  "const": "/api/hausman_hub/v1/scenarios/action"
+                }
+              }
             }
           }
         }

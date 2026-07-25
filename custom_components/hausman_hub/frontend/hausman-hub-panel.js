@@ -12,6 +12,12 @@ const SCHEDULE_API = "hausman_hub/v1/admin/climate-schedule";
 const AI_ASSISTANT_API = "hausman_hub/v1/admin/ai-assistant";
 const AI_ASSISTANT_SETTINGS_API = `${AI_ASSISTANT_API}/settings`;
 const AI_ASSISTANT_REFRESH_API = `${AI_ASSISTANT_API}/refresh`;
+const SCENARIOS_API = "hausman_hub/v1/admin/scenarios";
+const SCENARIOS_CATALOG_API = "hausman_hub/v1/admin/scenarios/catalog";
+const SCENARIOS_TEST_API = "hausman_hub/v1/admin/scenarios/test";
+const SCENARIOS_DELETE_API = "hausman_hub/v1/admin/scenarios/delete";
+const SCENARIOS_RUN_API = "hausman_hub/v1/admin/scenarios/run";
+const CONNECTION_SETTINGS_API = "hausman_hub/v1/admin/connection-settings";
 const REFRESH_MS = 30000;
 
 const PROFILE_CONTRACT = { name: "hausman-hub-climate-profile-update-request", version: 1 };
@@ -35,13 +41,15 @@ const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 const ZIGBEE2MQTT_IMAGE_PATTERN =
   /^https:\/\/www\.zigbee2mqtt\.io\/images\/devices\/(?:[A-Za-z0-9._~-]|%[0-9A-F]{2})+\.png$/;
 const PANEL_SECTIONS = [
-  { id: "overview", label: "Обзор" },
-  { id: "contour", label: "Контур" },
-  { id: "profiles", label: "Профили" },
-  { id: "schedule", label: "Расписание" },
-  { id: "home", label: "Дом" },
-  { id: "windows", label: "Сигналы комнат" },
-  { id: "assistant", label: "Помощник" },
+  { id: "overview", label: "Главная" },
+  { id: "scenarios", label: "Сценарии" },
+  { id: "climate", label: "Климат" },
+  { id: "lights", label: "Свет" },
+  { id: "rooms", label: "Комнаты" },
+  { id: "media", label: "Медиа" },
+  { id: "security", label: "Безопасность" },
+  { id: "devices", label: "Устройства" },
+  { id: "settings", label: "Настройки" },
 ];
 const READINESS_LABELS = {
   ready: "Система готова к управлению",
@@ -108,6 +116,9 @@ class HausmanHubPanel extends HTMLElement {
     this._assistant = {
       data: null, error: false, fields: null, loaded: false, loading: false,
     };
+    this._scenarios = { list: null, catalog: null, loading: false, error: false };
+    this._settingsData = { connection_mode: "center", smart_home_center_url: "", home_assistant_url: "" };
+    this._settingsDirty = false;
     this._error = false;
     this._busy = false;
     this._notice = "";
@@ -192,9 +203,46 @@ class HausmanHubPanel extends HTMLElement {
         windows: results[3],
         setup: results[4],
       };
+      this._loadScenarios();
+      this._loadSettings();
       this._error = false;
     } catch (error) {
       this._error = true;
+    }
+    this._render();
+  }
+
+  async _loadScenarios() {
+    if (!this._hass) return;
+    this._scenarios.loading = true;
+    try {
+      const [list, catalog] = await Promise.all([
+        this._hass.callApi("GET", SCENARIOS_API).catch(() => null),
+        this._hass.callApi("GET", SCENARIOS_CATALOG_API).catch(() => null),
+      ]);
+      this._scenarios.list = list;
+      this._scenarios.catalog = catalog;
+      this._scenarios.error = false;
+    } catch (error) {
+      this._scenarios.error = true;
+    } finally {
+      this._scenarios.loading = false;
+      this._render();
+    }
+  }
+
+  async _loadSettings() {
+    if (!this._hass) return;
+    try {
+      const data = await this._hass.callApi("GET", CONNECTION_SETTINGS_API).catch(() => null);
+      if (data && typeof data === "object") {
+        this._settingsData = {
+          connection_mode: data.connection_mode || "center",
+          smart_home_center_url: data.smart_home_center_url || "",
+          home_assistant_url: data.home_assistant_url || "",
+        };
+      }
+    } catch (error) {
     }
     this._render();
   }
@@ -320,7 +368,9 @@ class HausmanHubPanel extends HTMLElement {
     if (!this._dirty.schedule) this._renderSchedule(shell.schedule, this._settings);
     if (!this._dirty.home) this._renderHome(shell.home, this._settings.home);
     if (!this._dirty.windows) this._renderWindows(shell.windows, this._settings.windows);
-    if (this._activeSection === "assistant") this._renderAssistant(shell.assistant);
+    if (this._activeSection === "climate") this._renderAssistant(shell.assistant);
+    if (this._activeSection === "scenarios") this._renderScenarios(shell.scenarios);
+    if (this._activeSection === "settings") this._renderSettings(shell.settings);
     this._syncSectionVisibility();
   }
 
@@ -614,15 +664,28 @@ class HausmanHubPanel extends HTMLElement {
     sectionNodes.overview.appendChild(readiness);
     sectionNodes.overview.appendChild(summary);
     sectionNodes.overview.appendChild(rooms);
+    const climate = sectionNodes.climate;
+    const contour = el("div");
+    const profiles = el("div");
+    const schedule = el("div");
+    const home = el("div");
+    const windows = el("div");
+    const assistant = el("div");
+    climate.appendChild(contour);
+    climate.appendChild(profiles);
+    climate.appendChild(schedule);
+    climate.appendChild(home);
+    climate.appendChild(windows);
+    climate.appendChild(assistant);
+    const scenarios = el("div");
+    sectionNodes.scenarios.appendChild(scenarios);
+    const settings = el("div");
+    sectionNodes.settings.appendChild(settings);
     this._shell = {
       banner, notice, loading, statusPill, versionBadge, tabs, nav, sectionNodes, wizard,
       readiness, summary, rooms,
-      contour: sectionNodes.contour,
-      profiles: sectionNodes.profiles,
-      schedule: sectionNodes.schedule,
-       home: sectionNodes.home,
-       windows: sectionNodes.windows,
-       assistant: sectionNodes.assistant,
+      contour, profiles, schedule, home, windows, assistant,
+      scenarios, settings,
     };
   }
 
@@ -639,16 +702,23 @@ class HausmanHubPanel extends HTMLElement {
   _chooseInitialSection() {
     if (this._activeSection) return;
     const setup = this._settings.setup;
-    this._activeSection = setup && setup.status === "not_configured" ? "contour" : "overview";
+    this._activeSection = setup && setup.status === "not_configured" ? "climate" : "overview";
   }
 
   _activateSection(section, focus = false) {
     if (!PANEL_SECTIONS.some((item) => item.id === section)) return;
     this._activeSection = section;
     this._syncSectionVisibility();
-    if (section === "assistant") {
+    if (section === "climate") {
       this._renderAssistant(this._shell.assistant);
-      this._loadAssistant();
+      if (!this._assistant.loaded) this._loadAssistant();
+    }
+    if (section === "scenarios") {
+      this._renderScenarios(this._shell.scenarios);
+      this._loadScenarios();
+    }
+    if (section === "settings") {
+      this._loadSettings();
     }
     if (focus) focusNode(this._shell && this._shell.tabs[section]);
   }
@@ -667,13 +737,10 @@ class HausmanHubPanel extends HTMLElement {
 
   _syncSectionVisibility() {
     if (!this._shell) return;
+    const climateDirty = this._dirty.wizard || this._dirty.profiles || this._dirty.schedule || this._dirty.home || this._dirty.windows || this._dirty.assistant;
     const dirtyBySection = {
-      contour: this._dirty.wizard,
-      profiles: this._dirty.profiles,
-      schedule: this._dirty.schedule,
-      home: this._dirty.home,
-      windows: this._dirty.windows,
-      assistant: this._dirty.assistant,
+      climate: climateDirty,
+      settings: this._settingsDirty,
     };
     PANEL_SECTIONS.forEach((section) => {
       const active = section.id === this._activeSection;
@@ -682,8 +749,9 @@ class HausmanHubPanel extends HTMLElement {
       setAttr(tab, "aria-current", active ? "page" : "false");
       setAttr(tab, "aria-selected", active ? "true" : "false");
       setAttr(tab, "tabindex", active ? "0" : "-1");
-      tab.className = `tab${dirtyBySection[section.id] ? " is-dirty" : ""}`;
-      tab.title = dirtyBySection[section.id] ? "Есть несохранённые изменения" : "";
+      const dirty = dirtyBySection[section.id];
+      tab.className = `tab${dirty ? " is-dirty" : ""}`;
+      tab.title = dirty ? "Есть несохранённые изменения" : "";
     });
   }
 
@@ -785,7 +853,7 @@ class HausmanHubPanel extends HTMLElement {
       this._dirty.assistant = false;
     } catch (error) {
       this._assistant.error = true;
-      this._assistant.loaded = false;
+      this._assistant.loaded = true;
     } finally {
       this._assistant.loading = false;
       this._render();
@@ -2321,7 +2389,7 @@ class HausmanHubPanel extends HTMLElement {
 
   _openWizard(setup) {
     if (setup.status !== "not_configured" && setup.editing_allowed !== true) return;
-    this._activateSection("contour");
+    this._activateSection("climate");
     this._wizard.open = true;
     this._expandedWizardRooms.clear();
     this._wizard.setupRevision = setup.setup_revision;
@@ -2914,7 +2982,7 @@ class HausmanHubPanel extends HTMLElement {
 
   _showWizardMessage(message, roomId = null, control = null) {
     this._clearWizardIssues();
-    this._activateSection("contour");
+    this._activateSection("climate");
     const room = roomId && this._wizardFields && this._wizardFields.rooms[roomId];
     if (room) {
       room.setExpanded(true);
@@ -2961,7 +3029,7 @@ class HausmanHubPanel extends HTMLElement {
       ? "Контур проверен: сохранение доступно."
       : "Сохранение станет доступно после успешной проверки контура.";
     if (!ready) {
-      this._activateSection("contour");
+      this._activateSection("climate");
       if (firstRoom) firstRoom.setExpanded(true);
       focusNode(firstControl || (firstRoom ? firstRoom.include : this._wizardButtons.check));
     }
@@ -3328,7 +3396,7 @@ class HausmanHubPanel extends HTMLElement {
       });
       if (firstInvalid) {
         validationSummary.textContent = "Исправьте отмеченные значения перед сохранением.";
-        this._activateSection("profiles");
+        this._activateSection("climate");
         focusNode(firstInvalid);
         return;
       }
@@ -3414,7 +3482,7 @@ class HausmanHubPanel extends HTMLElement {
       if (!TIME_PATTERN.test(day) || !TIME_PATTERN.test(night) || day === night) {
         validationError.textContent =
           "Проверьте время: формат ЧЧ:ММ, начала дня и ночи должны отличаться.";
-        this._activateSection("schedule");
+        this._activateSection("climate");
         focusNode(!TIME_PATTERN.test(day) || day === night ? dayStart : nightStart);
         return;
       }
@@ -3723,7 +3791,7 @@ class HausmanHubPanel extends HTMLElement {
       ) {
         validationError.textContent =
           "Проверьте пороги: от -40 до 60 °C, нижний строго меньше верхнего.";
-        this._activateSection("home");
+        this._activateSection("climate");
         focusNode(
           rawHigh === "" || !Number.isFinite(highValue) || highValue < -40 || highValue > 60
             ? high : low
@@ -3978,6 +4046,135 @@ class HausmanHubPanel extends HTMLElement {
 
   _humidity(value) {
     return typeof value === "number" ? `${Math.round(value)} %` : "Нет данных";
+  }
+
+  _renderScenarios(container) {
+    container.innerHTML = "";
+    const card = el("div", "card");
+    card.appendChild(el("h2", null, "Сценарии"));
+    if (this._scenarios.loading && !this._scenarios.list) {
+      card.appendChild(el("div", "muted", "Загрузка сценариев…"));
+      container.appendChild(card);
+      return;
+    }
+    if (!this._scenarios.list || !this._scenarios.list.scenarios) {
+      card.appendChild(el("div", "muted", "Список сценариев недоступен."));
+      container.appendChild(card);
+      return;
+    }
+    const items = this._scenarios.list.scenarios;
+    if (!items.length) {
+      card.appendChild(el("div", "muted", "Нет сохранённых сценариев."));
+    }
+    items.forEach((scenario) => {
+      const row = el("div", "row");
+      row.style.alignItems = "center";
+      const title = el("span", null, `${scenario.icon || "mdi:script"} ${scenario.title || scenario.id}`);
+      row.appendChild(title);
+      const actions = el("span");
+      actions.style.display = "flex";
+      actions.style.gap = "8px";
+      if (scenario.enabled) {
+        const runBtn = el("button", null, "Запустить");
+        runBtn.addEventListener("click", () => this._post(SCENARIOS_RUN_API, { scenario_id: scenario.id }, scenario.requires_confirmation ? `Запустить сценарий "${scenario.title}"?` : null));
+        actions.appendChild(runBtn);
+      }
+      const testBtn = el("button", "secondary", "Проверить");
+      testBtn.addEventListener("click", () => this._scenarioTest(scenario));
+      actions.appendChild(testBtn);
+      const delBtn = el("button", "secondary", "Удалить");
+      delBtn.addEventListener("click", () => this._post(SCENARIOS_DELETE_API, { scenario_id: scenario.id }, `Удалить сценарий "${scenario.title}"?`));
+      actions.appendChild(delBtn);
+      row.appendChild(actions);
+      card.appendChild(row);
+    });
+    container.appendChild(card);
+  }
+
+  async _scenarioTest(scenario) {
+    if (this._busy) return;
+    this._busy = true;
+    this._notice = "";
+    this._render();
+    try {
+      const result = await this._hass.callApi("POST", SCENARIOS_TEST_API, scenario);
+      this._notice = result && result.ok ? `Сценарий "${scenario.title}" прошёл проверку.` : "Проверка сценария не пройдена.";
+      this._error = false;
+    } catch (error) {
+      this._notice = "Проверить сценарий не удалось.";
+    } finally {
+      this._busy = false;
+    }
+    this._render();
+  }
+
+  _renderSettings(container) {
+    container.innerHTML = "";
+    const card = el("div", "card");
+    card.appendChild(el("h2", null, "Подключение"));
+    const modeLabel = el("label", "form-field", "Режим подключения");
+    const modeSelect = el("select");
+    [
+      { value: "center", label: "Центр умного дома" },
+      { value: "home_assistant", label: "Home Assistant" },
+    ].forEach((opt) => {
+      const option = el("option", null, opt.label);
+      option.value = opt.value;
+      modeSelect.appendChild(option);
+    });
+    modeSelect.value = this._settingsData.connection_mode;
+    modeSelect.addEventListener("change", () => {
+      this._settingsData.connection_mode = modeSelect.value;
+      this._settingsDirty = true;
+      this._render();
+    });
+    modeLabel.appendChild(modeSelect);
+    card.appendChild(modeLabel);
+    const centerLabel = el("label", "form-field", "Адрес Центра умного дома");
+    const centerInput = el("input");
+    centerInput.type = "text";
+    centerInput.value = this._settingsData.smart_home_center_url;
+    centerInput.addEventListener("input", () => {
+      this._settingsData.smart_home_center_url = centerInput.value;
+      this._settingsDirty = true;
+      this._render();
+    });
+    centerLabel.appendChild(centerInput);
+    card.appendChild(centerLabel);
+    const haLabel = el("label", "form-field", "Адрес Home Assistant");
+    const haInput = el("input");
+    haInput.type = "text";
+    haInput.value = this._settingsData.home_assistant_url;
+    haInput.addEventListener("input", () => {
+      this._settingsData.home_assistant_url = haInput.value;
+      this._settingsDirty = true;
+      this._render();
+    });
+    haLabel.appendChild(haInput);
+    card.appendChild(haLabel);
+    const saveBtn = el("button", null, "Сохранить");
+    saveBtn.disabled = !this._settingsDirty;
+    saveBtn.addEventListener("click", () => this._saveSettings());
+    card.appendChild(saveBtn);
+    container.appendChild(card);
+  }
+
+  async _saveSettings() {
+    if (this._busy || !this._settingsDirty) return;
+    this._busy = true;
+    this._notice = "";
+    this._render();
+    try {
+      await this._hass.callApi("POST", CONNECTION_SETTINGS_API, this._settingsData);
+      this._settingsDirty = false;
+      this._notice = "Настройки подключения сохранены.";
+      this._error = false;
+    } catch (error) {
+      this._notice = "Не удалось сохранить настройки подключения.";
+    } finally {
+      this._busy = false;
+    }
+    await this._load();
   }
 }
 
