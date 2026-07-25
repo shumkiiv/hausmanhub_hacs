@@ -15,6 +15,9 @@ from custom_components.hausman_hub.application.climate_ha_observations import (
 )
 from custom_components.hausman_hub.application.climate_registry import registry_from_payload
 from custom_components.hausman_hub.application.contour_apply import ContourApplyViolation
+from custom_components.hausman_hub.application.contour_override import (
+    TemporaryTemperatureViolation,
+)
 from custom_components.hausman_hub.application.climate_runtime import (
     ClimateRuntime,
     ClimateRuntimeUnavailable,
@@ -661,7 +664,7 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_contour_draft_reads_once_without_saving_or_commanding(self) -> None:
         bridge = MemoryBridge()
-        registry = registry_from_payload({"version": 2, "home": {"outdoor_temperature_entity_id": None, "presence_entity_id": None, "central_heating_entity_id": None}, "rooms": [{"id": "living", "name": "Living room", "window_entity_id": None}, {"id": "kids", "name": "Kids", "window_entity_id": None}], "devices": []})
+        registry = registry_from_payload({"version": 3, "home": {"outdoor_temperature_entity_id": None, "presence_entity_id": None, "central_heating_entity_id": None}, "rooms": [{"id": "living", "name": "Living room", "window_entity_id": None}, {"id": "kids", "name": "Kids", "window_entity_id": None}], "devices": []})
         registry_store = MemoryStore(registry)
         contour_store = MemoryContourStore()
         runtime = ClimateRuntime(
@@ -718,7 +721,7 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
         bridge = MemoryBridge()
         original_registry = ClimateRegistry()
         setup_registry = registry_from_payload({
-            "version": 2,
+            "version": 3,
             "home": {"outdoor_temperature_entity_id": None, "presence_entity_id": None, "central_heating_entity_id": None},
             "rooms": [
                 {"id": "living", "name": "Living room", "window_entity_id": None},
@@ -751,10 +754,13 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
                         "target_temperature": 25.0,
                         "target_humidity": 45,
                         "strategy": "normal",
+                        "min_temperature": 22.0,
+                        "max_temperature": 26.0,
                         "devices": [
                             {
                                 "candidate_id": "candidate_0002",
                                 "type": "air_conditioner",
+                                "control_channel": "direct_wifi",
                             }
                         ],
                     },
@@ -775,6 +781,9 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
         )
         saves_before = len(registry_store.saved)
         contour_saves_before = len(contour_store.saved)
+        validation = await runtime.async_validate_contour_draft(draft)
+
+        self.assertTrue(validation["save_allowed"], validation)
 
         receipt = await runtime.async_save_contour_draft(draft)
 
@@ -792,6 +801,16 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             [24.0, 25.0],
             [room.day_profile.target_temperature for room in contour.rooms],  # type: ignore[union-attr]
         )
+        living = next(room for room in contour.rooms if room.room_id == "living")  # type: ignore[union-attr]
+        self.assertEqual(22.0, living.min_temperature)
+        self.assertEqual(26.0, living.max_temperature)
+        living_device = next(
+            device
+            for device in registry_store.registry.devices
+            if device.room_id == "living"
+            and device.kind.value == "air_conditioner"
+        )
+        self.assertEqual("direct_wifi", living_device.control_channel.value)
         current = await runtime.async_current_contour_setup()
         self.assertEqual("ready", current["status"])
         self.assertTrue(current["editing_allowed"])
@@ -810,7 +829,7 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
         original_registry = ClimateRegistry()
         original_contours = ContourRegistry()
         setup_registry = registry_from_payload({
-            "version": 2,
+            "version": 3,
             "home": {"outdoor_temperature_entity_id": None, "presence_entity_id": None, "central_heating_entity_id": None},
             "rooms": [{"id": "living", "name": "Living room", "window_entity_id": None}],
             "devices": [],
@@ -963,6 +982,9 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             target_temperature=25.0,
             target_humidity=45,
             strategy="normal",
+            room_bounds={
+                "living": {"min_temperature": 23.0, "max_temperature": 26.0}
+            },
         )
         runtime = ClimateRuntime(
             entry_id="entry",
@@ -1058,6 +1080,9 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             target_temperature=25.0,
             target_humidity=45,
             strategy="normal",
+            room_bounds={
+                "living": {"min_temperature": 23.0, "max_temperature": 26.0}
+            },
         )
         contours = with_climate_schedule(
             contours,
@@ -1084,6 +1109,23 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             now_ms=lambda: 1784280005000,
         )
         await runtime.async_start()
+
+        with self.assertRaises(TemporaryTemperatureViolation) as invalid:
+            await runtime.async_temporary_temperature(
+                {
+                    "request_id": "temporary-living-outside-bounds",
+                    "contour_id": "climate",
+                    "room_id": "living",
+                    "action": "set",
+                    "target_temperature": 22.5,
+                    "confirm": True,
+                },
+                datetime(2026, 7, 19, 12, 0),
+            )
+
+        self.assertEqual("temperature_out_of_bounds", invalid.exception.code)
+        self.assertEqual("living", invalid.exception.room_id)
+        self.assertEqual([], contour_store.saved)
 
         changed = await runtime.async_temporary_temperature(
             {

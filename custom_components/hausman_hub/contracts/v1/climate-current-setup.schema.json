@@ -152,6 +152,23 @@
       ]
     },
     "strategy": {"enum": ["soft", "normal", "aggressive"]},
+    "nullable_temperature": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "number",
+          "minimum": 18,
+          "maximum": 28,
+          "multipleOf": 0.5
+        }
+      ]
+    },
+    "nullable_control_channel": {
+      "oneOf": [
+        {"type": "null"},
+        {"enum": ["universal_ir", "yandex_remote", "direct_wifi"]}
+      ]
+    },
     "comfort": {
       "type": "object",
       "additionalProperties": false,
@@ -180,7 +197,8 @@
         "candidate_id": {"$ref": "#/$defs/candidate_id"},
         "name": {"$ref": "#/$defs/name"},
         "type": {"$ref": "#/$defs/device_type"},
-        "type_name": {"$ref": "#/$defs/name"}
+        "type_name": {"$ref": "#/$defs/name"},
+        "control_channel": {"$ref": "#/$defs/nullable_control_channel"}
       }
     },
     "profiles": {
@@ -213,6 +231,8 @@
           "items": {"$ref": "#/$defs/device"}
         },
         "profiles": {"$ref": "#/$defs/profiles"},
+        "min_temperature": {"$ref": "#/$defs/nullable_temperature"},
+        "max_temperature": {"$ref": "#/$defs/nullable_temperature"},
         "temporary_temperature": {
           "oneOf": [
             {"type": "null"},

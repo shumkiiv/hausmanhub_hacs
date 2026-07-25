@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": ["version", "home", "rooms", "devices"],
   "properties": {
-    "version": {"const": 2},
+    "version": {"const": 3},
     "home": {
       "type": "object",
       "additionalProperties": false,
@@ -46,7 +46,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "name", "room_id", "kind", "source_id", "control_scope", "control_owner", "capabilities", "endpoints"],
+        "required": ["id", "name", "room_id", "kind", "source_id", "control_scope", "control_owner", "capabilities", "endpoints", "control_channel"],
         "properties": {
           "id": {"$ref": "#/$defs/stable_id"},
           "name": {"$ref": "#/$defs/name"},
@@ -73,6 +73,12 @@
                 "entity_id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*\\.[a-z0-9_]+$"}
               }
             }
+          },
+          "control_channel": {
+            "oneOf": [
+              {"type": "null"},
+              {"enum": ["universal_ir", "yandex_remote", "direct_wifi"]}
+            ]
           }
         }
       }

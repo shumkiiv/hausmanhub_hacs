@@ -34,7 +34,7 @@ def registry_payload() -> dict[str, object]:
     """Return an exact configured registry with private synthetic bindings."""
 
     return {
-        "version": 2,
+        "version": 3,
         "home": {
             "outdoor_temperature_entity_id": None,
             "presence_entity_id": None,
@@ -65,6 +65,7 @@ def registry_payload() -> dict[str, object]:
                         "entity_id": "climate.synthetic_living_ac",
                     }
                 ],
+                "control_channel": None,
             }
         ],
     }
@@ -90,6 +91,7 @@ def complete_registry_payload() -> dict[str, object]:
                     "entity_id": "humidifier.synthetic_kids",
                 }
             ],
+            "control_channel": None,
         }
     )
     return payload
@@ -194,6 +196,7 @@ class ClimateImportTest(unittest.TestCase):
                         "entity_id": "humidifier.synthetic_missing",
                     }
                 ],
+                "control_channel": None,
             }
         )
         registry = registry_from_payload(payload)

@@ -12,13 +12,14 @@ from enum import StrEnum
 import re
 
 
-REGISTRY_VERSION = 2
+REGISTRY_VERSION = 3
 LEGACY_REGISTRY_VERSION = 1
+NATIVE_REGISTRY_VERSION = 2
 _STABLE_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _ENTITY_ID = re.compile(r"^[a-z][a-z0-9_]*\.[a-z0-9_]+$")
 
 _WINDOW_ENTITY_DOMAINS = frozenset({"binary_sensor"})
-_OUTDOOR_TEMPERATURE_ENTITY_DOMAINS = frozenset({"sensor"})
+_OUTDOOR_TEMPERATURE_ENTITY_DOMAINS = frozenset({"sensor", "weather"})
 _PRESENCE_ENTITY_DOMAINS = frozenset({"binary_sensor", "person", "device_tracker"})
 _ROOM_PRESENCE_ENTITY_DOMAINS = frozenset({"binary_sensor"})
 _CENTRAL_HEATING_ENTITY_DOMAINS = frozenset(
@@ -41,6 +42,14 @@ class ClimateDeviceKind(StrEnum):
     FLOOR_HEATING = "floor_heating"
     TEMPERATURE_SENSOR = "temperature_sensor"
     HUMIDITY_SENSOR = "humidity_sensor"
+
+
+class ClimateControlChannel(StrEnum):
+    """The configured physical control path for a managed climate device."""
+
+    UNIVERSAL_IR = "universal_ir"
+    YANDEX_REMOTE = "yandex_remote"
+    DIRECT_WIFI = "direct_wifi"
 
 
 class ClimateCapability(StrEnum):
@@ -220,6 +229,7 @@ class ClimateDevice:
     control_owner: ClimateControlOwner
     capabilities: tuple[ClimateCapability, ...]
     endpoints: tuple[ClimateEndpoint, ...]
+    control_channel: ClimateControlChannel | None = None
 
     def __post_init__(self) -> None:
         _require_stable_id(self.device_id, "device id")
@@ -239,6 +249,16 @@ class ClimateDevice:
             raise ClimateModelViolation("device control scope must be approved")
         if not isinstance(self.control_owner, ClimateControlOwner):
             raise ClimateModelViolation("device control owner must be approved")
+        if self.control_channel is not None and not isinstance(
+            self.control_channel,
+            ClimateControlChannel,
+        ):
+            raise ClimateModelViolation("device control channel must be approved")
+        if (
+            self.control_channel is not None
+            and self.control_scope is not ClimateControlScope.MANAGED
+        ):
+            raise ClimateModelViolation("device control channel requires managed scope")
         _require_unique(self.capabilities, "device capabilities")
         _require_unique((endpoint.role for endpoint in self.endpoints), "endpoint roles")
         if any(not isinstance(value, ClimateCapability) for value in self.capabilities):

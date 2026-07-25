@@ -30,7 +30,7 @@ from .climate_observation import (
     ClimateWindowState,
 )
 from .climate_targets import ClimateRoomTarget
-from .contours import ContourMode
+from .contours import ContourMode, clamp_climate_temperature
 
 
 CLIMATE_STABILITY_MODEL_VERSION = 1
@@ -273,14 +273,17 @@ class ClimateStableDevicePlan:
             raise ClimateStabilityViolation("stability protection must be approved")
         if not isinstance(self.reason, ClimateStabilityReason):
             raise ClimateStabilityViolation("stability reason must be approved")
-        expected = _expected_stability_output(
-            device=self.device,
-            room=self.room,
-            target=self.target,
-            home=self.home,
-            observed_at=self.observed_at,
-            base=self.base,
-            cooling_active=self.cooling_active,
+        expected = _bounded_stability_output(
+            _expected_stability_output(
+                device=self.device,
+                room=self.room,
+                target=self.target,
+                home=self.home,
+                observed_at=self.observed_at,
+                base=self.base,
+                cooling_active=self.cooling_active,
+            ),
+            self.target,
         )
         actual = (
             self.action,
@@ -419,6 +422,7 @@ def resolve_climate_stability_plan(
         base=base,
         cooling_active=cooling_active,
     )
+    output = _bounded_stability_output(output, target)
     return ClimateStableDevicePlan(
         device=device,
         room=room,
@@ -541,6 +545,52 @@ def _expected_stability_output(
             "humidifier stability must not have a thermal base plan"
         )
     return _humidifier_output(device, room, target, home, cooling_active)
+
+
+def _bounded_stability_output(
+    output: tuple[
+        ClimateStabilityAction,
+        float | None,
+        ClimateFanMode | None,
+        bool | None,
+        int | None,
+        int | None,
+        ClimateCycleTiming | None,
+        int | None,
+        ClimateStabilityProtection,
+        ClimateStabilityReason,
+    ],
+    target: ClimateRoomTarget,
+) -> tuple[
+    ClimateStabilityAction,
+    float | None,
+    ClimateFanMode | None,
+    bool | None,
+    int | None,
+    int | None,
+    ClimateCycleTiming | None,
+    int | None,
+    ClimateStabilityProtection,
+    ClimateStabilityReason,
+]:
+    if output[1] is None:
+        return output
+    return (
+        output[0],
+        clamp_climate_temperature(
+            output[1],
+            target.min_temperature,
+            target.max_temperature,
+        ),
+        output[2],
+        output[3],
+        output[4],
+        output[5],
+        output[6],
+        output[7],
+        output[8],
+        output[9],
+    )
 
 
 def _air_conditioner_output(

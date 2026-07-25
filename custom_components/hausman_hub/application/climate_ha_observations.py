@@ -428,7 +428,7 @@ def _home_number(
     state = states.entity_state(entity_id)
     if state is None or state.state in _UNAVAILABLE_STATES:
         return None
-    value = _number(state.state)
+    value = _outdoor_temperature_value(state)
     # An implausible outdoor reading is unusable, never a crash or a default.
     if value is None or not -80.0 <= value <= 80.0:
         return None
@@ -447,10 +447,18 @@ def _heat_load_temperature(
         return None
     if not _is_fresh(state, observed_at):
         return None
-    value = _number(state.state)
+    value = _outdoor_temperature_value(state)
     if value is None or not -80.0 <= value <= 100.0:
         return None
     return value
+
+
+def _outdoor_temperature_value(state: ClimateHaEntityState) -> float | None:
+    """Read a sensor state or the standard temperature attribute of weather.*."""
+
+    if state.entity_id.startswith("weather."):
+        return _number(state.attributes.get("temperature"))
+    return _number(state.state)
 
 
 def _home_switch(

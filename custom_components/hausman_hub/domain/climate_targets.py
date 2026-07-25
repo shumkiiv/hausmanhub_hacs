@@ -24,6 +24,8 @@ from .contours import (
     ClimateStrategy,
     ClimateTemporaryOverride,
     ContourMode,
+    clamp_climate_temperature,
+    climate_target_temperature,
 )
 
 
@@ -52,6 +54,8 @@ class ClimateRoomTargetPolicy:
     night_profile: ClimateComfortSettings
     active_profile: ClimateProfile
     temporary_override: ClimateTemporaryOverride | None = None
+    min_temperature: float | None = None
+    max_temperature: float | None = None
 
     def __post_init__(self) -> None:
         _stable_room_id(self.room_id)
@@ -68,6 +72,7 @@ class ClimateRoomTargetPolicy:
             raise ClimateTargetViolation(
                 "temporary temperature target must be validated"
             )
+        _temperature_bounds(self.min_temperature, self.max_temperature)
 
     @property
     def active_settings(self) -> ClimateComfortSettings:
@@ -93,6 +98,8 @@ class ClimateRoomTarget:
     temperature_origin: ClimateTemperatureTargetOrigin
     observation_status: ClimateDataStatus
     observation_observed_at: int
+    min_temperature: float | None = None
+    max_temperature: float | None = None
 
     def __post_init__(self) -> None:
         _stable_room_id(self.room_id)
@@ -116,9 +123,15 @@ class ClimateRoomTarget:
         if not isinstance(self.observation_status, ClimateDataStatus):
             raise ClimateTargetViolation("target observation status must be approved")
         _timestamp(self.observation_observed_at)
+        _temperature_bounds(self.min_temperature, self.max_temperature)
         if (
             self.temperature_origin is ClimateTemperatureTargetOrigin.PROFILE
-            and self.target_temperature != self.profile_temperature
+            and self.target_temperature
+            != clamp_climate_temperature(
+                self.profile_temperature,
+                self.min_temperature,
+                self.max_temperature,
+            )
         ):
             raise ClimateTargetViolation(
                 "profile target must equal the selected saved temperature"
@@ -222,6 +235,11 @@ def resolve_climate_room_target(
     else:
         target_temperature = profile.target_temperature
         temperature_origin = ClimateTemperatureTargetOrigin.PROFILE
+    target_temperature = clamp_climate_temperature(
+        target_temperature,
+        policy.min_temperature,
+        policy.max_temperature,
+    )
     return ClimateRoomTarget(
         room_id=policy.room_id,
         active_profile=policy.active_profile,
@@ -232,6 +250,8 @@ def resolve_climate_room_target(
         temperature_origin=temperature_origin,
         observation_status=observation_status,
         observation_observed_at=observed_at,
+        min_temperature=policy.min_temperature,
+        max_temperature=policy.max_temperature,
     )
 
 
@@ -283,3 +303,18 @@ def _comfort(
         )
     except (TypeError, ValueError) as error:
         raise ClimateTargetViolation("resolved comfort target is invalid") from error
+
+
+def _temperature_bounds(
+    minimum: float | None,
+    maximum: float | None,
+) -> None:
+    try:
+        if minimum is not None:
+            climate_target_temperature(minimum)
+        if maximum is not None:
+            climate_target_temperature(maximum)
+    except ValueError as error:
+        raise ClimateTargetViolation("room temperature bounds are invalid") from error
+    if minimum is not None and maximum is not None and minimum > maximum:
+        raise ClimateTargetViolation("room temperature bounds are inverted")

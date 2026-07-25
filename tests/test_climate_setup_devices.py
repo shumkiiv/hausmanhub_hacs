@@ -166,7 +166,7 @@ class ClimateSetupDevicesTest(unittest.TestCase):
 
     def test_snapshot_revision_changes_when_private_binding_changes(self) -> None:
         empty_registry = registry_from_payload(
-            {"version": 2, "home": {"outdoor_temperature_entity_id": None, "presence_entity_id": None, "central_heating_entity_id": None}, "rooms": [], "devices": []}
+            {"version": 3, "home": {"outdoor_temperature_entity_id": None, "presence_entity_id": None, "central_heating_entity_id": None}, "rooms": [], "devices": []}
         )
         source = load_json(SOURCE_FIXTURE)
         changed = copy.deepcopy(source)

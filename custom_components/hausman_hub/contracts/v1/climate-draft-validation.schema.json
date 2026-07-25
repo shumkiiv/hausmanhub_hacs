@@ -233,7 +233,11 @@
               ],
               "properties": {
                 "code": {
-                  "const": "unsupported_device_set"
+                  "enum": [
+                    "unsupported_device_set",
+                    "invalid_temperature_bounds",
+                    "invalid_control_channel"
+                  ]
                 }
               }
             },
@@ -284,7 +288,9 @@
         "code": {
           "enum": [
             "no_controllable_device",
-            "unsupported_device_set"
+            "unsupported_device_set",
+            "invalid_temperature_bounds",
+            "invalid_control_channel"
           ]
         },
         "room_id": {
@@ -297,10 +303,16 @@
             }
           ]
         },
+        "candidate_id": {
+          "type": "string",
+          "pattern": "^candidate_[0-9]{4}$"
+        },
         "message": {
           "enum": [
             "В комнате нет устройства, которое может управлять климатом.",
-            "Выбранный набор устройств нельзя безопасно подготовить к сохранению."
+            "Выбранный набор устройств нельзя безопасно подготовить к сохранению.",
+            "Границы температуры комнаты не согласованы с её профилем.",
+            "Выбранный канал управления не подходит этому устройству."
           ]
         }
       },
@@ -326,10 +338,74 @@
           "else": {
             "properties": {
               "room_id": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/$defs/stable_id"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "unsupported_device_set"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "room_id": {
                 "type": "null"
               },
               "message": {
                 "const": "Выбранный набор устройств нельзя безопасно подготовить к сохранению."
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "invalid_temperature_bounds"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "room_id": {
+                "$ref": "#/$defs/stable_id"
+              },
+              "message": {
+                "const": "Границы температуры комнаты не согласованы с её профилем."
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "invalid_control_channel"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "candidate_id"
+            ],
+            "properties": {
+              "room_id": {
+                "$ref": "#/$defs/stable_id"
+              },
+              "message": {
+                "const": "Выбранный канал управления не подходит этому устройству."
               }
             }
           }

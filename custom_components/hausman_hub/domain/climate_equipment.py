@@ -30,7 +30,7 @@ from .climate_resolution import (
     ClimateThermalResolution,
 )
 from .climate_targets import ClimateRoomTarget
-from .contours import ClimateStrategy, ContourMode
+from .contours import ClimateStrategy, ContourMode, clamp_climate_temperature
 
 
 CLIMATE_EQUIPMENT_MODEL_VERSION = 1
@@ -105,6 +105,8 @@ class ClimateDevicePlan:
     fan_mode: ClimateFanMode | None
     quiet: bool | None
     reason: ClimateEquipmentReason
+    min_temperature: float | None = None
+    max_temperature: float | None = None
 
     def __post_init__(self) -> None:
         _stable_id(self.device_id, "thermal device id")
@@ -144,6 +146,7 @@ class ClimateDevicePlan:
             35,
             "equipment target temperature",
         )
+        _temperature_bounds(self.min_temperature, self.max_temperature)
         if self.fan_mode is not None:
             _enum(self.fan_mode, ClimateFanMode, "equipment fan mode")
         _optional_bool(self.quiet, "equipment quiet flag")
@@ -162,6 +165,8 @@ class ClimateDevicePlan:
             heat_load_temperature=self.heat_load_temperature,
             comfort_temperature=self.comfort_temperature,
             strategy=self.strategy,
+            min_temperature=self.min_temperature,
+            max_temperature=self.max_temperature,
         )
         actual = (
             self.action,
@@ -298,6 +303,8 @@ def resolve_climate_device_plan(
         heat_load_temperature=home.heat_load_temperature,
         comfort_temperature=target.target_temperature,
         strategy=target.strategy,
+        min_temperature=target.min_temperature,
+        max_temperature=target.max_temperature,
     )
     action, equipment_target, fan_mode, quiet, reason = output
     return ClimateDevicePlan(
@@ -323,6 +330,8 @@ def resolve_climate_device_plan(
         fan_mode=fan_mode,
         quiet=quiet,
         reason=reason,
+        min_temperature=target.min_temperature,
+        max_temperature=target.max_temperature,
     )
 
 
@@ -341,6 +350,8 @@ def _expected_device_output(
     heat_load_temperature: float | None,
     comfort_temperature: float,
     strategy: ClimateStrategy,
+    min_temperature: float | None = None,
+    max_temperature: float | None = None,
 ) -> tuple[
     ClimateEquipmentAction,
     float | None,
@@ -357,21 +368,33 @@ def _expected_device_output(
             ClimateEquipmentReason.DEVICE_UNAVAILABLE,
         )
     if kind is ClimateObservationDeviceKind.AIR_CONDITIONER:
-        return _air_conditioner_output(thermal, comfort_temperature, strategy)
+        return _bounded_output(
+            _air_conditioner_output(thermal, comfort_temperature, strategy),
+            min_temperature,
+            max_temperature,
+        )
     if kind is ClimateObservationDeviceKind.RADIATOR_THERMOSTAT:
-        return _radiator_output(
-            room_data_status=room_data_status,
-            thermal=thermal,
-            season=season,
-            period=period,
-            occupancy=occupancy,
-            central_heating_on=central_heating_on,
-            central_heating_configured=central_heating_configured,
-            outdoor_temperature=outdoor_temperature,
-            heat_load_temperature=heat_load_temperature,
+        return _bounded_output(
+            _radiator_output(
+                room_data_status=room_data_status,
+                thermal=thermal,
+                season=season,
+                period=period,
+                occupancy=occupancy,
+                central_heating_on=central_heating_on,
+                central_heating_configured=central_heating_configured,
+                outdoor_temperature=outdoor_temperature,
+                heat_load_temperature=heat_load_temperature,
+            ),
+            min_temperature,
+            max_temperature,
         )
     if kind is ClimateObservationDeviceKind.FLOOR_HEATING:
-        return _floor_output(thermal, comfort_temperature)
+        return _bounded_output(
+            _floor_output(thermal, comfort_temperature),
+            min_temperature,
+            max_temperature,
+        )
     raise ClimateEquipmentViolation("device kind has no thermal policy")
 
 
@@ -595,6 +618,45 @@ def _optional_number(
 ) -> None:
     if value is not None:
         _number(value, minimum, maximum, label)
+
+
+def _temperature_bounds(
+    minimum: float | None,
+    maximum: float | None,
+) -> None:
+    _optional_number(minimum, 18, 28, "minimum room temperature")
+    _optional_number(maximum, 18, 28, "maximum room temperature")
+    if minimum is not None and maximum is not None and minimum > maximum:
+        raise ClimateEquipmentViolation("room temperature bounds are inverted")
+
+
+def _bounded_output(
+    output: tuple[
+        ClimateEquipmentAction,
+        float | None,
+        ClimateFanMode | None,
+        bool | None,
+        ClimateEquipmentReason,
+    ],
+    minimum: float | None,
+    maximum: float | None,
+) -> tuple[
+    ClimateEquipmentAction,
+    float | None,
+    ClimateFanMode | None,
+    bool | None,
+    ClimateEquipmentReason,
+]:
+    action, target, fan_mode, quiet, reason = output
+    if target is None:
+        return output
+    return (
+        action,
+        clamp_climate_temperature(target, minimum, maximum),
+        fan_mode,
+        quiet,
+        reason,
+    )
 
 
 def _optional_bool(value: object, label: str) -> None:

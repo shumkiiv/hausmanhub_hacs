@@ -194,6 +194,26 @@ class ClimateEquipmentTest(unittest.TestCase):
                     ClimateEquipmentReason.COOLING_REQUIRED,
                 )
 
+    def test_air_conditioner_setpoint_clamps_to_effective_room_bounds(self) -> None:
+        observed_home = home()
+        bounded_target = replace(target(temperature=24.0), max_temperature=24.0)
+        bounded = resolve_climate_device_plan(
+            device(ClimateObservationDeviceKind.AIR_CONDITIONER),
+            bounded_target,
+            resolution(25.7, observed_home, room_target=bounded_target),
+            observed_home,
+        )
+        unbounded_target = target(temperature=24.0)
+        unbounded = resolve_climate_device_plan(
+            device(ClimateObservationDeviceKind.AIR_CONDITIONER),
+            unbounded_target,
+            resolution(25.7, observed_home, room_target=unbounded_target),
+            observed_home,
+        )
+
+        self.assertEqual(24.0, bounded.target_temperature)
+        self.assertEqual(26.0, unbounded.target_temperature)
+
     def test_radiator_uses_day_night_cold_and_warm_load_rules(self) -> None:
         radiator = device(ClimateObservationDeviceKind.RADIATOR_THERMOSTAT)
         cases = (

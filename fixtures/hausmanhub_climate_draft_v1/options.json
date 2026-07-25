@@ -7,6 +7,11 @@
   "snapshot_revision": 8115739542118920,
   "data_status": "current",
   "draft_creation_allowed": true,
+  "control_channels": [
+    "universal_ir",
+    "yandex_remote",
+    "direct_wifi"
+  ],
   "display_names": {
     "room_status": {
       "available": "Можно выбрать",

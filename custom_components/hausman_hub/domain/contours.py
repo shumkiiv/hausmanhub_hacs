@@ -15,7 +15,7 @@ from enum import StrEnum
 import re
 
 
-CONTOUR_REGISTRY_VERSION = 4
+CONTOUR_REGISTRY_VERSION = 5
 MAX_CONTOURS = 32
 MAX_CONTOUR_ROOMS = 128
 MAX_CONTOUR_DEVICES = 512
@@ -172,6 +172,20 @@ class ClimateTemporaryOverride:
         _temperature(self.target_temperature)
 
 
+def clamp_climate_temperature(
+    temperature: float,
+    minimum: float | None,
+    maximum: float | None,
+) -> float:
+    """Keep one computed climate target within optional room bounds."""
+
+    if minimum is not None and temperature < minimum:
+        return minimum
+    if maximum is not None and temperature > maximum:
+        return maximum
+    return temperature
+
+
 @dataclass(frozen=True, slots=True)
 class ClimateContourRoom:
     """One room assignment and its user-facing comfort parameters."""
@@ -182,6 +196,8 @@ class ClimateContourRoom:
     night_profile: ClimateComfortSettings
     active_profile: ClimateProfile = ClimateProfile.DAY
     temporary_override: ClimateTemporaryOverride | None = None
+    min_temperature: float | None = None
+    max_temperature: float | None = None
 
     def __post_init__(self) -> None:
         _stable_id(self.room_id, "contour room id")
@@ -203,6 +219,45 @@ class ClimateContourRoom:
             ClimateTemporaryOverride,
         ):
             raise ContourViolation("temporary climate override must be validated")
+        minimum = (
+            None
+            if self.min_temperature is None
+            else _temperature(self.min_temperature)
+        )
+        maximum = (
+            None
+            if self.max_temperature is None
+            else _temperature(self.max_temperature)
+        )
+        if minimum is not None and maximum is not None and minimum > maximum:
+            raise ContourViolation(
+                "minimum climate temperature cannot exceed maximum climate temperature"
+            )
+        if minimum is not None and (
+            minimum > self.day_profile.target_temperature
+            or minimum > self.night_profile.target_temperature
+        ):
+            raise ContourViolation(
+                "minimum climate temperature cannot exceed a profile target"
+            )
+        if maximum is not None and (
+            maximum < self.day_profile.target_temperature
+            or maximum < self.night_profile.target_temperature
+        ):
+            raise ContourViolation(
+                "maximum climate temperature cannot fall below a profile target"
+            )
+        if self.temporary_override is not None and (
+            clamp_climate_temperature(
+                self.temporary_override.target_temperature,
+                minimum,
+                maximum,
+            )
+            != self.temporary_override.target_temperature
+        ):
+            raise ContourViolation(
+                "temporary climate temperature must stay within room bounds"
+            )
 
     @property
     def profile_settings(self) -> ClimateComfortSettings:
@@ -325,6 +380,8 @@ def climate_contour_room(
     profiles: object = None,
     active_profile: object = None,
     temporary_override: object = None,
+    min_temperature: object = None,
+    max_temperature: object = None,
 ) -> ClimateContourRoom:
     """Build one exact room policy from a form or persisted payload."""
 
@@ -376,6 +433,8 @@ def climate_contour_room(
         night_profile=night_profile,
         active_profile=selected_profile,
         temporary_override=selected_override,
+        min_temperature=min_temperature,
+        max_temperature=max_temperature,
     )
 
 

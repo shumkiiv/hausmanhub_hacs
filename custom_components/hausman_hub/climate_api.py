@@ -24,10 +24,11 @@ from .application.configuration import (
     effective_configuration,
 )
 from .application.climate_signal_settings import (
-    CENTRAL_HEATING_DOMAINS,
-    OUTDOOR_TEMPERATURE_DOMAINS,
-    PRESENCE_DOMAINS,
-    WINDOW_DOMAINS,
+    CENTRAL_HEATING_SIGNAL,
+    OUTDOOR_TEMPERATURE_SIGNAL,
+    PRESENCE_SIGNAL,
+    ROOM_PRESENCE_SIGNAL,
+    WINDOW_SIGNAL,
     ClimateSignalSettingsViolation,
     validate_climate_mode_update,
     validate_home_environment_update,
@@ -930,11 +931,11 @@ class ClimateAdminHomeEnvironmentView(_ClimateView):
             payload = await runtime.async_registry_payload()
             candidates = {
                 "outdoor_temperature": await runtime.async_signal_catalog(
-                    OUTDOOR_TEMPERATURE_DOMAINS
+                    OUTDOOR_TEMPERATURE_SIGNAL
                 ),
-                "presence": await runtime.async_signal_catalog(PRESENCE_DOMAINS),
+                "presence": await runtime.async_signal_catalog(PRESENCE_SIGNAL),
                 "central_heating": await runtime.async_signal_catalog(
-                    CENTRAL_HEATING_DOMAINS
+                    CENTRAL_HEATING_SIGNAL
                 ),
             }
         except Exception:
@@ -968,12 +969,22 @@ class ClimateAdminHomeEnvironmentView(_ClimateView):
                 payload,
                 entity_known=runtime.signal_entity_known,
             )
+            registry = await runtime.async_registry_payload()
+            current_home = registry.get("home")
+            if not isinstance(current_home, Mapping) or not _home_signals_suitable(
+                runtime,
+                home,
+                current_home,
+            ):
+                raise ClimateSignalSettingsViolation("unsuitable_entity")
         except ClimateSignalSettingsViolation:
             return self.json_message(
                 "Настройки сигналов дома заполнены неверно.",
                 HTTPStatus.BAD_REQUEST,
                 headers=NO_STORE_HEADERS,
             )
+        except Exception:
+            return self._unavailable()
         try:
             result = await runtime.async_update_home_environment(home)
         except Exception:
@@ -997,14 +1008,17 @@ class ClimateAdminRoomSignalsView(_ClimateView):
             return self._unavailable()
         try:
             payload = await runtime.async_registry_payload()
-            candidates = await runtime.async_signal_catalog(WINDOW_DOMAINS)
+            candidates = await runtime.async_signal_catalog(WINDOW_SIGNAL)
+            presence_candidates = await runtime.async_signal_catalog(
+                ROOM_PRESENCE_SIGNAL
+            )
         except Exception:
             return self._unavailable()
         return self.json(
             {
                 "rooms": _room_signal_payloads(payload),
                 "candidates": candidates,
-                "presence_candidates": candidates,
+                "presence_candidates": presence_candidates,
             },
             headers=NO_STORE_HEADERS,
         )
@@ -1056,6 +1070,17 @@ class ClimateAdminRoomSignalsView(_ClimateView):
                 )
                 presence_entity_ids = None
                 updates = None
+            checked_updates = (
+                updates
+                if updates is not None
+                else ((room_id, entity_id, presence_entity_ids or ()),)
+            )
+            if not _room_signals_suitable(
+                runtime,
+                checked_updates,
+                _room_signal_payloads(registry),
+            ):
+                raise ClimateSignalSettingsViolation("unsuitable_entity")
         except ClimateSignalSettingsViolation:
             return self.json_message(
                 "Привязка сигналов комнаты заполнена неверно.",
@@ -1112,6 +1137,93 @@ def _room_signal_payloads(registry_payload: dict[str, object]) -> list[dict[str,
         for room in rooms
         if isinstance(room, dict)
     ]
+
+
+def _home_signals_suitable(
+    runtime: ClimateRuntime,
+    home: Mapping[str, object],
+    current: Mapping[str, object],
+) -> bool:
+    """Allow only purpose-specific candidates, retaining exact legacy bindings."""
+
+    return all(
+        _signal_suitable_or_current(
+            runtime,
+            signal_kind,
+            home.get(field),
+            current.get(field),
+        )
+        for field, signal_kind in (
+            ("outdoor_temperature_entity_id", OUTDOOR_TEMPERATURE_SIGNAL),
+            ("presence_entity_id", PRESENCE_SIGNAL),
+            ("central_heating_entity_id", CENTRAL_HEATING_SIGNAL),
+        )
+    )
+
+
+def _room_signals_suitable(
+    runtime: ClimateRuntime,
+    updates: tuple[tuple[str, str | None, tuple[str, ...]], ...],
+    current_rooms: list[dict[str, object]],
+) -> bool:
+    """Require new room bindings to match both their purpose and HA room."""
+
+    current_by_id = {
+        room["id"]: room
+        for room in current_rooms
+        if isinstance(room.get("id"), str)
+    }
+    for room_id, window_entity_id, presence_entity_ids in updates:
+        current = current_by_id.get(room_id, {})
+        if not _signal_suitable_or_current(
+            runtime,
+            WINDOW_SIGNAL,
+            window_entity_id,
+            current.get("window_entity_id"),
+            room_id=room_id,
+        ):
+            return False
+        current_presence = current.get("presence_entity_ids")
+        retained = (
+            frozenset(current_presence)
+            if isinstance(current_presence, list)
+            else frozenset()
+        )
+        if any(
+            entity_id not in retained
+            and not runtime.signal_entity_suitable(
+                ROOM_PRESENCE_SIGNAL,
+                entity_id,
+                room_id=room_id,
+            )
+            for entity_id in presence_entity_ids
+        ):
+            return False
+    return True
+
+
+def _signal_suitable_or_current(
+    runtime: ClimateRuntime,
+    signal_kind: str,
+    value: object,
+    current: object,
+    *,
+    room_id: str | None = None,
+) -> bool:
+    """Keep an unchanged binding or require it to exist in the suitable catalog."""
+
+    return (
+        value is None
+        or value == current
+        or (
+            isinstance(value, str)
+            and runtime.signal_entity_suitable(
+                signal_kind,
+                value,
+                room_id=room_id,
+            )
+        )
+    )
 
 
 async def _request_json(

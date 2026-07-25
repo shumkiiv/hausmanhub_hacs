@@ -8,6 +8,7 @@ from typing import Any
 
 from ..domain.climate import (
     ClimateCapability,
+    ClimateControlChannel,
     ClimateControlOwner,
     ClimateControlScope,
     ClimateDevice,
@@ -20,6 +21,7 @@ from ..domain.climate import (
     ClimateRegistry,
     ClimateRoom,
     LEGACY_REGISTRY_VERSION,
+    NATIVE_REGISTRY_VERSION,
     REGISTRY_VERSION,
 )
 from .climate_discovery import ClimateImportSnapshot
@@ -84,6 +86,11 @@ def registry_to_payload(registry: ClimateRegistry) -> dict[str, object]:
                     {"role": endpoint.role.value, "entity_id": endpoint.entity_id}
                     for endpoint in device.endpoints
                 ],
+                "control_channel": (
+                    None
+                    if device.control_channel is None
+                    else device.control_channel.value
+                ),
             }
             for device in registry.devices
         ],
@@ -154,17 +161,55 @@ def migrate_climate_registry_payload(
     storage_version: int,
     payload: object,
 ) -> dict[str, object]:
-    """Migrate a stored version-1 registry to the exact current shape once.
+    """Migrate stored version-1 and version-2 registries to the current shape.
 
-    The legacy shape carries no native observation bindings, so every new
-    field migrates to an absent binding. An absent binding keeps the matching
-    observation fact unknown; it never becomes a permissive default.
+    The earlier shapes carry no control channel, so migration makes that field
+    absent. Version 1 also lacks native observation bindings, which remain
+    absent rather than becoming permissive defaults.
     """
 
     if storage_version == REGISTRY_VERSION:
         # Home Assistant also calls the migrate hook when only the minor
         # version differs; the exact round trip keeps that path safe.
         return registry_to_payload(registry_from_payload(payload))
+    if storage_version == NATIVE_REGISTRY_VERSION:
+        root = _exact_mapping(
+            payload,
+            {"version", "home", "rooms", "devices"},
+            "stored registry",
+        )
+        if root.get("version") != NATIVE_REGISTRY_VERSION:
+            raise ClimateRegistryViolation(
+                "stored climate registry version does not match storage"
+            )
+        devices = _bounded_list(root["devices"], "registry devices", 512)
+        current_payload = {
+            "version": REGISTRY_VERSION,
+            "home": root["home"],
+            "rooms": root["rooms"],
+            "devices": [
+                {
+                    **_exact_mapping(
+                        device,
+                        {
+                            "id",
+                            "name",
+                            "room_id",
+                            "kind",
+                            "source_id",
+                            "control_scope",
+                            "control_owner",
+                            "capabilities",
+                            "endpoints",
+                        },
+                        f"stored device {index}",
+                    ),
+                    "control_channel": None,
+                }
+                for index, device in enumerate(devices)
+            ],
+        }
+        return registry_to_payload(registry_from_payload(current_payload))
     if storage_version != LEGACY_REGISTRY_VERSION:
         raise ClimateRegistryViolation("unsupported stored climate registry version")
     root = _exact_mapping(payload, {"version", "rooms", "devices"}, "stored registry")
@@ -180,7 +225,8 @@ def migrate_climate_registry_payload(
                 _legacy_room(value, index) for index, value in enumerate(rooms)
             ),
             devices=tuple(
-                _device(value, index) for index, value in enumerate(devices)
+                _previous_device(value, index)
+                for index, value in enumerate(devices)
             ),
         )
     except (ClimateModelViolation, ValueError) as error:
@@ -295,11 +341,13 @@ def _device(value: object, index: int) -> ClimateDevice:
             "control_owner",
             "capabilities",
             "endpoints",
+            "control_channel",
         },
         f"device {index}",
     )
     capabilities = _bounded_list(item["capabilities"], "device capabilities", 16)
     endpoints = _bounded_list(item["endpoints"], "device endpoints", 16)
+    raw_control_channel = item["control_channel"]
     return ClimateDevice(
         device_id=item["id"],  # type: ignore[arg-type]
         name=item["name"],  # type: ignore[arg-type]
@@ -310,7 +358,31 @@ def _device(value: object, index: int) -> ClimateDevice:
         control_owner=ClimateControlOwner(item["control_owner"]),
         capabilities=tuple(ClimateCapability(value) for value in capabilities),
         endpoints=tuple(_endpoint(value, endpoint_index) for endpoint_index, value in enumerate(endpoints)),
+        control_channel=(
+            None
+            if raw_control_channel is None
+            else ClimateControlChannel(raw_control_channel)
+        ),
     )
+
+
+def _previous_device(value: object, index: int) -> ClimateDevice:
+    item = _exact_mapping(
+        value,
+        {
+            "id",
+            "name",
+            "room_id",
+            "kind",
+            "source_id",
+            "control_scope",
+            "control_owner",
+            "capabilities",
+            "endpoints",
+        },
+        f"stored device {index}",
+    )
+    return _device({**item, "control_channel": None}, index)
 
 
 def _endpoint(value: object, index: int) -> ClimateEndpoint:

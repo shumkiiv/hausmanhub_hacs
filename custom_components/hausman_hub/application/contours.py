@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any
 
 from ..domain.climate import (
+    ClimateControlChannel,
     ClimateControlOwner,
     ClimateControlScope,
     ClimateDeviceKind,
@@ -30,6 +31,7 @@ from ..domain.contours import (
     ContourMode,
     ContourRegistry,
     ContourViolation,
+    clamp_climate_temperature,
     climate_contour_room,
     climate_target_temperature,
 )
@@ -51,6 +53,7 @@ CONTOUR_CONTRACT_VERSION = 7
 LEGACY_CONTOUR_REGISTRY_VERSION = 1
 PROFILE_CONTOUR_REGISTRY_VERSION = 2
 SCHEDULE_CONTOUR_REGISTRY_VERSION = 3
+BOUNDS_CONTOUR_REGISTRY_VERSION = 4
 _ACTIVE_KINDS = frozenset(
     {
         ClimateDeviceKind.AIR_CONDITIONER,
@@ -68,6 +71,10 @@ _CLIMATE_ROOM_PARAMETER_FIELDS = {
 
 class ContourRegistryViolation(ValueError):
     """A contour payload or its device binding is unsupported."""
+
+    def __init__(self, message: str, *, code: str = "invalid_contour") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 def contour_registry_from_payload(payload: object) -> ContourRegistry:
@@ -103,6 +110,8 @@ def contour_registry_from_payload(payload: object) -> ContourRegistry:
                         "profiles",
                         "active_profile",
                         "temporary_override",
+                        "min_temperature",
+                        "max_temperature",
                     },
                     f"contour {index} room {room_index}",
                 )
@@ -113,6 +122,8 @@ def contour_registry_from_payload(payload: object) -> ContourRegistry:
                         profiles=room.get("profiles"),
                         active_profile=room.get("active_profile"),
                         temporary_override=room.get("temporary_override"),
+                        min_temperature=room.get("min_temperature"),
+                        max_temperature=room.get("max_temperature"),
                     )
                 )
             contours.append(
@@ -152,6 +163,8 @@ def contour_registry_to_payload(registry: ContourRegistry) -> dict[str, object]:
                         "device_ids": list(room.device_ids),
                         **climate_room_profiles(room),
                         "temporary_override": _temporary_override_payload(room),
+                        "min_temperature": room.min_temperature,
+                        "max_temperature": room.max_temperature,
                     }
                     for room in contour.rooms
                 ],
@@ -165,7 +178,7 @@ def migrate_contour_registry_payload(
     storage_version: int,
     payload: object,
 ) -> dict[str, object]:
-    """Migrate older room/profile shapes to the explicit schedule shape."""
+    """Migrate older room/profile shapes to the current bounded schedule shape."""
 
     if storage_version == CONTOUR_REGISTRY_VERSION:
         return contour_registry_to_payload(contour_registry_from_payload(payload))
@@ -173,6 +186,7 @@ def migrate_contour_registry_payload(
         LEGACY_CONTOUR_REGISTRY_VERSION,
         PROFILE_CONTOUR_REGISTRY_VERSION,
         SCHEDULE_CONTOUR_REGISTRY_VERSION,
+        BOUNDS_CONTOUR_REGISTRY_VERSION,
     }:
         raise ContourRegistryViolation("unsupported stored contour version")
     root = _mapping(payload, "older contour registry")
@@ -184,7 +198,10 @@ def migrate_contour_registry_payload(
         for index, raw in enumerate(_list(root.get("contours"), "older contours")):
             item = _mapping(raw, f"older contour {index}")
             item_keys = {"id", "name", "kind", "mode", "engine", "rooms"}
-            if storage_version == SCHEDULE_CONTOUR_REGISTRY_VERSION:
+            if storage_version in {
+                SCHEDULE_CONTOUR_REGISTRY_VERSION,
+                BOUNDS_CONTOUR_REGISTRY_VERSION,
+            }:
                 item_keys.add("schedule")
             _exact_keys(item, item_keys, f"older contour {index}")
             rooms: list[ClimateContourRoom] = []
@@ -216,6 +233,27 @@ def migrate_contour_registry_payload(
                             strategy=room.get("strategy"),
                         )
                     )
+                elif storage_version == BOUNDS_CONTOUR_REGISTRY_VERSION:
+                    _exact_keys(
+                        room,
+                        {
+                            "room_id",
+                            "device_ids",
+                            "profiles",
+                            "active_profile",
+                            "temporary_override",
+                        },
+                        f"older contour {index} room {room_index}",
+                    )
+                    rooms.append(
+                        climate_contour_room(
+                            room_id=room.get("room_id"),
+                            device_ids=room.get("device_ids"),
+                            profiles=room.get("profiles"),
+                            active_profile=room.get("active_profile"),
+                            temporary_override=room.get("temporary_override"),
+                        )
+                    )
                 else:
                     _exact_keys(
                         room,
@@ -235,7 +273,11 @@ def migrate_contour_registry_payload(
                     item.get("schedule"),
                     f"older contour {index} schedule",
                 )
-                if storage_version == SCHEDULE_CONTOUR_REGISTRY_VERSION
+                if storage_version
+                in {
+                    SCHEDULE_CONTOUR_REGISTRY_VERSION,
+                    BOUNDS_CONTOUR_REGISTRY_VERSION,
+                }
                 else ClimateSchedule()
             )
             contours.append(
@@ -304,6 +346,8 @@ def build_climate_contour_setup(
     strategy: object = None,
     room_parameters: object = None,
     room_profiles: object = None,
+    room_bounds: object = None,
+    control_channels: object = None,
     schedule: object = None,
 ) -> tuple[ClimateRegistry, ContourRegistry]:
     """Create one climate contour from explicit existing-engine selections.
@@ -329,6 +373,7 @@ def build_climate_contour_setup(
             source_kinds=source_kinds,
             source_room_assignments=source_room_assignments,
         )
+        registry = _with_control_channels(registry, control_channels)
         parameters_by_room = _climate_parameters_by_room(
             registry,
             room_parameters=room_parameters,
@@ -340,6 +385,10 @@ def build_climate_contour_setup(
             registry,
             parameters_by_room=parameters_by_room,
             room_profiles=room_profiles,
+        )
+        bounds_by_room = _climate_bounds_by_room(
+            registry,
+            room_bounds=room_bounds,
         )
         selected_schedule = (
             ClimateSchedule()
@@ -362,6 +411,8 @@ def build_climate_contour_setup(
                 ),
                 profiles=profiles_by_room[room.room_id]["profiles"],
                 active_profile=profiles_by_room[room.room_id]["active_profile"],
+                min_temperature=bounds_by_room[room.room_id]["min_temperature"],
+                max_temperature=bounds_by_room[room.room_id]["max_temperature"],
             )
             for room in registry.rooms
         )
@@ -444,6 +495,88 @@ def _climate_parameters_by_room(
         room_id: climate_room_parameters(raw[room_id])
         for room_id in room_ids
     }
+
+
+def _climate_bounds_by_room(
+    registry: ClimateRegistry,
+    *,
+    room_bounds: object,
+) -> dict[str, dict[str, object]]:
+    room_ids = {room.room_id for room in registry.rooms}
+    if room_bounds is None:
+        return {
+            room_id: {"min_temperature": None, "max_temperature": None}
+            for room_id in room_ids
+        }
+    raw = _mapping(room_bounds, "climate room bounds")
+    if set(raw) != room_ids:
+        raise ContourRegistryViolation(
+            "climate room bounds must exactly match selected rooms"
+        )
+    bounds: dict[str, dict[str, object]] = {}
+    for room_id in room_ids:
+        values = _mapping(raw[room_id], "climate room bounds")
+        _exact_keys(
+            values,
+            {"min_temperature", "max_temperature"},
+            "climate room bounds",
+        )
+        bounds[room_id] = {
+            "min_temperature": values.get("min_temperature"),
+            "max_temperature": values.get("max_temperature"),
+        }
+    return bounds
+
+
+def _with_control_channels(
+    registry: ClimateRegistry,
+    control_channels: object,
+) -> ClimateRegistry:
+    if control_channels is None:
+        return registry
+    raw = _mapping(control_channels, "climate control channels")
+    channel_source_ids: dict[str, str] = {}
+    for device in registry.devices:
+        source_id = device.source_id
+        if source_id in raw:
+            channel_source_ids[source_id] = source_id
+        elif (
+            source_id.startswith("hausmanhub-native-")
+            and source_id.removeprefix("hausmanhub-native-") in raw
+        ):
+            channel_source_ids[source_id] = source_id.removeprefix(
+                "hausmanhub-native-"
+            )
+    if (
+        set(channel_source_ids.values()) != set(raw)
+        or len(channel_source_ids) != len(registry.devices)
+    ):
+        raise ContourRegistryViolation(
+            "climate control channels must exactly match selected devices"
+        )
+    try:
+        channels = {
+            source_id: (
+                None
+                if raw[channel_source_ids[source_id]] is None
+                else ClimateControlChannel(raw[channel_source_ids[source_id]])
+            )
+            for source_id in channel_source_ids
+        }
+        return ClimateRegistry(
+            version=registry.version,
+            rooms=registry.rooms,
+            devices=tuple(
+                replace(
+                    device,
+                    control_channel=channels[device.source_id],
+                )
+                for device in registry.devices
+            ),
+            home=registry.home,
+        )
+    except (TypeError, ValueError) as error:
+        raise ContourRegistryViolation("climate control channel is unsupported") from error
 
 
 def climate_room_profiles(room: ClimateContourRoom) -> dict[str, object]:
@@ -658,14 +791,25 @@ def with_climate_temporary_temperature(
     if not isinstance(room_id, str):
         raise ContourRegistryViolation("temporary temperature room is invalid")
     try:
-        override = ClimateTemporaryOverride(
-            target_temperature=climate_target_temperature(target_temperature),
-        )
+        selected_temperature = climate_target_temperature(target_temperature)
+        override = ClimateTemporaryOverride(target_temperature=selected_temperature)
         found = False
         rooms: list[ClimateContourRoom] = []
         for room in contour.rooms:
             if room.room_id == room_id:
                 found = True
+                if (
+                    clamp_climate_temperature(
+                        selected_temperature,
+                        room.min_temperature,
+                        room.max_temperature,
+                    )
+                    != selected_temperature
+                ):
+                    raise ContourRegistryViolation(
+                        "temporary climate temperature must stay within room bounds",
+                        code="temperature_out_of_bounds",
+                    )
                 rooms.append(replace(room, temporary_override=override))
             else:
                 rooms.append(room)
@@ -678,6 +822,8 @@ def with_climate_temporary_temperature(
                 for item in registry.contours
             )
         )
+    except ContourRegistryViolation:
+        raise
     except (ContourViolation, TypeError, ValueError) as error:
         raise ContourRegistryViolation(str(error)) from error
 

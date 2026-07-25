@@ -53,6 +53,7 @@ class ClimateHaCallLimit(StrEnum):
     UNSUPPORTED_ACTION = "unsupported_action"
     MISSING_CONTROL_ENDPOINT = "missing_control_endpoint"
     MISSING_CAPABILITY = "missing_capability"
+    UNSUPPORTED_CONTROL_CHANNEL = "unsupported_control_channel"
     NOTHING_TO_TRANSLATE = "nothing_to_translate"
     QUIET_NOT_TRANSLATED = "quiet_not_translated"
 

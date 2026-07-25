@@ -65,6 +65,14 @@
       "items": {
         "$ref": "#/$defs/device"
       }
+    },
+    "control_channels": {
+      "type": "array",
+      "maxItems": 3,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/control_channel"
+      }
     }
   },
   "allOf": [
@@ -170,6 +178,22 @@
       "type": "string",
       "pattern": "^candidate_[0-9]{4}$"
     },
+    "device_group_id": {
+      "type": "string",
+      "pattern": "^device_[0-9a-f]{16}$"
+    },
+    "device_detail": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^\\S(?:.*\\S)?$"
+    },
+    "zigbee2mqtt_image_url": {
+      "type": "string",
+      "minLength": 52,
+      "maxLength": 360,
+      "pattern": "^https://www\\.zigbee2mqtt\\.io/images/devices/(?:[A-Za-z0-9._~-]|%[0-9A-F]{2})+\\.png$"
+    },
     "device_type": {
       "enum": [
         "air_conditioner",
@@ -178,6 +202,13 @@
         "floor_heating",
         "temperature_sensor",
         "humidity_sensor"
+      ]
+    },
+    "control_channel": {
+      "enum": [
+        "universal_ir",
+        "yandex_remote",
+        "direct_wifi"
       ]
     },
     "nullable_device_type": {
@@ -311,6 +342,21 @@
         },
         "name": {
           "$ref": "#/$defs/name"
+        },
+        "device_group_id": {
+          "$ref": "#/$defs/device_group_id"
+        },
+        "device_name": {
+          "$ref": "#/$defs/device_detail"
+        },
+        "manufacturer": {
+          "$ref": "#/$defs/device_detail"
+        },
+        "model": {
+          "$ref": "#/$defs/device_detail"
+        },
+        "image_url": {
+          "$ref": "#/$defs/zigbee2mqtt_image_url"
         },
         "room_id": {
           "$ref": "#/$defs/stable_id"

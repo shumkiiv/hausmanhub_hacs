@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "home": {
     "outdoor_temperature_entity_id": null,
     "presence_entity_id": null,
@@ -19,7 +19,8 @@
       "control_scope": "canary",
       "control_owner": "climate_core",
       "capabilities": ["power", "target_temperature", "hvac_mode", "fan_mode"],
-      "endpoints": [{"role": "control", "entity_id": "climate.synthetic_living_ac"}]
+      "endpoints": [{"role": "control", "entity_id": "climate.synthetic_living_ac"}],
+      "control_channel": null
     },
     {
       "id": "kids_humidifier",
@@ -30,7 +31,8 @@
       "control_scope": "observed",
       "control_owner": "observed",
       "capabilities": ["power", "target_humidity"],
-      "endpoints": [{"role": "control", "entity_id": "humidifier.synthetic_kids"}]
+      "endpoints": [{"role": "control", "entity_id": "humidifier.synthetic_kids"}],
+      "control_channel": null
     }
   ]
 }

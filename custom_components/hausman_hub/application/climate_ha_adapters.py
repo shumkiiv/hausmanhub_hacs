@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from ..domain.climate import (
     ClimateCapability,
+    ClimateControlChannel,
     ClimateDevice,
     ClimateDeviceKind,
     ClimateEndpointRole,
@@ -110,6 +111,12 @@ def _service_calls(
     plan: ClimateFinalDevicePlan,
     limits: list[ClimateHaCallLimit],
 ) -> tuple[ClimateHaServiceCall, ...]:
+    if device.control_channel in {
+        ClimateControlChannel.UNIVERSAL_IR,
+        ClimateControlChannel.YANDEX_REMOTE,
+    }:
+        limits.append(ClimateHaCallLimit.UNSUPPORTED_CONTROL_CHANNEL)
+        return ()
     endpoint = device.endpoint(ClimateEndpointRole.CONTROL)
     required = _required_capabilities(device.kind, plan.action)
     if required is None or (

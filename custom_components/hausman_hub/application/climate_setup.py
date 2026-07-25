@@ -6,8 +6,18 @@ from dataclasses import replace
 import hashlib
 import json
 
-from ..domain.climate import ClimateRegistry, ClimateRoom
-from ..domain.contours import ContourMode, ContourRegistry
+from ..domain.climate import (
+    ClimateControlChannel,
+    ClimateControlScope,
+    ClimateModelViolation,
+    ClimateRegistry,
+    ClimateRoom,
+)
+from ..domain.contours import (
+    ContourMode,
+    ContourRegistry,
+    climate_target_temperature,
+)
 from .contours import (
     ContourRegistryViolation,
     build_climate_contour_setup,
@@ -78,7 +88,11 @@ _CLIMATE_DRAFT_ROOM_FIELDS = frozenset(
         "devices",
     }
 )
+_CLIMATE_DRAFT_ROOM_OPTIONAL_FIELDS = frozenset(
+    {"min_temperature", "max_temperature"}
+)
 _CLIMATE_DRAFT_DEVICE_FIELDS = frozenset({"candidate_id", "type"})
+_CLIMATE_DRAFT_DEVICE_OPTIONAL_FIELDS = frozenset({"control_channel"})
 _CLIMATE_DRAFT_RESPONSE_FIELDS = frozenset(
     {
         "contract",
@@ -98,12 +112,16 @@ _CLIMATE_DRAFT_RESPONSE_FIELDS = frozenset(
 _CLIMATE_DRAFT_RESPONSE_ROOM_FIELDS = frozenset(
     {"id", "name", "targets", "devices"}
 )
+_CLIMATE_DRAFT_RESPONSE_ROOM_OPTIONAL_FIELDS = frozenset(
+    {"min_temperature", "max_temperature"}
+)
 _CLIMATE_DRAFT_TARGET_FIELDS = frozenset(
     {"target_temperature", "target_humidity", "strategy"}
 )
 _CLIMATE_DRAFT_RESPONSE_DEVICE_FIELDS = frozenset(
     {"candidate_id", "name", "type", "type_name"}
 )
+_CLIMATE_DRAFT_RESPONSE_DEVICE_OPTIONAL_FIELDS = frozenset({"control_channel"})
 _CLIMATE_PROFILE_UPDATE_REQUEST_FIELDS = frozenset(
     {"contract", "setup_revision", "rooms"}
 )
@@ -130,6 +148,12 @@ _VALIDATION_ISSUE_NAMES = {
     ),
     "unsupported_device_set": (
         "Выбранный набор устройств нельзя безопасно подготовить к сохранению."
+    ),
+    "invalid_temperature_bounds": (
+        "Границы температуры комнаты не согласованы с её профилем."
+    ),
+    "invalid_control_channel": (
+        "Выбранный канал управления не подходит этому устройству."
     ),
 }
 _DRAFT_MODE_NAMES = {
@@ -582,9 +606,10 @@ def create_climate_contour_draft(
     device_type_names = public_climate_display_names()["device_kinds"]
 
     for room_value in room_values:
-        room = _exact_mapping(
+        room = _mapping_with_optional_fields(
             room_value,
             _CLIMATE_DRAFT_ROOM_FIELDS,
+            _CLIMATE_DRAFT_ROOM_OPTIONAL_FIELDS,
             "climate draft room",
         )
         room_id = room["room_id"]
@@ -612,9 +637,10 @@ def create_climate_contour_draft(
             raise ClimateSetupViolation("climate draft has too many devices")
         normalized_devices: list[dict[str, object]] = []
         for device_value in device_values:
-            device = _exact_mapping(
+            device = _mapping_with_optional_fields(
                 device_value,
                 _CLIMATE_DRAFT_DEVICE_FIELDS,
+                _CLIMATE_DRAFT_DEVICE_OPTIONAL_FIELDS,
                 "climate draft device",
             )
             candidate_id = device["candidate_id"]
@@ -648,6 +674,7 @@ def create_climate_contour_draft(
                     "name": candidate["name"],
                     "type": selected_type,
                     "type_name": device_type_names[selected_type],
+                    "control_channel": device.get("control_channel"),
                 }
             )
 
@@ -656,6 +683,8 @@ def create_climate_contour_draft(
                 "id": room_id,
                 "name": available_rooms[room_id]["name"],
                 "targets": targets,
+                "min_temperature": room.get("min_temperature"),
+                "max_temperature": room.get("max_temperature"),
                 "devices": sorted(
                     normalized_devices,
                     key=lambda item: item["candidate_id"],  # type: ignore[return-value]
@@ -711,23 +740,43 @@ def climate_setup_options(
         suggestion["candidate_id"]: suggestion
         for suggestion in suggestions_payload["suggestions"]  # type: ignore[index]
     }
+    candidate_sources = {
+        f"candidate_{index:04d}": source_id
+        for index, source_id in enumerate(
+            _ordered_candidate_source_ids(registry, snapshot),
+            start=1,
+        )
+    }
     devices: list[dict[str, object]] = []
     for candidate in candidates_payload["candidates"]:  # type: ignore[index]
         suggestion = suggestions[candidate["candidate_id"]]
-        devices.append(
-            {
-                "candidate_id": candidate["candidate_id"],
-                "name": candidate["name"],
-                "room_id": candidate["room_id"],
-                "suggested_types": candidate["suggested_types"],
-                "recommended_type": candidate["recommended_type"],
-                "status": candidate["status"],
-                "suggested_room_id": suggestion["suggested_room_id"],
-                "suggested_room_name": suggestion["suggested_room_name"],
-                "reason": suggestion["reason"],
-                "can_add": suggestion["can_accept"],
-            }
+        device = {
+            "candidate_id": candidate["candidate_id"],
+            "name": candidate["name"],
+            "room_id": candidate["room_id"],
+            "suggested_types": candidate["suggested_types"],
+            "recommended_type": candidate["recommended_type"],
+            "status": candidate["status"],
+            "suggested_room_id": suggestion["suggested_room_id"],
+            "suggested_room_name": suggestion["suggested_room_name"],
+            "reason": suggestion["reason"],
+            "can_add": suggestion["can_accept"],
+        }
+        imported = snapshot.device(
+            candidate_sources[candidate["candidate_id"]]
         )
+        if imported is not None:
+            for field in (
+                "device_group_id",
+                "device_name",
+                "manufacturer",
+                "model",
+                "image_url",
+            ):
+                value = getattr(imported, field)
+                if value is not None:
+                    device[field] = value
+        devices.append(device)
 
     return {
         "contract": {
@@ -738,6 +787,9 @@ def climate_setup_options(
         "snapshot_revision": candidates_payload["snapshot_revision"],
         "data_status": candidates_payload["data_status"],
         "draft_creation_allowed": any(device["can_add"] is True for device in devices),
+        "control_channels": [
+            channel.value for channel in ClimateControlChannel
+        ],
         "display_names": {
             "room_status": dict(_ROOM_STATUS_NAMES),
             "device_types": dict(
@@ -877,6 +929,11 @@ def current_climate_contour_setup(
                     "name": device.name,
                     "type": device.kind.value,
                     "type_name": device_kind_names[device.kind.value],
+                    "control_channel": (
+                        None
+                        if device.control_channel is None
+                        else device.control_channel.value
+                    ),
                 }
             )
             device_count += 1
@@ -905,6 +962,8 @@ def current_climate_contour_setup(
                     },
                     "active_profile": assignment.active_profile.value,
                 },
+                "min_temperature": assignment.min_temperature,
+                "max_temperature": assignment.max_temperature,
                 "temporary_temperature": (
                     None
                     if assignment.temporary_override is None
@@ -1261,9 +1320,10 @@ def validate_climate_contour_draft(
 
     request_rooms: list[dict[str, object]] = []
     for room_value in rooms:
-        room = _exact_mapping(
+        room = _mapping_with_optional_fields(
             room_value,
             _CLIMATE_DRAFT_RESPONSE_ROOM_FIELDS,
+            _CLIMATE_DRAFT_RESPONSE_ROOM_OPTIONAL_FIELDS,
             "climate draft response room",
         )
         targets = _exact_mapping(
@@ -1276,15 +1336,17 @@ def validate_climate_contour_draft(
             raise ClimateSetupViolation("climate draft response devices are invalid")
         request_devices: list[dict[str, object]] = []
         for device_value in devices:
-            device = _exact_mapping(
+            device = _mapping_with_optional_fields(
                 device_value,
                 _CLIMATE_DRAFT_RESPONSE_DEVICE_FIELDS,
+                _CLIMATE_DRAFT_RESPONSE_DEVICE_OPTIONAL_FIELDS,
                 "climate draft response device",
             )
             request_devices.append(
                 {
                     "candidate_id": device["candidate_id"],
                     "type": device["type"],
+                    "control_channel": device.get("control_channel"),
                 }
             )
         request_rooms.append(
@@ -1293,6 +1355,8 @@ def validate_climate_contour_draft(
                 "target_temperature": targets["target_temperature"],
                 "target_humidity": targets["target_humidity"],
                 "strategy": targets["strategy"],
+                "min_temperature": room.get("min_temperature"),
+                "max_temperature": room.get("max_temperature"),
                 "devices": request_devices,
             }
         )
@@ -1314,8 +1378,53 @@ def validate_climate_contour_draft(
         expected_request,
         contours=contours,
     )
-    comparable_draft = dict(draft)
+    comparable_rooms: list[dict[str, object]] = []
+    has_legacy_optional_fields = False
+    for room_value in rooms:
+        room = _mapping_with_optional_fields(
+            room_value,
+            _CLIMATE_DRAFT_RESPONSE_ROOM_FIELDS,
+            _CLIMATE_DRAFT_RESPONSE_ROOM_OPTIONAL_FIELDS,
+            "climate draft response room",
+        )
+        devices = room["devices"]
+        if not isinstance(devices, list):
+            raise ClimateSetupViolation("climate draft response devices are invalid")
+        normalized_devices: list[dict[str, object]] = []
+        for device_value in devices:
+            device = _mapping_with_optional_fields(
+                device_value,
+                _CLIMATE_DRAFT_RESPONSE_DEVICE_FIELDS,
+                _CLIMATE_DRAFT_RESPONSE_DEVICE_OPTIONAL_FIELDS,
+                "climate draft response device",
+            )
+            if "control_channel" not in device:
+                has_legacy_optional_fields = True
+            normalized_devices.append(
+                {**device, "control_channel": device.get("control_channel")}
+            )
+        if (
+            "min_temperature" not in room
+            or "max_temperature" not in room
+        ):
+            has_legacy_optional_fields = True
+        comparable_rooms.append(
+            {
+                **room,
+                "min_temperature": room.get("min_temperature"),
+                "max_temperature": room.get("max_temperature"),
+                "devices": normalized_devices,
+            }
+        )
+    comparable_draft = {**draft, "rooms": comparable_rooms}
     comparable_draft["generated_at"] = expected["generated_at"]
+    if has_legacy_optional_fields:
+        comparable_without_revision = dict(comparable_draft)
+        expected_without_revision = dict(expected)
+        comparable_without_revision.pop("draft_revision", None)
+        expected_without_revision.pop("draft_revision", None)
+        if comparable_without_revision == expected_without_revision:
+            comparable_draft["draft_revision"] = expected["draft_revision"]
     if comparable_draft != expected:
         comparable_without_revision = dict(comparable_draft)
         expected_without_revision = dict(expected)
@@ -1338,7 +1447,9 @@ def validate_climate_contour_draft(
     }
     selected_source_ids: list[str] = []
     selected_source_kinds: dict[str, object] = {}
+    selected_control_channels: dict[str, object] = {}
     room_parameters: dict[str, object] = {}
+    room_bounds: dict[str, dict[str, object]] = {}
     issues: list[dict[str, object]] = []
     for room in request_rooms:
         room_id = room["room_id"]
@@ -1349,8 +1460,24 @@ def validate_climate_contour_draft(
             source_id = source_by_candidate[candidate_id]
             selected_source_ids.append(source_id)
             selected_source_kinds[source_id] = device["type"]
+            selected_control_channels[source_id] = device.get("control_channel")
             if device["type"] in _ACTIVE_CLIMATE_DRAFT_TYPES:
                 active = True
+            if _invalid_control_channel(device) or _channel_needs_managed_scope(
+                registry,
+                source_id,
+                device.get("control_channel"),
+            ):
+                issues.append(
+                    {
+                        "code": "invalid_control_channel",
+                        "room_id": room_id,
+                        "candidate_id": candidate_id,
+                        "message": _VALIDATION_ISSUE_NAMES[
+                            "invalid_control_channel"
+                        ],
+                    }
+                )
         if not active:
             issues.append(
                 {
@@ -1364,33 +1491,51 @@ def validate_climate_contour_draft(
             "target_humidity": room["target_humidity"],
             "strategy": room["strategy"],
         }
+        room_bounds[room_id] = {
+            "min_temperature": room.get("min_temperature"),
+            "max_temperature": room.get("max_temperature"),
+        }
+        if _invalid_temperature_bounds(room, room_bounds[room_id]):
+            issues.append(
+                {
+                    "code": "invalid_temperature_bounds",
+                    "room_id": room_id,
+                    "message": _VALIDATION_ISSUE_NAMES[
+                        "invalid_temperature_bounds"
+                    ],
+                }
+            )
 
-    capabilities_supported = True
-    try:
-        import_managed_climate_selection(
-            snapshot,
-            room_ids=[room["room_id"] for room in request_rooms],
-            source_ids=selected_source_ids,
-            source_kinds=selected_source_kinds,
-            source_room_assignments={
-                source_by_candidate[device["candidate_id"]]: room["room_id"]
-                for room in request_rooms
-                for device in room["devices"]  # type: ignore[union-attr]
-            },
-        )
-    except ClimateRegistryImportViolation:
-        capabilities_supported = False
-        issues.append(
-            {
-                "code": "unsupported_device_set",
-                "room_id": None,
-                "message": _VALIDATION_ISSUE_NAMES["unsupported_device_set"],
-            }
-        )
+    capabilities_supported = not any(
+        issue["code"] in {"invalid_temperature_bounds", "invalid_control_channel"}
+        for issue in issues
+    )
+    if not issues:
+        try:
+            import_managed_climate_selection(
+                snapshot,
+                room_ids=[room["room_id"] for room in request_rooms],
+                source_ids=selected_source_ids,
+                source_kinds=selected_source_kinds,
+                source_room_assignments={
+                    source_by_candidate[device["candidate_id"]]: room["room_id"]
+                    for room in request_rooms
+                    for device in room["devices"]  # type: ignore[union-attr]
+                },
+            )
+        except ClimateRegistryImportViolation:
+            capabilities_supported = False
+            issues.append(
+                {
+                    "code": "unsupported_device_set",
+                    "room_id": None,
+                    "message": _VALIDATION_ISSUE_NAMES["unsupported_device_set"],
+                }
+            )
 
     if not issues:
         try:
-            build_climate_contour_setup(
+            rebuilt_registry, _ = build_climate_contour_setup(
                 snapshot,
                 room_ids=[room["room_id"] for room in request_rooms],
                 source_ids=selected_source_ids,
@@ -1403,8 +1548,11 @@ def validate_climate_contour_draft(
                 name=draft["name"],
                 mode=draft["mode"],
                 room_parameters=room_parameters,
+                room_bounds=room_bounds,
+                control_channels=selected_control_channels,
             )
-        except ContourRegistryViolation:
+            _preserve_registry_settings(registry, rebuilt_registry)
+        except (ClimateModelViolation, ContourRegistryViolation):
             capabilities_supported = False
             issues.append(
                 {
@@ -1474,7 +1622,9 @@ def build_climate_contour_draft_setup(
     }
     selected_source_ids: list[str] = []
     selected_source_kinds: dict[str, object] = {}
+    selected_control_channels: dict[str, object] = {}
     room_parameters: dict[str, object] = {}
+    room_bounds: dict[str, dict[str, object]] = {}
     room_ids: list[str] = []
     rooms = draft["rooms"]
     if not isinstance(rooms, list):
@@ -1491,6 +1641,10 @@ def build_climate_contour_draft_setup(
         if not isinstance(targets, dict) or not isinstance(devices, list):
             raise ClimateSetupViolation("saved climate draft room is invalid")
         room_parameters[room_id] = dict(targets)
+        room_bounds[room_id] = {
+            "min_temperature": room.get("min_temperature"),
+            "max_temperature": room.get("max_temperature"),
+        }
         for device in devices:
             if not isinstance(device, dict):
                 raise ClimateSetupViolation("saved climate draft device is invalid")
@@ -1502,6 +1656,7 @@ def build_climate_contour_draft_setup(
             source_id = source_by_candidate[candidate_id]
             selected_source_ids.append(source_id)
             selected_source_kinds[source_id] = device["type"]
+            selected_control_channels[source_id] = device.get("control_channel")
 
     source_room_assignments: dict[str, str] = {}
     for room in rooms:
@@ -1539,6 +1694,8 @@ def build_climate_contour_draft_setup(
         mode=draft["mode"],
         room_parameters=room_parameters,
         room_profiles=prior_profiles,
+        room_bounds=room_bounds,
+        control_channels=selected_control_channels,
         schedule=prior_schedule,
     )
     climate_registry, device_id_replacements = _preserve_registry_settings(
@@ -1595,7 +1752,10 @@ def _preserve_registry_settings(
     for device in rebuilt.devices:
         previous = reusable.get(device.source_id)
         if previous is not None:
-            selected = previous
+            selected = replace(
+                previous,
+                control_channel=device.control_channel,
+            )
         else:
             selected = replace(
                 device,
@@ -1673,6 +1833,59 @@ def _available_device_id(preferred: str, unavailable: set[str]) -> str:
         ordinal += 1
 
 
+def _invalid_temperature_bounds(
+    room: dict[str, object],
+    bounds: dict[str, object],
+) -> bool:
+    try:
+        minimum = (
+            None
+            if bounds["min_temperature"] is None
+            else climate_target_temperature(bounds["min_temperature"])
+        )
+        maximum = (
+            None
+            if bounds["max_temperature"] is None
+            else climate_target_temperature(bounds["max_temperature"])
+        )
+        target = climate_target_temperature(room["target_temperature"])
+    except ValueError:
+        return True
+    return (
+        (minimum is not None and minimum > target)
+        or (maximum is not None and maximum < target)
+        or (minimum is not None and maximum is not None and minimum > maximum)
+    )
+
+
+def _invalid_control_channel(device: dict[str, object]) -> bool:
+    channel = device.get("control_channel")
+    if channel is None:
+        return False
+    if device["type"] not in _ACTIVE_CLIMATE_DRAFT_TYPES:
+        return True
+    try:
+        ClimateControlChannel(channel)
+    except (TypeError, ValueError):
+        return True
+    return False
+
+
+def _channel_needs_managed_scope(
+    registry: ClimateRegistry,
+    source_id: str,
+    channel: object,
+) -> bool:
+    if channel is None:
+        return False
+    return any(
+        device.control_scope is not ClimateControlScope.MANAGED
+        and device.source_id
+        in {source_id, f"hausmanhub-native-{source_id}"}
+        for device in registry.devices
+    )
+
+
 def climate_draft_save_receipt(
     draft: object,
     validation: object,
@@ -1745,6 +1958,20 @@ def _exact_mapping(
     label: str,
 ) -> dict[str, object]:
     if not isinstance(value, dict) or set(value) != fields:
+        raise ClimateSetupViolation(f"{label} fields are invalid")
+    return value
+
+
+def _mapping_with_optional_fields(
+    value: object,
+    required_fields: frozenset[str],
+    optional_fields: frozenset[str],
+    label: str,
+) -> dict[str, object]:
+    if (
+        not isinstance(value, dict)
+        or not required_fields <= set(value) <= required_fields | optional_fields
+    ):
         raise ClimateSetupViolation(f"{label} fields are invalid")
     return value
 

@@ -56,6 +56,7 @@ from custom_components.hausman_hub.domain.climate_stability import (
 from custom_components.hausman_hub.domain.climate_targets import ClimateStrategy
 from custom_components.hausman_hub.domain.climate import (
     ClimateCapability,
+    ClimateControlChannel,
     ClimateControlOwner,
     ClimateControlScope,
     ClimateDevice,
@@ -314,6 +315,55 @@ class ClimateHaAdapterTest(unittest.TestCase):
             ),
             device.limits,
         )
+
+    def test_ir_and_yandex_channels_block_native_entity_calls(self) -> None:
+        payload, registry, contours = _setup(entity_id="climate.living_ac")
+        isolation = _pipeline(
+            payload,
+            registry,
+            contours,
+            mutate_observation=_close_windows,
+        )
+
+        for channel in (
+            ClimateControlChannel.UNIVERSAL_IR,
+            ClimateControlChannel.YANDEX_REMOTE,
+        ):
+            with self.subTest(channel=channel):
+                routed_registry = ClimateRegistry(
+                    rooms=registry.rooms,
+                    devices=(replace(registry.devices[0], control_channel=channel),),
+                )
+
+                plan = build_climate_ha_call_plan(routed_registry, isolation)
+
+                (device,) = plan.room("living").devices  # type: ignore[union-attr]
+                self.assertEqual((), device.calls)
+                self.assertIn(ClimateHaCallLimit.UNSUPPORTED_CONTROL_CHANNEL, device.limits)
+
+    def test_direct_wifi_channel_uses_existing_entity_calls(self) -> None:
+        payload, registry, contours = _setup(entity_id="climate.living_ac")
+        isolation = _pipeline(
+            payload,
+            registry,
+            contours,
+            mutate_observation=_close_windows,
+        )
+        routed_registry = ClimateRegistry(
+            rooms=registry.rooms,
+            devices=(
+                replace(
+                    registry.devices[0],
+                    control_channel=ClimateControlChannel.DIRECT_WIFI,
+                ),
+            ),
+        )
+
+        plan = build_climate_ha_call_plan(routed_registry, isolation)
+
+        (device,) = plan.room("living").devices  # type: ignore[union-attr]
+        self.assertTrue(device.calls)
+        self.assertNotIn(ClimateHaCallLimit.UNSUPPORTED_CONTROL_CHANNEL, device.limits)
 
     def test_missing_hvac_capability_blocks_the_whole_translation(self) -> None:
         payload, registry, contours = _setup(

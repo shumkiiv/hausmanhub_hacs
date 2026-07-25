@@ -21,6 +21,17 @@ _STABLE_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 class TemporaryTemperatureViolation(ValueError):
     """A temporary room temperature request is unsafe or incomplete."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "invalid_temporary_temperature",
+        room_id: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.room_id = room_id
+
 
 class TemporaryTemperatureAction(StrEnum):
     """The two bounded temporary-temperature operations."""

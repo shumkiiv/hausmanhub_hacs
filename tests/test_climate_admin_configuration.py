@@ -25,6 +25,7 @@ from custom_components.hausman_hub.application.climate_signal_settings import (
     PRESENCE_DOMAINS,
     ROOM_PRESENCE_DOMAINS,
     WINDOW_DOMAINS,
+    WINDOW_SIGNAL,
     ClimateSignalSettingsViolation,
     validate_climate_mode_update,
     validate_home_environment_update,
@@ -47,7 +48,7 @@ def registry_with_rooms() -> object:
 
     return registry_from_payload(
         {
-            "version": 2,
+            "version": 3,
             "home": {
                 "outdoor_temperature_entity_id": None,
                 "presence_entity_id": None,
@@ -87,7 +88,10 @@ def configured_setup() -> tuple[object, ContourRegistry]:
 class SignalStateView:
     """Bounded fake state view with the signal catalog extension."""
 
-    def __init__(self, states: dict[str, tuple[str, str]] | None = None) -> None:
+    def __init__(
+        self,
+        states: dict[str, tuple[str, str, str | None, str]] | None = None,
+    ) -> None:
         self._states = dict(states or {})
 
     def entity_state(self, entity_id: str) -> object | None:
@@ -96,10 +100,14 @@ class SignalStateView:
             return None
         return SimpleNamespace(entity_id=entity_id, state=item[0])
 
-    def signal_entity_catalog(self, allowed_domains: frozenset[str]) -> object:
+    def signal_entity_catalog(self, signal_kind: str) -> object:
         from custom_components.hausman_hub.application.climate_native_setup import (
             ClimateHaCatalogEntry,
+            ClimateHaCatalogRoom,
             ClimateHaEntityCatalog,
+        )
+        from custom_components.hausman_hub.application.climate_signal_settings import (
+            signal_candidate_is_suitable,
         )
 
         return ClimateHaEntityCatalog(
@@ -108,15 +116,35 @@ class SignalStateView:
                     entity_id=entity_id,
                     domain=entity_id.split(".", 1)[0],
                     state=state,
-                    device_class=None,
+                    device_class=device_class,
                     supported_features=0,
                     friendly_name=name,
                     available=state not in {"", "unavailable", "unknown"},
                     last_updated_ms=0,
+                    room_id=room_id,
                 )
-                for entity_id, (state, name) in sorted(self._states.items())
-                if entity_id.split(".", 1)[0] in allowed_domains
-            )
+                for entity_id, (
+                    state,
+                    name,
+                    device_class,
+                    room_id,
+                ) in sorted(self._states.items())
+                if signal_candidate_is_suitable(
+                    signal_kind,
+                    domain=entity_id.split(".", 1)[0],
+                    device_class=device_class,
+                    entity_category=None,
+                    attributes={},
+                )
+            ),
+            rooms=tuple(
+                ClimateHaCatalogRoom(room_id=room_id, name=name)
+                for room_id, name in (
+                    ("kids", "Детская"),
+                    ("living", "Гостиная"),
+                )
+                if any(item[3] == room_id for item in self._states.values())
+            ),
         )
 
 
@@ -188,6 +216,7 @@ class ClimateSignalSettingsValidationTest(unittest.TestCase):
     def test_home_environment_update_happy_path(self) -> None:
         known = {
             "sensor.outdoor_temperature",
+            "weather.home",
             "person.ivan",
             "switch.central_heating",
         }
@@ -210,6 +239,20 @@ class ClimateSignalSettingsValidationTest(unittest.TestCase):
                 "heating_lockout_low": 15.5,
             },
             result,
+        )
+        weather = validate_home_environment_update(
+            {
+                "outdoor_temperature_entity_id": "weather.home",
+                "presence_entity_id": "person.ivan",
+                "central_heating_entity_id": "switch.central_heating",
+                "heating_lockout_high": 19,
+                "heating_lockout_low": 15.5,
+            },
+            entity_known=known.__contains__,
+        )
+        self.assertEqual(
+            "weather.home",
+            weather["outdoor_temperature_entity_id"],
         )
 
     def test_home_environment_update_rejects_bad_shapes_and_thresholds(self) -> None:
@@ -515,6 +558,23 @@ class ClimateSignalSettingsValidationTest(unittest.TestCase):
 class ClimateAdminRuntimeSupportTest(unittest.TestCase):
     """Lock the new runtime seams behind the admin configuration routes."""
 
+    def test_configured_setup_serializes_null_bounds_and_control_channel(self) -> None:
+        from custom_components.hausman_hub.application.climate_registry import (
+            registry_to_payload,
+        )
+        from custom_components.hausman_hub.application.contours import (
+            contour_registry_to_payload,
+        )
+
+        registry, contours = configured_setup()
+        registry_payload = registry_to_payload(registry)  # type: ignore[arg-type]
+        contour_payload = contour_registry_to_payload(contours)
+
+        self.assertIsNone(registry_payload["devices"][0]["control_channel"])  # type: ignore[index]
+        room = contour_payload["contours"][0]["rooms"][0]  # type: ignore[index]
+        self.assertIsNone(room["min_temperature"])
+        self.assertIsNone(room["max_temperature"])
+
     def test_update_room_window_rewrites_one_room_atomically(self) -> None:
         runtime, store, _ = build_runtime(registry_with_rooms())
         payload = asyncio.run(
@@ -622,21 +682,35 @@ class ClimateAdminRuntimeSupportTest(unittest.TestCase):
     def test_signal_catalog_and_entity_lookup(self) -> None:
         view = SignalStateView(
             {
-                "binary_sensor.living_window": ("off", "Окно гостиной"),
-                "sensor.outdoor_temperature": ("4.5", "Улица"),
-                "climate.living_ac": ("cool", "Кондиционер"),
+                "binary_sensor.living_window": (
+                    "off",
+                    "Окно гостиной",
+                    "window",
+                    "living",
+                ),
+                "sensor.outdoor_temperature": (
+                    "4.5",
+                    "Улица",
+                    "temperature",
+                    "",
+                ),
+                "climate.living_ac": ("cool", "Кондиционер", None, "living"),
             }
         )
         runtime, _, _ = build_runtime(registry_with_rooms(), state_view=view)
         self.assertTrue(runtime.signal_entity_known("binary_sensor.living_window"))
         self.assertFalse(runtime.signal_entity_known("binary_sensor.missing"))
-        catalog = asyncio.run(runtime.async_signal_catalog(WINDOW_DOMAINS))
+        catalog = asyncio.run(runtime.async_signal_catalog(WINDOW_SIGNAL))
         self.assertEqual(
             [
                 {
                     "entity_id": "binary_sensor.living_window",
                     "name": "Окно гостиной",
                     "available": True,
+                    "domain": "binary_sensor",
+                    "room_id": "living",
+                    "device_class": "window",
+                    "room_name": "Гостиная",
                 }
             ],
             catalog,
@@ -645,10 +719,10 @@ class ClimateAdminRuntimeSupportTest(unittest.TestCase):
     def test_signal_catalog_fails_closed_without_the_extension(self) -> None:
         runtime, _, _ = build_runtime(registry_with_rooms(), state_view=object())
         with self.assertRaises(ClimateRuntimeUnavailable):
-            asyncio.run(runtime.async_signal_catalog(WINDOW_DOMAINS))
+            asyncio.run(runtime.async_signal_catalog(WINDOW_SIGNAL))
         runtime_without_view, _, _ = build_runtime(registry_with_rooms())
         with self.assertRaises(ClimateRuntimeUnavailable):
-            asyncio.run(runtime_without_view.async_signal_catalog(WINDOW_DOMAINS))
+            asyncio.run(runtime_without_view.async_signal_catalog(WINDOW_SIGNAL))
         self.assertFalse(runtime_without_view.signal_entity_known("sensor.any"))
 
 
@@ -719,7 +793,28 @@ class ClimateAdminConfigurationRoutesTest(unittest.TestCase):
             "sensor.synthetic_outdoor": SimpleNamespace(
                 entity_id="sensor.synthetic_outdoor",
                 state="4.5",
-                attributes={"friendly_name": "Улица"},
+                attributes={
+                    "friendly_name": "Улица",
+                    "device_class": "temperature",
+                },
+                last_updated=dt(2026, 7, 19, 12, 0),
+            ),
+            "weather.synthetic_home": SimpleNamespace(
+                entity_id="weather.synthetic_home",
+                state="sunny",
+                attributes={
+                    "friendly_name": "Погода дома",
+                    "temperature": 6.5,
+                },
+                last_updated=dt(2026, 7, 19, 12, 0),
+            ),
+            "sensor.synthetic_lock_temperature": SimpleNamespace(
+                entity_id="sensor.synthetic_lock_temperature",
+                state="37.0",
+                attributes={
+                    "friendly_name": "Температура замка",
+                    "device_class": "temperature",
+                },
                 last_updated=dt(2026, 7, 19, 12, 0),
             ),
             "person.synthetic_ivan": SimpleNamespace(
@@ -737,24 +832,53 @@ class ClimateAdminConfigurationRoutesTest(unittest.TestCase):
             "binary_sensor.synthetic_window": SimpleNamespace(
                 entity_id="binary_sensor.synthetic_window",
                 state="off",
-                attributes={"friendly_name": "Окно"},
+                attributes={"friendly_name": "Окно", "device_class": "window"},
                 last_updated=dt(2026, 7, 19, 12, 0),
             ),
             "binary_sensor.synthetic_motion": SimpleNamespace(
                 entity_id="binary_sensor.synthetic_motion",
                 state="off",
-                attributes={"friendly_name": "Движение"},
+                attributes={"friendly_name": "Движение", "device_class": "motion"},
                 last_updated=dt(2026, 7, 19, 12, 0),
             ),
             "binary_sensor.synthetic_occupancy": SimpleNamespace(
                 entity_id="binary_sensor.synthetic_occupancy",
                 state="on",
-                attributes={"friendly_name": "Присутствие"},
+                attributes={
+                    "friendly_name": "Присутствие",
+                    "device_class": "occupancy",
+                },
                 last_updated=dt(2026, 7, 19, 12, 0),
             ),
         }
         self.hass.states.values = signal_states
         self.hass.states.async_all = lambda: list(signal_states.values())
+        self.hass.area_registry = SimpleNamespace(
+            async_list_areas=lambda: [
+                SimpleNamespace(id="kids", name="Детская"),
+                SimpleNamespace(id="living", name="Гостиная"),
+            ]
+        )
+        for index, (entity_id, room_id) in enumerate(
+            (
+                ("binary_sensor.synthetic_motion", "living"),
+                ("binary_sensor.synthetic_occupancy", "living"),
+                ("binary_sensor.synthetic_window", "living"),
+                ("sensor.synthetic_outdoor", ""),
+                ("weather.synthetic_home", ""),
+                ("sensor.synthetic_lock_temperature", "living"),
+            )
+        ):
+            self.hass.entity_registry.entities[f"signal-{index}"] = SimpleNamespace(
+                entity_id=entity_id,
+                area_id=room_id or None,
+                device_id=None,
+                entity_category=(
+                    "diagnostic"
+                    if entity_id == "sensor.synthetic_lock_temperature"
+                    else None
+                ),
+            )
 
     def _admin(self) -> object:
         from tests.test_local_summary_access import reader_user
@@ -779,9 +903,30 @@ class ClimateAdminConfigurationRoutesTest(unittest.TestCase):
             contours=contours,
             state_view=SignalStateView(
                 {
-                    "binary_sensor.synthetic_window": ("off", "Окно"),
-                    "binary_sensor.synthetic_motion": ("off", "Движение"),
-                    "binary_sensor.synthetic_occupancy": ("on", "Присутствие"),
+                    "binary_sensor.synthetic_window": (
+                        "off",
+                        "Окно",
+                        "window",
+                        "living",
+                    ),
+                    "binary_sensor.synthetic_motion": (
+                        "off",
+                        "Движение",
+                        "motion",
+                        "living",
+                    ),
+                    "binary_sensor.synthetic_occupancy": (
+                        "on",
+                        "Присутствие",
+                        "occupancy",
+                        "living",
+                    ),
+                    "binary_sensor.synthetic_kids_motion": (
+                        "off",
+                        "Движение детской",
+                        "motion",
+                        "kids",
+                    ),
                 }
             ),
         )
@@ -1016,23 +1161,19 @@ class ClimateAdminConfigurationRoutesTest(unittest.TestCase):
         )
         candidate_groups = response.payload["candidates"]
         self.assertEqual(
-            ["sensor.synthetic_outdoor"],
+            ["sensor.synthetic_outdoor", "weather.synthetic_home"],
             [item["entity_id"] for item in candidate_groups["outdoor_temperature"]],
         )
         self.assertEqual(
             [
                 "binary_sensor.synthetic_motion",
                 "binary_sensor.synthetic_occupancy",
-                "binary_sensor.synthetic_window",
                 "person.synthetic_ivan",
             ],
             [item["entity_id"] for item in candidate_groups["presence"]],
         )
         self.assertEqual(
             [
-                "binary_sensor.synthetic_motion",
-                "binary_sensor.synthetic_occupancy",
-                "binary_sensor.synthetic_window",
                 "switch.synthetic_central",
             ],
             [item["entity_id"] for item in candidate_groups["central_heating"]],
@@ -1056,6 +1197,23 @@ class ClimateAdminConfigurationRoutesTest(unittest.TestCase):
         )
         self.assertEqual(19.0, saved.payload["home"]["heating_lockout_high"])
 
+        weather_saved = self._post(
+            path,
+            self._admin(),
+            {
+                "outdoor_temperature_entity_id": "weather.synthetic_home",
+                "presence_entity_id": "person.synthetic_ivan",
+                "central_heating_entity_id": "switch.synthetic_central",
+                "heating_lockout_high": 19,
+                "heating_lockout_low": 15,
+            },
+        )
+        self.assertEqual(200, weather_saved.status)
+        self.assertEqual(
+            "weather.synthetic_home",
+            weather_saved.payload["home"]["outdoor_temperature_entity_id"],
+        )
+
         for payload in (
             {
                 "outdoor_temperature_entity_id": "binary_sensor.synthetic_window",
@@ -1066,6 +1224,13 @@ class ClimateAdminConfigurationRoutesTest(unittest.TestCase):
             },
             {
                 "outdoor_temperature_entity_id": "sensor.missing_outdoor",
+                "presence_entity_id": None,
+                "central_heating_entity_id": None,
+                "heating_lockout_high": 18,
+                "heating_lockout_low": 16,
+            },
+            {
+                "outdoor_temperature_entity_id": "sensor.synthetic_lock_temperature",
                 "presence_entity_id": None,
                 "central_heating_entity_id": None,
                 "heating_lockout_high": 18,
@@ -1105,18 +1270,14 @@ class ClimateAdminConfigurationRoutesTest(unittest.TestCase):
             response.payload["rooms"],
         )
         self.assertEqual(
-            [
-                "binary_sensor.synthetic_motion",
-                "binary_sensor.synthetic_occupancy",
-                "binary_sensor.synthetic_window",
-            ],
+            ["binary_sensor.synthetic_window"],
             [item["entity_id"] for item in response.payload["candidates"]],
         )
         self.assertEqual(
             [
+                "binary_sensor.synthetic_kids_motion",
                 "binary_sensor.synthetic_motion",
                 "binary_sensor.synthetic_occupancy",
-                "binary_sensor.synthetic_window",
             ],
             [
                 item["entity_id"]
@@ -1171,7 +1332,7 @@ class ClimateAdminConfigurationRoutesTest(unittest.TestCase):
                         "room_id": "kids",
                         "window_entity_id": None,
                         "presence_entity_ids": [
-                            "binary_sensor.synthetic_motion"
+                            "binary_sensor.synthetic_kids_motion"
                         ],
                     },
                 ],
@@ -1184,7 +1345,7 @@ class ClimateAdminConfigurationRoutesTest(unittest.TestCase):
             moved_rooms["living"]["presence_entity_ids"],
         )
         self.assertEqual(
-            ["binary_sensor.synthetic_motion"],
+            ["binary_sensor.synthetic_kids_motion"],
             moved_rooms["kids"]["presence_entity_ids"],
         )
 
@@ -1211,6 +1372,13 @@ class ClimateAdminConfigurationRoutesTest(unittest.TestCase):
             {"room_id": "living", "window_entity_id": "sensor.synthetic_outdoor"},
             {"room_id": "living", "window_entity_id": "binary_sensor.missing"},
             {"room_id": "living"},
+            {
+                "room_id": "kids",
+                "window_entity_id": None,
+                "presence_entity_ids": [
+                    "binary_sensor.synthetic_occupancy",
+                ],
+            },
             {
                 "room_id": "kids",
                 "window_entity_id": None,

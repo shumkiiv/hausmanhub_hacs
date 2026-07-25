@@ -38,6 +38,8 @@ def build_climate_target_snapshot(
                 night_profile=room.night_profile,
                 active_profile=room.active_profile,
                 temporary_override=room.temporary_override,
+                min_temperature=room.min_temperature,
+                max_temperature=room.max_temperature,
             ),
             observation.room(room.room_id),
             observed_at=observation.observed_at,

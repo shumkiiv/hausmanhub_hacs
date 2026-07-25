@@ -175,6 +175,33 @@
         "aggressive"
       ]
     },
+    "nullable_temperature": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "number",
+          "minimum": 18,
+          "maximum": 28,
+          "multipleOf": 0.5
+        }
+      ]
+    },
+    "nullable_control_channel": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "enum": [
+            "universal_ir",
+            "yandex_remote",
+            "direct_wifi"
+          ]
+        }
+      ]
+    },
     "targets": {
       "type": "object",
       "additionalProperties": false,
@@ -229,6 +256,9 @@
             "Датчик температуры",
             "Датчик влажности"
           ]
+        },
+        "control_channel": {
+          "$ref": "#/$defs/nullable_control_channel"
         }
       },
       "allOf": [
@@ -348,6 +378,12 @@
         },
         "targets": {
           "$ref": "#/$defs/targets"
+        },
+        "min_temperature": {
+          "$ref": "#/$defs/nullable_temperature"
+        },
+        "max_temperature": {
+          "$ref": "#/$defs/nullable_temperature"
         },
         "devices": {
           "type": "array",

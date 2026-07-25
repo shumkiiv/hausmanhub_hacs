@@ -82,6 +82,8 @@ def target(
     temperature: float = 25.0,
     humidity: int = 45,
     strategy: ClimateStrategy = ClimateStrategy.NORMAL,
+    min_temperature: float | None = None,
+    max_temperature: float | None = None,
 ) -> ClimateRoomTarget:
     return ClimateRoomTarget(
         room_id="living",
@@ -93,6 +95,8 @@ def target(
         temperature_origin=ClimateTemperatureTargetOrigin.PROFILE,
         observation_status=ClimateDataStatus.FRESH,
         observation_observed_at=NOW,
+        min_temperature=min_temperature,
+        max_temperature=max_temperature,
     )
 
 
@@ -221,6 +225,21 @@ class ClimateStabilityTest(unittest.TestCase):
             softens.reason,
             ClimateStabilityReason.SOFTEN_BEFORE_STOP,
         )
+
+    def test_stability_setpoint_clamps_to_room_maximum(self) -> None:
+        running = device(
+            ClimateObservationDeviceKind.AIR_CONDITIONER,
+            activity=ClimateDeviceActivity.RUNNING,
+        )
+
+        result = stable(
+            running,
+            room(temperature=24.8),
+            selected_target=target(temperature=25.0, max_temperature=26.0),
+        )
+
+        self.assertIs(result.action, ClimateStabilityAction.MAINTAIN)
+        self.assertEqual(26.0, result.target_temperature)
 
     def test_minimum_run_and_off_windows_end_on_exact_boundary(self) -> None:
         slow_running = device(

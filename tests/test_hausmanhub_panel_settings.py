@@ -36,7 +36,22 @@ HOME_PAYLOAD = {
     },
     "candidates": {
         "outdoor_temperature": [
-            {"entity_id": "sensor.outdoor", "name": "Улица", "available": True}
+            {
+                "entity_id": "sensor.outdoor",
+                "name": "Улица",
+                "available": True,
+                "domain": "sensor",
+                "device_class": "temperature",
+                "room_id": "living",
+                "room_name": "Гостиная",
+            },
+            {
+                "entity_id": "weather.home",
+                "name": "Погода дома",
+                "available": True,
+                "domain": "weather",
+                "room_id": "",
+            },
         ],
         "presence": [],
         "central_heating": [],
@@ -63,6 +78,9 @@ WINDOWS_PAYLOAD = {
             "name": "Окно гостиной",
             "available": True,
             "device_class": "window",
+            "domain": "binary_sensor",
+            "room_id": "living",
+            "room_name": "Гостиная",
         },
     ],
     "presence_candidates": [
@@ -71,12 +89,18 @@ WINDOWS_PAYLOAD = {
             "name": "Движение гостиной",
             "available": True,
             "device_class": "motion",
+            "domain": "binary_sensor",
+            "room_id": "living",
+            "room_name": "Гостиная",
         },
         {
             "entity_id": "binary_sensor.living_occupancy",
             "name": "Присутствие гостиной",
             "available": True,
             "device_class": "occupancy",
+            "domain": "binary_sensor",
+            "room_id": "living",
+            "room_name": "Гостиная",
         },
     ],
 }
@@ -293,19 +317,18 @@ class PanelSettingsSectionsTest(unittest.TestCase):
             {},
             """
         const text = textOf(panel.shadowRoot);
-        if (!text.includes("Управление климатом выключено")) throw new Error("disabled readiness missing");
-        if (!text.includes("ещё не настроен")) throw new Error("not-configured hint missing");
-        if (!text.includes("Включение станет доступно после настройки")) {
-          throw new Error("contour prerequisite hint missing");
+        if (!text.includes("Первичная настройка климата")) {
+          throw new Error("first-run instruction missing");
         }
-        if (panel._activeSection !== "contour" || panel._shell.sectionNodes.contour.hidden) {
-          throw new Error("unconfigured setup did not open contour section");
+        if (!panel._shell.nav.hidden || panel._shell.wizard.hidden) {
+          throw new Error("unconfigured setup left regular tabs visible");
         }
-        const buttons = findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON");
-        const enable = buttons.find((node) => node.textContent === "Включить управление");
-        if (!enable) throw new Error("enable button missing");
-        if (enable.disabled !== true) throw new Error("enable button must stay disabled without a contour");
-        if (text.includes("Сохранить профили")) throw new Error("profiles editor rendered without setup");
+        if (panel._activeSection !== "overview" || !panel._shell.sectionNodes.overview.hidden) {
+          throw new Error("first-run exposed an editable overview section");
+        }
+        if (text.includes("Сохранить профили") || text.includes("Сохранить сигналы дома")) {
+          throw new Error("editable settings rendered before contour setup");
+        }
             """,
         )
         completed = run_panel_script(script)
@@ -448,12 +471,56 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         if (times.length !== 2 || times[0].value !== "07:00" || times[1].value !== "23:00") {
           throw new Error("saved schedule times not rendered");
         }
-        const selects = findAll(panel.shadowRoot, (node) => node.tagName === "SELECT");
-        const windowSelect = selects.find((node) => node.value === "binary_sensor.kids_window");
-        if (!windowSelect) throw new Error("saved window binding not selected");
-        const missingOption = findAll(windowSelect, (node) => node.tagName === "OPTION")
-          .find((node) => String(node.textContent).includes("недоступна"));
-        if (!missingOption) throw new Error("missing candidate fallback option absent");
+        const savedWindow = findAll(panel.shadowRoot, (node) =>
+          node.type === "radio"
+          && node.value === "binary_sensor.kids_window"
+          && node.checked);
+        if (savedWindow.length !== 1) throw new Error("saved window binding not selected");
+        if (!text.includes("ранее выбранная сущность сейчас недоступна")) {
+          throw new Error("missing candidate fallback absent");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_signal_pickers_are_grouped_cards_and_room_candidates_do_not_leak(self) -> None:
+        script = panel_script(
+            GET_PATHS,
+            {},
+            """
+        const fieldsets = findAll(panel.shadowRoot, (node) => node.tagName === "FIELDSET");
+        const outdoor = fieldsets.find((node) =>
+          textOf(node).includes("Наружная температура"));
+        if (!outdoor) throw new Error("outdoor card picker missing");
+        const outdoorText = textOf(outdoor);
+        for (const label of ["Гостиная", "Погодные сервисы", "Датчик температуры", "Погодный сервис"]) {
+          if (!outdoorText.includes(label)) throw new Error("outdoor grouping missing: " + label);
+        }
+        const weather = findAll(outdoor, (node) =>
+          node.type === "radio" && node.value === "weather.home");
+        if (weather.length !== 1) throw new Error("weather source missing");
+        if (findAll(outdoor, (node) => node.tagName === "SELECT").length) {
+          throw new Error("outdoor source is still a dropdown");
+        }
+        const roomCards = findAll(panel.shadowRoot, (node) =>
+          String(node.className).split(" ").includes("signal-room"));
+        const living = roomCards.find((node) => textOf(node).includes("Гостиная"));
+        const kids = roomCards.find((node) => textOf(node).includes("Детская"));
+        const livingPresence = findAll(living, (node) =>
+          node.type === "checkbox" && node.value === "binary_sensor.living_motion");
+        const kidsPresence = findAll(kids, (node) =>
+          node.type === "checkbox" && node.value === "binary_sensor.living_motion");
+        if (livingPresence.length !== 1 || kidsPresence.length !== 0) {
+          throw new Error("room presence candidates leaked across rooms");
+        }
+        const livingWindow = findAll(living, (node) =>
+          node.type === "radio" && node.value === "binary_sensor.living_window");
+        const kidsWindow = findAll(kids, (node) =>
+          node.type === "radio" && node.value === "binary_sensor.living_window");
+        if (livingWindow.length !== 1 || kidsWindow.length !== 0) {
+          throw new Error("window candidates leaked across rooms");
+        }
             """,
         )
         completed = run_panel_script(script)
@@ -581,12 +648,10 @@ class PanelSettingsSectionsTest(unittest.TestCase):
             GET_PATHS,
             {"hausman_hub/v1/admin/climate-room-signals": {"rooms": []}},
             """
-        const selects = findAll(panel.shadowRoot, (node) => node.tagName === "SELECT");
-        const living = selects.find((node) =>
-          findAll(node, (option) => option.tagName === "OPTION")
-            .some((option) => option.value === "binary_sensor.living_window"));
-        if (!living) throw new Error("living window select missing");
-        living.value = "binary_sensor.living_window";
+        const living = findAll(panel.shadowRoot, (node) =>
+          node.type === "radio" && node.value === "binary_sensor.living_window")[0];
+        if (!living) throw new Error("living window choice missing");
+        living.checked = true;
         living.fire("change");
         const buttons = findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON");
         const save = buttons.find((node) => node.textContent === "Сохранить сигналы комнат");
@@ -671,6 +736,9 @@ class PanelSettingsSectionsTest(unittest.TestCase):
                     "name": "Движение",
                     "available": True,
                     "device_class": "motion",
+                    "domain": "binary_sensor",
+                    "room_id": "living",
+                    "room_name": "Гостиная",
                 }
             ],
         }
@@ -789,11 +857,9 @@ class PanelSettingsSectionsTest(unittest.TestCase):
             GET_PATHS,
             {"hausman_hub/v1/admin/climate-room-signals": {"rooms": []}},
             """
-        const selects = findAll(panel.shadowRoot, (node) => node.tagName === "SELECT");
-        const living = selects.find((node) =>
-          findAll(node, (option) => option.tagName === "OPTION")
-            .some((option) => option.value === "binary_sensor.living_window"));
-        living.value = "binary_sensor.living_window";
+        const living = findAll(panel.shadowRoot, (node) =>
+          node.type === "radio" && node.value === "binary_sensor.living_window")[0];
+        living.checked = true;
         living.fire("change");
         const buttons = findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON");
         const save = buttons.find((node) => node.textContent === "Сохранить сигналы комнат");

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import unittest
 
 from custom_components.hausman_hub.application.climate_ha_observations import (
@@ -284,6 +285,27 @@ class NativeHaObservationTest(unittest.TestCase):
         assert temperature is not None
         self.assertIs(temperature.availability, ClimateDeviceAvailability.AVAILABLE)
         self.assertIs(temperature.activity, ClimateDeviceActivity.IDLE)
+
+    def test_weather_entity_temperature_attribute_is_a_real_outdoor_source(self) -> None:
+        registry = full_registry()
+        registry = replace(
+            registry,
+            home=replace(
+                registry.home,
+                outdoor_temperature_entity_id="weather.home",
+            ),
+        )
+        states = full_states()
+        states["weather.home"] = ha_state(
+            "weather.home",
+            "sunny",
+            {"temperature": 7.5},
+        )
+
+        observation = self.build(registry=registry, states=states)
+
+        self.assertEqual(7.5, observation.home.outdoor_temperature)
+        self.assertEqual(7.5, observation.home.heat_load_temperature)
 
     def test_protection_memory_supplies_confirmed_transitions(self) -> None:
         protection = ClimateProtectionMemory(

@@ -20,7 +20,17 @@ const ACTIVE_DEVICE_TYPES = new Set([
 ]);
 const SENSOR_DEVICE_TYPES = new Set(["temperature_sensor", "humidity_sensor"]);
 const ROOM_PRESENCE_DEVICE_CLASSES = new Set(["motion", "occupancy", "presence"]);
+const CONTROL_CHANNEL_LABELS = {
+  universal_ir: "Универсальный ИК-пульт",
+  yandex_remote: "Пульт Яндекса",
+  direct_wifi: "Прямое управление (WiFi)",
+};
+const FIRST_RUN_STEPS = [
+  "instructions", "rooms", "room", "home", "validation", "tablet", "completion", "success",
+];
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+const ZIGBEE2MQTT_IMAGE_PATTERN =
+  /^https:\/\/www\.zigbee2mqtt\.io\/images\/devices\/(?:[A-Za-z0-9._~-]|%[0-9A-F]{2})+\.png$/;
 const PANEL_SECTIONS = [
   { id: "overview", label: "Обзор" },
   { id: "contour", label: "Контур" },
@@ -114,6 +124,26 @@ class HausmanHubPanel extends HTMLElement {
     this._wizardFields = null;
     this._wizardIssues = null;
     this._wizardButtons = null;
+    this._firstRun = {
+      completed: false,
+      conflict: false,
+      deferred: false,
+      draft: null,
+      fields: {},
+      home: null,
+      issues: [],
+      loading: false,
+      options: null,
+      optionsError: false,
+      roomId: null,
+      rooms: {},
+      schedule: { enabled: false, dayStart: "07:00", nightStart: "23:00" },
+      setupRevision: null,
+      step: "instructions",
+      validRooms: new Set(),
+      validation: null,
+    };
+    this._firstRunFields = null;
     this._onVisible = () => {
       if (!document.hidden) this._load();
     };
@@ -246,8 +276,31 @@ class HausmanHubPanel extends HTMLElement {
       shell.notice.textContent = this._notice;
       shell.notice.style.display = "";
     }
-    this._chooseInitialSection();
     this._renderHeaderStatus(this._data.readiness);
+    if (this._isFirstRunActive()) {
+      this._activeSection = "overview";
+      shell.nav.hidden = true;
+      shell.wizard.hidden = false;
+      PANEL_SECTIONS.forEach((section) => { shell.sectionNodes[section.id].hidden = true; });
+      this._renderFirstRun(shell.wizard, this._settings.setup);
+      return;
+    }
+    shell.wizard.hidden = true;
+    shell.wizard.innerHTML = "";
+    if (this._isFirstRunDeferred()) {
+      shell.nav.hidden = true;
+      this._activeSection = "overview";
+      this._renderHeaderStatus(this._data.readiness);
+      this._renderReadiness(shell.readiness, this._data.readiness);
+      this._renderOverviewSummary(shell.summary, this._settings.setup, this._data.snapshot);
+      this._renderRooms(shell.rooms, this._data.snapshot);
+      PANEL_SECTIONS.forEach((section) => {
+        shell.sectionNodes[section.id].hidden = section.id !== "overview";
+      });
+      return;
+    }
+    shell.nav.hidden = false;
+    this._chooseInitialSection();
     this._renderReadiness(shell.readiness, this._data.readiness);
     const snapshot = this._data.snapshot;
     this._renderOverviewSummary(shell.summary, this._settings.setup, snapshot);
@@ -359,8 +412,53 @@ class HausmanHubPanel extends HTMLElement {
         color:#fff; background:var(--error-color,#db4437); font-size:11px; font-weight:700; }
       .room-editor { padding:8px 18px 20px; border-top:1px solid var(--divider-color,#ddd); }
       .entity-search { width:100%; margin:7px 0 10px; }
-      .entity-groups { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:10px 18px; }
-      .entity-group { min-width:0; padding:9px 12px; border:1px solid var(--divider-color,#ddd); border-radius:13px; }
+      .entity-groups { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:12px; }
+      .entity-group { min-width:0; overflow:hidden; border:1px solid var(--divider-color,#ddd); border-radius:14px;
+        background:var(--card-background-color,#fff); }
+      .candidate-room-warning { margin:14px 0; padding:11px 13px; border:1px solid var(--warning-color,#ef6c00);
+        border-radius:12px; color:var(--primary-text-color,#212121);
+        background:color-mix(in srgb,var(--warning-color,#ef6c00) 9%,var(--card-background-color,#fff));
+        font-size:13px; line-height:1.45; }
+      .signal-picker { min-width:0; margin:18px 0; padding:0; border:0; }
+      .signal-picker legend { padding:0; color:var(--primary-text-color,#212121); font-size:16px; font-weight:700; }
+      .signal-picker-help { margin:4px 0 8px; }
+      .signal-picker-list { display:grid; gap:12px; }
+      .signal-room-group { min-width:0; padding:12px; border:1px solid var(--divider-color,#ddd);
+        border-radius:15px; background:color-mix(in srgb,var(--secondary-background-color,#f2f4f5) 45%,
+        var(--card-background-color,#fff)); }
+      .signal-room-group h4, .signal-type-group h5 { margin:0 0 9px; }
+      .signal-room-group h4 { font-size:15px; }
+      .signal-type-groups { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:10px; }
+      .signal-type-group { min-width:0; }
+      .signal-type-group h5 { color:var(--secondary-text-color,#727272); font-size:12px; font-weight:700;
+        text-transform:uppercase; letter-spacing:.03em; }
+      .signal-type-options { display:grid; gap:7px; }
+      label.signal-option { display:grid; grid-template-columns:18px auto minmax(0,1fr); align-items:center;
+        gap:10px; min-width:0; min-height:48px; margin:0; padding:9px 11px;
+        border:1px solid var(--divider-color,#ddd); border-radius:12px;
+        background:var(--card-background-color,#fff); cursor:pointer; }
+      label.signal-option.is-selected { border-color:var(--primary-color,#03a9f4);
+        box-shadow:0 0 0 1px var(--primary-color,#03a9f4); }
+      label.signal-option > input[type="radio"] { grid-column:1; width:18px; min-height:18px; height:18px;
+        margin:0; padding:0; accent-color:var(--primary-color,#03a9f4); }
+      .signal-option-thumb { display:grid; place-items:center; grid-column:2; width:42px; height:42px;
+        overflow:hidden; border:1px solid var(--divider-color,#ddd); border-radius:10px;
+        background:var(--card-background-color,#fff); }
+      .signal-option-thumb img { display:block; width:100%; height:100%; object-fit:contain; }
+      .signal-option > .entity-label { grid-column:2 / 4; }
+      .signal-option.has-thumb > .entity-label { grid-column:3; }
+      .device-card-header { display:grid; grid-template-columns:64px minmax(0,1fr); align-items:center; gap:12px;
+        min-height:82px; padding:9px 12px; background:var(--secondary-background-color,#f2f4f5); }
+      .device-thumb { display:grid; place-items:center; width:64px; height:64px; overflow:hidden;
+        border:1px solid var(--divider-color,#ddd); border-radius:13px; background:var(--card-background-color,#fff); }
+      .device-thumb img { display:block; width:100%; height:100%; object-fit:contain; }
+      .device-thumb-fallback { color:var(--secondary-text-color,#727272); font-size:28px; line-height:1; }
+      .device-card-title { display:block; color:var(--primary-text-color,#212121); font-size:14px;
+        line-height:1.3; overflow-wrap:anywhere; }
+      .device-card-meta { display:block; margin-top:3px; color:var(--secondary-text-color,#727272);
+        font-size:11px; line-height:1.35; overflow-wrap:anywhere; }
+      .device-card-options { padding:4px 12px 7px; }
+      .device-card-options .device-option + .device-option { padding-top:9px; border-top:1px solid var(--divider-color,#ddd); }
       .entity-label { min-width:0; line-height:1.3; overflow-wrap:anywhere; }
       .entity-label strong, .entity-label small { display:block; }
       .entity-label small { margin-top:2px; color:var(--secondary-text-color,#727272); font-size:11px; }
@@ -372,6 +470,28 @@ class HausmanHubPanel extends HTMLElement {
         background:color-mix(in srgb,var(--warning-color,#ef6c00) 12%,transparent); font-size:12px; font-weight:650; }
       .actions { display:flex; flex-wrap:wrap; align-items:flex-start; gap:2px; margin-top:16px;
         padding-top:14px; border-top:1px solid var(--divider-color,#ddd); }
+      .first-run-wizard { max-width:1080px; }
+      .wizard-progress { display:flex; flex-wrap:wrap; gap:6px; margin:0 0 18px; }
+      .wizard-progress span { display:inline-flex; min-height:28px; align-items:center; padding:4px 9px;
+        border:1px solid var(--divider-color,#ddd); border-radius:999px; color:var(--secondary-text-color,#727272);
+        font-size:12px; }
+      .wizard-progress span.is-current { border-color:var(--primary-color,#03a9f4);
+        background:var(--primary-color,#03a9f4); color:var(--text-primary-color,#fff); font-weight:700; }
+      .wizard-progress span.is-complete { color:var(--success-color,#43a047); }
+      .first-run-room-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:14px; }
+      .first-run-room { display:flex; flex-direction:column; gap:10px; }
+      .first-run-room .actions { margin-top:auto; }
+      .status-badge { display:inline-flex; align-items:center; align-self:flex-start; min-height:26px;
+        padding:3px 9px; border-radius:999px; background:var(--secondary-background-color,#eceff1);
+        color:var(--primary-text-color,#212121); font-size:12px; font-weight:650; }
+      .status-badge.is-ready { color:var(--success-color,#43a047); }
+      .status-badge.is-attention { color:var(--warning-color,#ef6c00); }
+      .wizard-section { margin:20px 0; padding-top:4px; border-top:1px solid var(--divider-color,#ddd); }
+      .wizard-section > h3 { margin-bottom:8px; }
+      .wizard-report { margin:12px 0 0; padding:12px; border:1px solid var(--divider-color,#ddd);
+        border-radius:12px; background:var(--secondary-background-color,#f2f4f5); }
+      .wizard-report ul { margin:8px 0 0; padding-left:20px; }
+      .wizard-tablet-url { width:100%; max-width:520px; }
       .profile-room { margin-bottom:16px; }
       .profile-columns { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin-top:14px; }
       .profile-block { min-width:0; padding:14px; border-radius:14px; background:var(--secondary-background-color,#f2f4f5); }
@@ -391,7 +511,8 @@ class HausmanHubPanel extends HTMLElement {
         .room-summary-meta { order:3; flex-basis:100%; }
         .room-expander { margin-left:auto; }
         .room-editor { padding:8px 14px 18px; }
-        .entity-groups { grid-template-columns:minmax(0,1fr); }
+        .entity-groups, .signal-type-groups { grid-template-columns:minmax(0,1fr); }
+        .first-run-room-list { grid-template-columns:minmax(0,1fr); }
         .actions { flex-direction:column; }
         .actions button { width:100%; margin-right:0; }
       }
@@ -427,6 +548,10 @@ class HausmanHubPanel extends HTMLElement {
     const loading = el("div", "loading muted", "Загрузка данных HausmanHub…");
     loading.style.display = "none";
     container.appendChild(loading);
+    const wizard = el("section", "first-run-wizard");
+    setAttr(wizard, "aria-label", "Мастер первичной настройки HausmanHub");
+    wizard.hidden = true;
+    container.appendChild(wizard);
     const nav = el("nav", "tab-bar");
     setAttr(nav, "aria-label", "Разделы HausmanHub");
     const tabs = {};
@@ -456,7 +581,7 @@ class HausmanHubPanel extends HTMLElement {
     sectionNodes.overview.appendChild(summary);
     sectionNodes.overview.appendChild(rooms);
     this._shell = {
-      banner, notice, loading, statusPill, tabs, sectionNodes,
+      banner, notice, loading, statusPill, tabs, nav, sectionNodes, wizard,
       readiness, summary, rooms,
       contour: sectionNodes.contour,
       profiles: sectionNodes.profiles,
@@ -703,6 +828,1027 @@ class HausmanHubPanel extends HTMLElement {
     container.appendChild(grid);
   }
 
+  _isFirstRunActive() {
+    const setup = this._settings.setup;
+    return Boolean(
+      setup && setup.status === "not_configured"
+      && !this._firstRun.deferred && !this._firstRun.completed
+    );
+  }
+
+  _isFirstRunDeferred() {
+    const setup = this._settings.setup;
+    return Boolean(
+      setup && setup.status === "not_configured"
+      && this._firstRun.deferred && !this._firstRun.completed
+    );
+  }
+
+  _firstRunRoomCandidates(roomId) {
+    return (this._firstRun.options && this._firstRun.options.devices || []).filter((candidate) => (
+      candidate.can_add === true
+      && (candidate.room_id === roomId
+        || (candidate.room_id === "" && candidate.suggested_room_id === roomId))
+    ));
+  }
+
+  _firstRunRoomState(room) {
+    let state = this._firstRun.rooms[room.id];
+    if (state) return state;
+    const devices = {};
+    this._firstRunRoomCandidates(room.id).forEach((candidate) => {
+      const suggestedTypes = Array.isArray(candidate.suggested_types)
+        ? candidate.suggested_types : [];
+      suggestedTypes.forEach((type) => {
+        const key = `${candidate.candidate_id}:${type}`;
+        devices[key] = {
+          candidateId: candidate.candidate_id,
+          channel: null,
+          selected: candidate.suggested_room_id === room.id
+            && candidate.recommended_type === type,
+          type,
+        };
+      });
+    });
+    state = {
+      day: { humidity: 45, strategy: "normal", temperature: 22 },
+      devices,
+      included: Object.values(devices).some((device) => device.selected),
+      maxTemperature: null,
+      minTemperature: null,
+      night: { humidity: 45, strategy: "normal", temperature: 22 },
+      report: null,
+    };
+    this._firstRun.rooms[room.id] = state;
+    return state;
+  }
+
+  _firstRunInvalidate(roomId = null) {
+    this._firstRun.conflict = false;
+    this._firstRun.draft = null;
+    this._firstRun.issues = [];
+    this._firstRun.validation = null;
+    if (roomId) this._firstRun.validRooms.delete(roomId);
+  }
+
+  _firstRunPayload(roomIds) {
+    const options = this._firstRun.options;
+    if (!options) return { error: "Комнаты и устройства ещё загружаются." };
+    const setupRevision = this._firstRun.setupRevision;
+    if (!Number.isSafeInteger(setupRevision) || setupRevision < 0) {
+      return { error: "Настройки изменились. Обновите мастер и повторите действие." };
+    }
+    const selectedIds = roomIds || Array.from(this._firstRun.validRooms);
+    if (!selectedIds.length) return { error: "Сначала успешно проверьте хотя бы одну комнату." };
+    const channels = new Set(options.control_channels || []);
+    const rooms = [];
+    const selectedCandidates = new Set();
+    for (const roomId of selectedIds) {
+      const room = (options.rooms || []).find((item) => item.id === roomId);
+      const state = room && this._firstRunRoomState(room);
+      if (!room || !state || !state.included) continue;
+      const profiles = ["day", "night"].map((profile) => {
+        const values = state[profile];
+        const temperature = Number(values.temperature);
+        const humidity = Number(values.humidity);
+        if (
+          values.temperature === "" || !Number.isFinite(temperature)
+          || temperature < 18 || temperature > 28 || !Number.isInteger(temperature * 2)
+        ) return { error: `Проверьте температуру профиля «${profile === "day" ? "День" : "Ночь"}».` };
+        if (
+          values.humidity === "" || !Number.isFinite(humidity)
+          || humidity < 30 || humidity > 70 || !Number.isInteger(humidity / 5)
+        ) return { error: `Проверьте влажность профиля «${profile === "day" ? "День" : "Ночь"}».` };
+        if (!STRATEGY_ORDER.includes(values.strategy)) {
+          return { error: `Выберите стратегию профиля «${profile === "day" ? "День" : "Ночь"}».` };
+        }
+        return {
+          humidity: Math.round(humidity),
+          strategy: values.strategy,
+          temperature,
+        };
+      });
+      const invalidProfile = profiles.find((profile) => profile.error);
+      if (invalidProfile) return { error: invalidProfile.error, roomId };
+      const minTemperature = state.minTemperature === "" || state.minTemperature === null
+        ? null : Number(state.minTemperature);
+      const maxTemperature = state.maxTemperature === "" || state.maxTemperature === null
+        ? null : Number(state.maxTemperature);
+      if (
+        (minTemperature !== null && (!Number.isFinite(minTemperature) || minTemperature < 18
+          || minTemperature > 28 || !Number.isInteger(minTemperature * 2)))
+        || (maxTemperature !== null && (!Number.isFinite(maxTemperature) || maxTemperature < 18
+          || maxTemperature > 28 || !Number.isInteger(maxTemperature * 2)))
+      ) {
+        return { error: "Границы температуры допустимы от 18 до 28 °C с шагом 0,5.", roomId };
+      }
+      if (minTemperature !== null && maxTemperature !== null && minTemperature > maxTemperature) {
+        return { error: "Минимальная температура не может быть выше максимальной.", roomId };
+      }
+      if (
+        (minTemperature !== null && (minTemperature > profiles[0].temperature
+          || minTemperature > profiles[1].temperature))
+        || (maxTemperature !== null && (maxTemperature < profiles[0].temperature
+          || maxTemperature < profiles[1].temperature))
+      ) {
+        return { error: "Границы температуры должны включать цели дневного и ночного профилей.", roomId };
+      }
+      const devices = [];
+      for (const device of Object.values(state.devices)) {
+        if (!device.selected) continue;
+        if (selectedCandidates.has(device.candidateId)) {
+          return { error: "Одно устройство нельзя выбрать для нескольких комнат или типов.", roomId };
+        }
+        selectedCandidates.add(device.candidateId);
+        const item = { candidate_id: device.candidateId, type: device.type };
+        if (ACTIVE_DEVICE_TYPES.has(device.type)) {
+          if (device.channel && !channels.has(device.channel)) {
+            return { error: "Выберите канал управления из доступного списка.", roomId };
+          }
+          item.control_channel = device.channel || null;
+        }
+        devices.push(item);
+      }
+      if (!devices.length) return { error: "Выберите хотя бы одно устройство комнаты.", roomId };
+      rooms.push({
+        room_id: room.id,
+        target_temperature: profiles[0].temperature,
+        target_humidity: profiles[0].humidity,
+        strategy: profiles[0].strategy,
+        min_temperature: minTemperature,
+        max_temperature: maxTemperature,
+        devices,
+      });
+    }
+    if (!rooms.length) return { error: "Сначала успешно проверьте хотя бы одну комнату." };
+    return {
+      payload: {
+        snapshot_revision: options.snapshot_revision,
+        setup_revision: setupRevision,
+        name: "Климат",
+        mode: "automatic",
+        rooms,
+      },
+    };
+  }
+
+  _firstRunProfiles() {
+    return Array.from(this._firstRun.validRooms).map((roomId) => {
+      const state = this._firstRun.rooms[roomId];
+      return {
+        profiles: {
+          day: {
+            strategy: state.day.strategy,
+            target_humidity: Math.round(Number(state.day.humidity)),
+            target_temperature: Number(state.day.temperature),
+          },
+          night: {
+            strategy: state.night.strategy,
+            target_humidity: Math.round(Number(state.night.humidity)),
+            target_temperature: Number(state.night.temperature),
+          },
+        },
+        room_id: roomId,
+      };
+    });
+  }
+
+  async _startFirstRun() {
+    const setup = this._settings.setup;
+    if (!setup) return;
+    this._firstRun.setupRevision = setup.setup_revision;
+    this._firstRun.step = "rooms";
+    await this._loadFirstRunOptions();
+  }
+
+  async _loadFirstRunOptions(force = false) {
+    if (this._firstRun.loading || (!force && this._firstRun.options)) return;
+    this._firstRun.loading = true;
+    this._firstRun.optionsError = false;
+    if (force) this._firstRun.options = null;
+    this._render();
+    try {
+      this._firstRun.options = await this._hass.callApi("GET", DRAFT_API);
+    } catch (error) {
+      this._firstRun.optionsError = true;
+    } finally {
+      this._firstRun.loading = false;
+    }
+    this._render();
+  }
+
+  _deferFirstRun() {
+    this._firstRun.deferred = true;
+    this._activeSection = "overview";
+    this._render();
+  }
+
+  _openFirstRunRoom(roomId) {
+    this._firstRun.roomId = roomId;
+    this._firstRun.step = "room";
+    this._render();
+  }
+
+  _firstRunBackToRooms() {
+    this._firstRun.roomId = null;
+    this._firstRun.step = "rooms";
+    this._render();
+  }
+
+  async _checkFirstRunRoom(roomId) {
+    const collected = this._firstRunPayload([roomId]);
+    if (collected.error) {
+      const state = this._firstRun.rooms[roomId];
+      state.report = { issues: [{ message: collected.error }], save_allowed: false, status: "blocked" };
+      this._firstRun.validRooms.delete(roomId);
+      this._render();
+      return;
+    }
+    this._busy = true;
+    this._render();
+    try {
+      const draft = await this._hass.callApi("POST", DRAFT_API, collected.payload);
+      const validation = await this._hass.callApi("POST", DRAFT_VALIDATE_API, draft);
+      const state = this._firstRun.rooms[roomId];
+      state.report = validation;
+      if (validation.status === "ready" && validation.save_allowed === true) {
+        this._firstRun.validRooms.add(roomId);
+      } else {
+        this._firstRun.validRooms.delete(roomId);
+      }
+    } catch (error) {
+      this._firstRun.rooms[roomId].report = {
+        issues: [{ message: "Проверить комнату не удалось. Проверьте выбранные значения." }],
+        save_allowed: false,
+        status: "blocked",
+      };
+      this._firstRun.validRooms.delete(roomId);
+    } finally {
+      this._busy = false;
+      this._render();
+    }
+  }
+
+  async _saveFirstRunHome() {
+    const home = this._firstRun.home;
+    const high = Number(home.heating_lockout_high);
+    const low = Number(home.heating_lockout_low);
+    if (
+      home.heating_lockout_high === "" || home.heating_lockout_low === ""
+      || !Number.isFinite(high) || !Number.isFinite(low) || high < -40 || high > 60
+      || low < -40 || low > 60 || low >= high
+    ) {
+      this._firstRun.homeError = "Проверьте пороги: от -40 до 60 °C, нижний строго меньше верхнего.";
+      this._render();
+      return;
+    }
+    this._busy = true;
+    this._firstRun.homeError = "";
+    this._render();
+    try {
+      await this._hass.callApi("POST", HOME_API, {
+        central_heating_entity_id: home.central_heating_entity_id || null,
+        heating_lockout_high: high,
+        heating_lockout_low: low,
+        outdoor_temperature_entity_id: home.outdoor_temperature_entity_id || null,
+        presence_entity_id: home.presence_entity_id || null,
+      });
+      this._firstRun.step = "validation";
+    } catch (error) {
+      this._firstRun.homeError = "Сигналы дома сохранить не удалось. Проверьте значения и повторите.";
+    } finally {
+      this._busy = false;
+      this._render();
+    }
+  }
+
+  async _validateFirstRun() {
+    const collected = this._firstRunPayload();
+    if (collected.error) {
+      this._firstRun.issues = [{ message: collected.error, room_id: collected.roomId || null }];
+      this._render();
+      return;
+    }
+    this._busy = true;
+    this._render();
+    try {
+      const draft = await this._hass.callApi("POST", DRAFT_API, collected.payload);
+      const validation = await this._hass.callApi("POST", DRAFT_VALIDATE_API, draft);
+      this._firstRun.draft = draft;
+      this._firstRun.issues = validation.issues || [];
+      this._firstRun.validation = validation;
+    } catch (error) {
+      this._firstRun.draft = null;
+      this._firstRun.issues = [{ message: "Полная проверка не выполнена. Повторите попытку." }];
+      this._firstRun.validation = { save_allowed: false, status: "blocked" };
+    } finally {
+      this._busy = false;
+      this._render();
+    }
+  }
+
+  async _saveFirstRun() {
+    if (this._busy || !this._firstRun.draft || !this._firstRun.validation
+        || this._firstRun.validation.status !== "ready"
+        || this._firstRun.validation.save_allowed !== true) return;
+    this._busy = true;
+    this._firstRun.conflict = false;
+    this._render();
+    let contourSaved = false;
+    try {
+      await this._hass.callApi("POST", DRAFT_SAVE_API, this._firstRun.draft);
+      contourSaved = true;
+      this._firstRun.step = "success";
+      this._render();
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      await this._load();
+      const setup = this._settings.setup;
+      if (setup && setup.status !== "not_configured") {
+        const profiles = await this._hass.callApi("POST", PROFILES_API, {
+          contract: PROFILE_CONTRACT,
+          rooms: this._firstRunProfiles(),
+          setup_revision: setup.setup_revision,
+        });
+        const scheduleRevision = Number.isSafeInteger(profiles && profiles.setup_revision)
+          ? profiles.setup_revision : setup.setup_revision;
+        await this._hass.callApi("POST", SCHEDULE_API, {
+          confirm_automatic_application: this._firstRun.schedule.enabled === true,
+          contract: SCHEDULE_CONTRACT,
+          schedule: {
+            day_start: this._firstRun.schedule.dayStart,
+            enabled: this._firstRun.schedule.enabled === true,
+            night_start: this._firstRun.schedule.nightStart,
+          },
+          setup_revision: scheduleRevision,
+        });
+        await this._load();
+      }
+      this._firstRun.completed = true;
+      this._activeSection = "overview";
+      this._notice = "Настройка сохранена. Команды устройствам не отправлялись.";
+    } catch (error) {
+      if (contourSaved) {
+        this._firstRun.completed = true;
+        this._activeSection = "overview";
+        this._notice = "Контур сохранён, но профили или расписание не сохранились. Откройте соответствующие вкладки и повторите сохранение.";
+      } else if (error && error.status === 409) {
+        this._firstRun.conflict = true;
+      } else {
+        this._firstRun.issues = [{ message: "Сохранить настройку не удалось. Проверьте состояние и повторите." }];
+      }
+      this._firstRun.step = "completion";
+    } finally {
+      this._busy = false;
+      this._render();
+    }
+  }
+
+  async _reloadFirstRun() {
+    this._firstRun.completed = false;
+    this._firstRun.conflict = false;
+    this._firstRun.draft = null;
+    this._firstRun.issues = [];
+    this._firstRun.options = null;
+    this._firstRun.rooms = {};
+    this._firstRun.step = "instructions";
+    this._firstRun.validRooms.clear();
+    await this._load();
+  }
+
+  _renderFirstRunProgress(container) {
+    const labels = {
+      instructions: "Инструкция",
+      rooms: "Комнаты",
+      room: "Комната",
+      home: "Дом",
+      validation: "Проверка",
+      tablet: "Планшет",
+      completion: "Завершение",
+    };
+    const progress = el("nav", "wizard-progress");
+    setAttr(progress, "aria-label", "Шаги первичной настройки");
+    const current = this._firstRun.step === "success" ? "completion" : this._firstRun.step;
+    Object.keys(labels).forEach((step) => {
+      const item = el("span", null, labels[step]);
+      const index = FIRST_RUN_STEPS.indexOf(step);
+      const currentIndex = FIRST_RUN_STEPS.indexOf(current);
+      if (step === current) {
+        item.className = "is-current";
+        setAttr(item, "aria-current", "step");
+      }
+      if (index < currentIndex) item.className = "is-complete";
+      progress.appendChild(item);
+    });
+    container.appendChild(progress);
+  }
+
+  _renderFirstRun(container, setup) {
+    container.innerHTML = "";
+    this._firstRunFields = null;
+    this._renderFirstRunProgress(container);
+    const card = el("article", "card");
+    container.appendChild(card);
+    if (this._firstRun.step === "instructions") {
+      card.appendChild(el("h2", null, "Первичная настройка климата"));
+      card.appendChild(el("p", "section-intro", "Сначала назначьте устройства и датчики областям Home Assistant. Мастер использует области как состав комнат и не создаёт отдельные комнаты."));
+      const list = el("ol", "reasons");
+      [
+        "Откройте Настройки Home Assistant → Устройства и службы → Устройства и назначьте каждому устройству область.",
+        "Проверьте сами области в Настройки → Области.",
+        "Вернитесь сюда: мастер покажет устройства только в области, к которой они привязаны.",
+      ].forEach((text) => list.appendChild(el("li", null, text)));
+      card.appendChild(list);
+      card.appendChild(el("div", "candidate-room-warning", "Если область у устройства не задана, мастер не может безопасно предложить его для комнаты."));
+      const actions = el("div", "actions");
+      const start = el("button", null, "Начать настройку");
+      start.disabled = this._busy;
+      start.addEventListener("click", () => this._startFirstRun());
+      const later = el("button", "secondary", "Настроить позже");
+      later.disabled = this._busy;
+      later.addEventListener("click", () => this._deferFirstRun());
+      actions.appendChild(start);
+      actions.appendChild(later);
+      card.appendChild(actions);
+      return;
+    }
+    if (!this._firstRun.options) {
+      card.appendChild(el("h2", null, "Подготовка мастера"));
+      if (this._firstRun.optionsError) {
+        card.appendChild(el("div", "field-error", "Не удалось загрузить комнаты и устройства."));
+        const retry = el("button", "secondary", "Повторить загрузку");
+        retry.addEventListener("click", () => this._loadFirstRunOptions(true));
+        card.appendChild(retry);
+      } else {
+        card.appendChild(el("div", "muted", "Загрузка областей, устройств и датчиков…"));
+      }
+      return;
+    }
+    if (this._firstRun.step === "rooms") this._renderFirstRunRooms(card);
+    if (this._firstRun.step === "room") this._renderFirstRunRoom(card);
+    if (this._firstRun.step === "home") this._renderFirstRunHome(card);
+    if (this._firstRun.step === "validation") this._renderFirstRunValidation(card);
+    if (this._firstRun.step === "tablet") this._renderFirstRunTablet(card);
+    if (this._firstRun.step === "completion") this._renderFirstRunCompletion(card);
+    if (this._firstRun.step === "success") this._renderFirstRunSuccess(card);
+  }
+
+  _renderFirstRunRooms(card) {
+    card.appendChild(el("h2", null, "Выберите комнаты"));
+    card.appendChild(el("div", "section-intro", "Проверьте каждую нужную область отдельно. В настройку попадут только комнаты, которые успешно прошли проверку."));
+    const fields = { rooms: {} };
+    const list = el("div", "first-run-room-list");
+    (this._firstRun.options.rooms || []).forEach((room) => {
+      const state = this._firstRunRoomState(room);
+      const candidates = this._firstRunRoomCandidates(room.id);
+      const active = candidates.filter((candidate) => (
+        (candidate.suggested_types || []).some((type) => ACTIVE_DEVICE_TYPES.has(type))
+      )).length;
+      const sensors = candidates.filter((candidate) => (
+        (candidate.suggested_types || []).some((type) => SENSOR_DEVICE_TYPES.has(type))
+      )).length;
+      const roomCard = el("article", "card first-run-room");
+      roomCard.appendChild(el("h3", null, room.name || room.id));
+      const include = el("input");
+      include.type = "checkbox";
+      include.checked = state.included;
+      include.disabled = room.selectable !== true || this._busy;
+      const includeLabel = el("label", "checkbox-field");
+      includeLabel.appendChild(include);
+      includeLabel.appendChild(el("span", null, "Включить комнату в климатический контур"));
+      roomCard.appendChild(includeLabel);
+      roomCard.appendChild(el(
+        "div",
+        "muted",
+        `Найдено: устройств управления - ${active}, датчиков - ${sensors}.`
+      ));
+      const badge = el("span", "status-badge");
+      if (this._firstRun.validRooms.has(room.id)) {
+        badge.textContent = "Настроена";
+        badge.className += " is-ready";
+      } else if (state.report && (state.report.issues || []).length) {
+        badge.textContent = "Требует внимания";
+        badge.className += " is-attention";
+      } else {
+        badge.textContent = "Не настроена";
+      }
+      roomCard.appendChild(badge);
+      const actions = el("div", "actions");
+      const configure = el("button", "secondary", "Настроить");
+      configure.disabled = include.disabled;
+      configure.addEventListener("click", () => this._openFirstRunRoom(room.id));
+      actions.appendChild(configure);
+      roomCard.appendChild(actions);
+      include.addEventListener("change", () => {
+        state.included = include.checked;
+        this._firstRunInvalidate(room.id);
+        this._render();
+      });
+      fields.rooms[room.id] = { configure, include };
+      list.appendChild(roomCard);
+    });
+    if (!(this._firstRun.options.rooms || []).length) {
+      list.appendChild(el("div", "card empty-state muted", "Home Assistant пока не передал ни одной области."));
+    }
+    card.appendChild(list);
+    const actions = el("div", "actions");
+    const back = el("button", "secondary", "Назад к инструкции");
+    back.disabled = this._busy;
+    back.addEventListener("click", () => {
+      this._firstRun.step = "instructions";
+      this._render();
+    });
+    const finish = el("button", null, "Завершить настройку");
+    finish.disabled = this._busy || this._firstRun.validRooms.size === 0;
+    finish.title = finish.disabled
+      ? "Сначала успешно проверьте хотя бы одну комнату."
+      : "Перейти к параметрам дома и общей проверке.";
+    finish.addEventListener("click", () => {
+      this._firstRun.step = "home";
+      this._render();
+    });
+    actions.appendChild(back);
+    actions.appendChild(finish);
+    card.appendChild(actions);
+    if (finish.disabled) {
+      card.appendChild(el("div", "muted action-help", "Кнопка станет доступна после успешной проверки хотя бы одной комнаты."));
+    }
+    this._firstRunFields = fields;
+  }
+
+  _renderFirstRunRoom(card) {
+    const room = (this._firstRun.options.rooms || []).find((item) => item.id === this._firstRun.roomId);
+    if (!room) {
+      this._firstRunBackToRooms();
+      return;
+    }
+    const state = this._firstRunRoomState(room);
+    card.appendChild(el("h2", null, `Комната: ${room.name || room.id}`));
+    card.appendChild(el("div", "section-intro", "Изменения остаются в черновике мастера, пока комната не пройдёт проверку."));
+    const fields = { devices: [], maxTemperature: null, minTemperature: null, room: null };
+    const scheduleSection = el("section", "wizard-section");
+    scheduleSection.appendChild(el("h3", null, "Расписание комнаты"));
+    const dayStart = el("input");
+    dayStart.type = "time";
+    dayStart.value = this._firstRun.schedule.dayStart;
+    const dayRow = el("label", "form-field", "Начало дня");
+    dayRow.appendChild(dayStart);
+    scheduleSection.appendChild(dayRow);
+    const nightStart = el("input");
+    nightStart.type = "time";
+    nightStart.value = this._firstRun.schedule.nightStart;
+    const nightRow = el("label", "form-field", "Начало ночи");
+    nightRow.appendChild(nightStart);
+    scheduleSection.appendChild(nightRow);
+    const automatic = el("input");
+    automatic.type = "checkbox";
+    automatic.checked = this._firstRun.schedule.enabled === true;
+    const managed = this._settings.mode && this._settings.mode.mode === "managed";
+    automatic.disabled = !managed || this._busy;
+    const automaticLabel = el("label", "checkbox-field");
+    automaticLabel.appendChild(automatic);
+    automaticLabel.appendChild(el("span", null, "Автоматически переключать дневной и ночной профиль"));
+    scheduleSection.appendChild(automaticLabel);
+    if (!managed) {
+      scheduleSection.appendChild(el("div", "muted", "Автопереключение можно включить после сохранения контура и включения управляемого режима."));
+    }
+    [dayStart, nightStart, automatic].forEach((control) => {
+      control.addEventListener("input", () => {
+        this._firstRun.schedule.dayStart = dayStart.value;
+        this._firstRun.schedule.nightStart = nightStart.value;
+        this._firstRun.schedule.enabled = automatic.checked === true;
+        this._firstRunInvalidate();
+      });
+      control.addEventListener("change", () => {
+        this._firstRun.schedule.dayStart = dayStart.value;
+        this._firstRun.schedule.nightStart = nightStart.value;
+        this._firstRun.schedule.enabled = automatic.checked === true;
+        this._firstRunInvalidate();
+      });
+    });
+    card.appendChild(scheduleSection);
+
+    const profilesSection = el("section", "wizard-section");
+    profilesSection.appendChild(el("h3", null, "Дневной и ночной профиль"));
+    profilesSection.appendChild(el("div", "muted", "Цели сохраняются раздельно для дня и ночи. Температура 18-28 °C с шагом 0,5, влажность 30-70 % с шагом 5."));
+    const columns = el("div", "profile-columns");
+    ["day", "night"].forEach((profile) => {
+      const values = state[profile];
+      const block = el("div", "profile-block");
+      block.appendChild(el("h4", null, profile === "day" ? "День" : "Ночь"));
+      const temperature = numberField(values.temperature, 18, 28, 0.5, () => {
+        values.temperature = temperature.value;
+        this._firstRunInvalidate(room.id);
+      });
+      const temperatureRow = el("label", "form-field", "Температура, °C");
+      temperatureRow.appendChild(temperature);
+      block.appendChild(temperatureRow);
+      const humidity = numberField(values.humidity, 30, 70, 5, () => {
+        values.humidity = humidity.value;
+        this._firstRunInvalidate(room.id);
+      });
+      const humidityRow = el("label", "form-field", "Влажность, %");
+      humidityRow.appendChild(humidity);
+      block.appendChild(humidityRow);
+      const strategy = selectField(
+        STRATEGY_ORDER.map((code) => ({
+          label: ((this._firstRun.options.display_names || {}).strategies || {})[code] || code,
+          value: code,
+        })),
+        values.strategy,
+        () => {
+          values.strategy = strategy.value;
+          this._firstRunInvalidate(room.id);
+        }
+      );
+      const strategyRow = el("label", "form-field", "Стратегия");
+      strategyRow.appendChild(strategy);
+      block.appendChild(strategyRow);
+      columns.appendChild(block);
+    });
+    profilesSection.appendChild(columns);
+    card.appendChild(profilesSection);
+
+    const limitsSection = el("section", "wizard-section");
+    limitsSection.appendChild(el("h3", null, "Допустимая температура комнаты"));
+    limitsSection.appendChild(el("div", "muted", "Необязательные границы ограничивают команды кондиционеру и отоплению. Пустое поле означает, что дополнительной границы нет."));
+    const minTemperature = numberField(
+      state.minTemperature === null ? "" : state.minTemperature,
+      18, 28, 0.5,
+      () => {
+        state.minTemperature = minTemperature.value;
+        this._firstRunInvalidate(room.id);
+      }
+    );
+    const minRow = el("label", "form-field", "Минимальная температура, °C");
+    minRow.appendChild(minTemperature);
+    limitsSection.appendChild(minRow);
+    const maxTemperature = numberField(
+      state.maxTemperature === null ? "" : state.maxTemperature,
+      18, 28, 0.5,
+      () => {
+        state.maxTemperature = maxTemperature.value;
+        this._firstRunInvalidate(room.id);
+      }
+    );
+    const maxRow = el("label", "form-field", "Максимальная температура, °C");
+    maxRow.appendChild(maxTemperature);
+    limitsSection.appendChild(maxRow);
+    card.appendChild(limitsSection);
+
+    const devicesSection = el("section", "wizard-section");
+    devicesSection.appendChild(el("h3", null, "Устройства и датчики"));
+    devicesSection.appendChild(el("div", "muted", "Канал сохраняется для контура. Direct Wi-Fi использует текущий путь управления, а универсальный ИК и Yandex Remote будут подключены отдельными адаптерами: до этого устройства остаются в наблюдении."));
+    const choices = [];
+    this._firstRunRoomCandidates(room.id).forEach((candidate, candidateIndex) => {
+      (candidate.suggested_types || []).forEach((type, typeIndex) => {
+        const key = `${candidate.candidate_id}:${type}`;
+        const device = state.devices[key];
+        if (!device) return;
+        choices.push({ candidate, device, key, order: candidateIndex * 10 + typeIndex, type });
+      });
+    });
+    const search = el("input", "entity-search");
+    search.type = "search";
+    search.placeholder = "Найти устройство или датчик";
+    setAttr(search, "aria-label", "Поиск устройств комнаты");
+    devicesSection.appendChild(search);
+    const groups = el("div", "entity-groups");
+    const grouped = new Map();
+    choices.forEach((choice) => {
+      const id = choice.candidate.device_group_id || `candidate:${choice.candidate.candidate_id}`;
+      if (!grouped.has(id)) grouped.set(id, []);
+      grouped.get(id).push(choice);
+    });
+    const searchable = [];
+    Array.from(grouped.entries()).forEach(([groupId, groupChoices]) => {
+      const first = groupChoices[0].candidate;
+      const group = el("div", "entity-group device-card");
+      setAttr(group, "data-device-group-id", groupId);
+      const header = el("div", "device-card-header");
+      const thumb = el("div", "device-thumb");
+      const fallback = el("span", "device-thumb-fallback", "◈");
+      setAttr(fallback, "aria-hidden", "true");
+      if (first.image_url && ZIGBEE2MQTT_IMAGE_PATTERN.test(first.image_url)) {
+        const image = el("img");
+        image.src = first.image_url;
+        image.alt = "";
+        setAttr(image, "loading", "lazy");
+        setAttr(image, "decoding", "async");
+        setAttr(image, "referrerpolicy", "no-referrer");
+        fallback.hidden = true;
+        image.addEventListener("error", () => {
+          image.hidden = true;
+          fallback.hidden = false;
+        });
+        thumb.appendChild(image);
+      }
+      thumb.appendChild(fallback);
+      header.appendChild(thumb);
+      const identity = el("div");
+      identity.appendChild(el("strong", "device-card-title", first.device_name || first.name));
+      const details = [first.manufacturer, first.model].filter(Boolean);
+      if (details.length) identity.appendChild(el("small", "device-card-meta", details.join(" · ")));
+      header.appendChild(identity);
+      group.appendChild(header);
+      const options = el("div", "device-card-options");
+      groupChoices.sort((left, right) => left.order - right.order).forEach((choice) => {
+        const checkbox = el("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = choice.device.selected;
+        checkbox.value = choice.candidate.candidate_id;
+        const label = el("label", "device-option");
+        label.appendChild(checkbox);
+        const labelText = el("span", "entity-label");
+        const deviceName = ((this._firstRun.options.display_names || {}).device_types || {})[choice.type] || choice.type;
+        labelText.appendChild(el("strong", null, deviceName));
+        labelText.appendChild(el("small", null, choice.candidate.name));
+        label.appendChild(labelText);
+        options.appendChild(label);
+        let controlChannel = null;
+        let channelRow = null;
+        if (ACTIVE_DEVICE_TYPES.has(choice.type)) {
+          controlChannel = selectField(
+            [{ label: "Не выбран", value: "" }].concat((this._firstRun.options.control_channels || []).map((channel) => ({
+              label: CONTROL_CHANNEL_LABELS[channel] || channel,
+              value: channel,
+            }))),
+            choice.device.channel,
+            () => {
+              choice.device.channel = controlChannel.value || null;
+              this._firstRunInvalidate(room.id);
+            }
+          );
+          channelRow = el("label", "form-field", "Канал управления");
+          channelRow.appendChild(controlChannel);
+          channelRow.hidden = !choice.device.selected;
+          options.appendChild(channelRow);
+        }
+        checkbox.addEventListener("change", () => {
+          choice.device.selected = checkbox.checked;
+          if (checkbox.checked) {
+            choices.forEach((peer) => {
+              if (peer !== choice && peer.candidate.candidate_id === choice.candidate.candidate_id) {
+                peer.device.selected = false;
+                const peerField = fields.devices.find((item) => item.key === peer.key);
+                if (peerField) {
+                  peerField.checkbox.checked = false;
+                  if (peerField.channelRow) peerField.channelRow.hidden = true;
+                }
+              }
+            });
+          }
+          if (channelRow) channelRow.hidden = !checkbox.checked;
+          this._firstRunInvalidate(room.id);
+        });
+        fields.devices.push({ checkbox, controlChannel, channelRow, key: choice.key, type: choice.type });
+      });
+      groups.appendChild(group);
+      searchable.push({
+        group,
+        text: normalizedText([first.name, first.device_name, first.manufacturer, first.model].filter(Boolean).join(" ")),
+      });
+    });
+    if (!choices.length) groups.appendChild(el("div", "muted", "Подходящих устройств в этой области пока нет."));
+    search.addEventListener("input", () => {
+      const query = normalizedText(search.value);
+      searchable.forEach((entry) => { entry.group.hidden = Boolean(query) && !entry.text.includes(query); });
+    });
+    devicesSection.appendChild(groups);
+    card.appendChild(devicesSection);
+
+    const report = state.report;
+    if (report) {
+      const reportBox = el("div", "wizard-report");
+      const ready = report.status === "ready" && report.save_allowed === true;
+      reportBox.appendChild(el("strong", null, ready ? "Комната проверена" : "Проверка требует внимания"));
+      const issues = report.issues || [];
+      if (issues.length) {
+        const list = el("ul");
+        issues.forEach((issue) => list.appendChild(el("li", null, issue.message || "Проверьте настройки комнаты.")));
+        reportBox.appendChild(list);
+      } else if (ready) {
+        reportBox.appendChild(el("div", "muted", "Все выбранные устройства и цели прошли проверку."));
+      }
+      card.appendChild(reportBox);
+    }
+    const actions = el("div", "actions");
+    const back = el("button", "secondary", "Назад к списку комнат");
+    back.disabled = this._busy;
+    back.addEventListener("click", () => this._firstRunBackToRooms());
+    const check = el("button", null, "Проверить комнату");
+    check.disabled = this._busy || room.selectable !== true;
+    check.title = check.disabled ? "Комната недоступна для настройки." : "Проверить цели и выбранные привязки.";
+    check.addEventListener("click", () => this._checkFirstRunRoom(room.id));
+    actions.appendChild(back);
+    actions.appendChild(check);
+    card.appendChild(actions);
+    fields.maxTemperature = maxTemperature;
+    fields.minTemperature = minTemperature;
+    fields.room = room;
+    this._firstRunFields = { room: fields };
+  }
+
+  _renderFirstRunHome(card) {
+    card.appendChild(el("h2", null, "Параметры дома"));
+    card.appendChild(el("div", "section-intro", "Выберите общие сигналы и пороги отопления. Они сохраняются отдельным безопасным запросом без команд устройствам."));
+    if (!this._firstRun.home) {
+      const saved = (this._settings.home && this._settings.home.home) || {};
+      this._firstRun.home = {
+        central_heating_entity_id: saved.central_heating_entity_id || null,
+        heating_lockout_high: saved.heating_lockout_high === undefined ? 18 : saved.heating_lockout_high,
+        heating_lockout_low: saved.heating_lockout_low === undefined ? 16 : saved.heating_lockout_low,
+        outdoor_temperature_entity_id: saved.outdoor_temperature_entity_id || null,
+        presence_entity_id: saved.presence_entity_id || null,
+      };
+    }
+    const home = this._firstRun.home;
+    const candidates = (this._settings.home && this._settings.home.candidates) || {};
+    const pickers = {};
+    [
+      ["outdoor_temperature_entity_id", "Наружная температура", "sensor с температурой или погодный сервис Home Assistant.", "outdoor_temperature"],
+      ["presence_entity_id", "Общее присутствие дома", "Этот сигнал задаёт политику «дома/нет дома» для всего дома.", "presence"],
+      ["central_heating_entity_id", "Центральное отопление", "Сигнал показывает работу центрального отопления.", "central_heating"],
+    ].forEach(([key, title, helper, kind]) => {
+      const picker = this._singleChoicePicker({
+        candidates: candidates[kind] || [],
+        current: home[key],
+        helper,
+        onChange: () => {
+          home[key] = picker.value() || null;
+        },
+        signalKind: kind,
+        title,
+      });
+      card.appendChild(picker.root);
+      pickers[key] = picker;
+    });
+    const high = numberField(home.heating_lockout_high, -40, 60, 0.5, () => {
+      home.heating_lockout_high = high.value;
+    });
+    const highRow = el("label", "form-field", "Не греть выше, °C");
+    highRow.appendChild(high);
+    card.appendChild(highRow);
+    card.appendChild(el("div", "muted field-help", "Выше этого порога на улице отопление не включается: дома уже достаточно тепло."));
+    const low = numberField(home.heating_lockout_low, -40, 60, 0.5, () => {
+      home.heating_lockout_low = low.value;
+    });
+    const lowRow = el("label", "form-field", "Аварийная защита ниже, °C");
+    lowRow.appendChild(low);
+    card.appendChild(lowRow);
+    card.appendChild(el("div", "muted field-help", "Ниже этого порога защита снова разрешает отопление даже после тёплого периода."));
+    if (this._firstRun.homeError) card.appendChild(el("div", "field-error", this._firstRun.homeError));
+    const actions = el("div", "actions");
+    const back = el("button", "secondary", "Назад к комнатам");
+    back.disabled = this._busy;
+    back.addEventListener("click", () => {
+      this._firstRun.step = "rooms";
+      this._render();
+    });
+    const next = el("button", null, "Продолжить к проверке");
+    next.disabled = this._busy;
+    next.addEventListener("click", () => {
+      Object.keys(pickers).forEach((key) => { home[key] = pickers[key].value() || null; });
+      this._saveFirstRunHome();
+    });
+    actions.appendChild(back);
+    actions.appendChild(next);
+    card.appendChild(actions);
+  }
+
+  _renderFirstRunValidation(card) {
+    card.appendChild(el("h2", null, "Проверка настройки"));
+    card.appendChild(el("div", "section-intro", "Перед сохранением HausmanHub проверит все выбранные комнаты, устройства и границы одним черновиком."));
+    const validation = this._firstRun.validation;
+    if (validation) {
+      const ready = validation.status === "ready" && validation.save_allowed === true;
+      const report = el("div", "wizard-report");
+      report.appendChild(el("strong", null, ready ? "Настройка прошла проверку" : "Найдены замечания"));
+      const issues = this._firstRun.issues || [];
+      if (issues.length) {
+        const list = el("ul");
+        issues.forEach((issue) => {
+          const line = el("li");
+          line.appendChild(el("span", null, issue.message || "Проверьте настройку."));
+          if (issue.room_id) {
+            const fix = el("button", "secondary", "Исправить комнату");
+            fix.addEventListener("click", () => this._openFirstRunRoom(issue.room_id));
+            line.appendChild(fix);
+          }
+          list.appendChild(line);
+        });
+        report.appendChild(list);
+      } else if (ready) {
+        report.appendChild(el("div", "muted", "Все выбранные комнаты готовы к сохранению."));
+      }
+      card.appendChild(report);
+    }
+    const actions = el("div", "actions");
+    const back = el("button", "secondary", "Назад к параметрам дома");
+    back.disabled = this._busy;
+    back.addEventListener("click", () => {
+      this._firstRun.step = "home";
+      this._render();
+    });
+    const check = el("button", null, "Проверить настройку");
+    check.disabled = this._busy;
+    check.addEventListener("click", () => this._validateFirstRun());
+    actions.appendChild(back);
+    actions.appendChild(check);
+    if (validation && validation.status === "ready" && validation.save_allowed === true) {
+      const next = el("button", null, "Продолжить к подключению планшета");
+      next.disabled = this._busy;
+      next.addEventListener("click", () => {
+        this._firstRun.step = "tablet";
+        this._render();
+      });
+      actions.appendChild(next);
+    }
+    card.appendChild(actions);
+  }
+
+  _renderFirstRunTablet(card) {
+    card.appendChild(el("h2", null, "Подключение планшета"));
+    card.appendChild(el("div", "section-intro", "В приложении планшета укажите адрес этого Home Assistant и личный токен пользователя с нужными правами."));
+    const url = window.location && window.location.origin ? window.location.origin : "Адрес этого Home Assistant";
+    const address = el("input", "wizard-tablet-url");
+    address.type = "text";
+    address.readOnly = true;
+    address.value = url;
+    setAttr(address, "aria-label", "Базовый адрес Home Assistant для планшета");
+    card.appendChild(address);
+    const copy = el("button", "secondary", "Скопировать адрес");
+    copy.addEventListener("click", async () => {
+      if (typeof navigator !== "undefined" && navigator.clipboard) {
+        await navigator.clipboard.writeText(address.value);
+        this._notice = "Адрес скопирован.";
+        this._render();
+      }
+    });
+    card.appendChild(copy);
+    const endpoints = el("ul", "reasons");
+    [
+      "GET /endpoint/smart-home-center/api для сводки дома.",
+      "POST /endpoint/smart-home-center/action для подтверждённых действий.",
+      "GET и POST /endpoint/climate/api/v1/state и command для климата.",
+    ].forEach((text) => endpoints.appendChild(el("li", null, text)));
+    card.appendChild(endpoints);
+    const actions = el("div", "actions");
+    const back = el("button", "secondary", "Назад к проверке");
+    back.disabled = this._busy;
+    back.addEventListener("click", () => {
+      this._firstRun.step = "validation";
+      this._render();
+    });
+    const next = el("button", null, "Перейти к завершению");
+    next.disabled = this._busy;
+    next.addEventListener("click", () => {
+      this._firstRun.step = "completion";
+      this._render();
+    });
+    actions.appendChild(back);
+    actions.appendChild(next);
+    card.appendChild(actions);
+  }
+
+  _renderFirstRunCompletion(card) {
+    card.appendChild(el("h2", null, "Завершение настройки"));
+    if (this._firstRun.conflict) {
+      card.appendChild(el("div", "field-error", "Настройки изменились в другом окне. Обновите мастер, чтобы получить актуальные области и ревизию."));
+      const reload = el("button", "secondary", "Обновить мастер");
+      reload.disabled = this._busy;
+      reload.addEventListener("click", () => this._reloadFirstRun());
+      card.appendChild(reload);
+      return;
+    }
+    const validation = this._firstRun.validation;
+    const ready = validation && validation.status === "ready" && validation.save_allowed === true;
+    card.appendChild(el("div", "section-intro", ready
+      ? `Будет сохранено комнат: ${this._firstRun.validRooms.size}. Команды устройствам не отправляются.`
+      : "Сначала вернитесь к проверке и получите успешный результат."));
+    (this._firstRun.issues || []).forEach((issue) => {
+      card.appendChild(el("div", "field-error", issue.message || "Проверьте настройку."));
+    });
+    const actions = el("div", "actions");
+    const back = el("button", "secondary", "Назад к проверке");
+    back.disabled = this._busy;
+    back.addEventListener("click", () => {
+      this._firstRun.step = "validation";
+      this._render();
+    });
+    const save = el("button", null, "Сохранить настройку");
+    save.disabled = this._busy || !ready;
+    save.title = save.disabled ? "Сохранение доступно после успешной полной проверки." : "Сохранить проверенный климатический контур.";
+    save.addEventListener("click", () => this._saveFirstRun());
+    actions.appendChild(back);
+    actions.appendChild(save);
+    card.appendChild(actions);
+  }
+
+  _renderFirstRunSuccess(card) {
+    card.appendChild(el("h2", null, "Настройка сохранена"));
+    card.appendChild(el("div", "wizard-success", "Контур создан. Сейчас откроется обычная панель HausmanHub."));
+  }
+
   _renderContourWizard(container, setup) {
     if (!setup) {
       container.appendChild(el("div", "card muted", "Настройка контура временно недоступна."));
@@ -843,14 +1989,36 @@ class HausmanHubPanel extends HTMLElement {
     fields.mode = mode;
     fields.controls.push(name, mode);
 
+    const unassignedCandidates = (options.devices || []).filter((candidate) => (
+      candidate.room_id === ""
+      && !candidate.suggested_room_id
+      && candidate.can_add === true
+    ));
+    if (unassignedCandidates.length) {
+      card.appendChild(el(
+        "div",
+        "candidate-room-warning",
+        `Не показано устройств без комнаты: ${unassignedCandidates.length}. Назначьте им зону в Home Assistant, чтобы они появились только в нужной комнате.`
+      ));
+    }
+
     (options.rooms || []).forEach((room) => {
       const currentRoom = currentRooms.get(room.id);
       const currentDevices = new Map(
         (((currentRoom && currentRoom.devices) || [])).map((device) => [device.candidate_id, device])
       );
       const candidates = (options.devices || []).filter((candidate) => (
-        (candidate.room_id === room.id || candidate.room_id === "")
-        && (candidate.can_add === true || currentDevices.has(candidate.candidate_id))
+        currentDevices.has(candidate.candidate_id)
+        || (
+          candidate.can_add === true
+          && (
+            candidate.room_id === room.id
+            || (
+              candidate.room_id === ""
+              && candidate.suggested_room_id === room.id
+            )
+          )
+        )
       ));
       const suggested = !editing && candidates.some(
         (candidate) => candidate.can_add === true && candidate.suggested_room_id === room.id
@@ -881,7 +2049,9 @@ class HausmanHubPanel extends HTMLElement {
       summary.appendChild(expander);
       block.appendChild(summary);
       const editor = el("div", "room-editor");
+      editor.id = `hausman-wizard-room-${room.id}`;
       editor.hidden = true;
+      setAttr(expander, "aria-controls", editor.id);
       block.appendChild(editor);
 
       const profiles = (currentRoom && currentRoom.profiles) || {};
@@ -962,15 +2132,68 @@ class HausmanHubPanel extends HTMLElement {
         setAttr(search, "aria-label", `Поиск: ${title.toLocaleLowerCase("ru")}`);
         editor.appendChild(search);
         const groups = el("div", "entity-groups");
-        const groupNodes = new Map();
-        const optionNodes = [];
-        choices.forEach(({ candidate, type, checked, payloadOrder }) => {
-          if (!groupNodes.has(type)) {
-            const group = el("div", "entity-group");
-            group.appendChild(el("h4", null, deviceTypes[type] || type));
-            groups.appendChild(group);
-            groupNodes.set(type, group);
+        const groupedChoices = new Map();
+        choices.forEach((choice) => {
+          const candidate = choice.candidate;
+          const groupId = candidate.device_group_id || `candidate:${candidate.candidate_id}`;
+          if (!groupedChoices.has(groupId)) {
+            groupedChoices.set(groupId, {
+              groupId,
+              choices: [],
+              deviceName: candidate.device_name || candidate.name,
+              manufacturer: candidate.manufacturer || "",
+              model: candidate.model || "",
+              imageUrl: (
+                typeof candidate.image_url === "string"
+                && ZIGBEE2MQTT_IMAGE_PATTERN.test(candidate.image_url)
+              ) ? candidate.image_url : "",
+            });
           }
+          groupedChoices.get(groupId).choices.push(choice);
+        });
+        const deviceGroups = Array.from(groupedChoices.values()).sort((left, right) => (
+          Number(right.choices.some((choice) => choice.checked))
+          - Number(left.choices.some((choice) => choice.checked))
+          || String(left.deviceName).localeCompare(String(right.deviceName), "ru")
+        ));
+        const optionNodes = [];
+        deviceGroups.forEach((deviceGroup) => {
+          const group = el("div", "entity-group device-card");
+          setAttr(group, "data-device-group-id", deviceGroup.groupId);
+          const header = el("div", "device-card-header");
+          const thumb = el("div", "device-thumb");
+          const fallback = el("span", "device-thumb-fallback", "◈");
+          setAttr(fallback, "aria-hidden", "true");
+          if (deviceGroup.imageUrl) {
+            const image = el("img");
+            image.src = deviceGroup.imageUrl;
+            image.alt = "";
+            setAttr(image, "loading", "lazy");
+            setAttr(image, "decoding", "async");
+            setAttr(image, "referrerpolicy", "no-referrer");
+            fallback.hidden = true;
+            image.addEventListener("error", () => {
+              image.hidden = true;
+              fallback.hidden = false;
+            });
+            thumb.appendChild(image);
+          }
+          thumb.appendChild(fallback);
+          header.appendChild(thumb);
+          const identity = el("div");
+          identity.appendChild(el("strong", "device-card-title", deviceGroup.deviceName));
+          const details = [deviceGroup.manufacturer, deviceGroup.model].filter(Boolean);
+          if (details.length) {
+            identity.appendChild(el("small", "device-card-meta", details.join(" · ")));
+          }
+          header.appendChild(identity);
+          group.appendChild(header);
+          const groupOptions = el("div", "device-card-options");
+          deviceGroup.choices.sort((left, right) => (
+            Number(right.checked) - Number(left.checked)
+            || String(deviceTypes[left.type] || left.type)
+              .localeCompare(String(deviceTypes[right.type] || right.type), "ru")
+          )).forEach(({ candidate, type, checked, payloadOrder }) => {
             const checkbox = el("input");
             checkbox.type = "checkbox";
             checkbox.value = candidate.candidate_id;
@@ -987,14 +2210,10 @@ class HausmanHubPanel extends HTMLElement {
             const label = el("label", "device-option");
             label.appendChild(checkbox);
             const labelText = el("span", "entity-label");
-            labelText.appendChild(el("strong", null, candidate.name));
-            labelText.appendChild(el("small", null, deviceTypes[type] || type));
+            labelText.appendChild(el("strong", null, deviceTypes[type] || type));
+            labelText.appendChild(el("small", null, candidate.name));
             label.appendChild(labelText);
-            groupNodes.get(type).appendChild(label);
-            optionNodes.push({
-              node: label,
-              searchText: normalizedText(`${candidate.name} ${deviceTypes[type] || type}`),
-            });
+            groupOptions.appendChild(label);
             const choice = {
               checkbox, candidateId: candidate.candidate_id, type, label, payloadOrder,
             };
@@ -1002,6 +2221,20 @@ class HausmanHubPanel extends HTMLElement {
             fields.candidateBoxes[candidate.candidate_id] =
               fields.candidateBoxes[candidate.candidate_id] || [];
             fields.candidateBoxes[candidate.candidate_id].push(checkbox);
+          });
+          group.appendChild(groupOptions);
+          groups.appendChild(group);
+          optionNodes.push({
+            node: group,
+            searchText: normalizedText([
+              deviceGroup.deviceName,
+              deviceGroup.manufacturer,
+              deviceGroup.model,
+              ...deviceGroup.choices.flatMap(({ candidate, type }) => (
+                [candidate.name, deviceTypes[type] || type]
+              )),
+            ].join(" ")),
+          });
         });
         search.addEventListener("input", () => {
           const query = normalizedText(search.value);
@@ -1808,6 +3041,197 @@ class HausmanHubPanel extends HTMLElement {
     container.appendChild(card);
   }
 
+  _signalCandidateType(candidate, signalKind) {
+    const deviceClassLabels = {
+      temperature: "Датчик температуры",
+      motion: "Датчик движения",
+      occupancy: "Датчик занятости",
+      presence: "Датчик присутствия",
+      window: "Датчик окна",
+      door: "Датчик двери",
+      opening: "Датчик открытия",
+      garage_door: "Датчик ворот",
+      heat: "Датчик нагрева",
+      running: "Датчик работы",
+      power: "Датчик питания",
+    };
+    if (candidate.domain === "weather") return "Погодный сервис";
+    if (candidate.domain === "person") return "Человек";
+    if (candidate.domain === "device_tracker") return "Трекер";
+    if (candidate.domain === "switch") return "Выключатель";
+    if (candidate.domain === "input_boolean") return "Логический переключатель";
+    if (deviceClassLabels[candidate.device_class]) {
+      return deviceClassLabels[candidate.device_class];
+    }
+    if (signalKind === "outdoor_temperature") return "Датчик температуры";
+    return "Другое устройство";
+  }
+
+  _candidateWithCurrent(candidates, current) {
+    const result = Array.from(candidates || []);
+    if (current && !result.some((candidate) => candidate.entity_id === current)) {
+      result.push({
+        entity_id: current,
+        name: current,
+        available: false,
+        domain: String(current).split(".", 1)[0],
+        room_id: "",
+        missing: true,
+      });
+    }
+    return result;
+  }
+
+  _singleChoicePicker({
+    title, helper, candidates, current, signalKind, onChange, groupByRoom = true,
+  }) {
+    const fieldset = el("fieldset", "signal-picker");
+    fieldset.appendChild(el("legend", null, title));
+    if (helper) fieldset.appendChild(el("div", "muted signal-picker-help", helper));
+    const search = el("input", "entity-search");
+    search.type = "search";
+    search.placeholder = "Найти подходящее устройство";
+    setAttr(search, "aria-label", `Поиск: ${title.toLocaleLowerCase("ru")}`);
+    fieldset.appendChild(search);
+    const list = el("div", "signal-picker-list");
+    fieldset.appendChild(list);
+    const radioName = requestId("signal");
+    const radios = [];
+    const optionNodes = [];
+    const groups = new Map();
+
+    const addRadio = (container, candidate, value, label, meta) => {
+      const radio = el("input");
+      radio.type = "radio";
+      radio.name = radioName;
+      radio.value = value;
+      radio.checked = current ? value === current : value === "";
+      const option = el("label", "signal-option");
+      if (radio.checked) option.className += " is-selected";
+      option.appendChild(radio);
+      if (candidate && candidate.image_url
+          && ZIGBEE2MQTT_IMAGE_PATTERN.test(candidate.image_url)) {
+        option.className += " has-thumb";
+        const thumb = el("span", "signal-option-thumb");
+        const image = el("img");
+        image.src = candidate.image_url;
+        image.alt = "";
+        setAttr(image, "loading", "lazy");
+        setAttr(image, "decoding", "async");
+        setAttr(image, "referrerpolicy", "no-referrer");
+        image.addEventListener("error", () => { thumb.hidden = true; });
+        thumb.appendChild(image);
+        option.appendChild(thumb);
+      }
+      const identity = el("span", "entity-label");
+      identity.appendChild(el("strong", null, label));
+      if (meta) identity.appendChild(el("small", null, meta));
+      option.appendChild(identity);
+      radio.addEventListener("change", () => {
+        if (!radio.checked) return;
+        radios.forEach((peer) => {
+          peer.radio.checked = peer.radio === radio;
+          peer.option.className = [
+            "signal-option",
+            peer.hasThumb ? "has-thumb" : "",
+            peer.radio.checked ? "is-selected" : "",
+          ].filter(Boolean).join(" ");
+        });
+        onChange();
+      });
+      container.appendChild(option);
+      radios.push({ radio, option, hasThumb: option.className.includes("has-thumb") });
+      if (candidate) {
+        optionNodes.push({
+          node: option,
+          group: container,
+          searchText: normalizedText([
+            candidate.name,
+            candidate.entity_id,
+            candidate.room_name,
+            candidate.device_name,
+            candidate.manufacturer,
+            candidate.model,
+            this._signalCandidateType(candidate, signalKind),
+          ].join(" ")),
+        });
+      }
+    };
+
+    const noneGroup = el("div", "signal-type-options");
+    addRadio(noneGroup, null, "", "Не привязано", "Источник можно выбрать позже");
+    list.appendChild(noneGroup);
+    this._candidateWithCurrent(candidates, current)
+      .sort((left, right) => (
+        Number(right.entity_id === current) - Number(left.entity_id === current)
+        || String(left.room_name || "").localeCompare(String(right.room_name || ""), "ru")
+        || this._signalCandidateType(left, signalKind)
+          .localeCompare(this._signalCandidateType(right, signalKind), "ru")
+        || String(left.name).localeCompare(String(right.name), "ru")
+      ))
+      .forEach((candidate) => {
+        const roomLabel = candidate.domain === "weather"
+          ? "Погодные сервисы"
+          : (candidate.room_name || (candidate.room_id ? candidate.room_id : "Без комнаты"));
+        const roomKey = groupByRoom ? roomLabel : "room";
+        if (!groups.has(roomKey)) {
+          const roomGroup = el("section", "signal-room-group");
+          if (groupByRoom) roomGroup.appendChild(el("h4", null, roomLabel));
+          const typeGroups = el("div", "signal-type-groups");
+          roomGroup.appendChild(typeGroups);
+          list.appendChild(roomGroup);
+          groups.set(roomKey, { roomGroup, typeGroups, types: new Map() });
+        }
+        const roomGroup = groups.get(roomKey);
+        const typeLabel = this._signalCandidateType(candidate, signalKind);
+        if (!roomGroup.types.has(typeLabel)) {
+          const typeGroup = el("div", "signal-type-group");
+          typeGroup.appendChild(el("h5", null, typeLabel));
+          const typeOptions = el("div", "signal-type-options");
+          typeGroup.appendChild(typeOptions);
+          roomGroup.typeGroups.appendChild(typeGroup);
+          roomGroup.types.set(typeLabel, { typeGroup, typeOptions });
+        }
+        const typeGroup = roomGroup.types.get(typeLabel);
+        const details = [
+          candidate.entity_id,
+          candidate.missing ? "ранее выбранная сущность сейчас недоступна" : "",
+          candidate.available === false && !candidate.missing ? "сейчас недоступно" : "",
+        ].filter(Boolean).join(" · ");
+        addRadio(
+          typeGroup.typeOptions,
+          candidate,
+          candidate.entity_id,
+          candidate.device_name || candidate.name || candidate.entity_id,
+          details
+        );
+      });
+    if (!optionNodes.length) {
+      list.appendChild(el("div", "muted", "Подходящих устройств пока не найдено."));
+    }
+    search.addEventListener("input", () => {
+      const query = normalizedText(search.value);
+      optionNodes.forEach((option) => {
+        option.node.hidden = Boolean(query) && !option.searchText.includes(query);
+      });
+      groups.forEach((roomGroup) => {
+        roomGroup.types.forEach(({ typeGroup, typeOptions }) => {
+          typeGroup.hidden = Array.from(typeOptions.children).every((node) => node.hidden);
+        });
+        roomGroup.roomGroup.hidden = Array.from(roomGroup.types.values())
+          .every(({ typeGroup }) => typeGroup.hidden);
+      });
+    });
+    return {
+      root: fieldset,
+      value: () => {
+        const selected = radios.find(({ radio }) => radio.checked);
+        return selected ? selected.radio.value : "";
+      },
+      radios,
+    };
+  }
+
   _renderHome(container, home) {
     container.innerHTML = "";
     container.appendChild(el("h2", null, "Сигналы дома"));
@@ -1826,38 +3250,40 @@ class HausmanHubPanel extends HTMLElement {
     const bindings = [
       {
         key: "outdoor_temperature_entity_id",
-        label: "Датчик наружной температуры",
+        label: "Наружная температура",
+        helper: "Можно выбрать уличный датчик температуры или погодный сервис Home Assistant.",
+        signalKind: "outdoor_temperature",
         options: candidates.outdoor_temperature || [],
       },
       {
         key: "presence_entity_id",
         label: "Общее присутствие дома",
+        helper: "Только люди, трекеры и датчики движения, занятости или присутствия.",
+        signalKind: "presence",
         options: candidates.presence || [],
       },
       {
         key: "central_heating_entity_id",
         label: "Центральное отопление",
+        helper: "Выключатель отопления или подходящий датчик его работы.",
+        signalKind: "central_heating",
         options: candidates.central_heating || [],
       },
     ];
-    const selects = {};
+    const pickers = {};
     bindings.forEach((binding) => {
-      const options = [{ value: "", label: "Не привязано" }].concat(
-        binding.options.map((item) => ({
-          value: item.entity_id,
-          label: item.name === item.entity_id
-            ? item.entity_id
-            : `${item.name} (${item.entity_id})`,
-        }))
-      );
-      this._appendMissingBinding(options, values[binding.key]);
-      const select = selectField(options, values[binding.key], () => {
-        this._markDirty("home", dirtyNotice);
+      const picker = this._singleChoicePicker({
+        title: binding.label,
+        helper: binding.helper,
+        candidates: binding.options,
+        current: values[binding.key],
+        signalKind: binding.signalKind,
+        onChange: () => {
+          this._markDirty("home", dirtyNotice);
+        },
       });
-      const row = el("label", "form-field", binding.label);
-      row.appendChild(select);
-      card.appendChild(row);
-      selects[binding.key] = select;
+      card.appendChild(picker.root);
+      pickers[binding.key] = picker;
     });
     const high = numberField(
       values.heating_lockout_high, -40, 60, 0.5,
@@ -1908,9 +3334,11 @@ class HausmanHubPanel extends HTMLElement {
         "home",
         HOME_API,
         {
-          outdoor_temperature_entity_id: selects.outdoor_temperature_entity_id.value || null,
-          presence_entity_id: selects.presence_entity_id.value || null,
-          central_heating_entity_id: selects.central_heating_entity_id.value || null,
+          outdoor_temperature_entity_id:
+            pickers.outdoor_temperature_entity_id.value() || null,
+          presence_entity_id: pickers.presence_entity_id.value() || null,
+          central_heating_entity_id:
+            pickers.central_heating_entity_id.value() || null,
           heating_lockout_high: highValue,
           heating_lockout_low: lowValue,
         },
@@ -1946,33 +3374,11 @@ class HausmanHubPanel extends HTMLElement {
       );
       return;
     }
-    const windowOptions = [{ value: "", label: "Не привязано" }].concat(
-      (windows.candidates || []).map((item) => ({
-        value: item.entity_id,
-        label: item.name === item.entity_id
-          ? item.entity_id
-          : `${item.name} (${item.entity_id})`,
-      }))
-    );
     const presenceCandidates = (
       windows.presence_candidates || windows.candidates || []
     ).filter((item) => (
-      !item.device_class || ROOM_PRESENCE_DEVICE_CLASSES.has(item.device_class)
+      ROOM_PRESENCE_DEVICE_CLASSES.has(item.device_class)
     ));
-    const presenceById = new Map(
-      presenceCandidates.map((item) => [item.entity_id, item])
-    );
-    rooms.forEach((room) => {
-      (room.presence_entity_ids || []).forEach((entityId) => {
-        if (!presenceById.has(entityId)) {
-          presenceById.set(entityId, {
-            entity_id: entityId,
-            name: entityId,
-            available: false,
-          });
-        }
-      });
-    });
     const fields = {};
     const presenceBoxes = {};
     const dirtyNotice = el("div", "unsaved", "Есть несохранённые изменения");
@@ -1981,19 +3387,45 @@ class HausmanHubPanel extends HTMLElement {
     rooms.forEach((room) => {
       const block = el("article", "card signal-room");
       block.appendChild(el("h3", null, room.name || room.id));
-      const roomOptions = windowOptions.slice();
-      this._appendMissingBinding(roomOptions, room.window_entity_id);
-      const select = selectField(roomOptions, room.window_entity_id, () => {
-        this._markDirty("windows", dirtyNotice);
+      const roomWindows = (windows.candidates || []).filter((candidate) => (
+        candidate.room_id === room.id
+        || candidate.entity_id === room.window_entity_id
+      ));
+      const windowPicker = this._singleChoicePicker({
+        title: "Датчик окна",
+        helper: "Показаны только датчики открытия, назначенные этой комнате.",
+        candidates: roomWindows,
+        current: room.window_entity_id,
+        signalKind: "window",
+        groupByRoom: false,
+        onChange: () => {
+          this._markDirty("windows", dirtyNotice);
+        },
       });
-      const row = el("label", "form-field", "Датчик окна");
-      row.appendChild(select);
-      block.appendChild(row);
+      block.appendChild(windowPicker.root);
       block.appendChild(el("h4", null, "Датчики присутствия"));
       block.appendChild(
         el("div", "muted", "Можно выбрать несколько датчиков движения или занятости; один датчик относится только к одной комнате.")
       );
       const selected = new Set(room.presence_entity_ids || []);
+      const roomPresenceById = new Map(
+        presenceCandidates
+          .filter((candidate) => (
+            candidate.room_id === room.id || selected.has(candidate.entity_id)
+          ))
+          .map((candidate) => [candidate.entity_id, candidate])
+      );
+      selected.forEach((entityId) => {
+        if (!roomPresenceById.has(entityId)) {
+          roomPresenceById.set(entityId, {
+            entity_id: entityId,
+            name: entityId,
+            available: false,
+            room_id: room.id,
+            missing: true,
+          });
+        }
+      });
       const boxes = [];
       const search = el("input", "entity-search");
       search.type = "search";
@@ -2009,7 +3441,7 @@ class HausmanHubPanel extends HTMLElement {
         presence: "Присутствие",
         other: "Шаблонные датчики",
       };
-      Array.from(presenceById.values())
+      Array.from(roomPresenceById.values())
         .sort((left, right) => (
           Number(selected.has(right.entity_id)) - Number(selected.has(left.entity_id))
           || String(left.name).localeCompare(String(right.name), "ru")
@@ -2037,6 +3469,19 @@ class HausmanHubPanel extends HTMLElement {
         });
         const label = el("label", "device-option");
         label.appendChild(checkbox);
+        if (candidate.image_url
+            && ZIGBEE2MQTT_IMAGE_PATTERN.test(candidate.image_url)) {
+          const thumb = el("span", "signal-option-thumb");
+          const image = el("img");
+          image.src = candidate.image_url;
+          image.alt = "";
+          setAttr(image, "loading", "lazy");
+          setAttr(image, "decoding", "async");
+          setAttr(image, "referrerpolicy", "no-referrer");
+          image.addEventListener("error", () => { thumb.hidden = true; });
+          thumb.appendChild(image);
+          label.appendChild(thumb);
+        }
         const labelText = el("span", "entity-label");
         labelText.appendChild(el("strong", null, candidate.name || candidate.entity_id));
         labelText.appendChild(el("small", null, candidate.entity_id));
@@ -2065,7 +3510,7 @@ class HausmanHubPanel extends HTMLElement {
       });
       grid.appendChild(block);
       fields[room.id] = {
-        select,
+        windowPicker,
         boxes,
         originalWindow: room.window_entity_id || "",
         originalPresence: Array.from(selected).sort(),
@@ -2081,7 +3526,7 @@ class HausmanHubPanel extends HTMLElement {
     saveButton.addEventListener("click", async () => {
       if (this._busy) return;
       const changed = Object.keys(fields).filter((roomId) => (
-        fields[roomId].select.value !== fields[roomId].originalWindow
+        fields[roomId].windowPicker.value() !== fields[roomId].originalWindow
         || JSON.stringify(selectedPresence(roomId))
           !== JSON.stringify(fields[roomId].originalPresence)
       ));
@@ -2100,7 +3545,7 @@ class HausmanHubPanel extends HTMLElement {
         await this._hass.callApi("POST", WINDOWS_API, {
           rooms: changed.map((roomId) => ({
             room_id: roomId,
-            window_entity_id: fields[roomId].select.value || null,
+            window_entity_id: fields[roomId].windowPicker.value() || null,
             presence_entity_ids: selectedPresence(roomId),
           })),
         });
@@ -2118,12 +3563,6 @@ class HausmanHubPanel extends HTMLElement {
     const actions = el("div", "actions");
     actions.appendChild(saveButton);
     container.appendChild(actions);
-  }
-
-  _appendMissingBinding(options, current) {
-    if (!current) return;
-    if (options.some((item) => item.value === current)) return;
-    options.push({ value: current, label: `${current} (недоступна)` });
   }
 
   _row(card, label, value) {

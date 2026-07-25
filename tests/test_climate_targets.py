@@ -41,6 +41,7 @@ from custom_components.hausman_hub.domain.contours import (
     ClimateProfile,
     ClimateStrategy,
     ClimateTemporaryOverride,
+    clamp_climate_temperature,
 )
 from tests.test_contours import setup, source_snapshot
 
@@ -162,6 +163,29 @@ class ClimateTargetsTest(unittest.TestCase):
             target.temperature_origin,
             ClimateTemperatureTargetOrigin.TEMPORARY_OVERRIDE,
         )
+
+    def test_effective_temperature_clamps_to_room_bounds_without_mutating_profiles(self) -> None:
+        lower_policy = replace(_setback_policy(24.0), min_temperature=24.0)
+        upper_policy = replace(_setback_policy(26.0), max_temperature=26.0)
+
+        lower = resolve_climate_room_target(
+            lower_policy,
+            _setback_observation(20.0),
+            observed_at=NOW,
+            occupancy=ClimateOccupancyMode.AWAY_SETBACK,
+        )
+        upper = resolve_climate_room_target(
+            upper_policy,
+            _setback_observation(30.0),
+            observed_at=NOW,
+            occupancy=ClimateOccupancyMode.AWAY_SETBACK,
+        )
+
+        self.assertEqual((24.0, 24.0), (lower.profile_temperature, lower.target_temperature))
+        self.assertEqual((26.0, 26.0), (upper.profile_temperature, upper.target_temperature))
+        self.assertEqual(28.0, clamp_climate_temperature(30.0, None, 28.0))
+        self.assertEqual(18.0, clamp_climate_temperature(16.0, 18.0, None))
+        self.assertEqual(24.0, clamp_climate_temperature(24.0, None, None))
 
     def test_unavailable_observation_keeps_configuration_but_not_authority(self) -> None:
         _, contours = setup()

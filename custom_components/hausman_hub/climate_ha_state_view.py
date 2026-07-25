@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import hashlib
 import importlib
 import re
 from typing import TYPE_CHECKING
+from urllib.parse import quote
 
 from .application.climate_ha_observations import (
     MAX_STATE_LENGTH,
@@ -17,6 +19,11 @@ from .application.climate_native_setup import (
     ClimateHaCatalogEntry,
     ClimateHaCatalogRoom,
     ClimateHaEntityCatalog,
+)
+from .application.climate_signal_settings import (
+    SIGNAL_DOMAINS_BY_KIND,
+    SIGNAL_KINDS,
+    signal_candidate_is_suitable,
 )
 
 if TYPE_CHECKING:
@@ -32,6 +39,19 @@ _OBSERVED_ATTRIBUTES = frozenset(
     }
 )
 _STABLE_ROOM_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+_ZIGBEE2MQTT_IMAGE_BASE = "https://www.zigbee2mqtt.io/images/devices/"
+_MAX_DEVICE_DETAIL_LENGTH = 160
+
+
+@dataclass(frozen=True, slots=True)
+class _EntityDevicePresentation:
+    """Bounded public presentation metadata for one HA registry device."""
+
+    group_id: str
+    name: str | None
+    manufacturer: str | None
+    model: str | None
+    image_url: str | None
 
 
 class HomeAssistantClimateStateView:
@@ -76,7 +96,7 @@ class HomeAssistantClimateStateView:
             if len(state.state) > MAX_STATE_LENGTH:
                 continue
             states.append(state)
-        rooms, entity_rooms = self._room_catalog(
+        rooms, entity_rooms, entity_devices, entity_categories = self._room_catalog(
             tuple(state.entity_id for state in states)
         )
         entries: list[ClimateHaCatalogEntry] = []
@@ -85,6 +105,10 @@ class HomeAssistantClimateStateView:
             device_class = state.attributes.get("device_class")
             supported_features = state.attributes.get("supported_features")
             friendly_name = state.attributes.get("friendly_name")
+            device = entity_devices.get(state.entity_id)
+            entity_category = entity_categories.get(state.entity_id)
+            if domain == "sensor" and entity_category == "diagnostic":
+                continue
             entries.append(
                 ClimateHaCatalogEntry(
                     entity_id=state.entity_id,
@@ -108,6 +132,14 @@ class HomeAssistantClimateStateView:
                         state.entity_id,
                         "",
                     ),
+                    entity_category=entity_category,
+                    device_group_id=None if device is None else device.group_id,
+                    device_name=None if device is None else device.name,
+                    manufacturer=(
+                        None if device is None else device.manufacturer
+                    ),
+                    model=None if device is None else device.model,
+                    image_url=None if device is None else device.image_url,
                 )
             )
         return ClimateHaEntityCatalog(
@@ -120,8 +152,13 @@ class HomeAssistantClimateStateView:
     def _room_catalog(
         self,
         entity_ids: tuple[str, ...],
-    ) -> tuple[tuple[ClimateHaCatalogRoom, ...], dict[str, str]]:
-        """Resolve HA areas and inherited entity/device assignments read-only."""
+    ) -> tuple[
+        tuple[ClimateHaCatalogRoom, ...],
+        dict[str, str],
+        dict[str, _EntityDevicePresentation],
+        dict[str, str],
+    ]:
+        """Resolve HA areas and bounded device presentation metadata read-only."""
 
         try:
             area_module = importlib.import_module(
@@ -135,13 +172,23 @@ class HomeAssistantClimateStateView:
             )
         except ModuleNotFoundError:
             # The pure unit-test environment intentionally has no HA package.
-            return (), {}
+            return (), {}, {}, {}
 
         area_registry = area_module.async_get(self._hass)
         device_registry = device_module.async_get(self._hass)
         entity_registry = entity_module.async_get(self._hass)
+        list_areas = getattr(area_registry, "async_list_areas", None)
+        raw_area_entries = (
+            list_areas()
+            if callable(list_areas)
+            else tuple(getattr(area_registry, "areas", {}).values())
+        )
         area_entries = sorted(
-            area_registry.async_list_areas(),
+            (
+                area
+                for area in raw_area_entries
+                if isinstance(getattr(area, "id", None), str)
+            ),
             key=lambda area: area.id,
         )
         area_room_ids: dict[str, str] = {}
@@ -160,37 +207,81 @@ class HomeAssistantClimateStateView:
             )
 
         entity_rooms: dict[str, str] = {}
+        entity_devices: dict[str, _EntityDevicePresentation] = {}
+        entity_categories: dict[str, str] = {}
         for entity_id in entity_ids:
-            registry_entry = entity_registry.async_get(entity_id)
+            registry_entry = _registry_entry(
+                entity_registry,
+                entity_id,
+                collection_name="entities",
+                match_entity_id=True,
+            )
             if registry_entry is None:
                 continue
+            entity_category = _entity_category(
+                getattr(registry_entry, "entity_category", None)
+            )
+            if entity_category is not None:
+                entity_categories[entity_id] = entity_category
             source_area_id = registry_entry.area_id
-            if not source_area_id and registry_entry.device_id:
-                device_entry = device_registry.async_get(registry_entry.device_id)
+            device_entry = None
+            if registry_entry.device_id:
+                device_entry = _registry_entry(
+                    device_registry,
+                    registry_entry.device_id,
+                    collection_name="devices",
+                )
+                if device_entry is not None:
+                    entity_devices[entity_id] = _device_presentation(
+                        registry_entry.device_id,
+                        device_entry,
+                    )
+            if not source_area_id and device_entry is not None:
                 source_area_id = (
-                    None if device_entry is None else device_entry.area_id
+                    device_entry.area_id
                 )
             room_id = area_room_ids.get(source_area_id)
             if room_id is not None:
                 entity_rooms[entity_id] = room_id
 
-        return tuple(rooms), entity_rooms
+        return tuple(rooms), entity_rooms, entity_devices, entity_categories
 
     def signal_entity_catalog(
         self,
-        allowed_domains: frozenset[str],
+        signal_kind: str,
     ) -> ClimateHaEntityCatalog:
         """Enumerate only entities usable for one signal binding selection."""
 
-        entries: list[ClimateHaCatalogEntry] = []
+        if signal_kind not in SIGNAL_KINDS:
+            return ClimateHaEntityCatalog(entries=())
+        states = []
         for state in self._hass.states.async_all():
             domain = state.entity_id.split(".", 1)[0]
-            if domain not in allowed_domains:
+            if domain not in SIGNAL_DOMAINS_BY_KIND[signal_kind]:
                 continue
             if len(state.state) > MAX_STATE_LENGTH:
                 continue
+            states.append(state)
+        rooms, entity_rooms, entity_devices, entity_categories = self._room_catalog(
+            tuple(state.entity_id for state in states)
+        )
+        entries: list[ClimateHaCatalogEntry] = []
+        for state in states:
+            domain = state.entity_id.split(".", 1)[0]
             friendly_name = state.attributes.get("friendly_name")
             device_class = state.attributes.get("device_class")
+            entity_category = entity_categories.get(state.entity_id)
+            if not signal_candidate_is_suitable(
+                signal_kind,
+                domain=domain,
+                device_class=(
+                    device_class if isinstance(device_class, str) else None
+                ),
+                entity_category=entity_category,
+                attributes=state.attributes,
+            ):
+                continue
+            device = entity_devices.get(state.entity_id)
             entries.append(
                 ClimateHaCatalogEntry(
                     entity_id=state.entity_id,
@@ -205,12 +296,22 @@ class HomeAssistantClimateStateView:
                     ),
                     available=state.state not in {"", "unavailable", "unknown"},
                     last_updated_ms=int(state.last_updated.timestamp() * 1000),
+                    room_id=entity_rooms.get(state.entity_id, ""),
+                    entity_category=entity_category,
+                    device_group_id=None if device is None else device.group_id,
+                    device_name=None if device is None else device.name,
+                    manufacturer=(
+                        None if device is None else device.manufacturer
+                    ),
+                    model=None if device is None else device.model,
+                    image_url=None if device is None else device.image_url,
                 )
             )
         return ClimateHaEntityCatalog(
             entries=tuple(
                 sorted(entries, key=lambda entry: entry.entity_id)
-            )
+            ),
+            rooms=rooms,
         )
 
 
@@ -237,3 +338,88 @@ def _bounded_area_name(value: object, room_id: str) -> str:
         if normalized:
             return normalized
     return f"Комната {room_id}"[:120]
+
+
+def _entity_category(value: object) -> str | None:
+    """Normalize an HA EntityCategory enum without importing its concrete type."""
+
+    raw = getattr(value, "value", value)
+    return raw if isinstance(raw, str) and raw else None
+
+
+def _registry_entry(
+    registry: object,
+    key: str,
+    *,
+    collection_name: str,
+    match_entity_id: bool = False,
+) -> object | None:
+    """Read one registry entry across the real HA and minimal test shapes."""
+
+    getter = getattr(registry, "async_get", None)
+    if callable(getter):
+        return getter(key)
+    collection = getattr(registry, collection_name, None)
+    if not isinstance(collection, dict):
+        return None
+    direct = collection.get(key)
+    if direct is not None or not match_entity_id:
+        return direct
+    return next(
+        (
+            entry
+            for entry in collection.values()
+            if getattr(entry, "entity_id", None) == key
+        ),
+        None,
+    )
+
+
+def _device_presentation(
+    registry_device_id: str,
+    device_entry: object,
+) -> _EntityDevicePresentation:
+    """Project only display-safe facts and an opaque physical-device group."""
+
+    group_digest = hashlib.sha256(
+        registry_device_id.encode("utf-8")
+    ).hexdigest()[:16]
+    name = _bounded_device_detail(
+        getattr(device_entry, "name_by_user", None)
+        or getattr(device_entry, "name", None)
+    )
+    manufacturer = _bounded_device_detail(
+        getattr(device_entry, "manufacturer", None)
+    )
+    model = _bounded_device_detail(getattr(device_entry, "model", None))
+    model_id = _bounded_device_detail(getattr(device_entry, "model_id", None))
+    identifiers = getattr(device_entry, "identifiers", ()) or ()
+    is_zigbee2mqtt = any(
+        isinstance(identifier, (tuple, list))
+        and len(identifier) == 2
+        and identifier[0] == "mqtt"
+        and isinstance(identifier[1], str)
+        and identifier[1].startswith("zigbee2mqtt_")
+        for identifier in identifiers
+    )
+    image_url = (
+        f"{_ZIGBEE2MQTT_IMAGE_BASE}{quote(model_id, safe='')}.png"
+        if is_zigbee2mqtt and model_id is not None
+        else None
+    )
+    return _EntityDevicePresentation(
+        group_id=f"device_{group_digest}",
+        name=name,
+        manufacturer=manufacturer,
+        model=model,
+        image_url=image_url,
+    )
+
+
+def _bounded_device_detail(value: object) -> str | None:
+    """Return one compact single-line registry label or no public value."""
+
+    if not isinstance(value, str):
+        return None
+    normalized = " ".join(value.split())[:_MAX_DEVICE_DETAIL_LENGTH].rstrip()
+    return normalized or None

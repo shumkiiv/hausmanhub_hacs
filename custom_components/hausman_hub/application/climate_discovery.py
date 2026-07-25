@@ -64,6 +64,11 @@ class ImportedClimateDevice:
     command_types: tuple[str, ...]
     suggested_kinds: tuple[ClimateDeviceKind, ...]
     endpoints: tuple = ()
+    device_group_id: str | None = None
+    device_name: str | None = None
+    manufacturer: str | None = None
+    model: str | None = None
+    image_url: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,5 +92,4 @@ class ClimateImportSnapshot:
             (device for device in self.devices if device.source_id == source_id),
             None,
         )
-
 

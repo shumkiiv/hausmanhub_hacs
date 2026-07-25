@@ -5,7 +5,7 @@
   },
   "generated_at": 1784280000000,
   "snapshot_revision": 8115739542118920,
-  "draft_revision": 2766488448644126,
+  "draft_revision": 173834081165130,
   "status": "created",
   "save_allowed": false,
   "validation_required": true,
@@ -31,12 +31,15 @@
         "target_humidity": 50,
         "strategy": "soft"
       },
+      "min_temperature": null,
+      "max_temperature": null,
       "devices": [
         {
           "candidate_id": "candidate_0001",
           "name": "Kids humidifier",
           "type": "humidifier",
-          "type_name": "Увлажнитель"
+          "type_name": "Увлажнитель",
+          "control_channel": null
         }
       ]
     },
@@ -48,12 +51,15 @@
         "target_humidity": 45,
         "strategy": "normal"
       },
+      "min_temperature": null,
+      "max_temperature": null,
       "devices": [
         {
           "candidate_id": "candidate_0002",
           "name": "Living AC",
           "type": "air_conditioner",
-          "type_name": "Кондиционер"
+          "type_name": "Кондиционер",
+          "control_channel": null
         }
       ]
     }

@@ -72,6 +72,33 @@
         "aggressive"
       ]
     },
+    "nullable_temperature": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "number",
+          "minimum": 18,
+          "maximum": 28,
+          "multipleOf": 0.5
+        }
+      ]
+    },
+    "nullable_control_channel": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "enum": [
+            "universal_ir",
+            "yandex_remote",
+            "direct_wifi"
+          ]
+        }
+      ]
+    },
     "device": {
       "type": "object",
       "additionalProperties": false,
@@ -85,6 +112,9 @@
         },
         "type": {
           "$ref": "#/$defs/device_type"
+        },
+        "control_channel": {
+          "$ref": "#/$defs/nullable_control_channel"
         }
       }
     },
@@ -116,6 +146,12 @@
         },
         "strategy": {
           "$ref": "#/$defs/strategy"
+        },
+        "min_temperature": {
+          "$ref": "#/$defs/nullable_temperature"
+        },
+        "max_temperature": {
+          "$ref": "#/$defs/nullable_temperature"
         },
         "devices": {
           "type": "array",

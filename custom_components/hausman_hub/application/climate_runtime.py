@@ -652,6 +652,12 @@ class ClimateRuntime:
                         room_id=request.room_id,
                     )
             except ContourRegistryViolation as error:
+                if error.code == "temperature_out_of_bounds":
+                    raise TemporaryTemperatureViolation(
+                        "temporary temperature is outside room bounds",
+                        code=error.code,
+                        room_id=request.room_id,
+                    ) from error
                 raise ContourApplyViolation(str(error)) from error
             updated_contour = updated.contour(CLIMATE_CONTOUR_ID)
             if updated_contour is None:
@@ -1511,7 +1517,7 @@ class ClimateRuntime:
 
     async def async_signal_catalog(
         self,
-        allowed_domains: frozenset[str],
+        signal_kind: str,
     ) -> list[dict[str, object]]:
         """List bounded local candidates for one signal binding selection."""
 
@@ -1521,18 +1527,57 @@ class ClimateRuntime:
             raise ClimateRuntimeUnavailable(
                 "the local signal entity catalog is unavailable"
             )
-        entries = catalog(allowed_domains).entries
+        projected = catalog(signal_kind)
+        room_names = {
+            room.room_id: room.name
+            for room in projected.rooms
+        }
         result: list[dict[str, object]] = []
-        for entry in entries:
+        for entry in projected.entries:
             item: dict[str, object] = {
                 "entity_id": entry.entity_id,
                 "name": entry.friendly_name or entry.entity_id,
                 "available": entry.available,
+                "domain": entry.domain,
+                "room_id": entry.room_id,
             }
             if entry.device_class is not None:
                 item["device_class"] = entry.device_class
+            if entry.room_id in room_names:
+                item["room_name"] = room_names[entry.room_id]
+            for key in (
+                "device_group_id",
+                "device_name",
+                "manufacturer",
+                "model",
+                "image_url",
+            ):
+                value = getattr(entry, key)
+                if value is not None:
+                    item[key] = value
             result.append(item)
         return result
+
+    def signal_entity_suitable(
+        self,
+        signal_kind: str,
+        entity_id: str,
+        *,
+        room_id: str | None = None,
+    ) -> bool:
+        """Check one current entity against the same catalog shown by the UI."""
+
+        view = self._ha_state_view
+        catalog = getattr(view, "signal_entity_catalog", None)
+        if view is None or catalog is None:
+            return False
+        try:
+            entry = catalog(signal_kind).entry(entity_id)
+        except Exception:
+            return False
+        return entry is not None and (
+            room_id is None or entry.room_id == room_id
+        )
 
     async def async_replace_contours(self, payload: object) -> dict[str, object]:
         """Replace contour definitions while keeping their bindings exact."""

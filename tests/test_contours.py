@@ -37,7 +37,10 @@ from custom_components.hausman_hub.domain.climate import (
     ClimateRegistry,
 )
 from custom_components.hausman_hub.domain.contours import (
+    ClimateComfortSettings,
+    ClimateContourRoom,
     ClimateProfile,
+    ClimateStrategy,
     ContourMode,
     ContourViolation,
 )
@@ -188,7 +191,7 @@ class ContoursTest(unittest.TestCase):
 
         migrated = migrate_contour_registry_payload(1, legacy)
         room = migrated["contours"][0]["rooms"][0]  # type: ignore[index]
-        self.assertEqual(4, migrated["version"])
+        self.assertEqual(5, migrated["version"])
         self.assertEqual("day", room["active_profile"])
         self.assertEqual(room["profiles"]["day"], room["profiles"]["night"])
         self.assertIsNone(room["temporary_override"])
@@ -212,6 +215,8 @@ class ContoursTest(unittest.TestCase):
         profile_payload["contours"][0]["rooms"][0].pop(  # type: ignore[index]
             "temporary_override"
         )
+        profile_payload["contours"][0]["rooms"][0].pop("min_temperature")  # type: ignore[index]
+        profile_payload["contours"][0]["rooms"][0].pop("max_temperature")  # type: ignore[index]
 
         migrated = migrate_contour_registry_payload(2, profile_payload)
 
@@ -225,7 +230,7 @@ class ContoursTest(unittest.TestCase):
             },
             schedule,
         )
-        self.assertEqual(4, migrated["version"])
+        self.assertEqual(5, migrated["version"])
         self.assertIsNone(
             migrated["contours"][0]["rooms"][0]["temporary_override"]  # type: ignore[index]
         )
@@ -245,10 +250,12 @@ class ContoursTest(unittest.TestCase):
         payload["contours"][0]["rooms"][0].pop(  # type: ignore[index]
             "temporary_override"
         )
+        payload["contours"][0]["rooms"][0].pop("min_temperature")  # type: ignore[index]
+        payload["contours"][0]["rooms"][0].pop("max_temperature")  # type: ignore[index]
 
         migrated = migrate_contour_registry_payload(3, payload)
 
-        self.assertEqual(4, migrated["version"])
+        self.assertEqual(5, migrated["version"])
         self.assertEqual(
             {
                 "enabled": True,
@@ -261,6 +268,65 @@ class ContoursTest(unittest.TestCase):
         self.assertIsNone(
             migrated["contours"][0]["rooms"][0]["temporary_override"]  # type: ignore[index]
         )
+
+    def test_bounds_registry_migration_uses_absent_defaults_and_writes_version_five(
+        self,
+    ) -> None:
+        _, contours = setup()
+        version_four = contour_registry_to_payload(contours)
+        version_four["version"] = 4
+        room = version_four["contours"][0]["rooms"][0]  # type: ignore[index]
+        room.pop("min_temperature")
+        room.pop("max_temperature")
+
+        migrated = migrate_contour_registry_payload(4, version_four)
+        restored = contour_registry_from_payload(migrated)
+
+        self.assertEqual(5, migrated["version"])
+        self.assertIsNone(restored.contours[0].rooms[0].min_temperature)
+        self.assertIsNone(restored.contours[0].rooms[0].max_temperature)
+        migrated_room = migrated["contours"][0]["rooms"][0]  # type: ignore[index]
+        self.assertIsNone(migrated_room["min_temperature"])
+        self.assertIsNone(migrated_room["max_temperature"])
+
+    def test_climate_room_bounds_require_safe_ordered_profile_range(self) -> None:
+        day = ClimateComfortSettings(
+            target_temperature=25.0,
+            target_humidity=45,
+            strategy=ClimateStrategy.NORMAL,
+        )
+        night = ClimateComfortSettings(
+            target_temperature=22.0,
+            target_humidity=40,
+            strategy=ClimateStrategy.SOFT,
+        )
+
+        room = ClimateContourRoom(
+            room_id="living",
+            device_ids=("living_ac",),
+            day_profile=day,
+            night_profile=night,
+            min_temperature=22.0,
+            max_temperature=25.0,
+        )
+
+        self.assertEqual(22.0, room.min_temperature)
+        self.assertEqual(25.0, room.max_temperature)
+        for bounds in (
+            {"min_temperature": 25.0, "max_temperature": 24.0},
+            {"min_temperature": 22.5},
+            {"max_temperature": 24.5},
+            {"min_temperature": 22.25},
+            {"min_temperature": True},
+        ):
+            with self.subTest(bounds=bounds), self.assertRaises(ContourViolation):
+                ClimateContourRoom(
+                    room_id="living",
+                    device_ids=("living_ac",),
+                    day_profile=day,
+                    night_profile=night,
+                    **bounds,
+                )
 
     def test_schedule_selects_day_and_night_across_midnight(self) -> None:
         climate_registry, contours = setup()
@@ -420,6 +486,42 @@ class ContoursTest(unittest.TestCase):
         restored_room = restored.contour("climate").rooms[0]  # type: ignore[union-attr]
         self.assertEqual(24.0, restored_room.target_temperature)
         self.assertIsNone(restored_room.temporary_override)
+
+    def test_temporary_temperature_rejects_values_outside_room_bounds(self) -> None:
+        _, contours = build_climate_contour_setup(
+            source_snapshot(),
+            room_ids=["living"],
+            source_ids=["synthetic-ac-source-living"],
+            name="Климат",
+            mode="automatic",
+            target_temperature=25.0,
+            target_humidity=45,
+            strategy="normal",
+            room_bounds={
+                "living": {"min_temperature": 24.0, "max_temperature": 26.0}
+            },
+        )
+        scheduled = with_climate_schedule(
+            contours,
+            enabled=True,
+            day_start="07:00",
+            night_start="23:00",
+        )
+
+        with self.assertRaisesRegex(ContourRegistryViolation, "room bounds") as below:
+            with_climate_temporary_temperature(
+                scheduled,
+                room_id="living",
+                target_temperature=23.5,
+            )
+        self.assertEqual("temperature_out_of_bounds", below.exception.code)
+        with self.assertRaisesRegex(ContourRegistryViolation, "room bounds") as above:
+            with_climate_temporary_temperature(
+                scheduled,
+                room_id="living",
+                target_temperature=26.5,
+            )
+        self.assertEqual("temperature_out_of_bounds", above.exception.code)
 
     def test_schedule_profile_change_clears_temporary_temperature(self) -> None:
         _, contours = setup()

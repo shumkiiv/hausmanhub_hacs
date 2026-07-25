@@ -14,11 +14,35 @@ from math import isfinite
 
 from ..domain.climate import MAX_ROOM_PRESENCE_ENTITIES
 
-OUTDOOR_TEMPERATURE_DOMAINS = frozenset({"sensor"})
+OUTDOOR_TEMPERATURE_DOMAINS = frozenset({"sensor", "weather"})
 PRESENCE_DOMAINS = frozenset({"binary_sensor", "person", "device_tracker"})
 CENTRAL_HEATING_DOMAINS = frozenset({"binary_sensor", "switch", "input_boolean"})
 WINDOW_DOMAINS = frozenset({"binary_sensor"})
 ROOM_PRESENCE_DOMAINS = frozenset({"binary_sensor"})
+OUTDOOR_TEMPERATURE_SIGNAL = "outdoor_temperature"
+PRESENCE_SIGNAL = "presence"
+CENTRAL_HEATING_SIGNAL = "central_heating"
+WINDOW_SIGNAL = "window"
+ROOM_PRESENCE_SIGNAL = "room_presence"
+SIGNAL_KINDS = frozenset(
+    {
+        OUTDOOR_TEMPERATURE_SIGNAL,
+        PRESENCE_SIGNAL,
+        CENTRAL_HEATING_SIGNAL,
+        WINDOW_SIGNAL,
+        ROOM_PRESENCE_SIGNAL,
+    }
+)
+SIGNAL_DOMAINS_BY_KIND = {
+    OUTDOOR_TEMPERATURE_SIGNAL: OUTDOOR_TEMPERATURE_DOMAINS,
+    PRESENCE_SIGNAL: PRESENCE_DOMAINS,
+    CENTRAL_HEATING_SIGNAL: CENTRAL_HEATING_DOMAINS,
+    WINDOW_SIGNAL: WINDOW_DOMAINS,
+    ROOM_PRESENCE_SIGNAL: ROOM_PRESENCE_DOMAINS,
+}
+PRESENCE_DEVICE_CLASSES = frozenset({"motion", "occupancy", "presence"})
+WINDOW_DEVICE_CLASSES = frozenset({"window", "door", "opening", "garage_door"})
+CENTRAL_HEATING_DEVICE_CLASSES = frozenset({"heat", "running", "power"})
 HEATING_LOCKOUT_MINIMUM = -40.0
 HEATING_LOCKOUT_MAXIMUM = 60.0
 CLIMATE_MODES = frozenset({"disabled", "managed"})
@@ -48,6 +72,44 @@ class ClimateSignalSettingsViolation(ValueError):
     def __init__(self, code: str) -> None:
         super().__init__(code)
         self.code = code
+
+
+def signal_candidate_is_suitable(
+    signal_kind: str,
+    *,
+    domain: str,
+    device_class: str | None,
+    entity_category: str | None,
+    attributes: Mapping[str, object],
+) -> bool:
+    """Return whether one HA entity is semantically suitable for a binding."""
+
+    if signal_kind not in SIGNAL_KINDS or entity_category == "diagnostic":
+        return False
+    if signal_kind == OUTDOOR_TEMPERATURE_SIGNAL:
+        if domain == "sensor":
+            return device_class == "temperature"
+        return (
+            domain == "weather"
+            and _finite_signal_number(attributes.get("temperature")) is not None
+        )
+    if signal_kind == PRESENCE_SIGNAL:
+        return domain in {"person", "device_tracker"} or (
+            domain == "binary_sensor"
+            and device_class in PRESENCE_DEVICE_CLASSES
+        )
+    if signal_kind == CENTRAL_HEATING_SIGNAL:
+        return domain in {"switch", "input_boolean"} or (
+            domain == "binary_sensor"
+            and device_class in CENTRAL_HEATING_DEVICE_CLASSES
+        )
+    if signal_kind == WINDOW_SIGNAL:
+        return domain == "binary_sensor" and device_class in WINDOW_DEVICE_CLASSES
+    return (
+        signal_kind == ROOM_PRESENCE_SIGNAL
+        and domain == "binary_sensor"
+        and device_class in PRESENCE_DEVICE_CLASSES
+    )
 
 
 def validate_optional_signal_entity(
@@ -260,3 +322,15 @@ def _lockout_threshold(value: object) -> float:
     if not HEATING_LOCKOUT_MINIMUM <= result <= HEATING_LOCKOUT_MAXIMUM:
         raise ClimateSignalSettingsViolation("invalid_lockout_threshold")
     return result
+
+
+def _finite_signal_number(value: object) -> float | None:
+    """Parse one finite non-boolean numeric signal attribute."""
+
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        result = float(value)
+    except OverflowError:
+        return None
+    return result if isfinite(result) else None

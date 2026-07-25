@@ -183,7 +183,7 @@ class ClimateContractSchemasTest(unittest.TestCase):
         candidates = climate_device_candidates(registry, snapshot)
         suggestions = climate_room_suggestions(registry, snapshot)
         draft_registry = registry_from_payload(
-            {"version": 2, "home": {"outdoor_temperature_entity_id": None, "presence_entity_id": None, "central_heating_entity_id": None}, "rooms": [], "devices": []}
+            {"version": 3, "home": {"outdoor_temperature_entity_id": None, "presence_entity_id": None, "central_heating_entity_id": None}, "rooms": [], "devices": []}
         )
         draft_request = load_json(
             ROOT / "fixtures" / "hausmanhub_climate_draft_v1" / "request.json"
@@ -226,6 +226,23 @@ class ClimateContractSchemasTest(unittest.TestCase):
         )
         validator("v1/climate-draft-save.schema.json").validate(draft_save)
         validator("v1/climate-current-setup.schema.json").validate(current_setup)
+        legacy_draft = copy.deepcopy(draft)
+        for room in legacy_draft["rooms"]:
+            room.pop("min_temperature")
+            room.pop("max_temperature")
+            for device in room["devices"]:
+                device.pop("control_channel")
+        legacy_options = dict(setup_options)
+        legacy_options.pop("control_channels")
+        legacy_current = copy.deepcopy(current_setup)
+        for room in legacy_current["rooms"]:
+            room.pop("min_temperature")
+            room.pop("max_temperature")
+            for device in room["devices"]:
+                device.pop("control_channel")
+        validator("v1/climate-draft.schema.json").validate(legacy_draft)
+        validator("v1/climate-setup-options.schema.json").validate(legacy_options)
+        validator("v1/climate-current-setup.schema.json").validate(legacy_current)
         self.assertEqual(
             load_json(
                 ROOT / "fixtures" / "hausmanhub_climate_draft_v1" / "save.json"

@@ -44,7 +44,7 @@ def load_json(path: Path) -> object:
 
 
 def empty_registry() -> object:
-    return registry_from_payload({"version": 2, "home": {"outdoor_temperature_entity_id": None, "presence_entity_id": None, "central_heating_entity_id": None}, "rooms": [], "devices": []})
+    return registry_from_payload({"version": 3, "home": {"outdoor_temperature_entity_id": None, "presence_entity_id": None, "central_heating_entity_id": None}, "rooms": [], "devices": []})
 
 
 class ClimateSetupDraftTest(unittest.TestCase):
@@ -136,6 +136,257 @@ class ClimateSetupDraftTest(unittest.TestCase):
             registry_to_payload(self.registry),  # type: ignore[arg-type]
         )
         self.assertEqual(snapshot_before, self.snapshot)
+
+    def test_draft_round_trips_room_bounds_and_managed_control_channel(self) -> None:
+        request = copy.deepcopy(self.request)
+        living = next(room for room in request["rooms"] if room["room_id"] == "living")
+        living["min_temperature"] = 22.0
+        living["max_temperature"] = 26.0
+        living["devices"][0]["control_channel"] = "direct_wifi"
+
+        draft = create_climate_contour_draft(
+            self.registry,  # type: ignore[arg-type]
+            self.snapshot,
+            request,
+        )
+        validation = validate_climate_contour_draft(
+            self.registry,  # type: ignore[arg-type]
+            self.snapshot,
+            draft,
+        )
+        registry, contours, _ = build_climate_contour_draft_setup(
+            self.registry,  # type: ignore[arg-type]
+            self.snapshot,
+            draft,
+        )
+        current = current_climate_contour_setup(registry, contours, self.snapshot)
+
+        self.assertTrue(validation["save_allowed"])
+        self.assertEqual(22.0, draft["rooms"][1]["min_temperature"])
+        self.assertEqual(26.0, draft["rooms"][1]["max_temperature"])
+        self.assertEqual(
+            "direct_wifi",
+            draft["rooms"][1]["devices"][0]["control_channel"],
+        )
+        saved_living = next(room for room in contours.contours[0].rooms if room.room_id == "living")
+        self.assertEqual(22.0, saved_living.min_temperature)
+        self.assertEqual(26.0, saved_living.max_temperature)
+        saved_device = next(
+            device
+            for device in registry.devices
+            if device.source_id == "synthetic-ac-source-living"
+        )
+        self.assertEqual("direct_wifi", saved_device.control_channel.value)
+        current_living = next(room for room in current["rooms"] if room["id"] == "living")
+        self.assertEqual(22.0, current_living["min_temperature"])
+        self.assertEqual(26.0, current_living["max_temperature"])
+        self.assertEqual(
+            "direct_wifi",
+            current_living["devices"][0]["control_channel"],
+        )
+
+    def test_legacy_draft_without_new_fields_defaults_to_null(self) -> None:
+        draft = create_climate_contour_draft(
+            self.registry,  # type: ignore[arg-type]
+            self.snapshot,
+            self.request,
+        )
+
+        self.assertTrue(
+            all(room["min_temperature"] is None for room in draft["rooms"])
+        )
+        self.assertTrue(
+            all(room["max_temperature"] is None for room in draft["rooms"])
+        )
+        self.assertTrue(
+            all(
+                device["control_channel"] is None
+                for room in draft["rooms"]
+                for device in room["devices"]
+            )
+        )
+        legacy_draft = copy.deepcopy(draft)
+        for room in legacy_draft["rooms"]:
+            room.pop("min_temperature")
+            room.pop("max_temperature")
+            for device in room["devices"]:
+                device.pop("control_channel")
+
+        validation = validate_climate_contour_draft(
+            self.registry,  # type: ignore[arg-type]
+            self.snapshot,
+            legacy_draft,
+        )
+
+        self.assertTrue(validation["save_allowed"])
+
+    def test_draft_validation_blocks_invalid_bounds_and_control_channels(self) -> None:
+        invalid_bounds = copy.deepcopy(self.request)
+        living = next(
+            room for room in invalid_bounds["rooms"] if room["room_id"] == "living"
+        )
+        living["min_temperature"] = 25.5
+        bounds_draft = create_climate_contour_draft(
+            self.registry,  # type: ignore[arg-type]
+            self.snapshot,
+            invalid_bounds,
+        )
+
+        bounds_validation = validate_climate_contour_draft(
+            self.registry,  # type: ignore[arg-type]
+            self.snapshot,
+            bounds_draft,
+        )
+
+        self.validation_validator.validate(bounds_validation)
+        self.assertEqual("blocked", bounds_validation["status"])
+        self.assertEqual("invalid_temperature_bounds", bounds_validation["issues"][0]["code"])
+        self.assertEqual("living", bounds_validation["issues"][0]["room_id"])
+
+        invalid_channel = copy.deepcopy(self.request)
+        living = next(
+            room for room in invalid_channel["rooms"] if room["room_id"] == "living"
+        )
+        living["devices"][0]["control_channel"] = "not_a_channel"
+        channel_draft = create_climate_contour_draft(
+            self.registry,  # type: ignore[arg-type]
+            self.snapshot,
+            invalid_channel,
+        )
+
+        channel_validation = validate_climate_contour_draft(
+            self.registry,  # type: ignore[arg-type]
+            self.snapshot,
+            channel_draft,
+        )
+
+        self.validation_validator.validate(channel_validation)
+        self.assertEqual("blocked", channel_validation["status"])
+        self.assertEqual("invalid_control_channel", channel_validation["issues"][0]["code"])
+        self.assertEqual("living", channel_validation["issues"][0]["room_id"])
+        self.assertEqual(
+            living["devices"][0]["candidate_id"],
+            channel_validation["issues"][0]["candidate_id"],
+        )
+
+        source = copy.deepcopy(load_json(SOURCE_FIXTURE))
+        source["devices"].append(  # type: ignore[union-attr]
+            {
+                "id": "synthetic-living-temperature",
+                "name": "Living temperature",
+                "roomId": "living",
+                "domain": "sensor",
+                "category": "temperature",
+                "state": "24.0",
+                "unavailable": False,
+            }
+        )
+        snapshot = import_climate_state(source)
+        options = climate_setup_options(self.registry, snapshot)  # type: ignore[arg-type]
+        observed_candidate = next(
+            device
+            for device in options["devices"]
+            if "temperature_sensor" in device["suggested_types"]
+        )
+        observed_channel = copy.deepcopy(self.request)
+        observed_channel["snapshot_revision"] = options["snapshot_revision"]
+        living = next(
+            room for room in observed_channel["rooms"] if room["room_id"] == "living"
+        )
+        living["devices"].append(
+            {
+                "candidate_id": observed_candidate["candidate_id"],
+                "type": "temperature_sensor",
+                "control_channel": "universal_ir",
+            }
+        )
+        observed_draft = create_climate_contour_draft(
+            self.registry,  # type: ignore[arg-type]
+            snapshot,
+            observed_channel,
+        )
+
+        observed_validation = validate_climate_contour_draft(
+            self.registry,  # type: ignore[arg-type]
+            snapshot,
+            observed_draft,
+        )
+
+        self.validation_validator.validate(observed_validation)
+        self.assertEqual("blocked", observed_validation["status"])
+        self.assertEqual(
+            "invalid_control_channel",
+            observed_validation["issues"][0]["code"],
+        )
+        self.assertEqual("living", observed_validation["issues"][0]["room_id"])
+        self.assertEqual(
+            observed_candidate["candidate_id"],
+            observed_validation["issues"][0]["candidate_id"],
+        )
+
+    def test_draft_validation_blocks_channel_for_preserved_canary_device(self) -> None:
+        registry, contours, snapshot = configured_setup()
+        registry_payload = registry_to_payload(registry)
+        for device in registry_payload["devices"]:  # type: ignore[union-attr]
+            if device["id"] == "living_air_conditioner":
+                device["control_scope"] = "canary"
+                device["endpoints"] = [
+                    {"role": "control", "entity_id": "climate.living_ac"}
+                ]
+        canary_registry = registry_from_payload(registry_payload)
+        current = current_climate_contour_setup(
+            canary_registry,
+            contours,
+            snapshot,
+        )
+        request = {
+            "snapshot_revision": current["snapshot_revision"],
+            "setup_revision": current["setup_revision"],
+            "name": current["name"],
+            "mode": current["mode"],
+            "rooms": [
+                {
+                    "room_id": room["id"],
+                    "target_temperature": room["profiles"]["day"]["target_temperature"],
+                    "target_humidity": room["profiles"]["day"]["target_humidity"],
+                    "strategy": room["profiles"]["day"]["strategy"],
+                    "devices": [
+                        {
+                            "candidate_id": device["candidate_id"],
+                            "type": device["type"],
+                            "control_channel": (
+                                "universal_ir"
+                                if room["id"] == "living"
+                                else None
+                            ),
+                        }
+                        for device in room["devices"]
+                    ],
+                }
+                for room in current["rooms"]
+            ],
+        }
+        draft = create_climate_contour_draft(
+            canary_registry,
+            snapshot,
+            request,
+            contours=contours,
+        )
+
+        validation = validate_climate_contour_draft(
+            canary_registry,
+            snapshot,
+            draft,
+            contours=contours,
+        )
+
+        self.assertEqual("blocked", validation["status"])
+        self.assertFalse(validation["save_allowed"])
+        self.assertEqual(
+            "invalid_control_channel",
+            validation["issues"][0]["code"],
+        )
+        self.assertEqual("living", validation["issues"][0]["room_id"])
 
     def test_sensor_only_room_is_blocked_with_plain_issue(self) -> None:
         source = copy.deepcopy(load_json(SOURCE_FIXTURE))
@@ -350,6 +601,27 @@ class ClimateSetupDraftTest(unittest.TestCase):
         self.options_validator.validate(stale)
         self.assertFalse(stale["draft_creation_allowed"])
         self.assertFalse(any(device["can_add"] for device in stale["devices"]))
+
+    def test_setup_options_schema_allows_only_official_zigbee2mqtt_images(self) -> None:
+        options = copy.deepcopy(load_json(DRAFT_FIXTURES / "options.json"))
+        options["devices"][0].update(  # type: ignore[index]
+            {
+                "device_group_id": "device_0123456789abcdef",
+                "device_name": "Климат детская",
+                "manufacturer": "KOJIMA",
+                "model": "Temperature and humidity sensor",
+                "image_url": (
+                    "https://www.zigbee2mqtt.io/images/devices/"
+                    "KOJIMA-THS-ZG-LCD.png"
+                ),
+            }
+        )
+
+        self.options_validator.validate(options)
+
+        options["devices"][0]["image_url"] = "https://example.com/device.png"  # type: ignore[index]
+        with self.assertRaises(Exception):
+            self.options_validator.validate(options)
 
     def test_valid_request_creates_exact_sorted_private_id_free_draft(self) -> None:
         request_before = copy.deepcopy(self.request)

@@ -80,6 +80,12 @@ class ClimateHaCatalogEntry:
     available: bool
     last_updated_ms: int
     room_id: str = UNASSIGNED_CANDIDATE_ROOM
+    entity_category: str | None = None
+    device_group_id: str | None = None
+    device_name: str | None = None
+    manufacturer: str | None = None
+    model: str | None = None
+    image_url: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -250,6 +256,11 @@ def _bound_device(
         command_types=native_device_command_types(device),
         suggested_kinds=(device.kind,),
         endpoints=device.endpoints,
+        device_group_id=None if entry is None else entry.device_group_id,
+        device_name=None if entry is None else entry.device_name,
+        manufacturer=None if entry is None else entry.manufacturer,
+        model=None if entry is None else entry.model,
+        image_url=None if entry is None else entry.image_url,
     )
 
 
@@ -264,6 +275,11 @@ def _unbound_device(entry: ClimateHaCatalogEntry) -> ImportedClimateDevice:
         available=entry.available,
         command_types=_unbound_command_types(entry),
         suggested_kinds=_unbound_suggested_kinds(entry),
+        device_group_id=entry.device_group_id,
+        device_name=entry.device_name,
+        manufacturer=entry.manufacturer,
+        model=entry.model,
+        image_url=entry.image_url,
     )
 
 

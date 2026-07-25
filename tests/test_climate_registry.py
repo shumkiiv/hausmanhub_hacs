@@ -12,6 +12,7 @@ from custom_components.hausman_hub.application.climate_registry import (
 )
 from custom_components.hausman_hub.domain.climate import (
     ClimateCapability,
+    ClimateControlChannel,
     ClimateControlOwner,
     ClimateControlScope,
     ClimateDevice,
@@ -167,6 +168,14 @@ class ClimateRegistryTest(unittest.TestCase):
                 control_owner=ClimateControlOwner.CLIMATE_CORE,
             )
 
+    def test_observed_device_cannot_have_a_control_channel(self) -> None:
+        with self.assertRaisesRegex(ClimateModelViolation, "managed scope"):
+            air_conditioner(
+                control_scope=ClimateControlScope.OBSERVED,
+                control_owner=ClimateControlOwner.OBSERVED,
+                control_channel=ClimateControlChannel.UNIVERSAL_IR,
+            )
+
     def test_registry_rejects_duplicate_sources_and_unknown_rooms(self) -> None:
         with self.assertRaisesRegex(ClimateModelViolation, "source ids"):
             ClimateRegistry(
@@ -268,13 +277,14 @@ class ClimateRegistryTest(unittest.TestCase):
 
     def test_home_environment_bindings_stay_optional_and_domain_strict(self) -> None:
         home = ClimateHomeEnvironment(
-            outdoor_temperature_entity_id="sensor.outdoor_temperature",
+            outdoor_temperature_entity_id="weather.home",
             presence_entity_id="person.ivan",
             central_heating_entity_id="switch.central_heating",
         )
         registry = ClimateRegistry(home=home)
 
         self.assertIs(registry.home, home)
+        self.assertEqual("weather.home", registry.home.outdoor_temperature_entity_id)
         self.assertEqual(
             ClimateHomeEnvironment(),
             ClimateRegistry().home,
@@ -353,7 +363,7 @@ class ClimateRegistryTest(unittest.TestCase):
 class ClimateRegistryPayloadTest(unittest.TestCase):
     """Keep the stored shape exact and the legacy migration fail-closed."""
 
-    def test_version_two_payload_round_trips_native_bindings(self) -> None:
+    def test_version_three_payload_round_trips_native_bindings(self) -> None:
         registry = ClimateRegistry(
             rooms=(
                 ClimateRoom(
@@ -394,6 +404,25 @@ class ClimateRegistryPayloadTest(unittest.TestCase):
         restored = registry_from_payload(registry_to_payload(registry))
 
         self.assertEqual(registry, restored)
+
+    def test_managed_control_channels_round_trip(self) -> None:
+        for channel in ClimateControlChannel:
+            with self.subTest(channel=channel):
+                registry = ClimateRegistry(
+                    rooms=(ClimateRoom("living", "Living room"),),
+                    devices=(
+                        air_conditioner(
+                            control_scope=ClimateControlScope.MANAGED,
+                            control_channel=channel,
+                        ),
+                    ),
+                )
+
+                payload = registry_to_payload(registry)
+                restored = registry_from_payload(payload)
+
+                self.assertEqual(channel.value, payload["devices"][0]["control_channel"])  # type: ignore[index]
+                self.assertEqual(channel, restored.devices[0].control_channel)
 
     def test_absent_bindings_round_trip_as_absent(self) -> None:
         registry = ClimateRegistry(
@@ -456,7 +485,7 @@ class ClimateRegistryPayloadTest(unittest.TestCase):
         migrated = migrate_climate_registry_payload(1, legacy)
         restored = registry_from_payload(migrated)
 
-        self.assertEqual(2, migrated["version"])
+        self.assertEqual(3, migrated["version"])
         self.assertEqual(
             ClimateHomeEnvironment(),
             restored.home,
@@ -464,13 +493,30 @@ class ClimateRegistryPayloadTest(unittest.TestCase):
         self.assertIsNone(restored.rooms[0].window_entity_id)
         self.assertEqual((), restored.rooms[0].presence_entity_ids)
         self.assertEqual("living_ac", restored.devices[0].device_id)
+        self.assertIsNone(restored.devices[0].control_channel)
+
+    def test_version_two_payload_migrates_with_an_absent_control_channel(self) -> None:
+        registry = ClimateRegistry(
+            rooms=(ClimateRoom("living", "Living room"),),
+            devices=(air_conditioner(),),
+        )
+        version_two = registry_to_payload(registry)
+        version_two["version"] = 2
+        version_two["devices"][0].pop("control_channel")  # type: ignore[index]
+
+        migrated = migrate_climate_registry_payload(2, version_two)
+        restored = registry_from_payload(migrated)
+
+        self.assertEqual(3, migrated["version"])
+        self.assertIsNone(restored.devices[0].control_channel)
+        self.assertIsNone(migrated["devices"][0]["control_channel"])  # type: ignore[index]
 
     def test_migration_rejects_unknown_storage_version_and_shape(self) -> None:
         with self.assertRaisesRegex(ClimateRegistryViolation, "unsupported"):
             migrate_climate_registry_payload(0, {})
 
         with self.assertRaisesRegex(ClimateRegistryViolation, "unsupported"):
-            migrate_climate_registry_payload(3, {})
+            migrate_climate_registry_payload(4, {})
 
         with self.assertRaisesRegex(ClimateRegistryViolation, "does not match"):
             migrate_climate_registry_payload(
@@ -491,7 +537,7 @@ class ClimateRegistryPayloadTest(unittest.TestCase):
         )
         payload = registry_to_payload(registry)
 
-        self.assertEqual(payload, migrate_climate_registry_payload(2, payload))
+        self.assertEqual(payload, migrate_climate_registry_payload(3, payload))
 
 
 if __name__ == "__main__":

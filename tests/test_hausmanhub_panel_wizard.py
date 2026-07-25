@@ -123,6 +123,11 @@ DRAFT_OPTIONS = {
             "suggested_types": ["temperature_sensor"], "recommended_type": "temperature_sensor",
             "status": "available", "suggested_room_id": "living", "suggested_room_name": "Гостиная",
             "reason": "detected_room", "can_add": True,
+            "device_group_id": "device_0123456789abcdef",
+            "device_name": "Климат Kojima Гостинная",
+            "manufacturer": "KOJIMA",
+            "model": "Temperature and humidity sensor",
+            "image_url": "https://www.zigbee2mqtt.io/images/devices/KOJIMA-THS-ZG-LCD.png",
         },
         {
             "candidate_id": "candidate_temp_2", "name": "Температура у двери", "room_id": "",
@@ -135,6 +140,11 @@ DRAFT_OPTIONS = {
             "suggested_types": ["humidity_sensor"], "recommended_type": "humidity_sensor",
             "status": "available", "suggested_room_id": "living", "suggested_room_name": "Гостиная",
             "reason": "detected_room", "can_add": True,
+            "device_group_id": "device_0123456789abcdef",
+            "device_name": "Климат Kojima Гостинная",
+            "manufacturer": "KOJIMA",
+            "model": "Temperature and humidity sensor",
+            "image_url": "https://www.zigbee2mqtt.io/images/devices/KOJIMA-THS-ZG-LCD.png",
         },
         {
             "candidate_id": "candidate_trv", "name": "Батарея детской", "room_id": "kids",
@@ -149,6 +159,7 @@ DRAFT_OPTIONS = {
             "reason": "detected_room", "can_add": True,
         },
     ],
+    "control_channels": ["universal_ir", "yandex_remote", "direct_wifi"],
 }
 
 
@@ -339,74 +350,318 @@ class PanelContourWizardTest(unittest.TestCase):
             get_payloads(),
             {},
             """
-        const text = textOf(panel.shadowRoot);
-        if (!text.includes("Создание климатического контура")) throw new Error("create title missing");
-        if (!text.includes("Устройства управления") || !text.includes("Датчики")) {
-          throw new Error("device group headings missing");
-        }
-        if (!text.includes("Температура у окна") || !text.includes("Температура у двери")) {
-          throw new Error("multiple temperature sensors missing");
-        }
-        const living = panel._wizardFields.rooms.living;
-        if (!living.editor.hidden || living.expander["aria-expanded"] !== "false") {
-          throw new Error("selected room editor did not start collapsed");
-        }
-        if (living.expander.tagName !== "BUTTON") {
-          throw new Error("room expander must use native keyboard button semantics");
-        }
-        living.expander.fire("click");
-        if (living.editor.hidden || living.expander["aria-expanded"] !== "true") {
-          throw new Error("room expansion failed");
-        }
-        living.expander.fire("click");
-        if (!living.editor.hidden) throw new Error("room collapse failed");
-        const temperatureSensors = living.devices.filter((choice) => choice.type === "temperature_sensor");
-        if (temperatureSensors.length !== 2) throw new Error("expected two selectable temperature sensors");
-        if (!temperatureSensors.every((choice) => choice.checkbox.checked)) {
-          throw new Error("suggested temperature sensors were not preselected");
-        }
-        const formFields = findAll(panel.shadowRoot, (node) =>
-          node.tagName === "LABEL" && String(node.className).includes("form-field"));
-        if (formFields.length < 8) throw new Error("form-field layout classes missing");
-        const checkboxes = findAll(panel.shadowRoot, (node) =>
-          node.tagName === "LABEL" && (
-            String(node.className).includes("checkbox-field")
-            || String(node.className).includes("device-option")
-          ));
-        if (!checkboxes.length) throw new Error("checkbox layout classes missing");
-        const style = findAll(panel.shadowRoot, (node) => node.tagName === "STYLE")[0];
-        if (!style || !String(style.textContent).includes("grid-template-columns")) {
-          throw new Error("responsive form grid CSS missing");
-        }
-        if (!panel._wizardFields.rooms.kids.editor.hidden) {
-          throw new Error("all room editors must start collapsed");
-        }
-        const searches = findAll(panel.shadowRoot, (node) => node.type === "search");
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать настройку")[0].fire("click");
+        await tick();
+        panel._firstRunFields.rooms.living.configure.fire("click");
+        const fields = panel._firstRunFields.room;
         const groups = findAll(panel.shadowRoot, (node) =>
           String(node.className).split(" ").includes("entity-group"));
-        if (searches.length < 2 || groups.length < 2) {
-          throw new Error("grouped searchable device candidates missing");
+        const physicalDevice = groups.find((node) =>
+          node["data-device-group-id"] === "device_0123456789abcdef");
+        if (!physicalDevice) throw new Error("physical HA device group missing");
+        const image = findAll(physicalDevice, (node) => node.tagName === "IMG")[0];
+        if (!image
+          || image.src !== "https://www.zigbee2mqtt.io/images/devices/KOJIMA-THS-ZG-LCD.png"
+          || image.loading !== "lazy"
+          || image.referrerpolicy !== "no-referrer") {
+          throw new Error("official Zigbee2MQTT image is not configured safely");
         }
-        panel._wizardFields.name.value = "Несохранённый контур";
-        panel._wizardFields.name.fire("input");
-        getTable["hausman_hub/v1/admin/climate-drafts/current"] = {
-          ...getTable["hausman_hub/v1/admin/climate-drafts/current"], setup_revision: 6
-        };
-        await panel._load();
-        if (panel._wizardFields.name.value !== "Несохранённый контур") {
-          throw new Error("background refresh clobbered dirty wizard");
+        const fallback = findAll(physicalDevice, (node) =>
+          String(node.className).includes("device-thumb-fallback"))[0];
+        image.fire("error");
+        if (!image.hidden || fallback.hidden) {
+          throw new Error("broken device image did not reveal local fallback");
         }
-        if (panel._dirty.wizard !== true) throw new Error("wizard dirty flag missing");
-        const collected = panel._collectWizardPayload();
-        if (panel._settings.setup.setup_revision !== 6) {
-          throw new Error("background setup did not refresh");
+        const groupedChoices = fields.devices.filter((choice) =>
+          ["candidate_temp_1:temperature_sensor", "candidate_humidity:humidity_sensor"].includes(choice.key));
+        if (groupedChoices.length !== 2 || !groupedChoices.every((choice) => choice.checkbox.checked)) {
+          throw new Error("physical device bindings were not preserved independently");
         }
-        if (collected.error || collected.payload.setup_revision !== 5) {
-          throw new Error("dirty wizard did not keep its original setup revision");
+        if (groupedChoices.some((choice) => choice.controlChannel !== null)) {
+          throw new Error("observed sensors exposed a control-channel selector");
         }
-        const rendered = textOf(panel.shadowRoot);
-        if (rendered.includes("entity_id") || rendered.includes("source_id")) {
-          throw new Error("private binding name rendered");
+        const sensorSearch = findAll(panel.shadowRoot, (node) => node.type === "search")[0];
+        sensorSearch.value = "KOJIMA";
+        sensorSearch.fire("input");
+        if (physicalDevice.hidden) throw new Error("device metadata search hid the matching group");
+        const ungroupedSensor = groups.find((node) =>
+          node["data-device-group-id"] === "candidate:candidate_temp_2");
+        if (!ungroupedSensor || !ungroupedSensor.hidden) {
+          throw new Error("device search did not filter a non-matching group");
+        }
+        sensorSearch.value = "";
+        sensorSearch.fire("input");
+        const groupedPayload = panel._firstRunPayload(["living"]);
+        const livingPayload = groupedPayload.payload.rooms.find((room) => room.room_id === "living");
+        if (!livingPayload
+          || !livingPayload.devices.some((device) => device.candidate_id === "candidate_temp_1")
+          || !livingPayload.devices.some((device) => device.candidate_id === "candidate_humidity")) {
+          throw new Error("physical presentation changed the entity-level draft payload");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+
+class PanelFirstRunWizardTest(unittest.TestCase):
+    def test_not_configured_shows_first_run_only_and_defer_stays_in_memory(self) -> None:
+        script = panel_script(
+            get_payloads(),
+            {},
+            """
+        if (!panel._shell.nav || panel._shell.nav.hidden !== true) {
+          throw new Error("first-run did not hide the tab navigation");
+        }
+        if (!panel._shell.wizard || panel._shell.wizard.hidden !== false) {
+          throw new Error("first-run wizard is not visible");
+        }
+        if (panel._activeSection !== "overview") {
+          throw new Error("first-run exposed an ordinary section");
+        }
+        const activeStep = findAll(panel.shadowRoot, (node) =>
+          node["aria-current"] === "step");
+        if (activeStep.length !== 1 || activeStep[0].textContent !== "Инструкция") {
+          throw new Error("active wizard step is not announced semantically");
+        }
+        const getCount = calls.filter((call) => call.method === "GET").length;
+        const later = findAll(panel.shadowRoot, (node) =>
+          node.tagName === "BUTTON" && node.textContent === "Настроить позже")[0];
+        if (!later) throw new Error("defer action missing");
+        later.fire("click");
+        if (panel._firstRun.deferred !== true || panel._shell.wizard.hidden !== true) {
+          throw new Error("defer did not hide the first-run wizard");
+        }
+        if (panel._shell.nav.hidden !== true || panel._shell.sectionNodes.overview.hidden) {
+          throw new Error("defer did not show a read-only overview");
+        }
+        if (calls.filter((call) => call.method === "GET").length !== getCount) {
+          throw new Error("defer unexpectedly called an API");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_room_check_gates_progress_and_shows_per_room_report(self) -> None:
+        checked_draft = draft_for(
+            [{
+                "id": "living",
+                "name": "Гостиная",
+                "targets": {
+                    "target_temperature": 22,
+                    "target_humidity": 45,
+                    "strategy": "normal",
+                },
+                "devices": [{
+                    "candidate_id": "candidate_ac",
+                    "name": "Кондиционер",
+                    "type": "air_conditioner",
+                    "type_name": "Кондиционер",
+                }],
+            }]
+        )
+        blocked = {
+            "status": "blocked",
+            "save_allowed": False,
+            "issues": [{
+                "code": "no_controllable_device",
+                "room_id": "living",
+                "message": "В комнате нет устройства управления",
+            }],
+            "summary": checked_draft["summary"],
+        }
+        script = panel_script(
+            get_payloads(),
+            {
+                "hausman_hub/v1/admin/climate-drafts": [checked_draft, checked_draft],
+                "hausman_hub/v1/admin/climate-drafts/validate": [blocked, ready_validation(checked_draft)],
+            },
+            """
+        const start = findAll(panel.shadowRoot, (node) =>
+          node.tagName === "BUTTON" && node.textContent === "Начать настройку")[0];
+        start.fire("click");
+        await tick();
+        const finish = findAll(panel.shadowRoot, (node) =>
+          node.tagName === "BUTTON" && node.textContent === "Завершить настройку")[0];
+        if (!finish || finish.disabled !== true || !finish.title) {
+          throw new Error("finish must explain the zero-valid-room gate");
+        }
+        panel._firstRunFields.rooms.living.configure.fire("click");
+        const check = findAll(panel.shadowRoot, (node) =>
+          node.tagName === "BUTTON" && node.textContent === "Проверить комнату")[0];
+        check.fire("click");
+        await tick();
+        if (!textOf(panel.shadowRoot).includes("В комнате нет устройства управления")) {
+          throw new Error("room validation report is missing");
+        }
+        if (panel._firstRun.validRooms.has("living")) {
+          throw new Error("blocked room became configured");
+        }
+        check.fire("click");
+        await tick();
+        if (!panel._firstRun.validRooms.has("living")) {
+          throw new Error("checked room was not retained as configured");
+        }
+        const back = findAll(panel.shadowRoot, (node) =>
+          node.tagName === "BUTTON" && node.textContent === "Назад к списку комнат")[0];
+        back.fire("click");
+        const enabledFinish = findAll(panel.shadowRoot, (node) =>
+          node.tagName === "BUTTON" && node.textContent === "Завершить настройку")[0];
+        if (!enabledFinish || enabledFinish.disabled) {
+          throw new Error("one checked room did not open progress");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_final_save_preserves_optional_fields_and_returns_to_tabs(self) -> None:
+        draft = draft_for(
+            [{
+                "id": "living",
+                "name": "Гостиная",
+                "targets": {
+                    "target_temperature": 22,
+                    "target_humidity": 45,
+                    "strategy": "normal",
+                },
+                "devices": [
+                    {
+                        "candidate_id": "candidate_ac",
+                        "name": "Кондиционер",
+                        "type": "air_conditioner",
+                        "type_name": "Кондиционер",
+                        "control_channel": "direct_wifi",
+                    },
+                    {
+                        "candidate_id": "candidate_temp_1",
+                        "name": "Температура у окна",
+                        "type": "temperature_sensor",
+                        "type_name": "Датчик температуры",
+                    },
+                    {
+                        "candidate_id": "candidate_humidity",
+                        "name": "Влажность гостиной",
+                        "type": "humidity_sensor",
+                        "type_name": "Датчик влажности",
+                    },
+                ],
+                "min_temperature": 20,
+                "max_temperature": 26,
+            }]
+        )
+        expected_request = {
+            "snapshot_revision": 77,
+            "setup_revision": 5,
+            "name": "Климат",
+            "mode": "automatic",
+            "rooms": [{
+                "room_id": "living",
+                "target_temperature": 22,
+                "target_humidity": 45,
+                "strategy": "normal",
+                "min_temperature": 20,
+                "max_temperature": 26,
+                "devices": [
+                    {
+                        "candidate_id": "candidate_ac",
+                        "type": "air_conditioner",
+                        "control_channel": "direct_wifi",
+                    },
+                    {"candidate_id": "candidate_temp_1", "type": "temperature_sensor"},
+                    {"candidate_id": "candidate_temp_2", "type": "temperature_sensor"},
+                    {"candidate_id": "candidate_humidity", "type": "humidity_sensor"},
+                ],
+            }],
+        }
+        script = panel_script(
+            get_payloads(),
+            {
+                "hausman_hub/v1/admin/climate-drafts": [draft, draft],
+                "hausman_hub/v1/admin/climate-drafts/validate": [ready_validation(draft), ready_validation(draft)],
+                "hausman_hub/v1/admin/climate-drafts/save": {
+                    "status": "saved", "commands_sent": False, "restart_required": False,
+                },
+            },
+            f"""
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать настройку")[0].fire("click");
+        await tick();
+        panel._firstRunFields.rooms.living.configure.fire("click");
+        const fields = panel._firstRunFields.room;
+        fields.minTemperature.value = "20";
+        fields.minTemperature.fire("input");
+        fields.maxTemperature.value = "26";
+        fields.maxTemperature.fire("input");
+        const airConditioner = fields.devices.find((device) =>
+          device.type === "air_conditioner");
+        airConditioner.controlChannel.value = "direct_wifi";
+        airConditioner.controlChannel.fire("change");
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Проверить комнату")[0].fire("click");
+        await tick();
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Назад к списку комнат")[0].fire("click");
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Завершить настройку")[0].fire("click");
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Продолжить к проверке")[0].fire("click");
+        await tick();
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Проверить настройку")[0].fire("click");
+        await tick();
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Продолжить к подключению планшета")[0].fire("click");
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Перейти к завершению")[0].fire("click");
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Сохранить настройку")[0].fire("click");
+        await new Promise((resolve) => setTimeout(resolve, 750));
+        await tick(12);
+        const created = calls.find((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/admin/climate-drafts");
+        const saved = calls.find((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/admin/climate-drafts/save");
+        const expected = {json.dumps(expected_request, ensure_ascii=False)};
+        const expectedDraft = {json.dumps(draft, ensure_ascii=False)};
+        if (!created || JSON.stringify(created.payload) !== JSON.stringify(expected)) {{
+          throw new Error("first-run create payload mismatch: "
+            + JSON.stringify(created && created.payload));
+        }}
+        if (!saved || JSON.stringify(saved.payload) !== JSON.stringify(expectedDraft)) {{
+          throw new Error("first-run save did not receive the exact validated draft");
+        }}
+        if (panel._shell.nav.hidden || !panel._shell.wizard.hidden || panel._activeSection !== "overview") {{
+          throw new Error("successful first-run save did not return to normal tabs");
+        }}
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_final_save_conflict_keeps_first_run_and_offers_reload(self) -> None:
+        script = panel_script(
+            get_payloads(),
+            {"hausman_hub/v1/admin/climate-drafts/save": {"__fail": 409}},
+            """
+        panel._firstRun.step = "completion";
+        panel._firstRun.options = {rooms: [], devices: [], control_channels: []};
+        panel._firstRun.draft = {status: "created"};
+        panel._firstRun.validation = {status: "ready", save_allowed: true};
+        panel._render();
+        const save = findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Сохранить настройку")[0];
+        save.fire("click");
+        await tick();
+        if (!textOf(panel.shadowRoot).includes("изменились в другом окне")) {
+          throw new Error("first-run conflict explanation missing");
+        }
+        const reload = findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Обновить мастер")[0];
+        if (!reload || panel._shell.wizard.hidden) {
+          throw new Error("conflict did not retain a reloadable first-run wizard");
         }
             """,
         )
@@ -426,6 +681,9 @@ class PanelContourWizardTest(unittest.TestCase):
             get_payloads(options=blocked),
             {},
             """
+        panel._firstRun.completed = true;
+        panel._openWizard(panel._settings.setup);
+        await tick();
         let text = textOf(panel.shadowRoot);
         if (!text.includes("не найдены зоны (комнаты)")) {
           throw new Error("missing-room explanation absent");
@@ -511,6 +769,9 @@ class PanelContourWizardTest(unittest.TestCase):
             get_payloads(),
             post_table,
             f"""
+        panel._firstRun.completed = true;
+        panel._openWizard(panel._settings.setup);
+        await tick();
         const fields = panel._wizardFields;
         fields.name.value = "Дом";
         fields.name.fire("input");
@@ -594,6 +855,9 @@ class PanelContourWizardTest(unittest.TestCase):
                 "hausman_hub/v1/admin/climate-drafts/validate": [blocked, ready_validation(ready_draft)],
             },
             """
+        panel._firstRun.completed = true;
+        panel._openWizard(panel._settings.setup);
+        await tick();
         const check = findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON")
           .find((node) => node.textContent === "Проверить контур");
         check.fire("click");
@@ -625,6 +889,9 @@ class PanelContourWizardTest(unittest.TestCase):
             get_payloads(),
             {},
             """
+        panel._firstRun.completed = true;
+        panel._openWizard(panel._settings.setup);
+        await tick();
         const living = panel._wizardFields.rooms.living;
         const check = findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON")
           .find((node) => node.textContent === "Проверить контур");
@@ -741,6 +1008,9 @@ class PanelContourWizardTest(unittest.TestCase):
                 "hausman_hub/v1/admin/climate-drafts/save": {"__fail": 409},
             },
             """
+        panel._firstRun.completed = true;
+        panel._openWizard(panel._settings.setup);
+        await tick();
         const check = findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON")
           .find((node) => node.textContent === "Проверить контур");
         check.fire("click");

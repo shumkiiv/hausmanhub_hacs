@@ -3742,6 +3742,7 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
                     "control_owner": user_input.get(CLIMATE_DEVICE_OWNER_FIELD),
                     "capabilities": capabilities,
                     "endpoints": endpoints,
+                    "control_channel": None,
                 }
                 candidate["devices"] = [
                     value
