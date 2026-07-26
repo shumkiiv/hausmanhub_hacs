@@ -118,8 +118,8 @@ class HomeAssistantClimateStateView:
                         device_class if isinstance(device_class, str) else None
                     ),
                     supported_features=(
-                        supported_features
-                        if type(supported_features) is int
+                        int(supported_features)
+                        if isinstance(supported_features, int)
                         and supported_features >= 0
                         else 0
                     ),

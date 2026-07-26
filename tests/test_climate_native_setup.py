@@ -417,6 +417,39 @@ class HomeAssistantEntityCatalogTest(unittest.TestCase):
         ).entity_catalog()
         self.assertFalse(catalog.entries[0].available)
 
+    def test_catalog_accepts_intflag_supported_features(self) -> None:
+        """Real HA stores climate supported_features as IntFlag, not plain int."""
+        from enum import IntFlag
+
+        from custom_components.hausman_hub.climate_ha_state_view import (
+            HomeAssistantClimateStateView,
+        )
+
+        class _ClimateFeature(IntFlag):
+            TARGET_TEMPERATURE = 1
+            FAN_MODE = 8
+            TURN_OFF = 128
+            TURN_ON = 256
+
+        hass = _FakeHass(
+            [
+                _FakeState(
+                    "climate.living_ac",
+                    "off",
+                    {
+                        "friendly_name": "Living AC",
+                        "supported_features": _ClimateFeature(393),
+                    },
+                ),
+            ]
+        )
+        view = HomeAssistantClimateStateView(hass)  # type: ignore[arg-type]
+
+        catalog = view.entity_catalog()
+
+        self.assertEqual(393, catalog.entries[0].supported_features)
+        self.assertIs(int, type(catalog.entries[0].supported_features))
+
     def test_signal_catalog_filters_by_purpose_and_preserves_device_class(self) -> None:
         from custom_components.hausman_hub.climate_ha_state_view import (
             HomeAssistantClimateStateView,
