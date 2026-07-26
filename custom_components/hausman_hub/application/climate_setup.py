@@ -1559,13 +1559,14 @@ def validate_climate_contour_draft(
                     for device in room["devices"]  # type: ignore[union-attr]
                 },
             )
-        except ClimateRegistryImportViolation:
+        except ClimateRegistryImportViolation as error:
             capabilities_supported = False
             issues.append(
                 {
                     "code": "unsupported_device_set",
                     "room_id": None,
                     "message": _VALIDATION_ISSUE_NAMES["unsupported_device_set"],
+                    "detail": f"import: {error}",
                 }
             )
 
@@ -1588,13 +1589,14 @@ def validate_climate_contour_draft(
                 control_channels=selected_control_channels,
             )
             _preserve_registry_settings(registry, rebuilt_registry)
-        except (ClimateModelViolation, ContourRegistryViolation):
+        except (ClimateModelViolation, ContourRegistryViolation) as error:
             capabilities_supported = False
             issues.append(
                 {
                     "code": "unsupported_device_set",
                     "room_id": None,
                     "message": _VALIDATION_ISSUE_NAMES["unsupported_device_set"],
+                    "detail": f"setup: {error}",
                 }
             )
 
