@@ -1,30 +1,47 @@
 # HausmanHub AI Context
 
-Last updated: 2026-07-26 (evening, 1.25.0 released and deployed).
+Last updated: 2026-07-26 (night, 1.25.2 released and deployed).
 
 ## Current work
 
+- Release 1.25.2 (wizard device-selection fix) is RELEASED and DEPLOYED:
+  - Release commit `3eb8ffe` on `origin/main`; tag `v1.25.2`; GitHub Actions
+    run `30219220629` passed; public Latest release at
+    https://github.com/shumkiiv/hausmanhub_hacs/releases/tag/v1.25.2.
+    Full local gate in clean worktree: 812 tests passed, 4 skipped, plus
+    check_local_release.py.
+  - Root cause of the live "не выбирается устройство" bug: the entity catalog
+    in `climate_ha_state_view.py` read `supported_features` with the strict
+    guard `type(x) is int`. Real HA stores it as a `ClimateEntityFeature`
+    IntFlag, so the guard zeroed it for every climate entity, command_types
+    collapsed to `(climate.set_hvac_mode,)`, and every air-conditioner
+    candidate failed validation with "device is missing required
+    capabilities: power, target_temperature". The guard existed since 09aea13
+    (native discovery, 1.21.0); tests and JSON dumps always carried plain
+    ints, which hid the bug. Fix: `isinstance` check plus `int()`
+    normalization, regression test `test_catalog_accepts_intflag_supported_features`.
+  - Proven end-to-end before release: clean tag 1.25.1 fed IntFlag features
+    reproduced the exact live error; fed plain ints it returned `ready`.
+  - Deployed to live HA via the HACS update entity (explicit version v1.25.2)
+    plus an HA restart. Verified live: `installed_version: v1.25.2`; draft
+    validation for гостиная returns `status: ready`, `save_allowed: true`,
+    `issues: []`; snapshot_revision `239926551809926` matches the local
+    clean-tag reconstruction exactly. Four of five AC candidates validate
+    `ready`; candidate_0030 (Electrolux air purifier) is honestly blocked on
+    missing `target_temperature`, which is correct behaviour.
+  - 1.25.1 (commit `4d15037`, tag `v1.25.1`) shipped the `detail` field in
+    `unsupported_device_set` issues, which pinpointed the failure stage
+    (import) on live without server logs.
+  - Next development: 1.26.0 wizard IR-learning vertical (SmartIR code DB
+    scan, Broadlink `.storage` codes, `remote.learn_command`) per the
+    approved "2 lite" design. WIP files stay uncommitted in the working tree.
 - Release 1.25.0 (universal IR-AC, approved variant 1) is RELEASED and DEPLOYED:
-  - Release commit `82b29c6` on `origin/main`; tag `v1.25.0` resolves exactly
-    to `82b29c6d6c03384d71574fdf0e95df381d257a21`; GitHub Actions run
-    `30195356712` passed; public Latest release at
-    https://github.com/shumkiiv/hausmanhub_hacs/releases/tag/v1.25.0.
-  - Deployed to live HA via the HACS update entity
-    (`update.hausman_hub_hasc_update`, explicit version v1.25.0) plus an HA
-    restart. Verified live read-only: `integration_version: 1.25.0`, served
-    panel JS is the 192769-byte build with the new wizard strings, setup
-    options return real `ir_remotes` (Broadlink remotes in гостиная/кухня),
-    and `climate.komanchi_living_smartir` appears as roomless candidate_0001
-    with `can_add: true`. Contour stays `not_configured`; readiness honestly
-    `disabled` (bridge_disabled).
+  - Release commit `82b29c6` on `origin/main`; tag `v1.25.0`; GitHub Actions
+    run `30195356712` passed.
   - Contents: channel is an honest transport label (climate facades translate
     for any channel; `unsupported_control_channel` only for raw `remote.*`
     endpoints); bounded private-id-free `ir_remotes` in setup options; wizard
     "Устройства без комнаты" binding group, SmartIR hint, honest channel copy.
-    Full local gate: 815 tests + check_local_release.py.
-  - Next development: 1.26.0 wizard IR-learning vertical (SmartIR code DB
-    scan, Broadlink `.storage` codes, `remote.learn_command`) per the
-    approved "2 lite" design.
 - Phase 3 (1.24.0) released: 9-tab panel, scenario engine, and connection settings.
 - Commit `97547ad` is on `main`; tag `v1.24.0` points to it.
 - The tag initially had no GitHub Release, so HACS could only offer `1.23.0`.
@@ -2504,5 +2521,5 @@ Engineering and review rules are in
 
 - Obsidian/context index: `LLM_WIKI/00_Index.md`.
 - Latest generated context: `LLM_WIKI/Context.md`.
-- Last sync: 2026-07-26T11:47:53+03:00.
+- Last sync: 2026-07-26T23:38:44+03:00.
 <!-- llm-wiki-sync:end -->
