@@ -602,6 +602,118 @@ class ClimateSetupDraftTest(unittest.TestCase):
         self.assertFalse(stale["draft_creation_allowed"])
         self.assertFalse(any(device["can_add"] for device in stale["devices"]))
 
+    def test_setup_options_project_bounded_private_id_free_ir_remotes(self) -> None:
+        from custom_components.hausman_hub.application.climate_native_setup import (
+            ClimateHaCatalogEntry,
+            ClimateHaCatalogRoom,
+            ClimateHaEntityCatalog,
+        )
+
+        remotes = ClimateHaEntityCatalog(
+            rooms=(
+                ClimateHaCatalogRoom(room_id="living", name="Гостиная"),
+            ),
+            entries=(
+                ClimateHaCatalogEntry(
+                    entity_id="remote.living_broadlink",
+                    domain="remote",
+                    state="on",
+                    device_class=None,
+                    supported_features=0,
+                    friendly_name="  Пульт   гостиной  ",
+                    available=True,
+                    last_updated_ms=1,
+                    room_id="living",
+                ),
+                ClimateHaCatalogEntry(
+                    entity_id="remote.roomless",
+                    domain="remote",
+                    state="unavailable",
+                    device_class=None,
+                    supported_features=0,
+                    friendly_name=None,
+                    available=False,
+                    last_updated_ms=1,
+                ),
+                ClimateHaCatalogEntry(
+                    entity_id="climate.not_a_remote",
+                    domain="climate",
+                    state="cool",
+                    device_class=None,
+                    supported_features=0,
+                    friendly_name="Фасад",
+                    available=True,
+                    last_updated_ms=1,
+                    room_id="living",
+                ),
+            ),
+        )
+
+        options = climate_setup_options(
+            self.registry,  # type: ignore[arg-type]
+            self.snapshot,
+            remotes,
+        )
+
+        self.options_validator.validate(options)
+        self.assertEqual(
+            [
+                {
+                    "name": "Пульт гостиной",
+                    "room_id": "living",
+                    "available": True,
+                },
+                {"name": "ИК-пульт", "room_id": "", "available": False},
+            ],
+            options["ir_remotes"],
+        )
+        serialized = json.dumps(options, ensure_ascii=True, sort_keys=True)
+        self.assertNotIn("entity_id", serialized)
+        self.assertNotIn("remote.living_broadlink", serialized)
+
+        with self.assertRaises(ClimateSetupViolation):
+            climate_setup_options(
+                self.registry,  # type: ignore[arg-type]
+                self.snapshot,
+                object(),  # type: ignore[arg-type]
+            )
+
+    def test_setup_options_schema_covers_roomless_candidates_and_ir_remotes(self) -> None:
+        options = copy.deepcopy(load_json(DRAFT_FIXTURES / "options.json"))
+        options["ir_remotes"] = [
+            {"name": "Пульт гостиной", "room_id": "living", "available": True},
+            {"name": "ИК-пульт", "room_id": "", "available": False},
+        ]
+        options["devices"].append(
+            {
+                "candidate_id": "candidate_0003",
+                "name": "Комнатный фасад SmartIR",
+                "room_id": "",
+                "suggested_types": ["air_conditioner"],
+                "recommended_type": "air_conditioner",
+                "status": "available",
+                "suggested_room_id": None,
+                "suggested_room_name": None,
+                "reason": "unassigned_room",
+                "can_add": True,
+            }
+        )
+
+        self.options_validator.validate(options)
+
+        invalid = copy.deepcopy(options)
+        invalid["devices"][-1]["reason"] = "detected_room"  # type: ignore[index]
+        with self.assertRaises(Exception):
+            self.options_validator.validate(invalid)
+        invalid = copy.deepcopy(options)
+        invalid["ir_remotes"][0]["entity_id"] = "remote.living"  # type: ignore[index]
+        with self.assertRaises(Exception):
+            self.options_validator.validate(invalid)
+        invalid = copy.deepcopy(options)
+        invalid["devices"][-1]["room_id"] = "kids"  # type: ignore[index]
+        with self.assertRaises(Exception):
+            self.options_validator.validate(invalid)
+
     def test_setup_options_schema_allows_only_official_zigbee2mqtt_images(self) -> None:
         options = copy.deepcopy(load_json(DRAFT_FIXTURES / "options.json"))
         options["devices"][0].update(  # type: ignore[index]

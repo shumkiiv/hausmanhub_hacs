@@ -234,6 +234,7 @@ class ClimateContractSchemasTest(unittest.TestCase):
                 device.pop("control_channel")
         legacy_options = dict(setup_options)
         legacy_options.pop("control_channels")
+        legacy_options.pop("ir_remotes")
         legacy_current = copy.deepcopy(current_setup)
         for room in legacy_current["rooms"]:
             room.pop("min_temperature")

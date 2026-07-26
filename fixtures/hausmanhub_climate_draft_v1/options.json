@@ -12,6 +12,7 @@
     "yandex_remote",
     "direct_wifi"
   ],
+  "ir_remotes": [],
   "display_names": {
     "room_status": {
       "available": "Можно выбрать",

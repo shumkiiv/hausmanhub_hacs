@@ -246,6 +246,56 @@ class HomeAssistantClimateStateView:
 
         return tuple(rooms), entity_rooms, entity_devices, entity_categories
 
+    def ir_remote_catalog(self) -> ClimateHaEntityCatalog:
+        """Enumerate IR/RF remotes read-only for setup guidance hints.
+
+        Remotes are never climate candidates; this bounded catalog only lets
+        the wizard point a room at a missing SmartIR-style climate facade.
+        """
+
+        states = []
+        for state in self._hass.states.async_all():
+            if state.entity_id.split(".", 1)[0] != "remote":
+                continue
+            if len(state.state) > MAX_STATE_LENGTH:
+                continue
+            states.append(state)
+        rooms, entity_rooms, entity_devices, _categories = self._room_catalog(
+            tuple(state.entity_id for state in states)
+        )
+        entries: list[ClimateHaCatalogEntry] = []
+        for state in states:
+            friendly_name = state.attributes.get("friendly_name")
+            device = entity_devices.get(state.entity_id)
+            entries.append(
+                ClimateHaCatalogEntry(
+                    entity_id=state.entity_id,
+                    domain="remote",
+                    state=state.state,
+                    device_class=None,
+                    supported_features=0,
+                    friendly_name=(
+                        friendly_name if isinstance(friendly_name, str) else None
+                    ),
+                    available=state.state not in {"", "unavailable", "unknown"},
+                    last_updated_ms=int(state.last_updated.timestamp() * 1000),
+                    room_id=entity_rooms.get(state.entity_id, ""),
+                    device_group_id=None if device is None else device.group_id,
+                    device_name=None if device is None else device.name,
+                    manufacturer=(
+                        None if device is None else device.manufacturer
+                    ),
+                    model=None if device is None else device.model,
+                    image_url=None,
+                )
+            )
+        return ClimateHaEntityCatalog(
+            entries=tuple(
+                sorted(entries, key=lambda entry: entry.entity_id)
+            ),
+            rooms=rooms,
+        )
+
     def signal_entity_catalog(
         self,
         signal_kind: str,

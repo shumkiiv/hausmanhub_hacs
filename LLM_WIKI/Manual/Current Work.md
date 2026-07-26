@@ -1,23 +1,37 @@
-# Current Work - HausmanHub 1.24.0
+# Current Work - HausmanHub 1.25.0 (вариант 1, локально)
 
 ## Goal
-- Phase 3: 9-tab Android-style panel + scenario engine per `SCENARIO_EDITOR_API_CONTRACT.md` v1.
-- Release 1.24.0.
+- Universal IR-AC mechanism, release slicing: 1.25.0 = approved variant 1
+  (facade control + roomless binding + hints); 1.26.0 = wizard IR-learning
+  vertical ("2 lite": SmartIR code DB scan, Broadlink `.storage` codes,
+  `remote.learn_command` last).
 
-## Done this session
-- Closed scenario-engine P1 blockers:
-  - `ScenarioService.async_update_scenario` now keeps `asyncio.Lock` through validation, save, and swap.
-  - Payloads accept both `id` and `scenarioId` aliases.
-  - `ScenarioExecutor` propagates a `visited` recursion context through nested `run_scenario` calls.
-  - Device-action values are normalized before HA calls (brightness/position/temperature/modes).
-  - Minimal condition evaluator and dry-run plan added to the executor.
-- Added scenario admin API views and connection-settings view; updated capabilities contract + fixture.
-- Refactored `frontend/hausman-hub-panel.js` to 9 tabs; grouped climate sections under the Climate tab.
-- Added Scenarios tab UI (list, run/test/delete) and Settings tab UI (connection mode + two URL fields).
-- Updated panel tests for 9 tabs and new admin routes; raised panel size limit to 200 KB.
-- Bumped `manifest.json` to 1.24.0 and added CHANGELOG entry.
-- Full test suite: 808 OK (4 skipped); `tools/check_local_release.py` passed.
-- Committed to `main` (`97547ad`) and pushed tag `v1.24.0` to origin.
+## Done this session (2026-07-26, uncommitted)
+- `application/climate_ha_adapters.py`: channel is an honest transport label.
+  Climate facades (`climate.*`/`humidifier.*` endpoints) translate via standard
+  HA services for any channel; `unsupported_control_channel` remains only for
+  raw `remote.*` control endpoints (no codebook).
+- `climate_ha_state_view.py`: read-only `ir_remote_catalog()` for `remote.*`
+  entities with HA-area binding.
+- `application/climate_setup.py` + `climate_runtime.py`: setup options gain a
+  bounded private-id-free `ir_remotes` list (name/room_id/available only).
+- Contract `v1/climate-setup-options.schema.json`: optional additive
+  `ir_remotes`; honest roomless-candidate shape (`room_id: ""`,
+  `reason: unassigned_room`, null suggestion fields).
+- Panel wizard: "Устройства без комнаты" group binds roomless candidates to
+  the current room in the HausmanHub registry only; SmartIR hint when a room
+  has an IR remote but no climate facade; honest channel copy (control works
+  immediately through the facade).
+- Tests: adapter channel/facade/raw-remote cases, state-view remote catalog,
+  setup-options projection + schema coverage, runtime fakes, panel wizard
+  roomless/hint/copy cases. Full gate: 815 tests OK (4 skipped) +
+  `tools/check_local_release.py` passed.
 
 ## Next
-- Verify HACS refresh and install on a live Home Assistant instance.
+- Version bump 1.25.0 + CHANGELOG + commit/push/release only after explicit
+  user go-ahead.
+- Then 1.26.0 wizard IR-learning vertical per the approved design.
+
+## Previous (1.24.0, released)
+- 9-tab panel, scenario engine, connection settings; release
+  https://github.com/shumkiiv/hausmanhub_hacs/releases/tag/v1.24.0 (Latest).

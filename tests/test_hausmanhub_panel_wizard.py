@@ -329,6 +329,25 @@ def draft_for(rooms: list[dict], *, name: str = "Дом", mode: str = "automatic
     }
 
 
+def roomless_options() -> dict:
+    options = copy.deepcopy(DRAFT_OPTIONS)
+    options["devices"].append(
+        {
+            "candidate_id": "candidate_smartir",
+            "name": "Komanchi Living SmartIR",
+            "room_id": "",
+            "suggested_types": ["air_conditioner"],
+            "recommended_type": "air_conditioner",
+            "status": "available",
+            "suggested_room_id": None,
+            "suggested_room_name": None,
+            "reason": "unassigned_room",
+            "can_add": True,
+        }
+    )
+    return options
+
+
 def ready_validation(draft: dict) -> dict:
     return {
         "contract": {"name": "hausman-hub-climate-contour-validation", "version": 1},
@@ -406,6 +425,106 @@ class PanelContourWizardTest(unittest.TestCase):
 
 
 class PanelFirstRunWizardTest(unittest.TestCase):
+    def test_roomless_devices_bind_to_the_room_in_hausmanhub_only(self) -> None:
+        script = panel_script(
+            get_payloads(options=roomless_options()),
+            {},
+            """
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать настройку")[0].fire("click");
+        await tick();
+        panel._firstRunFields.rooms.living.configure.fire("click");
+        if (!textOf(panel.shadowRoot).includes("Устройства без комнаты")) {
+          throw new Error("roomless device group is missing");
+        }
+        if (!textOf(panel.shadowRoot).includes("только в HausmanHub")) {
+          throw new Error("roomless note does not promise untouched HA areas");
+        }
+        const entry = panel._firstRunFields.room.devices.find((item) =>
+          item.key === "candidate_smartir:air_conditioner");
+        if (!entry) throw new Error("roomless candidate checkbox missing");
+        if (entry.checkbox.checked) {
+          throw new Error("roomless candidate must stay unselected by default");
+        }
+        entry.checkbox.checked = true;
+        entry.checkbox.fire("change");
+        const built = panel._firstRunPayload(["living"]);
+        if (built.error) throw new Error("payload failed: " + built.error);
+        const living = built.payload.rooms.find((room) => room.room_id === "living");
+        const bound = living.devices.find((device) =>
+          device.candidate_id === "candidate_smartir");
+        if (!bound || bound.type !== "air_conditioner"
+          || !("control_channel" in bound)) {
+          throw new Error("roomless candidate was not bound into the room draft");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_ir_remote_without_facade_shows_smartir_hint(self) -> None:
+        options = copy.deepcopy(DRAFT_OPTIONS)
+        options["devices"] = [
+            device for device in options["devices"]
+            if device["candidate_id"] != "candidate_ac"
+        ]
+        options["ir_remotes"] = [
+            {"name": "Пульт гостиной", "room_id": "living", "available": True},
+        ]
+        script = panel_script(
+            get_payloads(options=options),
+            {},
+            """
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать настройку")[0].fire("click");
+        await tick();
+        panel._firstRunFields.rooms.living.configure.fire("click");
+        const text = textOf(panel.shadowRoot);
+        if (!text.includes("climate-обёртку SmartIR")
+          || !text.includes("«Пульт гостиной»")) {
+          throw new Error("SmartIR facade guidance is missing");
+        }
+        panel._firstRunBackToRooms();
+        panel._firstRunFields.rooms.kids.configure.fire("click");
+        if (textOf(panel.shadowRoot).includes("climate-обёртку SmartIR")) {
+          throw new Error("hint leaked into a room without an IR remote");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_climate_facade_suppresses_smartir_hint_and_copy_is_honest(self) -> None:
+        options = copy.deepcopy(DRAFT_OPTIONS)
+        options["ir_remotes"] = [
+            {"name": "Пульт гостиной", "room_id": "living", "available": True},
+        ]
+        script = panel_script(
+            get_payloads(options=options),
+            {},
+            """
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать настройку")[0].fire("click");
+        await tick();
+        panel._firstRunFields.rooms.living.configure.fire("click");
+        const text = textOf(panel.shadowRoot);
+        if (text.includes("climate-обёртку SmartIR с готовым кодом")) {
+          throw new Error("hint shown although a climate facade exists");
+        }
+        if (!text.includes("честно показывает транспорт")) {
+          throw new Error("channel copy does not describe the honest transport");
+        }
+        if (text.includes("остаются в наблюдении")) {
+          throw new Error("stale channel copy survived");
+        }
+        if (text.includes("Устройства без комнаты")) {
+          throw new Error("roomless group rendered without roomless candidates");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_not_configured_shows_first_run_only_and_defer_stays_in_memory(self) -> None:
         script = panel_script(
             get_payloads(),

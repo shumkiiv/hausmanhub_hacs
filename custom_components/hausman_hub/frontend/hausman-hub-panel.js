@@ -552,6 +552,8 @@ class HausmanHubPanel extends HTMLElement {
       .wizard-section > h3 { margin-bottom:8px; }
       .wizard-report { margin:12px 0 0; padding:12px; border:1px solid var(--divider-color,#ddd);
         border-radius:12px; background:var(--secondary-background-color,#f2f4f5); }
+      .wizard-hint { margin:12px 0 0; padding:12px; border:1px dashed var(--divider-color,#ddd);
+        border-radius:12px; color:var(--secondary-text-color,#5b5b5b); }
       .wizard-report ul { margin:8px 0 0; padding-left:20px; }
       .wizard-tablet-url { width:100%; max-width:520px; }
       .profile-room { margin-bottom:16px; }
@@ -1320,24 +1322,146 @@ class HausmanHubPanel extends HTMLElement {
     ));
   }
 
+  _firstRunRoomlessCandidates() {
+    return (this._firstRun.options && this._firstRun.options.devices || []).filter((candidate) => (
+      candidate.can_add === true
+      && candidate.room_id === ""
+      && !candidate.suggested_room_id
+    ));
+  }
+
+  _firstRunRoomChoices(state, candidates) {
+    const choices = [];
+    candidates.forEach((candidate, candidateIndex) => {
+      (candidate.suggested_types || []).forEach((type, typeIndex) => {
+        const key = `${candidate.candidate_id}:${type}`;
+        const device = state.devices[key];
+        if (!device) return;
+        choices.push({ candidate, device, key, order: candidateIndex * 10 + typeIndex, type });
+      });
+    });
+    return choices;
+  }
+
+  _firstRunDeviceGroups(choiceList, room, fields, allChoices, searchable) {
+    const groups = el("div", "entity-groups");
+    const grouped = new Map();
+    choiceList.forEach((choice) => {
+      const id = choice.candidate.device_group_id || `candidate:${choice.candidate.candidate_id}`;
+      if (!grouped.has(id)) grouped.set(id, []);
+      grouped.get(id).push(choice);
+    });
+    Array.from(grouped.entries()).forEach(([groupId, groupChoices]) => {
+      const first = groupChoices[0].candidate;
+      const group = el("div", "entity-group device-card");
+      setAttr(group, "data-device-group-id", groupId);
+      const header = el("div", "device-card-header");
+      const thumb = el("div", "device-thumb");
+      const fallback = el("span", "device-thumb-fallback", "◈");
+      setAttr(fallback, "aria-hidden", "true");
+      if (first.image_url && ZIGBEE2MQTT_IMAGE_PATTERN.test(first.image_url)) {
+        const image = el("img");
+        image.src = first.image_url;
+        image.alt = "";
+        setAttr(image, "loading", "lazy");
+        setAttr(image, "decoding", "async");
+        setAttr(image, "referrerpolicy", "no-referrer");
+        fallback.hidden = true;
+        image.addEventListener("error", () => {
+          image.hidden = true;
+          fallback.hidden = false;
+        });
+        thumb.appendChild(image);
+      }
+      thumb.appendChild(fallback);
+      header.appendChild(thumb);
+      const identity = el("div");
+      identity.appendChild(el("strong", "device-card-title", first.device_name || first.name));
+      const details = [first.manufacturer, first.model].filter(Boolean);
+      if (details.length) identity.appendChild(el("small", "device-card-meta", details.join(" · ")));
+      header.appendChild(identity);
+      group.appendChild(header);
+      const options = el("div", "device-card-options");
+      groupChoices.sort((left, right) => left.order - right.order).forEach((choice) => {
+        const checkbox = el("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = choice.device.selected;
+        checkbox.value = choice.candidate.candidate_id;
+        const label = el("label", "device-option");
+        label.appendChild(checkbox);
+        const labelText = el("span", "entity-label");
+        const deviceName = ((this._firstRun.options.display_names || {}).device_types || {})[choice.type] || choice.type;
+        labelText.appendChild(el("strong", null, deviceName));
+        labelText.appendChild(el("small", null, choice.candidate.name));
+        label.appendChild(labelText);
+        options.appendChild(label);
+        let controlChannel = null;
+        let channelRow = null;
+        if (ACTIVE_DEVICE_TYPES.has(choice.type)) {
+          controlChannel = selectField(
+            [{ label: "Не выбран", value: "" }].concat((this._firstRun.options.control_channels || []).map((channel) => ({
+              label: CONTROL_CHANNEL_LABELS[channel] || channel,
+              value: channel,
+            }))),
+            choice.device.channel,
+            () => {
+              choice.device.channel = controlChannel.value || null;
+              this._firstRunInvalidate(room.id);
+            }
+          );
+          channelRow = el("label", "form-field", "Канал управления");
+          channelRow.appendChild(controlChannel);
+          channelRow.hidden = !choice.device.selected;
+          options.appendChild(channelRow);
+        }
+        checkbox.addEventListener("change", () => {
+          choice.device.selected = checkbox.checked;
+          if (checkbox.checked) {
+            allChoices.forEach((peer) => {
+              if (peer !== choice && peer.candidate.candidate_id === choice.candidate.candidate_id) {
+                peer.device.selected = false;
+                const peerField = fields.devices.find((item) => item.key === peer.key);
+                if (peerField) {
+                  peerField.checkbox.checked = false;
+                  if (peerField.channelRow) peerField.channelRow.hidden = true;
+                }
+              }
+            });
+          }
+          if (channelRow) channelRow.hidden = !checkbox.checked;
+          this._firstRunInvalidate(room.id);
+        });
+        fields.devices.push({ checkbox, controlChannel, channelRow, key: choice.key, type: choice.type });
+      });
+      groups.appendChild(group);
+      searchable.push({
+        group,
+        text: normalizedText([first.name, first.device_name, first.manufacturer, first.model].filter(Boolean).join(" ")),
+      });
+    });
+    return groups;
+  }
+
   _firstRunRoomState(room) {
     let state = this._firstRun.rooms[room.id];
     if (state) return state;
     const devices = {};
-    this._firstRunRoomCandidates(room.id).forEach((candidate) => {
-      const suggestedTypes = Array.isArray(candidate.suggested_types)
-        ? candidate.suggested_types : [];
-      suggestedTypes.forEach((type) => {
-        const key = `${candidate.candidate_id}:${type}`;
-        devices[key] = {
-          candidateId: candidate.candidate_id,
-          channel: null,
-          selected: candidate.suggested_room_id === room.id
-            && candidate.recommended_type === type,
-          type,
-        };
+    this._firstRunRoomCandidates(room.id)
+      .concat(this._firstRunRoomlessCandidates())
+      .forEach((candidate) => {
+        const suggestedTypes = Array.isArray(candidate.suggested_types)
+          ? candidate.suggested_types : [];
+        suggestedTypes.forEach((type) => {
+          const key = `${candidate.candidate_id}:${type}`;
+          devices[key] = {
+            candidateId: candidate.candidate_id,
+            channel: null,
+            selected: candidate.suggested_room_id === room.id
+              && candidate.recommended_type === type,
+            type,
+          };
+        });
       });
-    });
     state = {
       day: { humidity: 45, strategy: "normal", temperature: 22 },
       devices,
@@ -1965,123 +2089,36 @@ class HausmanHubPanel extends HTMLElement {
 
     const devicesSection = el("section", "wizard-section");
     devicesSection.appendChild(el("h3", null, "Устройства и датчики"));
-    devicesSection.appendChild(el("div", "muted", "Канал сохраняется для контура. Direct Wi-Fi использует текущий путь управления, а универсальный ИК и Yandex Remote будут подключены отдельными адаптерами: до этого устройства остаются в наблюдении."));
-    const choices = [];
-    this._firstRunRoomCandidates(room.id).forEach((candidate, candidateIndex) => {
-      (candidate.suggested_types || []).forEach((type, typeIndex) => {
-        const key = `${candidate.candidate_id}:${type}`;
-        const device = state.devices[key];
-        if (!device) return;
-        choices.push({ candidate, device, key, order: candidateIndex * 10 + typeIndex, type });
-      });
-    });
+    devicesSection.appendChild(el("div", "muted", "Канал управления сохраняется в контуре и честно показывает транспорт устройства. Если устройство - климатическая обёртка (например, SmartIR), команды выполняются сразу через стандартные сервисы Home Assistant при любом канале. Без такой обёртки сырой ИК-пульт остаётся только в наблюдении."));
+    const roomChoices = this._firstRunRoomChoices(state, this._firstRunRoomCandidates(room.id));
+    const roomlessChoices = this._firstRunRoomChoices(state, this._firstRunRoomlessCandidates());
+    const choices = roomChoices.concat(roomlessChoices);
+    const irRemotes = (this._firstRun.options.ir_remotes || []).filter((remote) => remote.room_id === room.id);
+    const hasClimateFacade = choices.some((choice) => (
+      choice.type === "air_conditioner" || choice.type === "humidifier"
+    ));
+    if (irRemotes.length && !hasClimateFacade) {
+      const names = irRemotes.map((remote) => `«${remote.name}»`).join(", ");
+      devicesSection.appendChild(el("div", "wizard-hint", `В комнате найден ИК-пульт ${names}, но климатической обёртки для него нет. Чтобы управлять кондиционером или увлажнителем через такой пульт, создайте в Home Assistant climate-обёртку SmartIR с готовым кодом устройства, привяжите её к этой зоне и обновите список: обёртка появится кандидатом, и управление заработает сразу.`));
+    }
     const search = el("input", "entity-search");
     search.type = "search";
     search.placeholder = "Найти устройство или датчик";
     setAttr(search, "aria-label", "Поиск устройств комнаты");
     devicesSection.appendChild(search);
-    const groups = el("div", "entity-groups");
-    const grouped = new Map();
-    choices.forEach((choice) => {
-      const id = choice.candidate.device_group_id || `candidate:${choice.candidate.candidate_id}`;
-      if (!grouped.has(id)) grouped.set(id, []);
-      grouped.get(id).push(choice);
-    });
     const searchable = [];
-    Array.from(grouped.entries()).forEach(([groupId, groupChoices]) => {
-      const first = groupChoices[0].candidate;
-      const group = el("div", "entity-group device-card");
-      setAttr(group, "data-device-group-id", groupId);
-      const header = el("div", "device-card-header");
-      const thumb = el("div", "device-thumb");
-      const fallback = el("span", "device-thumb-fallback", "◈");
-      setAttr(fallback, "aria-hidden", "true");
-      if (first.image_url && ZIGBEE2MQTT_IMAGE_PATTERN.test(first.image_url)) {
-        const image = el("img");
-        image.src = first.image_url;
-        image.alt = "";
-        setAttr(image, "loading", "lazy");
-        setAttr(image, "decoding", "async");
-        setAttr(image, "referrerpolicy", "no-referrer");
-        fallback.hidden = true;
-        image.addEventListener("error", () => {
-          image.hidden = true;
-          fallback.hidden = false;
-        });
-        thumb.appendChild(image);
-      }
-      thumb.appendChild(fallback);
-      header.appendChild(thumb);
-      const identity = el("div");
-      identity.appendChild(el("strong", "device-card-title", first.device_name || first.name));
-      const details = [first.manufacturer, first.model].filter(Boolean);
-      if (details.length) identity.appendChild(el("small", "device-card-meta", details.join(" · ")));
-      header.appendChild(identity);
-      group.appendChild(header);
-      const options = el("div", "device-card-options");
-      groupChoices.sort((left, right) => left.order - right.order).forEach((choice) => {
-        const checkbox = el("input");
-        checkbox.type = "checkbox";
-        checkbox.checked = choice.device.selected;
-        checkbox.value = choice.candidate.candidate_id;
-        const label = el("label", "device-option");
-        label.appendChild(checkbox);
-        const labelText = el("span", "entity-label");
-        const deviceName = ((this._firstRun.options.display_names || {}).device_types || {})[choice.type] || choice.type;
-        labelText.appendChild(el("strong", null, deviceName));
-        labelText.appendChild(el("small", null, choice.candidate.name));
-        label.appendChild(labelText);
-        options.appendChild(label);
-        let controlChannel = null;
-        let channelRow = null;
-        if (ACTIVE_DEVICE_TYPES.has(choice.type)) {
-          controlChannel = selectField(
-            [{ label: "Не выбран", value: "" }].concat((this._firstRun.options.control_channels || []).map((channel) => ({
-              label: CONTROL_CHANNEL_LABELS[channel] || channel,
-              value: channel,
-            }))),
-            choice.device.channel,
-            () => {
-              choice.device.channel = controlChannel.value || null;
-              this._firstRunInvalidate(room.id);
-            }
-          );
-          channelRow = el("label", "form-field", "Канал управления");
-          channelRow.appendChild(controlChannel);
-          channelRow.hidden = !choice.device.selected;
-          options.appendChild(channelRow);
-        }
-        checkbox.addEventListener("change", () => {
-          choice.device.selected = checkbox.checked;
-          if (checkbox.checked) {
-            choices.forEach((peer) => {
-              if (peer !== choice && peer.candidate.candidate_id === choice.candidate.candidate_id) {
-                peer.device.selected = false;
-                const peerField = fields.devices.find((item) => item.key === peer.key);
-                if (peerField) {
-                  peerField.checkbox.checked = false;
-                  if (peerField.channelRow) peerField.channelRow.hidden = true;
-                }
-              }
-            });
-          }
-          if (channelRow) channelRow.hidden = !checkbox.checked;
-          this._firstRunInvalidate(room.id);
-        });
-        fields.devices.push({ checkbox, controlChannel, channelRow, key: choice.key, type: choice.type });
-      });
-      groups.appendChild(group);
-      searchable.push({
-        group,
-        text: normalizedText([first.name, first.device_name, first.manufacturer, first.model].filter(Boolean).join(" ")),
-      });
-    });
-    if (!choices.length) groups.appendChild(el("div", "muted", "Подходящих устройств в этой области пока нет."));
+    const groups = this._firstRunDeviceGroups(roomChoices, room, fields, choices, searchable);
+    if (!roomChoices.length) groups.appendChild(el("div", "muted", "Подходящих устройств в этой области пока нет."));
+    devicesSection.appendChild(groups);
+    if (roomlessChoices.length) {
+      devicesSection.appendChild(el("h4", null, "Устройства без комнаты"));
+      devicesSection.appendChild(el("div", "muted", "Эти устройства не привязаны ни к одной зоне Home Assistant. Отметьте нужные, чтобы привязать их к этой комнате только в HausmanHub: зоны Home Assistant не изменятся."));
+      devicesSection.appendChild(this._firstRunDeviceGroups(roomlessChoices, room, fields, choices, searchable));
+    }
     search.addEventListener("input", () => {
       const query = normalizedText(search.value);
       searchable.forEach((entry) => { entry.group.hidden = Boolean(query) && !entry.text.includes(query); });
     });
-    devicesSection.appendChild(groups);
     card.appendChild(devicesSection);
 
     const report = state.report;

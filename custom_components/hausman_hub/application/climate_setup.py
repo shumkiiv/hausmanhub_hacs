@@ -30,7 +30,10 @@ from .contours import (
     with_climate_temporary_temperature,
 )
 from .climate_discovery import ClimateImportSnapshot
-from .climate_native_setup import UNASSIGNED_CANDIDATE_ROOM
+from .climate_native_setup import (
+    UNASSIGNED_CANDIDATE_ROOM,
+    ClimateHaEntityCatalog,
+)
 from .climate_registry_import import (
     ClimateRegistryImportViolation,
     import_managed_climate_selection,
@@ -73,6 +76,7 @@ CLIMATE_SCHEDULE_UPDATE_CONTRACT_VERSION = 1
 MAX_CLIMATE_DRAFT_NAME_LENGTH = 120
 MAX_CLIMATE_DRAFT_ROOMS = 128
 MAX_CLIMATE_DRAFT_DEVICES = 512
+MAX_CLIMATE_SETUP_IR_REMOTES = 64
 
 _CLIMATE_DRAFT_MODES = frozenset({"observe", "automatic"})
 _CLIMATE_DRAFT_FIELDS = frozenset(
@@ -730,9 +734,14 @@ def create_climate_contour_draft(
 def climate_setup_options(
     registry: ClimateRegistry,
     snapshot: ClimateImportSnapshot,
+    ir_remotes: ClimateHaEntityCatalog | None = None,
 ) -> dict[str, object]:
     """Return everything an admin form needs to create a safe draft."""
 
+    if ir_remotes is not None and not isinstance(
+        ir_remotes, ClimateHaEntityCatalog
+    ):
+        raise ClimateSetupViolation("climate IR remote catalog must be valid")
     rooms_payload = climate_available_rooms(registry, snapshot)
     candidates_payload = climate_device_candidates(registry, snapshot)
     suggestions_payload = climate_room_suggestions(registry, snapshot)
@@ -790,6 +799,7 @@ def climate_setup_options(
         "control_channels": [
             channel.value for channel in ClimateControlChannel
         ],
+        "ir_remotes": _ir_remote_options(ir_remotes),
         "display_names": {
             "room_status": dict(_ROOM_STATUS_NAMES),
             "device_types": dict(
@@ -811,6 +821,32 @@ def climate_setup_options(
         ],
         "devices": devices,
     }
+
+
+def _ir_remote_options(
+    ir_remotes: ClimateHaEntityCatalog | None,
+) -> list[dict[str, object]]:
+    """Project bounded remote facts for SmartIR-facade guidance hints.
+
+    The setup-options contract stays private-id free, so only the display
+    name, room binding, and availability are exposed, never the entity id.
+    """
+
+    if ir_remotes is None:
+        return []
+    options: list[dict[str, object]] = []
+    for entry in ir_remotes.entries[:MAX_CLIMATE_SETUP_IR_REMOTES]:
+        if entry.domain != "remote":
+            continue
+        name = " ".join((entry.friendly_name or "").split())[:120].rstrip()
+        options.append(
+            {
+                "name": name or "ИК-пульт",
+                "room_id": entry.room_id,
+                "available": entry.available,
+            }
+        )
+    return options
 
 
 def current_climate_contour_setup(

@@ -316,7 +316,7 @@ class ClimateHaAdapterTest(unittest.TestCase):
             device.limits,
         )
 
-    def test_ir_and_yandex_channels_block_native_entity_calls(self) -> None:
+    def test_ir_and_yandex_channels_use_climate_facade_calls(self) -> None:
         payload, registry, contours = _setup(entity_id="climate.living_ac")
         isolation = _pipeline(
             payload,
@@ -328,6 +328,44 @@ class ClimateHaAdapterTest(unittest.TestCase):
         for channel in (
             ClimateControlChannel.UNIVERSAL_IR,
             ClimateControlChannel.YANDEX_REMOTE,
+            ClimateControlChannel.DIRECT_WIFI,
+            None,
+        ):
+            with self.subTest(channel=channel):
+                routed_registry = ClimateRegistry(
+                    rooms=registry.rooms,
+                    devices=(replace(registry.devices[0], control_channel=channel),),
+                )
+
+                plan = build_climate_ha_call_plan(routed_registry, isolation)
+
+                (device,) = plan.room("living").devices  # type: ignore[union-attr]
+                self.assertTrue(device.calls)
+                self.assertNotIn(
+                    ClimateHaCallLimit.UNSUPPORTED_CONTROL_CHANNEL,
+                    device.limits,
+                )
+                self.assertTrue(
+                    all(
+                        call.entity_id == "climate.living_ac"
+                        for call in device.calls
+                    )
+                )
+
+    def test_raw_remote_endpoint_stays_blocked_for_any_channel(self) -> None:
+        payload, registry, contours = _setup(entity_id="remote.living_ir")
+        isolation = _pipeline(
+            payload,
+            registry,
+            contours,
+            mutate_observation=_close_windows,
+        )
+
+        for channel in (
+            ClimateControlChannel.UNIVERSAL_IR,
+            ClimateControlChannel.YANDEX_REMOTE,
+            ClimateControlChannel.DIRECT_WIFI,
+            None,
         ):
             with self.subTest(channel=channel):
                 routed_registry = ClimateRegistry(
@@ -339,7 +377,10 @@ class ClimateHaAdapterTest(unittest.TestCase):
 
                 (device,) = plan.room("living").devices  # type: ignore[union-attr]
                 self.assertEqual((), device.calls)
-                self.assertIn(ClimateHaCallLimit.UNSUPPORTED_CONTROL_CHANNEL, device.limits)
+                self.assertIn(
+                    ClimateHaCallLimit.UNSUPPORTED_CONTROL_CHANNEL,
+                    device.limits,
+                )
 
     def test_direct_wifi_channel_uses_existing_entity_calls(self) -> None:
         payload, registry, contours = _setup(entity_id="climate.living_ac")

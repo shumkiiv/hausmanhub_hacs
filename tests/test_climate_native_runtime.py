@@ -112,6 +112,31 @@ class CountingStateView:
             )
         )
 
+    def ir_remote_catalog(self):
+        from custom_components.hausman_hub.application.climate_native_setup import (
+            ClimateHaCatalogEntry,
+            ClimateHaEntityCatalog,
+        )
+
+        return ClimateHaEntityCatalog(
+            entries=tuple(
+                ClimateHaCatalogEntry(
+                    entity_id=state.entity_id,
+                    domain="remote",
+                    state=state.state,
+                    device_class=None,
+                    supported_features=0,
+                    friendly_name=state.entity_id,
+                    available=state.state not in {"", "unavailable", "unknown"},
+                    last_updated_ms=state.last_updated_ms,
+                )
+                for state in sorted(
+                    self._states.values(), key=lambda state: state.entity_id
+                )
+                if state.entity_id.split(".", 1)[0] == "remote"
+            )
+        )
+
 
 class RecordingTrialExecutor:
     def __init__(self) -> None:

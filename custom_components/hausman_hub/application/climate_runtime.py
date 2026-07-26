@@ -347,7 +347,13 @@ class ClimateRuntime:
 
         async with self._lock:
             snapshot = await self._async_native_setup_snapshot_unlocked()
-            return climate_setup_options(self._registry, snapshot)
+            if self._ha_state_view is None:
+                raise ClimateRuntimeUnavailable("climate state is unavailable")
+            return climate_setup_options(
+                self._registry,
+                snapshot,
+                self._ha_state_view.ir_remote_catalog(),
+            )
 
     async def async_current_contour_setup(self) -> dict[str, object]:
         """Return saved editor values without persistence or commands."""

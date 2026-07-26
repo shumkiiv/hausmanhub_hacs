@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from ..domain.climate import (
     ClimateCapability,
-    ClimateControlChannel,
     ClimateDevice,
     ClimateDeviceKind,
     ClimateEndpointRole,
@@ -111,13 +110,14 @@ def _service_calls(
     plan: ClimateFinalDevicePlan,
     limits: list[ClimateHaCallLimit],
 ) -> tuple[ClimateHaServiceCall, ...]:
-    if device.control_channel in {
-        ClimateControlChannel.UNIVERSAL_IR,
-        ClimateControlChannel.YANDEX_REMOTE,
-    }:
+    endpoint = device.endpoint(ClimateEndpointRole.CONTROL)
+    if endpoint is not None and endpoint.entity_id.split(".", 1)[0] == "remote":
+        # The control channel is an honest transport label, not a blocker:
+        # climate facades (SmartIR etc.) translate through standard climate
+        # services for any channel. Only a raw IR/RF remote endpoint has no
+        # codebook here and therefore stays untranslatable.
         limits.append(ClimateHaCallLimit.UNSUPPORTED_CONTROL_CHANNEL)
         return ()
-    endpoint = device.endpoint(ClimateEndpointRole.CONTROL)
     required = _required_capabilities(device.kind, plan.action)
     if required is None or (
         plan.target_temperature is None

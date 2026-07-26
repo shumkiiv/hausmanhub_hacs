@@ -1,11 +1,44 @@
 # HausmanHub AI Context
 
-Last updated: 2026-07-25.
+Last updated: 2026-07-26 (evening, 1.25.0 variant-1 implemented locally).
 
 ## Current work
 
+- Release 1.25.0 (universal IR-AC, approved variant 1) is IMPLEMENTED locally,
+  uncommitted, no version bump yet:
+  - `application/climate_ha_adapters.py`: the control channel is now an honest
+    transport label, not a blocker. Climate facades (`climate.*`/`humidifier.*`
+    endpoints, e.g. SmartIR) translate through standard HA services for any
+    channel (direct_wifi/universal_ir/yandex_remote/none).
+    `unsupported_control_channel` now fires only for raw `remote.*` control
+    endpoints, which have no codebook here.
+  - `climate_ha_state_view.py`: new read-only `ir_remote_catalog()` enumerates
+    `remote.*` entities with HA-area binding (entity or inherited device area).
+  - `application/climate_setup.py`: `climate_setup_options(..., ir_remotes)`
+    adds a bounded private-id-free `ir_remotes` list (name/room_id/available
+    only, no entity_id) for wizard hints; `climate_runtime.py` plumbs it.
+  - Contract `v1/climate-setup-options.schema.json`: optional `ir_remotes`
+    (additive, legacy payloads still validate) and honest roomless-candidate
+    shape (`room_id: ""` + `reason: unassigned_room` + null suggestion).
+  - Panel wizard (`frontend/hausman-hub-panel.js`): new "Устройства без
+    комнаты" group in the room step explicitly binds roomless candidates to
+    the current room in the HausmanHub registry only (HA areas untouched;
+    backend already accepted such candidates); SmartIR hint when the room has
+    an IR remote but no climate facade; channel copy now says control works
+    immediately through the facade instead of "остаются в наблюдении".
+  - Full local release gate green: 815 tests OK (4 skipped, no HA package)
+    plus fixture, Android compatibility, naming, HACS package, and
+    repository-safety checks.
+  - Next: version bump 1.25.0 + CHANGELOG + commit/push/release only after
+    explicit user go-ahead. Release 1.26.0 remains the wizard IR-learning
+    vertical (SmartIR code DB scan, Broadlink `.storage` codes,
+    `remote.learn_command`) per the approved "2 lite" design.
 - Phase 3 (1.24.0) released: 9-tab panel, scenario engine, and connection settings.
-- Commit `97547ad` pushed to `main`; tag `v1.24.0` pushed to origin.
+- Commit `97547ad` is on `main`; tag `v1.24.0` points to it.
+- The tag initially had no GitHub Release, so HACS could only offer `1.23.0`.
+  On 2026-07-26 the public non-draft release `HausmanHub 1.24.0` was
+  published: https://github.com/shumkiiv/hausmanhub_hacs/releases/tag/v1.24.0.
+  GitHub now marks it Latest; HACS only needs to refresh its repository data.
 - Full test suite 808 OK (4 skipped); local release check passed.
 
 ## Project state
@@ -2479,5 +2512,5 @@ Engineering and review rules are in
 
 - Obsidian/context index: `LLM_WIKI/00_Index.md`.
 - Latest generated context: `LLM_WIKI/Context.md`.
-- Last sync: 2026-07-26T00:07:33+03:00.
+- Last sync: 2026-07-26T11:47:53+03:00.
 <!-- llm-wiki-sync:end -->

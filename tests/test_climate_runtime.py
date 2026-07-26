@@ -254,6 +254,13 @@ class SnapshotStateView:
         self.extra_catalog_entries = extra_catalog_entries
         self.reads = 0
 
+    def ir_remote_catalog(self):
+        from custom_components.hausman_hub.application.climate_native_setup import (
+            ClimateHaEntityCatalog,
+        )
+
+        return ClimateHaEntityCatalog(entries=())
+
     def entity_state(self, entity_id: str) -> ClimateHaEntityState | None:
         self.reads += 1
         snapshot = self._bridge.snapshot
@@ -516,6 +523,13 @@ class ReflectingNativeStateView:
                 )
             )
         )
+
+    def ir_remote_catalog(self):
+        from custom_components.hausman_hub.application.climate_native_setup import (
+            ClimateHaEntityCatalog,
+        )
+
+        return ClimateHaEntityCatalog(entries=())
 
 
 class PersistedScheduleStateView(ReflectingNativeStateView):

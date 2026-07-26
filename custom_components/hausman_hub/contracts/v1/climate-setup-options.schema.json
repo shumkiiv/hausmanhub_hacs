@@ -73,6 +73,13 @@
       "items": {
         "$ref": "#/$defs/control_channel"
       }
+    },
+    "ir_remotes": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "$ref": "#/$defs/ir_remote"
+      }
     }
   },
   "allOf": [
@@ -262,6 +269,30 @@
         }
       ]
     },
+    "candidate_room_id": {
+      "type": "string",
+      "pattern": "^$|^[a-z][a-z0-9_-]{0,63}$"
+    },
+    "ir_remote": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "room_id",
+        "available"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/name"
+        },
+        "room_id": {
+          "$ref": "#/$defs/candidate_room_id"
+        },
+        "available": {
+          "type": "boolean"
+        }
+      }
+    },
     "nullable_name": {
       "oneOf": [
         {
@@ -359,7 +390,7 @@
           "$ref": "#/$defs/zigbee2mqtt_image_url"
         },
         "room_id": {
-          "$ref": "#/$defs/stable_id"
+          "$ref": "#/$defs/candidate_room_id"
         },
         "suggested_types": {
           "type": "array",
@@ -403,19 +434,57 @@
                 "const": "available"
               },
               "reason": {
-                "const": "detected_room"
+                "enum": [
+                  "detected_room",
+                  "unassigned_room"
+                ]
               },
               "suggested_types": {
                 "minItems": 1
               },
               "recommended_type": {
                 "$ref": "#/$defs/device_type"
-              },
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "reason": {
+                "const": "detected_room"
+              }
+            }
+          },
+          "then": {
+            "properties": {
               "suggested_room_id": {
                 "$ref": "#/$defs/stable_id"
               },
               "suggested_room_name": {
                 "$ref": "#/$defs/name"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "reason": {
+                "const": "unassigned_room"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "room_id": {
+                "const": ""
+              },
+              "suggested_room_id": {
+                "type": "null"
+              },
+              "suggested_room_name": {
+                "type": "null"
               }
             }
           }

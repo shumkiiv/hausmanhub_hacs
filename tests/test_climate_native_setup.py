@@ -458,6 +458,91 @@ class HomeAssistantEntityCatalogTest(unittest.TestCase):
             [entry.entity_id for entry in windows.entries],
         )
 
+    def test_ir_remote_catalog_filters_domains_and_binds_rooms(self) -> None:
+        from custom_components.hausman_hub.climate_ha_state_view import (
+            HomeAssistantClimateStateView,
+        )
+
+        hass = _FakeHass(
+            [
+                _FakeState(
+                    "remote.living_broadlink",
+                    "on",
+                    {"friendly_name": "Пульт гостиной"},
+                ),
+                _FakeState("remote.roomless", "unavailable", {}),
+                _FakeState("climate.living_ac", "cool", {}),
+                _FakeState("remote.oversized", "x" * 65, {}),
+            ]
+        )
+        hass.area_registry = SimpleNamespace(
+            async_list_areas=lambda: [
+                SimpleNamespace(id="living", name="Гостиная"),
+            ]
+        )
+        entity_entries = {
+            "remote.living_broadlink": SimpleNamespace(
+                area_id=None,
+                device_id="device_living_remote",
+            ),
+        }
+        hass.entity_registry = SimpleNamespace(
+            async_get=lambda entity_id: entity_entries.get(entity_id)
+        )
+        hass.device_registry = SimpleNamespace(
+            async_get=lambda device_id: {
+                "device_living_remote": SimpleNamespace(
+                    area_id="living",
+                    identifiers=set(),
+                    name="Broadlink RM4",
+                    manufacturer="Broadlink",
+                    model="RM4 mini",
+                    model_id=None,
+                ),
+            }.get(device_id)
+        )
+
+        homeassistant = ModuleType("homeassistant")
+        helpers = ModuleType("homeassistant.helpers")
+        area_module = ModuleType("homeassistant.helpers.area_registry")
+        device_module = ModuleType("homeassistant.helpers.device_registry")
+        entity_module = ModuleType("homeassistant.helpers.entity_registry")
+        area_module.async_get = lambda value: value.area_registry  # type: ignore[attr-defined]
+        device_module.async_get = lambda value: value.device_registry  # type: ignore[attr-defined]
+        entity_module.async_get = lambda value: value.entity_registry  # type: ignore[attr-defined]
+        homeassistant.helpers = helpers  # type: ignore[attr-defined]
+        helpers.area_registry = area_module  # type: ignore[attr-defined]
+        helpers.device_registry = device_module  # type: ignore[attr-defined]
+        helpers.entity_registry = entity_module  # type: ignore[attr-defined]
+        fake_modules = {
+            "homeassistant": homeassistant,
+            "homeassistant.helpers": helpers,
+            "homeassistant.helpers.area_registry": area_module,
+            "homeassistant.helpers.device_registry": device_module,
+            "homeassistant.helpers.entity_registry": entity_module,
+        }
+
+        with patch.dict(sys.modules, fake_modules):
+            catalog = HomeAssistantClimateStateView(  # type: ignore[arg-type]
+                hass
+            ).ir_remote_catalog()
+
+        by_id = {entry.entity_id: entry for entry in catalog.entries}
+        self.assertEqual(
+            {"remote.living_broadlink", "remote.roomless"},
+            set(by_id),
+        )
+        living = by_id["remote.living_broadlink"]
+        self.assertEqual("remote", living.domain)
+        self.assertEqual("Пульт гостиной", living.friendly_name)
+        self.assertEqual("living", living.room_id)
+        self.assertEqual("Broadlink RM4", living.device_name)
+        self.assertTrue(living.available)
+        self.assertIsNone(living.image_url)
+        roomless = by_id["remote.roomless"]
+        self.assertEqual("", roomless.room_id)
+        self.assertFalse(roomless.available)
+
     def test_catalog_reads_ha_areas_and_inherits_device_assignment(self) -> None:
         from custom_components.hausman_hub.climate_ha_state_view import (
             HomeAssistantClimateStateView,
