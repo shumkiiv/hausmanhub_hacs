@@ -1,37 +1,30 @@
-# Current Work - HausmanHub 1.25.0 (вариант 1, локально)
+# Current Work - HausmanHub 1.25.0 (выпущен и задеплоен)
 
-## Goal
-- Universal IR-AC mechanism, release slicing: 1.25.0 = approved variant 1
-  (facade control + roomless binding + hints); 1.26.0 = wizard IR-learning
-  vertical ("2 lite": SmartIR code DB scan, Broadlink `.storage` codes,
-  `remote.learn_command` last).
+## Result
+- Release 1.25.0 (universal IR-AC, approved variant 1) is RELEASED and DEPLOYED
+  on 2026-07-26.
+- Release commit `82b29c6` on `origin/main`; tag `v1.25.0` resolves exactly to
+  `82b29c6d6c03384d71574fdf0e95df381d257a21`; GitHub Actions run `30195356712`
+  passed; public Latest release:
+  https://github.com/shumkiiv/hausmanhub_hacs/releases/tag/v1.25.0.
 
-## Done this session (2026-07-26, uncommitted)
-- `application/climate_ha_adapters.py`: channel is an honest transport label.
-  Climate facades (`climate.*`/`humidifier.*` endpoints) translate via standard
-  HA services for any channel; `unsupported_control_channel` remains only for
-  raw `remote.*` control endpoints (no codebook).
-- `climate_ha_state_view.py`: read-only `ir_remote_catalog()` for `remote.*`
-  entities with HA-area binding.
-- `application/climate_setup.py` + `climate_runtime.py`: setup options gain a
-  bounded private-id-free `ir_remotes` list (name/room_id/available only).
-- Contract `v1/climate-setup-options.schema.json`: optional additive
-  `ir_remotes`; honest roomless-candidate shape (`room_id: ""`,
-  `reason: unassigned_room`, null suggestion fields).
-- Panel wizard: "Устройства без комнаты" group binds roomless candidates to
-  the current room in the HausmanHub registry only; SmartIR hint when a room
-  has an IR remote but no climate facade; honest channel copy (control works
-  immediately through the facade).
-- Tests: adapter channel/facade/raw-remote cases, state-view remote catalog,
-  setup-options projection + schema coverage, runtime fakes, panel wizard
-  roomless/hint/copy cases. Full gate: 815 tests OK (4 skipped) +
-  `tools/check_local_release.py` passed.
+## Contents
+- Channel is an honest transport label: climate/humidifier facades (SmartIR
+  etc.) translate via standard HA services for any channel;
+  `unsupported_control_channel` only for raw `remote.*` endpoints.
+- Setup options: bounded private-id-free `ir_remotes` (name/room_id/available).
+- Panel wizard: "Устройства без комнаты" binding group (HausmanHub registry
+  only), SmartIR hint, honest channel copy.
+- Full local gate: 815 tests + `tools/check_local_release.py`.
+
+## Deploy verification (live HA, read-only)
+- HACS update entity installed `v1.25.0` explicitly; HA restarted.
+- `integration_version: 1.25.0`; served panel JS is the 192769-byte build with
+  the new strings; setup options return real `ir_remotes` (Broadlink remotes
+  in гостиная/кухня); `climate.komanchi_living_smartir` is roomless
+  candidate_0001 with `can_add: true`.
+- Contour stays `not_configured`; readiness honestly `disabled`.
 
 ## Next
-- Version bump 1.25.0 + CHANGELOG + commit/push/release only after explicit
-  user go-ahead.
-- Then 1.26.0 wizard IR-learning vertical per the approved design.
-
-## Previous (1.24.0, released)
-- 9-tab panel, scenario engine, connection settings; release
-  https://github.com/shumkiiv/hausmanhub_hacs/releases/tag/v1.24.0 (Latest).
+- 1.26.0 wizard IR-learning vertical ("2 lite"): SmartIR code DB scan,
+  Broadlink `.storage` codes, `remote.learn_command` last.
