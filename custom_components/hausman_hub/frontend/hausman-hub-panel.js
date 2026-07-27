@@ -105,6 +105,16 @@ const ICON_PATHS = {
   chevron: "M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z",
   device: "M4 6h18V4H4c-1.1 0-2 .9-2 2v11H0v3h14v-3H4zm19 2h-6c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h6c.55 0 1-.45 1-1V9c0-.55-.45-1-1-1m-1 9h-4v-7h4z",
   warning: "M1 21h22L12 2zm12-3h-2v-2h2zm0-4h-2v-4h2z",
+  sun: "M6.76 4.84l-1.8-1.79-1.41 1.41 1.79 1.79 1.42-1.41zM4 10.5H1v2h3v-2zm9-9.95h-2V3.5h2V.55zm7.45 3.91l-1.41-1.41-1.79 1.79 1.41 1.41 1.79-1.79zm-3.21 13.7l1.79 1.8 1.41-1.41-1.8-1.79-1.4 1.4zM20 10.5v2h3v-2h-3zm-8-5c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm-1 16.95h2V19.5h-2v2.95zm-7.45-3.91l1.41 1.41 1.79-1.8-1.41-1.41-1.79 1.8z",
+  moon: "M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z",
+  auto: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18V4c4.41 0 8 3.59 8 8s-3.59 8-8 8z",
+};
+
+const THEME_MODES = ["auto", "light", "dark"];
+const THEME_MODE_META = {
+  auto: { icon: "auto", label: "Тема: авто (следует Home Assistant)", hint: "авто" },
+  light: { icon: "sun", label: "Тема: светлая", hint: "светлая" },
+  dark: { icon: "moon", label: "Тема: тёмная", hint: "тёмная" },
 };
 
 function svgIcon(name, className) {
@@ -144,6 +154,7 @@ class HausmanHubPanel extends HTMLElement {
     this._error = false;
     this._busy = false;
     this._notice = "";
+    this._themeMode = "auto";
     this._timer = null;
     this._shell = null;
     this._activeSection = null;
@@ -193,6 +204,7 @@ class HausmanHubPanel extends HTMLElement {
   set hass(value) {
     const first = this._hass === null;
     this._hass = value;
+    this._applyThemeMode();
     if (first) this._load();
   }
 
@@ -206,6 +218,32 @@ class HausmanHubPanel extends HTMLElement {
     if (this._timer) clearInterval(this._timer);
     this._timer = null;
     document.removeEventListener("visibilitychange", this._onVisible);
+  }
+
+  _applyThemeMode() {
+    const darkMode = !!(this._hass && this._hass.themes && this._hass.themes.darkMode);
+    const effective = this._themeMode === "auto" ? (darkMode ? "dark" : "light") : this._themeMode;
+    if (this.classList && typeof this.classList.toggle === "function") {
+      this.classList.toggle("theme-light", effective === "light");
+    }
+    this._updateThemeSwitcher();
+  }
+
+  _cycleThemeMode() {
+    const index = THEME_MODES.indexOf(this._themeMode);
+    this._themeMode = THEME_MODES[(index + 1) % THEME_MODES.length];
+    this._applyThemeMode();
+  }
+
+  _updateThemeSwitcher() {
+    const button = this._shell && this._shell.themeButton;
+    if (!button) return;
+    const meta = THEME_MODE_META[this._themeMode] || THEME_MODE_META.auto;
+    setAttr(button, "title", meta.label);
+    setAttr(button, "aria-label", meta.label);
+    button.innerHTML = "";
+    button.appendChild(svgIcon(meta.icon));
+    button.appendChild(el("span", "theme-switch-hint", meta.hint));
   }
 
   async _load() {
@@ -415,6 +453,15 @@ class HausmanHubPanel extends HTMLElement {
         --disabled-color:#3A4450;
         font-family:var(--primary-font-family,sans-serif);
         color:var(--primary-text-color,#E7ECF3); background:var(--primary-background-color,#0B0F14); }
+      :host(.theme-light) {
+        --hmh-bg:#EEF1F6; --hmh-surface:#FFFFFF; --hmh-raised:#F6F8FB; --hmh-hover:#E5EAF1;
+        --hmh-border:#D8DFE9; --hmh-accent:#2F6FE4; --hmh-text:#161C26; --hmh-text-dim:#5C6878;
+        --hmh-radius-control:12px; --hmh-radius-card:16px; --hmh-radius-section:20px;
+        --text-primary-color:#FFFFFF;
+        --error-color:#C93A32; --success-color:#2E7D4C; --warning-color:#9A5F0B;
+        --disabled-color:#C3CBD6; }
+      :host(.theme-light) .card { box-shadow:var(--ha-card-box-shadow,0 2px 9px rgba(22,28,38,.09)); }
+      :host(.theme-light) .hero { box-shadow:0 8px 28px rgba(22,28,38,.13); }
       *, *::before, *::after { box-sizing:border-box; }
       [hidden] { display:none !important; }
       h1 { margin:0; font-size:clamp(26px,3vw,36px); line-height:1.1; letter-spacing:-.02em; }
@@ -434,6 +481,12 @@ class HausmanHubPanel extends HTMLElement {
       .version-badge { display:inline-flex; align-items:center; min-height:32px; margin-left:8px;
         padding:6px 12px; border-radius:999px; font-size:13px;
         background:var(--secondary-background-color,#eceff1); color:var(--secondary-text-color,#727272); }
+      .theme-switch { display:inline-flex; align-items:center; gap:7px; min-width:40px; min-height:40px;
+        margin:0 0 0 8px; padding:6px 11px; border:1px solid var(--divider-color,#ddd);
+        border-radius:999px; background:var(--secondary-background-color,#eceff1);
+        color:var(--secondary-text-color,#727272); vertical-align:middle; }
+      .theme-switch .icon { width:19px; height:19px; }
+      .theme-switch-hint { font-size:12px; font-weight:600; }
       .tab-bar { display:flex; gap:6px; margin:0 -4px 22px; padding:4px; overflow-x:auto;
         overscroll-behavior-inline:contain; scrollbar-width:thin; border-bottom:1px solid var(--divider-color,#ddd); }
       .tab { flex:0 0 auto; min-height:42px; margin:0; padding:9px 15px; border-radius:11px 11px 0 0;
@@ -557,6 +610,8 @@ class HausmanHubPanel extends HTMLElement {
       .device-card-meta { display:block; margin-top:3px; color:var(--secondary-text-color,#727272);
         font-size:11px; line-height:1.35; overflow-wrap:anywhere; }
       .device-card-options { padding:4px 12px 7px; }
+      .device-card-options label.form-field { grid-template-columns:minmax(0,1fr); gap:5px; margin:9px 0 4px; }
+      .device-card-options label.form-field > select { width:100%; max-width:none; }
       .collapsible-section { margin-top:14px; }
       .collapsible-toggle { display:inline-flex; align-items:center; gap:8px; margin:0;
         font-size:13px; text-transform:uppercase; letter-spacing:.05em;
@@ -665,6 +720,10 @@ class HausmanHubPanel extends HTMLElement {
     const versionBadge = el("div", "version-badge muted", "");
     versionBadge.style.display = "none";
     header.appendChild(versionBadge);
+    const themeButton = el("button", "theme-switch");
+    themeButton.type = "button";
+    themeButton.addEventListener("click", () => this._cycleThemeMode());
+    header.appendChild(themeButton);
     container.appendChild(header);
     const banner = el("div", "banner", "Данные HausmanHub недоступны. Проверьте интеграцию и повторите.");
     setAttr(banner, "role", "alert");
@@ -733,11 +792,12 @@ class HausmanHubPanel extends HTMLElement {
     const settings = el("div");
     sectionNodes.settings.appendChild(settings);
     this._shell = {
-      banner, notice, loading, statusPill, versionBadge, tabs, nav, sectionNodes, wizard,
+      banner, notice, loading, statusPill, versionBadge, themeButton, tabs, nav, sectionNodes, wizard,
       readiness, summary, rooms,
       contour, profiles, schedule, home, windows, assistant,
       scenarios, settings,
     };
+    this._updateThemeSwitcher();
   }
 
   _clearDynamic() {

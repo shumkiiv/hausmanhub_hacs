@@ -134,7 +134,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
           const panel = new Panel();
           panel._data = {{
             contract: {{ name: "hausman-hub-admin-panel", version: 2 }},
-            integration_version: "1.26.0",
+            integration_version: "1.26.1",
             snapshot: null,
             readiness: {{
               status: "disabled",
@@ -162,7 +162,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
           if (!text.includes("Управление климатом выключено")) {{
             throw new Error("disabled readiness missing");
           }}
-          if (!text.includes("Версия 1.26.0")) {{
+          if (!text.includes("Версия 1.26.1")) {{
             throw new Error("integration version badge missing");
           }}
           if (text.includes("Климатический контур")) {{
@@ -171,7 +171,9 @@ class PanelJavaScriptContractTest(unittest.TestCase):
           const tabs = visible.filter((node) => String(node.className).split(" ").includes("tab"));
           if (tabs.length !== 9) throw new Error("nine persistent tabs missing");
           if (visible.some((node) => (
-            node.tagName === "BUTTON" && !String(node.className).split(" ").includes("tab")
+            node.tagName === "BUTTON"
+            && !String(node.className).split(" ").includes("tab")
+            && !String(node.className).split(" ").includes("theme-switch")
           ))) {{
             throw new Error("climate action rendered without settings");
           }}
@@ -181,6 +183,160 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             check=False,
             capture_output=True,
             text=True,
+        )
+
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+
+THEME_TEST_HARNESS = """
+  const fs = require("fs");
+  const vm = require("vm");
+
+  class FakeElement {
+    constructor(tag = "element") {
+      this.tagName = tag.toUpperCase();
+      this.children = [];
+      this.className = "";
+      this.textContent = "";
+      this.disabled = false;
+      this.style = {};
+      this._listeners = {};
+      const classes = new Set();
+      this.classList = {
+        toggle: (name, force) => {
+          const should = force === undefined ? !classes.has(name) : !!force;
+          if (should) classes.add(name); else classes.delete(name);
+          return should;
+        },
+        contains: (name) => classes.has(name),
+        add: (name) => classes.add(name),
+        remove: (name) => classes.delete(name),
+      };
+    }
+    appendChild(child) {
+      this.children.push(child);
+      return child;
+    }
+    addEventListener(type, handler) {
+      (this._listeners[type] = this._listeners[type] || []).push(handler);
+    }
+    click() {
+      (this._listeners.click || []).forEach((handler) => handler({}));
+    }
+    set innerHTML(value) {
+      if (value === "") this.children = [];
+    }
+  }
+
+  global.document = {
+    hidden: false,
+    createElement: (tag) => new FakeElement(tag),
+    createElementNS: (ns, tag) => new FakeElement(tag),
+    addEventListener() {},
+    removeEventListener() {},
+  };
+  global.HTMLElement = class extends FakeElement {
+    attachShadow() {
+      this.shadowRoot = new FakeElement("shadow-root");
+      return this.shadowRoot;
+    }
+  };
+  const registry = new Map();
+  global.customElements = {
+    define: (name, value) => registry.set(name, value),
+  };
+  vm.runInThisContext(
+    fs.readFileSync(__PANEL_JS__, "utf8"),
+    { filename: __PANEL_JS__ }
+  );
+
+  const Panel = registry.get("hausman-hub-panel");
+  const pendingHass = (darkMode) => ({
+    themes: { darkMode },
+    callApi: () => new Promise(() => {}),
+  });
+"""
+
+
+class PanelThemeSwitcherTest(unittest.TestCase):
+    """The panel cycles auto/light/dark and follows the HA theme in auto mode."""
+
+    def _run_script(self, body: str) -> subprocess.CompletedProcess[str]:
+        script = THEME_TEST_HARNESS.replace("__PANEL_JS__", repr(str(PANEL_JS))) + body
+        return subprocess.run(
+            ("node", "--input-type=commonjs", "--eval", script),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+    def test_auto_mode_follows_hass_dark_mode(self) -> None:
+        completed = self._run_script(
+            """
+  const panel = new Panel();
+  panel._render();
+  if (panel._themeMode !== "auto") throw new Error("default mode must be auto");
+  panel.hass = pendingHass(true);
+  if (panel.classList.contains("theme-light")) {
+    throw new Error("auto mode with darkMode=true must stay dark");
+  }
+  panel.hass = pendingHass(false);
+  if (!panel.classList.contains("theme-light")) {
+    throw new Error("auto mode with darkMode=false must switch to light");
+  }
+  panel.hass = pendingHass(true);
+  if (panel.classList.contains("theme-light")) {
+    throw new Error("auto mode must react to hass theme changes");
+  }
+            """
+        )
+
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_switcher_cycles_modes_and_ignores_hass_when_explicit(self) -> None:
+        completed = self._run_script(
+            """
+  const panel = new Panel();
+  panel._render();
+  panel.hass = pendingHass(true);
+  const button = panel._shell.themeButton;
+  if (!button) throw new Error("theme switcher missing");
+  const state = () => ({
+    mode: panel._themeMode,
+    light: panel.classList.contains("theme-light"),
+    label: button["aria-label"],
+    hint: button.children.length > 1 ? button.children[1].textContent : "",
+  });
+  let s = state();
+  if (s.mode !== "auto" || s.light) throw new Error("initial auto+dark expected");
+  if (s.label !== "Тема: авто (следует Home Assistant)") {
+    throw new Error("auto aria-label mismatch: " + s.label);
+  }
+  if (s.hint !== "авто") throw new Error("auto hint missing");
+  button.click();
+  s = state();
+  if (s.mode !== "light" || !s.light || s.label !== "Тема: светлая") {
+    throw new Error("auto -> light cycle failed");
+  }
+  panel.hass = pendingHass(false);
+  if (!panel.classList.contains("theme-light")) {
+    throw new Error("explicit light must ignore hass darkMode");
+  }
+  button.click();
+  s = state();
+  if (s.mode !== "dark" || s.light || s.label !== "Тема: тёмная") {
+    throw new Error("light -> dark cycle failed");
+  }
+  panel.hass = pendingHass(false);
+  if (panel.classList.contains("theme-light")) {
+    throw new Error("explicit dark must ignore hass darkMode");
+  }
+  button.click();
+  s = state();
+  if (s.mode !== "auto" || !s.light) {
+    throw new Error("dark -> auto cycle failed, auto must follow hass again");
+  }
+            """
         )
 
         self.assertEqual(0, completed.returncode, completed.stderr)
@@ -294,7 +450,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.26.0",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.26.1",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },
