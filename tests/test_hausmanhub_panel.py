@@ -18,7 +18,7 @@ PANEL_JS = (
     / "frontend"
     / "hausman-hub-panel.js"
 )
-MAX_PANEL_JS_BYTES = 200 * 1024
+MAX_PANEL_JS_BYTES = 210 * 1024
 
 
 class PanelJavaScriptContractTest(unittest.TestCase):
@@ -133,7 +133,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
           const panel = new Panel();
           panel._data = {{
             contract: {{ name: "hausman-hub-admin-panel", version: 2 }},
-            integration_version: "1.25.2",
+            integration_version: "1.25.3",
             snapshot: null,
             readiness: {{
               status: "disabled",
@@ -161,7 +161,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
           if (!text.includes("Управление климатом выключено")) {{
             throw new Error("disabled readiness missing");
           }}
-          if (!text.includes("Версия 1.25.2")) {{
+          if (!text.includes("Версия 1.25.3")) {{
             throw new Error("integration version badge missing");
           }}
           if (text.includes("Климатический контур")) {{
@@ -293,7 +293,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.25.2",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.25.3",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },

@@ -98,6 +98,57 @@ class ClimateSetupDevicesTest(unittest.TestCase):
         self.assertNotIn("synthetic-humidifier-source-kids", serialized)
         self.assertNotIn("entity_id", serialized)
 
+    def test_candidate_key_survives_positional_renumbering(self) -> None:
+        empty_registry = registry_from_payload(
+            {"version": 3, "home": {"outdoor_temperature_entity_id": None, "presence_entity_id": None, "central_heating_entity_id": None}, "rooms": [], "devices": []}
+        )
+        source = load_json(SOURCE_FIXTURE)
+        renumbered = copy.deepcopy(source)
+        renumbered["devices"].append(  # type: ignore[index]
+            {
+                "id": "synthetic-ac-source-aardvark",
+                "name": "Aardvark conditioner",
+                "roomId": "kids",
+                "domain": "climate",
+                "category": "climate",
+                "state": "cool",
+                "unavailable": False,
+            }
+        )
+        renumbered["capabilities"].append(  # type: ignore[index]
+            {
+                "deviceId": "synthetic-ac-source-aardvark",
+                "commandTypes": ["climate.set_hvac_mode", "climate.turn_off"],
+            }
+        )
+
+        before = climate_device_candidates(
+            empty_registry,
+            import_climate_state(source),
+        )
+        after = climate_device_candidates(
+            empty_registry,
+            import_climate_state(renumbered),
+        )
+
+        before_keys = {
+            candidate["candidate_key"]: candidate["candidate_id"]
+            for candidate in before["candidates"]  # type: ignore[index]
+        }
+        after_keys = {
+            candidate["candidate_key"]: candidate["candidate_id"]
+            for candidate in after["candidates"]  # type: ignore[index]
+        }
+        shared_keys = before_keys.keys() & after_keys.keys()
+        self.assertEqual(set(before_keys), shared_keys)
+        self.assertTrue(
+            any(
+                before_keys[key] != after_keys[key]
+                for key in shared_keys
+            ),
+            "the inserted candidate must renumber at least one positional id",
+        )
+
     def test_stale_data_disables_every_candidate(self) -> None:
         stale = copy.deepcopy(load_json(SOURCE_FIXTURE))
         stale["runtimeHealth"]["status"] = "stale"  # type: ignore[index]
@@ -188,11 +239,18 @@ class ClimateSetupDevicesTest(unittest.TestCase):
             import_climate_state(changed),
         )
 
-        before_without_revision = dict(before)
-        after_without_revision = dict(after)
+        before_without_revision = copy.deepcopy(before)
+        after_without_revision = copy.deepcopy(after)
         before_without_revision.pop("snapshot_revision")
         after_without_revision.pop("snapshot_revision")
+        for payload in (before_without_revision, after_without_revision):
+            for candidate in payload["candidates"]:  # type: ignore[index]
+                candidate.pop("candidate_key")
         self.assertEqual(before_without_revision, after_without_revision)
+        self.assertNotEqual(
+            [candidate["candidate_key"] for candidate in before["candidates"]],  # type: ignore[index]
+            [candidate["candidate_key"] for candidate in after["candidates"]],  # type: ignore[index]
+        )
         self.assertNotEqual(before["snapshot_revision"], after["snapshot_revision"])
 
     def test_snapshot_revision_ignores_read_time_when_candidates_are_equal(self) -> None:

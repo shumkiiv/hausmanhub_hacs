@@ -344,6 +344,7 @@ def climate_device_candidates(
         candidates.append(
             {
                 "candidate_id": f"candidate_{index:04d}",
+                "candidate_key": _candidate_key(source_id),
                 "name": name,
                 "room_id": room_id,
                 "available": available,
@@ -761,6 +762,7 @@ def climate_setup_options(
         suggestion = suggestions[candidate["candidate_id"]]
         device = {
             "candidate_id": candidate["candidate_id"],
+            "candidate_key": candidate["candidate_key"],
             "name": candidate["name"],
             "room_id": candidate["room_id"],
             "suggested_types": candidate["suggested_types"],
@@ -1958,6 +1960,13 @@ def climate_draft_save_receipt(
         },
         "summary": dict(summary),
     }
+
+
+def _candidate_key(source_id: str) -> str:
+    """Return a stable opaque candidate identity that survives list renumbering."""
+
+    digest = hashlib.sha256(source_id.encode("utf-8")).hexdigest()
+    return f"ckey_{digest[:12]}"
 
 
 def _ordered_candidate_source_ids(

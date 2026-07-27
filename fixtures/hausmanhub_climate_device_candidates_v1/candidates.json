@@ -29,6 +29,7 @@
   "candidates": [
     {
       "candidate_id": "candidate_0001",
+      "candidate_key": "ckey_9dc7c803b460",
       "name": "Kids humidifier",
       "room_id": "kids",
       "available": true,
@@ -45,6 +46,7 @@
     },
     {
       "candidate_id": "candidate_0002",
+      "candidate_key": "ckey_ee7dad9a271f",
       "name": "Living AC",
       "room_id": "living",
       "available": true,

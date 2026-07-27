@@ -15,6 +15,7 @@ empty, or absent, never permissive.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from ..domain.climate import (
@@ -45,6 +46,13 @@ UNASSIGNED_CANDIDATE_ROOM = ""
 _CLIMATE_FEATURE_TARGET_TEMPERATURE = 1
 _CLIMATE_FEATURE_FAN_MODE = 8
 _CLIMATE_FEATURE_TURN_OFF = 128
+_TRV_MARKERS = (
+    "термоголовка",
+    "терморегулятор",
+    "thermostatic radiator valve",
+    "trvzb",
+)
+_TRV_TOKEN = re.compile(r"\btrv\b", re.IGNORECASE)
 
 
 class ClimateNativeSetupViolation(ValueError):
@@ -86,6 +94,7 @@ class ClimateHaCatalogEntry:
     manufacturer: str | None = None
     model: str | None = None
     image_url: str | None = None
+    hvac_modes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -307,6 +316,16 @@ def _unbound_command_types(entry: ClimateHaCatalogEntry) -> tuple[str, ...]:
 
 def _unbound_suggested_kinds(entry: ClimateHaCatalogEntry) -> tuple[ClimateDeviceKind, ...]:
     if entry.domain == "climate":
+        if entry.hvac_modes:
+            if "cool" in entry.hvac_modes:
+                return (ClimateDeviceKind.AIR_CONDITIONER,)
+            if "heat" in entry.hvac_modes:
+                return (ClimateDeviceKind.RADIATOR_THERMOSTAT,)
+            if _is_trv(entry):
+                return (ClimateDeviceKind.RADIATOR_THERMOSTAT,)
+            return ()
+        if _is_trv(entry):
+            return (ClimateDeviceKind.RADIATOR_THERMOSTAT,)
         return (ClimateDeviceKind.AIR_CONDITIONER,)
     if entry.domain == "humidifier":
         return (ClimateDeviceKind.HUMIDIFIER,)
@@ -315,3 +334,13 @@ def _unbound_suggested_kinds(entry: ClimateHaCatalogEntry) -> tuple[ClimateDevic
     if entry.device_class == "humidity":
         return (ClimateDeviceKind.HUMIDITY_SENSOR,)
     return ()
+
+
+def _is_trv(entry: ClimateHaCatalogEntry) -> bool:
+    values = (
+        entry.friendly_name,
+        entry.device_name,
+        entry.model,
+    )
+    text = " ".join(value for value in values if value is not None).casefold()
+    return any(marker in text for marker in _TRV_MARKERS) or bool(_TRV_TOKEN.search(text))

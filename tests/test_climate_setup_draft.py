@@ -687,6 +687,7 @@ class ClimateSetupDraftTest(unittest.TestCase):
         options["devices"].append(
             {
                 "candidate_id": "candidate_0003",
+                "candidate_key": "ckey_000000000003",
                 "name": "Комнатный фасад SmartIR",
                 "room_id": "",
                 "suggested_types": ["air_conditioner"],

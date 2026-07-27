@@ -458,6 +458,8 @@ class HausmanHubPanel extends HTMLElement {
         align-items:center; gap:12px 18px; margin:12px 0; }
       label.checkbox-field, label.device-option { display:flex; align-items:flex-start; gap:10px; margin:9px 0; }
       label.checkbox-field > input, label.device-option > input { order:-1; flex:0 0 auto; }
+      label.device-option.is-disabled { opacity:.7; cursor:not-allowed; }
+      label.device-option.is-disabled > input { cursor:not-allowed; }
       .field-help { grid-column:2; margin-top:-7px; }
       .reasons { margin:10px 0 0; font-size:13px; }
       .chip { display:inline-flex; align-items:center; min-height:25px; margin:2px 5px 2px 0; padding:3px 9px;
@@ -1316,9 +1318,9 @@ class HausmanHubPanel extends HTMLElement {
 
   _firstRunRoomCandidates(roomId) {
     return (this._firstRun.options && this._firstRun.options.devices || []).filter((candidate) => (
-      candidate.can_add === true
-      && (candidate.room_id === roomId
-        || (candidate.room_id === "" && candidate.suggested_room_id === roomId))
+      candidate.room_id === roomId
+      || (candidate.can_add === true
+        && candidate.room_id === "" && candidate.suggested_room_id === roomId)
     ));
   }
 
@@ -1330,11 +1332,89 @@ class HausmanHubPanel extends HTMLElement {
     ));
   }
 
+  _firstRunCandidateSelectable(candidate, room) {
+    return candidate.can_add === true && (
+      candidate.room_id === room.id
+      || (candidate.room_id === ""
+        && (candidate.suggested_room_id === room.id || !candidate.suggested_room_id))
+    );
+  }
+
+  _firstRunRoomNameRoot(name) {
+    let root = normalizedText(name || "").replace(/ё/g, "е").replace(/[^а-я]/g, "");
+    const endings = ["нная", "ная", "яя", "ая", "ий", "ый", "ое", "ее", "ь", "а", "я"];
+    let stripped = true;
+    while (stripped) {
+      stripped = false;
+      for (const ending of endings) {
+        if (root.endsWith(ending) && root.length > ending.length) {
+          root = root.slice(0, -ending.length);
+          stripped = true;
+          break;
+        }
+      }
+    }
+    return root;
+  }
+
+  _firstRunCandidateRoomName(candidate) {
+    const rooms = (this._firstRun.options && this._firstRun.options.rooms) || [];
+    const room = rooms.find((item) => item.id === candidate.room_id);
+    return (room && room.name) || candidate.suggested_room_name || candidate.room_id || "Без комнаты";
+  }
+
+  _firstRunPossibleRoomCandidates(room) {
+    const roomName = normalizedText(room.name || room.id).replace(/ё/g, "е");
+    const root = this._firstRunRoomNameRoot(room.name || room.id);
+    return (this._firstRun.options && this._firstRun.options.devices || []).filter((candidate) => (
+      candidate.room_id && candidate.room_id !== room.id
+      && (candidate.suggested_types || []).some((type) => ACTIVE_DEVICE_TYPES.has(type))
+      && (() => {
+        const candidateName = normalizedText([candidate.name, candidate.device_name]
+          .filter(Boolean).join(" ")).replace(/ё/g, "е");
+        return (roomName && candidateName.includes(roomName))
+          || (root.length >= 4 && candidateName.includes(root));
+      })()
+    ));
+  }
+
+  _firstRunCandidateStatusName(candidate) {
+    const names = ((this._firstRun.options || {}).display_names || {}).device_status || {};
+    return names[candidate.status] || candidate.status || "Статус не указан";
+  }
+
+  _firstRunCandidateReasonName(candidate) {
+    const names = ((this._firstRun.options || {}).display_names || {}).suggestion_reasons || {};
+    return names[candidate.reason] || candidate.reason || "Причина не указана";
+  }
+
+  _firstRunCandidateHint(candidate, room) {
+    if (candidate.status === "unavailable") {
+      return "Устройство сейчас недоступно в Home Assistant. Попробуйте обновить список.";
+    }
+    if (candidate.room_id && candidate.room_id !== room.id) {
+      return `Сейчас относится к зоне «${this._firstRunCandidateRoomName(candidate)}». Если это неверно, переназначьте область в Home Assistant.`;
+    }
+    return "Это устройство сейчас нельзя добавить в комнату.";
+  }
+
   _firstRunRoomChoices(state, candidates) {
     const choices = [];
     candidates.forEach((candidate, candidateIndex) => {
-      (candidate.suggested_types || []).forEach((type, typeIndex) => {
-        const key = `${candidate.candidate_id}:${type}`;
+      const suggestedTypes = Array.isArray(candidate.suggested_types) ? candidate.suggested_types : [];
+      if (!suggestedTypes.length) {
+        choices.push({
+          candidate,
+          device: { channel: null, selected: false },
+          key: `${candidate.candidate_key || candidate.candidate_id}:unknown`,
+          order: candidateIndex * 10,
+          pseudo: true,
+          type: null,
+        });
+        return;
+      }
+      suggestedTypes.forEach((type, typeIndex) => {
+        const key = `${candidate.candidate_key || candidate.candidate_id}:${type}`;
         const device = state.devices[key];
         if (!device) return;
         choices.push({ candidate, device, key, order: candidateIndex * 10 + typeIndex, type });
@@ -1383,21 +1463,43 @@ class HausmanHubPanel extends HTMLElement {
       group.appendChild(header);
       const options = el("div", "device-card-options");
       groupChoices.sort((left, right) => left.order - right.order).forEach((choice) => {
+        const selectable = !choice.pseudo && this._firstRunCandidateSelectable(choice.candidate, room);
+        if (!selectable && choice.device.selected) {
+          choice.device.selected = false;
+          choice.device.channel = null;
+        }
         const checkbox = el("input");
         checkbox.type = "checkbox";
         checkbox.checked = choice.device.selected;
         checkbox.value = choice.candidate.candidate_id;
-        const label = el("label", "device-option");
+        checkbox.disabled = !selectable || this._busy;
+        const label = el("label", selectable ? "device-option" : "device-option is-disabled");
         label.appendChild(checkbox);
         const labelText = el("span", "entity-label");
-        const deviceName = ((this._firstRun.options.display_names || {}).device_types || {})[choice.type] || choice.type;
+        const deviceName = choice.pseudo
+          ? "Тип не определён"
+          : ((this._firstRun.options.display_names || {}).device_types || {})[choice.type] || choice.type;
         labelText.appendChild(el("strong", null, deviceName));
         labelText.appendChild(el("small", null, choice.candidate.name));
+        const status = el("small", choice.candidate.status === "available" ? "status-badge is-ready" : "status-badge is-attention");
+        status.textContent = this._firstRunCandidateStatusName(choice.candidate);
+        labelText.appendChild(status);
+        const reason = el("small", "status-badge is-attention");
+        reason.textContent = this._firstRunCandidateReasonName(choice.candidate);
+        labelText.appendChild(reason);
+        if (choice.candidate.room_id && choice.candidate.room_id !== room.id) {
+          labelText.appendChild(el(
+            "small",
+            "status-badge is-attention",
+            `Сейчас: ${this._firstRunCandidateRoomName(choice.candidate)}`
+          ));
+        }
+        if (!selectable) labelText.appendChild(el("small", "muted", this._firstRunCandidateHint(choice.candidate, room)));
         label.appendChild(labelText);
         options.appendChild(label);
         let controlChannel = null;
         let channelRow = null;
-        if (ACTIVE_DEVICE_TYPES.has(choice.type)) {
+        if (ACTIVE_DEVICE_TYPES.has(choice.type) && selectable) {
           controlChannel = selectField(
             [{ label: "Не выбран", value: "" }].concat((this._firstRun.options.control_channels || []).map((channel) => ({
               label: CONTROL_CHANNEL_LABELS[channel] || channel,
@@ -1415,6 +1517,7 @@ class HausmanHubPanel extends HTMLElement {
           options.appendChild(channelRow);
         }
         checkbox.addEventListener("change", () => {
+          if (!selectable) return;
           choice.device.selected = checkbox.checked;
           if (checkbox.checked) {
             allChoices.forEach((peer) => {
@@ -1433,6 +1536,7 @@ class HausmanHubPanel extends HTMLElement {
         });
         fields.devices.push({ checkbox, controlChannel, channelRow, key: choice.key, type: choice.type });
       });
+      group.appendChild(options);
       groups.appendChild(group);
       searchable.push({
         group,
@@ -1444,34 +1548,40 @@ class HausmanHubPanel extends HTMLElement {
 
   _firstRunRoomState(room) {
     let state = this._firstRun.rooms[room.id];
-    if (state) return state;
-    const devices = {};
-    this._firstRunRoomCandidates(room.id)
-      .concat(this._firstRunRoomlessCandidates())
-      .forEach((candidate) => {
-        const suggestedTypes = Array.isArray(candidate.suggested_types)
-          ? candidate.suggested_types : [];
-        suggestedTypes.forEach((type) => {
-          const key = `${candidate.candidate_id}:${type}`;
-          devices[key] = {
-            candidateId: candidate.candidate_id,
-            channel: null,
-            selected: candidate.suggested_room_id === room.id
-              && candidate.recommended_type === type,
-            type,
-          };
-        });
+    const newState = !state;
+    if (!state) {
+      state = {
+        day: { humidity: 45, strategy: "normal", temperature: 22 },
+        devices: {},
+        included: false,
+        maxTemperature: null,
+        minTemperature: null,
+        night: { humidity: 45, strategy: "normal", temperature: 22 },
+        report: null,
+        showAllDevices: false,
+      };
+      this._firstRun.rooms[room.id] = state;
+    }
+    (this._firstRun.options && this._firstRun.options.devices || []).forEach((candidate) => {
+      const suggestedTypes = Array.isArray(candidate.suggested_types) ? candidate.suggested_types : [];
+      suggestedTypes.forEach((type) => {
+        const candidateKey = candidate.candidate_key || candidate.candidate_id;
+        const key = `${candidateKey}:${type}`;
+        if (state.devices[key]) {
+          state.devices[key].candidateId = candidate.candidate_id;
+          state.devices[key].candidateKey = candidateKey;
+          return;
+        }
+        state.devices[key] = {
+          candidateId: candidate.candidate_id,
+          candidateKey,
+          channel: null,
+          selected: false,
+          type,
+        };
       });
-    state = {
-      day: { humidity: 45, strategy: "normal", temperature: 22 },
-      devices,
-      included: Object.values(devices).some((device) => device.selected),
-      maxTemperature: null,
-      minTemperature: null,
-      night: { humidity: 45, strategy: "normal", temperature: 22 },
-      report: null,
-    };
-    this._firstRun.rooms[room.id] = state;
+    });
+    if (newState) state.included = Object.values(state.devices).some((device) => device.selected);
     return state;
   }
 
@@ -1493,6 +1603,13 @@ class HausmanHubPanel extends HTMLElement {
     const selectedIds = roomIds || Array.from(this._firstRun.validRooms);
     if (!selectedIds.length) return { error: "Сначала успешно проверьте хотя бы одну комнату." };
     const channels = new Set(options.control_channels || []);
+    const candidateIds = new Map();
+    (options.devices || []).forEach((candidate) => {
+      const candidateKey = candidate.candidate_key || candidate.candidate_id;
+      (Array.isArray(candidate.suggested_types) ? candidate.suggested_types : []).forEach((type) => {
+        candidateIds.set(`${candidateKey}:${type}`, candidate.candidate_id);
+      });
+    });
     const rooms = [];
     const selectedCandidates = new Set();
     for (const roomId of selectedIds) {
@@ -1548,11 +1665,15 @@ class HausmanHubPanel extends HTMLElement {
       const devices = [];
       for (const device of Object.values(state.devices)) {
         if (!device.selected) continue;
-        if (selectedCandidates.has(device.candidateId)) {
+        const candidateId = candidateIds.get(`${device.candidateKey || device.candidateId}:${device.type}`);
+        if (!candidateId) {
+          return { error: "Список устройств изменился. Обновите список и повторите проверку.", roomId };
+        }
+        if (selectedCandidates.has(candidateId)) {
           return { error: "Одно устройство нельзя выбрать для нескольких комнат или типов.", roomId };
         }
-        selectedCandidates.add(device.candidateId);
-        const item = { candidate_id: device.candidateId, type: device.type };
+        selectedCandidates.add(candidateId);
+        const item = { candidate_id: candidateId, type: device.type };
         if (ACTIVE_DEVICE_TYPES.has(device.type)) {
           if (device.channel && !channels.has(device.channel)) {
             return { error: "Выберите канал управления из доступного списка.", roomId };
@@ -1617,10 +1738,20 @@ class HausmanHubPanel extends HTMLElement {
     if (this._firstRun.loading || (!force && this._firstRun.options)) return;
     this._firstRun.loading = true;
     this._firstRun.optionsError = false;
-    if (force) this._firstRun.options = null;
     this._render();
     try {
       this._firstRun.options = await this._hass.callApi("GET", DRAFT_API);
+      Object.keys(this._firstRun.rooms).forEach((roomId) => {
+        const room = (this._firstRun.options.rooms || []).find((item) => item.id === roomId);
+        if (room) this._firstRunRoomState(room);
+      });
+      if (force) {
+        Object.values(this._firstRun.rooms).forEach((state) => { state.report = null; });
+        this._firstRun.draft = null;
+        this._firstRun.issues = [];
+        this._firstRun.validation = null;
+        this._firstRun.validRooms.clear();
+      }
     } catch (error) {
       this._firstRun.optionsError = true;
     } finally {
@@ -2090,9 +2221,28 @@ class HausmanHubPanel extends HTMLElement {
     const devicesSection = el("section", "wizard-section");
     devicesSection.appendChild(el("h3", null, "Устройства и датчики"));
     devicesSection.appendChild(el("div", "muted", "Канал управления сохраняется в контуре и честно показывает транспорт устройства. Если устройство - климатическая обёртка (например, SmartIR), команды выполняются сразу через стандартные сервисы Home Assistant при любом канале. Без такой обёртки сырой ИК-пульт остаётся только в наблюдении."));
+    const deviceActions = el("div", "actions");
+    const refreshDevices = el("button", "secondary", "Обновить список устройств");
+    refreshDevices.disabled = this._busy || this._firstRun.loading;
+    refreshDevices.addEventListener("click", () => this._loadFirstRunOptions(true));
+    deviceActions.appendChild(refreshDevices);
+    devicesSection.appendChild(deviceActions);
+    const showAll = el("input");
+    showAll.type = "checkbox";
+    showAll.checked = state.showAllDevices === true;
+    showAll.disabled = this._busy;
+    const showAllLabel = el("label", "checkbox-field");
+    showAllLabel.appendChild(showAll);
+    showAllLabel.appendChild(el("span", null, "Показать все устройства"));
+    devicesSection.appendChild(showAllLabel);
     const roomChoices = this._firstRunRoomChoices(state, this._firstRunRoomCandidates(room.id));
     const roomlessChoices = this._firstRunRoomChoices(state, this._firstRunRoomlessCandidates());
-    const choices = roomChoices.concat(roomlessChoices);
+    const nearbyChoices = this._firstRunRoomChoices(state, this._firstRunPossibleRoomCandidates(room));
+    const catalogChoices = this._firstRunRoomChoices(
+      state,
+      (this._firstRun.options && this._firstRun.options.devices) || []
+    );
+    const choices = roomChoices.concat(roomlessChoices, nearbyChoices);
     const irRemotes = (this._firstRun.options.ir_remotes || []).filter((remote) => remote.room_id === room.id);
     const hasClimateFacade = choices.some((choice) => (
       choice.type === "air_conditioner" || choice.type === "humidifier"
@@ -2107,14 +2257,50 @@ class HausmanHubPanel extends HTMLElement {
     setAttr(search, "aria-label", "Поиск устройств комнаты");
     devicesSection.appendChild(search);
     const searchable = [];
-    const groups = this._firstRunDeviceGroups(roomChoices, room, fields, choices, searchable);
-    if (!roomChoices.length) groups.appendChild(el("div", "muted", "Подходящих устройств в этой области пока нет."));
-    devicesSection.appendChild(groups);
-    if (roomlessChoices.length) {
-      devicesSection.appendChild(el("h4", null, "Устройства без комнаты"));
-      devicesSection.appendChild(el("div", "muted", "Эти устройства не привязаны ни к одной зоне Home Assistant. Отметьте нужные, чтобы привязать их к этой комнате только в HausmanHub: зоны Home Assistant не изменятся."));
-      devicesSection.appendChild(this._firstRunDeviceGroups(roomlessChoices, room, fields, choices, searchable));
+    if (state.showAllDevices) {
+      const byRoom = new Map();
+      catalogChoices.forEach((choice) => {
+        const roomId = choice.candidate.room_id || "";
+        if (!byRoom.has(roomId)) byRoom.set(roomId, []);
+        byRoom.get(roomId).push(choice);
+      });
+      Array.from(byRoom.entries())
+        .sort(([left], [right]) => {
+          if (!left) return 1;
+          if (!right) return -1;
+          return this._firstRunCandidateRoomName({ room_id: left }).localeCompare(
+            this._firstRunCandidateRoomName({ room_id: right }), "ru"
+          );
+        })
+        .forEach(([roomId, groupedChoices]) => {
+          devicesSection.appendChild(el("h4", null, roomId
+            ? this._firstRunCandidateRoomName({ room_id: roomId }) : "Без комнаты"));
+          devicesSection.appendChild(this._firstRunDeviceGroups(
+            groupedChoices, room, fields, catalogChoices, searchable
+          ));
+        });
+      if (!catalogChoices.length) {
+        devicesSection.appendChild(el("div", "muted", "Home Assistant пока не передал ни одного устройства."));
+      }
+    } else {
+      const groups = this._firstRunDeviceGroups(roomChoices, room, fields, choices, searchable);
+      if (!roomChoices.length) groups.appendChild(el("div", "muted", "Подходящих устройств в этой области пока нет."));
+      devicesSection.appendChild(groups);
+      if (roomlessChoices.length) {
+        devicesSection.appendChild(el("h4", null, "Устройства без комнаты"));
+        devicesSection.appendChild(el("div", "muted", "Эти устройства не привязаны ни к одной зоне Home Assistant. Отметьте нужные, чтобы привязать их к этой комнате только в HausmanHub: зоны Home Assistant не изменятся."));
+        devicesSection.appendChild(this._firstRunDeviceGroups(roomlessChoices, room, fields, choices, searchable));
+      }
+      if (nearbyChoices.length) {
+        devicesSection.appendChild(el("h4", null, "Возможно, относится к этой комнате"));
+        devicesSection.appendChild(el("div", "muted", "Эти климатические устройства уже привязаны к другой области Home Assistant и показаны только для проверки."));
+        devicesSection.appendChild(this._firstRunDeviceGroups(nearbyChoices, room, fields, choices, searchable));
+      }
     }
+    showAll.addEventListener("change", () => {
+      state.showAllDevices = showAll.checked === true;
+      this._render();
+    });
     search.addEventListener("input", () => {
       const query = normalizedText(search.value);
       searchable.forEach((entry) => { entry.group.hidden = Boolean(query) && !entry.text.includes(query); });

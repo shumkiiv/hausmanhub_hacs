@@ -113,13 +113,13 @@ DRAFT_OPTIONS = {
     ],
     "devices": [
         {
-            "candidate_id": "candidate_ac", "name": "Кондиционер", "room_id": "living",
+            "candidate_id": "candidate_ac", "candidate_key": "candidate_ac", "name": "Кондиционер", "room_id": "living",
             "suggested_types": ["air_conditioner"], "recommended_type": "air_conditioner",
             "status": "available", "suggested_room_id": "living", "suggested_room_name": "Гостиная",
             "reason": "detected_room", "can_add": True,
         },
         {
-            "candidate_id": "candidate_temp_1", "name": "Температура у окна", "room_id": "living",
+            "candidate_id": "candidate_temp_1", "candidate_key": "candidate_temp_1", "name": "Температура у окна", "room_id": "living",
             "suggested_types": ["temperature_sensor"], "recommended_type": "temperature_sensor",
             "status": "available", "suggested_room_id": "living", "suggested_room_name": "Гостиная",
             "reason": "detected_room", "can_add": True,
@@ -130,13 +130,13 @@ DRAFT_OPTIONS = {
             "image_url": "https://www.zigbee2mqtt.io/images/devices/KOJIMA-THS-ZG-LCD.png",
         },
         {
-            "candidate_id": "candidate_temp_2", "name": "Температура у двери", "room_id": "",
+            "candidate_id": "candidate_temp_2", "candidate_key": "candidate_temp_2", "name": "Температура у двери", "room_id": "",
             "suggested_types": ["temperature_sensor"], "recommended_type": "temperature_sensor",
             "status": "available", "suggested_room_id": "living", "suggested_room_name": "Гостиная",
             "reason": "detected_room", "can_add": True,
         },
         {
-            "candidate_id": "candidate_humidity", "name": "Влажность гостиной", "room_id": "living",
+            "candidate_id": "candidate_humidity", "candidate_key": "candidate_humidity", "name": "Влажность гостиной", "room_id": "living",
             "suggested_types": ["humidity_sensor"], "recommended_type": "humidity_sensor",
             "status": "available", "suggested_room_id": "living", "suggested_room_name": "Гостиная",
             "reason": "detected_room", "can_add": True,
@@ -147,13 +147,13 @@ DRAFT_OPTIONS = {
             "image_url": "https://www.zigbee2mqtt.io/images/devices/KOJIMA-THS-ZG-LCD.png",
         },
         {
-            "candidate_id": "candidate_trv", "name": "Батарея детской", "room_id": "kids",
+            "candidate_id": "candidate_trv", "candidate_key": "candidate_trv", "name": "Батарея детской", "room_id": "kids",
             "suggested_types": ["radiator_thermostat"], "recommended_type": "radiator_thermostat",
             "status": "available", "suggested_room_id": "kids", "suggested_room_name": "Детская",
             "reason": "detected_room", "can_add": True,
         },
         {
-            "candidate_id": "candidate_kids_temp", "name": "Температура детской", "room_id": "kids",
+            "candidate_id": "candidate_kids_temp", "candidate_key": "candidate_kids_temp", "name": "Температура детской", "room_id": "kids",
             "suggested_types": ["temperature_sensor"], "recommended_type": "temperature_sensor",
             "status": "available", "suggested_room_id": "kids", "suggested_room_name": "Детская",
             "reason": "detected_room", "can_add": True,
@@ -333,7 +333,7 @@ def roomless_options() -> dict:
     options = copy.deepcopy(DRAFT_OPTIONS)
     options["devices"].append(
         {
-            "candidate_id": "candidate_smartir",
+            "candidate_id": "candidate_smartir", "candidate_key": "candidate_smartir",
             "name": "Komanchi Living SmartIR",
             "room_id": "",
             "suggested_types": ["air_conditioner"],
@@ -372,6 +372,8 @@ class PanelContourWizardTest(unittest.TestCase):
         findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
           && node.textContent === "Начать настройку")[0].fire("click");
         await tick();
+        panel._firstRunFields.rooms.living.include.checked = true;
+        panel._firstRunFields.rooms.living.include.fire("change");
         panel._firstRunFields.rooms.living.configure.fire("click");
         const fields = panel._firstRunFields.room;
         const groups = findAll(panel.shadowRoot, (node) =>
@@ -394,9 +396,13 @@ class PanelContourWizardTest(unittest.TestCase):
         }
         const groupedChoices = fields.devices.filter((choice) =>
           ["candidate_temp_1:temperature_sensor", "candidate_humidity:humidity_sensor"].includes(choice.key));
-        if (groupedChoices.length !== 2 || !groupedChoices.every((choice) => choice.checkbox.checked)) {
-          throw new Error("physical device bindings were not preserved independently");
+        if (groupedChoices.length !== 2 || groupedChoices.some((choice) => choice.checkbox.checked)) {
+          throw new Error("новые устройства должны быть не выбраны");
         }
+        groupedChoices.forEach((choice) => {
+          choice.checkbox.checked = true;
+          choice.checkbox.fire("change");
+        });
         if (groupedChoices.some((choice) => choice.controlChannel !== null)) {
           throw new Error("observed sensors exposed a control-channel selector");
         }
@@ -425,6 +431,315 @@ class PanelContourWizardTest(unittest.TestCase):
 
 
 class PanelFirstRunWizardTest(unittest.TestCase):
+    def test_unavailable_room_device_stays_visible_disabled_with_reason(self) -> None:
+        options = copy.deepcopy(DRAFT_OPTIONS)
+        options["display_names"]["device_status"] = {"unavailable": "Недоступно"}
+        options["display_names"]["suggestion_reasons"] = {
+            "device_unavailable": "Устройство недоступно",
+        }
+        options["devices"].append(
+            {
+                "candidate_id": "candidate_offline", "candidate_key": "candidate_offline",
+                "name": "Датчик у дивана",
+                "room_id": "living",
+                "suggested_types": ["temperature_sensor"],
+                "recommended_type": "temperature_sensor",
+                "status": "unavailable",
+                "suggested_room_id": "living",
+                "suggested_room_name": "Гостиная",
+                "reason": "device_unavailable",
+                "can_add": False,
+            }
+        )
+        script = panel_script(
+            get_payloads(options=options),
+            {},
+            """
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать настройку")[0].fire("click");
+        await tick();
+        panel._firstRunFields.rooms.living.configure.fire("click");
+        const offline = panel._firstRunFields.room.devices.find((item) =>
+          item.key === "candidate_offline:temperature_sensor");
+        if (!offline || offline.checkbox.disabled !== true || offline.checkbox.checked) {
+          throw new Error("unavailable room candidate must remain a disabled unchecked row");
+        }
+        const text = textOf(panel.shadowRoot);
+        if (!text.includes("Недоступно") || !text.includes("Устройство недоступно")
+          || !text.includes("Устройство сейчас недоступно в Home Assistant")) {
+          throw new Error("unavailable candidate status, reason, or refresh hint missing: " + text);
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_similar_room_name_cross_room_device_is_visible_but_disabled(self) -> None:
+        options = copy.deepcopy(DRAFT_OPTIONS)
+        options["devices"].append(
+            {
+                "candidate_id": "candidate_similar_room", "candidate_key": "candidate_similar_room",
+                "name": "Климат Kojima Гостинная Температура",
+                "device_name": "Климат Kojima Гостинная",
+                "room_id": "kids",
+                "suggested_types": ["air_conditioner"],
+                "recommended_type": "air_conditioner",
+                "status": "available",
+                "suggested_room_id": "kids",
+                "suggested_room_name": "Детская",
+                "reason": "detected_room",
+                "can_add": True,
+            }
+        )
+        script = panel_script(
+            get_payloads(options=options),
+            {},
+            """
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать настройку")[0].fire("click");
+        await tick();
+        panel._firstRunFields.rooms.living.configure.fire("click");
+        const similar = panel._firstRunFields.room.devices.find((item) =>
+          item.key === "candidate_similar_room:air_conditioner");
+        if (!similar || similar.checkbox.disabled !== true || similar.checkbox.checked) {
+          throw new Error("similar cross-room candidate must be shown disabled and unchecked");
+        }
+        const text = textOf(panel.shadowRoot);
+        if (!text.includes("Возможно, относится к этой комнате")
+          || !text.includes("Сейчас: Детская")
+          || !text.includes("переназначьте область в Home Assistant")) {
+          throw new Error("similar-room group or current-room guidance missing: " + text);
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_show_all_catalog_groups_other_rooms_and_roomless_disabled_candidates(self) -> None:
+        options = copy.deepcopy(DRAFT_OPTIONS)
+        options["devices"].append(
+            {
+                "candidate_id": "candidate_roomless_elsewhere", "candidate_key": "candidate_roomless_elsewhere",
+                "name": "Датчик другой комнаты",
+                "room_id": "",
+                "suggested_types": ["temperature_sensor"],
+                "recommended_type": "temperature_sensor",
+                "status": "available",
+                "suggested_room_id": "kids",
+                "suggested_room_name": "Детская",
+                "reason": "detected_room",
+                "can_add": True,
+            }
+        )
+        script = panel_script(
+            get_payloads(options=options),
+            {},
+            """
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать настройку")[0].fire("click");
+        await tick();
+        panel._firstRunFields.rooms.living.configure.fire("click");
+        const toggle = findAll(panel.shadowRoot, (node) => node.tagName === "LABEL"
+          && String(node.className).includes("checkbox-field")
+          && textOf(node).includes("Показать все устройства"))[0].children[0];
+        toggle.checked = true;
+        toggle.fire("change");
+        const text = textOf(panel.shadowRoot);
+        if (!text.includes("Детская") || !text.includes("Без комнаты")) {
+          throw new Error("show-all catalog did not render room and roomless groups");
+        }
+        const otherRoom = panel._firstRunFields.room.devices.find((item) =>
+          item.key === "candidate_trv:radiator_thermostat");
+        const roomless = panel._firstRunFields.room.devices.find((item) =>
+          item.key === "candidate_roomless_elsewhere:temperature_sensor");
+        if (!otherRoom || !roomless || !otherRoom.checkbox.disabled || !roomless.checkbox.disabled) {
+          throw new Error("show-all candidates outside this room became selectable");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_show_all_catalog_keeps_unsupported_device_as_disabled_unknown_type(self) -> None:
+        options = copy.deepcopy(DRAFT_OPTIONS)
+        options["display_names"]["device_status"] = {"unavailable": "Недоступно"}
+        options["display_names"]["suggestion_reasons"] = {
+            "unsupported_type": "Тип не поддерживается",
+        }
+        options["devices"].append(
+            {
+                "candidate_id": "candidate_unknown", "candidate_key": "candidate_unknown",
+                "name": "Неизвестное устройство", "room_id": "living",
+                "suggested_types": [], "recommended_type": None,
+                "status": "unavailable", "suggested_room_id": "living",
+                "suggested_room_name": "Гостиная", "reason": "unsupported_type",
+                "can_add": False,
+            }
+        )
+        script = panel_script(
+            get_payloads(options=options),
+            {},
+            """
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать настройку")[0].fire("click");
+        await tick();
+        panel._firstRunFields.rooms.living.configure.fire("click");
+        const toggle = findAll(panel.shadowRoot, (node) => node.tagName === "LABEL"
+          && String(node.className).includes("checkbox-field")
+          && textOf(node).includes("Показать все устройства"))[0].children[0];
+        toggle.checked = true;
+        toggle.fire("change");
+        const unknown = panel._firstRunFields.room.devices.find((item) =>
+          item.key === "candidate_unknown:unknown");
+        if (!unknown || !unknown.checkbox.disabled || unknown.checkbox.checked) {
+          throw new Error("неподдерживаемое устройство должно быть отключено");
+        }
+        const text = textOf(panel.shadowRoot);
+        if (!text.includes("Тип не определён") || !text.includes("Недоступно")
+          || !text.includes("Тип не поддерживается")) {
+          throw new Error("для неподдерживаемого устройства нет статуса и причины");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_show_all_catalog_uses_russian_labels_for_all_core_device_types(self) -> None:
+        script = panel_script(
+            get_payloads(),
+            {},
+            """
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать настройку")[0].fire("click");
+        await tick();
+        panel._firstRunFields.rooms.living.configure.fire("click");
+        const toggle = findAll(panel.shadowRoot, (node) => node.tagName === "LABEL"
+          && String(node.className).includes("checkbox-field")
+          && textOf(node).includes("Показать все устройства"))[0].children[0];
+        toggle.checked = true;
+        toggle.fire("change");
+        const text = textOf(panel.shadowRoot);
+        ["Радиаторный термостат", "Кондиционер", "Датчик температуры", "Датчик влажности"]
+          .forEach((label) => {
+            if (!text.includes(label)) throw new Error("нет русского названия типа: " + label);
+          });
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_room_name_matching_keeps_vannaya_and_zal(self) -> None:
+        options = copy.deepcopy(DRAFT_OPTIONS)
+        options["rooms"] = [
+            {"id": "bath", "name": "Ванная", "status": "available", "selectable": True},
+            {"id": "hall", "name": "Зал", "status": "available", "selectable": True},
+            {"id": "other", "name": "Другая", "status": "available", "selectable": True},
+        ]
+        options["devices"] = [
+            {
+                "candidate_id": "candidate_bath", "candidate_key": "candidate_bath",
+                "name": "Кондиционер Ванная", "room_id": "other",
+                "suggested_types": ["air_conditioner"], "recommended_type": "air_conditioner",
+                "status": "available", "suggested_room_id": "other",
+                "suggested_room_name": "Другая", "reason": "detected_room", "can_add": True,
+            },
+            {
+                "candidate_id": "candidate_hall", "candidate_key": "candidate_hall",
+                "name": "Кондиционер Зал", "room_id": "other",
+                "suggested_types": ["air_conditioner"], "recommended_type": "air_conditioner",
+                "status": "available", "suggested_room_id": "other",
+                "suggested_room_name": "Другая", "reason": "detected_room", "can_add": True,
+            },
+        ]
+        script = panel_script(
+            get_payloads(options=options),
+            {},
+            """
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать настройку")[0].fire("click");
+        await tick();
+        const bath = panel._firstRun.options.rooms.find((room) => room.id === "bath");
+        const hall = panel._firstRun.options.rooms.find((room) => room.id === "hall");
+        const bathMatches = panel._firstRunPossibleRoomCandidates(bath);
+        const hallMatches = panel._firstRunPossibleRoomCandidates(hall);
+        if (!bathMatches.some((candidate) => candidate.candidate_key === "candidate_bath")
+          || !hallMatches.some((candidate) => candidate.candidate_key === "candidate_hall")) {
+          throw new Error("полное имя комнаты не нашло устройство");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_refresh_preserves_selection_and_merges_new_candidate_rows(self) -> None:
+        options = copy.deepcopy(DRAFT_OPTIONS)
+        refreshed = copy.deepcopy(DRAFT_OPTIONS)
+        for candidate in refreshed["devices"]:
+            candidate["candidate_id"] = f"{candidate['candidate_id']}_refreshed"
+        refreshed["devices"].append(
+            {
+                "candidate_id": "candidate_new_after_refresh", "candidate_key": "candidate_new_after_refresh",
+                "name": "Новый датчик гостиной",
+                "room_id": "living",
+                "suggested_types": ["temperature_sensor"],
+                "recommended_type": "temperature_sensor",
+                "status": "available",
+                "suggested_room_id": None,
+                "suggested_room_name": None,
+                "reason": "detected_room",
+                "can_add": True,
+            }
+        )
+        script = panel_script(
+            get_payloads(options=options),
+            {},
+            """
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать настройку")[0].fire("click");
+        await tick();
+        panel._firstRunFields.rooms.living.configure.fire("click");
+        const before = panel._firstRunFields.room.devices.find((item) =>
+          item.key === "candidate_ac:air_conditioner");
+        before.checkbox.checked = true;
+        before.checkbox.fire("change");
+        before.controlChannel.value = "direct_wifi";
+        before.controlChannel.fire("change");
+        panel._firstRun.rooms.living.report = {status: "ready", save_allowed: true};
+        panel._firstRun.validRooms.add("living");
+        panel._firstRun.validation = {status: "ready", save_allowed: true};
+        getTable["hausman_hub/v1/admin/climate-drafts"] = """
+            + json.dumps(refreshed, ensure_ascii=False)
+            + """;
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Обновить список устройств")[0].fire("click");
+        await tick();
+        const preserved = panel._firstRunFields.room.devices.find((item) =>
+          item.key === "candidate_ac:air_conditioner");
+        const added = panel._firstRunFields.room.devices.find((item) =>
+          item.key === "candidate_new_after_refresh:temperature_sensor");
+        if (!preserved || !preserved.checkbox.checked
+          || preserved.controlChannel.value !== "direct_wifi") {
+          throw new Error("refresh discarded the existing device selection or channel");
+        }
+        if (!added || added.checkbox.checked || added.checkbox.disabled) {
+          throw new Error("refresh did not merge a new selectable candidate as unchecked");
+        }
+        if (panel._firstRun.rooms.living.report || panel._firstRun.validRooms.size
+          || panel._firstRun.validation) {
+          throw new Error("refresh did not invalidate stale validation results");
+        }
+        panel._firstRun.rooms.living.included = true;
+        const collected = panel._firstRunPayload(["living"]);
+        const refreshedAc = collected.payload.rooms[0].devices.find((device) =>
+          device.type === "air_conditioner");
+        if (!refreshedAc || refreshedAc.candidate_id !== "candidate_ac_refreshed") {
+          throw new Error("draft did not use the refreshed candidate id");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_roomless_devices_bind_to_the_room_in_hausmanhub_only(self) -> None:
         script = panel_script(
             get_payloads(options=roomless_options()),
@@ -433,6 +748,8 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
           && node.textContent === "Начать настройку")[0].fire("click");
         await tick();
+        panel._firstRunFields.rooms.living.include.checked = true;
+        panel._firstRunFields.rooms.living.include.fire("change");
         panel._firstRunFields.rooms.living.configure.fire("click");
         if (!textOf(panel.shadowRoot).includes("Устройства без комнаты")) {
           throw new Error("roomless device group is missing");
@@ -607,7 +924,13 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         if (!finish || finish.disabled !== true || !finish.title) {
           throw new Error("finish must explain the zero-valid-room gate");
         }
+        panel._firstRunFields.rooms.living.include.checked = true;
+        panel._firstRunFields.rooms.living.include.fire("change");
         panel._firstRunFields.rooms.living.configure.fire("click");
+        const airConditioner = panel._firstRunFields.room.devices.find((item) =>
+          item.type === "air_conditioner");
+        airConditioner.checkbox.checked = true;
+        airConditioner.checkbox.fire("change");
         const check = findAll(panel.shadowRoot, (node) =>
           node.tagName === "BUTTON" && node.textContent === "Проверить комнату")[0];
         check.fire("click");
@@ -708,8 +1031,14 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
           && node.textContent === "Начать настройку")[0].fire("click");
         await tick();
+        panel._firstRunFields.rooms.living.include.checked = true;
+        panel._firstRunFields.rooms.living.include.fire("change");
         panel._firstRunFields.rooms.living.configure.fire("click");
         const fields = panel._firstRunFields.room;
+        fields.devices.forEach((device) => {{
+          device.checkbox.checked = true;
+          device.checkbox.fire("change");
+        }});
         fields.minTemperature.value = "20";
         fields.minTemperature.fire("input");
         fields.maxTemperature.value = "26";
@@ -725,14 +1054,20 @@ class PanelFirstRunWizardTest(unittest.TestCase):
           && node.textContent === "Назад к списку комнат")[0].fire("click");
         findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
           && node.textContent === "Завершить настройку")[0].fire("click");
-        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
-          && node.textContent === "Продолжить к проверке")[0].fire("click");
+        const saveHome = findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Продолжить к проверке")[0];
+        if (!saveHome) throw new Error("home step did not render a continue action");
+        saveHome.fire("click");
         await tick();
-        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
-          && node.textContent === "Проверить настройку")[0].fire("click");
+        const validate = findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Проверить настройку")[0];
+        if (!validate) throw new Error("home step did not advance to validation");
+        validate.fire("click");
         await tick();
-        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
-          && node.textContent === "Продолжить к подключению планшета")[0].fire("click");
+        const tablet = findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Продолжить к подключению планшета")[0];
+        if (!tablet) throw new Error("ready validation did not open the tablet step");
+        tablet.fire("click");
         findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
           && node.textContent === "Перейти к завершению")[0].fire("click");
         findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"

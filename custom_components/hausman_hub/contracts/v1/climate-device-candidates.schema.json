@@ -202,6 +202,7 @@
       "additionalProperties": false,
       "required": [
         "candidate_id",
+        "candidate_key",
         "name",
         "room_id",
         "available",
@@ -216,6 +217,7 @@
       ],
       "properties": {
         "candidate_id": {"type": "string", "pattern": "^candidate_[0-9]{4}$"},
+        "candidate_key": {"type": "string", "pattern": "^ckey_[0-9a-f]{12}$"},
         "name": {"$ref": "#/$defs/name"},
         "room_id": {"$ref": "#/$defs/stable_id"},
         "available": {"type": "boolean"},

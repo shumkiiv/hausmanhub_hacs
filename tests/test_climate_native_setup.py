@@ -51,6 +51,7 @@ def _entry(
     manufacturer: str | None = None,
     model: str | None = None,
     image_url: str | None = None,
+    hvac_modes: tuple[str, ...] = (),
 ) -> ClimateHaCatalogEntry:
     domain = entity_id.split(".", 1)[0]
     return ClimateHaCatalogEntry(
@@ -68,6 +69,7 @@ def _entry(
         manufacturer=manufacturer,
         model=model,
         image_url=image_url,
+        hvac_modes=hvac_modes,
     )
 
 
@@ -200,6 +202,201 @@ class NativeSetupSnapshotTest(unittest.TestCase):
         stray = snapshot.device("switch.guest_socket")
         self.assertEqual((), stray.suggested_kinds)
         self.assertEqual((), stray.command_types)
+
+    def test_unbound_climate_kinds_use_hvac_modes_then_trv_markers(self) -> None:
+        registry, contours, _ = _setup()
+        _, observation = _native_observation(registry, contours)
+        catalog = _catalog(
+            [
+                _entry(
+                    "climate.sonoff_trvzb",
+                    supported_features=1,
+                    model="Zigbee thermostatic radiator valve",
+                    hvac_modes=("off", "auto", "heat"),
+                ),
+                _entry(
+                    "climate.office_ac",
+                    hvac_modes=("off", "cool"),
+                ),
+                _entry(
+                    "climate.air_purifier",
+                    hvac_modes=("fan_only", "off"),
+                ),
+                _entry(
+                    "climate.marker_trv",
+                    friendly_name="Термоголовка спальни",
+                ),
+                _entry(
+                    "climate.legacy_facade",
+                    friendly_name="Климат гостиной",
+                ),
+            ]
+        )
+
+        snapshot = build_native_climate_setup_snapshot(
+            ClimateRegistry(),
+            observation,
+            catalog,
+        )
+
+        self.assertEqual(
+            (ClimateDeviceKind.RADIATOR_THERMOSTAT,),
+            snapshot.device("climate.sonoff_trvzb").suggested_kinds,
+        )
+        self.assertEqual(
+            (ClimateDeviceKind.AIR_CONDITIONER,),
+            snapshot.device("climate.office_ac").suggested_kinds,
+        )
+        self.assertEqual(
+            (),
+            snapshot.device("climate.air_purifier").suggested_kinds,
+        )
+        self.assertEqual(
+            (ClimateDeviceKind.RADIATOR_THERMOSTAT,),
+            snapshot.device("climate.marker_trv").suggested_kinds,
+        )
+        self.assertEqual(
+            (ClimateDeviceKind.AIR_CONDITIONER,),
+            snapshot.device("climate.legacy_facade").suggested_kinds,
+        )
+
+    def test_uninformative_hvac_modes_still_fall_back_to_trv_markers(self) -> None:
+        registry, contours, _ = _setup()
+        _, observation = _native_observation(registry, contours)
+        catalog = _catalog(
+            [
+                _entry(
+                    "climate.named_trv",
+                    friendly_name="Термоголовка ванной",
+                    hvac_modes=("off", "auto"),
+                ),
+                _entry(
+                    "climate.heat_cool_combo",
+                    hvac_modes=("heat", "cool"),
+                ),
+                _entry(
+                    "climate.unknown_box",
+                    hvac_modes=("off", "auto"),
+                ),
+            ]
+        )
+
+        snapshot = build_native_climate_setup_snapshot(
+            ClimateRegistry(),
+            observation,
+            catalog,
+        )
+
+        self.assertEqual(
+            (ClimateDeviceKind.RADIATOR_THERMOSTAT,),
+            snapshot.device("climate.named_trv").suggested_kinds,
+        )
+        self.assertEqual(
+            (ClimateDeviceKind.AIR_CONDITIONER,),
+            snapshot.device("climate.heat_cool_combo").suggested_kinds,
+        )
+        self.assertEqual(
+            (),
+            snapshot.device("climate.unknown_box").suggested_kinds,
+        )
+
+    def test_missing_hvac_modes_recognize_all_trv_markers(self) -> None:
+        registry, contours, _ = _setup()
+        _, observation = _native_observation(registry, contours)
+        marker_entries = [
+            _entry("climate.russian_head", friendly_name="Термоголовка"),
+            _entry("climate.russian_regulator", device_name="Терморегулятор"),
+            _entry(
+                "climate.radiator_valve",
+                model="Thermostatic Radiator Valve",
+            ),
+            _entry("climate.sonoff", model="TRVZB"),
+            _entry("climate.token", device_name="Bedroom TRV"),
+            _entry("climate.not_token", device_name="TRVending gateway"),
+        ]
+
+        snapshot = build_native_climate_setup_snapshot(
+            ClimateRegistry(),
+            observation,
+            _catalog(marker_entries),
+        )
+
+        for entity_id in (
+            "climate.russian_head",
+            "climate.russian_regulator",
+            "climate.radiator_valve",
+            "climate.sonoff",
+            "climate.token",
+        ):
+            with self.subTest(entity_id=entity_id):
+                self.assertEqual(
+                    (ClimateDeviceKind.RADIATOR_THERMOSTAT,),
+                    snapshot.device(entity_id).suggested_kinds,
+                )
+        self.assertEqual(
+            (ClimateDeviceKind.AIR_CONDITIONER,),
+            snapshot.device("climate.not_token").suggested_kinds,
+        )
+
+    def test_trv_candidate_creates_a_ready_draft(self) -> None:
+        from custom_components.hausman_hub.application.climate_setup import (
+            create_climate_contour_draft,
+            climate_setup_options,
+            validate_climate_contour_draft,
+        )
+
+        registry, contours, _ = _setup()
+        _, observation = _native_observation(registry, contours)
+        snapshot = build_native_climate_setup_snapshot(
+            ClimateRegistry(),
+            observation,
+            _catalog(
+                [
+                    _entry(
+                        "climate.sonoff_trvzb",
+                        supported_features=1,
+                        model="Zigbee thermostatic radiator valve",
+                        hvac_modes=("off", "auto", "heat"),
+                        room_id="living",
+                    )
+                ],
+                [ClimateHaCatalogRoom("living", "Гостиная")],
+            ),
+        )
+        options = climate_setup_options(ClimateRegistry(), snapshot)
+        trv = options["devices"][0]
+
+        draft = create_climate_contour_draft(
+            ClimateRegistry(),
+            snapshot,
+            {
+                "snapshot_revision": options["snapshot_revision"],
+                "name": "Климат",
+                "mode": "automatic",
+                "rooms": [
+                    {
+                        "room_id": "living",
+                        "target_temperature": 22.0,
+                        "target_humidity": 45,
+                        "strategy": "normal",
+                        "devices": [
+                            {
+                                "candidate_id": trv["candidate_id"],
+                                "type": "radiator_thermostat",
+                            }
+                        ],
+                    }
+                ],
+            },
+        )
+        validation = validate_climate_contour_draft(
+            ClimateRegistry(),
+            snapshot,
+            draft,
+        )
+
+        self.assertEqual(["radiator_thermostat"], trv["suggested_types"])
+        self.assertTrue(validation["save_allowed"])
 
     def test_ha_areas_bootstrap_an_empty_registry_and_enable_page_drafts(self) -> None:
         from custom_components.hausman_hub.application.climate_setup import (
@@ -449,6 +646,54 @@ class HomeAssistantEntityCatalogTest(unittest.TestCase):
 
         self.assertEqual(393, catalog.entries[0].supported_features)
         self.assertIs(int, type(catalog.entries[0].supported_features))
+
+    def test_catalog_accepts_only_bounded_hvac_mode_lists(self) -> None:
+        from custom_components.hausman_hub.climate_ha_state_view import (
+            HomeAssistantClimateStateView,
+        )
+
+        hass = _FakeHass(
+            [
+                _FakeState(
+                    "climate.valid",
+                    "cool",
+                    {"hvac_modes": ["cool", "off"]},
+                ),
+                _FakeState(
+                    "climate.not_a_sequence",
+                    "off",
+                    {"hvac_modes": "cool"},
+                ),
+                _FakeState(
+                    "climate.too_many",
+                    "off",
+                    {"hvac_modes": ["off"] * 17},
+                ),
+                _FakeState(
+                    "climate.invalid_member",
+                    "off",
+                    {"hvac_modes": ["off", 1]},
+                ),
+                _FakeState(
+                    "climate.too_long",
+                    "off",
+                    {"hvac_modes": ["x" * 33]},
+                ),
+            ]
+        )
+
+        catalog = HomeAssistantClimateStateView(hass).entity_catalog()  # type: ignore[arg-type]
+        by_id = {entry.entity_id: entry for entry in catalog.entries}
+
+        self.assertEqual(("cool", "off"), by_id["climate.valid"].hvac_modes)
+        for entity_id in (
+            "climate.not_a_sequence",
+            "climate.too_many",
+            "climate.invalid_member",
+            "climate.too_long",
+        ):
+            with self.subTest(entity_id=entity_id):
+                self.assertEqual((), by_id[entity_id].hvac_modes)
 
     def test_signal_catalog_filters_by_purpose_and_preserves_device_class(self) -> None:
         from custom_components.hausman_hub.climate_ha_state_view import (

@@ -357,6 +357,7 @@
       "additionalProperties": false,
       "required": [
         "candidate_id",
+        "candidate_key",
         "name",
         "room_id",
         "suggested_types",
@@ -370,6 +371,10 @@
       "properties": {
         "candidate_id": {
           "$ref": "#/$defs/candidate_id"
+        },
+        "candidate_key": {
+          "type": "string",
+          "pattern": "^ckey_[0-9a-f]{12}$"
         },
         "name": {
           "$ref": "#/$defs/name"

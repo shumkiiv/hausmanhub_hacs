@@ -140,6 +140,11 @@ class HomeAssistantClimateStateView:
                     ),
                     model=None if device is None else device.model,
                     image_url=None if device is None else device.image_url,
+                    hvac_modes=(
+                        _bounded_hvac_modes(state.attributes.get("hvac_modes"))
+                        if domain == "climate"
+                        else ()
+                    ),
                 )
             )
         return ClimateHaEntityCatalog(
@@ -473,3 +478,11 @@ def _bounded_device_detail(value: object) -> str | None:
         return None
     normalized = " ".join(value.split())[:_MAX_DEVICE_DETAIL_LENGTH].rstrip()
     return normalized or None
+
+
+def _bounded_hvac_modes(value: object) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)) or len(value) > 16:
+        return ()
+    if not all(isinstance(mode, str) and len(mode) <= 32 for mode in value):
+        return ()
+    return tuple(value)
