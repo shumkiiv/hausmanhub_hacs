@@ -1,4 +1,30 @@
-# Current Work - редизайн панели HMH-II (релиз 1.26.0)
+# Current Work - светлая тема панели (релиз 1.26.1)
+
+## 2026-07-27: релиз 1.26.1 - светлая тема + фикс селекта канала
+- Release commit `0d215c4` на `origin/main`; tag `v1.26.1`; GitHub Actions
+  run `30288293165` passed; публичный релиз:
+  https://github.com/shumkiiv/hausmanhub_hacs/releases/tag/v1.26.1.
+- Светлая тема: токены `:host(.theme-light)`, переключатель авто/светлая/
+  тёмная (авто следует `hass.themes.darkMode`), выбор только в сессии
+  панели (localStorage запрещён контрактным тестом).
+- `--warning-color` светлой темы `#9A5F0B` (замеренный контраст 4.62-5.23:1)
+  после Oracle-замечания: `#B06F14` давал 4.09:1 < WCAG 4.5:1. DESIGN.md
+  ревизия 3 обновлён (только в основном checkout, untracked).
+- Фикс обрезки селекта «Канал управления»: `.device-card-options
+  label.form-field` переведён в одноколоночный grid, селект на всю ширину
+  карточки устройства.
+- Расследование «кондиционер Broadlink отсутствует в мастере»: не баг.
+  SmartIR-сущность есть в payload climate-drafts (candidate_0001,
+  can_add true, available), но у неё нет area в HA (room_id "",
+  suggested_room_id null, reason unassigned_room; template-проверка:
+  area_id/area_name/device_id все None). В first-run мастере она видна в
+  свернутой секции «Устройства без комнаты», в редакторе контура
+  roomless-устройства скрыты с предупреждением (by design). Решение для
+  пользователя: назначить зону сущности climate.komanchi_living_smartir.
+- Гейты: 827 passed, 4 skipped, 732 subtests; check_local_release.py
+  зелёный после бампа версии (manifest + 3 ссылки на версию в тестах).
+- Собрано в worktree `hausmanhub_hasc-1261` (ветка ui-1.26.1-theme);
+  IR-learning WIP 1.27.0 остаётся незакоммиченным в основном checkout.
 
 ## 2026-07-27: релиз 1.26.0 - редизайн панели + selectable-недоступные
 - Release commit `3ab7584` на `origin/main`; tag `v1.26.0`; GitHub Actions

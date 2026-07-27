@@ -1,9 +1,42 @@
 # HausmanHub AI Context
 
-Last updated: 2026-07-27 (release 1.26.0 published).
+Last updated: 2026-07-27 (release 1.26.1 published).
 
 ## Current work
 
+- Release 1.26.1 (light theme + theme switcher, wizard select CSS fix)
+  is RELEASED, 2026-07-27:
+  - Release commit `0d215c4` on `origin/main`; tag `v1.26.1`; GitHub Actions
+    run `30288293165` passed; public release:
+    https://github.com/shumkiiv/hausmanhub_hacs/releases/tag/v1.26.1.
+  - Contents: light theme via `:host(.theme-light)` tokens and a session-only
+    theme switcher (auto/light/dark; auto follows `hass.themes.darkMode`,
+    no localStorage per the panel contract test); wizard fix: the
+    `Канал управления` select no longer collapses, `.device-card-options
+    label.form-field` switches to a single-column grid with a full-width
+    select.
+  - DESIGN.md revision 3 (main checkout only, untracked) documents the
+    modes and the light palette; light-theme `--warning-color` is `#9A5F0B`
+    (measured contrast 4.62-5.23:1) after Oracle flagged `#B06F14` at
+    4.09:1 (< WCAG 4.5:1). One fix iteration, then accepted.
+  - Gates: full suite 827 passed, 4 skipped, 732 subtests;
+    `tools/check_local_release.py` passed after the version bump
+    (manifest plus 3 version references in tests).
+  - Broadlink AC finding (user report "SmartIR AC missing from wizard"):
+    not a code bug. Live `GET climate-drafts` payload contains
+    `candidate_0001 "Komanchi Living SmartIR"` (can_add true, available)
+    with `room_id ""` and `suggested_room_id null` (reason
+    `unassigned_room`) because the SmartIR climate entity has NO area in
+    HA (template check: area_id/area_name/device_id all None). First-run
+    wizard shows it in the collapsed `Устройства без комнаты` section;
+    the contour editor hides roomless devices with a warning by design.
+    User-side fix: assign an area to `climate.komanchi_living_smartir`.
+  - The release was built in the `hausmanhub_hasc-1261` worktree (branch
+    `ui-1.26.1-theme`); the 1.27.0 IR-learning WIP stays uncommitted in
+    the main checkout `/home/ivsh/projects/hausmanhub_hasc`.
+  - Next: 1.27.0 wizard IR-learning vertical ("2 lite"): restore a fixed
+    `code_source` step, SmartIR code DB scan, Broadlink `.storage` codes,
+    `remote.learn_command` last; fix the WIP test failures.
 - Release 1.26.0 (panel redesign per HMH-II + selectable unavailable devices)
   is RELEASED, 2026-07-27:
   - Release commit `3ab7584` on `origin/main`; tag `v1.26.0`; GitHub Actions
