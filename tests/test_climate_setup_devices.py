@@ -213,7 +213,7 @@ class ClimateSetupDevicesTest(unittest.TestCase):
         self.assertTrue(candidate["configured"])
         self.assertFalse(candidate["available"])
         self.assertEqual("unavailable", candidate["status"])
-        self.assertFalse(candidate["selectable"])
+        self.assertTrue(candidate["selectable"])
 
     def test_snapshot_revision_changes_when_private_binding_changes(self) -> None:
         empty_registry = registry_from_payload(

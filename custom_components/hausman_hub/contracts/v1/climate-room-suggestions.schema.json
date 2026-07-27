@@ -355,9 +355,6 @@
               },
               "confidence": {
                 "const": "none"
-              },
-              "can_accept": {
-                "const": false
               }
             }
           },
@@ -383,11 +380,42 @@
           "then": {
             "properties": {
               "candidate_status": {
+                "enum": [
+                  "available",
+                  "unavailable"
+                ]
+              },
+              "reason": {
+                "enum": [
+                  "detected_room",
+                  "device_unavailable",
+                  "unassigned_room"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "candidate_status": {
                 "const": "available"
+              },
+              "can_accept": {
+                "const": true
               },
               "suggested_room_id": {
                 "$ref": "#/$defs/stable_id"
-              },
+              }
+            },
+            "required": [
+              "candidate_status",
+              "can_accept",
+              "suggested_room_id"
+            ]
+          },
+          "then": {
+            "properties": {
               "suggested_room_name": {
                 "$ref": "#/$defs/name"
               },
@@ -396,6 +424,39 @@
               },
               "reason": {
                 "const": "detected_room"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "candidate_status": {
+                "const": "available"
+              },
+              "can_accept": {
+                "const": true
+              },
+              "suggested_room_id": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "candidate_status",
+              "can_accept",
+              "suggested_room_id"
+            ]
+          },
+          "then": {
+            "properties": {
+              "suggested_room_name": {
+                "type": "null"
+              },
+              "confidence": {
+                "const": "none"
+              },
+              "reason": {
+                "const": "unassigned_room"
               }
             }
           }
@@ -465,14 +526,22 @@
             "properties": {
               "candidate_status": {
                 "const": "unavailable"
+              },
+              "can_accept": {
+                "const": true
+              },
+              "suggested_room_id": {
+                "$ref": "#/$defs/stable_id"
               }
-            }
+            },
+            "required": [
+              "candidate_status",
+              "can_accept",
+              "suggested_room_id"
+            ]
           },
           "then": {
             "properties": {
-              "suggested_room_id": {
-                "$ref": "#/$defs/stable_id"
-              },
               "suggested_room_name": {
                 "$ref": "#/$defs/name"
               },
@@ -481,9 +550,71 @@
               },
               "reason": {
                 "const": "device_unavailable"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "candidate_status": {
+                "const": "unavailable"
+              },
+              "can_accept": {
+                "const": true
+              },
+              "suggested_room_id": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "candidate_status",
+              "can_accept",
+              "suggested_room_id"
+            ]
+          },
+          "then": {
+            "properties": {
+              "suggested_room_name": {
+                "type": "null"
+              },
+              "confidence": {
+                "const": "none"
+              },
+              "reason": {
+                "const": "unassigned_room"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "candidate_status": {
+                "const": "unavailable"
               },
               "can_accept": {
                 "const": false
+              }
+            },
+            "required": [
+              "candidate_status",
+              "can_accept"
+            ]
+          },
+          "then": {
+            "properties": {
+              "suggested_room_id": {
+                "type": "null"
+              },
+              "suggested_room_name": {
+                "type": "null"
+              },
+              "confidence": {
+                "const": "none"
+              },
+              "reason": {
+                "const": "room_unavailable"
               }
             }
           }

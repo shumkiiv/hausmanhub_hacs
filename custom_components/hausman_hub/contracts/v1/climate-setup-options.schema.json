@@ -436,11 +436,15 @@
           "then": {
             "properties": {
               "status": {
-                "const": "available"
+                "enum": [
+                  "available",
+                  "unavailable"
+                ]
               },
               "reason": {
                 "enum": [
                   "detected_room",
+                  "device_unavailable",
                   "unassigned_room"
                 ]
               },
@@ -463,6 +467,31 @@
           },
           "then": {
             "properties": {
+              "status": {
+                "const": "available"
+              },
+              "suggested_room_id": {
+                "$ref": "#/$defs/stable_id"
+              },
+              "suggested_room_name": {
+                "$ref": "#/$defs/name"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "reason": {
+                "const": "device_unavailable"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": "unavailable"
+              },
               "suggested_room_id": {
                 "$ref": "#/$defs/stable_id"
               },

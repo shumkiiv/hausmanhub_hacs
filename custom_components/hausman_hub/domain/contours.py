@@ -26,7 +26,7 @@ CLIMATE_TARGET_TEMPERATURE_MAXIMUM = 28.0
 CLIMATE_TARGET_TEMPERATURE_STEP = 0.5
 CLIMATE_TARGET_HUMIDITY_MINIMUM = 30
 CLIMATE_TARGET_HUMIDITY_MAXIMUM = 70
-CLIMATE_TARGET_HUMIDITY_STEP = 5
+CLIMATE_TARGET_HUMIDITY_STEP = 1
 CLIMATE_DAY_START_DEFAULT = "07:00"
 CLIMATE_NIGHT_START_DEFAULT = "23:00"
 
@@ -524,7 +524,7 @@ def _humidity(value: object) -> int:
         <= CLIMATE_TARGET_HUMIDITY_MAXIMUM
         or value % CLIMATE_TARGET_HUMIDITY_STEP != 0
     ):
-        raise ContourViolation("target humidity must be 30..70 in 5 steps")
+        raise ContourViolation("target humidity must be 30..70")
     return value
 
 

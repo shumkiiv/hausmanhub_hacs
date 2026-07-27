@@ -362,7 +362,7 @@ def climate_device_candidates(
                 "recommended_type": (
                     suggested_types[0] if suggested_types else None
                 ),
-                "selectable": status == "available",
+                "selectable": status in ("available", "unavailable"),
                 "status": status,
             }
         )
@@ -458,7 +458,7 @@ def climate_room_suggestions(
             for room in rooms_payload["rooms"]  # type: ignore[index]
         )
         can_accept = bool(
-            candidate_status == "available"
+            candidate_status in ("available", "unavailable")
             and (
                 (
                     proposal_room is not None
@@ -467,15 +467,19 @@ def climate_room_suggestions(
                 or (unassigned and any_room_selectable)
             )
         )
-        if candidate_status == "available":
+        if candidate_status in ("available", "unavailable"):
             if can_accept and unassigned and proposal_room is None:
                 reason = "unassigned_room"
+            elif can_accept:
+                reason = (
+                    "detected_room"
+                    if candidate_status == "available"
+                    else "device_unavailable"
+                )
             else:
-                reason = "detected_room" if can_accept else "room_unavailable"
+                reason = "room_unavailable"
         elif candidate_status == "already_configured":
             reason = "already_configured"
-        elif candidate_status == "unavailable":
-            reason = "device_unavailable"
         elif candidate_status == "unsupported":
             reason = "unsupported_device"
         elif candidate_status == "data_stale":
@@ -1509,6 +1513,7 @@ def validate_climate_contour_draft(
                 issues.append(
                     {
                         "code": "invalid_control_channel",
+                        "level": "error",
                         "room_id": room_id,
                         "candidate_id": candidate_id,
                         "message": _VALIDATION_ISSUE_NAMES[
@@ -1520,6 +1525,7 @@ def validate_climate_contour_draft(
             issues.append(
                 {
                     "code": "no_controllable_device",
+                    "level": "error",
                     "room_id": room_id,
                     "message": _VALIDATION_ISSUE_NAMES["no_controllable_device"],
                 }
@@ -1537,6 +1543,7 @@ def validate_climate_contour_draft(
             issues.append(
                 {
                     "code": "invalid_temperature_bounds",
+                    "level": "error",
                     "room_id": room_id,
                     "message": _VALIDATION_ISSUE_NAMES[
                         "invalid_temperature_bounds"
@@ -1544,11 +1551,36 @@ def validate_climate_contour_draft(
                 }
             )
 
+    candidate_infos = {
+        candidate["candidate_id"]: candidate
+        for candidate in climate_device_candidates(registry, snapshot)[
+            "candidates"
+        ]  # type: ignore[index]
+    }
+    for room in request_rooms:
+        for device in room["devices"]:  # type: ignore[union-attr]
+            candidate = candidate_infos.get(device["candidate_id"])
+            if candidate is None or candidate["status"] != "unavailable":
+                continue
+            issues.append(
+                {
+                    "code": "device_unavailable",
+                    "level": "warning",
+                    "room_id": room["room_id"],
+                    "candidate_id": device["candidate_id"],
+                    "message": (
+                        f"Устройство «{candidate['name']}» недоступно, "
+                        "оно будет применено, когда появится в сети."
+                    ),
+                }
+            )
+
+    blocking = any(issue["level"] == "error" for issue in issues)
     capabilities_supported = not any(
         issue["code"] in {"invalid_temperature_bounds", "invalid_control_channel"}
         for issue in issues
     )
-    if not issues:
+    if not blocking:
         try:
             import_managed_climate_selection(
                 snapshot,
@@ -1563,16 +1595,18 @@ def validate_climate_contour_draft(
             )
         except ClimateRegistryImportViolation as error:
             capabilities_supported = False
+            blocking = True
             issues.append(
                 {
                     "code": "unsupported_device_set",
+                    "level": "error",
                     "room_id": None,
                     "message": _VALIDATION_ISSUE_NAMES["unsupported_device_set"],
                     "detail": f"import: {error}",
                 }
             )
 
-    if not issues:
+    if not blocking:
         try:
             rebuilt_registry, _ = build_climate_contour_setup(
                 snapshot,
@@ -1593,16 +1627,18 @@ def validate_climate_contour_draft(
             _preserve_registry_settings(registry, rebuilt_registry)
         except (ClimateModelViolation, ContourRegistryViolation) as error:
             capabilities_supported = False
+            blocking = True
             issues.append(
                 {
                     "code": "unsupported_device_set",
+                    "level": "error",
                     "room_id": None,
                     "message": _VALIDATION_ISSUE_NAMES["unsupported_device_set"],
                     "detail": f"setup: {error}",
                 }
             )
 
-    ready = not issues
+    ready = not blocking
     return {
         "contract": {
             "name": CLIMATE_DRAFT_VALIDATION_CONTRACT_NAME,

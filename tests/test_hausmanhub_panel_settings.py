@@ -281,6 +281,7 @@ def panel_script(get_payloads: dict, post_table: dict, assertions: str) -> str:
       global.document = {{
         hidden: false,
         createElement: (tag) => new FakeElement(tag),
+        createElementNS: (ns, tag) => new FakeElement(tag),
         addEventListener() {{}},
         removeEventListener() {{}},
       }};
@@ -551,7 +552,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
             {},
             """
         const text = textOf(panel.shadowRoot);
-        if (!text.includes("Климат, комнаты и сценарии — в одном месте")) {
+        if (!text.includes("Климат, комнаты и сценарии в одном месте")) {
           throw new Error("header subtitle missing");
         }
         if (!text.includes("Управление климатом выключено")) {

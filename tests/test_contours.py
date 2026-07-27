@@ -688,7 +688,7 @@ class ContoursTest(unittest.TestCase):
             ([], ["synthetic-ac-source-living"], 25, 45, "normal"),
             (["living"], [], 25, 45, "normal"),
             (["living"], ["synthetic-ac-source-living"], 17, 45, "normal"),
-            (["living"], ["synthetic-ac-source-living"], 25, 44, "normal"),
+            (["living"], ["synthetic-ac-source-living"], 25, 75, "normal"),
             (["living"], ["synthetic-ac-source-living"], 25, 45, "unknown"),
         ):
             with self.subTest(

@@ -218,6 +218,7 @@ def panel_script(get_table: dict, post_table: dict, assertions: str) -> str:
       global.document = {{
         hidden: false,
         createElement: (tag) => new FakeElement(tag),
+        createElementNS: (ns, tag) => new FakeElement(tag),
         addEventListener() {{}},
         removeEventListener() {{}},
       }};
@@ -431,7 +432,7 @@ class PanelContourWizardTest(unittest.TestCase):
 
 
 class PanelFirstRunWizardTest(unittest.TestCase):
-    def test_unavailable_room_device_stays_visible_disabled_with_reason(self) -> None:
+    def test_unavailable_room_device_stays_selectable_with_badge_and_warning(self) -> None:
         options = copy.deepcopy(DRAFT_OPTIONS)
         options["display_names"]["device_status"] = {"unavailable": "Недоступно"}
         options["display_names"]["suggestion_reasons"] = {
@@ -448,7 +449,7 @@ class PanelFirstRunWizardTest(unittest.TestCase):
                 "suggested_room_id": "living",
                 "suggested_room_name": "Гостиная",
                 "reason": "device_unavailable",
-                "can_add": False,
+                "can_add": True,
             }
         )
         script = panel_script(
@@ -461,13 +462,25 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         panel._firstRunFields.rooms.living.configure.fire("click");
         const offline = panel._firstRunFields.room.devices.find((item) =>
           item.key === "candidate_offline:temperature_sensor");
-        if (!offline || offline.checkbox.disabled !== true || offline.checkbox.checked) {
-          throw new Error("unavailable room candidate must remain a disabled unchecked row");
+        if (!offline || offline.checkbox.disabled || offline.checkbox.checked) {
+          throw new Error("unavailable room candidate must stay selectable and unchecked");
         }
         const text = textOf(panel.shadowRoot);
-        if (!text.includes("Недоступно") || !text.includes("Устройство недоступно")
-          || !text.includes("Устройство сейчас недоступно в Home Assistant")) {
-          throw new Error("unavailable candidate status, reason, or refresh hint missing: " + text);
+        if (!text.includes("Сейчас недоступно") || !text.includes("Устройство недоступно")) {
+          throw new Error("unavailable candidate badge or reason missing: " + text);
+        }
+        const warning = findAll(panel.shadowRoot, (node) =>
+          String(node.className).includes("device-unavailable-warning"))[0];
+        if (!warning || !warning.hidden) {
+          throw new Error("unavailable warning must stay hidden until the candidate is selected");
+        }
+        offline.checkbox.checked = true;
+        offline.checkbox.fire("change");
+        if (warning.hidden) {
+          throw new Error("unavailable warning must appear after selecting the candidate");
+        }
+        if (!warning.textContent.includes("недоступно, оно будет применено, когда появится в сети")) {
+          throw new Error("unavailable warning text mismatch: " + warning.textContent);
         }
             """,
         )
@@ -595,7 +608,7 @@ class PanelFirstRunWizardTest(unittest.TestCase):
           throw new Error("неподдерживаемое устройство должно быть отключено");
         }
         const text = textOf(panel.shadowRoot);
-        if (!text.includes("Тип не определён") || !text.includes("Недоступно")
+        if (!text.includes("Тип не определён") || !text.includes("Сейчас недоступно")
           || !text.includes("Тип не поддерживается")) {
           throw new Error("для неподдерживаемого устройства нет статуса и причины");
         }
@@ -999,10 +1012,10 @@ class PanelFirstRunWizardTest(unittest.TestCase):
             "setup_revision": 5,
             "name": "Климат",
             "mode": "automatic",
-            "rooms": [{
+             "rooms": [{
                 "room_id": "living",
-                "target_temperature": 22,
-                "target_humidity": 45,
+                "target_temperature": 25,
+                "target_humidity": 53,
                 "strategy": "normal",
                 "min_temperature": 20,
                 "max_temperature": 26,
@@ -1361,11 +1374,11 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         }
         living.temperature.value = "22";
         living.temperature.fire("input");
-        living.humidity.value = "41";
+        living.humidity.value = "41.5";
         living.humidity.fire("input");
         check.fire("click");
         await tick();
-        if (!textOf(panel.shadowRoot).includes("шаг 5 %")) {
+        if (!textOf(panel.shadowRoot).includes("шаг 1 %")) {
           throw new Error("humidity contract hint missing");
         }
         if (!living.humidity.focused) throw new Error("humidity error field was not focused");

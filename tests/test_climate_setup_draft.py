@@ -453,6 +453,7 @@ class ClimateSetupDraftTest(unittest.TestCase):
             [
                 {
                     "code": "no_controllable_device",
+                    "level": "error",
                     "room_id": "living",
                     "message": (
                         "В комнате нет устройства, которое может управлять климатом."
@@ -831,7 +832,7 @@ class ClimateSetupDraftTest(unittest.TestCase):
 
         for field, invalid in (
             ("target_temperature", 25.2),
-            ("target_humidity", 47),
+            ("target_humidity", 75),
             ("strategy", "turbo"),
         ):
             with self.subTest(field=field):

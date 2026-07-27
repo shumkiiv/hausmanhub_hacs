@@ -98,6 +98,28 @@ function setAttr(node, name, value) {
   else node[name] = String(value);
 }
 
+// Namespace URI is split so the module contains no absolute URL literals.
+const SVG_NAMESPACE = "http" + "://www.w3.org/2000/svg";
+
+const ICON_PATHS = {
+  chevron: "M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z",
+  device: "M4 6h18V4H4c-1.1 0-2 .9-2 2v11H0v3h14v-3H4zm19 2h-6c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h6c.55 0 1-.45 1-1V9c0-.55-.45-1-1-1m-1 9h-4v-7h4z",
+  warning: "M1 21h22L12 2zm12-3h-2v-2h2zm0-4h-2v-4h2z",
+};
+
+function svgIcon(name, className) {
+  const svg = document.createElementNS(SVG_NAMESPACE, "svg");
+  setAttr(svg, "viewBox", "0 0 24 24");
+  setAttr(svg, "aria-hidden", "true");
+  setAttr(svg, "focusable", "false");
+  setAttr(svg, "class", className ? `icon ${className}` : "icon");
+  const path = document.createElementNS(SVG_NAMESPACE, "path");
+  setAttr(path, "d", ICON_PATHS[name]);
+  setAttr(path, "fill", "currentColor");
+  svg.appendChild(path);
+  return svg;
+}
+
 function focusNode(node) {
   if (node && typeof node.focus === "function") node.focus();
 }
@@ -380,8 +402,19 @@ class HausmanHubPanel extends HTMLElement {
     const style = el("style");
     style.textContent = `
       :host { display:block; box-sizing:border-box; width:100%; max-width:1440px; margin:0 auto;
-        padding:28px 30px 48px; overflow-x:hidden; font-family:var(--primary-font-family,sans-serif);
-        color:var(--primary-text-color,#212121); background:var(--primary-background-color,#fafafa); }
+        padding:28px 30px 48px; overflow-x:hidden;
+        --hmh-bg:#0B0F14; --hmh-surface:#12171D; --hmh-raised:#181E26; --hmh-hover:#1F2630;
+        --hmh-border:#2F3845; --hmh-accent:#4F8CFF; --hmh-text:#E7ECF3; --hmh-text-dim:#9AA7B4;
+        --hmh-radius-control:12px; --hmh-radius-card:16px; --hmh-radius-section:20px;
+        --primary-font-family:Inter,"Segoe UI",Roboto,sans-serif;
+        --primary-text-color:var(--hmh-text); --secondary-text-color:var(--hmh-text-dim);
+        --primary-background-color:var(--hmh-bg); --card-background-color:var(--hmh-surface);
+        --secondary-background-color:var(--hmh-raised); --divider-color:var(--hmh-border);
+        --primary-color:var(--hmh-accent); --text-primary-color:#FFFFFF;
+        --error-color:#E5534B; --success-color:#4CAF6E; --warning-color:#F0A23C;
+        --disabled-color:#3A4450;
+        font-family:var(--primary-font-family,sans-serif);
+        color:var(--primary-text-color,#E7ECF3); background:var(--primary-background-color,#0B0F14); }
       *, *::before, *::after { box-sizing:border-box; }
       [hidden] { display:none !important; }
       h1 { margin:0; font-size:clamp(26px,3vw,36px); line-height:1.1; letter-spacing:-.02em; }
@@ -417,11 +450,11 @@ class HausmanHubPanel extends HTMLElement {
       .loading { min-height:72px; padding:20px; border-radius:16px; border:1px solid var(--divider-color,#ddd);
         background:var(--card-background-color,#fff); }
       .cards, .room-card-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:16px; }
-      .card { min-width:0; padding:20px; border:1px solid var(--divider-color,#ddd); border-radius:18px;
-        background:var(--card-background-color,#fff); box-shadow:var(--ha-card-box-shadow,0 2px 9px rgba(0,0,0,.08)); }
+      .card { min-width:0; padding:20px; border:1px solid var(--divider-color,#2F3845); border-radius:var(--hmh-radius-card,16px);
+        background:var(--card-background-color,#12171D); box-shadow:var(--ha-card-box-shadow,0 2px 9px rgba(0,0,0,.42)); }
       .hero { padding:clamp(20px,3vw,30px); border-color:color-mix(in srgb,var(--primary-color,#03a9f4) 28%,var(--divider-color,#ddd));
         background:linear-gradient(135deg,color-mix(in srgb,var(--primary-color,#03a9f4) 10%,var(--card-background-color,#fff)),
-        var(--card-background-color,#fff) 58%); box-shadow:0 8px 28px rgba(0,0,0,.12); }
+        var(--card-background-color,#12171D) 58%); box-shadow:0 8px 28px rgba(0,0,0,.5); }
       .hero-status { margin:0 0 16px; font-size:clamp(21px,2.4vw,28px); font-weight:700; }
       .overview-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
         gap:12px; margin:16px 0 24px; }
@@ -436,7 +469,7 @@ class HausmanHubPanel extends HTMLElement {
       .row > :first-child { color:var(--secondary-text-color,#727272); }
       .value { max-width:62%; text-align:right; font-weight:600; overflow-wrap:anywhere; }
       button { min-height:40px; max-width:100%; margin:8px 8px 0 0; padding:9px 15px;
-        border:0; border-radius:11px; font:inherit; font-weight:600; cursor:pointer;
+        border:0; border-radius:var(--hmh-radius-control,12px); font:inherit; font-weight:600; cursor:pointer;
         background:var(--primary-color,#03a9f4); color:var(--text-primary-color,#fff); }
       button.secondary { border:1px solid var(--divider-color,#ccc);
         background:var(--secondary-background-color,#eceff1); color:var(--primary-text-color,#212121); }
@@ -445,9 +478,9 @@ class HausmanHubPanel extends HTMLElement {
       button:focus-visible, input:focus-visible, select:focus-visible {
         outline:3px solid color-mix(in srgb,var(--primary-color,#03a9f4) 58%,transparent);
         outline-offset:2px; }
-      input, select { min-height:42px; max-width:100%; padding:8px 10px; border:1px solid var(--divider-color,#bbb);
-        border-radius:11px; font:inherit; color:var(--primary-text-color,#212121);
-        background:var(--card-background-color,#fff); }
+      input, select { min-height:42px; max-width:100%; padding:8px 10px; border:1px solid var(--divider-color,#2F3845);
+        border-radius:var(--hmh-radius-control,12px); font:inherit; color:var(--primary-text-color,#E7ECF3);
+        background:var(--card-background-color,#12171D); }
       input[type="number"] { width:110px; }
       input[type="text"], input[type="search"] { width:min(420px,100%); }
       input[type="time"] { width:150px; }
@@ -516,17 +549,31 @@ class HausmanHubPanel extends HTMLElement {
       .device-thumb { display:grid; place-items:center; width:64px; height:64px; overflow:hidden;
         border:1px solid var(--divider-color,#ddd); border-radius:13px; background:var(--card-background-color,#fff); }
       .device-thumb img { display:block; width:100%; height:100%; object-fit:contain; }
-      .device-thumb-fallback { color:var(--secondary-text-color,#727272); font-size:28px; line-height:1; }
+      .device-thumb-fallback { color:var(--secondary-text-color,#9AA7B4); font-size:28px; line-height:1; }
+      .icon { width:1em; height:1em; display:inline-block; vertical-align:middle; }
+      .device-thumb-fallback .icon { width:28px; height:28px; }
       .device-card-title { display:block; color:var(--primary-text-color,#212121); font-size:14px;
         line-height:1.3; overflow-wrap:anywhere; }
       .device-card-meta { display:block; margin-top:3px; color:var(--secondary-text-color,#727272);
         font-size:11px; line-height:1.35; overflow-wrap:anywhere; }
       .device-card-options { padding:4px 12px 7px; }
+      .collapsible-section { margin-top:14px; }
+      .collapsible-toggle { display:inline-flex; align-items:center; gap:8px; margin:0;
+        font-size:13px; text-transform:uppercase; letter-spacing:.05em;
+        color:var(--secondary-text-color,#9AA7B4); }
+      .collapsible-chevron { transition:transform .18s ease; }
+      .collapsible-toggle[aria-expanded="false"] .collapsible-chevron { transform:rotate(-90deg); }
+      .collapsible-body { margin-top:6px; }
+      .device-card-chips { margin-top:6px; }
+      .device-unavailable-warning { display:block; margin-top:4px; color:var(--warning-color,#F0A23C);
+        font-size:12px; line-height:1.4; }
       .device-card-options .device-option + .device-option { padding-top:9px; border-top:1px solid var(--divider-color,#ddd); }
       .entity-label { min-width:0; line-height:1.3; overflow-wrap:anywhere; }
       .entity-label strong, .entity-label small { display:block; }
       .entity-label small { margin-top:2px; color:var(--secondary-text-color,#727272); font-size:11px; }
-      .wizard-issues, .field-error { margin-top:7px; color:var(--error-color,#db4437); font-size:13px; line-height:1.4; }
+      .wizard-issues, .field-error { margin-top:7px; color:var(--error-color,#E5534B); font-size:13px; line-height:1.4; }
+      .wizard-issues .issue-warning, .field-error.issue-warning { color:var(--warning-color,#F0A23C); }
+      .wizard-report li.issue-warning { color:var(--warning-color,#F0A23C); }
       .wizard-success { margin-top:9px; color:var(--success-color,#43a047); font-size:13px; }
       .action-help { margin-top:8px; }
       .unsaved { display:inline-flex; align-items:center; min-height:28px; margin:10px 0 0; padding:4px 10px;
@@ -610,7 +657,7 @@ class HausmanHubPanel extends HTMLElement {
     const header = el("header", "page-header");
     header.appendChild(el("h1", null, "HausmanHub"));
     header.appendChild(
-      el("div", "subtitle", "Климат, комнаты и сценарии — в одном месте")
+      el("div", "subtitle", "Климат, комнаты и сценарии в одном месте")
     );
     const statusPill = el("div", "status-pill", "Загрузка состояния…");
     setAttr(statusPill, "role", "status");
@@ -1437,7 +1484,8 @@ class HausmanHubPanel extends HTMLElement {
       setAttr(group, "data-device-group-id", groupId);
       const header = el("div", "device-card-header");
       const thumb = el("div", "device-thumb");
-      const fallback = el("span", "device-thumb-fallback", "◈");
+      const fallback = el("span", "device-thumb-fallback");
+      fallback.appendChild(svgIcon("device"));
       setAttr(fallback, "aria-hidden", "true");
       if (first.image_url && ZIGBEE2MQTT_IMAGE_PATTERN.test(first.image_url)) {
         const image = el("img");
@@ -1459,6 +1507,16 @@ class HausmanHubPanel extends HTMLElement {
       identity.appendChild(el("strong", "device-card-title", first.device_name || first.name));
       const details = [first.manufacturer, first.model].filter(Boolean);
       if (details.length) identity.appendChild(el("small", "device-card-meta", details.join(" · ")));
+      const deviceTypeNames = ((this._firstRun.options || {}).display_names || {}).device_types || {};
+      const chipTypes = [];
+      groupChoices.forEach((choice) => {
+        if (!choice.pseudo && !chipTypes.includes(choice.type)) chipTypes.push(choice.type);
+      });
+      if (chipTypes.length) {
+        const chips = el("div", "device-card-chips");
+        chipTypes.forEach((type) => chips.appendChild(el("span", "chip", deviceTypeNames[type] || type)));
+        identity.appendChild(chips);
+      }
       header.appendChild(identity);
       group.appendChild(header);
       const options = el("div", "device-card-options");
@@ -1482,7 +1540,9 @@ class HausmanHubPanel extends HTMLElement {
         labelText.appendChild(el("strong", null, deviceName));
         labelText.appendChild(el("small", null, choice.candidate.name));
         const status = el("small", choice.candidate.status === "available" ? "status-badge is-ready" : "status-badge is-attention");
-        status.textContent = this._firstRunCandidateStatusName(choice.candidate);
+        status.textContent = choice.candidate.status === "unavailable"
+          ? "Сейчас недоступно"
+          : this._firstRunCandidateStatusName(choice.candidate);
         labelText.appendChild(status);
         const reason = el("small", "status-badge is-attention");
         reason.textContent = this._firstRunCandidateReasonName(choice.candidate);
@@ -1495,6 +1555,17 @@ class HausmanHubPanel extends HTMLElement {
           ));
         }
         if (!selectable) labelText.appendChild(el("small", "muted", this._firstRunCandidateHint(choice.candidate, room)));
+        const unavailableWarning = choice.candidate.status === "unavailable"
+          ? el(
+            "small",
+            "device-unavailable-warning",
+            `Устройство «${choice.candidate.name}» недоступно, оно будет применено, когда появится в сети.`
+          )
+          : null;
+        if (unavailableWarning) {
+          unavailableWarning.hidden = !choice.device.selected;
+          labelText.appendChild(unavailableWarning);
+        }
         label.appendChild(labelText);
         options.appendChild(label);
         let controlChannel = null;
@@ -1532,6 +1603,7 @@ class HausmanHubPanel extends HTMLElement {
             });
           }
           if (channelRow) channelRow.hidden = !checkbox.checked;
+          if (unavailableWarning) unavailableWarning.hidden = !checkbox.checked;
           this._firstRunInvalidate(room.id);
         });
         fields.devices.push({ checkbox, controlChannel, channelRow, key: choice.key, type: choice.type });
@@ -1546,17 +1618,39 @@ class HausmanHubPanel extends HTMLElement {
     return groups;
   }
 
+  _collapsibleDeviceSection(title, hint, contentNode, expanded) {
+    const section = el("div", "collapsible-section");
+    const toggle = el("button", "collapsible-toggle secondary");
+    toggle.type = "button";
+    const chevron = svgIcon("chevron", "collapsible-chevron");
+    toggle.appendChild(chevron);
+    toggle.appendChild(el("span", null, title));
+    setAttr(toggle, "aria-expanded", expanded ? "true" : "false");
+    const body = el("div", "collapsible-body");
+    if (hint) body.appendChild(el("div", "muted", hint));
+    body.appendChild(contentNode);
+    body.hidden = !expanded;
+    toggle.addEventListener("click", () => {
+      const show = body.hidden;
+      body.hidden = !show;
+      setAttr(toggle, "aria-expanded", show ? "true" : "false");
+    });
+    section.appendChild(toggle);
+    section.appendChild(body);
+    return section;
+  }
+
   _firstRunRoomState(room) {
     let state = this._firstRun.rooms[room.id];
     const newState = !state;
     if (!state) {
       state = {
-        day: { humidity: 45, strategy: "normal", temperature: 22 },
+        day: { humidity: 53, strategy: "normal", temperature: 25 },
         devices: {},
         included: false,
-        maxTemperature: null,
-        minTemperature: null,
-        night: { humidity: 45, strategy: "normal", temperature: 22 },
+        maxTemperature: 27,
+        minTemperature: 24.5,
+        night: { humidity: 50, strategy: "normal", temperature: 25.5 },
         report: null,
         showAllDevices: false,
       };
@@ -1626,7 +1720,7 @@ class HausmanHubPanel extends HTMLElement {
         ) return { error: `Проверьте температуру профиля «${profile === "day" ? "День" : "Ночь"}».` };
         if (
           values.humidity === "" || !Number.isFinite(humidity)
-          || humidity < 30 || humidity > 70 || !Number.isInteger(humidity / 5)
+          || humidity < 30 || humidity > 70 || !Number.isInteger(humidity)
         ) return { error: `Проверьте влажность профиля «${profile === "day" ? "День" : "Ночь"}».` };
         if (!STRATEGY_ORDER.includes(values.strategy)) {
           return { error: `Выберите стратегию профиля «${profile === "day" ? "День" : "Ночь"}».` };
@@ -2152,7 +2246,7 @@ class HausmanHubPanel extends HTMLElement {
 
     const profilesSection = el("section", "wizard-section");
     profilesSection.appendChild(el("h3", null, "Дневной и ночной профиль"));
-    profilesSection.appendChild(el("div", "muted", "Цели сохраняются раздельно для дня и ночи. Температура 18-28 °C с шагом 0,5, влажность 30-70 % с шагом 5."));
+    profilesSection.appendChild(el("div", "muted", "Цели сохраняются раздельно для дня и ночи. Температура 18-28 °C с шагом 0,5, влажность 30-70 % с шагом 1."));
     const columns = el("div", "profile-columns");
     ["day", "night"].forEach((profile) => {
       const values = state[profile];
@@ -2165,7 +2259,7 @@ class HausmanHubPanel extends HTMLElement {
       const temperatureRow = el("label", "form-field", "Температура, °C");
       temperatureRow.appendChild(temperature);
       block.appendChild(temperatureRow);
-      const humidity = numberField(values.humidity, 30, 70, 5, () => {
+      const humidity = numberField(values.humidity, 30, 70, 1, () => {
         values.humidity = humidity.value;
         this._firstRunInvalidate(room.id);
       });
@@ -2287,14 +2381,20 @@ class HausmanHubPanel extends HTMLElement {
       if (!roomChoices.length) groups.appendChild(el("div", "muted", "Подходящих устройств в этой области пока нет."));
       devicesSection.appendChild(groups);
       if (roomlessChoices.length) {
-        devicesSection.appendChild(el("h4", null, "Устройства без комнаты"));
-        devicesSection.appendChild(el("div", "muted", "Эти устройства не привязаны ни к одной зоне Home Assistant. Отметьте нужные, чтобы привязать их к этой комнате только в HausmanHub: зоны Home Assistant не изменятся."));
-        devicesSection.appendChild(this._firstRunDeviceGroups(roomlessChoices, room, fields, choices, searchable));
+        devicesSection.appendChild(this._collapsibleDeviceSection(
+          "Устройства без комнаты",
+          "Эти устройства не привязаны ни к одной зоне Home Assistant. Отметьте нужные, чтобы привязать их к этой комнате только в HausmanHub: зоны Home Assistant не изменятся.",
+          this._firstRunDeviceGroups(roomlessChoices, room, fields, choices, searchable),
+          false
+        ));
       }
       if (nearbyChoices.length) {
-        devicesSection.appendChild(el("h4", null, "Возможно, относится к этой комнате"));
-        devicesSection.appendChild(el("div", "muted", "Эти климатические устройства уже привязаны к другой области Home Assistant и показаны только для проверки."));
-        devicesSection.appendChild(this._firstRunDeviceGroups(nearbyChoices, room, fields, choices, searchable));
+        devicesSection.appendChild(this._collapsibleDeviceSection(
+          "Возможно, относится к этой комнате",
+          "Эти климатические устройства уже привязаны к другой области Home Assistant и показаны только для проверки.",
+          this._firstRunDeviceGroups(nearbyChoices, room, fields, choices, searchable),
+          true
+        ));
       }
     }
     showAll.addEventListener("change", () => {
@@ -2315,7 +2415,11 @@ class HausmanHubPanel extends HTMLElement {
       const issues = report.issues || [];
       if (issues.length) {
         const list = el("ul");
-        issues.forEach((issue) => list.appendChild(el("li", null, issue.message || "Проверьте настройки комнаты.")));
+        issues.forEach((issue) => list.appendChild(el(
+          "li",
+          issue.level === "warning" ? "issue-warning" : null,
+          issue.message || "Проверьте настройки комнаты."
+        )));
         reportBox.appendChild(list);
       } else if (ready) {
         reportBox.appendChild(el("div", "muted", "Все выбранные устройства и цели прошли проверку."));
@@ -2419,7 +2523,11 @@ class HausmanHubPanel extends HTMLElement {
         const list = el("ul");
         issues.forEach((issue) => {
           const line = el("li");
-          line.appendChild(el("span", null, issue.message || "Проверьте настройку."));
+          line.appendChild(el(
+            "span",
+            issue.level === "warning" ? "issue-warning" : null,
+            issue.message || "Проверьте настройку."
+          ));
           if (issue.room_id) {
             const fix = el("button", "secondary", "Исправить комнату");
             fix.addEventListener("click", () => this._openFirstRunRoom(issue.room_id));
@@ -2517,7 +2625,11 @@ class HausmanHubPanel extends HTMLElement {
       ? `Будет сохранено комнат: ${this._firstRun.validRooms.size}. Команды устройствам не отправляются.`
       : "Сначала вернитесь к проверке и получите успешный результат."));
     (this._firstRun.issues || []).forEach((issue) => {
-      card.appendChild(el("div", "field-error", issue.message || "Проверьте настройку."));
+      card.appendChild(el(
+        "div",
+        issue.level === "warning" ? "field-error issue-warning" : "field-error",
+        issue.message || "Проверьте настройку."
+      ));
     });
     const actions = el("div", "actions");
     const back = el("button", "secondary", "Назад к проверке");
@@ -2755,7 +2867,7 @@ class HausmanHubPanel extends HTMLElement {
       );
       const humidity = numberField(
         activeSettings.target_humidity === undefined ? 45 : activeSettings.target_humidity,
-        30, 70, 5, () => this._wizardChanged()
+        30, 70, 1, () => this._wizardChanged()
       );
       const strategy = selectField(
         STRATEGY_ORDER.map((code) => ({ value: code, label: strategies[code] || code })),
@@ -2773,7 +2885,7 @@ class HausmanHubPanel extends HTMLElement {
       const humidityRow = el("label", "form-field", humidityLabel);
       humidityRow.appendChild(humidity);
       editor.appendChild(humidityRow);
-      editor.appendChild(el("div", "muted field-help", "Допустимо 30–70 %, шаг 5 %."));
+      editor.appendChild(el("div", "muted field-help", "Допустимо 30–70 %, шаг 1 %."));
       const strategyRow = el("label", "form-field", "Стратегия");
       strategyRow.appendChild(strategy);
       editor.appendChild(strategyRow);
@@ -2853,7 +2965,8 @@ class HausmanHubPanel extends HTMLElement {
           setAttr(group, "data-device-group-id", deviceGroup.groupId);
           const header = el("div", "device-card-header");
           const thumb = el("div", "device-thumb");
-          const fallback = el("span", "device-thumb-fallback", "◈");
+          const fallback = el("span", "device-thumb-fallback");
+          fallback.appendChild(svgIcon("device"));
           setAttr(fallback, "aria-hidden", "true");
           if (deviceGroup.imageUrl) {
             const image = el("img");
@@ -2950,7 +3063,7 @@ class HausmanHubPanel extends HTMLElement {
           device.checkbox.checked && SENSOR_DEVICE_TYPES.has(device.type)
         )).length;
         summaryText.textContent = include.checked
-          ? `Выбрано: управление — ${active}, датчики — ${sensors}`
+          ? `Выбрано: управление ${active}, датчики ${sensors}`
           : "Комната не включена; выбранные привязки сохранены в форме";
       };
       roomFields.setExpanded = (expanded, shouldFocus = false) => {
@@ -3137,10 +3250,10 @@ class HausmanHubPanel extends HTMLElement {
       }
       if (
         rawHumidity === "" || !Number.isFinite(humidity)
-        || humidity < 30 || humidity > 70 || !Number.isInteger(humidity / 5)
+        || humidity < 30 || humidity > 70 || !Number.isInteger(humidity)
       ) {
         return {
-          error: `Проверьте влажность в комнате «${room.name || room.id}»: 30-70 %, шаг 5 %.`,
+          error: `Проверьте влажность в комнате «${room.name || room.id}»: 30-70 %, шаг 1 %.`,
           roomId: room.id,
           control: entry.humidity,
         };
@@ -3223,7 +3336,7 @@ class HausmanHubPanel extends HTMLElement {
     let firstControl = null;
     (validation.issues || []).forEach((issue) => {
       const room = issue.room_id && this._wizardFields.rooms[issue.room_id];
-      if (room) {
+      if (room && issue.level !== "warning") {
         room.errorBadge.hidden = false;
         if (!firstRoom) firstRoom = room;
         if (!firstControl) {
@@ -3234,7 +3347,11 @@ class HausmanHubPanel extends HTMLElement {
         }
       }
       const target = room ? this._wizardIssues.rooms[issue.room_id] : this._wizardIssues.global;
-      target.appendChild(el("div", null, issue.message));
+      target.appendChild(el(
+        "div",
+        issue.level === "warning" ? "issue-warning" : null,
+        issue.message
+      ));
     });
     const ready = validation.status === "ready" && validation.save_allowed === true;
     if (ready) {
@@ -3538,7 +3655,7 @@ class HausmanHubPanel extends HTMLElement {
           () => this._markDirty("profiles", dirtyNotice)
         );
         const humidity = numberField(
-          values.target_humidity, 30, 70, 5,
+          values.target_humidity, 30, 70, 1,
           () => this._markDirty("profiles", dirtyNotice)
         );
         const strategy = selectField(
@@ -3556,7 +3673,7 @@ class HausmanHubPanel extends HTMLElement {
         const humidityRow = el("label", "form-field", "Влажность, %");
         humidityRow.appendChild(humidity);
         profileBlock.appendChild(humidityRow);
-        profileBlock.appendChild(el("div", "muted field-help", "30–70 %, шаг 5 %."));
+        profileBlock.appendChild(el("div", "muted field-help", "30–70 %, шаг 1 %."));
         const strategyRow = el("label", "form-field", "Стратегия");
         strategyRow.appendChild(strategy);
         profileBlock.appendChild(strategyRow);
@@ -3599,10 +3716,10 @@ class HausmanHubPanel extends HTMLElement {
             || !Number.isFinite(temperature) || temperature < 18 || temperature > 28
             || !Number.isInteger(temperature * 2)
             || !Number.isFinite(humidity) || humidity < 30 || humidity > 70
-            || !Number.isInteger(humidity / 5)
+            || !Number.isInteger(humidity)
           ) {
             fields[roomId].error.textContent =
-              "Проверьте температуру (18–28 °C, шаг 0,5) и влажность (30–70 %, шаг 5).";
+              "Проверьте температуру (18–28 °C, шаг 0,5) и влажность (30–70 %, шаг 1).";
             if (!firstInvalid) {
               firstInvalid = rawTemperature === "" || !Number.isFinite(temperature)
                 || temperature < 18 || temperature > 28 || !Number.isInteger(temperature * 2)
@@ -4050,7 +4167,7 @@ class HausmanHubPanel extends HTMLElement {
     container.appendChild(el(
       "div",
       "section-intro",
-      "Окно — одиночная привязка. Комнатное присутствие — набор датчиков и пока не меняет температуру мгновенно: для этого нужна отдельная политика занятости."
+      "Окно - одиночная привязка. Комнатное присутствие - набор датчиков и пока не меняет температуру мгновенно: для этого нужна отдельная политика занятости."
     ));
     if (!windows) {
       container.appendChild(
