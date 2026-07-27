@@ -1,9 +1,63 @@
 # HausmanHub AI Context
 
-Last updated: 2026-07-26 (night, 1.25.2 released and deployed).
+Last updated: 2026-07-27 (release 1.25.3 published).
 
 ## Current work
 
+- Release 1.25.3 (first-run wizard device-catalog rework) is RELEASED, 2026-07-27:
+  - Release commit `f3cb4e7` on `origin/main`; tag `v1.25.3`; GitHub Actions
+    run `30251991310` passed; public release:
+    https://github.com/shumkiiv/hausmanhub_hacs/releases/tag/v1.25.3.
+  - Full local gate in a clean worktree from the release commit: 825 tests
+    passed, 4 skipped, 732 subtests passed; `tools/check_local_release.py`
+    passed (829 tests OK plus fixture, naming, and repo-safety checks).
+  - For this release the unfinished 1.26.0 `code_source` wizard step
+    (IR-learning WIP reading nonexistent `state.choices`) was removed from
+    the panel: IR constants, the step-list entry, the home→validation
+    transition, the dispatch line, and `_renderFirstRunCodeSource`. The
+    wizard flow is again home → validation.
+  - `hausman-hub-panel.js` keeps unavailable in-room candidates visible as
+    disabled checkbox rows with status/reason badges and a Home Assistant
+    refresh hint. It adds the disabled similar-room climate-device group,
+    the per-room `Показать все устройства` catalog (including a disabled
+    `Тип не определён` pseudo-row for candidates with empty
+    `suggested_types`), and an in-step refresh that merges newly discovered
+    candidates without discarding valid selections or control channels.
+  - Oracle review (gpt-5.6-sol) returned 4 blockers; one fix iteration closed
+    all of them plus the medium issues:
+    - Backend: every candidate now carries a stable opaque `candidate_key`
+      (`ckey_<sha256(source_id)[:12]>`) in `climate_device_candidates` and
+      `climate_setup_options`; both v1 JSON schemas and both fixtures require
+      it. The UI merges selection state by `candidate_key` (fallback
+      `candidate_id`) and resolves the current positional `candidate_id` at
+      draft-build time, so refresh renumbering can no longer move a selection
+      to the wrong physical device.
+    - Frontend: new candidates start `selected: false` (explicit selection
+      requirement); room-name matching tries the full normalized room name
+      before the >=4-char stripped root (`Ванная`/`Зал` now match); a
+      successful refresh invalidates stale per-room reports, validRooms, the
+      draft, and validation while preserving selections.
+    - Classification: `_unbound_suggested_kinds` now falls back to TRV name
+      markers when `hvac_modes` is non-empty but uninformative
+      (`("off", "auto")`); `("heat", "cool")` stays an air conditioner.
+  - `tests/test_hausmanhub_panel_wizard.py` now has 21 tests (was 14). The
+    refresh test models real positional renumbering (same `candidate_key`,
+    different `candidate_id`) and asserts the draft posts the refreshed id.
+    New backend tests: TRV marker with `("off", "auto")`, `("heat", "cool")`
+    as AC, candidate-key stability across renumbering.
+  - `tests/test_hausmanhub_panel.py` byte budget raised 200 -> 210 KiB (panel
+    grew legitimately with the wizard rework, 205.7 KiB now).
+  - Gates before commit: wizard file 21/21; dirty-tree suite 861 passed, 4
+    skipped, 728 subtests passed, with 11 failures only in the pre-existing
+    1.26.0 IR-learning WIP (`test_ir_code_storage`, raw remote endpoint,
+    read-only skeleton, local-summary boundary); our diff adds none. The
+    1.26.0 WIP files stay uncommitted: `__init__.py`, `climate_api.py`,
+    `application/climate_ha_adapters.py`, `domain/climate_ha_calls.py`,
+    untracked `ir_code_*.py`, `tests/test_ir_code_*.py`.
+  - Next: 1.26.0 wizard IR-learning vertical ("2 lite"): restore a fixed
+    `code_source` step, SmartIR code DB scan, Broadlink `.storage` codes,
+    `remote.learn_command` last; fix the WIP test failures so the release
+    gate runs green in the plain working tree.
 - Release 1.25.2 (wizard device-selection fix) is RELEASED and DEPLOYED:
   - Release commit `3eb8ffe` on `origin/main`; tag `v1.25.2`; GitHub Actions
     run `30219220629` passed; public Latest release at
@@ -2521,5 +2575,5 @@ Engineering and review rules are in
 
 - Obsidian/context index: `LLM_WIKI/00_Index.md`.
 - Latest generated context: `LLM_WIKI/Context.md`.
-- Last sync: 2026-07-26T23:38:44+03:00.
+- Last sync: 2026-07-27T12:05:30+03:00.
 <!-- llm-wiki-sync:end -->

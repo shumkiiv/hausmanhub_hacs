@@ -1,6 +1,46 @@
-# Current Work - HausmanHub 1.25.2 (выпущен и задеплоен)
+# Current Work - first-run каталог устройств (релиз 1.25.3)
+
+## 2026-07-27: first-run wizard device visibility + Oracle fix iteration
+- В шаге комнаты первичной настройки недоступные устройства своей области
+  остаются видимыми, но получают disabled checkbox, статус, причину и подсказку
+  обновить каталог Home Assistant.
+- Добавлены: группа похожей области для активных климатических устройств,
+  переключатель полного каталога с группами по областям и последней группой
+  «Без комнаты», обновление каталога с сохранением прежнего выбора и канала,
+  а также disabled-псевдострока «Тип не определён» для кандидатов с пустым
+  `suggested_types`.
+- Oracle-ревью (gpt-5.6-sol) нашло 4 блокера; одна итерация закрыла все:
+  - backend отдаёт стабильный `candidate_key` (`ckey_<sha256(source_id)[:12]>`)
+    в `climate_device_candidates` и `climate_setup_options`; обе v1 JSON-схемы
+    и обе фикстуры обновлены. UI объединяет выбор по `candidate_key` и при
+    отправке черновика берёт текущий позиционный `candidate_id`, поэтому
+    перенумерация при refresh больше не переносит выбор на чужое устройство;
+  - новые кандидаты стартуют с `selected: false` (явный выбор пользователем);
+  - матчинг похожей комнаты сначала пробует полное нормализованное имя, затем
+    укороченный корень от 4 символов («Ванная», «Зал» работают);
+  - успешный refresh сбрасывает устаревшие report/validRooms/draft/validation;
+  - `_unbound_suggested_kinds` при неинформативных `hvac_modes`
+    (`("off", "auto")`) теперь пробует TRV-маркеры имени; `("heat", "cool")`
+    остаётся кондиционером.
+- Тесты: wizard-файл 21 тест (было 14); refresh-тест моделирует реальную
+  перенумерацию id. Новые backend-тесты: TRV-fallback и стабильность ключа.
+  Бюджет panel.js поднят 200 -> 210 КиБ (рост от переработки мастера).
+- Полный suite: 861 passed, 4 skipped, 728 subtests passed, 11 failures -
+  только предсуществующая незакоммиченная IR-learning ветка. Коммит и релиз
+  не делались; сначала разобрать IR-learning WIP.
 
 ## Result
+- Release 1.25.3 (first-run wizard device-catalog rework) is RELEASED on
+  2026-07-27.
+- Release commit `f3cb4e7` on `origin/main`; tag `v1.25.3`; GitHub Actions
+  run `30251991310` passed; public release:
+  https://github.com/shumkiiv/hausmanhub_hacs/releases/tag/v1.25.3.
+- Full local gate in a clean worktree from the release commit: 825 passed,
+  4 skipped, 732 subtests; `tools/check_local_release.py` passed (829 tests
+  OK plus fixture, naming, and repo-safety checks).
+- For the release the unfinished 1.26.0 `code_source` step was removed from
+  the panel (broken `state.choices` read); wizard flow is home → validation
+  again. 1.26.0 IR-learning WIP files stay uncommitted in the working tree.
 - Release 1.25.2 (wizard device-selection fix) is RELEASED and DEPLOYED on
   2026-07-26.
 - Release commit `3eb8ffe` on `origin/main`; tag `v1.25.2`; GitHub Actions
@@ -42,6 +82,10 @@
 - 1.26.0 wizard IR-learning vertical ("2 lite"): SmartIR code DB scan,
   Broadlink `.storage` codes, `remote.learn_command` last. WIP files stay
   uncommitted in the working tree.
-- Known WIP-scope issues to fix there: frontend `code_source` step uses
-  nonexistent `state.choices` (`hausman-hub-panel.js` ~2236); failing test
-  `test_raw_remote_endpoint_stays_blocked_for_any_channel`.
+- Known WIP-scope issues to fix there: the `code_source` wizard step was
+  removed from the released panel (it read nonexistent `state.choices` and
+  always rendered an empty IR-device list); a fixed re-implementation must
+  consume the real draft/choices shape. Failing WIP tests include
+  `test_raw_remote_endpoint_stays_blocked_for_any_channel`,
+  `test_ir_code_storage`, local-summary boundary, and read-only skeleton
+  (11 failures total in the dirty tree).
