@@ -1,9 +1,39 @@
 # HausmanHub AI Context
 
-Last updated: 2026-07-27 (release 1.25.3 published).
+Last updated: 2026-07-27 (release 1.26.0 published).
 
 ## Current work
 
+- Release 1.26.0 (panel redesign per HMH-II + selectable unavailable devices)
+  is RELEASED, 2026-07-27:
+  - Release commit `3ab7584` on `origin/main`; tag `v1.26.0`; GitHub Actions
+    run `30282626657` passed; public release:
+    https://github.com/shumkiiv/hausmanhub_hacs/releases/tag/v1.26.0.
+  - Contents: dark HMH-II palette with inline SVG icons (per approved DESIGN.md
+    revision 2, which overrides the historical neumorphism section 2 tokens);
+    comfort defaults day 25.0/53%, night 25.5/50%, bounds 24.5-27, humidity
+    step 1; unavailable devices are selectable with the `Сейчас недоступно`
+    badge and a post-selection warning; backend `can_accept` covers
+    available+unavailable and validation returns a `device_unavailable`
+    warning instead of blocking (`save_allowed` true).
+  - Gates: full suite 825 passed, 4 skipped, 732 subtests;
+    `tools/check_local_release.py` passed after the version bump (829 tests
+    plus fixture/naming/safety checks); headless Chrome visual QA at
+    1224/420/360 px for wizard, room step, and configured overview.
+  - Oracle review (gpt-5.6-sol) returned REJECT with 2 majors; one fix
+    iteration: the `message` field in `climate-draft-validation.schema.json`
+    now allows the dynamic `device_unavailable` warning via anyOf
+    enum+pattern (was enum-only, rejected the real backend response). The
+    second finding (hard `--hmh-*` palette vs `--hh-*` section-2 tokens) was
+    dismissed as based on revision-1 history: DESIGN.md revision 2 explicitly
+    takes priority and mandates the fixed dark HMH-II palette with radii
+    12/16/20.
+  - The 1.27.0 IR-learning WIP stays uncommitted in the main checkout
+    `/home/ivsh/projects/hausmanhub_hasc`; the release was built in the
+    `hausmanhub_hasc-1260` worktree from clean `main`.
+  - Next: 1.27.0 wizard IR-learning vertical ("2 lite"): restore a fixed
+    `code_source` step, SmartIR code DB scan, Broadlink `.storage` codes,
+    `remote.learn_command` last; fix the WIP test failures.
 - Release 1.25.3 (first-run wizard device-catalog rework) is RELEASED, 2026-07-27:
   - Release commit `f3cb4e7` on `origin/main`; tag `v1.25.3`; GitHub Actions
     run `30251991310` passed; public release:

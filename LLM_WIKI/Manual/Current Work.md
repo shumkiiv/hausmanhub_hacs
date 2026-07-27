@@ -1,6 +1,30 @@
-# Current Work - first-run каталог устройств (релиз 1.25.3)
+# Current Work - редизайн панели HMH-II (релиз 1.26.0)
 
-## 2026-07-27: first-run wizard device visibility + Oracle fix iteration
+## 2026-07-27: релиз 1.26.0 - редизайн панели + selectable-недоступные
+- Release commit `3ab7584` на `origin/main`; tag `v1.26.0`; GitHub Actions
+  run `30282626657` passed; публичный релиз:
+  https://github.com/shumkiiv/hausmanhub_hacs/releases/tag/v1.26.0.
+- Панель перерисована по утверждённой ревизии 2 DESIGN.md (тёмная палитра
+  HMH-II, inline SVG-иконки). Ревизия 2 имеет приоритет над историческими
+  разделами 1-2 (neumorphism, токены `--hh-*`): это важно при ревью,
+  Oracle один раз ошибочно применил токены из отклонённой ревизии 1.
+- Дефолты комфорта: день 25.0°/53%, ночь 25.5°/50%, границы 24.5-27°,
+  шаг влажности 1%.
+- Недоступные устройства выбираемы (продуктовое решение 4): бейдж
+  «Сейчас недоступно», warning после выбора, `save_allowed` true; backend
+  `can_accept` покрывает available+unavailable.
+- Oracle-ревью: REJECT, 2 major; одна итерация - схема
+  `climate-draft-validation.schema.json` `message` теперь anyOf
+  (статический enum для error-кодов + pattern для динамического
+  `device_unavailable` с именем устройства). Второе finding отклонено
+  как основанное на ревизии 1.
+- Гейты: 825 passed, 4 skipped, 732 subtests; check_local_release.py
+  зелёный после бампа версии; визуальная проверка headless Chrome
+  1224/420/360 px (wizard, шаг комнаты, настроенный обзор).
+- Релиз собран в worktree `hausmanhub_hasc-1260` с чистого main;
+  IR-learning WIP 1.27.0 остаётся незакоммиченным в основном checkout.
+
+## 2026-07-27: first-run wizard device visibility + Oracle fix iteration (1.25.3)
 - В шаге комнаты первичной настройки недоступные устройства своей области
   остаются видимыми, но получают disabled checkbox, статус, причину и подсказку
   обновить каталог Home Assistant.
