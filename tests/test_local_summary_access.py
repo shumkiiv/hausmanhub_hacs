@@ -1740,7 +1740,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.30.0", panel.payload["integration_version"])
+        self.assertEqual("1.31.0", panel.payload["integration_version"])
 
     def test_admin_panel_accepts_ipv6_link_local_admin_from_mdns(self) -> None:
         """A local admin may open the panel when mDNS selects IPv6 link-local."""
@@ -2143,6 +2143,40 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertEqual({"message"}, set(response.payload))
                 self.assertEqual("no-store", response.headers.get("Cache-Control"))
 
+    def test_public_scenario_routes_are_available_to_the_local_tablet(self) -> None:
+        views = {view.url: view for view in self.hass.http.views}
+        tablet = reader_user("system-users")
+        scenarios_path = "/api/hausman_hub/v1/scenarios"
+        catalog_path = "/api/hausman_hub/v1/scenarios/catalog"
+        action_path = "/api/hausman_hub/v1/scenarios/action"
+
+        scenarios = asyncio.run(
+            views[scenarios_path].get(
+                FakeRequest("192.168.1.20", tablet, path=scenarios_path)
+            )
+        )
+        catalog = asyncio.run(
+            views[catalog_path].get(
+                FakeRequest("192.168.1.20", tablet, path=catalog_path)
+            )
+        )
+        unknown_action = asyncio.run(
+            views[action_path].post(
+                FakeJsonRequest(
+                    "192.168.1.20",
+                    tablet,
+                    action_path,
+                    {"action": "unsupported"},
+                )
+            )
+        )
+
+        self.assertEqual(200, scenarios.status)
+        self.assertIn("scenarios", scenarios.payload)
+        self.assertEqual(200, catalog.status)
+        self.assertIn("devices", catalog.payload)
+        self.assertEqual(400, unknown_action.status)
+
     def test_view_rejects_disallowed_origins_before_reading_the_home(self) -> None:
         """Only ordinary home-network source ranges may read the summary."""
 
@@ -2278,7 +2312,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertFalse(hasattr(self.view, method))
 
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
-        self.assertEqual(42, len(self.hass.http.views))
+        self.assertEqual(48, len(self.hass.http.views))
         self.assertEqual(
             1,
             sum(
@@ -2567,7 +2601,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             [(closed_entry, ("sensor", "switch"))],
             closed_hass.config_entries.forwarded,
         )
-        self.assertEqual(41, len(closed_hass.http.views))
+        self.assertEqual(47, len(closed_hass.http.views))
         self.assertEqual(
             {
                 "/api/hausman_hub/v1/capabilities",
@@ -2605,6 +2639,12 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 "/api/hausman_hub/v1/admin/scenarios/delete",
                 "/api/hausman_hub/v1/admin/scenarios/run",
                 "/api/hausman_hub/v1/admin/scenarios/test",
+                "/api/hausman_hub/v1/scenarios",
+                "/api/hausman_hub/v1/scenarios/action",
+                "/api/hausman_hub/v1/scenarios/catalog",
+                "/api/hausman_hub/v1/scenarios/delete",
+                "/api/hausman_hub/v1/scenarios/run",
+                "/api/hausman_hub/v1/scenarios/test",
                 "/api/hausman_hub/v1/admin/ir-codes",
                 "/api/hausman_hub/v1/admin/ir-codes/scan",
                 "/api/hausman_hub/v1/admin/ir-codes/bindings",

@@ -1,4 +1,4 @@
-"""Authenticated admin HTTP views for HausmanHub scenarios."""
+"""Authenticated admin and local-tablet HTTP views for HausmanHub scenarios."""
 
 from __future__ import annotations
 
@@ -21,8 +21,17 @@ from .climate_api import (
     _forbidden,
     _is_exact_request,
     _is_local_admin_request,
+    _is_local_tablet_request,
     _not_found,
     _request_json,
+)
+from .application.api_capabilities import (
+    SCENARIOS_ACTION_PATH,
+    SCENARIOS_CATALOG_PATH,
+    SCENARIOS_DELETE_PATH,
+    SCENARIOS_PATH,
+    SCENARIOS_RUN_PATH,
+    SCENARIOS_TEST_PATH,
 )
 from .domain.scenarios import ScenarioDefinition, _scenario_to_payload
 
@@ -60,6 +69,9 @@ class _ScenarioView(HomeAssistantView):
             return None
         return service
 
+    def _authorized(self, request: Any) -> bool:
+        return _is_local_admin_request(request)
+
 
 class ScenarioCatalogView(_ScenarioView):
     """Expose the live device/action catalog for the scenario editor."""
@@ -68,9 +80,9 @@ class ScenarioCatalogView(_ScenarioView):
     name = "api:hausman_hub:scenarios_catalog"
 
     async def get(self, request: Any) -> Any:
-        if not _is_exact_request(request, ADMIN_SCENARIOS_CATALOG_PATH):
+        if not _is_exact_request(request, self.url):
             return _not_found(self)
-        if not _is_local_admin_request(request):
+        if not self._authorized(request):
             return _forbidden(self)
         service = self._service_ready()
         if service is None:
@@ -107,9 +119,9 @@ class ScenariosView(_ScenarioView):
     name = "api:hausman_hub:scenarios"
 
     async def get(self, request: Any) -> Any:
-        if not _is_exact_request(request, ADMIN_SCENARIOS_PATH):
+        if not _is_exact_request(request, self.url):
             return _not_found(self)
-        if not _is_local_admin_request(request):
+        if not self._authorized(request):
             return _forbidden(self)
         service = self._service_ready()
         if service is None:
@@ -121,9 +133,9 @@ class ScenariosView(_ScenarioView):
         )
 
     async def post(self, request: Any) -> Any:
-        if not _is_exact_request(request, ADMIN_SCENARIOS_PATH):
+        if not _is_exact_request(request, self.url):
             return _not_found(self)
-        if not _is_local_admin_request(request):
+        if not self._authorized(request):
             return _forbidden(self)
         service = self._service_ready()
         if service is None:
@@ -181,9 +193,9 @@ class ScenarioTestView(_ScenarioView):
     name = "api:hausman_hub:scenario_test"
 
     async def post(self, request: Any) -> Any:
-        if not _is_exact_request(request, ADMIN_SCENARIOS_TEST_PATH):
+        if not _is_exact_request(request, self.url):
             return _not_found(self)
-        if not _is_local_admin_request(request):
+        if not self._authorized(request):
             return _forbidden(self)
         service = self._service_ready()
         if service is None:
@@ -240,9 +252,9 @@ class ScenarioDeleteView(_ScenarioView):
     name = "api:hausman_hub:scenario_delete"
 
     async def post(self, request: Any) -> Any:
-        if not _is_exact_request(request, ADMIN_SCENARIOS_DELETE_PATH):
+        if not _is_exact_request(request, self.url):
             return _not_found(self)
-        if not _is_local_admin_request(request):
+        if not self._authorized(request):
             return _forbidden(self)
         service = self._service_ready()
         if service is None:
@@ -295,9 +307,9 @@ class ScenarioRunView(_ScenarioView):
     name = "api:hausman_hub:scenario_run"
 
     async def post(self, request: Any) -> Any:
-        if not _is_exact_request(request, ADMIN_SCENARIOS_RUN_PATH):
+        if not _is_exact_request(request, self.url):
             return _not_found(self)
-        if not _is_local_admin_request(request):
+        if not self._authorized(request):
             return _forbidden(self)
         service = self._service_ready()
         if service is None:
@@ -357,7 +369,7 @@ class ScenarioActionView(_ScenarioView):
     async def post(self, request: Any) -> Any:
         if not _is_exact_request(request, self.url):
             return _not_found(self)
-        if not _is_local_admin_request(request):
+        if not self._authorized(request):
             return _forbidden(self)
         service = self._service_ready()
         if service is None:
@@ -378,18 +390,132 @@ class ScenarioActionView(_ScenarioView):
             )
         action = payload.get("action")
         if action == "update_scenario":
-            return await ScenariosView(self._hass).post(request)
+            try:
+                scenario = await service.async_update_scenario(dict(payload))
+            except ScenarioValidationError as error:
+                return self.json(
+                    _validation_error_payload(error),
+                    status=HTTPStatus.BAD_REQUEST,
+                    headers=NO_STORE_HEADERS,
+                )
+            except ScenarioServiceError as error:
+                return self.json_message(error.message, error.status, headers=NO_STORE_HEADERS)
+            return self.json(
+                {"ok": True, "status": "success", "scenario_id": scenario.id, "updated_at": scenario.updated_at},
+                headers=NO_STORE_HEADERS,
+            )
         if action == "test_scenario":
-            return await ScenarioTestView(self._hass).post(request)
+            try:
+                result = await service.async_test_scenario(dict(payload))
+            except ScenarioValidationError as error:
+                return self.json(
+                    _validation_error_payload(error),
+                    status=HTTPStatus.BAD_REQUEST,
+                    headers=NO_STORE_HEADERS,
+                )
+            except ScenarioServiceError as error:
+                return self.json_message(error.message, error.status, headers=NO_STORE_HEADERS)
+            return self.json({"ok": True, "status": "success", "result": result}, headers=NO_STORE_HEADERS)
         if action == "delete_scenario":
-            return await ScenarioDeleteView(self._hass).post(request)
+            return await _delete_scenario(self, service, payload)
         if action == "run_scenario":
-            return await ScenarioRunView(self._hass).post(request)
+            return await _run_scenario(self, service, payload)
         return self.json_message(
             "Unknown scenario action.",
             HTTPStatus.BAD_REQUEST,
             headers=NO_STORE_HEADERS,
         )
+
+
+class _TabletScenarioAccess:
+    """Allow authenticated local tablet users on the public scenario surface."""
+
+    def _authorized(self, request: Any) -> bool:
+        return _is_local_tablet_request(request)
+
+
+class TabletScenarioCatalogView(_TabletScenarioAccess, ScenarioCatalogView):
+    url = SCENARIOS_CATALOG_PATH
+    name = "api:hausman_hub:tablet_scenarios_catalog"
+
+
+class TabletScenariosView(_TabletScenarioAccess, ScenariosView):
+    url = SCENARIOS_PATH
+    name = "api:hausman_hub:tablet_scenarios"
+
+
+class TabletScenarioTestView(_TabletScenarioAccess, ScenarioTestView):
+    url = SCENARIOS_TEST_PATH
+    name = "api:hausman_hub:tablet_scenario_test"
+
+
+class TabletScenarioDeleteView(_TabletScenarioAccess, ScenarioDeleteView):
+    url = SCENARIOS_DELETE_PATH
+    name = "api:hausman_hub:tablet_scenario_delete"
+
+
+class TabletScenarioRunView(_TabletScenarioAccess, ScenarioRunView):
+    url = SCENARIOS_RUN_PATH
+    name = "api:hausman_hub:tablet_scenario_run"
+
+
+class TabletScenarioActionView(_TabletScenarioAccess, ScenarioActionView):
+    url = SCENARIOS_ACTION_PATH
+    name = "api:hausman_hub:tablet_scenario_action"
+
+
+def _validation_error_payload(error: ScenarioValidationError) -> dict[str, object]:
+    return {
+        "ok": False,
+        "status": "failed",
+        "error": "scenario_validation_failed",
+        "message": error.message,
+        "violations": [
+            {"message": str(item), "path": item.path, "code": item.code}
+            for item in error.violations
+        ],
+    }
+
+
+async def _delete_scenario(
+    view: _ScenarioView,
+    service: ScenarioService,
+    payload: Mapping[str, object],
+) -> Any:
+    scenario_id = payload.get("scenario_id") or payload.get("scenarioId")
+    if not isinstance(scenario_id, str) or not scenario_id:
+        return view.json_message("scenario_id is required.", HTTPStatus.BAD_REQUEST, headers=NO_STORE_HEADERS)
+    try:
+        await service.async_delete_scenario(scenario_id)
+    except ScenarioReferencedError as error:
+        return view.json_message(error.message, HTTPStatus.CONFLICT, headers=NO_STORE_HEADERS)
+    except ScenarioNotFoundError as error:
+        return view.json_message(error.message, HTTPStatus.NOT_FOUND, headers=NO_STORE_HEADERS)
+    except ScenarioServiceError as error:
+        return view.json_message(error.message, error.status, headers=NO_STORE_HEADERS)
+    return view.json({"ok": True, "status": "success", "scenario_id": scenario_id}, headers=NO_STORE_HEADERS)
+
+
+async def _run_scenario(
+    view: _ScenarioView,
+    service: ScenarioService,
+    payload: Mapping[str, object],
+) -> Any:
+    scenario_id = payload.get("scenario_id") or payload.get("scenarioId")
+    if not isinstance(scenario_id, str) or not scenario_id:
+        return view.json_message("scenario_id is required.", HTTPStatus.BAD_REQUEST, headers=NO_STORE_HEADERS)
+    try:
+        result = await service.async_run_scenario(scenario_id)
+    except ScenarioNotFoundError as error:
+        return view.json_message(error.message, HTTPStatus.NOT_FOUND, headers=NO_STORE_HEADERS)
+    except ScenarioServiceError as error:
+        return view.json_message(error.message, error.status, headers=NO_STORE_HEADERS)
+    completed = result.get("status") == "completed"
+    return view.json(
+        {"ok": completed, "status": "success" if completed else "failed", "result": result},
+        status=HTTPStatus.OK if completed else HTTPStatus.CONFLICT,
+        headers=NO_STORE_HEADERS,
+    )
 
 
 def scenario_api_views(
@@ -405,4 +531,10 @@ def scenario_api_views(
         ScenarioDeleteView(hass),
         ScenarioRunView(hass),
         ScenarioActionView(hass),
+        TabletScenarioCatalogView(hass),
+        TabletScenariosView(hass),
+        TabletScenarioTestView(hass),
+        TabletScenarioDeleteView(hass),
+        TabletScenarioRunView(hass),
+        TabletScenarioActionView(hass),
     )
