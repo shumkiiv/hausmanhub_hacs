@@ -501,6 +501,7 @@ def build_dashboard_snapshot(
         "capabilities": {
             "actions": False,
             "scenarios": bool(scenario_payloads),
+            "scenarioEditing": True,
             "alarms": True,
             "events": False,
             "smartClimate": any(room["hasClimateControl"] for room in room_payloads),

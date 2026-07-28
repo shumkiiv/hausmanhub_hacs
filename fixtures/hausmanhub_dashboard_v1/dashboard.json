@@ -125,6 +125,7 @@
   "capabilities": {
     "actions": true,
     "scenarios": true,
+    "scenarioEditing": true,
     "alarms": true,
     "events": true,
     "smartClimate": true,
