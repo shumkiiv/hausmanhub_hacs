@@ -565,10 +565,13 @@ class HausmanHubPanel extends HTMLElement {
       .entity-groups { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:12px; }
       .entity-group { min-width:0; overflow:hidden; border:1px solid var(--divider-color,#ddd); border-radius:14px;
         background:var(--card-background-color,#fff); }
-      .candidate-room-warning { margin:14px 0; padding:11px 13px; border:1px solid var(--warning-color,#ef6c00);
+      .candidate-room-warning, .wizard-warning { padding:11px 13px; border:1px solid var(--warning-color,#ef6c00);
         border-radius:12px; color:var(--primary-text-color,#212121);
         background:color-mix(in srgb,var(--warning-color,#ef6c00) 9%,var(--card-background-color,#fff));
         font-size:13px; line-height:1.45; }
+      .candidate-room-warning { margin:14px 0; }
+      .wizard-warning { margin:0 0 16px; }
+      .wizard-section > .muted + .wizard-warning { margin-top:12px; }
       .signal-picker { min-width:0; margin:18px 0; padding:0; border:0; }
       .signal-picker legend { padding:0; color:var(--primary-text-color,#212121); font-size:16px; font-weight:700; }
       .signal-picker-help { margin:4px 0 8px; }
@@ -2172,6 +2175,14 @@ class HausmanHubPanel extends HTMLElement {
   _renderFirstRunRooms(card) {
     card.appendChild(el("h2", null, "Выберите комнаты"));
     card.appendChild(el("div", "section-intro", "Проверьте каждую нужную область отдельно. В настройку попадут только комнаты, которые успешно прошли проверку."));
+    const roomlessCandidates = this._firstRunRoomlessCandidates();
+    if (roomlessCandidates.length) {
+      card.appendChild(el(
+        "div",
+        "wizard-warning",
+        `Устройства без комнаты: ${roomlessCandidates.length}. Они доступны на шаге комнаты в секции «Устройства без комнаты» или после назначения зоны в Home Assistant.`
+      ));
+    }
     const fields = { rooms: {} };
     const list = el("div", "first-run-room-list");
     (this._firstRun.options.rooms || []).forEach((room) => {
@@ -2375,6 +2386,19 @@ class HausmanHubPanel extends HTMLElement {
     const devicesSection = el("section", "wizard-section");
     devicesSection.appendChild(el("h3", null, "Устройства и датчики"));
     devicesSection.appendChild(el("div", "muted", "Канал управления сохраняется в контуре и честно показывает транспорт устройства. Если устройство - климатическая обёртка (например, SmartIR), команды выполняются сразу через стандартные сервисы Home Assistant при любом канале. Без такой обёртки сырой ИК-пульт остаётся только в наблюдении."));
+    const roomlessCandidates = this._firstRunRoomlessCandidates();
+    if (roomlessCandidates.length) {
+      const visibleNames = roomlessCandidates.slice(0, 5).map((candidate) => (
+        candidate.name || candidate.device_name || candidate.candidate_id
+      ));
+      const remaining = roomlessCandidates.length - visibleNames.length;
+      const names = `${visibleNames.join(", ")}${remaining ? ` и ещё ${remaining}` : ""}`;
+      devicesSection.appendChild(el(
+        "div",
+        "wizard-warning",
+        `Внимание: найдены устройства без комнаты: ${names}. Они не показаны в списке комнаты. Отметьте нужные в секции «Устройства без комнаты» ниже - привязка сохранится только в HausmanHub, зоны Home Assistant не изменятся. Либо назначьте устройству зону в Home Assistant и нажмите «Обновить список устройств».`
+      ));
+    }
     const deviceActions = el("div", "actions");
     const refreshDevices = el("button", "secondary", "Обновить список устройств");
     refreshDevices.disabled = this._busy || this._firstRun.loading;
@@ -2390,7 +2414,7 @@ class HausmanHubPanel extends HTMLElement {
     showAllLabel.appendChild(el("span", null, "Показать все устройства"));
     devicesSection.appendChild(showAllLabel);
     const roomChoices = this._firstRunRoomChoices(state, this._firstRunRoomCandidates(room.id));
-    const roomlessChoices = this._firstRunRoomChoices(state, this._firstRunRoomlessCandidates());
+    const roomlessChoices = this._firstRunRoomChoices(state, roomlessCandidates);
     const nearbyChoices = this._firstRunRoomChoices(state, this._firstRunPossibleRoomCandidates(room));
     const catalogChoices = this._firstRunRoomChoices(
       state,

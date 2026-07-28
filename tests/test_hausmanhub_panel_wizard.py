@@ -753,6 +753,66 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
+    def test_roomless_warning_lists_five_names_and_remaining_count(self) -> None:
+        options = roomless_options()
+        template = options["devices"][-1]
+        for index in range(2, 7):
+            candidate = copy.deepcopy(template)
+            candidate["candidate_id"] = f"candidate_roomless_{index}"
+            candidate["candidate_key"] = f"candidate_roomless_{index}"
+            candidate["name"] = f"Устройство без комнаты {index}"
+            options["devices"].append(candidate)
+        script = panel_script(
+            get_payloads(options=options),
+            {},
+            """
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать настройку")[0].fire("click");
+        await tick();
+        panel._firstRunFields.rooms.living.configure.fire("click");
+        const warnings = findAll(panel.shadowRoot, (node) =>
+          String(node.className).split(" ").includes("wizard-warning"));
+        if (warnings.length !== 1) {
+          throw new Error("room step must show one roomless warning");
+        }
+        const warning = warnings[0].textContent;
+        const expectedNames = "Komanchi Living SmartIR, Устройство без комнаты 2, "
+          + "Устройство без комнаты 3, Устройство без комнаты 4, "
+          + "Устройство без комнаты 5 и ещё 1";
+        if (!warning.includes("Внимание: найдены устройства без комнаты: " + expectedNames)) {
+          throw new Error("roomless warning names or truncation mismatch: " + warning);
+        }
+        if (warning.includes("Устройство без комнаты 6")) {
+          throw new Error("roomless warning rendered more than five device names");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_rooms_step_warns_about_roomless_candidate_count(self) -> None:
+        script = panel_script(
+            get_payloads(options=roomless_options()),
+            {},
+            """
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать настройку")[0].fire("click");
+        await tick();
+        const warnings = findAll(panel.shadowRoot, (node) =>
+          String(node.className).split(" ").includes("wizard-warning"));
+        if (warnings.length !== 1) {
+          throw new Error("rooms step must show one roomless warning");
+        }
+        const expected = "Устройства без комнаты: 1. Они доступны на шаге комнаты "
+          + "в секции «Устройства без комнаты» или после назначения зоны в Home Assistant.";
+        if (warnings[0].textContent !== expected) {
+          throw new Error("rooms-step roomless count mismatch: " + warnings[0].textContent);
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_roomless_devices_bind_to_the_room_in_hausmanhub_only(self) -> None:
         script = panel_script(
             get_payloads(options=roomless_options()),
@@ -849,6 +909,10 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         }
         if (text.includes("Устройства без комнаты")) {
           throw new Error("roomless group rendered without roomless candidates");
+        }
+        if (findAll(panel.shadowRoot, (node) =>
+          String(node.className).split(" ").includes("wizard-warning")).length) {
+          throw new Error("roomless warning rendered without roomless candidates");
         }
             """,
         )
