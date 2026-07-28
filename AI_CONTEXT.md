@@ -1,9 +1,39 @@
 # HausmanHub AI Context
 
-Last updated: 2026-07-27 (release 1.26.1 published).
+Last updated: 2026-07-28 (release 1.26.2 published and deployed).
 
 ## Current work
 
+- Release 1.26.2 (prominent roomless-device warning in the wizard)
+  is RELEASED and DEPLOYED, 2026-07-28:
+  - Release commit `083b4c7` on `origin/main`; tag `v1.26.2` resolves to
+    `083b4c733d16fee806104a7760320b68cab798fc`; GitHub Actions run
+    `30341142526` success; public release:
+    https://github.com/shumkiiv/hausmanhub_hacs/releases/tag/v1.26.2.
+  - Contents: `.wizard-warning` amber banner (reuses the
+    `--warning-color` tonal styling of `.candidate-room-warning`). Rooms
+    step shows the roomless count; room step lists the first 5 roomless
+    device names with "и ещё N" and offers both fixes (HausmanHub-only
+    binding in the `Устройства без комнаты` section, or HA area assignment
+    + refresh). Banners render only when roomless candidates exist.
+  - Built in worktree `hausmanhub_hasc-1262` (branch
+    `ui-1.26.2-roomless-warning`); tests in
+    `tests/test_hausmanhub_panel_wizard.py` cover names, 5-name
+    truncation, rooms-step counter, and the absent-when-empty state.
+  - Gates: full suite 829 passed, 4 skipped, 732 subtests;
+    `tools/check_local_release.py` passed (version bump touched manifest
+    plus 3 version references in tests).
+  - Deploy: HACS `update.hausman_hub_hasc_update` installed explicit
+    `v1.26.2`, HA restarted, verified live (read-only):
+    `integration_version: 1.26.2` at `/api/hausman_hub/v1/admin/panel`,
+    panel JS 212368 bytes with the new warning strings.
+  - Figma (HMH--HA) batch 2 is done the same day: the banner pattern and
+    all DESIGN.md section-4 screens now exist in dark+light (details in
+    the `УД-hasc` project AI_CONTEXT.md).
+  - Next: 1.27.0 wizard IR-learning vertical ("2 lite") in the main
+    checkout `/home/ivsh/projects/hausmanhub_hasc` (uncommitted WIP with
+    failing tests): restore a fixed `code_source` step, SmartIR code DB
+    scan, Broadlink `.storage` codes, `remote.learn_command` last.
 - Release 1.26.1 (light theme + theme switcher, wizard select CSS fix)
   is RELEASED, 2026-07-27:
   - Release commit `0d215c4` on `origin/main`; tag `v1.26.1`; GitHub Actions

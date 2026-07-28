@@ -1,4 +1,22 @@
-# Current Work - светлая тема панели (релиз 1.26.1)
+# Current Work - roomless-предупреждение (релиз 1.26.2)
+
+## 2026-07-28: релиз 1.26.2 - заметное предупреждение об устройствах без комнаты
+- Release commit `083b4c7` на `origin/main`; tag `v1.26.2`; GitHub Actions
+  run `30341142526` success; публичный релиз:
+  https://github.com/shumkiiv/hausmanhub_hacs/releases/tag/v1.26.2.
+- Worktree `hausmanhub_hasc-1262` (branch `ui-1.26.2-roomless-warning`).
+- `.wizard-warning` amber-баннер: шаг списка комнат - счётчик roomless,
+  шаг комнаты - до 5 имён с «и ещё N» и оба пути (привязка только в
+  HausmanHub через секцию «Устройства без комнаты» или назначение зоны в
+  HA + «Обновить список устройств»). Баннеры скрыты, когда roomless нет.
+- Тесты в `tests/test_hausmanhub_panel_wizard.py`: имена, усечение до 5,
+  счётчик, отсутствие баннера. Гейт: 829 passed / 4 skipped,
+  `check_local_release.py` passed.
+- Деплой: HACS update entity, явная `v1.26.2`, рестарт HA; read-only
+  проверка: `integration_version: 1.26.2`, панель отдаёт новую сборку
+  (212368 байт, строки предупреждения на месте).
+- Тот же паттерн баннера отрисован в Figma HMH--HA (обе темы), партия 2
+  закрыла все экраны раздела 4 DESIGN.md в dark+light.
 
 ## 2026-07-27: релиз 1.26.1 - светлая тема + фикс селекта канала
 - Release commit `0d215c4` на `origin/main`; tag `v1.26.1`; GitHub Actions
