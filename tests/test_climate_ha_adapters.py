@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, replace
 import json
+from types import SimpleNamespace
 import unittest
 
 from custom_components.hausman_hub.application.climate_ha_adapters import (
@@ -84,6 +85,11 @@ from custom_components.hausman_hub.domain.climate_observation import (
     ClimateWindowState,
 )
 from custom_components.hausman_hub.domain.contours import ContourMode
+from custom_components.hausman_hub.domain.ir_codes import (
+    IRCodeRegistry,
+    IRCodeSource,
+    IRCommandCode,
+)
 from tests.test_contours import source_payload
 
 
@@ -352,7 +358,7 @@ class ClimateHaAdapterTest(unittest.TestCase):
                     )
                 )
 
-    def test_raw_remote_endpoint_stays_blocked_for_any_channel(self) -> None:
+    def test_raw_remote_endpoint_requires_a_learned_ir_command_for_any_channel(self) -> None:
         payload, registry, contours = _setup(entity_id="remote.living_ir")
         isolation = _pipeline(
             payload,
@@ -378,9 +384,71 @@ class ClimateHaAdapterTest(unittest.TestCase):
                 (device,) = plan.room("living").devices  # type: ignore[union-attr]
                 self.assertEqual((), device.calls)
                 self.assertIn(
+                    ClimateHaCallLimit.IR_COMMAND_NOT_LEARNED,
+                    device.limits,
+                )
+                self.assertNotIn(
                     ClimateHaCallLimit.UNSUPPORTED_CONTROL_CHANNEL,
                     device.limits,
                 )
+
+    def test_raw_remote_translates_the_exact_canonical_ir_command_to_typed_call(self) -> None:
+        payload, registry, contours = _setup(entity_id="remote.living_ir")
+        isolation = _pipeline(
+            payload,
+            registry,
+            contours,
+            mutate_observation=_close_windows,
+        )
+        code = IRCommandCode(
+            code_id="ir_living_cool",
+            device_id=registry.devices[0].device_id,
+            remote_entity_id="remote.living_ir",
+            command_name="ac.cool.26_0",
+            code_data="JgBQAAAB",
+            source=IRCodeSource.SMARTIR,
+            created_at=NOW,
+        )
+        codes = IRCodeRegistry(codes=(code,))
+        service = SimpleNamespace(code_for_command=codes.code_for_command)
+
+        plan = build_climate_ha_call_plan(registry, isolation, service)
+
+        (device,) = plan.room("living").devices  # type: ignore[union-attr]
+        self.assertEqual((), device.limits)
+        self.assertEqual(1, len(device.calls))
+        call = device.calls[0]
+        self.assertIs(ClimateHaService.REMOTE_SEND_COMMAND, call.service)
+        self.assertEqual("remote.living_ir", call.entity_id)
+        self.assertEqual(registry.devices[0].device_id, call.device)
+        self.assertEqual("b64:JgBQAAAB", call.command)
+
+    def test_raw_remote_rejects_an_unrelated_ir_code(self) -> None:
+        payload, registry, contours = _setup(entity_id="remote.living_ir")
+        isolation = _pipeline(
+            payload,
+            registry,
+            contours,
+            mutate_observation=_close_windows,
+        )
+        code = IRCommandCode(
+            code_id="ir_living_off",
+            device_id=registry.devices[0].device_id,
+            remote_entity_id="remote.living_ir",
+            command_name="ac.off",
+            code_data="JgBQAAAB",
+            source=IRCodeSource.MANUAL,
+            created_at=NOW,
+        )
+        service = SimpleNamespace(
+            code_for_command=IRCodeRegistry(codes=(code,)).code_for_command
+        )
+
+        plan = build_climate_ha_call_plan(registry, isolation, service)
+
+        (device,) = plan.room("living").devices  # type: ignore[union-attr]
+        self.assertEqual((), device.calls)
+        self.assertIn(ClimateHaCallLimit.IR_COMMAND_NOT_LEARNED, device.limits)
 
     def test_direct_wifi_channel_uses_existing_entity_calls(self) -> None:
         payload, registry, contours = _setup(entity_id="climate.living_ac")

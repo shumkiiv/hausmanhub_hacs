@@ -9,6 +9,7 @@ import json
 from ..domain.climate import (
     ClimateControlChannel,
     ClimateControlScope,
+    ClimateEndpointRole,
     ClimateModelViolation,
     ClimateRegistry,
     ClimateRoom,
@@ -965,19 +966,18 @@ def current_climate_contour_setup(
                         "message": _CURRENT_SETUP_ISSUE_NAMES[issue_code],
                     }
                 )
-            devices.append(
-                {
-                    "candidate_id": candidate_id,
-                    "name": device.name,
-                    "type": device.kind.value,
-                    "type_name": device_kind_names[device.kind.value],
-                    "control_channel": (
-                        None
-                        if device.control_channel is None
-                        else device.control_channel.value
-                    ),
-                }
-            )
+            device_payload = {
+                "candidate_id": candidate_id,
+                "name": device.name,
+                "type": device.kind.value,
+                "type_name": device_kind_names[device.kind.value],
+                "control_channel": (
+                    None
+                    if device.control_channel is None
+                    else device.control_channel.value
+                ),
+            }
+            devices.append(device_payload)
             device_count += 1
         rooms.append(
             {
@@ -1045,6 +1045,52 @@ def current_climate_contour_setup(
             "device_count": device_count,
         },
     }
+
+
+def climate_ir_code_bindings(
+    registry: ClimateRegistry,
+    contours: ContourRegistry,
+    snapshot: ClimateImportSnapshot,
+) -> dict[str, object]:
+    """Return raw-remote bindings on the separate local admin IR endpoint."""
+
+    if not isinstance(registry, ClimateRegistry):
+        raise ClimateSetupViolation("IR binding climate registry must be valid")
+    if not isinstance(contours, ContourRegistry):
+        raise ClimateSetupViolation("IR binding contours must be valid")
+    if not isinstance(snapshot, ClimateImportSnapshot):
+        raise ClimateSetupViolation("IR binding snapshot must be valid")
+    validate_contour_bindings(contours, registry)
+    contour = contours.contour("climate")
+    if contour is None:
+        return {"bindings": []}
+    candidate_id_by_source = {
+        source_id: f"candidate_{index:04d}"
+        for index, source_id in enumerate(
+            _ordered_candidate_source_ids(registry, snapshot),
+            start=1,
+        )
+    }
+    bindings: list[dict[str, str]] = []
+    for assignment in contour.rooms:
+        for device_id in assignment.device_ids:
+            device = registry.device(device_id)
+            if device is None:  # pragma: no cover - checked by contour bindings
+                raise ClimateSetupViolation("IR binding device is unavailable")
+            control_endpoint = device.endpoint(ClimateEndpointRole.CONTROL)
+            if (
+                device.control_channel is ClimateControlChannel.UNIVERSAL_IR
+                and control_endpoint is not None
+                and control_endpoint.entity_id.startswith("remote.")
+            ):
+                bindings.append(
+                    {
+                        "candidate_id": candidate_id_by_source[device.source_id],
+                        "configured_device_id": device.device_id,
+                        "remote_entity_id": control_endpoint.entity_id,
+                    }
+                )
+    return {"bindings": sorted(bindings, key=lambda binding: binding["candidate_id"])}
 
 
 def climate_setup_revision(

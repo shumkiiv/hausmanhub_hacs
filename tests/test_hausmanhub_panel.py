@@ -18,7 +18,7 @@ PANEL_JS = (
     / "frontend"
     / "hausman-hub-panel.js"
 )
-MAX_PANEL_JS_BYTES = 210 * 1024
+MAX_PANEL_JS_BYTES = 230 * 1024
 
 
 class PanelJavaScriptContractTest(unittest.TestCase):
@@ -450,7 +450,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.26.2",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.27.0",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },

@@ -43,6 +43,7 @@ from .climate_application import ClimateDesiredStateChanges
 from .climate_equipment import build_climate_equipment_snapshot
 from .ai_assistant_evidence import ai_evidence_from_observation
 from .climate_ha_adapters import build_climate_ha_call_plan
+from .ir_code_service import IRCodeService
 from .climate_ha_observations import (
     ClimateHaObservationViolation,
     ClimateHaStateView,
@@ -97,6 +98,7 @@ from .climate_registry import (
 from .climate_setup import (
     build_climate_contour_draft_setup,
     climate_draft_save_receipt,
+    climate_ir_code_bindings,
     climate_setup_options,
     create_climate_contour_draft,
     current_climate_contour_setup,
@@ -204,6 +206,7 @@ class ClimateRuntime:
         protection_store: ClimateProtectionStorage | None = None,
         strict_ha_call_executor: ClimateStrictHaCallExecutor | None = None,
         ha_state_view: ClimateHaStateView | None = None,
+        ir_code_service: IRCodeService | None = None,
         operation_id_factory: Callable[[], str] | None = None,
         now_ms: Callable[[], int] | None = None,
         local_now: Callable[[], datetime] | None = None,
@@ -215,6 +218,7 @@ class ClimateRuntime:
         self._protection_store = protection_store
         self._strict_ha_call_executor = strict_ha_call_executor
         self._ha_state_view = ha_state_view
+        self._ir_code_service = ir_code_service
         self._now_ms = now_ms or (lambda: int(time.time() * 1000))
         self._local_now = local_now or (lambda: datetime.now().astimezone())
         self._registry = ClimateRegistry()
@@ -365,6 +369,47 @@ class ClimateRuntime:
                 self._contours,
                 snapshot,
             )
+
+    async def async_ir_code_bindings(self) -> dict[str, object]:
+        """Return current raw-remote bindings for the local IR admin API."""
+
+        async with self._lock:
+            snapshot = await self._async_native_setup_snapshot_unlocked()
+            return climate_ir_code_bindings(
+                self._registry,
+                self._contours,
+                snapshot,
+            )
+
+    async def async_validate_ir_code_binding(
+        self, device_id: str, remote_entity_id: str
+    ) -> str | None:
+        """Return a public violation when an IR request misses its saved raw remote."""
+
+        async with self._lock:
+            device = self._registry.device(device_id)
+            if device is None:
+                return "IR code device is not part of the saved climate contour."
+            contour = self._contours.contour(CLIMATE_CONTOUR_ID)
+            if contour is None or not any(
+                device_id in assignment.device_ids for assignment in contour.rooms
+            ):
+                return "IR code device is not part of the saved climate contour."
+            endpoint = next(
+                (
+                    item
+                    for item in device.endpoints
+                    if item.role.value == "control"
+                ),
+                None,
+            )
+            if (
+                endpoint is None
+                or not endpoint.entity_id.startswith("remote.")
+                or endpoint.entity_id != remote_entity_id
+            ):
+                return "IR code remote does not match the saved device control endpoint."
+            return None
 
     async def async_validate_contour_draft(
         self,
@@ -1074,7 +1119,11 @@ class ClimateRuntime:
                 return None
             observation = await self._async_native_climate_observation_unlocked()
             isolation = build_isolated_climate_policy_snapshot(contour, observation)
-            return build_climate_ha_call_plan(self._registry, isolation)
+            return build_climate_ha_call_plan(
+                self._registry,
+                isolation,
+                ir_code_service=self._ir_code_service,
+            )
 
     async def async_run_climate_trial(
         self,
@@ -1089,7 +1138,11 @@ class ClimateRuntime:
             observation = await self._async_native_climate_observation_unlocked()
             isolation = build_isolated_climate_policy_snapshot(contour, observation)
             comparison = build_climate_comparison_snapshot(isolation, observation)
-            call_plan = build_climate_ha_call_plan(self._registry, isolation)
+            call_plan = build_climate_ha_call_plan(
+                self._registry,
+                isolation,
+                ir_code_service=self._ir_code_service,
+            )
             decision = plan_climate_trial(
                 trial_room_id,
                 bridge_mode=self.configuration.climate_bridge_mode,
@@ -1116,7 +1169,11 @@ class ClimateRuntime:
             observation = await self._async_native_climate_observation_unlocked()
             isolation = build_isolated_climate_policy_snapshot(contour, observation)
             comparison = build_climate_comparison_snapshot(isolation, observation)
-            call_plan = build_climate_ha_call_plan(self._registry, isolation)
+            call_plan = build_climate_ha_call_plan(
+                self._registry,
+                isolation,
+                ir_code_service=self._ir_code_service,
+            )
             receipts: list[ClimateTrialReceipt] = []
             for room_id in managed_room_ids:
                 decision = plan_climate_trial(

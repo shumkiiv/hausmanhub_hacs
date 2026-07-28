@@ -61,7 +61,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         self.assertEqual("hausman_hub", manifest["domain"])
         self.assertTrue(manifest["config_flow"])
         self.assertTrue(manifest["single_config_entry"])
-        self.assertEqual("1.26.2", manifest["version"])
+        self.assertEqual("1.27.0", manifest["version"])
 
     def test_current_manifest_version_has_a_plain_change_note(self) -> None:
         manifest = json.loads((INTEGRATION / "manifest.json").read_text(encoding="utf-8"))
@@ -2204,7 +2204,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
                     {field.name for field in fields(guidance)},
                 )
 
-    def test_outer_adapters_keep_execution_to_two_typed_boundaries(self) -> None:
+    def test_outer_adapters_keep_execution_to_typed_boundaries(self) -> None:
         forbidden_fragments = (
             "hass.services",
             "async_call(",
@@ -2216,7 +2216,12 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             "requests",
             "websocket",
         )
-        executor_modules = {"switch.py", "climate_ha_executor.py"}
+        executor_modules = {
+            "switch.py",
+            "climate_ha_executor.py",
+            "ir_code_gateway.py",
+            "ir_code_service.py",
+        }
         source = "\n".join(
             path.read_text(encoding="utf-8").lower()
             for path in INTEGRATION.rglob("*.py")
@@ -2262,6 +2267,23 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         ):
             self.assertNotIn(forbidden_surface, executor_source.lower())
 
+        ir_code_service_source = (
+            INTEGRATION / "application" / "ir_code_service.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("hass.services.async_call(", ir_code_service_source)
+        gateway_source = (INTEGRATION / "ir_code_gateway.py").read_text(encoding="utf-8")
+        self.assertEqual(2, gateway_source.count("hass.services.async_call("))
+        self.assertIn('"remote", "learn_command"', gateway_source)
+        self.assertIn('"send_command"', gateway_source)
+        self.assertIn("blocking=True", gateway_source)
+        for forbidden_surface in (
+            "async_register_entity_service",
+            "async_register(",
+            "requests",
+            "websocket",
+            "async_fire(",
+        ):
+            self.assertNotIn(forbidden_surface, ir_code_service_source.lower())
 
         sensor_source = (INTEGRATION / "sensor.py").read_text(encoding="utf-8")
         self.assertIn("HOME_SUMMARY_COUNT_KEYS", sensor_source)

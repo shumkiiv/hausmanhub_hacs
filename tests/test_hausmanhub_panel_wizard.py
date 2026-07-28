@@ -169,6 +169,7 @@ def get_payloads(
     options: dict | None = None,
     panel: dict | None = None,
     windows: dict | None = None,
+    bindings: dict | None = None,
 ) -> dict:
     return {
         "hausman_hub/v1/admin/panel": panel or PANEL_PAYLOAD,
@@ -176,7 +177,44 @@ def get_payloads(
         "hausman_hub/v1/admin/home-environment": HOME_PAYLOAD,
         "hausman_hub/v1/admin/climate-room-signals": windows or WINDOWS_PAYLOAD,
         "hausman_hub/v1/admin/climate-drafts/current": setup or NOT_CONFIGURED_SETUP,
+        "hausman_hub/v1/admin/ir-codes/bindings": bindings or {"bindings": []},
         "hausman_hub/v1/admin/climate-drafts": options or DRAFT_OPTIONS,
+    }
+
+
+def universal_ir_setup() -> dict:
+    setup = copy.deepcopy(NOT_CONFIGURED_SETUP)
+    setup["rooms"] = [
+        {
+            "id": "living",
+            "name": "Гостиная",
+            "devices": [
+                {
+                    "candidate_id": "candidate_ac",
+                    "control_channel": "universal_ir",
+                    "name": "Пульт Broadlink гостиной",
+                    "type": "air_conditioner",
+                    "type_name": "Кондиционер",
+                }
+            ],
+            "profiles": {
+                "day": {"target_temperature": 25.0},
+                "night": {"target_temperature": 24.0},
+            },
+        }
+    ]
+    return setup
+
+
+def universal_ir_bindings() -> dict:
+    return {
+        "bindings": [
+            {
+                "candidate_id": "candidate_ac",
+                "configured_device_id": "living_air_conditioner",
+                "remote_entity_id": "remote.pult_broadlink_gostinnaya",
+            }
+        ]
     }
 
 
@@ -1141,16 +1179,19 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         if (!validate) throw new Error("home step did not advance to validation");
         validate.fire("click");
         await tick();
-        const tablet = findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
-          && node.textContent === "Продолжить к подключению планшета")[0];
-        if (!tablet) throw new Error("ready validation did not open the tablet step");
-        tablet.fire("click");
-        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
-          && node.textContent === "Перейти к завершению")[0].fire("click");
+        const saveStep = findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Перейти к сохранению")[0];
+        if (!saveStep) throw new Error("ready validation did not open the save step");
+        saveStep.fire("click");
         findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
           && node.textContent === "Сохранить настройку")[0].fire("click");
-        await new Promise((resolve) => setTimeout(resolve, 750));
         await tick(12);
+        const finishTablet = findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Перейти к завершению")[0];
+        if (!finishTablet) throw new Error("save did not open the tablet step");
+        finishTablet.fire("click");
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Открыть панель")[0].fire("click");
         const created = calls.find((call) => call.method === "POST"
           && call.path === "hausman_hub/v1/admin/climate-drafts");
         const saved = calls.find((call) => call.method === "POST"
@@ -1557,6 +1598,385 @@ class PanelFirstRunWizardTest(unittest.TestCase):
           call.method === "GET" && call.path === "hausman_hub/v1/admin/climate-drafts");
         if (optionGets.length < 2) throw new Error("wizard options were not reloaded after conflict");
         if (panel._dirty.wizard !== false) throw new Error("conflict left stale dirty form active");
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_universal_ir_code_source_renders_priority_import_and_collapsed_broadlink(self) -> None:
+        imported = {
+            "codes": [
+                {
+                    "code_id": "living_air_conditioner_off",
+                    "device_id": "living_air_conditioner",
+                    "remote_entity_id": "remote.pult_broadlink_gostinnaya",
+                    "command_name": "ac.off",
+                    "code_data": "CODE_OFF",
+                    "source": "manual",
+                    "created_at": 1784280000,
+                }
+            ]
+        }
+        scan = {
+            "smartir": {"1001": "Daikin FTX"},
+            "broadlink_remotes": [],
+            "smartir_catalog": [
+                {
+                    "brand": "Daikin",
+                    "models": [
+                        {
+                            "device_code": "1001",
+                            "model": "FTX",
+                            "name": "Daikin FTX",
+                            "commands": [
+                                {"command_name": "ac.off", "code_data": "SMARTIR_OFF"}
+                            ],
+                        }
+                    ],
+                }
+            ],
+            "broadlink_catalog": [
+                {
+                    "remote_entity_id": "remote.other_broadlink",
+                    "commands": [
+                        {"command_name": "broadlink_only", "code_data": "BROADLINK_COOL", "slot": 0}
+                    ],
+                }
+            ],
+        }
+        get_table = get_payloads(
+            setup=universal_ir_setup(), bindings=universal_ir_bindings()
+        )
+        get_table.update(
+            {
+                "hausman_hub/v1/admin/ir-codes": imported,
+                "hausman_hub/v1/admin/ir-codes/scan": scan,
+            }
+        )
+        script = panel_script(
+            get_table,
+            {"hausman_hub/v1/admin/ir-codes": {"ok": True, "code_id": "new_code"}},
+            """
+        panel._firstRun.options = {rooms: [], devices: [], control_channels: []};
+        panel._firstRun.step = "code_source";
+        panel._firstRun.ir = {
+          activeDeviceId: "living_air_conditioner", broadlinkExpanded: false,
+          codes: getTable["hausman_hub/v1/admin/ir-codes"].codes,
+          error: "", loading: false, manual: {deviceId: null, index: 0, statuses: {}},
+          scan: getTable["hausman_hub/v1/admin/ir-codes/scan"],
+          smartir: {brand: "", deviceCode: "", commandName: ""},
+        };
+        panel._render();
+        const text = textOf(panel.shadowRoot);
+        ["База кодов SmartIR", "Выученные коды Broadlink", "Ручное обучение"].reduce((cursor, title) => {
+          const next = text.indexOf(title, cursor + 1);
+          if (next <= cursor) throw new Error("IR source priority order mismatch at " + title);
+          return next;
+        }, -1);
+        if (!text.includes("Пульт Broadlink гостиной")
+          || !text.includes("Канал: universal_ir")
+          || !text.includes("remote.pult_broadlink_gostinnaya")) {
+          throw new Error("universal IR device summary is incomplete");
+        }
+        if (text.includes("broadlink_only")) {
+          throw new Error("Broadlink commands must stay collapsed initially");
+        }
+        const showCommands = findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Показать команды")[0];
+        showCommands.fire("click");
+        if (!textOf(panel.shadowRoot).includes("broadlink_only")) {
+          throw new Error("Broadlink commands did not expand");
+        }
+        const smartirImport = findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Импортировать")[0];
+        smartirImport.fire("click");
+        await tick();
+        const importedCall = calls.find((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/admin/ir-codes");
+        if (!importedCall || JSON.stringify(importedCall.payload) !== JSON.stringify({
+          device_id: "living_air_conditioner",
+          remote_entity_id: "remote.pult_broadlink_gostinnaya",
+          command_name: "ac.off",
+          code_data: "SMARTIR_OFF",
+          source: "smartir",
+        })) {
+          throw new Error("SmartIR import payload mismatch: " + JSON.stringify(importedCall && importedCall.payload));
+        }
+        if (!textOf(panel.shadowRoot).includes("ir_command_not_learned")) {
+          throw new Error("IR warning note is missing");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_manual_ir_learning_reports_timeout_then_progresses(self) -> None:
+        get_table = get_payloads(
+            setup=universal_ir_setup(), bindings=universal_ir_bindings()
+        )
+        get_table.update(
+            {
+                "hausman_hub/v1/admin/ir-codes": {"codes": []},
+                "hausman_hub/v1/admin/ir-codes/scan": {
+                    "smartir_catalog": [], "broadlink_catalog": [],
+                },
+            }
+        )
+        script = panel_script(
+            get_table,
+            {
+                "hausman_hub/v1/admin/ir-codes/learn": [
+                    {"__fail": 408}, {"ok": True, "code_id": "learned_off", "source": "manual"},
+                ]
+            },
+            """
+        panel._firstRun.options = {rooms: [], devices: [], control_channels: []};
+        panel._firstRun.step = "code_source";
+        panel._firstRun.ir = {
+          activeDeviceId: "living_air_conditioner", broadlinkExpanded: false, codes: [], error: "",
+          loading: false, manual: {deviceId: null, index: 0, statuses: {}},
+          scan: getTable["hausman_hub/v1/admin/ir-codes/scan"],
+          smartir: {brand: "", deviceCode: "", commandName: ""},
+        };
+        panel._render();
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать обучение")[0].fire("click");
+        await tick();
+        if (!textOf(panel.shadowRoot).includes("Время ожидания истекло")
+          || !textOf(panel.shadowRoot).includes("Повторить обучение")) {
+          throw new Error("manual learning timeout retry hint is missing");
+        }
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Повторить обучение")[0].fire("click");
+        await tick();
+        const learns = calls.filter((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/admin/ir-codes/learn");
+        if (learns.length !== 2 || learns.some((call) => call.payload.command_name !== "ac.off")) {
+          throw new Error("manual learning did not retry the first off command");
+        }
+        if (!textOf(panel.shadowRoot).includes("Готово")
+          || !textOf(panel.shadowRoot).includes("cool 25.0 °C")) {
+          throw new Error("manual sequence did not retain progress and profile presets");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_imported_ir_codes_test_delete_and_non_ir_step_is_absent(self) -> None:
+        imported = {
+            "codes": [
+                {
+                    "code_id": "living_air_conditioner_off",
+                    "device_id": "living_air_conditioner",
+                    "remote_entity_id": "remote.pult_broadlink_gostinnaya",
+                    "command_name": "ac.off",
+                    "code_data": "CODE_OFF",
+                    "source": "manual",
+                    "created_at": 1784280000,
+                }
+            ]
+        }
+        get_table = get_payloads(
+            setup=universal_ir_setup(), bindings=universal_ir_bindings()
+        )
+        get_table.update(
+            {
+                "hausman_hub/v1/admin/ir-codes": imported,
+                "hausman_hub/v1/admin/ir-codes/scan": {"smartir_catalog": [], "broadlink_catalog": []},
+            }
+        )
+        script = panel_script(
+            get_table,
+            {
+                "hausman_hub/v1/admin/ir-codes/test": {"ok": True},
+                "hausman_hub/v1/admin/ir-codes/delete": {"ok": True},
+            },
+            """
+        panel._firstRun.options = {rooms: [], devices: [], control_channels: []};
+        panel._firstRun.step = "code_source";
+        panel._firstRun.ir = {
+          activeDeviceId: "living_air_conditioner", broadlinkExpanded: false,
+          codes: getTable["hausman_hub/v1/admin/ir-codes"].codes, error: "", loading: false,
+          manual: {deviceId: null, index: 0, statuses: {}},
+          scan: getTable["hausman_hub/v1/admin/ir-codes/scan"],
+          smartir: {brand: "", deviceCode: "", commandName: ""},
+        };
+        panel._render();
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Тест-отправка").slice(-1)[0].fire("click");
+        await tick();
+        const testCall = calls.find((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/admin/ir-codes/test");
+        if (!testCall || JSON.stringify(testCall.payload) !== JSON.stringify({code_id: "living_air_conditioner_off"})) {
+          throw new Error("imported code test payload mismatch");
+        }
+        const remove = findAll(panel.shadowRoot, (node) => node["aria-label"] === "Удалить код ac.off")[0];
+        getTable["hausman_hub/v1/admin/ir-codes"] = {codes: []};
+        remove.fire("click");
+        await tick();
+        const deleteCall = calls.find((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/admin/ir-codes/delete");
+        if (!deleteCall || JSON.stringify(deleteCall.payload) !== JSON.stringify({code_id: "living_air_conditioner_off"})) {
+          throw new Error("imported code delete payload mismatch");
+        }
+        panel._settings.setup.rooms[0].devices[0].control_channel = "direct_wifi";
+        panel._firstRun.ir = {activeDeviceId: null, broadlinkExpanded: false, codes: [], error: "",
+          loading: false, manual: {deviceId: null, index: 0, statuses: {}}, scan: {},
+          smartir: {brand: "", deviceCode: "", commandName: ""}};
+        panel._render();
+        if (textOf(panel.shadowRoot).includes("База кодов SmartIR")) {
+          throw new Error("IR code sources rendered for a non-IR device");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_saved_universal_ir_contour_opens_code_source_with_runtime_device_id(self) -> None:
+        saved_setup = universal_ir_setup()
+        saved_setup.update(
+            {
+                "status": "ready",
+                "editing_allowed": True,
+                "name": "Климат",
+                "mode": "automatic",
+                "schedule": {"enabled": False, "day_start": "07:00", "night_start": "23:00"},
+            }
+        )
+        get_table = get_payloads(bindings=universal_ir_bindings())
+        get_table.update(
+            {
+                "hausman_hub/v1/admin/ir-codes": {"codes": []},
+                "hausman_hub/v1/admin/ir-codes/scan": {"smartir_catalog": [], "broadlink_catalog": []},
+            }
+        )
+        script = panel_script(
+            get_table,
+            {
+                "hausman_hub/v1/admin/climate-drafts/save": {"status": "saved"},
+                "hausman_hub/v1/admin/climate-profiles": {"setup_revision": 6},
+                "hausman_hub/v1/admin/climate-schedule": {"status": "saved"},
+            },
+            f"""
+        getTable["hausman_hub/v1/admin/climate-drafts/current"] = {json.dumps(saved_setup, ensure_ascii=False)};
+        panel._firstRun.options = {{rooms: [], devices: [], control_channels: []}};
+        panel._firstRun.draft = {{status: "created"}};
+        panel._firstRun.validation = {{status: "ready", save_allowed: true}};
+        panel._firstRun.step = "completion";
+        panel._saveFirstRun();
+        await tick(16);
+        if (panel._firstRun.step !== "code_source" || panel._firstRun.completed) {{
+          throw new Error("saved universal IR contour did not open the code-source step");
+        }}
+        const scans = calls.filter((call) => call.method === "GET"
+          && call.path === "hausman_hub/v1/admin/ir-codes/scan");
+        if (scans.length !== 1 || !textOf(panel.shadowRoot).includes("remote.pult_broadlink_gostinnaya")) {{
+          throw new Error("code source did not use the saved runtime remote binding");
+        }}
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Продолжить к подключению планшета")[0].fire("click");
+        if (!textOf(panel.shadowRoot).includes("Подключение планшета")) {{
+          throw new Error("code-source continuation did not retain the wizard");
+        }}
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Перейти к завершению")[0].fire("click");
+        if (!findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Открыть панель")[0]) {{
+          throw new Error("post-save completion did not offer panel navigation");
+        }}
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_configured_universal_ir_contour_reopens_resumable_code_source(self) -> None:
+        setup = universal_ir_setup()
+        setup.update({"status": "ready", "editing_allowed": True, "name": "Климат"})
+        get_table = get_payloads(setup=setup, bindings=universal_ir_bindings())
+        get_table.update(
+            {
+                "hausman_hub/v1/admin/ir-codes": {"codes": []},
+                "hausman_hub/v1/admin/ir-codes/scan": {
+                    "smartir_catalog": [], "broadlink_catalog": [],
+                },
+            }
+        )
+        script = panel_script(
+            get_table,
+            {},
+            """
+        const resume = findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Настроить IR-коды")[0];
+        if (!resume) throw new Error("configured contour has no IR setup entry point");
+        resume.fire("click");
+        await tick();
+        if (!textOf(panel.shadowRoot).includes("Источник IR-кодов")
+          || !textOf(panel.shadowRoot).includes("remote.pult_broadlink_gostinnaya")) {
+          throw new Error("resumable IR setup did not render saved device binding");
+        }
+        const scans = calls.filter((call) => call.method === "GET"
+          && call.path === "hausman_hub/v1/admin/ir-codes/scan");
+        if (scans.length !== 1) throw new Error("resumable IR setup did not load sources once");
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_smartir_import_uses_the_latest_selected_command(self) -> None:
+        scan = {
+            "smartir_catalog": [
+                {
+                    "brand": "Daikin",
+                    "models": [
+                        {
+                            "device_code": "1001",
+                            "model": "FTX",
+                            "name": "Daikin FTX",
+                            "commands": [
+                                {"command_name": "ac.off", "code_data": "SMARTIR_OFF"},
+                                {"command_name": "ac.cool.25_0", "code_data": "SMARTIR_COOL"},
+                            ],
+                        }
+                    ],
+                }
+            ],
+            "broadlink_catalog": [],
+        }
+        get_table = get_payloads(
+            setup=universal_ir_setup(), bindings=universal_ir_bindings()
+        )
+        get_table.update(
+            {
+                "hausman_hub/v1/admin/ir-codes": {"codes": []},
+                "hausman_hub/v1/admin/ir-codes/scan": scan,
+            }
+        )
+        script = panel_script(
+            get_table,
+            {"hausman_hub/v1/admin/ir-codes": {"ok": True, "code_id": "new_code"}},
+            """
+        panel._firstRun.options = {rooms: [], devices: [], control_channels: []};
+        panel._firstRun.step = "code_source";
+        panel._firstRun.ir = {
+          activeDeviceId: "living_air_conditioner", broadlinkExpanded: false, codes: [], error: "",
+          loading: false, manual: {deviceId: null, index: 0, statuses: {}},
+          scan: getTable["hausman_hub/v1/admin/ir-codes/scan"],
+          smartir: {brand: "", deviceCode: "", commandName: ""},
+        };
+        panel._render();
+        const commandPicker = findAll(panel.shadowRoot, (node) => node.tagName === "SELECT").slice(-1)[0];
+        commandPicker.value = "ac.cool.25_0";
+        commandPicker.fire("change");
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Импортировать")[0].fire("click");
+        await tick();
+        const imported = calls.find((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/admin/ir-codes");
+        if (!imported || imported.payload.command_name !== "ac.cool.25_0"
+          || imported.payload.code_data !== "SMARTIR_COOL") {
+          throw new Error("SmartIR import used stale command selection");
+        }
             """,
         )
         completed = run_panel_script(script)

@@ -21,6 +21,7 @@ from ..domain.climate_ha_calls import (
 )
 from ..domain.climate_isolation import ClimateIsolationSnapshot
 from ..domain.climate_policy import ClimateFinalDeviceAction, ClimateFinalDevicePlan
+from ..domain.ir_codes import required_ir_command_key
 
 
 _OBSERVE_ACTIONS = frozenset(
@@ -40,6 +41,7 @@ _STOP_ACTIONS = frozenset(
 def build_climate_ha_call_plan(
     registry: ClimateRegistry,
     isolation: ClimateIsolationSnapshot,
+    ir_code_service: object | None = None,
 ) -> ClimateHaCallPlanSnapshot:
     """Translate one isolated policy snapshot into strict HA call plans."""
 
@@ -54,6 +56,7 @@ def build_climate_ha_call_plan(
                 _translate_device(
                     _registry_device(registry, plan.device_id),
                     plan,
+                    ir_code_service=ir_code_service,
                 )
                 for plan in (result.policy.devices if result.policy is not None else ())
             ),
@@ -81,6 +84,7 @@ def _registry_device(
 def _translate_device(
     device: ClimateDevice | None,
     plan: ClimateFinalDevicePlan,
+    ir_code_service: object | None = None,
 ) -> ClimateHaDeviceCallPlan:
     limits: list[ClimateHaCallLimit] = []
     if device is None:
@@ -91,8 +95,10 @@ def _translate_device(
     elif plan.action is ClimateFinalDeviceAction.HOLD:
         limits.append(ClimateHaCallLimit.HOLD_STATE)
     else:
-        calls = _service_calls(device, plan, limits)
-    if plan.quiet is not None:
+        calls = _service_calls(device, plan, limits, ir_code_service=ir_code_service)
+    if plan.quiet is not None and not any(
+        call.service is ClimateHaService.REMOTE_SEND_COMMAND for call in calls
+    ):
         limits.append(ClimateHaCallLimit.QUIET_NOT_TRANSLATED)
     ordered = tuple(limit for limit in ClimateHaCallLimit if limit in limits)
     return ClimateHaDeviceCallPlan(
@@ -109,15 +115,17 @@ def _service_calls(
     device: ClimateDevice,
     plan: ClimateFinalDevicePlan,
     limits: list[ClimateHaCallLimit],
+    ir_code_service: object | None = None,
 ) -> tuple[ClimateHaServiceCall, ...]:
     endpoint = device.endpoint(ClimateEndpointRole.CONTROL)
     if endpoint is not None and endpoint.entity_id.split(".", 1)[0] == "remote":
-        # The control channel is an honest transport label, not a blocker:
-        # climate facades (SmartIR etc.) translate through standard climate
-        # services for any channel. Only a raw IR/RF remote endpoint has no
-        # codebook here and therefore stays untranslatable.
-        limits.append(ClimateHaCallLimit.UNSUPPORTED_CONTROL_CHANNEL)
-        return ()
+        return _remote_ir_service_call(
+            device,
+            plan,
+            endpoint.entity_id,
+            limits,
+            ir_code_service,
+        )
     required = _required_capabilities(device.kind, plan.action)
     if required is None or (
         plan.target_temperature is None
@@ -239,4 +247,43 @@ def _temperature_required(kind: ClimateDeviceKind, action: ClimateFinalDeviceAct
             ClimateDeviceKind.FLOOR_HEATING,
         }
         and action is ClimateFinalDeviceAction.SET_TEMPERATURE
+    )
+
+
+def _remote_ir_service_call(
+    device: ClimateDevice,
+    plan: ClimateFinalDevicePlan,
+    remote_entity_id: str,
+    limits: list[ClimateHaCallLimit],
+    ir_code_service: object | None,
+) -> tuple[ClimateHaServiceCall, ...]:
+    command_name = required_ir_command_key(
+        device.kind,
+        plan.action,
+        plan.target_temperature,
+    )
+    if command_name is None:
+        limits.append(ClimateHaCallLimit.UNSUPPORTED_ACTION)
+        return ()
+    getter = None if ir_code_service is None else getattr(
+        ir_code_service, "code_for_command", None
+    )
+    code = (
+        None
+        if getter is None
+        else getter(device.device_id, command_name)
+    )
+    if code is None:
+        limits.append(ClimateHaCallLimit.IR_COMMAND_NOT_LEARNED)
+        return ()
+    code_data = code.code_data
+    return (
+        ClimateHaServiceCall(
+            service=ClimateHaService.REMOTE_SEND_COMMAND,
+            entity_id=remote_entity_id,
+            device=device.device_id,
+            command=(
+                code_data if code_data.startswith("b64:") else f"b64:{code_data}"
+            ),
+        ),
     )

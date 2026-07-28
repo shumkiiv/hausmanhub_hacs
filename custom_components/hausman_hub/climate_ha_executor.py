@@ -39,6 +39,9 @@ class HomeAssistantClimateCallExecutor:
                 data["fan_mode"] = call.fan_mode.value  # type: ignore[union-attr]
             elif call.service is ClimateHaService.HUMIDIFIER_SET_HUMIDITY:
                 data["humidity"] = call.humidity
+            elif call.service is ClimateHaService.REMOTE_SEND_COMMAND:
+                data["device"] = call.device
+                data["command"] = call.command
             try:
                 await self._hass.services.async_call(
                     domain,

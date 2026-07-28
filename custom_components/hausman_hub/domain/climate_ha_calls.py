@@ -35,6 +35,7 @@ class ClimateHaService(StrEnum):
     HUMIDIFIER_TURN_ON = "humidifier.turn_on"
     HUMIDIFIER_TURN_OFF = "humidifier.turn_off"
     HUMIDIFIER_SET_HUMIDITY = "humidifier.set_humidity"
+    REMOTE_SEND_COMMAND = "remote.send_command"
 
 
 class ClimateHaHvacMode(StrEnum):
@@ -54,6 +55,7 @@ class ClimateHaCallLimit(StrEnum):
     MISSING_CONTROL_ENDPOINT = "missing_control_endpoint"
     MISSING_CAPABILITY = "missing_capability"
     UNSUPPORTED_CONTROL_CHANNEL = "unsupported_control_channel"
+    IR_COMMAND_NOT_LEARNED = "ir_command_not_learned"
     NOTHING_TO_TRANSLATE = "nothing_to_translate"
     QUIET_NOT_TRANSLATED = "quiet_not_translated"
 
@@ -71,6 +73,8 @@ class ClimateHaServiceCall:
     temperature: float | None = None
     fan_mode: ClimateFanMode | None = None
     humidity: int | None = None
+    device: str | None = None
+    command: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.service, ClimateHaService):
@@ -108,6 +112,10 @@ class ClimateHaServiceCall:
             ClimateHaService.HUMIDIFIER_SET_HUMIDITY: (self.humidity is not None, 4),
             ClimateHaService.HUMIDIFIER_TURN_ON: (True, 0),
             ClimateHaService.HUMIDIFIER_TURN_OFF: (True, 0),
+            ClimateHaService.REMOTE_SEND_COMMAND: (
+                self.device is not None and self.command is not None,
+                5,
+            ),
         }
         present, expected = values[self.service]
         fields = (
@@ -116,6 +124,19 @@ class ClimateHaServiceCall:
             self.fan_mode is not None,
             self.humidity is not None,
         )
+        if self.service is ClimateHaService.REMOTE_SEND_COMMAND:
+            if (
+                not present
+                or any(fields)
+                or not isinstance(self.device, str)
+                or not self.device
+                or not isinstance(self.command, str)
+                or not self.command
+            ):
+                raise ClimateHaCallViolation(
+                    "call values must exactly match its service"
+                )
+            return
         if not present or sum(fields) != (0 if expected == 0 else 1):
             raise ClimateHaCallViolation(
                 "call values must exactly match its service"

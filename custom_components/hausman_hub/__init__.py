@@ -49,6 +49,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .climate_protection_storage import HomeAssistantClimateProtectionStore
     from .climate_storage import HomeAssistantClimateRegistryStore
     from .contour_storage import HomeAssistantContourStore
+    from .application.ir_code_service import IRCodeService
+    from .application.ir_code_sources import HomeAssistantIRCodeCatalog
+    from .ir_code_gateway import HomeAssistantIRCodeTransmitter
+    from .ir_code_storage import HomeAssistantIRCodeStore
     from .local_summary import register_local_summary_access
 
     await hass.config_entries.async_forward_entry_setups(
@@ -56,6 +60,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         (Platform.SENSOR, Platform.SWITCH),
     )
     contour_store = HomeAssistantContourStore(hass, entry.entry_id)
+    ir_code_store = HomeAssistantIRCodeStore(hass, entry.entry_id)
+    ir_code_service = IRCodeService(
+        ir_code_store,
+        HomeAssistantIRCodeCatalog(hass),
+        HomeAssistantIRCodeTransmitter(hass),
+    )
+    await ir_code_service.async_load()
     if configuration.local_summary_enabled:
         register_local_summary_access(hass, entry)
     climate_runtime = ClimateRuntime(
@@ -66,8 +77,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         protection_store=HomeAssistantClimateProtectionStore(hass, entry.entry_id),
         strict_ha_call_executor=HomeAssistantClimateCallExecutor(hass),
         ha_state_view=HomeAssistantClimateStateView(hass),
+        ir_code_service=ir_code_service,
         local_now=dt_util.now,
     )
+    ir_code_service.set_binding_validator(climate_runtime)
     await climate_runtime.async_start()
     from .ai_assistant_setup import async_start_ai_assistant
     from .climate_schedule import async_start_climate_schedule
@@ -91,7 +104,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     scenario_service.set_executor(scenario_executor)
 
-    register_climate_api(hass, climate_runtime, ai_assistant, scenario_service)
+    register_climate_api(
+        hass, climate_runtime, ai_assistant, scenario_service, ir_code_service,
+    )
     from .panel import async_register_hausmanhub_panel
 
     await async_register_hausmanhub_panel(hass)

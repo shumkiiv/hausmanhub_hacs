@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
 import json
 from pathlib import Path
 import unittest
@@ -16,6 +17,7 @@ from custom_components.hausman_hub.application.climate_registry import (
     registry_to_payload,
 )
 from custom_components.hausman_hub.application.climate_setup import (
+    climate_ir_code_bindings,
     current_climate_contour_setup,
 )
 from custom_components.hausman_hub.application.contours import (
@@ -26,7 +28,12 @@ from custom_components.hausman_hub.application.contours import (
     with_climate_schedule,
     with_climate_temporary_temperature,
 )
-from custom_components.hausman_hub.domain.climate import ClimateRegistry
+from custom_components.hausman_hub.domain.climate import (
+    ClimateControlChannel,
+    ClimateEndpoint,
+    ClimateEndpointRole,
+    ClimateRegistry,
+)
 from custom_components.hausman_hub.domain.contours import (
     ClimateProfile,
     ContourRegistry,
@@ -183,6 +190,9 @@ class ClimateSetupCurrentTest(unittest.TestCase):
         with self.assertRaises(Exception):
             self.validator.validate(invalid)
 
+    def test_1262_v1_fixture_remains_schema_compatible(self) -> None:
+        self.validator.validate(load_json(FIXTURE))
+
     def test_stale_devices_block_editing_but_keep_saved_profiles_visible(self) -> None:
         registry, contours, snapshot = configured_setup()
         ready = current_climate_contour_setup(
@@ -217,6 +227,49 @@ class ClimateSetupCurrentTest(unittest.TestCase):
             snapshot,  # type: ignore[arg-type]
         )
         self.assertNotEqual(ready["setup_revision"], changed["setup_revision"])
+
+    def test_universal_ir_bindings_stay_out_of_the_v1_current_setup_payload(self) -> None:
+        registry, contours, snapshot = configured_setup()
+        original = registry.devices[0]
+        remote_device = replace(
+            original,
+            control_channel=ClimateControlChannel.UNIVERSAL_IR,
+            endpoints=(
+                ClimateEndpoint(
+                    ClimateEndpointRole.CONTROL,
+                    "remote.pult_broadlink_gostinnaya",
+                ),
+            ),
+        )
+        registry = ClimateRegistry(
+            rooms=registry.rooms,
+            devices=(remote_device, *registry.devices[1:]),
+            home=registry.home,
+        )
+
+        result = current_climate_contour_setup(registry, contours, snapshot)
+        self.validator.validate(result)
+        device = next(
+            device
+            for room in result["rooms"]
+            for device in room["devices"]
+            if device["candidate_id"] == "candidate_0001"
+        )
+
+        self.assertNotIn("configured_device_id", device)
+        self.assertNotIn("remote_entity_id", device)
+        self.assertEqual(
+            {
+                "bindings": [
+                    {
+                        "candidate_id": "candidate_0001",
+                        "configured_device_id": remote_device.device_id,
+                        "remote_entity_id": "remote.pult_broadlink_gostinnaya",
+                    }
+                ]
+            },
+            climate_ir_code_bindings(registry, contours, snapshot),
+        )
 
 
 if __name__ == "__main__":

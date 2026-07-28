@@ -54,6 +54,7 @@ def build_climate_application_plan(
     fingerprint: str,
     target_room_ids: tuple[str, ...],
     desired_state_changes: ClimateDesiredStateChanges,
+    ir_code_service: object | None = None,
 ) -> ClimateApplicationPlan:
     if not isinstance(contour, ContourDefinition) or contour.contour_id != "climate":
         raise ClimateApplicationViolation("climate contour is unavailable")
@@ -68,7 +69,11 @@ def build_climate_application_plan(
     target_ids = _contour_ordered_target_ids(contour, target_room_ids)
     isolation = build_isolated_climate_policy_snapshot(contour, observation)
     comparison = build_climate_comparison_snapshot(isolation, observation)
-    call_plan = build_climate_ha_call_plan(registry, isolation)
+    call_plan = build_climate_ha_call_plan(
+        registry,
+        isolation,
+        ir_code_service=ir_code_service,
+    )
     gates = tuple(
         _gate_room(
             room_id,

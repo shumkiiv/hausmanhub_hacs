@@ -1740,7 +1740,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.26.2", panel.payload["integration_version"])
+        self.assertEqual("1.27.0", panel.payload["integration_version"])
 
     def test_admin_panel_accepts_ipv6_link_local_admin_from_mdns(self) -> None:
         """A local admin may open the panel when mDNS selects IPv6 link-local."""
@@ -2278,7 +2278,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertFalse(hasattr(self.view, method))
 
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
-        self.assertEqual(33, len(self.hass.http.views))
+        self.assertEqual(39, len(self.hass.http.views))
         self.assertEqual(
             1,
             sum(
@@ -2567,7 +2567,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             [(closed_entry, ("sensor", "switch"))],
             closed_hass.config_entries.forwarded,
         )
-        self.assertEqual(32, len(closed_hass.http.views))
+        self.assertEqual(38, len(closed_hass.http.views))
         self.assertEqual(
             {
                 "/api/hausman_hub/v1/capabilities",
@@ -2602,6 +2602,12 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 "/api/hausman_hub/v1/admin/scenarios/delete",
                 "/api/hausman_hub/v1/admin/scenarios/run",
                 "/api/hausman_hub/v1/admin/scenarios/test",
+                "/api/hausman_hub/v1/admin/ir-codes",
+                "/api/hausman_hub/v1/admin/ir-codes/scan",
+                "/api/hausman_hub/v1/admin/ir-codes/bindings",
+                "/api/hausman_hub/v1/admin/ir-codes/learn",
+                "/api/hausman_hub/v1/admin/ir-codes/test",
+                "/api/hausman_hub/v1/admin/ir-codes/delete",
             },
             {view.url for view in closed_hass.http.views},
         )

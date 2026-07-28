@@ -18,6 +18,12 @@ const SCENARIOS_TEST_API = "hausman_hub/v1/admin/scenarios/test";
 const SCENARIOS_DELETE_API = "hausman_hub/v1/admin/scenarios/delete";
 const SCENARIOS_RUN_API = "hausman_hub/v1/admin/scenarios/run";
 const CONNECTION_SETTINGS_API = "hausman_hub/v1/admin/connection-settings";
+const IR_CODES_API = "hausman_hub/v1/admin/ir-codes";
+const IR_CODES_SCAN_API = `${IR_CODES_API}/scan`;
+const IR_CODES_LEARN_API = `${IR_CODES_API}/learn`;
+const IR_CODES_TEST_API = `${IR_CODES_API}/test`;
+const IR_CODES_DELETE_API = `${IR_CODES_API}/delete`;
+const IR_CODE_BINDINGS_API = `${IR_CODES_API}/bindings`;
 const REFRESH_MS = 30000;
 
 const PROFILE_CONTRACT = { name: "hausman-hub-climate-profile-update-request", version: 1 };
@@ -35,7 +41,7 @@ const CONTROL_CHANNEL_LABELS = {
   direct_wifi: "Прямое управление (WiFi)",
 };
 const FIRST_RUN_STEPS = [
-  "instructions", "rooms", "room", "home", "validation", "tablet", "completion", "success",
+  "instructions", "rooms", "room", "home", "validation", "save", "code_source", "tablet", "completion", "success",
 ];
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 const ZIGBEE2MQTT_IMAGE_PATTERN =
@@ -105,6 +111,7 @@ const ICON_PATHS = {
   chevron: "M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z",
   device: "M4 6h18V4H4c-1.1 0-2 .9-2 2v11H0v3h14v-3H4zm19 2h-6c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h6c.55 0 1-.45 1-1V9c0-.55-.45-1-1-1m-1 9h-4v-7h4z",
   warning: "M1 21h22L12 2zm12-3h-2v-2h2zm0-4h-2v-4h2z",
+  trash: "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6zm3.46-7.12 1.41-1.41L12 11.59l1.12-1.12 1.41 1.41L13.41 13l1.12 1.12-1.41 1.41L12 14.41l-1.12 1.12-1.41-1.41L10.59 13zM15.5 4l-1-1h-5l-1 1H5v2h14V4z",
   sun: "M6.76 4.84l-1.8-1.79-1.41 1.41 1.79 1.79 1.42-1.41zM4 10.5H1v2h3v-2zm9-9.95h-2V3.5h2V.55zm7.45 3.91l-1.41-1.41-1.79 1.79 1.41 1.41 1.79-1.79zm-3.21 13.7l1.79 1.8 1.41-1.41-1.8-1.79-1.4 1.4zM20 10.5v2h3v-2h-3zm-8-5c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm-1 16.95h2V19.5h-2v2.95zm-7.45-3.91l1.41 1.41 1.79-1.8-1.41-1.41-1.79 1.8z",
   moon: "M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z",
   auto: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18V4c4.41 0 8 3.59 8 8s-3.59 8-8 8z",
@@ -178,12 +185,23 @@ class HausmanHubPanel extends HTMLElement {
     this._wizardButtons = null;
     this._firstRun = {
       completed: false,
+      contourSaved: false,
       conflict: false,
       deferred: false,
       draft: null,
       fields: {},
       home: null,
       issues: [],
+      ir: {
+        activeDeviceId: null,
+        broadlinkExpanded: false,
+        codes: [],
+        error: "",
+        loading: false,
+        manual: { deviceId: null, index: 0, statuses: {} },
+        scan: null,
+        smartir: { brand: "", deviceCode: "", commandName: "" },
+      },
       loading: false,
       options: null,
       optionsError: false,
@@ -255,6 +273,7 @@ class HausmanHubPanel extends HTMLElement {
         this._hass.callApi("GET", HOME_API).catch(() => null),
         this._hass.callApi("GET", WINDOWS_API).catch(() => null),
         this._hass.callApi("GET", SETUP_API).catch(() => null),
+        this._hass.callApi("GET", IR_CODE_BINDINGS_API).catch(() => ({ bindings: [] })),
       ]);
       this._data = results[0];
       this._settings = {
@@ -262,6 +281,7 @@ class HausmanHubPanel extends HTMLElement {
         home: results[2],
         windows: results[3],
         setup: results[4],
+        irBindings: results[5],
       };
       this._loadScenarios();
       this._loadSettings();
@@ -661,7 +681,22 @@ class HausmanHubPanel extends HTMLElement {
         border-radius:12px; background:var(--secondary-background-color,#f2f4f5); }
       .wizard-hint { margin:12px 0 0; padding:12px; border:1px dashed var(--divider-color,#ddd);
         border-radius:12px; color:var(--secondary-text-color,#5b5b5b); }
-      .wizard-report ul { margin:8px 0 0; padding-left:20px; }
+       .wizard-report ul { margin:8px 0 0; padding-left:20px; }
+       .ir-source-card { margin:14px 0; padding:15px; border:1px solid var(--divider-color,#ddd);
+         border-radius:14px; background:var(--secondary-background-color,#f2f4f5); }
+       .ir-source-card.is-recommended { border-color:color-mix(in srgb,var(--primary-color,#03a9f4) 48%,var(--divider-color,#ddd)); }
+       .ir-source-card.is-muted { opacity:.82; }
+       .ir-device-summary { display:flex; flex-wrap:wrap; align-items:center; gap:7px; margin:0 0 14px; }
+       .ir-code-list { display:grid; gap:7px; margin-top:10px; }
+       .ir-code-row { display:grid; grid-template-columns:minmax(0,1fr) auto auto; align-items:center; gap:8px;
+         padding:9px 0; border-top:1px solid var(--divider-color,#ddd); font-size:13px; }
+       .ir-code-row:first-child { border-top:0; }
+       .ir-icon-action { display:inline-grid; place-items:center; min-width:40px; padding:8px; }
+       .ir-icon-action .icon { width:18px; height:18px; }
+       .ir-manual-progress { display:grid; gap:7px; margin:10px 0; }
+       .ir-manual-progress > div { display:flex; flex-wrap:wrap; align-items:center; gap:8px; font-size:13px; }
+       .ir-manual-progress .is-ready { color:var(--success-color,#43a047); }
+       .ir-manual-progress .is-timeout { color:var(--warning-color,#F0A23C); }
       .wizard-tablet-url { width:100%; max-width:520px; }
       .profile-room { margin-bottom:16px; }
       .profile-columns { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin-top:14px; }
@@ -1412,8 +1447,14 @@ class HausmanHubPanel extends HTMLElement {
 
   _isFirstRunActive() {
     const setup = this._settings.setup;
+    const postSaveStep = this._firstRun.contourSaved && [
+      "code_source", "tablet", "completion",
+    ].includes(this._firstRun.step);
     return Boolean(
-      setup && setup.status === "not_configured"
+      (
+        setup && setup.status === "not_configured"
+        || postSaveStep
+      )
       && !this._firstRun.deferred && !this._firstRun.completed
     );
   }
@@ -1883,6 +1924,199 @@ class HausmanHubPanel extends HTMLElement {
     });
   }
 
+  _firstRunIrDevices() {
+    const setup = this._settings.setup || {};
+    const bindings = new Map((this._settings.irBindings?.bindings || [])
+      .filter((binding) => typeof binding?.candidate_id === "string"
+        && typeof binding.configured_device_id === "string"
+        && typeof binding.remote_entity_id === "string")
+      .map((binding) => [binding.candidate_id, binding]));
+    return (setup.rooms || []).flatMap((room) => (room.devices || []).flatMap((device) => {
+      const binding = bindings.get(device.candidate_id);
+      if (
+        device.control_channel !== "universal_ir"
+        || !binding
+      ) return [];
+      return [{
+        deviceId: binding.configured_device_id,
+        name: device.name || binding.configured_device_id,
+        remoteEntityId: binding.remote_entity_id,
+        roomId: room.id,
+        type: device.type,
+        profiles: room.profiles || {},
+      }];
+    }));
+  }
+
+  _firstRunActiveIrDevice() {
+    const ir = this._firstRun.ir;
+    const devices = this._firstRunIrDevices();
+    if (!devices.some((device) => device.deviceId === ir.activeDeviceId)) {
+      ir.activeDeviceId = devices.length ? devices[0].deviceId : null;
+    }
+    return devices.find((device) => device.deviceId === ir.activeDeviceId) || null;
+  }
+
+  _firstRunIrManualCommands(device) {
+    if (device.type === "humidifier") {
+      return [
+        { commandName: "humidifier.on", label: "on" },
+        { commandName: "humidifier.off", label: "off" },
+      ];
+    }
+    const temperatures = [device.profiles.day, device.profiles.night]
+      .map((profile) => Number(profile && profile.target_temperature))
+      .filter((temperature) => Number.isFinite(temperature));
+    const commands = [{ commandName: "ac.off", label: "off" }];
+    Array.from(new Set(temperatures)).forEach((temperature) => {
+      const label = `cool ${temperature.toFixed(1)} °C`;
+      commands.push({
+        commandName: `ac.cool.${temperature.toFixed(1).replace(".", "_")}`,
+        label,
+      });
+    });
+    return commands;
+  }
+
+  async _loadFirstRunIrData() {
+    const ir = this._firstRun.ir;
+    if (ir.loading) return;
+    ir.loading = true;
+    ir.error = "";
+    this._render();
+    try {
+      const [codes, scan] = await Promise.all([
+        this._hass.callApi("GET", IR_CODES_API),
+        this._hass.callApi("GET", IR_CODES_SCAN_API),
+      ]);
+      ir.codes = Array.isArray(codes && codes.codes) ? codes.codes : [];
+      ir.scan = scan || {};
+    } catch (error) {
+      ir.error = "Не удалось загрузить источники или импортированные ИК-коды.";
+    } finally {
+      ir.loading = false;
+      this._render();
+    }
+  }
+
+  async _refreshFirstRunIrCodes() {
+    const codes = await this._hass.callApi("GET", IR_CODES_API);
+    this._firstRun.ir.codes = Array.isArray(codes && codes.codes) ? codes.codes : [];
+  }
+
+  async _importFirstRunIrCode(device, command, source) {
+    const ir = this._firstRun.ir;
+    if (ir.loading) return;
+    ir.loading = true;
+    ir.error = "";
+    this._render();
+    try {
+      await this._hass.callApi("POST", IR_CODES_API, {
+        device_id: device.deviceId,
+        remote_entity_id: device.remoteEntityId,
+        command_name: command.command_name,
+        code_data: command.code_data,
+        source,
+      });
+      await this._refreshFirstRunIrCodes();
+    } catch (error) {
+      ir.error = "Импортировать ИК-код не удалось. Проверьте источник и повторите.";
+    } finally {
+      ir.loading = false;
+      this._render();
+    }
+  }
+
+  async _testFirstRunIrCode(device, command) {
+    const ir = this._firstRun.ir;
+    if (ir.loading) return;
+    ir.loading = true;
+    ir.error = "";
+    this._render();
+    try {
+      await this._hass.callApi("POST", IR_CODES_TEST_API, {
+        device_id: device.deviceId,
+        remote_entity_id: device.remoteEntityId,
+        code_data: command.code_data,
+      });
+      this._notice = "Тестовая отправка ИК-кода выполнена.";
+    } catch (error) {
+      ir.error = "Тестовую отправку ИК-кода выполнить не удалось.";
+    } finally {
+      ir.loading = false;
+      this._render();
+    }
+  }
+
+  async _testFirstRunImportedIrCode(code) {
+    const ir = this._firstRun.ir;
+    if (ir.loading) return;
+    ir.loading = true;
+    ir.error = "";
+    this._render();
+    try {
+      await this._hass.callApi("POST", IR_CODES_TEST_API, { code_id: code.code_id });
+      this._notice = "Тестовая отправка ИК-кода выполнена.";
+    } catch (error) {
+      ir.error = "Тестовую отправку ИК-кода выполнить не удалось.";
+    } finally {
+      ir.loading = false;
+      this._render();
+    }
+  }
+
+  async _deleteFirstRunIrCode(code) {
+    const ir = this._firstRun.ir;
+    if (ir.loading) return;
+    ir.loading = true;
+    ir.error = "";
+    this._render();
+    try {
+      await this._hass.callApi("POST", IR_CODES_DELETE_API, { code_id: code.code_id });
+      await this._refreshFirstRunIrCodes();
+    } catch (error) {
+      ir.error = "Удалить ИК-код не удалось. Повторите попытку.";
+    } finally {
+      ir.loading = false;
+      this._render();
+    }
+  }
+
+  async _learnFirstRunIrCode(device) {
+    const ir = this._firstRun.ir;
+    const commands = this._firstRunIrManualCommands(device);
+    const manual = ir.manual;
+    if (manual.deviceId !== device.deviceId) {
+      manual.deviceId = device.deviceId;
+      manual.index = 0;
+      manual.statuses = {};
+    }
+    const command = commands[manual.index];
+    if (!command || ir.loading) return;
+    ir.loading = true;
+    ir.error = "";
+    manual.statuses[command.commandName] = "learning";
+    this._render();
+    try {
+      await this._hass.callApi("POST", IR_CODES_LEARN_API, {
+        device_id: device.deviceId,
+        remote_entity_id: device.remoteEntityId,
+        command_name: command.commandName,
+      });
+      manual.statuses[command.commandName] = "ready";
+      manual.index += 1;
+      await this._refreshFirstRunIrCodes();
+    } catch (error) {
+      manual.statuses[command.commandName] = error && error.status === 408 ? "timeout" : "error";
+      if (manual.statuses[command.commandName] === "error") {
+        ir.error = "Обучение ИК-кода не удалось. Проверьте пульт и повторите.";
+      }
+    } finally {
+      ir.loading = false;
+      this._render();
+    }
+  }
+
   async _startFirstRun() {
     const setup = this._settings.setup;
     if (!setup) return;
@@ -2038,9 +2272,7 @@ class HausmanHubPanel extends HTMLElement {
     try {
       await this._hass.callApi("POST", DRAFT_SAVE_API, this._firstRun.draft);
       contourSaved = true;
-      this._firstRun.step = "success";
-      this._render();
-      await new Promise((resolve) => setTimeout(resolve, 700));
+      this._firstRun.contourSaved = true;
       await this._load();
       const setup = this._settings.setup;
       if (setup && setup.status !== "not_configured") {
@@ -2063,9 +2295,12 @@ class HausmanHubPanel extends HTMLElement {
         });
         await this._load();
       }
-      this._firstRun.completed = true;
-      this._activeSection = "overview";
-      this._notice = "Настройка сохранена. Команды устройствам не отправлялись.";
+      if (this._firstRunIrDevices().length) {
+        this._firstRun.step = "code_source";
+        await this._loadFirstRunIrData();
+        return;
+      }
+      this._firstRun.step = "tablet";
     } catch (error) {
       if (contourSaved) {
         this._firstRun.completed = true;
@@ -2085,14 +2320,34 @@ class HausmanHubPanel extends HTMLElement {
 
   async _reloadFirstRun() {
     this._firstRun.completed = false;
+    this._firstRun.contourSaved = false;
     this._firstRun.conflict = false;
     this._firstRun.draft = null;
     this._firstRun.issues = [];
+    this._firstRun.ir = {
+      activeDeviceId: null,
+      broadlinkExpanded: false,
+      codes: [],
+      error: "",
+      loading: false,
+      manual: { deviceId: null, index: 0, statuses: {} },
+      scan: null,
+      smartir: { brand: "", deviceCode: "", commandName: "" },
+    };
     this._firstRun.options = null;
     this._firstRun.rooms = {};
     this._firstRun.step = "instructions";
     this._firstRun.validRooms.clear();
     await this._load();
+  }
+
+  async _openSavedIrCodeSetup() {
+    if (!this._firstRunIrDevices().length) return;
+    this._firstRun.completed = false;
+    this._firstRun.contourSaved = true;
+    this._firstRun.deferred = false;
+    this._firstRun.step = "code_source";
+    await this._loadFirstRunIrData();
   }
 
   _renderFirstRunProgress(container) {
@@ -2102,6 +2357,8 @@ class HausmanHubPanel extends HTMLElement {
       room: "Комната",
       home: "Дом",
       validation: "Проверка",
+      save: "Сохранение",
+      code_source: "ИК-коды",
       tablet: "Планшет",
       completion: "Завершение",
     };
@@ -2151,7 +2408,7 @@ class HausmanHubPanel extends HTMLElement {
       card.appendChild(actions);
       return;
     }
-    if (!this._firstRun.options) {
+    if (!this._firstRun.options && !["code_source", "tablet", "completion"].includes(this._firstRun.step)) {
       card.appendChild(el("h2", null, "Подготовка мастера"));
       if (this._firstRun.optionsError) {
         card.appendChild(el("div", "field-error", "Не удалось загрузить комнаты и устройства."));
@@ -2167,6 +2424,8 @@ class HausmanHubPanel extends HTMLElement {
     if (this._firstRun.step === "room") this._renderFirstRunRoom(card);
     if (this._firstRun.step === "home") this._renderFirstRunHome(card);
     if (this._firstRun.step === "validation") this._renderFirstRunValidation(card);
+    if (this._firstRun.step === "save") this._renderFirstRunCompletion(card);
+    if (this._firstRun.step === "code_source") this._renderFirstRunCodeSource(card);
     if (this._firstRun.step === "tablet") this._renderFirstRunTablet(card);
     if (this._firstRun.step === "completion") this._renderFirstRunCompletion(card);
     if (this._firstRun.step === "success") this._renderFirstRunSuccess(card);
@@ -2638,14 +2897,232 @@ class HausmanHubPanel extends HTMLElement {
     actions.appendChild(back);
     actions.appendChild(check);
     if (validation && validation.status === "ready" && validation.save_allowed === true) {
-      const next = el("button", null, "Продолжить к подключению планшета");
+      const next = el("button", null, "Перейти к сохранению");
       next.disabled = this._busy;
       next.addEventListener("click", () => {
-        this._firstRun.step = "tablet";
+        this._firstRun.step = "save";
         this._render();
       });
       actions.appendChild(next);
     }
+    card.appendChild(actions);
+  }
+
+  _renderFirstRunCodeSource(card) {
+    const ir = this._firstRun.ir;
+    const devices = this._firstRunIrDevices();
+    const device = this._firstRunActiveIrDevice();
+    card.appendChild(el("h2", null, "Источник IR-кодов"));
+    card.appendChild(el("div", "section-intro", "Добавьте коды для ИК-пульта из базы, сохранённых команд Broadlink или через обучение. Коды привязаны к уже сохранённому устройству контура."));
+    if (!device) {
+      card.appendChild(el("div", "wizard-hint", "Для устройств с каналом universal_ir не найден безопасный remote entity id. Источники ИК-кодов пропущены."));
+      const next = el("button", null, "Продолжить к подключению планшета");
+      next.addEventListener("click", () => {
+        this._firstRun.step = "tablet";
+        this._render();
+      });
+      card.appendChild(next);
+      return;
+    }
+    if (devices.length > 1) {
+      const devicePicker = selectField(
+        devices.map((item) => ({ label: item.name, value: item.deviceId })),
+        device.deviceId,
+        () => {
+          ir.activeDeviceId = devicePicker.value;
+          ir.manual = { deviceId: null, index: 0, statuses: {} };
+          this._render();
+        }
+      );
+      const deviceRow = el("label", "form-field", "Устройство");
+      deviceRow.appendChild(devicePicker);
+      card.appendChild(deviceRow);
+    }
+    const summary = el("div", "ir-device-summary");
+    summary.appendChild(el("strong", null, device.name));
+    summary.appendChild(el("span", "chip", "Канал: universal_ir"));
+    summary.appendChild(el("small", "muted", device.remoteEntityId));
+    card.appendChild(summary);
+    if (ir.loading && !ir.scan) {
+      card.appendChild(el("div", "muted", "Загрузка источников ИК-кодов…"));
+      return;
+    }
+    if (ir.error) card.appendChild(el("div", "field-error", ir.error));
+    const scan = ir.scan || {};
+    const smartirBrands = Array.isArray(scan.smartir_catalog) ? scan.smartir_catalog : [];
+    const smartir = el("section", "ir-source-card is-recommended");
+    smartir.appendChild(el("h3", null, "База кодов SmartIR"));
+    if (!smartirBrands.length) {
+      smartir.appendChild(el("div", "muted", "Источник SmartIR недоступен или не содержит кодов, он пропущен."));
+    } else {
+      const selectedBrand = smartirBrands.find((brand) => brand.brand === ir.smartir.brand) || smartirBrands[0];
+      ir.smartir.brand = selectedBrand.brand;
+      const selectedModel = (selectedBrand.models || []).find((model) => (
+        model.device_code === ir.smartir.deviceCode
+      )) || selectedBrand.models[0];
+      ir.smartir.deviceCode = selectedModel.device_code;
+      const selectedCommand = (selectedModel.commands || []).find((command) => (
+        command.command_name === ir.smartir.commandName
+      )) || selectedModel.commands[0];
+      ir.smartir.commandName = selectedCommand.command_name;
+      const brandPicker = selectField(
+        smartirBrands.map((brand) => ({ label: brand.brand, value: brand.brand })),
+        selectedBrand.brand,
+        () => {
+          ir.smartir.brand = brandPicker.value;
+          ir.smartir.deviceCode = "";
+          ir.smartir.commandName = "";
+          this._render();
+        }
+      );
+      const brandRow = el("label", "form-field", "Бренд");
+      brandRow.appendChild(brandPicker);
+      smartir.appendChild(brandRow);
+      const modelPicker = selectField(
+        selectedBrand.models.map((model) => ({ label: model.model || model.name, value: model.device_code })),
+        selectedModel.device_code,
+        () => {
+          ir.smartir.deviceCode = modelPicker.value;
+          ir.smartir.commandName = "";
+          this._render();
+        }
+      );
+      const modelRow = el("label", "form-field", "Модель");
+      modelRow.appendChild(modelPicker);
+      smartir.appendChild(modelRow);
+      const commandPicker = selectField(
+        selectedModel.commands.map((command) => ({ label: command.command_name, value: command.command_name })),
+        selectedCommand.command_name,
+        () => { ir.smartir.commandName = commandPicker.value; }
+      );
+      const commandRow = el("label", "form-field", "Команда");
+      commandRow.appendChild(commandPicker);
+      smartir.appendChild(commandRow);
+      const actions = el("div", "actions");
+      const test = el("button", "secondary", "Тест-отправка");
+      test.disabled = ir.loading;
+      const currentCommand = () => (selectedModel.commands || []).find((command) => (
+        command.command_name === ir.smartir.commandName
+      )) || selectedModel.commands[0];
+      test.addEventListener("click", () => this._testFirstRunIrCode(device, currentCommand()));
+      const importCode = el("button", null, "Импортировать");
+      importCode.disabled = ir.loading;
+      importCode.addEventListener("click", () => this._importFirstRunIrCode(device, currentCommand(), "smartir"));
+      actions.appendChild(test);
+      actions.appendChild(importCode);
+      smartir.appendChild(actions);
+    }
+    smartir.appendChild(el("div", "muted", "Данные SmartIR только читаются, записи в SmartIR не выполняются."));
+    card.appendChild(smartir);
+
+    const broadlink = el("section", "ir-source-card");
+    broadlink.appendChild(el("h3", null, "Выученные коды Broadlink"));
+    const broadlinkToggle = el(
+      "button",
+      "secondary",
+      ir.broadlinkExpanded ? "Скрыть команды" : "Показать команды"
+    );
+    broadlinkToggle.disabled = ir.loading;
+    broadlinkToggle.addEventListener("click", () => {
+      ir.broadlinkExpanded = !ir.broadlinkExpanded;
+      this._render();
+    });
+    broadlink.appendChild(broadlinkToggle);
+    if (ir.broadlinkExpanded) {
+      const remotes = Array.isArray(scan.broadlink_catalog) ? scan.broadlink_catalog : [];
+      if (!remotes.length) {
+        broadlink.appendChild(el("div", "muted", "Сохранённых команд Broadlink не найдено."));
+      }
+      remotes.forEach((remote) => {
+        const block = el("div", "ir-code-list");
+        block.appendChild(el("strong", null, remote.remote_entity_id));
+        (remote.commands || []).forEach((command) => {
+          const row = el("div", "ir-code-row");
+          row.appendChild(el("span", null, command.command_name));
+          const importCode = el("button", "secondary", "Импортировать");
+          importCode.disabled = ir.loading;
+          importCode.addEventListener("click", () => this._importFirstRunIrCode(device, command, "broadlink"));
+          row.appendChild(importCode);
+          block.appendChild(row);
+        });
+        broadlink.appendChild(block);
+      });
+    }
+    broadlink.appendChild(el("div", "muted", "Чтение только из хранилища пульта; при ошибке чтения источник пропускается."));
+    card.appendChild(broadlink);
+
+    const manual = el("section", "ir-source-card is-muted");
+    manual.appendChild(el("h3", null, "Ручное обучение"));
+    manual.appendChild(el("div", "muted", "Нажмите кнопку, затем отправьте указанную команду оригинальным пультом."));
+    const commands = this._firstRunIrManualCommands(device);
+    if (ir.manual.deviceId !== device.deviceId) {
+      ir.manual = { deviceId: device.deviceId, index: 0, statuses: {} };
+    }
+    const progress = el("div", "ir-manual-progress");
+    commands.forEach((command, index) => {
+      const row = el("div");
+      row.appendChild(el("span", null, command.label));
+      const status = ir.manual.statuses[command.commandName];
+      if (status === "ready") row.appendChild(el("span", "status-badge is-ready", "Готово"));
+      if (status === "learning") row.appendChild(el("span", "status-badge", "Ожидание сигнала"));
+      if (status === "timeout") row.appendChild(el("span", "status-badge is-attention", "Время ожидания истекло"));
+      if (status === "error") row.appendChild(el("span", "status-badge is-attention", "Ошибка обучения"));
+      if (!status && index > ir.manual.index) row.appendChild(el("span", "muted", "Далее"));
+      progress.appendChild(row);
+    });
+    manual.appendChild(progress);
+    const currentCommand = commands[ir.manual.index];
+    if (currentCommand) {
+      const status = ir.manual.statuses[currentCommand.commandName];
+      const learn = el(
+        "button",
+        "secondary",
+        status === "timeout" ? "Повторить обучение" : ir.manual.index === 0 ? "Начать обучение" : "Продолжить обучение"
+      );
+      learn.disabled = ir.loading;
+      learn.addEventListener("click", () => this._learnFirstRunIrCode(device));
+      manual.appendChild(learn);
+      if (status === "timeout") {
+        manual.appendChild(el("div", "muted", "Время ожидания истекло. Убедитесь, что пульт готов к обучению, и повторите команду."));
+      }
+    }
+    card.appendChild(manual);
+
+    const imported = el("section", "wizard-section");
+    imported.appendChild(el("h3", null, "Импортированные коды"));
+    const codes = (ir.codes || []).filter((code) => code.device_id === device.deviceId);
+    if (!codes.length) imported.appendChild(el("div", "muted", "Для этого устройства пока нет импортированных кодов."));
+    const list = el("div", "ir-code-list");
+    codes.forEach((code) => {
+      const row = el("div", "ir-code-row");
+      const identity = el("span");
+      identity.appendChild(el("strong", null, code.command_name));
+      identity.appendChild(el("span", "chip", code.source));
+      row.appendChild(identity);
+      const test = el("button", "secondary", "Тест-отправка");
+      test.disabled = ir.loading;
+      test.addEventListener("click", () => this._testFirstRunImportedIrCode(code));
+      row.appendChild(test);
+      const remove = el("button", "secondary ir-icon-action");
+      setAttr(remove, "aria-label", `Удалить код ${code.command_name}`);
+      setAttr(remove, "title", "Удалить код");
+      remove.disabled = ir.loading;
+      remove.appendChild(svgIcon("trash"));
+      remove.addEventListener("click", () => this._deleteFirstRunIrCode(code));
+      row.appendChild(remove);
+      list.appendChild(row);
+    });
+    imported.appendChild(list);
+    card.appendChild(imported);
+    card.appendChild(el("div", "wizard-warning", "Если код команды не найден, контур покажет ограничение «ir_command_not_learned»: температура не подставляется автоматически."));
+    const actions = el("div", "actions");
+    const next = el("button", null, "Продолжить к подключению планшета");
+    next.disabled = ir.loading;
+    next.addEventListener("click", () => {
+      this._firstRun.step = "tablet";
+      this._render();
+    });
+    actions.appendChild(next);
     card.appendChild(actions);
   }
 
@@ -2679,7 +3156,7 @@ class HausmanHubPanel extends HTMLElement {
     const back = el("button", "secondary", "Назад к проверке");
     back.disabled = this._busy;
     back.addEventListener("click", () => {
-      this._firstRun.step = "validation";
+      this._firstRun.step = this._firstRunIrDevices().length ? "code_source" : "completion";
       this._render();
     });
     const next = el("button", null, "Перейти к завершению");
@@ -2695,6 +3172,19 @@ class HausmanHubPanel extends HTMLElement {
 
   _renderFirstRunCompletion(card) {
     card.appendChild(el("h2", null, "Завершение настройки"));
+    if (this._firstRun.contourSaved) {
+      card.appendChild(el("div", "section-intro", "Климатический контур сохранён. Источники ИК-кодов настроены на сохранённом устройстве."));
+      const finish = el("button", null, "Открыть панель");
+      finish.disabled = this._busy;
+      finish.addEventListener("click", () => {
+        this._firstRun.completed = true;
+        this._activeSection = "overview";
+        this._notice = "Настройка сохранена. Команды устройствам не отправлялись.";
+        this._render();
+      });
+      card.appendChild(finish);
+      return;
+    }
     if (this._firstRun.conflict) {
       card.appendChild(el("div", "field-error", "Настройки изменились в другом окне. Обновите мастер, чтобы получить актуальные области и ревизию."));
       const reload = el("button", "secondary", "Обновить мастер");
@@ -2757,6 +3247,12 @@ class HausmanHubPanel extends HTMLElement {
       edit.disabled = this._busy || setup.editing_allowed !== true;
       edit.addEventListener("click", () => this._openWizard(setup));
       card.appendChild(edit);
+      if (this._firstRunIrDevices().length) {
+        const irCodes = el("button", "secondary", "Настроить IR-коды");
+        irCodes.disabled = this._busy;
+        irCodes.addEventListener("click", () => this._openSavedIrCodeSetup());
+        card.appendChild(irCodes);
+      }
       if (setup.editing_allowed !== true) {
         card.appendChild(
           el("div", "muted", "Редактирование недоступно: данные устройств устарели или изменились.")

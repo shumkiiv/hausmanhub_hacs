@@ -123,6 +123,34 @@ class ClimateHaExecutorTest(unittest.IsolatedAsyncioTestCase):
             hass.services.calls[0],
         )
 
+    async def test_executor_runs_typed_remote_send_command(self) -> None:
+        hass = _FakeHass()
+        executor = HomeAssistantClimateCallExecutor(hass)  # type: ignore[arg-type]
+        calls = (
+            ClimateHaServiceCall(
+                service=ClimateHaService.REMOTE_SEND_COMMAND,
+                entity_id="remote.living_ir",
+                device="living_air_conditioner",
+                command="b64:JgBQAAAB",
+            ),
+        )
+
+        completed = await executor.async_execute(calls)
+
+        self.assertEqual(1, completed)
+        self.assertEqual(
+            (
+                "remote",
+                "send_command",
+                {
+                    "entity_id": "remote.living_ir",
+                    "device": "living_air_conditioner",
+                    "command": "b64:JgBQAAAB",
+                },
+            ),
+            hass.services.calls[0],
+        )
+
 
 class ClimateTrialModelTest(unittest.TestCase):
     def test_decision_rejects_contradictory_shapes(self) -> None:
