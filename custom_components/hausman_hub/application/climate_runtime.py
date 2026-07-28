@@ -116,6 +116,7 @@ from .contours import (
     validate_contour_bindings,
     with_active_climate_profile,
     with_applied_climate_schedule_profile,
+    with_home_climate_targets,
     with_climate_temporary_temperature,
     without_climate_temporary_temperature,
 )
@@ -137,6 +138,10 @@ from .contour_override import (
     TemporaryTemperatureAction,
     TemporaryTemperatureViolation,
     parse_temporary_temperature_request,
+)
+from .home_climate_targets import (
+    HomeClimateTargetsViolation,
+    parse_home_climate_targets_request,
 )
 
 
@@ -770,6 +775,39 @@ class ClimateRuntime:
                 CLIMATE_CONTOUR_ID,
                 context=context,
                 room_ids=room_scope,
+                desired_state_changes=desired_state_changes,
+            )
+
+    async def async_home_climate_targets(self, payload: object) -> ContourApplyReceipt:
+        """Save and apply one common temperature and/or humidity target."""
+
+        request = parse_home_climate_targets_request(payload)
+        async with self._lock:
+            self._require_native_contour_apply_mode()
+            if self._contour_store is None:
+                raise ClimateRuntimeUnavailable("contour storage is unavailable")
+            contour = self._climate_contour()
+            try:
+                updated = with_home_climate_targets(
+                    self._contours,
+                    target_temperature=request.target_temperature,
+                    target_humidity=request.target_humidity,
+                )
+            except ContourRegistryViolation as error:
+                raise HomeClimateTargetsViolation(str(error)) from error
+            updated_contour = self._require_climate_contour(updated)
+            desired_state_changes = local_desired_state_changes(
+                contour,
+                updated_contour,
+            )
+            await self._contour_store.async_save(updated)
+            self._contours = updated
+            return await self._async_apply_native_contour_unlocked(
+                request.request_id,
+                CLIMATE_CONTOUR_ID,
+                context=ClimateControlContext(
+                    action=ClimateControlAction.APPLY_SAVED_SETTINGS,
+                ),
                 desired_state_changes=desired_state_changes,
             )
 

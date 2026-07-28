@@ -19,6 +19,7 @@ from .application.api_capabilities import (
     CONTOUR_APPLY_PREVIEW_PATH,
     DASHBOARD_PATH,
     HOME_PATH,
+    HOME_CLIMATE_TARGETS_PATH,
     TEMPORARY_TEMPERATURE_PATH,
     api_capabilities_snapshot,
 )
@@ -54,6 +55,7 @@ from .application.climate_signal_settings import (
 )
 from .application.contour_apply import ContourApplyViolation
 from .application.contour_override import TemporaryTemperatureViolation
+from .application.home_climate_targets import HomeClimateTargetsViolation
 from .application.climate_registry import ClimateRegistryViolation
 from .application.climate_runtime import (
     ClimateRuntime,
@@ -154,6 +156,7 @@ def register_climate_api(
             ContourApplyPreviewView(hass),
             ContourApplyView(hass),
             TemporaryTemperatureView(hass),
+            HomeClimateTargetsView(hass),
             ClimateAdminImportView(hass),
             ClimateAdminDraftView(hass),
             ClimateAdminDraftCurrentView(hass),
@@ -420,6 +423,36 @@ class TemporaryTemperatureView(_ClimateView):
                 headers=NO_STORE_HEADERS,
             )
         except ClimateRuntimeUnavailable:
+            return self._unavailable()
+        except Exception:
+            return self._unavailable()
+        return self.json(receipt.as_payload(), headers=NO_STORE_HEADERS)
+
+
+class HomeClimateTargetsView(_ClimateView):
+    """Set a common target for every room and apply it as one operation."""
+
+    url = HOME_CLIMATE_TARGETS_PATH
+    name = "api:hausman_hub:home_climate_targets"
+
+    async def post(self, request: Any) -> Any:
+        if not _is_exact_request(request, HOME_CLIMATE_TARGETS_PATH):
+            return _not_found(self)
+        if not _is_local_tablet_request(request):
+            return _forbidden(self)
+        runtime = self._runtime()
+        if runtime is None:
+            return self._unavailable()
+        try:
+            payload = await _request_json(request)
+            receipt = await runtime.async_home_climate_targets(payload)
+        except HomeClimateTargetsViolation:
+            return self.json_message(
+                "The home climate target request is invalid.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        except (ContourApplyViolation, ClimateRuntimeUnavailable):
             return self._unavailable()
         except Exception:
             return self._unavailable()

@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hausmanhub/contracts/v1/home-climate-targets-request.schema.json",
+  "title": "HausmanHub whole-home climate targets request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["request_id", "contour_id", "target_temperature", "target_humidity", "confirm"],
+  "properties": {
+    "request_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"},
+    "contour_id": {"const": "climate"},
+    "target_temperature": {
+      "type": ["number", "null"],
+      "minimum": 18,
+      "maximum": 28,
+      "multipleOf": 0.5
+    },
+    "target_humidity": {
+      "type": ["integer", "null"],
+      "minimum": 30,
+      "maximum": 70
+    },
+    "confirm": {"const": true}
+  },
+  "anyOf": [
+    {"properties": {"target_temperature": {"type": "number"}}},
+    {"properties": {"target_humidity": {"type": "integer"}}}
+  ]
+}

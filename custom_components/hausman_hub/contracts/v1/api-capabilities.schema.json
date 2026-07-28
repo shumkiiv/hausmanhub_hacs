@@ -52,6 +52,7 @@
         "automatic_contours",
         "contour_settings_apply",
         "temporary_room_temperature",
+        "home_climate_targets",
         "scenarios"
       ],
       "properties": {
@@ -215,6 +216,30 @@
             },
             "request_contract": {
               "$ref": "#/$defs/temporary_temperature_request_contract"
+            },
+            "response_contract": {
+              "$ref": "#/$defs/climate_control_receipt_contract"
+            }
+          }
+        },
+        "home_climate_targets": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available",
+            "path",
+            "method",
+            "requires_confirmation",
+            "request_contract",
+            "response_contract"
+          ],
+          "properties": {
+            "available": {"const": true},
+            "path": {"const": "/api/hausman_hub/v1/contours/home-targets"},
+            "method": {"const": "POST"},
+            "requires_confirmation": {"const": true},
+            "request_contract": {
+              "$ref": "#/$defs/home_climate_targets_request_contract"
             },
             "response_contract": {
               "$ref": "#/$defs/climate_control_receipt_contract"
@@ -411,6 +436,15 @@
         "version": {
           "const": 1
         }
+      }
+    },
+    "home_climate_targets_request_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-home-climate-targets-request"},
+        "version": {"const": 1}
       }
     },
     "climate_action_request_contract": {

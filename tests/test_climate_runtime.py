@@ -18,6 +18,9 @@ from custom_components.hausman_hub.application.contour_apply import ContourApply
 from custom_components.hausman_hub.application.contour_override import (
     TemporaryTemperatureViolation,
 )
+from custom_components.hausman_hub.application.home_climate_targets import (
+    HomeClimateTargetsViolation,
+)
 from custom_components.hausman_hub.application.climate_runtime import (
     ClimateRuntime,
     ClimateRuntimeUnavailable,
@@ -1184,6 +1187,60 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(room.temporary_override)
         self.assertEqual(25.0, room.target_temperature)
         self.assertEqual([], bridge.executed)
+
+    async def test_home_targets_are_saved_before_one_confirmed_apply(self) -> None:
+        bridge = MemoryBridge()
+        registry, contours = build_climate_contour_setup(
+            bridge.snapshot,
+            room_ids=["living"],
+            source_ids=["synthetic-ac-source-living"],
+            name="Климат",
+            mode="automatic",
+            target_temperature=25.0,
+            target_humidity=45,
+            strategy="normal",
+        )
+        registry, state_view = native_application_inputs(registry)
+        executor = ReflectingStrictExecutor(state_view)
+        contour_store = MemoryContourStore(contours)
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateControlMode.MANAGED),
+            registry_store=MemoryStore(registry),
+            contour_store=contour_store,
+            strict_ha_call_executor=executor,
+            ha_state_view=state_view,
+            operation_id_factory=lambda: "a" * 32,
+            now_ms=lambda: 1784280005000,
+        )
+        await runtime.async_start()
+
+        with self.assertRaises(HomeClimateTargetsViolation):
+            await runtime.async_home_climate_targets(
+                {
+                    "request_id": "home-target-unconfirmed",
+                    "contour_id": "climate",
+                    "target_temperature": 24.5,
+                    "target_humidity": 50,
+                    "confirm": False,
+                }
+            )
+
+        receipt = await runtime.async_home_climate_targets(
+            {
+                "request_id": "home-target-1",
+                "contour_id": "climate",
+                "target_temperature": 24.5,
+                "target_humidity": 50,
+                "confirm": True,
+            }
+        )
+
+        self.assertEqual("confirmed", receipt.status.value)
+        saved_room = contour_store.registry.contour("climate").rooms[0]  # type: ignore[union-attr]
+        self.assertEqual(24.5, saved_room.target_temperature)
+        self.assertEqual(50, saved_room.target_humidity)
+        self.assertEqual(1, len(contour_store.saved))
         self.assertEqual(1, len(executor.batches))
 
     async def test_next_schedule_period_clears_temporary_temperature(self) -> None:

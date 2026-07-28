@@ -1,0 +1,7 @@
+{
+  "request_id": "tablet-home-target-1",
+  "contour_id": "climate",
+  "target_temperature": 25.5,
+  "target_humidity": 45,
+  "confirm": true
+}

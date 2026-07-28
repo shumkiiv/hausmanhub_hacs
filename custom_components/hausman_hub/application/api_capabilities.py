@@ -32,6 +32,7 @@ CONTOURS_PATH = f"{API_BASE_PATH}/contours"
 CONTOUR_APPLY_PREVIEW_PATH = f"{CONTOURS_PATH}/apply-preview"
 CONTOUR_APPLY_PATH = f"{CONTOURS_PATH}/apply"
 TEMPORARY_TEMPERATURE_PATH = f"{CONTOURS_PATH}/temporary-temperature"
+HOME_CLIMATE_TARGETS_PATH = f"{CONTOURS_PATH}/home-targets"
 SCENARIOS_PATH = f"{API_BASE_PATH}/scenarios"
 SCENARIOS_CATALOG_PATH = f"{SCENARIOS_PATH}/catalog"
 SCENARIOS_TEST_PATH = f"{SCENARIOS_PATH}/test"
@@ -121,6 +122,20 @@ def api_capabilities_snapshot(
                 "request_contract": {
                     "name": TEMPORARY_TEMPERATURE_REQUEST_CONTRACT_NAME,
                     "version": TEMPORARY_TEMPERATURE_REQUEST_CONTRACT_VERSION,
+                },
+                "response_contract": {
+                    "name": CLIMATE_CONTROL_RECEIPT_CONTRACT_NAME,
+                    "version": CLIMATE_CONTROL_RECEIPT_CONTRACT_VERSION,
+                },
+            },
+            "home_climate_targets": {
+                "available": True,
+                "path": HOME_CLIMATE_TARGETS_PATH,
+                "method": "POST",
+                "requires_confirmation": True,
+                "request_contract": {
+                    "name": "hausman-hub-home-climate-targets-request",
+                    "version": 1,
                 },
                 "response_contract": {
                     "name": CLIMATE_CONTROL_RECEIPT_CONTRACT_NAME,

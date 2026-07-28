@@ -126,6 +126,7 @@ class ClimateContractSchemasTest(unittest.TestCase):
             "hausmanhub_climate_control_receipt_v1/return.json": "v1/climate-control-receipt.schema.json",
             "hausmanhub_climate_control_receipt_v1/schedule.json": "v1/climate-control-receipt.schema.json",
             "hausmanhub_temporary_temperature_v1/request.json": "v1/temporary-temperature-request.schema.json",
+            "hausmanhub_home_climate_targets_v1/request.json": "v1/home-climate-targets-request.schema.json",
         }
         for fixture_name, schema_name in pairs.items():
             with self.subTest(fixture=fixture_name):

@@ -1740,7 +1740,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.29.0", panel.payload["integration_version"])
+        self.assertEqual("1.30.0", panel.payload["integration_version"])
 
     def test_admin_panel_accepts_ipv6_link_local_admin_from_mdns(self) -> None:
         """A local admin may open the panel when mDNS selects IPv6 link-local."""
@@ -2278,7 +2278,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertFalse(hasattr(self.view, method))
 
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
-        self.assertEqual(41, len(self.hass.http.views))
+        self.assertEqual(42, len(self.hass.http.views))
         self.assertEqual(
             1,
             sum(
@@ -2567,7 +2567,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             [(closed_entry, ("sensor", "switch"))],
             closed_hass.config_entries.forwarded,
         )
-        self.assertEqual(40, len(closed_hass.http.views))
+        self.assertEqual(41, len(closed_hass.http.views))
         self.assertEqual(
             {
                 "/api/hausman_hub/v1/capabilities",
@@ -2578,6 +2578,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 "/api/hausman_hub/v1/contours/apply-preview",
                 "/api/hausman_hub/v1/contours/apply",
                 "/api/hausman_hub/v1/contours/temporary-temperature",
+                "/api/hausman_hub/v1/contours/home-targets",
                 "/api/hausman_hub/v1/admin/climate-import",
                 "/api/hausman_hub/v1/admin/climate-drafts",
                 "/api/hausman_hub/v1/admin/climate-drafts/current",

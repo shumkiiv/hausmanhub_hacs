@@ -666,6 +666,64 @@ def with_active_climate_profile(
         raise ContourRegistryViolation(str(error)) from error
 
 
+def with_home_climate_targets(
+    registry: ContourRegistry,
+    *,
+    target_temperature: float | None,
+    target_humidity: int | None,
+) -> ContourRegistry:
+    """Set one common target on every room's currently active profile."""
+
+    contour = registry.contour(CLIMATE_CONTOUR_ID)
+    if contour is None:
+        raise ContourRegistryViolation("climate contour is not configured")
+    if target_temperature is None and target_humidity is None:
+        raise ContourRegistryViolation("home climate target is empty")
+    try:
+        rooms = []
+        for room in contour.rooms:
+            temperature = (
+                room.profile_settings.target_temperature
+                if target_temperature is None
+                else climate_target_temperature(target_temperature)
+            )
+            humidity = (
+                room.profile_settings.target_humidity
+                if target_humidity is None
+                else target_humidity
+            )
+            selected = ClimateComfortSettings(
+                target_temperature=temperature,
+                target_humidity=humidity,
+                strategy=room.profile_settings.strategy,
+            )
+            rooms.append(
+                replace(
+                    room,
+                    day_profile=(
+                        selected
+                        if room.active_profile is ClimateProfile.DAY
+                        else room.day_profile
+                    ),
+                    night_profile=(
+                        selected
+                        if room.active_profile is ClimateProfile.NIGHT
+                        else room.night_profile
+                    ),
+                    temporary_override=None,
+                )
+            )
+        updated = replace(contour, rooms=tuple(rooms))
+        return ContourRegistry(
+            contours=tuple(
+                updated if item.contour_id == CLIMATE_CONTOUR_ID else item
+                for item in registry.contours
+            )
+        )
+    except (ContourViolation, TypeError, ValueError) as error:
+        raise ContourRegistryViolation(str(error)) from error
+
+
 def with_climate_schedule(
     registry: ContourRegistry,
     *,

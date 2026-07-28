@@ -80,6 +80,20 @@
         "version": 1
       }
     },
+    "home_climate_targets": {
+      "available": true,
+      "path": "/api/hausman_hub/v1/contours/home-targets",
+      "method": "POST",
+      "requires_confirmation": true,
+      "request_contract": {
+        "name": "hausman-hub-home-climate-targets-request",
+        "version": 1
+      },
+      "response_contract": {
+        "name": "hausman-hub-climate-control-receipt",
+        "version": 1
+      }
+    },
     "scenarios": {
       "available": true,
       "read": true,
