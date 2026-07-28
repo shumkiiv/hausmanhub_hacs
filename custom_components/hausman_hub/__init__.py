@@ -91,7 +91,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     scenario_service.set_executor(scenario_executor)
 
-    register_climate_api(hass, climate_runtime, ai_assistant, scenario_service)
+    from .application.ir_code_service import IRCodeService
+    from .ir_code_storage import HomeAssistantIRCodeStore
+
+    ir_code_store = HomeAssistantIRCodeStore(hass, entry.entry_id)
+    ir_code_service = IRCodeService(hass, ir_code_store)
+    await ir_code_service.async_load()
+
+    register_climate_api(
+        hass, climate_runtime, ai_assistant, scenario_service, ir_code_service,
+    )
     from .panel import async_register_hausmanhub_panel
 
     await async_register_hausmanhub_panel(hass)

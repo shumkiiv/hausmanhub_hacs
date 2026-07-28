@@ -131,6 +131,7 @@ def register_climate_api(
     runtime: ClimateRuntime,
     ai_assistant: AiAssistantService | None = None,
     scenario_service: ScenarioService | None = None,
+    ir_code_service: object | None = None,
 ) -> None:
     """Register fixed routes once and point them at the loaded HausmanHub runtime."""
 
@@ -140,6 +141,8 @@ def register_climate_api(
         data[DATA_AI_ASSISTANT] = ai_assistant
     if scenario_service is not None:
         data["scenario_service"] = scenario_service
+    if ir_code_service is not None:
+        data["ir_code_service"] = ir_code_service
     if DATA_CLIMATE_VIEWS not in data:
         views = [
             ClimateCapabilitiesView(hass),
@@ -173,6 +176,10 @@ def register_climate_api(
             from .scenario_api import scenario_api_views
 
             views.extend(scenario_api_views(hass, scenario_service))
+        if ir_code_service is not None:
+            from .ir_code_api import ir_code_api_views
+
+            views.extend(ir_code_api_views(hass, ir_code_service))
         for view in views:
             hass.http.register_view(view)
         data[DATA_CLIMATE_VIEWS] = views
@@ -189,6 +196,7 @@ def clear_climate_api(hass: HomeAssistant, entry_id: str) -> None:
         data.pop(DATA_CLIMATE_RUNTIME, None)
         data.pop(DATA_AI_ASSISTANT, None)
         data.pop("scenario_service", None)
+        data.pop("ir_code_service", None)
 
 
 class _ClimateView(HomeAssistantView):

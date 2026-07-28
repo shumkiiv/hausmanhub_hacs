@@ -40,6 +40,7 @@ _STOP_ACTIONS = frozenset(
 def build_climate_ha_call_plan(
     registry: ClimateRegistry,
     isolation: ClimateIsolationSnapshot,
+    ir_code_service: object | None = None,
 ) -> ClimateHaCallPlanSnapshot:
     """Translate one isolated policy snapshot into strict HA call plans."""
 
@@ -54,6 +55,7 @@ def build_climate_ha_call_plan(
                 _translate_device(
                     _registry_device(registry, plan.device_id),
                     plan,
+                    ir_code_service=ir_code_service,
                 )
                 for plan in (result.policy.devices if result.policy is not None else ())
             ),
@@ -81,6 +83,7 @@ def _registry_device(
 def _translate_device(
     device: ClimateDevice | None,
     plan: ClimateFinalDevicePlan,
+    ir_code_service: object | None = None,
 ) -> ClimateHaDeviceCallPlan:
     limits: list[ClimateHaCallLimit] = []
     if device is None:
@@ -91,7 +94,7 @@ def _translate_device(
     elif plan.action is ClimateFinalDeviceAction.HOLD:
         limits.append(ClimateHaCallLimit.HOLD_STATE)
     else:
-        calls = _service_calls(device, plan, limits)
+        calls = _service_calls(device, plan, limits, ir_code_service=ir_code_service)
     if plan.quiet is not None:
         limits.append(ClimateHaCallLimit.QUIET_NOT_TRANSLATED)
     ordered = tuple(limit for limit in ClimateHaCallLimit if limit in limits)
@@ -109,14 +112,19 @@ def _service_calls(
     device: ClimateDevice,
     plan: ClimateFinalDevicePlan,
     limits: list[ClimateHaCallLimit],
+    ir_code_service: object | None = None,
 ) -> tuple[ClimateHaServiceCall, ...]:
     endpoint = device.endpoint(ClimateEndpointRole.CONTROL)
     if endpoint is not None and endpoint.entity_id.split(".", 1)[0] == "remote":
-        # The control channel is an honest transport label, not a blocker:
-        # climate facades (SmartIR etc.) translate through standard climate
-        # services for any channel. Only a raw IR/RF remote endpoint has no
-        # codebook here and therefore stays untranslatable.
-        limits.append(ClimateHaCallLimit.UNSUPPORTED_CONTROL_CHANNEL)
+        # Check whether IR codes are available for this device before
+        # marking the channel as unsupported.
+        if _has_ir_codes_for_device(ir_code_service, device.device_id):
+            # IR codes exist — the remote endpoint is usable but the
+            # standard climate service calls do not apply.  The caller
+            # should fall back to IR command translation separately.
+            limits.append(ClimateHaCallLimit.NOTHING_TO_TRANSLATE)
+            return ()
+        limits.append(ClimateHaCallLimit.IR_COMMAND_NOT_LEARNED)
         return ()
     required = _required_capabilities(device.kind, plan.action)
     if required is None or (
@@ -240,3 +248,15 @@ def _temperature_required(kind: ClimateDeviceKind, action: ClimateFinalDeviceAct
         }
         and action is ClimateFinalDeviceAction.SET_TEMPERATURE
     )
+
+
+def _has_ir_codes_for_device(ir_code_service: object | None, device_id: str) -> bool:
+    if ir_code_service is None:
+        return False
+    getter = getattr(ir_code_service, "codes_for_device", None)
+    if getter is None:
+        return False
+    try:
+        return len(getter(device_id)) > 0
+    except Exception:  # noqa: BLE001
+        return False
