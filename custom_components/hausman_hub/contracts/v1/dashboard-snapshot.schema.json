@@ -1,0 +1,211 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/dashboard-snapshot.schema.json",
+  "title": "HausmanHub universal dashboard snapshot v1",
+  "type": "object",
+  "required": ["contract", "generatedAt", "summary", "rooms", "devices", "scenarios", "alarms", "events"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "universal-home" },
+        "version": { "const": 1 },
+        "profile": { "type": "string" },
+        "source": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "generatedAt": { "type": "integer" },
+    "stateRevision": { "type": ["integer", "null"] },
+    "localIso": { "type": ["string", "null"] },
+    "summary": {
+      "type": "object",
+      "properties": {
+        "homeName": { "type": ["string", "null"] },
+        "mode": { "type": ["string", "null"] },
+        "targetTemp": { "type": ["number", "null"] },
+        "avgTemp": { "type": ["number", "null"] },
+        "outdoorTemp": { "type": ["number", "null"] },
+        "weatherCondition": { "type": ["string", "null"] },
+        "weatherHumidity": { "type": ["number", "null"] },
+        "weatherFeelsLike": { "type": ["number", "null"] },
+        "weatherWindSpeed": { "type": ["number", "null"] },
+        "weatherWindSpeedUnit": { "type": ["string", "null"] },
+        "weatherIsDay": { "type": ["boolean", "null"] },
+        "weatherUpdatedAt": { "type": ["integer", "null"] },
+        "co2": { "type": ["number", "null"] },
+        "activeLights": { "type": "integer" },
+        "activeClimate": { "type": "integer" },
+        "activeAlarms": { "type": "integer" }
+      },
+      "additionalProperties": true
+    },
+    "rooms": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/room" }
+    },
+    "devices": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/device" }
+    },
+    "scenarios": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/scenario" }
+    },
+    "alarms": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/alarm" }
+    },
+    "events": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/event" }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": { "type": "boolean" }
+    },
+    "raw": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "room": {
+      "type": "object",
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "icon": { "type": ["string", "null"] },
+        "temp": { "type": ["number", "null"] },
+        "humidity": { "type": ["number", "null"] },
+        "targetTemp": { "type": ["number", "null"] },
+        "minTargetTemp": { "type": ["number", "null"] },
+        "manualTarget": { "type": "boolean" },
+        "manualControl": { "type": "boolean" },
+        "targetStrategy": { "type": ["string", "null"] },
+        "climateState": { "type": ["string", "null"] },
+        "climateRunning": { "type": "boolean" },
+        "hasClimateControl": { "type": "boolean" },
+        "deviceIds": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "status": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
+    },
+    "device": {
+      "type": "object",
+      "required": ["id", "name", "domain", "category", "state"],
+      "properties": {
+        "id": { "type": "string" },
+        "entityId": { "type": ["string", "null"] },
+        "physicalId": { "type": "string", "minLength": 1 },
+        "name": { "type": "string" },
+        "roomId": { "type": ["string", "null"] },
+        "roomName": { "type": ["string", "null"] },
+        "domain": { "type": "string" },
+        "category": { "type": "string" },
+        "icon": { "type": ["string", "null"] },
+        "state": { "type": "string" },
+        "stateLabel": { "type": ["string", "null"] },
+        "active": { "type": "boolean" },
+        "unavailable": { "type": "boolean" },
+        "tone": { "type": ["string", "null"] },
+        "primaryValue": { "type": ["string", "null"] },
+        "source": { "type": ["string", "null"] },
+        "model": { "type": ["string", "null"] },
+        "manufacturer": { "type": ["string", "null"] },
+        "imageUrl": { "type": ["string", "null"] },
+        "ageMin": { "type": ["integer", "null"], "minimum": 0 },
+        "attributes": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/action" }
+        },
+        "details": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/deviceDetail" }
+        }
+      },
+      "additionalProperties": true
+    },
+    "scenario": {
+      "type": "object",
+      "required": ["id", "title"],
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "group": { "type": ["string", "null"] },
+        "description": { "type": ["string", "null"] },
+        "icon": { "type": ["string", "null"] },
+        "requiresConfirmation": { "type": "boolean" },
+        "favorite": { "type": "boolean" },
+        "danger": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "alarm": {
+      "type": "object",
+      "required": ["id", "title", "level", "active"],
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": ["string", "null"] },
+        "level": { "enum": ["info", "warn", "bad"] },
+        "active": { "type": "boolean" },
+        "roomId": { "type": ["string", "null"] },
+        "entityId": { "type": ["string", "null"] },
+        "ts": { "type": ["integer", "null"] }
+      },
+      "additionalProperties": true
+    },
+    "event": {
+      "type": "object",
+      "required": ["id", "ts", "title"],
+      "properties": {
+        "id": { "type": "string" },
+        "ts": { "type": "integer" },
+        "title": { "type": "string" },
+        "message": { "type": ["string", "null"] },
+        "roomId": { "type": ["string", "null"] },
+        "entityId": { "type": ["string", "null"] },
+        "kind": { "type": ["string", "null"] },
+        "level": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
+    },
+    "action": {
+      "type": "object",
+      "required": ["id", "title"],
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "confirmation": { "type": "boolean" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "deviceDetail": {
+      "type": "object",
+      "required": ["label", "value"],
+      "properties": {
+        "label": { "type": "string" },
+        "value": { "type": "string" },
+        "entityId": { "type": ["string", "null"] },
+        "domain": { "type": ["string", "null"] },
+        "state": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": true
+}

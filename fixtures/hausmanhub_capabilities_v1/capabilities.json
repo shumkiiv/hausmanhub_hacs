@@ -8,6 +8,16 @@
     "base_path": "/api/hausman_hub/v1"
   },
   "capabilities": {
+    "dashboard_snapshot": {
+      "available": true,
+      "path": "/api/hausman_hub/v1/dashboard",
+      "method": "GET",
+      "response_contract": {
+        "name": "universal-home",
+        "version": 1
+      },
+      "read_only": true
+    },
     "climate_home": {
       "available": true,
       "path": "/api/hausman_hub/v1/home",

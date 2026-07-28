@@ -46,6 +46,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
+        "dashboard_snapshot",
         "climate_home",
         "automatic_contours",
         "contour_settings_apply",
@@ -53,6 +54,34 @@
         "scenarios"
       ],
       "properties": {
+        "dashboard_snapshot": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available",
+            "path",
+            "method",
+            "response_contract",
+            "read_only"
+          ],
+          "properties": {
+            "available": {
+              "const": true
+            },
+            "path": {
+              "const": "/api/hausman_hub/v1/dashboard"
+            },
+            "method": {
+              "const": "GET"
+            },
+            "response_contract": {
+              "$ref": "#/$defs/dashboard_contract"
+            },
+            "read_only": {
+              "const": true
+            }
+          }
+        },
         "climate_home": {
           "type": "object",
           "additionalProperties": false,
@@ -247,6 +276,22 @@
     }
   },
   "$defs": {
+    "dashboard_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "const": "universal-home"
+        },
+        "version": {
+          "const": 1
+        }
+      }
+    },
     "climate_home_contract": {
       "type": "object",
       "additionalProperties": false,

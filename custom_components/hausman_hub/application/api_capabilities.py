@@ -26,6 +26,7 @@ API_BASE_PATH = "/api/hausman_hub/v1"
 
 CAPABILITIES_PATH = f"{API_BASE_PATH}/capabilities"
 HOME_PATH = f"{API_BASE_PATH}/home"
+DASHBOARD_PATH = f"{API_BASE_PATH}/dashboard"
 CONTOURS_PATH = f"{API_BASE_PATH}/contours"
 CONTOUR_APPLY_PREVIEW_PATH = f"{CONTOURS_PATH}/apply-preview"
 CONTOUR_APPLY_PATH = f"{CONTOURS_PATH}/apply"
@@ -51,6 +52,16 @@ def api_capabilities_snapshot() -> dict[str, object]:
             "base_path": API_BASE_PATH,
         },
         "capabilities": {
+            "dashboard_snapshot": {
+                "available": True,
+                "path": DASHBOARD_PATH,
+                "method": "GET",
+                "response_contract": {
+                    "name": "universal-home",
+                    "version": 1,
+                },
+                "read_only": True,
+            },
             "climate_home": {
                 "available": True,
                 "path": HOME_PATH,

@@ -1,0 +1,134 @@
+{
+  "contract": {
+    "name": "universal-home",
+    "version": 1,
+    "profile": "hausmanhub-dashboard",
+    "source": "home-assistant"
+  },
+  "generatedAt": 1782225600000,
+  "stateRevision": 42,
+  "localIso": "2026-06-23T20:00:00+03:00",
+  "summary": {
+    "homeName": "Дом",
+    "mode": "home",
+    "targetTemp": 25.0,
+    "avgTemp": 25.8,
+    "outdoorTemp": 29.4,
+    "weatherCondition": "partlycloudy",
+    "weatherHumidity": 52,
+    "weatherFeelsLike": 30.1,
+    "weatherWindSpeed": 2.4,
+    "weatherWindSpeedUnit": "m/s",
+    "weatherIsDay": true,
+    "weatherUpdatedAt": 1782225590000,
+    "co2": 596,
+    "activeLights": 2,
+    "activeClimate": 3,
+    "activeAlarms": 0
+  },
+  "rooms": [
+    {
+      "id": "living",
+      "name": "Гостиная",
+      "icon": "sofa",
+      "temp": 25.8,
+      "humidity": 46,
+      "targetTemp": 25.0,
+      "manualTarget": false,
+      "manualControl": false,
+      "targetStrategy": "normal",
+      "climateState": "cooling",
+      "climateRunning": true,
+      "hasClimateControl": true,
+      "deviceIds": ["device_living_ac"],
+      "status": "cooling"
+    }
+  ],
+  "devices": [
+    {
+      "id": "device_living_ac",
+      "entityId": "climate.living_room",
+      "physicalId": "device_living_ac",
+      "name": "Кондиционер",
+      "roomId": "living",
+      "roomName": "Гостиная",
+      "domain": "climate",
+      "category": "climate",
+      "icon": "ac_unit",
+      "state": "cool",
+      "stateLabel": "охлаждение",
+      "active": true,
+      "unavailable": false,
+      "tone": "good",
+      "primaryValue": "25°C",
+      "source": "home-assistant",
+      "model": "AC Demo",
+      "manufacturer": "Example",
+      "attributes": {
+        "temperature": 25,
+        "fan_mode": "medium"
+      },
+      "actions": [
+        {
+          "id": "turn_off",
+          "title": "Выключить",
+          "confirmation": false,
+          "payload": {
+            "targetId": "device_living_ac",
+            "actionId": "turn_off"
+          }
+        }
+      ],
+      "details": [
+        {
+          "label": "Климат",
+          "value": "Охлаждение",
+          "entityId": "climate.living_room",
+          "domain": "climate",
+          "state": "cool"
+        },
+        {
+          "label": "Температура",
+          "value": "25,8 °C",
+          "entityId": "sensor.living_room_temperature",
+          "domain": "sensor",
+          "state": "25.8"
+        }
+      ]
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "away_long_mode",
+      "title": "Ушел надолго",
+      "group": "Безопасность",
+      "description": "Закрывает воду и шторы, выключает свет, телевизоры и кондиционеры",
+      "icon": "shield",
+      "requiresConfirmation": true,
+      "favorite": true,
+      "danger": true
+    }
+  ],
+  "alarms": [],
+  "events": [
+    {
+      "id": "event-1",
+      "ts": 1782225580000,
+      "title": "Климат",
+      "message": "Гостиная: охлаждение 25°C",
+      "roomId": "living",
+      "entityId": "climate.living_room",
+      "kind": "climate",
+      "level": "info"
+    }
+  ],
+  "capabilities": {
+    "actions": true,
+    "scenarios": true,
+    "alarms": true,
+    "events": true,
+    "smartClimate": true,
+    "physicalDevices": true,
+    "dashboardSnapshot": true
+  }
+}

@@ -17,6 +17,7 @@ from .application.api_capabilities import (
     CONTOURS_PATH,
     CONTOUR_APPLY_PATH,
     CONTOUR_APPLY_PREVIEW_PATH,
+    DASHBOARD_PATH,
     HOME_PATH,
     TEMPORARY_TEMPERATURE_PATH,
     api_capabilities_snapshot,
@@ -61,6 +62,7 @@ from .application.climate_runtime import (
 )
 from .application.climate_setup import ClimateSetupViolation
 from .domain.ai_assistant import AiAdvisoryStatus, AiAssistantViolation
+from .dashboard_ha_snapshot import async_dashboard_snapshot
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -146,6 +148,7 @@ def register_climate_api(
     if DATA_CLIMATE_VIEWS not in data:
         views = [
             ClimateCapabilitiesView(hass),
+            DashboardView(hass),
             ClimateHomeView(hass),
             ContoursView(hass),
             ContourApplyPreviewView(hass),
@@ -268,6 +271,31 @@ class ClimateHomeView(_ClimateView):
             return self._unavailable()
         try:
             payload = await runtime.async_public_snapshot()
+        except Exception:
+            return self._unavailable()
+        return self.json(payload, headers=NO_STORE_HEADERS)
+
+
+class DashboardView(_ClimateView):
+    """Serve one read-only, physical-device-grouped home snapshot."""
+
+    url = DASHBOARD_PATH
+    name = "api:hausman_hub:dashboard"
+
+    async def get(self, request: Any) -> Any:
+        if not _is_exact_request(request, DASHBOARD_PATH):
+            return _not_found(self)
+        if not _is_local_tablet_request(request):
+            return _forbidden(self)
+        if self._runtime() is None:
+            return self._unavailable()
+        data = self._hass.data.get(DOMAIN, {})
+        scenario_service = data.get("scenario_service")
+        try:
+            payload = await async_dashboard_snapshot(
+                self._hass,
+                scenario_service if scenario_service is not None else None,
+            )
         except Exception:
             return self._unavailable()
         return self.json(payload, headers=NO_STORE_HEADERS)
