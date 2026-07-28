@@ -177,8 +177,10 @@ def register_climate_api(
         ]
         if scenario_service is not None:
             from .scenario_api import scenario_api_views
+            from .device_action_api import DeviceActionView
 
             views.extend(scenario_api_views(hass, scenario_service))
+            views.append(DeviceActionView(hass))
         if ir_code_service is not None:
             from .ir_code_api import ir_code_api_views
 
@@ -252,7 +254,13 @@ class ClimateCapabilitiesView(_ClimateView):
             return _forbidden(self)
         if self._runtime() is None:
             return self._unavailable()
-        return self.json(api_capabilities_snapshot(), headers=NO_STORE_HEADERS)
+        data = self._hass.data.get(DOMAIN, {})
+        return self.json(
+            api_capabilities_snapshot(
+                device_actions_available=data.get("scenario_service") is not None
+            ),
+            headers=NO_STORE_HEADERS,
+        )
 
 
 class ClimateHomeView(_ClimateView):

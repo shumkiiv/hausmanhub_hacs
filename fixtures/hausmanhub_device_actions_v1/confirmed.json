@@ -1,0 +1,15 @@
+{
+  "contract": {
+    "name": "hausman-hub-device-action-receipt",
+    "version": 1
+  },
+  "requestId": "synthetic-request-1",
+  "accepted": true,
+  "confirmed": true,
+  "status": "confirmed",
+  "targetId": "entity_0123456789abcdef",
+  "actionId": "turn_on",
+  "observedState": "on",
+  "appliedAt": 1785268800000,
+  "reason": null
+}

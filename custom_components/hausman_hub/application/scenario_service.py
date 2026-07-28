@@ -321,3 +321,19 @@ class ScenarioService:
             visited_scenarios=visited,
         )
         return result
+
+    async def async_execute_device_action(
+        self,
+        target_id: str,
+        action_id: str,
+        value: object | None = None,
+    ) -> dict[str, Any]:
+        """Execute one catalog action through the shared strict executor."""
+
+        if self._executor is None:
+            raise ScenarioServiceError("Executor not configured", status=500)
+        return await self._executor.async_execute_device_action(
+            target_id,
+            action_id,
+            value,
+        )

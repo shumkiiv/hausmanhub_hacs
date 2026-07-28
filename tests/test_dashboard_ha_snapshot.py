@@ -19,6 +19,16 @@ class _States:
 
 
 class _ScenarioService:
+    def __init__(self) -> None:
+        action = SimpleNamespace(action_id="turn_on", title="Включить")
+        device = SimpleNamespace(
+            target_id="entity_0123456789abcdef",
+            entity_id="climate.living",
+            name="Кондиционер",
+            actions=(action,),
+        )
+        self._catalog = SimpleNamespace(devices={device.target_id: device})
+
     async def async_list_scenarios(self) -> tuple[object, ...]:
         return (
             SimpleNamespace(
@@ -123,6 +133,12 @@ class DashboardHaSnapshotTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("Тестовый дом", payload["summary"]["homeName"])
         self.assertEqual(1, len(payload["devices"]))
         self.assertEqual(2, len(payload["devices"][0]["details"]))
+        self.assertEqual(1, len(payload["devices"][0]["actions"]))
+        self.assertEqual(
+            "entity_0123456789abcdef",
+            payload["devices"][0]["actions"][0]["payload"]["targetId"],
+        )
+        self.assertTrue(payload["capabilities"]["actions"])
         self.assertEqual(["welcome"], [item["id"] for item in payload["scenarios"]])
         self.assertEqual(int(now.timestamp() * 1000), payload["generatedAt"])
 

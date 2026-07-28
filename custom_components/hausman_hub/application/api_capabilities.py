@@ -27,6 +27,7 @@ API_BASE_PATH = "/api/hausman_hub/v1"
 CAPABILITIES_PATH = f"{API_BASE_PATH}/capabilities"
 HOME_PATH = f"{API_BASE_PATH}/home"
 DASHBOARD_PATH = f"{API_BASE_PATH}/dashboard"
+DEVICE_ACTIONS_PATH = f"{API_BASE_PATH}/device-actions"
 CONTOURS_PATH = f"{API_BASE_PATH}/contours"
 CONTOUR_APPLY_PREVIEW_PATH = f"{CONTOURS_PATH}/apply-preview"
 CONTOUR_APPLY_PATH = f"{CONTOURS_PATH}/apply"
@@ -39,7 +40,9 @@ SCENARIOS_RUN_PATH = f"{SCENARIOS_PATH}/run"
 SCENARIOS_ACTION_PATH = f"{SCENARIOS_PATH}/action"
 
 
-def api_capabilities_snapshot() -> dict[str, object]:
+def api_capabilities_snapshot(
+    *, device_actions_available: bool = True
+) -> dict[str, object]:
     """Describe only the stable, local, tablet-facing HausmanHub API surface."""
 
     return {
@@ -52,6 +55,21 @@ def api_capabilities_snapshot() -> dict[str, object]:
             "base_path": API_BASE_PATH,
         },
         "capabilities": {
+            "device_actions": {
+                "available": device_actions_available,
+                "path": DEVICE_ACTIONS_PATH,
+                "method": "POST",
+                "requires_confirmation": False,
+                "receipt_read_back": True,
+                "request_contract": {
+                    "name": "hausman-hub-device-action-request",
+                    "version": 1,
+                },
+                "response_contract": {
+                    "name": "hausman-hub-device-action-receipt",
+                    "version": 1,
+                },
+            },
             "dashboard_snapshot": {
                 "available": True,
                 "path": DASHBOARD_PATH,

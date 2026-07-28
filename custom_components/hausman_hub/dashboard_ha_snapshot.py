@@ -84,6 +84,55 @@ async def _dashboard_scenarios(
     )
 
 
+def _attach_catalog_actions(
+    payload: dict[str, object],
+    scenario_service: ScenarioService | None,
+) -> None:
+    """Attach only allowlisted catalog actions to their owning physical card."""
+
+    catalog = getattr(scenario_service, "_catalog", None)
+    catalog_devices = getattr(catalog, "devices", {})
+    by_entity = {
+        device.entity_id: device
+        for device in catalog_devices.values()
+        if isinstance(getattr(device, "entity_id", None), str)
+    }
+    action_count = 0
+    for device_payload in payload.get("devices", []):
+        entity_ids = [
+            detail.get("entityId")
+            for detail in device_payload.get("details", [])
+            if isinstance(detail, dict)
+        ]
+        actions: list[dict[str, object]] = []
+        multiple_entities = len(entity_ids) > 1
+        for entity_id in entity_ids:
+            catalog_device = by_entity.get(entity_id)
+            if catalog_device is None:
+                continue
+            for action in catalog_device.actions:
+                actions.append(
+                    {
+                        "id": f"{catalog_device.target_id}:{action.action_id}",
+                        "title": (
+                            f"{catalog_device.name} · {action.title}"
+                            if multiple_entities
+                            else action.title
+                        ),
+                        "confirmation": action.action_id in {"lock", "unlock"},
+                        "payload": {
+                            "targetId": catalog_device.target_id,
+                            "actionId": action.action_id,
+                        },
+                    }
+                )
+        device_payload["actions"] = actions
+        action_count += len(actions)
+    capabilities = payload.get("capabilities")
+    if isinstance(capabilities, dict):
+        capabilities["actions"] = action_count > 0
+
+
 async def async_dashboard_snapshot(
     hass: HomeAssistant,
     scenario_service: ScenarioService | None = None,
@@ -143,7 +192,7 @@ async def async_dashboard_snapshot(
         )
 
     local_now = _local_now()
-    return build_dashboard_snapshot(
+    payload = build_dashboard_snapshot(
         areas=area_values,
         devices=device_values,
         entities=entity_values,
@@ -153,3 +202,5 @@ async def async_dashboard_snapshot(
         home_name=_non_empty_string(getattr(hass.config, "location_name", None))
         or "Дом",
     )
+    _attach_catalog_actions(payload, scenario_service)
+    return payload

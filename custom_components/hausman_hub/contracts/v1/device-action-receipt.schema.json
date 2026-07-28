@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hausmanhub/contracts/v1/device-action-receipt.schema.json",
+  "title": "HausmanHub device action receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "requestId",
+    "accepted",
+    "confirmed",
+    "status",
+    "targetId",
+    "actionId"
+  ],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "hausman-hub-device-action-receipt" },
+        "version": { "const": 1 }
+      }
+    },
+    "requestId": { "type": "string", "minLength": 1 },
+    "accepted": { "type": "boolean" },
+    "confirmed": { "type": "boolean" },
+    "status": { "enum": ["failed", "accepted", "confirmed"] },
+    "targetId": { "type": "string", "minLength": 1 },
+    "actionId": { "type": "string", "minLength": 1 },
+    "observedState": { "type": ["string", "null"] },
+    "appliedAt": { "type": ["integer", "null"] },
+    "reason": { "type": ["string", "null"] },
+    "error": { "type": ["string", "null"] }
+  }
+}

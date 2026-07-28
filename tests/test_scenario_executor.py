@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -25,6 +26,14 @@ from custom_components.hausman_hub.domain.scenarios import (
 class _FakeHass:
     def __init__(self) -> None:
         self.services = AsyncMock()
+        self.states = SimpleNamespace(
+            get=lambda entity_id: {
+                "light.living_room": SimpleNamespace(state="on", attributes={}),
+                "climate.living_room": SimpleNamespace(
+                    state="cool", attributes={"temperature": 22}
+                ),
+            }.get(entity_id)
+        )
 
 
 class _FakeCatalog:
@@ -235,6 +244,29 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         run_id_2 = self.executor.new_run_id()
         self.assertNotEqual(run_id_1, run_id_2)
         self.assertEqual(len(run_id_1), 32)
+
+    async def test_public_device_action_returns_confirmed_read_back(self) -> None:
+        receipt = await self.executor.async_execute_device_action(
+            "device_1", "turn_on"
+        )
+
+        self.assertTrue(receipt["accepted"])
+        self.assertTrue(receipt["confirmed"])
+        self.assertEqual("confirmed", receipt["status"])
+        self.assertEqual("on", receipt["observedState"])
+        self.hass.services.async_call.assert_awaited_once_with(
+            "light", "turn_on", {"entity_id": "light.living_room"}, blocking=True
+        )
+
+    async def test_public_device_action_rejects_unknown_target(self) -> None:
+        receipt = await self.executor.async_execute_device_action(
+            "missing", "turn_on"
+        )
+
+        self.assertFalse(receipt["accepted"])
+        self.assertFalse(receipt["confirmed"])
+        self.assertEqual("failed", receipt["status"])
+        self.hass.services.async_call.assert_not_awaited()
 
 
 if __name__ == "__main__":

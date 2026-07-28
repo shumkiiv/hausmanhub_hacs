@@ -1,5 +1,18 @@
 # История версий
 
+## 1.29.0 - 2026-07-28
+
+- Добавлен локальный `POST /api/hausman_hub/v1/device-actions`. Клиент передаёт
+  только opaque `targetId` и `actionId`, которые разрешаются через общий catalog
+  сценариев; произвольные HA domain/service/entity_id не принимаются.
+- Исполнитель возвращает отдельные `accepted` и `confirmed`, наблюдаемое
+  состояние и причину `state_not_confirmed`. После блокирующего service call
+  read-back ожидается до двух секунд, поэтому HTTP 200 не подменяет физическое
+  подтверждение.
+- Dashboard публикует действия всех entities внутри одной физической карточки,
+  не создавая отдельные карточки для функций устройства. Capability честно
+  объявляет receipt/read-back contract v1.
+
 ## 1.28.0 - 2026-07-28
 
 - Добавлен локальный read-only endpoint `GET /api/hausman_hub/v1/dashboard`

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hausmanhub/contracts/v1/device-action-request.schema.json",
+  "title": "HausmanHub device action request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["targetId", "actionId"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "hausman-hub-device-action-request" },
+        "version": { "const": 1 }
+      }
+    },
+    "targetId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "actionId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "value": { "type": ["string", "number", "boolean", "null"] }
+  }
+}

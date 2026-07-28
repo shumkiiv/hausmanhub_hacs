@@ -1,0 +1,8 @@
+{
+  "contract": {
+    "name": "hausman-hub-device-action-request",
+    "version": 1
+  },
+  "targetId": "entity_0123456789abcdef",
+  "actionId": "turn_on"
+}

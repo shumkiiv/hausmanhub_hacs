@@ -25,6 +25,8 @@ if TYPE_CHECKING:
 
 
 _RUN_SCENARIO_DEPTH_LIMIT = 8
+_DEVICE_READBACK_ATTEMPTS = 10
+_DEVICE_READBACK_INTERVAL_SECONDS = 0.2
 
 
 def _value_parameter_name(action_id: str, domain: str, service: str) -> str | None:
@@ -191,6 +193,68 @@ class ScenarioExecutor:
     def new_run_id(self) -> str:
         """Generate a unique execution trace id."""
         return uuid.uuid4().hex
+
+    async def async_execute_device_action(
+        self,
+        target_id: str,
+        action_id: str,
+        value: object | None = None,
+    ) -> dict[str, Any]:
+        """Execute one allowlisted device action and confirm its HA read-back."""
+
+        request_id = self.new_run_id()
+        execution_action_id = f"action_{request_id[:16]}"
+        action = ScenarioAction(
+            id=execution_action_id,
+            type=ScenarioActionType.DEVICE_ACTION,
+            target_id=target_id,
+            action_id=action_id,
+            value=value,
+        )
+        receipt = await self._device_action_receipt(
+            action,
+            {
+                "action_id": execution_action_id,
+                "type": "device_action",
+                "status": "pending",
+            },
+        )
+        if receipt.get("status") != "completed":
+            return {
+                "requestId": request_id,
+                "accepted": False,
+                "confirmed": False,
+                "status": "failed",
+                "targetId": target_id,
+                "actionId": action_id,
+                "error": receipt.get("error", "device_action_failed"),
+            }
+
+        device = self._catalog.device(target_id)
+        observed_state: str | None = None
+        confirmed = False
+        if device is not None:
+            for attempt in range(_DEVICE_READBACK_ATTEMPTS):
+                state = self._hass.states.get(device.entity_id)
+                if state is not None:
+                    observed_state = str(getattr(state, "state", "unknown"))
+                    if _device_action_confirmed(state, action_id, value):
+                        confirmed = True
+                        break
+                if attempt + 1 < _DEVICE_READBACK_ATTEMPTS:
+                    await asyncio.sleep(_DEVICE_READBACK_INTERVAL_SECONDS)
+
+        return {
+            "requestId": request_id,
+            "accepted": True,
+            "confirmed": confirmed,
+            "status": "confirmed" if confirmed else "accepted",
+            "targetId": target_id,
+            "actionId": action_id,
+            "observedState": observed_state,
+            "appliedAt": int(time.time() * 1000),
+            "reason": None if confirmed else "state_not_confirmed",
+        }
 
     async def async_execute(
         self,
@@ -412,3 +476,35 @@ class ScenarioExecutor:
         if call is None:
             raise RuntimeError("Home Assistant async_call is not available")
         await call(domain, service, service_data, blocking=True)
+
+
+def _device_action_confirmed(state: object, action_id: str, value: object | None) -> bool:
+    """Compare one post-call state with the requested semantic action."""
+
+    state_value = str(getattr(state, "state", "unknown"))
+    attributes = getattr(state, "attributes", {})
+    if action_id == "turn_on":
+        return state_value not in {"off", "unknown", "unavailable"}
+    if action_id == "turn_off":
+        return state_value == "off"
+    if action_id == "open_cover":
+        return state_value in {"open", "opening"}
+    if action_id == "close_cover":
+        return state_value in {"closed", "closing"}
+    if action_id == "lock":
+        return state_value == "locked"
+    if action_id == "unlock":
+        return state_value == "unlocked"
+    expected_attribute = {
+        "set_brightness": "brightness",
+        "set_position": "current_position",
+        "set_temperature": "temperature",
+        "set_hvac_mode": "hvac_mode",
+        "set_fan_mode": "fan_mode",
+    }.get(action_id)
+    if expected_attribute is None:
+        return False
+    actual = attributes.get(expected_attribute)
+    if isinstance(actual, (int, float)) and isinstance(value, (int, float)):
+        return abs(float(actual) - float(value)) <= 0.1
+    return str(actual) == str(value)
