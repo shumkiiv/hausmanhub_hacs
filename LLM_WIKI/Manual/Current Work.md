@@ -1,4 +1,26 @@
-# Current Work - roomless-предупреждение (релиз 1.26.2)
+# Current Work - релиз 1.27.0 (IR-learning), далее roadmap 39/40
+
+## 2026-07-28: релиз 1.27.0 - обучение IR-кодов в мастере
+- Release commit `f22df48` на `origin/main` (30 файлов, +4021/-57); tag
+  `v1.27.0`; GitHub Actions run `30352650893` success; публичный релиз:
+  https://github.com/shumkiiv/hausmanhub_hacs/releases/tag/v1.27.0.
+- Деплой: HACS update entity, явная версия v1.27.0, рестарт HA, проверено
+  на живом: `integration_version: 1.27.0`.
+- Состав: шаг «Источник IR-кодов» после сохранения контура + возобновляемая
+  кнопка на карточке контура; приоритет SmartIR -> Broadlink .storage ->
+  ручное обучение с явным replace; коды в версионированном Store с привязкой
+  к device_id; канонические ключи ac.off/ac.cool.<t>/ac.heat.<t>/
+  humidifier.on|off; типизированный remote.send_command через строгий
+  исполнитель; ir_command_not_learned без молчаливой подмены; endpoint
+  /api/hausman_hub/v1/admin/ir-codes/bindings; 422/409 защиты; контракт v1
+  без изменений; сервис за протоколами, HA-адаптеры снаружи.
+- Oracle отклонил первую реализацию; одна программа исправлений в 3 прохода
+  (сессия ses_057e6b30affe0BV6WgVQntepEC) закрыла все блокеры. Второго
+  раунда ревью нет по политике. Гейт: 887 passed / 4 skipped,
+  check_local_release.py зелёный, бюджет панели 230 KiB сохранён.
+- Основной checkout hausmanhub_hasc устарел (первый WIP 1.27.0 + DESIGN.md
+  rev 4, позади origin/main): перед дальнейшей работой сбросить или
+  перебазировать, не строить на нём.
 
 ## 2026-07-28: релиз 1.26.2 - заметное предупреждение об устройствах без комнаты
 - Release commit `083b4c7` на `origin/main`; tag `v1.26.2`; GitHub Actions

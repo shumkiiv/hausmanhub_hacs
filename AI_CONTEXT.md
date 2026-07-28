@@ -1,9 +1,43 @@
 # HausmanHub AI Context
 
-Last updated: 2026-07-28 (release 1.26.2 published and deployed).
+Last updated: 2026-07-28 (release 1.27.0 published and deployed).
 
 ## Current work
 
+- Release 1.27.0 (wizard IR-code learning for universal IR contours)
+  is RELEASED and DEPLOYED, 2026-07-28:
+  - Release commit `f22df48` on `origin/main` (30 files, +4021/-57); tag
+    `v1.27.0` pushed; GitHub Actions run `30352650893` success; public
+    release:
+    https://github.com/shumkiiv/hausmanhub_hacs/releases/tag/v1.27.0.
+  - Contents: wizard `code_source` step AFTER contour save plus resumable
+    `Настроить IR-коды` entry on the saved contour card; strict source
+    priority SmartIR DB -> Broadlink `.storage` -> manual learn with
+    explicit `replace: true` (409); codes in HausmanHub versioned Store
+    keyed by contour device_id; canonical keys `ac.off`,
+    `ac.cool.<temp>`/`ac.heat.<temp>`, `humidifier.on|off`; runtime typed
+    `remote.send_command {entity_id, device, command}` through the strict
+    executor; missing code -> `ir_command_not_learned`; endpoint
+    `GET /api/hausman_hub/v1/admin/ir-codes/bindings`; 422 on unknown
+    device/remote mismatch; v1 current-setup contract unchanged;
+    IRCodeService behind protocols (`ir_code_ports.py`), HA adapters outer
+    (`ir_code_gateway.py`).
+  - Oracle (gpt-5.6-sol) REJECTED the first implementation; one fix
+    program in 3 delegated passes (session ses_057e6b30affe0BV6WgVQntepEC)
+    closed all 4 blockers + majors. No second review round per policy.
+  - Gates: 887 passed, 4 skipped, 732 subtests;
+    `tools/check_local_release.py` passed (version bump touched manifest
+    plus 3 version references in tests); panel budget 230 KiB kept.
+  - Built in worktree `hausmanhub_hasc-1270` (branch
+    `ui-1.27.0-ir-learning`). Deploy: HACS
+    `update.hausman_hub_hasc_update` installed explicit `v1.27.0`, HA
+    restarted, verified live (read-only): `integration_version: 1.27.0`.
+  - The main checkout `/home/ivsh/projects/hausmanhub_hasc` still holds
+    the superseded first 1.27.0 WIP + untracked DESIGN.md rev 4 and is
+    behind origin/main; do not build on it - reset or rebase before any
+    further work there.
+  - Next candidates: roadmap 39 (per-room schedules/profiles), roadmap 40
+    (standalone activation), then 2.0 line (41-50).
 - Release 1.26.2 (prominent roomless-device warning in the wizard)
   is RELEASED and DEPLOYED, 2026-07-28:
   - Release commit `083b4c7` on `origin/main`; tag `v1.26.2` resolves to
