@@ -454,6 +454,80 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
+    def test_overview_matches_figma_hierarchy_and_counts_physical_devices(self) -> None:
+        payloads = dict(GET_PATHS)
+        payloads["hausman_hub/v1/admin/panel"] = {
+            **PANEL_PAYLOAD,
+            "readiness": {
+                "status": "ready",
+                "bridge_mode": "native",
+                "reasons": [],
+            },
+            "snapshot": {
+                "rooms": [
+                    {
+                        "name": "Гостиная",
+                        "mode": "automatic",
+                        "active_profile": "day",
+                        "temperature": 24.5,
+                        "humidity": 46,
+                        "actual": {"data_status": "current"},
+                        "devices": [
+                            {
+                                "name": "Кондиционер",
+                                "state": "cool",
+                                "entities": ["climate.ac", "sensor.ac_temperature"],
+                            },
+                            {
+                                "name": "Увлажнитель",
+                                "state": "off",
+                                "entities": ["humidifier.room", "sensor.room_humidity"],
+                            },
+                        ],
+                    },
+                    {
+                        "name": "Спальня",
+                        "mode": "automatic",
+                        "active_profile": "night",
+                        "temperature": 23.5,
+                        "humidity": 50,
+                        "actual": {"data_status": "current"},
+                        "devices": [],
+                    },
+                ]
+            },
+        }
+        script = panel_script(
+            payloads,
+            {},
+            """
+        const overview = panel._shell.sectionNodes.overview;
+        const text = textOf(overview);
+        for (const label of [
+          "Дом в комфортном режиме", "Сводка", "Комнаты", "Гостиная", "Спальня",
+          "24.0 °C", "48 %", "1 из 2", "Дневной профиль", "Ночной профиль",
+        ]) {
+          if (!text.includes(label)) throw new Error("overview text missing: " + label);
+        }
+        if (text.includes("day профиль") || text.includes("night профиль")) {
+          throw new Error("raw profile code exposed");
+        }
+        const byClass = (name) => findAll(overview, (node) =>
+          String(node.className).split(" ").includes(name));
+        if (byClass("overview-hero-metric").length !== 4) {
+          throw new Error("overview hero must contain four metrics");
+        }
+        if (byClass("summary-item").length !== 3 || byClass("overview-room-card").length !== 2) {
+          throw new Error("overview summary or room hierarchy mismatch");
+        }
+        if (byClass("summary-icon").some((node) => node.children.length !== 1)) {
+          throw new Error("overview summary icon missing");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_assistant_loads_lazily_saves_settings_and_refreshes_advisory(self) -> None:
         script = panel_script(
             GET_PATHS | {AI_ASSISTANT_PATH: AI_ASSISTANT_PAYLOAD},

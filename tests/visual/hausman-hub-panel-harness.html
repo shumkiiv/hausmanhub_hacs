@@ -21,9 +21,46 @@
       document.documentElement.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       document.body.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       panel._data = {
-        integration_version: "1.38.1",
+        integration_version: "1.39.0",
         readiness: { status: "ready", bridge_mode: "native", reasons: [] },
-        snapshot: null,
+        snapshot: {
+          rooms: [
+            {
+              name: "Гостиная", mode: "automatic", active_profile: "day",
+              temperature: 24.8, humidity: 46, actual: { data_status: "current" },
+              devices: [
+                { name: "Кондиционер", state: "cool" },
+                { name: "Термоголовка", state: "off" },
+                { name: "Очиститель воздуха", state: "on" },
+              ],
+            },
+            {
+              name: "Спальня", mode: "automatic", active_profile: "night",
+              temperature: 24.2, humidity: 49, actual: { data_status: "current" },
+              devices: [
+                { name: "Кондиционер", state: "idle" },
+                { name: "Увлажнитель", state: "on" },
+              ],
+            },
+            {
+              name: "Кухня", mode: "automatic", active_profile: "day",
+              temperature: 25.1, humidity: 43, actual: { data_status: "current" },
+              devices: [
+                { name: "Тёплый пол", state: "off" },
+                { name: "Вытяжка", state: "on" },
+              ],
+            },
+            {
+              name: "Детская", mode: "automatic", active_profile: "day",
+              temperature: 24.5, humidity: 51, actual: { data_status: "current" },
+              devices: [
+                { name: "Термоголовка", state: "heat" },
+                { name: "Очиститель воздуха", state: "auto" },
+                { name: "Увлажнитель", state: "off" },
+              ],
+            },
+          ],
+        },
       };
       panel._settings.setup = { status: "configured" };
       panel._activeSection = params.get("section") || "overview";

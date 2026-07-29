@@ -117,6 +117,9 @@ const ICON_PATHS = {
   sun: "M6.76 4.84l-1.8-1.79-1.41 1.41 1.79 1.79 1.42-1.41zM4 10.5H1v2h3v-2zm9-9.95h-2V3.5h2V.55zm7.45 3.91l-1.41-1.41-1.79 1.79 1.41 1.41 1.79-1.79zm-3.21 13.7l1.79 1.8 1.41-1.41-1.8-1.79-1.4 1.4zM20 10.5v2h3v-2h-3zm-8-5c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm-1 16.95h2V19.5h-2v2.95zm-7.45-3.91l1.41 1.41 1.79-1.8-1.41-1.41-1.79 1.8z",
   moon: "M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z",
   auto: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18V4c4.41 0 8 3.59 8 8s-3.59 8-8 8z",
+  home: "M12 3 2 12h3v9h6v-6h2v6h6v-9h3L12 3zm0 2.69L18 11v8h-3v-6H9v6H6v-8l6-5.31z",
+  thermometer: "M15 13V5a3 3 0 0 0-6 0v8a5 5 0 1 0 6 0zm-3 6a3 3 0 0 1-1-5.83V5a1 1 0 0 1 2 0v8.17A3 3 0 0 1 12 19z",
+  water: "M12 2.69 6.35 8.34A8 8 0 0 0 4 14a8 8 0 0 0 16 0c0-2.21-.9-4.21-2.35-5.66L12 2.69zM12 20a6 6 0 0 1-4.24-10.24L12 5.52l4.24 4.24A6 6 0 0 1 12 20z",
 };
 
 const THEME_MODES = ["auto", "light", "dark"];
@@ -459,7 +462,7 @@ class HausmanHubPanel extends HTMLElement {
       this._activeSection = "overview";
       shell.brandSubtitle.textContent = SECTION_SUBTITLES.overview;
       this._renderHeaderStatus(this._data.readiness);
-      this._renderReadiness(shell.readiness, this._data.readiness);
+      this._renderReadiness(shell.readiness, this._data.readiness, this._data.snapshot);
       this._renderOverviewSummary(shell.summary, this._settings.setup, this._data.snapshot);
       this._renderRooms(shell.rooms, this._data.snapshot);
       PANEL_SECTIONS.forEach((section) => {
@@ -469,7 +472,7 @@ class HausmanHubPanel extends HTMLElement {
     }
     shell.nav.hidden = false;
     this._chooseInitialSection();
-    this._renderReadiness(shell.readiness, this._data.readiness);
+    this._renderReadiness(shell.readiness, this._data.readiness, this._data.snapshot);
     const snapshot = this._data.snapshot;
     this._renderOverviewSummary(shell.summary, this._settings.setup, snapshot);
     if (!this._dirty.wizard) {
@@ -672,24 +675,47 @@ class HausmanHubPanel extends HTMLElement {
   _renderOverviewSummary(container, setup, snapshot) {
     container.innerHTML = "";
     if (!setup && !snapshot) return;
+    const metrics = this._overviewMetrics(snapshot);
+    const heading = el("div", "overview-section-heading");
+    heading.appendChild(el("h2", null, "Сводка"));
+    heading.appendChild(el("p", "section-intro", "Основные показатели дома"));
+    container.appendChild(heading);
     const summary = el("div", "overview-summary");
-    const add = (label, value) => {
+    [
+      ["thermometer", "Температура", metrics.temperature],
+      ["water", "Влажность", metrics.humidity],
+      ["device", "Активные устройства", `${metrics.activeDevices} из ${metrics.deviceCount}`],
+    ].forEach(([iconName, label, value]) => {
       const item = el("div", "summary-item");
-      item.appendChild(el("span", "muted", label));
-      item.appendChild(el("strong", "summary-value", value));
+      const icon = el("span", "summary-icon");
+      icon.appendChild(svgIcon(iconName));
+      item.appendChild(icon);
+      const copy = el("div", "summary-copy");
+      copy.appendChild(el("span", "assistant-field-label", label));
+      copy.appendChild(el("strong", "summary-value", value));
+      item.appendChild(copy);
       summary.appendChild(item);
-    };
-    const setupSummary = (setup && setup.summary) || {};
-    add("Активный контур", (setup && setup.name) || "Не настроен");
-    add(
-      "Режим контура",
-      setup && setup.mode
-        ? (((setup.display_names || {}).modes || {})[setup.mode] || setup.mode)
-        : "Нет данных"
-    );
-    add("Комнат", setupSummary.room_count === undefined ? 0 : setupSummary.room_count);
-    add("Устройств", setupSummary.device_count === undefined ? 0 : setupSummary.device_count);
+    });
     container.appendChild(summary);
+  }
+
+  _overviewMetrics(snapshot) {
+    const rooms = snapshot && Array.isArray(snapshot.rooms) ? snapshot.rooms : [];
+    const average = (values) => {
+      const valid = values.filter((value) => typeof value === "number" && Number.isFinite(value));
+      return valid.length ? valid.reduce((sum, value) => sum + value, 0) / valid.length : null;
+    };
+    const devices = rooms.flatMap((room) => Array.isArray(room.devices) ? room.devices : []);
+    const activeDevices = devices.filter((device) => (
+      !["off", "idle", "unavailable", "unknown"].includes(device.state)
+    )).length;
+    return {
+      roomCount: rooms.length,
+      deviceCount: devices.length,
+      activeDevices,
+      temperature: this._temp(average(rooms.map((room) => room.temperature))),
+      humidity: this._humidity(average(rooms.map((room) => room.humidity))),
+    };
   }
 
   _markDirty(section, indicator = null) {
@@ -701,6 +727,7 @@ class HausmanHubPanel extends HTMLElement {
   _bridgeModeName(code) {
     const labels = {
       managed: "Управляемый",
+      native: "Нативное управление",
       disabled: "Выключен",
       shadow: "Наблюдение",
       canary: "Ограниченное управление",
@@ -718,6 +745,19 @@ class HausmanHubPanel extends HTMLElement {
       disabled: "Выключен",
     };
     return labels[code] || "Нет данных";
+  }
+
+  _profileName(code) {
+    const translated = this._names("profiles", code);
+    if (translated && translated !== code) return translated;
+    const labels = {
+      day: "Дневной",
+      night: "Ночной",
+      away: "Никого нет дома",
+      comfort: "Комфорт",
+      eco: "Экономичный",
+    };
+    return labels[code] || "Индивидуальный";
   }
 
   _dataStatusName(code) {
@@ -1104,20 +1144,42 @@ class HausmanHubPanel extends HTMLElement {
     return new Intl.NumberFormat("ru-RU").format(Number(value || 0));
   }
 
-  _renderReadiness(container, readiness) {
+  _renderReadiness(container, readiness, snapshot) {
     container.innerHTML = "";
-    container.appendChild(el("h2", null, "Обзор"));
-    container.appendChild(
-      el("div", "section-intro", "Текущее состояние климатического контура и комнат.")
-    );
-    const card = el("div", "card hero");
-    card.appendChild(
-      el("div", "hero-status", READINESS_LABELS[readiness.status] || "Состояние уточняется")
-    );
-    const modeRow = el("div", "row");
-    modeRow.appendChild(el("span", null, "Режим управления"));
-    modeRow.appendChild(el("span", "value", this._bridgeModeName(readiness.bridge_mode)));
-    card.appendChild(modeRow);
+    const metrics = this._overviewMetrics(snapshot);
+    const ready = readiness.status === "ready";
+    const card = el("div", "card hero overview-hero");
+    const head = el("div", "overview-hero-head");
+    const icon = el("span", "overview-hero-icon");
+    icon.appendChild(svgIcon("home"));
+    head.appendChild(icon);
+    const copy = el("div", "overview-hero-copy");
+    copy.appendChild(el(
+      "div",
+      "hero-status",
+      ready ? "Дом в комфортном режиме" : (READINESS_LABELS[readiness.status] || "Состояние уточняется")
+    ));
+    copy.appendChild(el(
+      "p",
+      "section-intro",
+      ready ? "Все основные показатели находятся в заданных диапазонах" : "Проверьте состояние и завершите необходимую настройку"
+    ));
+    head.appendChild(copy);
+    head.appendChild(el("span", "status-badge overview-mode-status", this._bridgeModeName(readiness.bridge_mode)));
+    card.appendChild(head);
+    const metricGrid = el("div", "overview-hero-metrics");
+    [
+      [metrics.temperature, "Температура"],
+      [metrics.humidity, "Влажность"],
+      [metrics.activeDevices, "Устройств активно"],
+      [metrics.roomCount, "Комнаты"],
+    ].forEach(([value, label]) => {
+      const metric = el("div", "overview-hero-metric");
+      metric.appendChild(el("strong", null, value));
+      metric.appendChild(el("span", "muted", label));
+      metricGrid.appendChild(metric);
+    });
+    card.appendChild(metricGrid);
     if (Array.isArray(readiness.reasons) && readiness.reasons.length) {
       const reasons = el("div", "reasons");
       readiness.reasons.forEach((reason) => {
@@ -1127,11 +1189,8 @@ class HausmanHubPanel extends HTMLElement {
     }
     const modeSettings = this._settings.mode;
     if (modeSettings) {
-      const switchRow = el("div", "row");
+      const switchRow = el("div", "overview-hero-actions");
       const managed = modeSettings.mode === "managed";
-      switchRow.appendChild(
-        el("span", null, managed ? "Управление включено" : "Управление выключено")
-      );
       const button = el(
         "button",
         managed ? "secondary" : null,
@@ -1173,42 +1232,47 @@ class HausmanHubPanel extends HTMLElement {
       container.appendChild(card);
       return;
     }
-    container.appendChild(el("h2", null, "Комнаты"));
-    const grid = el("div", "cards");
+    const heading = el("div", "overview-section-heading overview-rooms-heading");
+    const headingCopy = el("div");
+    headingCopy.appendChild(el("h2", null, "Комнаты"));
+    headingCopy.appendChild(el("p", "section-intro", "Короткая сводка по каждому пространству"));
+    heading.appendChild(headingCopy);
+    container.appendChild(heading);
+    const grid = el("div", "cards overview-room-grid");
     (snapshot.rooms || []).forEach((room) => {
-      const card = el("div", "card");
-      card.appendChild(el("h3", null, room.name));
-      const metrics = el("div", "room-metrics");
-      const temperature = el("div", "metric");
-      temperature.appendChild(el("span", "muted", "Температура"));
-      temperature.appendChild(el("strong", null, this._temp(room.temperature)));
-      metrics.appendChild(temperature);
-      const humidity = el("div", "metric");
-      humidity.appendChild(el("span", "muted", "Влажность"));
-      humidity.appendChild(el("strong", null, this._humidity(room.humidity)));
-      metrics.appendChild(humidity);
-      card.appendChild(metrics);
-      this._row(card, "Цель", this._temp(room.target_temperature));
+      const card = el("div", "card overview-room-card");
+      const cardHead = el("div", "overview-room-head");
+      const roomCopy = el("div");
+      roomCopy.appendChild(el("h3", null, room.name));
       const activeProfile = room.active_profile || (room.targets && room.targets.profile);
-      this._row(
-        card,
-        "Профиль и режим",
-        [
-          activeProfile && this._names("profiles", activeProfile),
-          this._roomModeName(room.mode),
-        ].filter(Boolean).join(" · ") || "Нет данных"
-      );
+      roomCopy.appendChild(el("p", "muted", activeProfile
+        ? `${this._profileName(activeProfile)} профиль`
+        : this._roomModeName(room.mode)));
+      cardHead.appendChild(roomCopy);
       const dataStatus = this._dataStatusName(room.actual && room.actual.data_status);
-      this._row(card, "Свежесть данных", dataStatus || "Нет данных");
+      cardHead.appendChild(el(
+        "span",
+        `status-badge ${dataStatus === "Свежие данные" ? "is-ready" : "is-attention"}`,
+        dataStatus === "Свежие данные" ? "В норме" : dataStatus
+      ));
+      card.appendChild(cardHead);
       const devices = room.devices || [];
       const activeDevices = devices.filter((device) => (
         !["off", "idle", "unavailable", "unknown"].includes(device.state)
       )).length;
-      this._row(
-        card,
-        "Устройства",
-        devices.length ? `${devices.length}, активно: ${activeDevices}` : "Нет данных"
-      );
+      const metrics = el("div", "overview-room-metrics");
+      [
+        ["Температура", this._temp(room.temperature)],
+        ["Влажность", this._humidity(room.humidity)],
+        ["Активно", `${activeDevices} ${activeDevices === 1 ? "устройство" : "устройства"}`],
+        ["Воздух", dataStatus === "Свежие данные" ? "Хорошо" : "Проверить"],
+      ].forEach(([label, value]) => {
+        const metric = el("div");
+        metric.appendChild(el("span", "assistant-field-label", label));
+        metric.appendChild(el("strong", null, value));
+        metrics.appendChild(metric);
+      });
+      card.appendChild(metrics);
       grid.appendChild(card);
     });
     if (!(snapshot.rooms || []).length) {
@@ -3873,7 +3937,7 @@ class HausmanHubPanel extends HTMLElement {
       this._row(card, "Режим", this._names("contour_modes", contour.mode));
       if (contour.schedule && contour.schedule.enabled) {
         const next = contour.schedule.next_profile
-          ? `${this._names("profiles", contour.schedule.next_profile)} · ${contour.schedule.next_change_at || ""}`
+          ? `${this._profileName(contour.schedule.next_profile)} · ${contour.schedule.next_change_at || ""}`
           : "Расписание включено";
         this._row(card, "Расписание", next);
       }
