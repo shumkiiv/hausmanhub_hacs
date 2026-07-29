@@ -30,6 +30,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         content = PANEL_JS.read_text(encoding="utf-8")
 
         self.assertLessEqual(len(content.encode("utf-8")), MAX_PANEL_JS_BYTES)
+        self.assertIn('customElements.get?.("hausman-hub-panel")', content)
         self.assertIn('customElements.define("hausman-hub-panel"', content)
 
     def test_panel_styles_are_local_and_stay_bounded(self) -> None:
@@ -474,7 +475,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.42.2",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.42.3",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },

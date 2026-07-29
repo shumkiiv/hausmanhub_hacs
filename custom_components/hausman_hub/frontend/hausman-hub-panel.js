@@ -1422,32 +1422,31 @@ class HausmanHubPanel extends HTMLElement {
       || (candidate.can_add === true
         && candidate.room_id === "" && candidate.suggested_room_id === roomId)
     ));
-    return this._firstRunWithoutShadowedDuplicates(candidates);
+    return this._firstRunDistinctCandidates(candidates);
   }
 
-  _firstRunCandidateDuplicateIdentity(candidate) {
-    const types = (candidate.suggested_types || [])
-      .filter((type) => ACTIVE_DEVICE_TYPES.has(type))
-      .sort();
-    const roomId = candidate.room_id || candidate.suggested_room_id || "";
-    const name = normalizedText(candidate.name || "");
-    const deviceName = normalizedText(candidate.device_name || candidate.name || "");
-    const maker = normalizedText(candidate.manufacturer || "");
-    const model = normalizedText(candidate.model || "");
-    if (!types.length || ![roomId, name, deviceName, maker, model].every(Boolean)) return null;
-    return [roomId, name, deviceName, maker, model, types.join(",")].join("|");
+  _firstRunDuplicateKey(candidate) {
+    const types = (candidate.suggested_types || []).filter((type) => ACTIVE_DEVICE_TYPES.has(type)).sort();
+    const identity = [
+      candidate.room_id || candidate.suggested_room_id || "",
+      normalizedText(candidate.name || ""),
+      normalizedText(candidate.device_name || candidate.name || ""),
+      normalizedText(candidate.manufacturer || ""),
+      normalizedText(candidate.model || ""),
+    ];
+    return types.length && identity.every(Boolean) ? [...identity, types.join(",")].join("|") : null;
   }
 
-  _firstRunWithoutShadowedDuplicates(candidates) {
+  _firstRunDistinctCandidates(candidates) {
     const availableIdentities = new Set();
     candidates.forEach((candidate) => {
       if (!["available", "already_configured"].includes(candidate.status)) return;
-      const identity = this._firstRunCandidateDuplicateIdentity(candidate);
+      const identity = this._firstRunDuplicateKey(candidate);
       if (identity) availableIdentities.add(identity);
     });
     return candidates.filter((candidate) => {
       if (candidate.status !== "unavailable") return true;
-      const identity = this._firstRunCandidateDuplicateIdentity(candidate);
+      const identity = this._firstRunDuplicateKey(candidate);
       return !identity || !availableIdentities.has(identity);
     });
   }
@@ -5269,4 +5268,4 @@ class HausmanHubPanel extends HTMLElement {
   }
 }
 
-customElements.define("hausman-hub-panel", HausmanHubPanel);
+customElements.get?.("hausman-hub-panel") || customElements.define("hausman-hub-panel", HausmanHubPanel);
