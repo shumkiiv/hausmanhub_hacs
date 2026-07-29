@@ -2146,10 +2146,11 @@ class HausmanHubPanel extends HTMLElement {
   }
 
   async _checkFirstRunRoom(roomId) {
+    const roomState = this._firstRun.rooms[roomId];
+    if (roomState) roomState.included = true;
     const collected = this._firstRunPayload([roomId]);
     if (collected.error) {
-      const state = this._firstRun.rooms[roomId];
-      state.report = { issues: [{ message: collected.error }], save_allowed: false, status: "blocked" };
+      roomState.report = { issues: [{ message: collected.error }], save_allowed: false, status: "blocked" };
       this._firstRun.validRooms.delete(roomId);
       this._render();
       return;

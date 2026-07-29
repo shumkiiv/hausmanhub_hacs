@@ -1135,6 +1135,100 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
+    def test_checking_second_room_auto_includes_it_and_keeps_first_room_valid(self) -> None:
+        kids_draft = draft_for(
+            [{
+                "id": "kids",
+                "name": "Детская",
+                "targets": {
+                    "target_temperature": 25,
+                    "target_humidity": 53,
+                    "strategy": "normal",
+                },
+                "devices": [{
+                    "candidate_id": "candidate_trv",
+                    "name": "Батарея детской",
+                    "type": "radiator_thermostat",
+                    "type_name": "Радиаторный термостат",
+                }],
+            }]
+        )
+        living_draft = draft_for(
+            [{
+                "id": "living",
+                "name": "Гостиная",
+                "targets": {
+                    "target_temperature": 25,
+                    "target_humidity": 53,
+                    "strategy": "normal",
+                },
+                "devices": [{
+                    "candidate_id": "candidate_ac",
+                    "name": "Кондиционер",
+                    "type": "air_conditioner",
+                    "type_name": "Кондиционер",
+                }],
+            }]
+        )
+        script = panel_script(
+            get_payloads(),
+            {
+                "hausman_hub/v1/admin/climate-drafts": [kids_draft, living_draft],
+                "hausman_hub/v1/admin/climate-drafts/validate": [
+                    ready_validation(kids_draft),
+                    ready_validation(living_draft),
+                ],
+            },
+            """
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать настройку")[0].fire("click");
+        await tick();
+
+        panel._firstRunFields.rooms.kids.include.checked = true;
+        panel._firstRunFields.rooms.kids.include.fire("change");
+        panel._firstRunFields.rooms.kids.configure.fire("click");
+        const kidsDevice = panel._firstRunFields.room.devices.find((item) =>
+          item.type === "radiator_thermostat");
+        kidsDevice.checkbox.checked = true;
+        kidsDevice.checkbox.fire("change");
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Проверить комнату")[0].fire("click");
+        await tick();
+        if (!panel._firstRun.validRooms.has("kids")) {
+          throw new Error("first room did not remain configured");
+        }
+
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Назад к списку комнат")[0].fire("click");
+        if (panel._firstRun.rooms.living.included) {
+          throw new Error("living room unexpectedly started included");
+        }
+        panel._firstRunFields.rooms.living.configure.fire("click");
+        const livingDevice = panel._firstRunFields.room.devices.find((item) =>
+          item.type === "air_conditioner");
+        livingDevice.checkbox.checked = true;
+        livingDevice.checkbox.fire("change");
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Проверить комнату")[0].fire("click");
+        await tick();
+
+        if (!panel._firstRun.rooms.living.included
+          || !panel._firstRun.validRooms.has("living")
+          || !panel._firstRun.validRooms.has("kids")) {
+          throw new Error("checking the second room did not include it independently");
+        }
+        const drafts = calls.filter((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/admin/climate-drafts");
+        if (drafts.length !== 2
+          || drafts[1].payload.rooms.length !== 1
+          || drafts[1].payload.rooms[0].room_id !== "living") {
+          throw new Error("second room check sent an invalid room draft");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_final_save_preserves_optional_fields_and_returns_to_tabs(self) -> None:
         draft = draft_for(
             [{
