@@ -43,6 +43,24 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn("--hmh-bg:#EEF1F6", styles)
         self.assertIn(".page-header", styles)
 
+    def test_overview_climate_and_scenarios_share_tablet_visual_contract(self) -> None:
+        styles = PANEL_CSS.read_text(encoding="utf-8")
+
+        for rule in (
+            ".overview-hero-copy .hero-status",
+            "font-size:clamp(30px,3vw,36px)",
+            ".overview-hero-metric:first-child",
+            "grid-template-columns:1fr 1fr 1.35fr 1fr",
+            ".climate-subnav",
+            "min-height:40px",
+            ".contour-config-card, .contour-state-card",
+            ".scenarios-card",
+            ".scenario-row",
+            "grid-template-columns:48px minmax(0,1fr) auto",
+        ):
+            with self.subTest(rule=rule):
+                self.assertIn(rule, styles)
+
     def test_panel_script_uses_only_relative_local_api_paths(self) -> None:
         content = PANEL_JS.read_text(encoding="utf-8")
 
@@ -475,7 +493,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.43.0",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.44.0",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },
