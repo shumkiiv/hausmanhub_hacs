@@ -286,10 +286,15 @@ label.signal-option > input[type="radio"] { grid-column:1; width:18px; min-heigh
 .binding-device-row { display:grid; grid-template-columns:64px minmax(0,1fr) minmax(190px,260px);
   align-items:center; gap:14px; min-width:0; padding:12px; border:1px solid var(--hmh-border,#2F3845);
   border-radius:16px; background:var(--hmh-surface,#12171D); }
+.binding-device-row.is-virtual { border-color:color-mix(in srgb,var(--primary-color,#4E7BC7) 30%,var(--hmh-border,#2F3845)); }
+.binding-device-row.is-virtual.is-unavailable { border-color:color-mix(in srgb,var(--warning-color,#ef6c00) 28%,var(--hmh-border,#2F3845)); }
 .binding-device-copy { min-width:0; }
 .binding-device-copy > strong, .binding-device-copy > small { display:block; overflow-wrap:anywhere; }
 .binding-device-copy > strong { font-size:16px; }
 .binding-device-copy > small { margin-top:4px; }
+.binding-device-copy > .status-badge { margin-top:8px; }
+.virtual-device-hint { max-width:680px; margin-top:8px !important; color:var(--hmh-text-dim,#9AA7B4);
+  font-size:13px; line-height:1.45; }
 .binding-room-picker { display:flex; flex-direction:column; gap:5px; margin:0; color:var(--hmh-text-dim,#9AA7B4);
   font-size:12px; }
 .binding-room-picker select { width:100%; min-height:46px; color:var(--hmh-text,#E7ECF3);

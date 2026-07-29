@@ -936,7 +936,7 @@ class HomeAssistantEntityCatalogTest(unittest.TestCase):
         by_id = {entry.entity_id: entry for entry in catalog.entries}
         self.assertNotIn("sensor.lock_device_temperature", by_id)
         self.assertEqual(
-            {"sensor.kids_temperature", "weather.home"},
+            {"weather.home"},
             {entry.entity_id for entry in outdoor.entries},
         )
         self.assertEqual("living", by_id["climate.living_ac"].room_id)

@@ -1486,6 +1486,22 @@ class HausmanHubPanel extends HTMLElement {
     return first ? (first.device_group_id || `candidate:${first.candidate_id}`) : "";
   }
 
+  _firstRunIsYandexVirtual(candidate) {
+    return normalizedText(candidate && candidate.manufacturer) === "yandex"
+      && normalizedText(candidate && candidate.model) === "yndx-0006";
+  }
+
+  _firstRunPublicIdentity(candidate) {
+    const key = String(candidate && (candidate.candidate_key || candidate.candidate_id) || "");
+    const compact = key.replace(/[^a-z0-9]/gi, "").slice(-4).toUpperCase();
+    return compact || "—";
+  }
+
+  _firstRunGroupAvailable(group) {
+    return (group || []).some((candidate) => candidate.status === "available"
+      || candidate.status === "already_configured");
+  }
+
   _firstRunGroupRoom(group) {
     const groupId = this._firstRunPhysicalGroupId(group);
     if (Object.prototype.hasOwnProperty.call(this._firstRun.areaAssignments, groupId)) {
@@ -2584,9 +2600,22 @@ class HausmanHubPanel extends HTMLElement {
     card.appendChild(el("h3", "binding-heading", "Устройства без комнаты"));
     card.appendChild(el("div", "muted binding-help", "Выбор остаётся черновиком до нажатия «Сохранить привязки». После сохранения физическое устройство и его сущности будут использовать область Home Assistant."));
     const unassigned = el("div", "binding-device-list");
+    const roomlessNames = new Map();
     roomlessGroups.forEach((group) => {
       const first = group[0];
+      const name = normalizedText(first.device_name || first.name || "");
+      if (name) roomlessNames.set(name, (roomlessNames.get(name) || 0) + 1);
+    });
+    roomlessGroups.forEach((group) => {
+      const first = group[0];
+      const virtualYandex = this._firstRunIsYandexVirtual(first);
+      const available = this._firstRunGroupAvailable(group);
+      const displayName = virtualYandex
+        ? (first.name || first.device_name || first.candidate_id)
+        : (first.device_name || first.name || first.candidate_id);
+      const duplicateName = (roomlessNames.get(normalizedText(first.device_name || first.name || "")) || 0) > 1;
       const row = el("article", "binding-device-row");
+      if (virtualYandex) row.className += available ? " is-virtual" : " is-virtual is-unavailable";
       const thumb = el("div", "device-thumb");
       const fallback = el("span", "device-thumb-fallback");
       fallback.appendChild(svgIcon("device"));
@@ -2601,15 +2630,33 @@ class HausmanHubPanel extends HTMLElement {
       thumb.appendChild(fallback);
       row.appendChild(thumb);
       const copy = el("div", "binding-device-copy");
-      copy.appendChild(el("strong", null, first.device_name || first.name || first.candidate_id));
-      const details = [first.manufacturer, first.model].filter(Boolean).join(" · ");
+      copy.appendChild(el("strong", null, displayName));
+      const details = virtualYandex
+        ? `Виртуальное устройство Яндекса · № ${this._firstRunPublicIdentity(first)}`
+        : [first.manufacturer, first.model].filter(Boolean).join(" · ");
       if (details) copy.appendChild(el("small", "muted", details));
+      if (virtualYandex) {
+        copy.appendChild(el(
+          "span",
+          `status-badge ${available ? "is-ready" : "is-attention"}`,
+          available ? "Доступно" : "Недоступно"
+        ));
+      }
       const types = new Set();
       group.forEach((candidate) => (candidate.suggested_types || []).forEach((type) => types.add(type)));
       const chips = el("div", "device-card-chips");
       const typeNames = (options.display_names || {}).device_types || {};
       types.forEach((type) => chips.appendChild(el("span", "chip", typeNames[type] || type)));
       copy.appendChild(chips);
+      if (virtualYandex && duplicateName) {
+        copy.appendChild(el(
+          "small",
+          "virtual-device-hint",
+          available
+            ? "Имя совпадает с другим виртуальным устройством. Назначайте комнату только после проверки объекта в Home Assistant."
+            : "Недоступный объект с таким же именем может быть устаревшей виртуальной сущностью. Проверьте его в Home Assistant перед привязкой."
+        ));
+      }
       row.appendChild(copy);
       const picker = selectField(
         [{ label: "Не привязано", value: "" }].concat(rooms.map((room) => ({
@@ -4668,9 +4715,12 @@ class HausmanHubPanel extends HTMLElement {
       running: "Датчик работы",
       power: "Датчик питания",
     };
+    if (candidate.missing && signalKind === "outdoor_temperature") {
+      return "Ранее выбранный источник";
+    }
     if (candidate.domain === "weather") return "Погодный сервис";
-    if (candidate.domain === "person") return "Человек";
-    if (candidate.domain === "device_tracker") return "Трекер";
+    if (candidate.domain === "person") return "Члены дома (геолокация)";
+    if (candidate.domain === "device_tracker") return "Телефоны и трекеры (геолокация)";
     if (candidate.domain === "switch") return "Выключатель";
     if (candidate.domain === "input_boolean") return "Логический переключатель";
     if (deviceClassLabels[candidate.device_class]) {
@@ -4808,9 +4858,17 @@ class HausmanHubPanel extends HTMLElement {
         || String(left.name).localeCompare(String(right.name), "ru")
       ))
       .forEach((candidate) => {
-        const roomLabel = candidate.domain === "weather"
-          ? "Погодные сервисы"
-          : (candidate.room_name || (candidate.room_id ? candidate.room_id : "Без комнаты"));
+        const roomLabel = candidate.missing
+          ? "Ранее выбранное"
+          : (
+            candidate.domain === "weather"
+              ? "Погодные сервисы"
+              : (
+                candidate.domain === "person" || candidate.domain === "device_tracker"
+                  ? "Присутствие дома"
+                  : (candidate.room_name || (candidate.room_id ? candidate.room_id : "Без комнаты"))
+              )
+          );
         const roomKey = groupByRoom ? roomLabel : "room";
         if (!groups.has(roomKey)) {
           const roomGroup = el("section", "signal-room-group");
@@ -4832,15 +4890,27 @@ class HausmanHubPanel extends HTMLElement {
         }
         const typeGroup = roomGroup.types.get(typeLabel);
         const details = [
+          candidate.domain === "person"
+            ? "профиль пользователя: дома / не дома"
+            : "",
+          candidate.domain === "device_tracker"
+            ? "геолокационный статус устройства"
+            : "",
           candidate.entity_id,
-          candidate.missing ? "ранее выбранная сущность сейчас недоступна" : "",
+          candidate.missing && signalKind === "outdoor_temperature"
+            ? "не подходит для наружной температуры или сейчас недоступно"
+            : candidate.missing
+              ? "ранее выбранная сущность сейчас недоступна"
+              : "",
           candidate.available === false && !candidate.missing ? "сейчас недоступно" : "",
         ].filter(Boolean).join(" · ");
         addRadio(
           typeGroup.typeOptions,
           candidate,
           candidate.entity_id,
-          candidate.device_name || candidate.name || candidate.entity_id,
+          candidate.domain === "person"
+            ? `${candidate.name || candidate.entity_id} · профиль пользователя`
+            : (candidate.device_name || candidate.name || candidate.entity_id),
           details
         );
       });
@@ -4896,7 +4966,7 @@ class HausmanHubPanel extends HTMLElement {
       {
         key: "presence_entity_id",
         label: "Общее присутствие дома",
-        helper: "Только люди, трекеры и датчики движения или присутствия.",
+        helper: "Профиль человека или трекер передаёт статус «дома/не дома». Датчик присутствия сообщает, есть ли кто-то в доме. Это не комнатная настройка.",
         signalKind: "presence",
         options: candidates.presence || [],
       },

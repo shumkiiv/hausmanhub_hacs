@@ -319,12 +319,14 @@ class HomeAssistantClimateStateView:
         rooms, entity_rooms, entity_devices, entity_categories = self._room_catalog(
             tuple(state.entity_id for state in states)
         )
+        room_names = {room.room_id: room.name for room in rooms}
         entries: list[ClimateHaCatalogEntry] = []
         for state in states:
             domain = state.entity_id.split(".", 1)[0]
             friendly_name = state.attributes.get("friendly_name")
             device_class = state.attributes.get("device_class")
             entity_category = entity_categories.get(state.entity_id)
+            room_id = entity_rooms.get(state.entity_id, "")
             if not signal_candidate_is_suitable(
                 signal_kind,
                 domain=domain,
@@ -333,6 +335,11 @@ class HomeAssistantClimateStateView:
                 ),
                 entity_category=entity_category,
                 attributes=state.attributes,
+                entity_id=state.entity_id,
+                friendly_name=(
+                    friendly_name if isinstance(friendly_name, str) else None
+                ),
+                room_name=room_names.get(room_id),
             ):
                 continue
             device = entity_devices.get(state.entity_id)
@@ -350,7 +357,7 @@ class HomeAssistantClimateStateView:
                     ),
                     available=state.state not in {"", "unavailable", "unknown"},
                     last_updated_ms=int(state.last_updated.timestamp() * 1000),
-                    room_id=entity_rooms.get(state.entity_id, ""),
+                    room_id=room_id,
                     entity_category=entity_category,
                     device_group_id=None if device is None else device.group_id,
                     device_name=None if device is None else device.name,

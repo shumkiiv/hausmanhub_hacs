@@ -38,13 +38,13 @@ HOME_PAYLOAD = {
     "candidates": {
         "outdoor_temperature": [
             {
-                "entity_id": "sensor.outdoor",
-                "name": "Улица",
+                "entity_id": "sensor.external_temperature",
+                "name": "Внешний датчик температуры",
                 "available": True,
                 "domain": "sensor",
                 "device_class": "temperature",
-                "room_id": "living",
-                "room_name": "Гостиная",
+                "room_id": "outside",
+                "room_name": "Улица",
             },
             {
                 "entity_id": "weather.home",
@@ -54,7 +54,15 @@ HOME_PAYLOAD = {
                 "room_id": "",
             },
         ],
-        "presence": [],
+        "presence": [
+            {
+                "entity_id": "person.ivsh_home",
+                "name": "Дом",
+                "available": True,
+                "domain": "person",
+                "room_id": "",
+            },
+        ],
         "central_heating": [],
     },
 }
@@ -990,8 +998,11 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           textOf(node).includes("Наружная температура"));
         if (!outdoor) throw new Error("outdoor card picker missing");
         const outdoorText = textOf(outdoor);
-        for (const label of ["Гостиная", "Погодные сервисы", "Датчик температуры", "Погодный сервис"]) {
+        for (const label of ["Улица", "Погодные сервисы", "Датчик температуры", "Погодный сервис"]) {
           if (!outdoorText.includes(label)) throw new Error("outdoor grouping missing: " + label);
+        }
+        if (outdoorText.includes("Детская") || outdoorText.includes("Гостиная")) {
+          throw new Error("indoor room leaked into the outdoor temperature picker");
         }
         const weather = findAll(outdoor, (node) =>
           node.type === "radio" && node.value === "weather.home");
@@ -1004,6 +1015,19 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         );
         if (occupancyLabel !== "Датчик присутствия") {
           throw new Error("occupancy device class has an unnatural Russian label");
+        }
+        const presence = fieldsets.find((node) =>
+          textOf(node).includes("Общее присутствие дома"));
+        const presenceText = textOf(presence);
+        for (const label of [
+          "Присутствие дома",
+          "Члены дома (геолокация)",
+          "Дом · профиль пользователя",
+          "профиль пользователя: дома / не дома",
+        ]) {
+          if (!presenceText.includes(label)) {
+            throw new Error("person entity is not explained: " + label);
+          }
         }
         const roomCards = findAll(panel.shadowRoot, (node) =>
           String(node.className).split(" ").includes("signal-room"));
@@ -1092,6 +1116,41 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         if (savedAlias.length !== 1
           || savedAlias[0].entity_id !== "sensor.vneshnii_datchik_temperatury_temperature") {
           throw new Error("the already saved entity did not retain priority");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_previously_selected_indoor_sensor_is_explained_as_unsuitable_outdoors(self) -> None:
+        payloads = dict(GET_PATHS)
+        home = json.loads(json.dumps(HOME_PAYLOAD))
+        home["home"]["outdoor_temperature_entity_id"] = "sensor.kids_temperature"
+        home["candidates"]["outdoor_temperature"] = [
+            candidate
+            for candidate in home["candidates"]["outdoor_temperature"]
+            if candidate["domain"] == "weather"
+        ]
+        payloads["hausman_hub/v1/admin/home-environment"] = home
+        script = panel_script(
+            payloads,
+            {},
+            """
+        const fieldsets = findAll(panel.shadowRoot, (node) => node.tagName === "FIELDSET");
+        const outdoor = fieldsets.find((node) =>
+          textOf(node).includes("Наружная температура"));
+        const text = textOf(outdoor);
+        for (const label of [
+          "Ранее выбранное",
+          "Ранее выбранный источник",
+          "не подходит для наружной температуры или сейчас недоступно",
+        ]) {
+          if (!text.includes(label)) {
+            throw new Error("unsuitable saved source is not explained: " + label);
+          }
+        }
+        if (text.includes("Детская")) {
+          throw new Error("indoor room is still presented as an outdoor source");
         }
             """,
         )

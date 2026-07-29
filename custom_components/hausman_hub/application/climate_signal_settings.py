@@ -9,6 +9,7 @@ plain values for the runtime's atomic write methods.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Mapping
 from math import isfinite
 
@@ -47,6 +48,11 @@ HEATING_LOCKOUT_MINIMUM = -40.0
 HEATING_LOCKOUT_MAXIMUM = 60.0
 CLIMATE_MODES = frozenset({"disabled", "managed"})
 MAX_ENTITY_ID_LENGTH = 255
+_OUTDOOR_IDENTITY = re.compile(
+    r"(?:outdoor|outside|external|exterior|street|yard|"
+    r"улич|улиц|наруж|внешн|двор|погод)",
+    re.IGNORECASE,
+)
 
 HOME_ENVIRONMENT_FIELDS = frozenset(
     {
@@ -81,6 +87,9 @@ def signal_candidate_is_suitable(
     device_class: str | None,
     entity_category: str | None,
     attributes: Mapping[str, object],
+    entity_id: str = "",
+    friendly_name: str | None = None,
+    room_name: str | None = None,
 ) -> bool:
     """Return whether one HA entity is semantically suitable for a binding."""
 
@@ -88,7 +97,15 @@ def signal_candidate_is_suitable(
         return False
     if signal_kind == OUTDOOR_TEMPERATURE_SIGNAL:
         if domain == "sensor":
-            return device_class == "temperature"
+            identity = " ".join(
+                value
+                for value in (entity_id, friendly_name, room_name)
+                if isinstance(value, str)
+            )
+            return (
+                device_class == "temperature"
+                and bool(_OUTDOOR_IDENTITY.search(identity))
+            )
         return (
             domain == "weather"
             and _finite_signal_number(attributes.get("temperature")) is not None

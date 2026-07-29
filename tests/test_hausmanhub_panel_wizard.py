@@ -982,6 +982,77 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
+    def test_binding_step_disambiguates_same_name_yandex_virtual_devices(self) -> None:
+        options = roomless_options()
+        options["devices"] = [
+            {
+                "candidate_id": "candidate_0101",
+                "candidate_key": "ckey_11111111a1b2",
+                "name": "Кондиционер",
+                "room_id": "",
+                "suggested_types": ["air_conditioner"],
+                "recommended_type": "air_conditioner",
+                "status": "available",
+                "suggested_room_id": None,
+                "suggested_room_name": None,
+                "reason": "unassigned_room",
+                "can_add": True,
+                "device_group_id": "device_1111111111111111",
+                "device_name": "Кондиционер",
+                "manufacturer": "Yandex",
+                "model": "YNDX-0006",
+            },
+            {
+                "candidate_id": "candidate_0102",
+                "candidate_key": "ckey_22222222c3d4",
+                "name": "Кондиционер",
+                "room_id": "",
+                "suggested_types": ["air_conditioner"],
+                "recommended_type": "air_conditioner",
+                "status": "unavailable",
+                "suggested_room_id": None,
+                "suggested_room_name": None,
+                "reason": "unassigned_room",
+                "can_add": True,
+                "device_group_id": "device_2222222222222222",
+                "device_name": "Кондиционер",
+                "manufacturer": "Yandex",
+                "model": "YNDX-0006",
+            },
+        ]
+        script = panel_script(
+            get_payloads(options=options),
+            {},
+            """
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать настройку")[0].fire("click");
+        await tick();
+        const rows = findAll(panel.shadowRoot, (node) =>
+          String(node.className).split(" ").includes("binding-device-row"));
+        if (rows.length !== 2) throw new Error("virtual entities were incorrectly merged");
+        const rendered = rows.map((row) => textOf(row));
+        if (!rendered.some((text) => text.includes("№ A1B2") && text.includes("Доступно"))) {
+          throw new Error("available virtual entity lacks a stable public identity");
+        }
+        if (!rendered.some((text) => text.includes("№ C3D4") && text.includes("Недоступно"))) {
+          throw new Error("unavailable virtual entity lacks a stable public identity");
+        }
+        if (!rendered.every((text) => text.includes("Виртуальное устройство Яндекса"))) {
+          throw new Error("virtual provider is not explained");
+        }
+        if (!rendered.some((text) => text.includes("устаревшей виртуальной сущностью"))) {
+          throw new Error("stale duplicate guidance is missing");
+        }
+        const full = textOf(panel.shadowRoot);
+        if (full.includes("climate.konditsioner") || full.includes("source_id")
+          || full.includes("entity_id")) {
+          throw new Error("private HA binding leaked into the wizard");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_roomless_devices_require_home_assistant_assignment_first(self) -> None:
         script = panel_script(
             get_payloads(options=roomless_options()),

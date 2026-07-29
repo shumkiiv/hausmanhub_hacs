@@ -137,6 +137,12 @@ class SignalStateView:
                     device_class=device_class,
                     entity_category=None,
                     attributes={},
+                    entity_id=entity_id,
+                    friendly_name=name,
+                    room_name={
+                        "kids": "Детская",
+                        "living": "Гостиная",
+                    }.get(room_id),
                 )
             ),
             rooms=tuple(
@@ -194,6 +200,32 @@ class ClimateSignalSettingsValidationTest(unittest.TestCase):
                 device_class=None,
                 entity_category=None,
                 attributes={"friendly_name": "Центральное отопление"},
+            )
+        )
+
+    def test_outdoor_temperature_rejects_indoor_room_sensors(self) -> None:
+        self.assertFalse(
+            signal_candidate_is_suitable(
+                "outdoor_temperature",
+                domain="sensor",
+                device_class="temperature",
+                entity_category=None,
+                attributes={},
+                entity_id="sensor.deerma_temperature",
+                friendly_name="Увлажнитель детская",
+                room_name="Детская",
+            )
+        )
+        self.assertTrue(
+            signal_candidate_is_suitable(
+                "outdoor_temperature",
+                domain="sensor",
+                device_class="temperature",
+                entity_category=None,
+                attributes={},
+                entity_id="sensor.vneshnii_datchik_external_temperature",
+                friendly_name="Внешний датчик температуры",
+                room_name=None,
             )
         )
 
@@ -847,6 +879,15 @@ class ClimateAdminConfigurationRoutesTest(unittest.TestCase):
                 },
                 last_updated=dt(2026, 7, 19, 12, 0),
             ),
+            "sensor.synthetic_kids_temperature": SimpleNamespace(
+                entity_id="sensor.synthetic_kids_temperature",
+                state="23.5",
+                attributes={
+                    "friendly_name": "Температура детской",
+                    "device_class": "temperature",
+                },
+                last_updated=dt(2026, 7, 19, 12, 0),
+            ),
             "person.synthetic_ivan": SimpleNamespace(
                 entity_id="person.synthetic_ivan",
                 state="home",
@@ -897,6 +938,7 @@ class ClimateAdminConfigurationRoutesTest(unittest.TestCase):
                 ("sensor.synthetic_outdoor", ""),
                 ("weather.synthetic_home", ""),
                 ("sensor.synthetic_lock_temperature", "living"),
+                ("sensor.synthetic_kids_temperature", "kids"),
             )
         ):
             self.hass.entity_registry.entities[f"signal-{index}"] = SimpleNamespace(

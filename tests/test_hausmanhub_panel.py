@@ -522,7 +522,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.45.3",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.45.4",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },
