@@ -999,6 +999,76 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
+    def test_signal_picker_collapses_duplicate_entities_of_one_physical_sensor(self) -> None:
+        payloads = dict(GET_PATHS)
+        home = json.loads(json.dumps(HOME_PAYLOAD))
+        home["candidates"]["outdoor_temperature"] = [
+            {
+                "entity_id": "sensor.vneshnii_datchik_temperatury_temperature",
+                "name": "Внешний датчик температуры",
+                "available": True,
+                "domain": "sensor",
+                "device_class": "temperature",
+                "room_id": "",
+                "device_group_id": "device_outdoor",
+                "device_name": "Внешний датчик температуры",
+            },
+            {
+                "entity_id": "sensor.vneshnii_datchik_temperatury_external_temperature",
+                "name": "Внешний датчик температуры",
+                "available": True,
+                "domain": "sensor",
+                "device_class": "temperature",
+                "room_id": "",
+                "device_group_id": "device_outdoor",
+                "device_name": "Внешний датчик температуры",
+            },
+            {
+                "entity_id": "sensor.rezervnyi_datchik_temperature",
+                "name": "Внешний датчик температуры",
+                "available": True,
+                "domain": "sensor",
+                "device_class": "temperature",
+                "room_id": "",
+                "device_group_id": "device_reserve",
+                "device_name": "Резервный датчик",
+            },
+        ]
+        payloads["hausman_hub/v1/admin/home-environment"] = home
+        script = panel_script(
+            payloads,
+            {},
+            """
+        const fieldsets = findAll(panel.shadowRoot, (node) => node.tagName === "FIELDSET");
+        const outdoor = fieldsets.find((node) =>
+          textOf(node).includes("Наружная температура"));
+        const physicalSensorChoices = findAll(outdoor, (node) =>
+          node.type === "radio"
+          && String(node.value).startsWith("sensor.vneshnii_datchik_temperatury_"));
+        if (physicalSensorChoices.length !== 1
+          || physicalSensorChoices[0].value
+            !== "sensor.vneshnii_datchik_temperatury_external_temperature") {
+          throw new Error("duplicate entities of one physical sensor were not collapsed");
+        }
+        const reserve = findAll(outdoor, (node) => node.type === "radio"
+          && node.value === "sensor.rezervnyi_datchik_temperature");
+        if (reserve.length !== 1) {
+          throw new Error("a different physical sensor was incorrectly collapsed");
+        }
+        const savedAlias = panel._signalCandidatesForPicker(
+          panel._settings.home.candidates.outdoor_temperature,
+          "sensor.vneshnii_datchik_temperatury_temperature",
+          "outdoor_temperature"
+        ).filter((candidate) => candidate.device_group_id === "device_outdoor");
+        if (savedAlias.length !== 1
+          || savedAlias[0].entity_id !== "sensor.vneshnii_datchik_temperatury_temperature") {
+          throw new Error("the already saved entity did not retain priority");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_mode_switch_posts_exact_payload(self) -> None:
         script = panel_script(
             GET_PATHS,

@@ -878,7 +878,7 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         const expectedNames = "Komanchi Living SmartIR, Устройство без комнаты 2, "
           + "Устройство без комнаты 3, Устройство без комнаты 4, "
           + "Устройство без комнаты 5 и ещё 1";
-        if (!warning.includes("Внимание: найдены устройства без комнаты: " + expectedNames)) {
+        if (!warning.includes("Без комнаты: " + expectedNames)) {
           throw new Error("roomless warning names or truncation mismatch: " + warning);
         }
         if (warning.includes("Устройство без комнаты 6")) {
@@ -969,13 +969,13 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         await tick();
         panel._firstRunFields.rooms.living.configure.fire("click");
         const text = textOf(panel.shadowRoot);
-        if (!text.includes("climate-обёртку SmartIR")
+        if (!text.includes("SmartIR climate")
           || !text.includes("«Пульт гостиной»")) {
           throw new Error("SmartIR facade guidance is missing");
         }
         panel._firstRunBackToRooms();
         panel._firstRunFields.rooms.kids.configure.fire("click");
-        if (textOf(panel.shadowRoot).includes("climate-обёртку SmartIR")) {
+        if (textOf(panel.shadowRoot).includes("SmartIR climate")) {
           throw new Error("hint leaked into a room without an IR remote");
         }
             """,
@@ -1000,7 +1000,7 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         if (text.includes("climate-обёртку SmartIR с готовым кодом")) {
           throw new Error("hint shown although a climate facade exists");
         }
-        if (!text.includes("честно показывает транспорт")) {
+        if (!text.includes("Канал определяет способ управления")) {
           throw new Error("channel copy does not describe the honest transport");
         }
         if (text.includes("остаются в наблюдении")) {

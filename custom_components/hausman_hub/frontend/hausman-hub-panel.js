@@ -2621,7 +2621,7 @@ class HausmanHubPanel extends HTMLElement {
 
     const devicesSection = el("section", "wizard-section");
     devicesSection.appendChild(el("h3", null, "Устройства и датчики"));
-    devicesSection.appendChild(el("div", "muted", "Канал управления сохраняется в контуре и честно показывает транспорт устройства. Если устройство - климатическая обёртка (например, SmartIR), команды выполняются сразу через стандартные сервисы Home Assistant при любом канале. Без такой обёртки сырой ИК-пульт остаётся только в наблюдении."));
+    devicesSection.appendChild(el("div", "muted", "Канал определяет способ управления. Климатическая обёртка Home Assistant выполняет команды напрямую; отдельный ИК-пульт без обёртки остаётся в наблюдении."));
     const roomlessCandidates = this._firstRunRoomlessCandidates();
     if (roomlessCandidates.length) {
       const visibleNames = roomlessCandidates.slice(0, 5).map((candidate) => (
@@ -2632,7 +2632,7 @@ class HausmanHubPanel extends HTMLElement {
       devicesSection.appendChild(el(
         "div",
         "wizard-warning",
-        `Внимание: найдены устройства без комнаты: ${names}. Они не показаны в списке комнаты. Отметьте нужные в секции «Устройства без комнаты» ниже - привязка сохранится только в HausmanHub, зоны Home Assistant не изменятся. Либо назначьте устройству зону в Home Assistant и нажмите «Обновить список устройств».`
+        `Без комнаты: ${names}. Выберите нужные ниже для локальной привязки HausmanHub или назначьте им зону в Home Assistant и обновите список.`
       ));
     }
     const deviceActions = el("div", "actions");
@@ -2663,7 +2663,7 @@ class HausmanHubPanel extends HTMLElement {
     ));
     if (irRemotes.length && !hasClimateFacade) {
       const names = irRemotes.map((remote) => `«${remote.name}»`).join(", ");
-      devicesSection.appendChild(el("div", "wizard-hint", `В комнате найден ИК-пульт ${names}, но климатической обёртки для него нет. Чтобы управлять кондиционером или увлажнителем через такой пульт, создайте в Home Assistant climate-обёртку SmartIR с готовым кодом устройства, привяжите её к этой зоне и обновите список: обёртка появится кандидатом, и управление заработает сразу.`));
+      devicesSection.appendChild(el("div", "wizard-hint", `Найден ИК-пульт ${names}, но нет климатической обёртки. Создайте SmartIR climate в Home Assistant, назначьте этой зоне и обновите список.`));
     }
     const search = el("input", "entity-search");
     search.type = "search";
@@ -4501,6 +4501,23 @@ class HausmanHubPanel extends HTMLElement {
     return result;
   }
 
+  _signalCandidatesForPicker(candidates, current, signalKind) {
+    const grouped = new Map();
+    this._candidateWithCurrent(candidates, current).forEach((candidate) => {
+      const key = candidate.device_group_id && candidate.name
+        ? `${candidate.device_group_id}:${normalizedText(candidate.name)}` : candidate.entity_id;
+      const existing = grouped.get(key);
+      if (
+        !existing || candidate.entity_id === current
+        || (existing.entity_id !== current && existing.available === false && candidate.available !== false)
+        || (existing.entity_id !== current && signalKind === "outdoor_temperature"
+          && /(?:external|outdoor)_temperature/.test(candidate.entity_id)
+          && !/(?:external|outdoor)_temperature/.test(existing.entity_id))
+      ) grouped.set(key, candidate);
+    });
+    return [...grouped.values()];
+  }
+
   _singleChoicePicker({
     title, helper, candidates, current, signalKind, onChange, groupByRoom = true,
   }) {
@@ -4580,7 +4597,7 @@ class HausmanHubPanel extends HTMLElement {
     const noneGroup = el("div", "signal-type-options");
     addRadio(noneGroup, null, "", "Не привязано", "Источник можно выбрать позже");
     list.appendChild(noneGroup);
-    this._candidateWithCurrent(candidates, current)
+    this._signalCandidatesForPicker(candidates, current, signalKind)
       .sort((left, right) => (
         Number(right.entity_id === current) - Number(left.entity_id === current)
         || String(left.room_name || "").localeCompare(String(right.room_name || ""), "ru")
