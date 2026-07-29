@@ -17,6 +17,8 @@ PANEL_JS = (
 )
 PANEL_CSS = PANEL_JS.with_name("hausman-hub-panel.css")
 HOME_SECTIONS_JS = PANEL_JS.with_name("hausman-hub-home-sections.js")
+ROOM_SETUP_JS = PANEL_JS.with_name("hausman-hub-room-setup.js")
+SETTINGS_CSS = PANEL_JS.with_name("hausman-hub-settings.css")
 
 PANEL_PAYLOAD = {
     "contract": {"name": "hausman-hub-admin-panel", "version": 2},
@@ -311,7 +313,11 @@ def panel_script(get_payloads: dict, post_table: dict, assertions: str) -> str:
         {{ filename: {str(HOME_SECTIONS_JS)!r} }}
       );
       vm.runInThisContext(
-        fs.readFileSync({str(PANEL_JS)!r}, "utf8").replace(/^import .*hausman-hub-home-sections.*;\\s*/m, ""),
+        fs.readFileSync({str(ROOM_SETUP_JS)!r}, "utf8").replace("export function renderFirstRunRoom", "function renderFirstRunRoom"),
+        {{ filename: {str(ROOM_SETUP_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(PANEL_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, ""),
         {{ filename: {str(PANEL_JS)!r} }}
       );
 
@@ -937,12 +943,17 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         self.assertEqual(0, completed.returncode, completed.stderr)
 
     def test_settings_match_figma_and_controls_have_real_behavior(self) -> None:
-        css = PANEL_CSS.read_text(encoding="utf-8")
+        css = (
+            PANEL_CSS.read_text(encoding="utf-8")
+            + SETTINGS_CSS.read_text(encoding="utf-8")
+        )
         for tablet_rule in (
-            ".settings-card::before",
-            "font-size:24px",
+            ".settings-subnav",
+            ".settings-overview-grid",
+            ".settings-menu-card",
+            ".settings-room-grid",
             ".settings-page-actions { position:sticky",
-            ".first-run-wizard .wizard-progress",
+            ".room-setup-nav",
             "backdrop-filter:blur(18px)",
         ):
             self.assertIn(tablet_rule, css)
@@ -964,16 +975,19 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         let screen = panel._shell.settings;
         let text = textOf(screen);
         for (const label of [
-          "Настройки", "Подключение", "Интерфейс", "Тема панели", "Уменьшить анимацию",
-          "Показывать подсказки", "Сброс HausmanHub", "О системе", "Версия",
-          "Единый интерфейс с планшетом HausmanHub",
+          "Настройки HausmanHub", "Обзор", "Комнаты", "Подключение", "Интерфейс", "Система",
+          "Комнаты и устройства", "Home Assistant остаётся единым источником устройств", "Версия",
         ]) {
           if (!text.includes(label)) throw new Error("settings text missing: " + label);
         }
         if (text.includes("Центр умного дома")) throw new Error("obsolete Smart Home Center label exposed");
+        findAll(screen, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Подключение")[0].fire("click");
+        screen = panel._shell.settings;
         const urls = findAll(screen, (node) => node.type === "url");
-        const toggles = findAll(screen, (node) => String(node.className).split(" ").includes("settings-toggle"));
-        if (urls.length !== 2 || toggles.length !== 2) throw new Error("settings controls mismatch");
+        if (urls.length !== 2 || !textOf(screen).includes("Параметры связи")) {
+          throw new Error("connection settings page mismatch");
+        }
         const panelGets = calls.filter((call) => call.method === "GET"
           && call.path === "hausman_hub/v1/admin/panel").length;
         findAll(screen, (node) => node.tagName === "BUTTON"
@@ -1012,6 +1026,13 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("settings payload mismatch: " + JSON.stringify(post && post.payload));
         }
         screen = panel._shell.settings;
+        findAll(screen, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Интерфейс")[0].fire("click");
+        screen = panel._shell.settings;
+        const toggles = findAll(screen, (node) => String(node.className).split(" ").includes("settings-toggle"));
+        if (toggles.length !== 2 || !textOf(screen).includes("Тема панели")) {
+          throw new Error("interface settings page mismatch");
+        }
         const motionToggle = findAll(screen, (node) =>
           String(node.className).split(" ").includes("settings-toggle"))[0];
         motionToggle.checked = true;
@@ -1019,6 +1040,9 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         if (panel._settingsPrefs.reduced_motion !== true) {
           throw new Error("reduced motion preference did not apply");
         }
+        screen = panel._shell.settings;
+        findAll(screen, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Система")[0].fire("click");
         screen = panel._shell.settings;
         findAll(screen, (node) => node.tagName === "BUTTON"
           && node.textContent === "Подготовить полный сброс")[0].fire("click");

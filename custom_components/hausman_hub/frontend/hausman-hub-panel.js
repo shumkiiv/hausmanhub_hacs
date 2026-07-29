@@ -1,4 +1,5 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.46.0";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.46.1";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.46.1";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css";
@@ -104,6 +105,20 @@ const CLIMATE_VIEWS = [
   { id: "home", label: "Сигналы дома", subtitle: "Сигналы дома и отопление" },
   { id: "windows", label: "Сигналы комнат", subtitle: "Окна и присутствие по комнатам" },
   { id: "assistant", label: "AI-помощник", subtitle: "Советы и статистика AI" },
+];
+const SETTINGS_VIEWS = [
+  { id: "overview", label: "Обзор", description: "Главные параметры и состояние" },
+  { id: "rooms", label: "Комнаты", description: "Комнаты, устройства и датчики" },
+  { id: "connection", label: "Подключение", description: "Связь с Home Assistant" },
+  { id: "appearance", label: "Интерфейс", description: "Тема, анимация и подсказки" },
+  { id: "system", label: "Система", description: "Версия и безопасный сброс" },
+];
+const ROOM_SETUP_PANES = [
+  { id: "devices", label: "Устройства", description: "Чем измерять и управлять" },
+  { id: "comfort", label: "Комфорт", description: "Цели температуры и влажности" },
+  { id: "schedule", label: "Режим дня", description: "Когда включать дневные и ночные цели" },
+  { id: "limits", label: "Защита", description: "Безопасные границы температуры" },
+  { id: "review", label: "Проверка", description: "Что будет сохранено" },
 ];
 const READINESS_LABELS = {
   ready: "Система готова к управлению",
@@ -264,6 +279,8 @@ class HausmanHubPanel extends HTMLElement {
     this._shell = null;
     this._activeSection = null;
     this._activeClimateView = "contour";
+    this._activeSettingsView = "overview";
+    this._activeRoomSetupPane = "devices";
     this._expandedWizardRooms = new Set();
     this._openSignalPickers = new Set();
     this._openHomeCards = new Set();
@@ -2338,6 +2355,7 @@ class HausmanHubPanel extends HTMLElement {
   _openFirstRunRoom(roomId) {
     this._firstRun.roomId = roomId;
     this._firstRun.step = "room";
+    this._activeRoomSetupPane = "devices";
     this._render();
   }
 
@@ -2837,269 +2855,11 @@ class HausmanHubPanel extends HTMLElement {
   }
 
   _renderFirstRunRoom(card) {
-    const room = (this._firstRun.options.rooms || []).find((item) => item.id === this._firstRun.roomId);
-    if (!room) {
-      this._firstRunBackToRooms();
-      return;
-    }
-    const state = this._firstRunRoomState(room);
-    card.appendChild(el("h2", null, `Комната: ${room.name || room.id}`));
-    card.appendChild(el("div", "section-intro", "Изменения остаются в черновике мастера, пока комната не пройдёт проверку."));
-    const fields = { devices: [], maxTemperature: null, minTemperature: null, room: null };
-    const scheduleSection = el("section", "wizard-section");
-    scheduleSection.appendChild(el("h3", null, "Расписание комнаты"));
-    const dayStart = el("input");
-    dayStart.type = "time";
-    dayStart.value = this._firstRun.schedule.dayStart;
-    const dayRow = el("label", "form-field", "Начало дня");
-    dayRow.appendChild(dayStart);
-    scheduleSection.appendChild(dayRow);
-    const nightStart = el("input");
-    nightStart.type = "time";
-    nightStart.value = this._firstRun.schedule.nightStart;
-    const nightRow = el("label", "form-field", "Начало ночи");
-    nightRow.appendChild(nightStart);
-    scheduleSection.appendChild(nightRow);
-    const automatic = el("input");
-    automatic.type = "checkbox";
-    automatic.checked = this._firstRun.schedule.enabled === true;
-    const managed = this._settings.mode && this._settings.mode.mode === "managed";
-    automatic.disabled = !managed || this._busy;
-    const automaticLabel = el("label", "checkbox-field");
-    automaticLabel.appendChild(automatic);
-    automaticLabel.appendChild(el("span", null, "Автоматически переключать дневной и ночной профиль"));
-    scheduleSection.appendChild(automaticLabel);
-    if (!managed) {
-      scheduleSection.appendChild(el("div", "muted", "Автопереключение можно включить после сохранения контура и включения управляемого режима."));
-    }
-    [dayStart, nightStart, automatic].forEach((control) => {
-      control.addEventListener("input", () => {
-        this._firstRun.schedule.dayStart = dayStart.value;
-        this._firstRun.schedule.nightStart = nightStart.value;
-        this._firstRun.schedule.enabled = automatic.checked === true;
-        this._firstRunInvalidate();
-      });
-      control.addEventListener("change", () => {
-        this._firstRun.schedule.dayStart = dayStart.value;
-        this._firstRun.schedule.nightStart = nightStart.value;
-        this._firstRun.schedule.enabled = automatic.checked === true;
-        this._firstRunInvalidate();
-      });
+    renderFirstRunRoom.call(this, card, {
+      el, setAttr, numberField, selectField, normalizedText,
+      STRATEGY_ORDER, ROOM_SETUP_PANES,
     });
-    card.appendChild(scheduleSection);
-
-    const profilesSection = el("section", "wizard-section");
-    profilesSection.appendChild(el("h3", null, "Дневной и ночной профиль"));
-    profilesSection.appendChild(el("div", "muted", "Цели сохраняются раздельно для дня и ночи. Температура 18-28 °C с шагом 0,5, влажность 30-70 % с шагом 1."));
-    const columns = el("div", "profile-columns");
-    ["day", "night"].forEach((profile) => {
-      const values = state[profile];
-      const block = el("div", "profile-block");
-      block.appendChild(el("h4", null, profile === "day" ? "День" : "Ночь"));
-      const temperature = numberField(values.temperature, 18, 28, 0.5, () => {
-        values.temperature = temperature.value;
-        this._firstRunInvalidate(room.id);
-      });
-      const temperatureRow = el("label", "form-field", "Температура, °C");
-      temperatureRow.appendChild(temperature);
-      block.appendChild(temperatureRow);
-      const humidity = numberField(values.humidity, 30, 70, 1, () => {
-        values.humidity = humidity.value;
-        this._firstRunInvalidate(room.id);
-      });
-      const humidityRow = el("label", "form-field", "Влажность, %");
-      humidityRow.appendChild(humidity);
-      block.appendChild(humidityRow);
-      const strategy = selectField(
-        STRATEGY_ORDER.map((code) => ({
-          label: ((this._firstRun.options.display_names || {}).strategies || {})[code] || code,
-          value: code,
-        })),
-        values.strategy,
-        () => {
-          values.strategy = strategy.value;
-          this._firstRunInvalidate(room.id);
-        }
-      );
-      const strategyRow = el("label", "form-field", "Стратегия");
-      strategyRow.appendChild(strategy);
-      block.appendChild(strategyRow);
-      columns.appendChild(block);
-    });
-    profilesSection.appendChild(columns);
-    card.appendChild(profilesSection);
-
-    const limitsSection = el("section", "wizard-section");
-    limitsSection.appendChild(el("h3", null, "Допустимая температура комнаты"));
-    limitsSection.appendChild(el("div", "muted", "Необязательные границы ограничивают команды кондиционеру и отоплению. Пустое поле означает, что дополнительной границы нет."));
-    const minTemperature = numberField(
-      state.minTemperature === null ? "" : state.minTemperature,
-      18, 28, 0.5,
-      () => {
-        state.minTemperature = minTemperature.value;
-        this._firstRunInvalidate(room.id);
-      }
-    );
-    const minRow = el("label", "form-field", "Минимальная температура, °C");
-    minRow.appendChild(minTemperature);
-    limitsSection.appendChild(minRow);
-    const maxTemperature = numberField(
-      state.maxTemperature === null ? "" : state.maxTemperature,
-      18, 28, 0.5,
-      () => {
-        state.maxTemperature = maxTemperature.value;
-        this._firstRunInvalidate(room.id);
-      }
-    );
-    const maxRow = el("label", "form-field", "Максимальная температура, °C");
-    maxRow.appendChild(maxTemperature);
-    limitsSection.appendChild(maxRow);
-    card.appendChild(limitsSection);
-
-    const devicesSection = el("section", "wizard-section");
-    devicesSection.appendChild(el("h3", null, "Устройства и датчики"));
-    devicesSection.appendChild(el("div", "muted", "Канал определяет способ управления. Без climate-обёртки Home Assistant ИК-пульт остаётся в наблюдении."));
-    const roomlessCandidates = this._firstRunRoomlessCandidates();
-    if (roomlessCandidates.length) {
-      const visibleNames = roomlessCandidates.slice(0, 5).map((candidate) => (
-        candidate.name || candidate.device_name || candidate.candidate_id
-      ));
-      const remaining = roomlessCandidates.length - visibleNames.length;
-      const names = `${visibleNames.join(", ")}${remaining ? ` и ещё ${remaining}` : ""}`;
-      devicesSection.appendChild(el(
-        "div",
-        "wizard-warning",
-        `Без комнаты: ${names}. Выберите нужные ниже для локальной привязки HausmanHub или назначьте им зону в Home Assistant и обновите список.`
-      ));
-    }
-    const deviceActions = el("div", "actions");
-    const refreshDevices = el("button", "secondary", "Обновить список устройств");
-    refreshDevices.disabled = this._busy || this._firstRun.loading;
-    refreshDevices.addEventListener("click", () => this._loadFirstRunOptions(true));
-    deviceActions.appendChild(refreshDevices);
-    devicesSection.appendChild(deviceActions);
-    const showAll = el("input");
-    showAll.type = "checkbox";
-    showAll.checked = state.showAllDevices === true;
-    showAll.disabled = this._busy;
-    const showAllLabel = el("label", "checkbox-field");
-    showAllLabel.appendChild(showAll);
-    showAllLabel.appendChild(el("span", null, "Показать устройства из других комнат"));
-    devicesSection.appendChild(showAllLabel);
-    const roomChoices = this._firstRunRoomChoices(state, this._firstRunRoomCandidates(room.id));
-    const roomlessChoices = this._firstRunRoomChoices(state, roomlessCandidates);
-    const nearbyChoices = this._firstRunRoomChoices(state, this._firstRunPossibleRoomCandidates(room));
-    const catalogChoices = this._firstRunRoomChoices(
-      state,
-      (this._firstRun.options && this._firstRun.options.devices) || []
-    );
-    const choices = roomChoices.concat(roomlessChoices, nearbyChoices);
-    const irRemotes = (this._firstRun.options.ir_remotes || []).filter((remote) => remote.room_id === room.id);
-    const hasClimateFacade = choices.some((choice) => (
-      choice.type === "air_conditioner" || choice.type === "humidifier"
-    ));
-    if (irRemotes.length && !hasClimateFacade) {
-      const names = irRemotes.map((remote) => `«${remote.name}»`).join(", ");
-      devicesSection.appendChild(el("div", "wizard-hint", `Для ${names} нет обёртки. Создайте SmartIR climate, назначьте зоне и обновите список.`));
-    }
-    const search = el("input", "entity-search");
-    search.type = "search";
-    search.placeholder = "Найти устройство или датчик";
-    setAttr(search, "aria-label", "Поиск устройств комнаты");
-    devicesSection.appendChild(search);
-    const searchable = [];
-    if (state.showAllDevices) {
-      const byRoom = new Map();
-      catalogChoices.forEach((choice) => {
-        const roomId = choice.candidate.room_id || "";
-        if (!byRoom.has(roomId)) byRoom.set(roomId, []);
-        byRoom.get(roomId).push(choice);
-      });
-      Array.from(byRoom.entries())
-        .sort(([left], [right]) => {
-          if (!left) return 1;
-          if (!right) return -1;
-          return this._firstRunCandidateRoomName({ room_id: left }).localeCompare(
-            this._firstRunCandidateRoomName({ room_id: right }), "ru"
-          );
-        })
-        .forEach(([roomId, groupedChoices]) => {
-          devicesSection.appendChild(el("h4", null, roomId
-            ? this._firstRunCandidateRoomName({ room_id: roomId }) : "Без комнаты"));
-          devicesSection.appendChild(this._firstRunDeviceGroups(
-            groupedChoices, room, fields, catalogChoices, searchable
-          ));
-        });
-      if (!catalogChoices.length) {
-        devicesSection.appendChild(el("div", "muted", "Home Assistant пока не передал ни одного устройства."));
-      }
-    } else {
-      const groups = this._firstRunDeviceGroups(roomChoices, room, fields, choices, searchable);
-      if (!roomChoices.length) groups.appendChild(el("div", "muted", "Подходящих устройств в этой области пока нет."));
-      devicesSection.appendChild(groups);
-      if (roomlessChoices.length) {
-        devicesSection.appendChild(this._collapsibleDeviceSection(
-          "Устройства без комнаты",
-          "Сначала вернитесь к привязке комнат и сохраните область устройства в Home Assistant. После обновления его можно будет добавить в климатический контур.",
-          this._firstRunDeviceGroups(roomlessChoices, room, fields, choices, searchable),
-          false
-        ));
-      }
-      if (nearbyChoices.length) {
-        devicesSection.appendChild(this._collapsibleDeviceSection(
-          "Возможно, относится к этой комнате",
-          "Эти климатические устройства уже привязаны к другой области Home Assistant и показаны только для проверки.",
-          this._firstRunDeviceGroups(nearbyChoices, room, fields, choices, searchable),
-          true
-        ));
-      }
-    }
-    showAll.addEventListener("change", () => {
-      state.showAllDevices = showAll.checked === true;
-      this._render();
-    });
-    search.addEventListener("input", () => {
-      const query = normalizedText(search.value);
-      searchable.forEach((entry) => { entry.group.hidden = Boolean(query) && !entry.text.includes(query); });
-    });
-    card.appendChild(devicesSection);
-
-    const report = state.report;
-    if (report) {
-      const reportBox = el("div", "wizard-report");
-      const ready = report.status === "ready" && report.save_allowed === true;
-      reportBox.appendChild(el("strong", null, ready ? "Комната проверена" : "Проверка требует внимания"));
-      const issues = report.issues || [];
-      if (issues.length) {
-        const list = el("ul");
-        issues.forEach((issue) => list.appendChild(el(
-          "li",
-          issue.level === "warning" ? "issue-warning" : null,
-          issue.message || "Проверьте настройки комнаты."
-        )));
-        reportBox.appendChild(list);
-      } else if (ready) {
-        reportBox.appendChild(el("div", "muted", "Все выбранные устройства и цели прошли проверку."));
-      }
-      card.appendChild(reportBox);
-    }
-    const actions = el("div", "actions");
-    const back = el("button", "secondary", "Назад к списку комнат");
-    back.disabled = this._busy;
-    back.addEventListener("click", () => this._firstRunBackToRooms());
-    const check = el("button", null, "Проверить комнату");
-    check.disabled = this._busy || room.selectable !== true;
-    check.title = check.disabled ? "Комната недоступна для настройки." : "Проверить цели и выбранные привязки.";
-    check.addEventListener("click", () => this._checkFirstRunRoom(room.id));
-    actions.appendChild(back);
-    actions.appendChild(check);
-    card.appendChild(actions);
-    fields.maxTemperature = maxTemperature;
-    fields.minTemperature = minTemperature;
-    fields.room = room;
-    this._firstRunFields = { room: fields };
   }
-
   _renderFirstRunHome(card) {
     card.appendChild(el("h2", null, "Параметры дома"));
     card.appendChild(el("div", "section-intro", "Выберите общие сигналы и пороги отопления. Они сохраняются отдельным безопасным запросом без команд устройствам."));
@@ -5737,10 +5497,153 @@ class HausmanHubPanel extends HTMLElement {
     this._render();
   }
 
+  _activateSettingsView(viewId) {
+    if (!SETTINGS_VIEWS.some((view) => view.id === viewId)) return;
+    this._activeSettingsView = viewId;
+    this._resetArmed = false;
+    this._render();
+  }
+
+  _settingsOverviewLink({ viewId, icon, title, description, value, status }) {
+    const card = el("button", "settings-menu-card");
+    card.type = "button";
+    card.appendChild(svgIcon(icon, "settings-menu-icon"));
+    const copy = el("span", "settings-menu-copy");
+    copy.appendChild(el("strong", null, title));
+    copy.appendChild(el("small", null, description));
+    card.appendChild(copy);
+    const meta = el("span", "settings-menu-meta");
+    if (status) meta.appendChild(el("span", `settings-menu-status ${status.className || ""}`, status.label));
+    meta.appendChild(el("b", null, value));
+    meta.appendChild(el("span", "settings-menu-chevron", "›"));
+    card.appendChild(meta);
+    card.addEventListener("click", () => this._activateSettingsView(viewId));
+    return card;
+  }
+
+  _renderSettingsOverview(container) {
+    const setup = this._settings.setup || {};
+    const rooms = Array.isArray(setup.rooms) ? setup.rooms : [];
+    const roomCount = Number(setup.summary && setup.summary.room_count) || rooms.length;
+    const deviceCount = Number(setup.summary && setup.summary.device_count)
+      || rooms.reduce((sum, room) => sum + (Array.isArray(room.devices) ? room.devices.length : 0), 0);
+    const configured = setup.status !== "not_configured";
+    const grid = el("div", "settings-overview-grid");
+    grid.appendChild(this._settingsOverviewLink({
+      viewId: "rooms", icon: "rooms", title: "Комнаты и устройства",
+      description: "Какие устройства относятся к комнатам и участвуют в управлении",
+      value: configured ? `${roomCount} комнат · ${deviceCount} устройств` : "Требуется настройка",
+      status: { className: configured ? "is-ready" : "is-warning", label: configured ? "Настроено" : "Внимание" },
+    }));
+    grid.appendChild(this._settingsOverviewLink({
+      viewId: "connection", icon: "device", title: "Подключение",
+      description: "Откуда панель получает данные и куда отправляет команды",
+      value: this._settingsData.connection_mode === "center" ? "HausmanHub" : "Home Assistant",
+      status: { className: "is-ready", label: "Активно" },
+    }));
+    grid.appendChild(this._settingsOverviewLink({
+      viewId: "appearance", icon: "sun", title: "Интерфейс",
+      description: "Тема, движение элементов и пояснения сложных параметров",
+      value: THEME_MODE_META[this._themeMode]?.hint || "авто",
+    }));
+    grid.appendChild(this._settingsOverviewLink({
+      viewId: "system", icon: "settings", title: "Система",
+      description: "Версия интеграции, состав данных и безопасный сброс",
+      value: `Версия ${this._data.integration_version || "—"}`,
+    }));
+    container.appendChild(grid);
+    const note = el("section", "card settings-help-card");
+    note.appendChild(svgIcon("home"));
+    const noteCopy = el("div");
+    noteCopy.appendChild(el("strong", null, "Home Assistant остаётся единым источником устройств"));
+    noteCopy.appendChild(el("p", "muted", "HausmanHub использует комнаты, названия и сущности из Home Assistant. Изменения привязок явно сохраняются обратно в Home Assistant."));
+    note.appendChild(noteCopy);
+    container.appendChild(note);
+  }
+
+  _renderSettingsRooms(container) {
+    const setup = this._settings.setup || {};
+    const rooms = Array.isArray(setup.rooms) ? setup.rooms : [];
+    const intro = el("section", "card settings-room-summary");
+    intro.appendChild(svgIcon("rooms", "settings-room-summary-icon"));
+    const copy = el("div", "settings-room-summary-copy");
+    copy.appendChild(el("h3", null, "Комнаты и устройства"));
+    copy.appendChild(el("p", "muted", "Сначала проверьте привязку физических устройств к комнатам Home Assistant. Затем выберите, какие из них измеряют климат и выполняют команды."));
+    intro.appendChild(copy);
+    const edit = el("button", null, setup.status === "not_configured" ? "Начать настройку" : "Настроить комнаты");
+    edit.disabled = this._busy || (setup.status !== "not_configured" && setup.editing_allowed !== true);
+    edit.addEventListener("click", () => this._openWizard(setup));
+    intro.appendChild(edit);
+    container.appendChild(intro);
+
+    const roomGrid = el("div", "settings-room-grid");
+    rooms.forEach((room) => {
+      const roomCard = el("article", "settings-room-card");
+      const head = el("div", "settings-room-card-head");
+      head.appendChild(svgIcon("home"));
+      const roomCopy = el("div");
+      roomCopy.appendChild(el("strong", null, room.name || room.id || "Комната"));
+      const devices = Array.isArray(room.devices) ? room.devices : [];
+      roomCopy.appendChild(el("small", null, `${devices.length} ${devices.length === 1 ? "устройство" : "устройств"}`));
+      head.appendChild(roomCopy);
+      roomCard.appendChild(head);
+      const roles = Array.from(new Set((room.devices || []).map((device) => device.type).filter(Boolean)));
+      roomCard.appendChild(el("p", "muted", roles.length
+        ? `Доступно для управления: ${roles.length} ${roles.length === 1 ? "тип устройства" : "типов устройств"}.`
+        : "Исполнительные устройства пока не выбраны."));
+      roomGrid.appendChild(roomCard);
+    });
+    if (!rooms.length) {
+      const empty = el("div", "card settings-empty-state");
+      empty.appendChild(el("strong", null, "Комнаты ещё не настроены"));
+      empty.appendChild(el("p", "muted", "Мастер сначала покажет комнаты Home Assistant и устройства без комнаты, чтобы их можно было быстро разобрать."));
+      roomGrid.appendChild(empty);
+    }
+    container.appendChild(roomGrid);
+
+    const guide = el("section", "card settings-guide-card");
+    guide.appendChild(el("h3", null, "Как устроена настройка комнаты"));
+    const steps = el("div", "settings-guide-steps");
+    ROOM_SETUP_PANES.forEach((pane, index) => {
+      const step = el("div", "settings-guide-step");
+      step.appendChild(el("span", null, String(index + 1)));
+      const stepCopy = el("div");
+      stepCopy.appendChild(el("strong", null, pane.label));
+      stepCopy.appendChild(el("small", null, pane.description));
+      step.appendChild(stepCopy);
+      steps.appendChild(step);
+    });
+    guide.appendChild(steps);
+    container.appendChild(guide);
+  }
+
   _renderSettings(container) {
     container.innerHTML = "";
-    container.appendChild(el("h2", null, "Настройки"));
-    container.appendChild(el("div", "section-intro", "Параметры панели и подключения"));
+    const activeView = SETTINGS_VIEWS.find((view) => view.id === this._activeSettingsView) || SETTINGS_VIEWS[0];
+    const heading = el("div", "settings-heading");
+    heading.appendChild(el("div", "settings-heading-eyebrow", "Настройки HausmanHub"));
+    heading.appendChild(el("h2", null, activeView.label));
+    heading.appendChild(el("div", "section-intro", activeView.description));
+    container.appendChild(heading);
+    const nav = el("nav", "settings-subnav");
+    setAttr(nav, "aria-label", "Разделы настроек");
+    SETTINGS_VIEWS.forEach((view) => {
+      const button = el("button", view.id === activeView.id ? "is-current" : "");
+      button.type = "button";
+      button.textContent = view.label;
+      setAttr(button, "aria-current", view.id === activeView.id ? "page" : "false");
+      button.addEventListener("click", () => this._activateSettingsView(view.id));
+      nav.appendChild(button);
+    });
+    container.appendChild(nav);
+    if (activeView.id === "overview") {
+      this._renderSettingsOverview(container);
+      return;
+    }
+    if (activeView.id === "rooms") {
+      this._renderSettingsRooms(container);
+      return;
+    }
 
     const card = el("section", "card settings-card");
     card.appendChild(el("h3", null, "Подключение"));
@@ -5798,7 +5701,7 @@ class HausmanHubPanel extends HTMLElement {
     check.disabled = this._busy;
     check.addEventListener("click", () => this._checkConnection());
     card.appendChild(check);
-    container.appendChild(card);
+    if (activeView.id === "connection") container.appendChild(card);
 
     const interfaceCard = el("section", "card settings-card interface-settings-card");
     interfaceCard.appendChild(el("h3", null, "Интерфейс"));
@@ -5852,7 +5755,7 @@ class HausmanHubPanel extends HTMLElement {
       row.appendChild(toggle);
       interfaceCard.appendChild(row);
     });
-    container.appendChild(interfaceCard);
+    if (activeView.id === "appearance") container.appendChild(interfaceCard);
 
     const danger = el("section", "card settings-card danger-settings-card");
     danger.appendChild(el("h3", null, "Сброс HausmanHub"));
@@ -5875,7 +5778,7 @@ class HausmanHubPanel extends HTMLElement {
       dangerActions.appendChild(openReset);
     }
     danger.appendChild(dangerActions);
-    container.appendChild(danger);
+    if (activeView.id === "system") container.appendChild(danger);
 
     const about = el("section", "card settings-about");
     const aboutIcon = el("span", "settings-about-icon");
@@ -5887,7 +5790,7 @@ class HausmanHubPanel extends HTMLElement {
     aboutCopy.appendChild(el("small", null, "Единый интерфейс с планшетом HausmanHub"));
     about.appendChild(aboutCopy);
     about.appendChild(el("span", "status-badge settings-version", `Версия ${this._data.integration_version || "—"}`));
-    container.appendChild(about);
+    if (activeView.id === "system") container.appendChild(about);
 
     const pageActions = el("div", "settings-page-actions");
     const reset = el("button", "secondary", "Сбросить изменения");
@@ -5903,7 +5806,7 @@ class HausmanHubPanel extends HTMLElement {
     saveBtn.addEventListener("click", () => this._saveSettings());
     pageActions.appendChild(reset);
     pageActions.appendChild(saveBtn);
-    container.appendChild(pageActions);
+    if (activeView.id === "connection") container.appendChild(pageActions);
   }
 
   async _resetAllSettings() {

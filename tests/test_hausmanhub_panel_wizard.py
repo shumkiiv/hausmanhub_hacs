@@ -15,6 +15,7 @@ PANEL_JS = (
     / "hausman-hub-panel.js"
 )
 HOME_SECTIONS_JS = PANEL_JS.with_name("hausman-hub-home-sections.js")
+ROOM_SETUP_JS = PANEL_JS.with_name("hausman-hub-room-setup.js")
 
 PANEL_PAYLOAD = {
     "contract": {"name": "hausman-hub-admin-panel", "version": 2},
@@ -279,7 +280,11 @@ def panel_script(get_table: dict, post_table: dict, assertions: str) -> str:
         {{ filename: {str(HOME_SECTIONS_JS)!r} }}
       );
       vm.runInThisContext(
-        fs.readFileSync({str(PANEL_JS)!r}, "utf8").replace(/^import .*hausman-hub-home-sections.*;\\s*/m, ""),
+        fs.readFileSync({str(ROOM_SETUP_JS)!r}, "utf8").replace("export function renderFirstRunRoom", "function renderFirstRunRoom"),
+        {{ filename: {str(ROOM_SETUP_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(PANEL_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, ""),
         {{ filename: {str(PANEL_JS)!r} }}
       );
 
@@ -1351,6 +1356,8 @@ class PanelFirstRunWizardTest(unittest.TestCase):
           item.type === "air_conditioner");
         airConditioner.checkbox.checked = true;
         airConditioner.checkbox.fire("change");
+        panel._activeRoomSetupPane = "review";
+        panel._render();
         const check = findAll(panel.shadowRoot, (node) =>
           node.tagName === "BUTTON" && node.textContent === "Проверить комнату")[0];
         check.fire("click");
@@ -1373,6 +1380,52 @@ class PanelFirstRunWizardTest(unittest.TestCase):
           node.tagName === "BUTTON" && node.textContent === "Завершить настройку")[0];
         if (!enabledFinish || enabledFinish.disabled) {
           throw new Error("one checked room did not open progress");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_room_editor_is_split_into_clear_stable_steps(self) -> None:
+        script = panel_script(
+            get_payloads(),
+            {},
+            """
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать настройку")[0].fire("click");
+        await tick();
+        panel._firstRunFields.rooms.living.configure.fire("click");
+        const steps = findAll(panel.shadowRoot, (node) =>
+          node.tagName === "BUTTON" && String(node.className).split(" ").includes("room-setup-step"));
+        if (steps.length !== 5) throw new Error("room setup must have five short steps");
+        for (const label of ["Комфорт", "Устройства", "Режим дня", "Защита", "Проверка"]) {
+          if (!steps.some((node) => textOf(node).includes(label))) {
+            throw new Error("room setup step missing: " + label);
+          }
+        }
+        let sections = findAll(panel.shadowRoot, (node) =>
+          String(node.className).split(" ").includes("wizard-section"));
+        if (sections.length !== 1 || !textOf(sections[0]).includes("Сначала выберите датчик")) {
+          throw new Error("device page is not the focused default");
+        }
+        const livingState = panel._firstRun.rooms.living;
+        const initialTemperature = livingState.day.temperature;
+        steps.find((node) => textOf(node).includes("Комфорт")).fire("click");
+        sections = findAll(panel.shadowRoot, (node) =>
+          String(node.className).split(" ").includes("wizard-section"));
+        if (sections.length !== 1 || !textOf(sections[0]).includes("Дневной и ночной профиль")) {
+          throw new Error("comfort page did not replace the long room form");
+        }
+        const refreshedSteps = findAll(panel.shadowRoot, (node) =>
+          node.tagName === "BUTTON" && String(node.className).split(" ").includes("room-setup-step"));
+        refreshedSteps.find((node) => textOf(node).includes("Защита")).fire("click");
+        sections = findAll(panel.shadowRoot, (node) =>
+          String(node.className).split(" ").includes("wizard-section"));
+        if (sections.length !== 1 || !textOf(sections[0]).includes("не являются целевой температурой")) {
+          throw new Error("protection explanation is missing");
+        }
+        if (livingState.day.temperature !== initialTemperature) {
+          throw new Error("room selection changed while switching pages");
         }
             """,
         )
@@ -1435,6 +1488,8 @@ class PanelFirstRunWizardTest(unittest.TestCase):
           item.type === "radiator_thermostat");
         kidsDevice.checkbox.checked = true;
         kidsDevice.checkbox.fire("change");
+        panel._activeRoomSetupPane = "review";
+        panel._render();
         findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
           && node.textContent === "Проверить комнату")[0].fire("click");
         await tick();
@@ -1452,6 +1507,8 @@ class PanelFirstRunWizardTest(unittest.TestCase):
           item.type === "air_conditioner");
         livingDevice.checkbox.checked = true;
         livingDevice.checkbox.fire("change");
+        panel._activeRoomSetupPane = "review";
+        panel._render();
         findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
           && node.textContent === "Проверить комнату")[0].fire("click");
         await tick();
@@ -1561,6 +1618,8 @@ class PanelFirstRunWizardTest(unittest.TestCase):
           device.type === "air_conditioner");
         airConditioner.controlChannel.value = "direct_wifi";
         airConditioner.controlChannel.fire("change");
+        panel._activeRoomSetupPane = "review";
+        panel._render();
         findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
           && node.textContent === "Проверить комнату")[0].fire("click");
         await tick();
