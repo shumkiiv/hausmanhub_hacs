@@ -21,7 +21,7 @@
       document.documentElement.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       document.body.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       panel._data = {
-        integration_version: "1.46.4",
+        integration_version: "1.46.5",
         readiness: { status: "ready", bridge_mode: "native", reasons: [] },
         snapshot: {
           rooms: [
@@ -189,6 +189,10 @@
       const screen = params.get("screen");
       if (["contour", "profiles", "schedule", "home", "windows", "assistant"].includes(screen)) {
         panel._activeClimateView = screen;
+      }
+      const settingsView = params.get("settings");
+      if (["overview", "rooms", "connection", "appearance", "system"].includes(settingsView)) {
+        panel._activeSettingsView = settingsView;
       }
       panel._render();
       panel.shadowRoot.querySelector("link").href =

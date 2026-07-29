@@ -255,7 +255,12 @@ AI_ASSISTANT_PAYLOAD = {
 }
 
 
-def panel_script(get_payloads: dict, post_table: dict, assertions: str) -> str:
+def panel_script(
+    get_payloads: dict,
+    post_table: dict,
+    assertions: str,
+    before_panel: str = "",
+) -> str:
     """Build one executed-JavaScript scenario around the real panel module."""
 
     return f"""
@@ -299,7 +304,16 @@ def panel_script(get_payloads: dict, post_table: dict, assertions: str) -> str:
         addEventListener() {{}},
         removeEventListener() {{}},
       }};
+      const clipboardWrites = [];
       global.window = {{ confirm: () => true }};
+      global.navigator = {{
+        clipboard: {{
+          writeText: (value) => {{
+            clipboardWrites.push(String(value));
+            return Promise.resolve();
+          }},
+        }},
+      }};
       global.HTMLElement = class {{
         attachShadow() {{
           this.shadowRoot = new FakeElement("shadow-root");
@@ -334,7 +348,26 @@ def panel_script(get_payloads: dict, post_table: dict, assertions: str) -> str:
       const getTable = {json.dumps(get_payloads, ensure_ascii=False)};
       const postTable = {json.dumps(post_table, ensure_ascii=False)};
       const calls = [];
+      const wsMessages = [];
+      let userPreferenceValue = null;
+      let userPreferenceReadResolve = null;
       const hass = {{
+        connection: {{
+          sendMessagePromise: (message) => {{
+            wsMessages.push(message);
+            if (message.type === "frontend/get_user_data") {{
+              if (global.deferUserPreferenceRead) {{
+                return new Promise((resolve) => {{ userPreferenceReadResolve = resolve; }});
+              }}
+              return Promise.resolve({{ value: userPreferenceValue }});
+            }}
+            if (message.type === "frontend/set_user_data") {{
+              userPreferenceValue = message.value;
+              return Promise.resolve();
+            }}
+            return Promise.reject(new Error("unexpected WS " + message.type));
+          }},
+        }},
         callApi: (method, path, payload) => {{
           calls.push({{ method, path, payload }});
           if (method === "GET") {{
@@ -375,6 +408,7 @@ def panel_script(get_payloads: dict, post_table: dict, assertions: str) -> str:
 
       (async () => {{
         const Panel = registry.get("hausman-hub-panel");
+        {before_panel}
         const panel = new Panel();
         panel.hass = hass;
         await tick();
@@ -995,33 +1029,42 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           && node.textContent === "Подключение")[0].fire("click");
         screen = panel._shell.settings;
         const urls = findAll(screen, (node) => node.type === "url");
-        if (urls.length !== 2 || !textOf(screen).includes("Параметры связи")) {
+        if (urls.length !== 2 || !textOf(screen).includes("Источник данных и команд")) {
           throw new Error("connection settings page mismatch");
         }
         const panelGets = calls.filter((call) => call.method === "GET"
           && call.path === "hausman_hub/v1/admin/panel").length;
         findAll(screen, (node) => node.tagName === "BUTTON"
-          && node.textContent === "Проверить подключение")[0].fire("click");
+          && node.textContent === "Проверить доступность панели")[0].fire("click");
         await tick();
         if (calls.filter((call) => call.method === "GET"
           && call.path === "hausman_hub/v1/admin/panel").length !== panelGets + 1) {
           throw new Error("connection check did not call the live panel API");
         }
         screen = panel._shell.settings;
-        const mode = findAll(screen, (node) => node.tagName === "SELECT")[0];
-        mode.value = "home_assistant";
-        mode.fire("change");
+        findAll(screen, (node) => node.tagName === "BUTTON"
+          && textOf(node).includes("Только Home Assistant"))[0].fire("click");
         screen = panel._shell.settings;
         const centerField = findAll(screen, (node) =>
           String(node.className).split(" ").includes("settings-field")
           && textOf(node).includes("Адрес HausmanHub"))[0];
-        if (!centerField.hidden) throw new Error("HausmanHub URL remains visible in HA-only mode");
+        if (centerField) throw new Error("HausmanHub URL remains visible in HA-only mode");
         const haUrl = findAll(screen, (node) => node.type === "url")[0];
+        const stableUrlField = haUrl;
         haUrl.value = "https://ha.example.test";
         haUrl.fire("input");
+        if (findAll(screen, (node) => node.type === "url")[0] !== stableUrlField) {
+          throw new Error("connection form was rerendered while typing");
+        }
+        panel.shadowRoot.activeElement = haUrl;
+        panel._render();
+        if (findAll(screen, (node) => node.type === "url")[0] !== stableUrlField) {
+          throw new Error("background render replaced the focused dirty connection field");
+        }
+        panel.shadowRoot.activeElement = null;
         screen = panel._shell.settings;
         const save = findAll(screen, (node) => node.tagName === "BUTTON"
-          && node.textContent === "Сохранить настройки")[0];
+          && node.textContent === "Сохранить")[0];
         if (save.disabled) throw new Error("settings save stayed disabled after edit");
         save.fire("click");
         await tick();
@@ -1040,19 +1083,49 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           && node.textContent === "Интерфейс")[0].fire("click");
         screen = panel._shell.settings;
         const toggles = findAll(screen, (node) => String(node.className).split(" ").includes("settings-toggle"));
-        if (toggles.length !== 2 || !textOf(screen).includes("Тема панели")) {
+        if (toggles.length !== 3 || !textOf(screen).includes("Тема панели")) {
           throw new Error("interface settings page mismatch");
         }
         const motionToggle = findAll(screen, (node) =>
-          String(node.className).split(" ").includes("settings-toggle"))[0];
+          String(node.className).split(" ").includes("settings-toggle"))[1];
         motionToggle.checked = true;
         motionToggle.fire("change");
         if (panel._settingsPrefs.reduced_motion !== true) {
           throw new Error("reduced motion preference did not apply");
         }
+        await tick();
+        const savedPreference = wsMessages.find((message) =>
+          message.type === "frontend/set_user_data" && message.key === "hausman_hub");
+        if (!savedPreference || savedPreference.value.reduced_motion !== true) {
+          throw new Error("interface preferences were not persisted in the HA user profile");
+        }
+        if (wsMessages.filter((message) => message.type === "frontend/get_user_data").length !== 1) {
+          throw new Error("HA user preferences were loaded more than once");
+        }
+        const restored = new (registry.get("hausman-hub-panel"))();
+        restored.hass = hass;
+        await tick();
+        if (restored._settingsPrefs.reduced_motion !== true) {
+          throw new Error("HA user interface preferences were not restored");
+        }
         screen = panel._shell.settings;
         findAll(screen, (node) => node.tagName === "BUTTON"
           && node.textContent === "Система")[0].fire("click");
+        screen = panel._shell.settings;
+        const systemText = textOf(screen);
+        for (const label of ["Состояние системы", "Устройства климата", "Копировать техническую сводку"]) {
+          if (!systemText.includes(label)) throw new Error("system status missing: " + label);
+        }
+        if (systemText.includes("native")) throw new Error("raw bridge mode exposed");
+        findAll(screen, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Копировать техническую сводку")[0].fire("click");
+        await tick();
+        if (clipboardWrites.length !== 1
+          || !clipboardWrites[0].includes("HausmanHub — техническая сводка")
+          || clipboardWrites[0].includes("ready")
+          || clipboardWrites[0].includes("homeassistant.local")) {
+          throw new Error("redacted technical summary copy mismatch");
+        }
         screen = panel._shell.settings;
         findAll(screen, (node) => node.tagName === "BUTTON"
           && node.textContent === "Подготовить полный сброс")[0].fire("click");
@@ -1069,6 +1142,47 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         if (!resetPost || resetPost.payload.confirmation !== "RESET_HAUSMANHUB") {
           throw new Error("full reset confirmation contract mismatch");
         }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_user_preference_edit_wins_over_delayed_initial_load(self) -> None:
+        script = panel_script(
+            dict(GET_PATHS),
+            {},
+            """
+        panel._settingsPrefs.large_text = true;
+        panel._persistUserPreferences();
+        await tick();
+        if (!userPreferenceReadResolve) {
+          throw new Error("preference load was not delayed");
+        }
+        userPreferenceReadResolve({
+          value: {
+            theme_mode: "dark",
+            large_text: false,
+            reduced_motion: true,
+            show_hints: false,
+          },
+        });
+        global.deferUserPreferenceRead = false;
+        await tick();
+        if (panel._settingsPrefs.large_text !== true
+          || panel._settingsPrefs.reduced_motion !== false
+          || panel._themeMode !== "auto") {
+          throw new Error("delayed preference load overwrote the current user edit");
+        }
+        const writes = wsMessages.filter((message) =>
+          message.type === "frontend/set_user_data" && message.key === "hausman_hub");
+        if (writes.length !== 1
+          || writes[0].value.large_text !== true
+          || writes[0].value.theme_mode !== "auto") {
+          throw new Error("current preferences were not persisted after delayed load");
+        }
+            """,
+            before_panel="""
+        global.deferUserPreferenceRead = true;
             """,
         )
         completed = run_panel_script(script)

@@ -1,7 +1,7 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.46.4";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.46.4";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.46.4";
-import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.46.4";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.46.5";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.46.5";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.46.5";
+import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.46.5";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css";
@@ -27,6 +27,7 @@ const SCENARIOS_DELETE_API = "hausman_hub/v1/admin/scenarios/delete";
 const SCENARIOS_RUN_API = "hausman_hub/v1/admin/scenarios/run";
 const CONNECTION_SETTINGS_API = "hausman_hub/v1/admin/connection-settings";
 const RESET_API = "hausman_hub/v1/admin/reset";
+const USER_PREFERENCES_KEY = "hausman_hub";
 const IR_CODES_API = "hausman_hub/v1/admin/ir-codes";
 const IR_CODES_SCAN_API = `${IR_CODES_API}/scan`;
 const IR_CODES_LEARN_API = `${IR_CODES_API}/learn`;
@@ -133,6 +134,18 @@ const READINESS_LABELS = {
   not_ready: "Нужна настройка системы",
   unavailable: "Система временно недоступна",
   disabled: "Управление климатом выключено",
+};
+const BRIDGE_MODE_LABELS = {
+  disabled: "Выключен",
+  managed: "Автоматическое управление",
+  native: "Встроенный контур",
+  shadow: "Только наблюдение",
+  canary: "Пилотная комната",
+};
+const SETUP_STATUS_LABELS = {
+  not_configured: "Не настроен",
+  ready: "Готов",
+  attention: "Требует внимания",
 };
 const LOCAL_DISPLAY_NAMES = {
   blocked_reasons: {
@@ -276,13 +289,17 @@ class HausmanHubPanel extends HTMLElement {
     this._scenarios = { list: null, catalog: null, loading: false, error: false };
     this._settingsData = { connection_mode: "center", smart_home_center_url: "", home_assistant_url: "" };
     this._settingsBaseline = { ...this._settingsData };
-    this._settingsPrefs = { reduced_motion: false, show_hints: true };
+    this._settingsPrefs = { large_text: false, reduced_motion: false, show_hints: true };
     this._settingsDirty = false;
     this._resetArmed = false;
     this._error = false;
     this._busy = false;
     this._notice = "";
     this._themeMode = "auto";
+    this._preferencesLoaded = false;
+    this._preferencesLoading = false;
+    this._preferencesDirty = false;
+    this._preferencesWriting = false;
     this._timer = null;
     this._shell = null;
     this._activeSection = null;
@@ -353,7 +370,10 @@ class HausmanHubPanel extends HTMLElement {
     const first = this._hass === null;
     this._hass = value;
     this._applyThemeMode();
-    if (first) this._load();
+    if (!this._preferencesLoaded) this._loadUserPreferences();
+    if (first) {
+      this._load();
+    }
   }
 
   connectedCallback() {
@@ -382,12 +402,78 @@ class HausmanHubPanel extends HTMLElement {
     if (this.classList && typeof this.classList.toggle === "function") {
       this.classList.toggle("reduced-motion", this._settingsPrefs.reduced_motion);
       this.classList.toggle("hide-hints", !this._settingsPrefs.show_hints);
+      this.classList.toggle("large-interface-text", this._settingsPrefs.large_text);
+    }
+  }
+
+  async _loadUserPreferences() {
+    if (this._preferencesLoaded || this._preferencesLoading || !this._hass?.connection?.sendMessagePromise) return;
+    this._preferencesLoading = true;
+    try {
+      const response = await this._hass.connection.sendMessagePromise({
+        type: "frontend/get_user_data",
+        key: USER_PREFERENCES_KEY,
+      });
+      const saved = response && response.value;
+      if (this._preferencesDirty || !saved || typeof saved !== "object") {
+        this._preferencesLoaded = true;
+        return;
+      }
+      if (THEME_MODES.includes(saved.theme_mode)) this._themeMode = saved.theme_mode;
+      ["large_text", "reduced_motion", "show_hints"].forEach((key) => {
+        if (typeof saved[key] === "boolean") this._settingsPrefs[key] = saved[key];
+      });
+    } catch (error) {
+    } finally {
+      this._preferencesLoaded = true;
+      this._preferencesLoading = false;
+      this._applyThemeMode();
+      this._render();
+      this._flushUserPreferences();
+    }
+  }
+
+  async _persistUserPreferences() {
+    this._preferencesDirty = true;
+    if (!this._preferencesLoaded && !this._preferencesLoading) {
+      await this._loadUserPreferences();
+    }
+    await this._flushUserPreferences();
+  }
+
+  async _flushUserPreferences() {
+    if (
+      !this._preferencesLoaded
+      || this._preferencesLoading
+      || this._preferencesWriting
+      || !this._preferencesDirty
+      || !this._hass?.connection?.sendMessagePromise
+    ) return;
+    this._preferencesWriting = true;
+    try {
+      while (this._preferencesDirty) {
+        this._preferencesDirty = false;
+        const value = { theme_mode: this._themeMode, ...this._settingsPrefs };
+        try {
+          await this._hass.connection.sendMessagePromise({
+            type: "frontend/set_user_data",
+            key: USER_PREFERENCES_KEY,
+            value,
+          });
+        } catch (error) {
+          this._preferencesDirty = true;
+          break;
+        }
+      }
+    } finally {
+      this._preferencesWriting = false;
     }
   }
 
   _cycleThemeMode() {
     const index = THEME_MODES.indexOf(this._themeMode);
     this._themeMode = THEME_MODES[(index + 1) % THEME_MODES.length];
+    this._persistUserPreferences();
     this._applyThemeMode();
   }
 
@@ -453,19 +539,21 @@ class HausmanHubPanel extends HTMLElement {
 
   async _loadSettings() {
     if (!this._hass) return;
+    let applied = false;
     try {
       const data = await this._hass.callApi("GET", CONNECTION_SETTINGS_API).catch(() => null);
-      if (data && typeof data === "object") {
+      if (data && typeof data === "object" && !this._settingsDirty) {
         this._settingsData = {
           connection_mode: data.connection_mode || "center",
           smart_home_center_url: data.smart_home_center_url || "",
           home_assistant_url: data.home_assistant_url || "",
         };
         this._settingsBaseline = { ...this._settingsData };
+        applied = true;
       }
     } catch (error) {
     }
-    this._render();
+    if (applied) this._render();
   }
 
   async _post(path, payload, confirmText) {
@@ -606,7 +694,9 @@ class HausmanHubPanel extends HTMLElement {
       this._renderAssistant(shell.assistant);
     }
     if (this._activeSection === "scenarios") this._renderScenarios(shell.scenarios);
-    if (this._activeSection === "settings") this._renderSettings(shell.settings);
+    if (this._activeSection === "settings" && !this._isEditingConnectionField()) {
+      this._renderSettings(shell.settings);
+    }
     if (shell.homeSections && shell.homeSections[this._activeSection]) {
       this._renderHomeSection(this._activeSection, shell.homeSections[this._activeSection]);
     }
@@ -787,6 +877,7 @@ class HausmanHubPanel extends HTMLElement {
       this._loadScenarios();
     }
     if (section === "settings") {
+      this._renderSettings(this._shell.settings);
       this._loadSettings();
     }
     if (this._shell.homeSections && this._shell.homeSections[section]) {
@@ -5463,6 +5554,342 @@ class HausmanHubPanel extends HTMLElement {
     container.appendChild(guide);
   }
 
+  _syncSettingsDirty() {
+    this._settingsDirty = JSON.stringify(this._settingsData) !== JSON.stringify(this._settingsBaseline);
+  }
+
+  _updateSettingsActionControls() {
+    const controls = this._settingsActionControls;
+    if (!controls) return;
+    controls.reset.disabled = this._busy || !this._settingsDirty;
+    controls.save.disabled = this._busy || !this._settingsDirty;
+    controls.state.textContent = this._settingsDirty
+      ? "Есть несохранённые изменения"
+      : "Все изменения сохранены";
+  }
+
+  _settingsStatusRow(title, value, tone = "") {
+    const row = el("div", `settings-status-row${tone ? ` ${tone}` : ""}`);
+    row.appendChild(el("span", null, title));
+    row.appendChild(el("strong", null, value));
+    return row;
+  }
+
+  _renderConnectionSettings(container) {
+    const card = el("section", "card settings-card connection-settings-card");
+    card.appendChild(el("h3", null, "Источник данных и команд"));
+    card.appendChild(el(
+      "p",
+      "muted settings-card-intro",
+      "Выберите, работает ли панель через полный контур HausmanHub или только внутри Home Assistant."
+    ));
+    const modes = el("div", "settings-mode-options");
+    [
+      {
+        value: "center",
+        title: "HausmanHub",
+        label: "Рекомендуется",
+        description: "Климатический контур, сценарии и подтверждённые команды через единый API.",
+      },
+      {
+        value: "home_assistant",
+        title: "Только Home Assistant",
+        label: "Базовый режим",
+        description: "Панель использует локальные данные Home Assistant без внешнего центра.",
+      },
+    ].forEach((mode) => {
+      const selected = this._settingsData.connection_mode === mode.value;
+      const button = el("button", `settings-mode-option${selected ? " is-selected" : ""}`);
+      button.type = "button";
+      setAttr(button, "aria-pressed", selected);
+      const head = el("span", "settings-mode-option-head");
+      head.appendChild(el("strong", null, mode.title));
+      head.appendChild(el("small", null, mode.label));
+      button.appendChild(head);
+      button.appendChild(el("span", "settings-mode-option-description", mode.description));
+      button.addEventListener("click", () => {
+        this._settingsData.connection_mode = mode.value;
+        this._syncSettingsDirty();
+        this._render();
+      });
+      modes.appendChild(button);
+    });
+    card.appendChild(modes);
+
+    const form = el("div", "settings-form-grid connection-address-grid");
+    const haLabel = el("label", "settings-field");
+    haLabel.appendChild(el("span", "assistant-field-label", "Адрес Home Assistant"));
+    const haInput = el("input");
+    haInput.type = "url";
+    haInput.value = this._settingsData.home_assistant_url;
+    haInput.placeholder = "https" + "://homeassistant.local";
+    haInput.addEventListener("input", () => {
+      this._settingsData.home_assistant_url = haInput.value.trim();
+      this._syncSettingsDirty();
+      this._updateSettingsActionControls();
+    });
+    haLabel.appendChild(haInput);
+    haLabel.appendChild(el("small", "settings-field-help", "Адрес для планшета и внешних клиентов. Текущая панель продолжит работать в этой вкладке."));
+    form.appendChild(haLabel);
+    if (this._settingsData.connection_mode === "center") {
+      const centerLabel = el("label", "settings-field");
+      centerLabel.appendChild(el("span", "assistant-field-label", "Адрес HausmanHub"));
+      const centerInput = el("input");
+      centerInput.type = "url";
+      centerInput.value = this._settingsData.smart_home_center_url;
+      centerInput.placeholder = "http" + "://hausmanhub.local";
+      centerInput.addEventListener("input", () => {
+        this._settingsData.smart_home_center_url = centerInput.value.trim();
+        this._syncSettingsDirty();
+        this._updateSettingsActionControls();
+      });
+      centerLabel.appendChild(centerInput);
+      centerLabel.appendChild(el("small", "settings-field-help", "Необязателен, пока самостоятельный центр не развёрнут."));
+      form.appendChild(centerLabel);
+    }
+    card.appendChild(form);
+
+    const status = el("div", "settings-status-panel");
+    status.appendChild(el("strong", null, "Текущее состояние"));
+    status.appendChild(this._settingsStatusRow("Панель Home Assistant", this._error ? "Недоступна" : "Доступна", this._error ? "is-warning" : "is-ready"));
+    status.appendChild(this._settingsStatusRow(
+      "Режим команд",
+      this._settingsData.connection_mode === "center" ? "Через HausmanHub" : "Локально в Home Assistant"
+    ));
+    if (this._settingsData.connection_mode === "center") {
+      status.appendChild(this._settingsStatusRow(
+        "Адрес HausmanHub",
+        this._settingsData.smart_home_center_url ? "Указан, но ещё не проверен" : "Пока не указан",
+        this._settingsData.smart_home_center_url ? "" : "is-warning"
+      ));
+    }
+    card.appendChild(status);
+    const check = el("button", "secondary settings-check", "Проверить доступность панели");
+    check.type = "button";
+    check.disabled = this._busy;
+    check.addEventListener("click", () => this._checkConnection());
+    card.appendChild(check);
+    container.appendChild(card);
+
+    const pageActions = el("div", "settings-page-actions");
+    const actionState = el(
+      "span",
+      "settings-actions-state",
+      this._settingsDirty ? "Есть несохранённые изменения" : "Все изменения сохранены"
+    );
+    pageActions.appendChild(actionState);
+    const reset = el("button", "secondary", "Отменить изменения");
+    reset.type = "button";
+    reset.disabled = this._busy || !this._settingsDirty;
+    reset.addEventListener("click", () => {
+      this._settingsData = { ...this._settingsBaseline };
+      this._settingsDirty = false;
+      this._render();
+    });
+    const saveBtn = el("button", null, "Сохранить");
+    saveBtn.disabled = this._busy || !this._settingsDirty;
+    saveBtn.addEventListener("click", () => this._saveSettings());
+    pageActions.appendChild(reset);
+    pageActions.appendChild(saveBtn);
+    this._settingsActionControls = { reset, save: saveBtn, state: actionState };
+    container.appendChild(pageActions);
+  }
+
+  _renderAppearanceSettings(container) {
+    const card = el("section", "card settings-card interface-settings-card");
+    card.appendChild(el("h3", null, "Вид и удобство"));
+    card.appendChild(el("p", "muted settings-card-intro", "Параметры применяются сразу и сохраняются в профиле пользователя Home Assistant."));
+    const themeRow = el("label", "settings-toggle-row");
+    const themeCopy = el("span", "settings-toggle-copy");
+    themeCopy.appendChild(el("strong", null, "Тема панели"));
+    themeCopy.appendChild(el("small", null, "Следовать теме Home Assistant или использовать постоянную светлую либо тёмную тему."));
+    themeRow.appendChild(themeCopy);
+    const themeSelect = selectField(
+      [
+        { value: "auto", label: "Как в Home Assistant" },
+        { value: "light", label: "Светлая" },
+        { value: "dark", label: "Тёмная" },
+      ],
+      this._themeMode,
+      () => {
+        this._themeMode = themeSelect.value;
+        this._persistUserPreferences();
+        this._applyThemeMode();
+        this._render();
+      }
+    );
+    themeSelect.className = "settings-compact-select";
+    themeRow.appendChild(themeSelect);
+    card.appendChild(themeRow);
+    [
+      {
+        key: "large_text",
+        title: "Крупнее текст и элементы",
+        description: "Увеличить вторичные подписи и зоны нажатия для настенной панели.",
+      },
+      {
+        key: "reduced_motion",
+        title: "Уменьшить анимацию",
+        description: "Отключить плавные переходы, если движение отвлекает или устройство работает медленно.",
+      },
+      {
+        key: "show_hints",
+        title: "Показывать пояснения",
+        description: "Оставить короткие подсказки рядом с настройками, которые влияют на автоматику.",
+      },
+    ].forEach((preference) => {
+      const row = el("label", "settings-toggle-row");
+      const copy = el("span", "settings-toggle-copy");
+      copy.appendChild(el("strong", null, preference.title));
+      copy.appendChild(el("small", null, preference.description));
+      row.appendChild(copy);
+      const toggle = el("input", "settings-toggle");
+      toggle.type = "checkbox";
+      toggle.checked = this._settingsPrefs[preference.key] === true;
+      toggle.addEventListener("change", () => {
+        this._settingsPrefs[preference.key] = toggle.checked;
+        this._persistUserPreferences();
+        this._applyLocalPreferences();
+        this._render();
+      });
+      row.appendChild(toggle);
+      card.appendChild(row);
+    });
+    container.appendChild(card);
+    const note = el("section", "card settings-help-card settings-local-note");
+    note.appendChild(svgIcon("device"));
+    const copy = el("div");
+    copy.appendChild(el("strong", null, "Настройки относятся к вашему профилю"));
+    copy.appendChild(el("p", "muted", "Тема и доступность будут восстановлены на панелях с тем же пользователем Home Assistant и не меняют устройства или климат."));
+    note.appendChild(copy);
+    container.appendChild(note);
+  }
+
+  _systemSummaryText() {
+    const setup = this._settings.setup || {};
+    const summary = setup.summary || {};
+    const readiness = this._data.readiness || {};
+    return [
+      "HausmanHub — техническая сводка",
+      `Версия: ${this._data.integration_version || "не определена"}`,
+      `Состояние: ${READINESS_LABELS[readiness.status] || "не определено"}`,
+      `Режим контура: ${BRIDGE_MODE_LABELS[readiness.bridge_mode] || "не определён"}`,
+      `Настройка климата: ${SETUP_STATUS_LABELS[setup.status] || "не определена"}`,
+      `Комнат: ${Number(summary.room_count) || 0}`,
+      `Устройств климата: ${Number(summary.device_count) || 0}`,
+      `Подключение: ${this._settingsData.connection_mode === "center" ? "HausmanHub" : "Home Assistant"}`,
+    ].join("\n");
+  }
+
+  async _copySystemSummary() {
+    const text = this._systemSummaryText();
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else if (document.body && typeof document.execCommand === "function") {
+        const field = document.createElement("textarea");
+        field.value = text;
+        document.body.appendChild(field);
+        field.select();
+        document.execCommand("copy");
+        document.body.removeChild(field);
+      } else {
+        throw new Error("clipboard unavailable");
+      }
+      this._notice = "Техническая сводка скопирована без адресов и имён устройств.";
+    } catch (error) {
+      this._notice = "Не удалось скопировать сводку. Разрешите браузеру доступ к буферу обмена.";
+    }
+    this._render();
+  }
+
+  _renderSystemSettings(container) {
+    const setup = this._settings.setup || {};
+    const summary = setup.summary || {};
+    const readiness = this._data.readiness || {};
+    const health = el("section", "card settings-card system-health-card");
+    const healthHead = el("div", "system-health-head");
+    const healthCopy = el("div");
+    healthCopy.appendChild(el("h3", null, "Состояние системы"));
+    healthCopy.appendChild(el("p", "muted settings-card-intro", "Краткая проверка без названий сущностей, адресов и показаний дома."));
+    healthHead.appendChild(healthCopy);
+    healthHead.appendChild(el(
+      "span",
+      `status-badge ${readiness.status === "ready" ? "is-ready" : "is-warning"}`,
+      READINESS_LABELS[readiness.status] || "Состояние не определено"
+    ));
+    health.appendChild(healthHead);
+    const metrics = el("div", "system-health-metrics");
+    [
+      ["Версия", this._data.integration_version || "—"],
+      ["Комнаты", Number(summary.room_count) || 0],
+      ["Устройства климата", Number(summary.device_count) || 0],
+      ["Режим", BRIDGE_MODE_LABELS[readiness.bridge_mode] || "Не настроен"],
+    ].forEach(([label, value]) => {
+      const metric = el("div", "system-health-metric");
+      metric.appendChild(el("span", null, label));
+      metric.appendChild(el("strong", null, value));
+      metrics.appendChild(metric);
+    });
+    health.appendChild(metrics);
+    const healthActions = el("div", "system-health-actions");
+    const refresh = el("button", "secondary", "Обновить состояние");
+    refresh.disabled = this._busy;
+    refresh.addEventListener("click", () => this._refreshSystemState());
+    const copy = el("button", "secondary", "Копировать техническую сводку");
+    copy.addEventListener("click", () => this._copySystemSummary());
+    healthActions.appendChild(refresh);
+    healthActions.appendChild(copy);
+    health.appendChild(healthActions);
+    container.appendChild(health);
+
+    const about = el("section", "card settings-about");
+    const aboutIcon = el("span", "settings-about-icon");
+    aboutIcon.appendChild(brandMark());
+    about.appendChild(aboutIcon);
+    const aboutCopy = el("div", "settings-about-copy");
+    aboutCopy.appendChild(el("h3", null, "HausmanHub"));
+    aboutCopy.appendChild(el("p", "muted", "Панель управления домом для Home Assistant"));
+    aboutCopy.appendChild(el("small", null, "Единый интерфейс с планшетом HausmanHub"));
+    about.appendChild(aboutCopy);
+    about.appendChild(el("span", "status-badge settings-version", `Версия ${this._data.integration_version || "—"}`));
+    container.appendChild(about);
+
+    const danger = el("section", "card settings-card danger-settings-card");
+    danger.appendChild(el("h3", null, "Сброс HausmanHub"));
+    danger.appendChild(el("p", "muted settings-card-intro", "Удаляет настройки климата, локальные привязки, сценарии, ИК-коды, AI и адреса подключения."));
+    danger.appendChild(el("div", "reset-preserves", "Комнаты, области, сущности и устройства Home Assistant останутся без изменений."));
+    const dangerActions = el("div", "danger-actions");
+    if (this._resetArmed) {
+      danger.appendChild(el("div", "reset-confirmation", "Действие нельзя отменить из панели. После сброса откроется мастер первичной настройки."));
+      const cancelReset = el("button", "secondary", "Отмена");
+      cancelReset.addEventListener("click", () => { this._resetArmed = false; this._render(); });
+      const confirmReset = el("button", "danger-button", "Сбросить все настройки");
+      confirmReset.disabled = this._busy;
+      confirmReset.addEventListener("click", () => this._resetAllSettings());
+      dangerActions.appendChild(cancelReset);
+      dangerActions.appendChild(confirmReset);
+    } else {
+      const openReset = el("button", "secondary danger-outline", "Подготовить полный сброс");
+      openReset.disabled = this._busy;
+      openReset.addEventListener("click", () => { this._resetArmed = true; this._render(); });
+      dangerActions.appendChild(openReset);
+    }
+    danger.appendChild(dangerActions);
+    container.appendChild(danger);
+  }
+
+  _isEditingConnectionField() {
+    const focused = this.shadowRoot && this.shadowRoot.activeElement;
+    return (
+      this._activeSection === "settings"
+      && this._activeSettingsView === "connection"
+      && this._settingsDirty
+      && focused
+      && focused.type === "url"
+    );
+  }
+
   _renderSettings(container) {
     container.innerHTML = "";
     const activeView = SETTINGS_VIEWS.find((view) => view.id === this._activeSettingsView) || SETTINGS_VIEWS[0];
@@ -5490,169 +5917,9 @@ class HausmanHubPanel extends HTMLElement {
       this._renderSettingsRooms(container);
       return;
     }
-
-    const card = el("section", "card settings-card");
-    card.appendChild(el("h3", null, "Подключение"));
-    card.appendChild(el("p", "muted settings-card-intro", "Параметры связи с Home Assistant и HausmanHub"));
-    const form = el("div", "settings-form-grid");
-    const modeLabel = el("label", "settings-field");
-    modeLabel.appendChild(el("span", "assistant-field-label", "Режим подключения"));
-    const modeSelect = el("select");
-    [
-      { value: "center", label: "HausmanHub" },
-      { value: "home_assistant", label: "Только Home Assistant" },
-    ].forEach((opt) => {
-      const option = el("option", null, opt.label);
-      option.value = opt.value;
-      modeSelect.appendChild(option);
-    });
-    modeSelect.value = this._settingsData.connection_mode;
-    modeSelect.addEventListener("change", () => {
-      this._settingsData.connection_mode = modeSelect.value;
-      this._settingsDirty = true;
-      this._render();
-    });
-    modeLabel.appendChild(modeSelect);
-    form.appendChild(modeLabel);
-    const centerLabel = el("label", "settings-field");
-    centerLabel.appendChild(el("span", "assistant-field-label", "Адрес HausmanHub"));
-    const centerInput = el("input");
-    centerInput.type = "url";
-    centerInput.value = this._settingsData.smart_home_center_url;
-    centerInput.placeholder = "http" + "://hausmanhub.local";
-    centerInput.addEventListener("input", () => {
-      this._settingsData.smart_home_center_url = centerInput.value;
-      this._settingsDirty = true;
-      this._render();
-    });
-    centerLabel.appendChild(centerInput);
-    centerLabel.hidden = this._settingsData.connection_mode !== "center";
-    const haLabel = el("label", "settings-field");
-    haLabel.appendChild(el("span", "assistant-field-label", "Адрес Home Assistant"));
-    const haInput = el("input");
-    haInput.type = "url";
-    haInput.value = this._settingsData.home_assistant_url;
-    haInput.placeholder = "https" + "://homeassistant.local";
-    haInput.addEventListener("input", () => {
-      this._settingsData.home_assistant_url = haInput.value;
-      this._settingsDirty = true;
-      this._render();
-    });
-    haLabel.appendChild(haInput);
-    form.appendChild(haLabel);
-    form.appendChild(centerLabel);
-    card.appendChild(form);
-    const check = el("button", "secondary settings-check", "Проверить подключение");
-    check.type = "button";
-    check.disabled = this._busy;
-    check.addEventListener("click", () => this._checkConnection());
-    card.appendChild(check);
-    if (activeView.id === "connection") container.appendChild(card);
-
-    const interfaceCard = el("section", "card settings-card interface-settings-card");
-    interfaceCard.appendChild(el("h3", null, "Интерфейс"));
-    interfaceCard.appendChild(el("p", "muted settings-card-intro", "Поведение и отображение панели"));
-    const themeRow = el("label", "settings-toggle-row");
-    const themeCopy = el("span", "settings-toggle-copy");
-    themeCopy.appendChild(el("strong", null, "Тема панели"));
-    themeCopy.appendChild(el("small", null, "Автоматически следовать Home Assistant или выбрать тему вручную"));
-    themeRow.appendChild(themeCopy);
-    const themeSelect = selectField(
-      [
-        { value: "auto", label: "Авто" },
-        { value: "light", label: "Светлая" },
-        { value: "dark", label: "Тёмная" },
-      ],
-      this._themeMode,
-      () => {
-        this._themeMode = themeSelect.value;
-        this._applyThemeMode();
-        this._render();
-      }
-    );
-    themeSelect.className = "settings-compact-select";
-    themeRow.appendChild(themeSelect);
-    interfaceCard.appendChild(themeRow);
-    [
-      {
-        key: "reduced_motion",
-        title: "Уменьшить анимацию",
-        description: "Отключить плавные переходы интерфейса",
-      },
-      {
-        key: "show_hints",
-        title: "Показывать подсказки",
-        description: "Короткие пояснения рядом со сложными настройками",
-      },
-    ].forEach((preference) => {
-      const row = el("label", "settings-toggle-row");
-      const copy = el("span", "settings-toggle-copy");
-      copy.appendChild(el("strong", null, preference.title));
-      copy.appendChild(el("small", null, preference.description));
-      row.appendChild(copy);
-      const toggle = el("input", "settings-toggle");
-      toggle.type = "checkbox";
-      toggle.checked = this._settingsPrefs[preference.key] === true;
-      toggle.addEventListener("change", () => {
-        this._settingsPrefs[preference.key] = toggle.checked;
-        this._applyLocalPreferences();
-        this._render();
-      });
-      row.appendChild(toggle);
-      interfaceCard.appendChild(row);
-    });
-    if (activeView.id === "appearance") container.appendChild(interfaceCard);
-
-    const danger = el("section", "card settings-card danger-settings-card");
-    danger.appendChild(el("h3", null, "Сброс HausmanHub"));
-    danger.appendChild(el("p", "muted settings-card-intro", "Удаляет настройки климата, локальные привязки, сценарии, ИК-коды, AI и адреса подключения."));
-    danger.appendChild(el("div", "reset-preserves", "Комнаты, области, сущности и устройства Home Assistant останутся без изменений."));
-    const dangerActions = el("div", "danger-actions");
-    if (this._resetArmed) {
-      danger.appendChild(el("div", "reset-confirmation", "Действие нельзя отменить из панели. После сброса откроется мастер первичной настройки."));
-      const cancelReset = el("button", "secondary", "Отмена");
-      cancelReset.addEventListener("click", () => { this._resetArmed = false; this._render(); });
-      const confirmReset = el("button", "danger-button", "Сбросить все настройки");
-      confirmReset.disabled = this._busy;
-      confirmReset.addEventListener("click", () => this._resetAllSettings());
-      dangerActions.appendChild(cancelReset);
-      dangerActions.appendChild(confirmReset);
-    } else {
-      const openReset = el("button", "secondary danger-outline", "Подготовить полный сброс");
-      openReset.disabled = this._busy;
-      openReset.addEventListener("click", () => { this._resetArmed = true; this._render(); });
-      dangerActions.appendChild(openReset);
-    }
-    danger.appendChild(dangerActions);
-    if (activeView.id === "system") container.appendChild(danger);
-
-    const about = el("section", "card settings-about");
-    const aboutIcon = el("span", "settings-about-icon");
-    aboutIcon.appendChild(brandMark());
-    about.appendChild(aboutIcon);
-    const aboutCopy = el("div", "settings-about-copy");
-    aboutCopy.appendChild(el("h3", null, "О системе"));
-    aboutCopy.appendChild(el("p", "muted", "HausmanHub — панель управления домом для Home Assistant"));
-    aboutCopy.appendChild(el("small", null, "Единый интерфейс с планшетом HausmanHub"));
-    about.appendChild(aboutCopy);
-    about.appendChild(el("span", "status-badge settings-version", `Версия ${this._data.integration_version || "—"}`));
-    if (activeView.id === "system") container.appendChild(about);
-
-    const pageActions = el("div", "settings-page-actions");
-    const reset = el("button", "secondary", "Сбросить изменения");
-    reset.type = "button";
-    reset.disabled = this._busy || !this._settingsDirty;
-    reset.addEventListener("click", () => {
-      this._settingsData = { ...this._settingsBaseline };
-      this._settingsDirty = false;
-      this._render();
-    });
-    const saveBtn = el("button", null, "Сохранить настройки");
-    saveBtn.disabled = this._busy || !this._settingsDirty;
-    saveBtn.addEventListener("click", () => this._saveSettings());
-    pageActions.appendChild(reset);
-    pageActions.appendChild(saveBtn);
-    if (activeView.id === "connection") container.appendChild(pageActions);
+    if (activeView.id === "connection") this._renderConnectionSettings(container);
+    if (activeView.id === "appearance") this._renderAppearanceSettings(container);
+    if (activeView.id === "system") this._renderSystemSettings(container);
   }
 
   async _resetAllSettings() {
@@ -5663,7 +5930,9 @@ class HausmanHubPanel extends HTMLElement {
     try {
       await this._hass.callApi("POST", RESET_API, { confirmation: "RESET_HAUSMANHUB" });
       this._themeMode = "auto";
-      this._settingsPrefs = { reduced_motion: false, show_hints: true };
+      this._settingsPrefs = { large_text: false, reduced_motion: false, show_hints: true };
+      this._persistUserPreferences();
+      this._applyThemeMode();
       this._settingsData = { connection_mode: "center", smart_home_center_url: "", home_assistant_url: "" };
       this._settingsBaseline = { ...this._settingsData };
       this._settingsDirty = false;
@@ -5690,13 +5959,26 @@ class HausmanHubPanel extends HTMLElement {
     this._render();
     try {
       await this._hass.callApi("GET", PANEL_API);
-      this._notice = "Подключение проверено: HausmanHub отвечает.";
+      this._notice = "Панель доступна. Проверка не отправляла команды устройствам.";
     } catch (error) {
-      this._notice = "Проверка подключения не пройдена.";
+      this._notice = "Панель не ответила. Проверьте Home Assistant и повторите попытку.";
     } finally {
       this._busy = false;
       this._render();
     }
+  }
+
+  async _refreshSystemState() {
+    if (this._busy || !this._hass) return;
+    this._busy = true;
+    this._notice = "";
+    this._render();
+    await this._load();
+    this._busy = false;
+    this._notice = this._error
+      ? "Не удалось обновить состояние системы."
+      : "Состояние системы обновлено.";
+    this._render();
   }
 
   async _saveSettings() {
@@ -5706,6 +5988,7 @@ class HausmanHubPanel extends HTMLElement {
     this._render();
     try {
       await this._hass.callApi("POST", CONNECTION_SETTINGS_API, this._settingsData);
+      this._settingsBaseline = { ...this._settingsData };
       this._settingsDirty = false;
       this._notice = "Настройки подключения сохранены.";
       this._error = false;

@@ -1,4 +1,4 @@
-@import url("./hausman-hub-settings.css?v=1.46.4");
+@import url("./hausman-hub-settings.css?v=1.46.5");
 
 :host { display:block; box-sizing:border-box; width:100%; min-height:100%; overflow-x:hidden;
   --hmh-bg:#0B0F14; --hmh-surface:#12171D; --hmh-raised:#181E26; --hmh-field:#181E26; --hmh-hover:#1F2630;
@@ -26,6 +26,9 @@
   animation-duration:.01ms !important; animation-iteration-count:1 !important;
   scroll-behavior:auto !important; transition-duration:.01ms !important; }
 :host(.hide-hints) .field-help, :host(.hide-hints) .action-help, :host(.hide-hints) .wizard-hint { display:none !important; }
+:host(.large-interface-text) .muted, :host(.large-interface-text) small,
+:host(.large-interface-text) .section-intro, :host(.large-interface-text) .row { font-size:max(15px,1em); }
+:host(.large-interface-text) button, :host(.large-interface-text) input, :host(.large-interface-text) select { min-height:50px; }
 *, *::before, *::after { box-sizing:border-box; }
 [hidden] { display:none !important; }
 main { width:100%; max-width:1440px; margin:0 auto; padding:56px 64px 64px; }

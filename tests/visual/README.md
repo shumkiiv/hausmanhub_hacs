@@ -24,6 +24,8 @@ http://127.0.0.1:8765/tests/visual/hausman-hub-panel-harness.html
   `devices`, `scenarios`, `settings`;
 - `screen` для раздела климата: `contour`, `profiles`, `schedule`, `home`,
   `windows`, `assistant`;
+- `settings` для раздела настроек: `overview`, `rooms`, `connection`,
+  `appearance`, `system`;
 - `theme`: `light` или `dark`.
 
 Пример:
