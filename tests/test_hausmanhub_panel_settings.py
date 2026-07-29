@@ -768,6 +768,15 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         self.assertEqual(0, completed.returncode, completed.stderr)
 
     def test_settings_match_figma_and_controls_have_real_behavior(self) -> None:
+        css = PANEL_CSS.read_text(encoding="utf-8")
+        for tablet_rule in (
+            ".settings-card::before",
+            "font-size:24px",
+            ".settings-page-actions { position:sticky",
+            ".first-run-wizard .wizard-progress",
+            "backdrop-filter:blur(18px)",
+        ):
+            self.assertIn(tablet_rule, css)
         payloads = dict(GET_PATHS)
         payloads["hausman_hub/v1/admin/connection-settings"] = {
             "connection_mode": "center",
@@ -784,7 +793,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         let text = textOf(screen);
         for (const label of [
           "Настройки", "Подключение", "Интерфейс", "Тема панели", "Уменьшить анимацию",
-          "Показывать подсказки", "О системе", "Версия",
+          "Показывать подсказки", "О системе", "Версия", "Единый интерфейс с планшетом HausmanHub",
         ]) {
           if (!text.includes(label)) throw new Error("settings text missing: " + label);
         }

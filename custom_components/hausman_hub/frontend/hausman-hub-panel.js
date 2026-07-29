@@ -5211,7 +5211,7 @@ class HausmanHubPanel extends HTMLElement {
     const aboutCopy = el("div", "settings-about-copy");
     aboutCopy.appendChild(el("h3", null, "О системе"));
     aboutCopy.appendChild(el("p", "muted", "HausmanHub — панель управления домом для Home Assistant"));
-    aboutCopy.appendChild(el("small", null, "Интерфейс синхронизирован с HMH HA в Figma"));
+    aboutCopy.appendChild(el("small", null, "Единый интерфейс с планшетом HausmanHub"));
     about.appendChild(aboutCopy);
     about.appendChild(el("span", "status-badge settings-version", `Версия ${this._data.integration_version || "—"}`));
     container.appendChild(about);
