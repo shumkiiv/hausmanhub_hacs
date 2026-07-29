@@ -26,7 +26,7 @@ const IR_CODES_TEST_API = `${IR_CODES_API}/test`;
 const IR_CODES_DELETE_API = `${IR_CODES_API}/delete`;
 const IR_CODE_BINDINGS_API = `${IR_CODES_API}/bindings`;
 const REFRESH_MS = 30000;
-const LOCKOUT_HELP = "Теплее верхнего порога — отопление выключено; холоднее нижнего — разрешено. Между ними режим не меняется.";
+const LOCKOUT_HELP = "Теплее верхнего порога — нагрев запрещён; холоднее нижнего — разрешён. Между ними режим не меняется.";
 
 const PROFILE_CONTRACT = { name: "hausman-hub-climate-profile-update-request", version: 1 };
 const SCHEDULE_CONTRACT = { name: "hausman-hub-climate-schedule-update-request", version: 1 };
@@ -2803,14 +2803,14 @@ class HausmanHubPanel extends HTMLElement {
       home.heating_lockout_high = high.value;
       clearError();
     });
-    const highRow = el("label", "form-field", "Отключать отопление теплее, °C");
+    const highRow = el("label", "form-field", "Блокировать нагрев теплее, °C");
     highRow.appendChild(high);
     card.appendChild(highRow);
     const low = numberField(home.heating_lockout_low, -40, 60, 0.5, () => {
       home.heating_lockout_low = low.value;
       clearError();
     });
-    const lowRow = el("label", "form-field", "Разрешать отопление холоднее, °C");
+    const lowRow = el("label", "form-field", "Разрешать нагрев холоднее, °C");
     lowRow.appendChild(low);
     card.appendChild(lowRow);
     card.appendChild(el("div", "muted field-help", LOCKOUT_HELP));
@@ -4736,13 +4736,13 @@ class HausmanHubPanel extends HTMLElement {
       values.heating_lockout_high, -40, 60, 0.5,
       () => { validationError.textContent = ""; this._markDirty("home", dirtyNotice); }
     );
-    const highRow = el("label", "form-field", "Отключать отопление теплее, °C");
+    const highRow = el("label", "form-field", "Блокировать нагрев теплее, °C");
     highRow.appendChild(high);
     const low = numberField(
       values.heating_lockout_low, -40, 60, 0.5,
       () => { validationError.textContent = ""; this._markDirty("home", dirtyNotice); }
     );
-    const lowRow = el("label", "form-field", "Разрешать отопление холоднее, °C");
+    const lowRow = el("label", "form-field", "Разрешать нагрев холоднее, °C");
     lowRow.appendChild(low);
     const thresholds = el("div", "home-threshold-grid");
     thresholds.appendChild(highRow);
