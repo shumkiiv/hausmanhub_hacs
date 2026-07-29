@@ -97,6 +97,15 @@ const READINESS_LABELS = {
   unavailable: "Система временно недоступна",
   disabled: "Управление климатом выключено",
 };
+const LOCAL_DISPLAY_NAMES = {
+  blocked_reasons: {
+    bridge_disabled: "Контур выключен в настройках", shadow_only: "Включена только проверка без команд",
+    room_not_selected: "Комната не выбрана для управления", state_stale: "Данные о климате устарели",
+    registry_mismatch: "Настройка устройств не совпадает", authority_not_ready: "Контур не готов к управлению",
+    device_unavailable: "Устройство недоступно", actions_unsupported: "Устройство не поддерживает нужные действия",
+    evidence_not_ready: "Проверка ещё не завершена", operation_pending: "Команда ещё проверяется", needs_reimport: "Устройство нужно подключить заново"
+  },
+};
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -470,7 +479,13 @@ class HausmanHubPanel extends HTMLElement {
   _names(section, code) {
     const names = this._data && this._data.snapshot && this._data.snapshot.display_names;
     const group = names && names[section];
-    return (group && group[code]) || code;
+    const localGroup = LOCAL_DISPLAY_NAMES[section];
+    const translated = (group && group[code]) || (localGroup && localGroup[code]);
+    if (translated) return translated;
+    if (section === "blocked_reasons") {
+      return "Требуется дополнительная настройка";
+    }
+    return code;
   }
 
   _render() {

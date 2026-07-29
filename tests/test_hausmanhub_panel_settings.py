@@ -536,6 +536,33 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
+    def test_overview_translates_readiness_reasons_without_snapshot(self) -> None:
+        script = panel_script(
+            GET_PATHS,
+            {},
+            """
+        const overview = panel._shell.sectionNodes.overview;
+        const text = textOf(overview);
+        if (!text.includes("Контур выключен в настройках")) {
+          throw new Error("disabled bridge reason is not translated");
+        }
+        if (text.includes("bridge_disabled")) {
+          throw new Error("raw disabled bridge reason exposed");
+        }
+        panel._data.readiness.reasons = ["future_internal_reason"];
+        panel._render();
+        const fallbackText = textOf(panel._shell.sectionNodes.overview);
+        if (!fallbackText.includes("Требуется дополнительная настройка")) {
+          throw new Error("safe fallback for an unknown reason missing");
+        }
+        if (fallbackText.includes("future_internal_reason")) {
+          throw new Error("unknown internal reason exposed");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_climate_screens_are_separate_accessible_views(self) -> None:
         script = panel_script(
             GET_PATHS,
