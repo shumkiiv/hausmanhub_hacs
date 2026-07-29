@@ -8,7 +8,7 @@
   --secondary-background-color:var(--hmh-raised); --divider-color:var(--hmh-border);
   --primary-color:var(--hmh-accent); --text-primary-color:#FFFFFF;
   --error-color:#E5534B; --success-color:#4CAF6E; --warning-color:#F0A23C;
-  --disabled-color:#3A4450;
+  --hmh-disabled-bg:#151B22; --hmh-disabled-border:#28323D; --hmh-disabled-text:#748191;
   font-family:var(--primary-font-family,sans-serif);
   color:var(--primary-text-color,#E7ECF3); background:var(--primary-background-color,#0B0F14); }
 :host(.theme-light) {
@@ -17,7 +17,7 @@
   --hmh-radius-control:12px; --hmh-radius-card:16px; --hmh-radius-section:20px;
   --text-primary-color:#FFFFFF;
   --error-color:#C93A32; --success-color:#2E7D4C; --warning-color:#9A5F0B;
-  --disabled-color:#C3CBD6; }
+  --hmh-disabled-bg:#F3F5F8; --hmh-disabled-border:#D5DCE5; --hmh-disabled-text:#7B8796; }
 :host(.theme-light) .card { box-shadow:0 5px 9px rgba(22,28,38,.09); }
 :host(.theme-light) .hero { box-shadow:0 8px 28px rgba(22,28,38,.13); }
 :host(.reduced-motion) *, :host(.reduced-motion) *::before, :host(.reduced-motion) *::after {
@@ -141,8 +141,11 @@ button { min-height:40px; max-width:100%; margin:8px 8px 0 0; padding:9px 15px;
   background:var(--primary-color,#03a9f4); color:var(--text-primary-color,#fff); }
 button.secondary { border:1px solid var(--divider-color,#ccc);
   background:var(--secondary-background-color,#eceff1); color:var(--primary-text-color,#212121); }
-button:disabled { opacity:1; cursor:not-allowed; background:var(--disabled-color,#bdbdbd);
-  color:var(--disabled-text-color,var(--secondary-text-color,#616161)); }
+button:disabled, button.secondary:disabled, button.danger-outline:disabled, button.danger-button:disabled {
+  opacity:1; cursor:not-allowed;
+  border:1px solid var(--hmh-disabled-border,#D5DCE5);
+  background:var(--hmh-disabled-bg,#F3F5F8); color:var(--hmh-disabled-text,#7B8796);
+  box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 5%,transparent); }
 button:focus-visible, input:focus-visible, select:focus-visible {
   outline:3px solid color-mix(in srgb,var(--primary-color,#03a9f4) 58%,transparent);
   outline-offset:2px; }

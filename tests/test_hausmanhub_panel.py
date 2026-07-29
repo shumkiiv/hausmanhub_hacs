@@ -43,6 +43,23 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn("--hmh-bg:#EEF1F6", styles)
         self.assertIn(".page-header", styles)
 
+    def test_disabled_buttons_use_semantic_surface_border_and_text_tokens(self) -> None:
+        styles = PANEL_CSS.read_text(encoding="utf-8")
+
+        for token in (
+            "--hmh-disabled-bg:#151B22",
+            "--hmh-disabled-border:#28323D",
+            "--hmh-disabled-text:#748191",
+            "--hmh-disabled-bg:#F3F5F8",
+            "--hmh-disabled-border:#D5DCE5",
+            "--hmh-disabled-text:#7B8796",
+            "button:disabled, button.secondary:disabled, button.danger-outline:disabled, button.danger-button:disabled",
+        ):
+            with self.subTest(token=token):
+                self.assertIn(token, styles)
+
+        self.assertNotIn("--disabled-color", styles)
+
     def test_overview_climate_and_scenarios_share_tablet_visual_contract(self) -> None:
         styles = PANEL_CSS.read_text(encoding="utf-8")
 
@@ -505,7 +522,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.45.2",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.45.3",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },
