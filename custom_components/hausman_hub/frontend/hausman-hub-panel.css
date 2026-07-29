@@ -1,4 +1,4 @@
-@import url("./hausman-hub-settings.css?v=1.46.5");
+@import url("./hausman-hub-settings.css?v=1.46.6");
 
 :host { display:block; box-sizing:border-box; width:100%; min-height:100%; overflow-x:hidden;
   --hmh-bg:#0B0F14; --hmh-surface:#12171D; --hmh-raised:#181E26; --hmh-field:#181E26; --hmh-hover:#1F2630;
@@ -124,13 +124,16 @@ section { min-width:0; }
 .overview-summary { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; margin:0 0 28px; }
 .summary-item { display:flex; align-items:center; gap:16px; min-width:0; min-height:92px; padding:18px 20px;
   border:1px solid var(--divider-color,#ddd); border-radius:16px; background:var(--hmh-surface,#12171D); }
+.summary-link { width:100%; margin:0; text-align:left; color:inherit; }
+.summary-link:hover, .overview-room-card:hover { border-color:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 42%,var(--hmh-border,#2F3845));
+  background:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 5%,var(--hmh-raised,#181E26)); }
 .summary-icon { display:grid; place-items:center; flex:0 0 48px; width:48px; height:48px; border-radius:14px;
   color:var(--hmh-accent,#4F8CFF); background:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 12%,var(--hmh-raised,#181E26)); }
 .summary-icon .icon { width:23px; height:23px; }
 .summary-copy { min-width:0; }
 .summary-value { display:block; margin-top:5px; font-size:22px; line-height:1.15; font-weight:700; overflow-wrap:anywhere; }
 .overview-room-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
-.overview-room-card { background:var(--hmh-raised,#181E26); }
+.overview-room-card { width:100%; margin:0; text-align:left; color:inherit; background:var(--hmh-raised,#181E26); }
 .overview-room-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
 .overview-room-head h3 { font-size:19px; }
 .overview-room-head p { margin:5px 0 0; }

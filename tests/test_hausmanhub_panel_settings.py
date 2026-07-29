@@ -20,6 +20,7 @@ HOME_SECTIONS_JS = PANEL_JS.with_name("hausman-hub-home-sections.js")
 ROOM_SETUP_JS = PANEL_JS.with_name("hausman-hub-room-setup.js")
 DEVICE_INVENTORY_JS = PANEL_JS.with_name("hausman-hub-device-inventory.js")
 AREA_BINDING_JS = PANEL_JS.with_name("hausman-hub-area-binding.js")
+NAVIGATION_JS = PANEL_JS.with_name("hausman-hub-navigation.js")
 SETTINGS_CSS = PANEL_JS.with_name("hausman-hub-settings.css")
 
 PANEL_PAYLOAD = {
@@ -305,15 +306,41 @@ def panel_script(
         removeEventListener() {{}},
       }};
       const clipboardWrites = [];
-      global.window = {{ confirm: () => true }};
-      global.navigator = {{
-        clipboard: {{
-          writeText: (value) => {{
-            clipboardWrites.push(String(value));
-            return Promise.resolve();
+      const historyCalls = [];
+      const windowListeners = {{}};
+      const setWindowLocation = (value) => {{
+        const parsed = new URL(value, "https://homeassistant.local/hausman-hub");
+        global.window.location.href = parsed.href;
+        global.window.location.search = parsed.search;
+      }};
+      global.window = {{
+        confirm: () => true,
+        location: {{
+          href: "https://homeassistant.local/hausman-hub",
+          search: "",
+        }},
+        history: {{
+          pushState: (state, title, value) => {{
+            historyCalls.push({{ state, value: String(value) }});
+            setWindowLocation(String(value));
           }},
         }},
+        addEventListener: (type, handler) => {{ windowListeners[type] = handler; }},
+        removeEventListener: (type, handler) => {{
+          if (windowListeners[type] === handler) delete windowListeners[type];
+        }},
       }};
+      Object.defineProperty(globalThis, "navigator", {{
+        configurable: true,
+        value: {{
+          clipboard: {{
+            writeText: (value) => {{
+              clipboardWrites.push(String(value));
+              return Promise.resolve();
+            }},
+          }},
+        }},
+      }});
       global.HTMLElement = class {{
         attachShadow() {{
           this.shadowRoot = new FakeElement("shadow-root");
@@ -339,6 +366,10 @@ def panel_script(
       vm.runInThisContext(
         fs.readFileSync({str(AREA_BINDING_JS)!r}, "utf8").replace("export function renderFirstRunAreaBinding", "function renderFirstRunAreaBinding"),
         {{ filename: {str(AREA_BINDING_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(NAVIGATION_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(NAVIGATION_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(PANEL_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, ""),
@@ -520,6 +551,59 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
+    def test_tablet_navigation_has_deep_links_back_state_and_working_sections(self) -> None:
+        script = panel_script(
+            GET_PATHS | {AI_ASSISTANT_PATH: AI_ASSISTANT_PAYLOAD},
+            {},
+            """
+        const ordered = [
+          "overview", "lighting", "climate", "rooms", "media",
+          "security", "devices", "scenarios", "settings",
+        ];
+        ordered.forEach((section) => {
+          panel._shell.tabs[section].fire("click");
+          if (panel._activeSection !== section || panel._shell.sectionNodes[section].hidden) {
+            throw new Error("top-level section is not functional: " + section);
+          }
+        });
+        panel._shell.tabs.climate.fire("click");
+        panel._shell.climateTabs.profiles.fire("click");
+        const climateRoute = historyCalls[historyCalls.length - 1].value;
+        if (!climateRoute.includes("hh_section=climate") || !climateRoute.includes("hh_view=profiles")) {
+          throw new Error("climate deep link mismatch: " + climateRoute);
+        }
+        panel._shell.tabs.settings.fire("click");
+        const systemButton = findAll(panel._shell.settings, (node) =>
+          node.tagName === "BUTTON" && node.textContent === "Система")[0];
+        systemButton.fire("click");
+        const settingsRoute = historyCalls[historyCalls.length - 1].value;
+        if (!settingsRoute.includes("hh_section=settings") || !settingsRoute.includes("hh_view=system")) {
+          throw new Error("settings deep link mismatch: " + settingsRoute);
+        }
+        setWindowLocation("https://homeassistant.local/hausman-hub?hh_section=rooms");
+        panel._onNavigationPop();
+        if (panel._activeSection !== "rooms" || panel._shell.sectionNodes.rooms.hidden) {
+          throw new Error("browser back state did not restore rooms");
+        }
+        setWindowLocation("https://homeassistant.local/hausman-hub?hh_section=climate&hh_view=assistant");
+        panel._onNavigationPop();
+        await tick();
+        if (!panel._assistant.loaded || panel._assistant.data?.settings?.enabled !== true) {
+          throw new Error("assistant deep link did not load its data");
+        }
+        if (!calls.some((call) => call.method === "GET" && call.path === "hausman_hub/v1/admin/ai-assistant")) {
+          throw new Error("assistant deep link did not call its read-only API");
+        }
+        setWindowLocation("https://homeassistant.local/hausman-hub");
+        panel._onNavigationPop();
+        if (panel._activeSection !== "overview" || panel._shell.sectionNodes.overview.hidden) {
+          throw new Error("route without HausmanHub params did not restore overview");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_overview_matches_figma_hierarchy_and_counts_physical_devices(self) -> None:
         payloads = dict(GET_PATHS)
         payloads["hausman_hub/v1/admin/panel"] = {
@@ -532,6 +616,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
             "snapshot": {
                 "rooms": [
                     {
+                        "id": "living",
                         "name": "Гостиная",
                         "mode": "automatic",
                         "active_profile": "day",
@@ -552,6 +637,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
                         ],
                     },
                     {
+                        "id": "bedroom",
                         "name": "Спальня",
                         "mode": "automatic",
                         "active_profile": "night",
@@ -562,6 +648,14 @@ class PanelSettingsSectionsTest(unittest.TestCase):
                     },
                 ]
             },
+        }
+        payloads["hausman_hub/v1/dashboard"] = {
+            "rooms": [
+                {"id": "living", "name": "Гостиная", "temp": 24.5, "humidity": 46},
+                {"id": "bedroom", "name": "Спальня", "temp": 23.5, "humidity": 50},
+            ],
+            "devices": [],
+            "alarms": [],
         }
         script = panel_script(
             payloads,
@@ -588,6 +682,37 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         }
         if (byClass("summary-icon").some((node) => node.children.length !== 1)) {
           throw new Error("overview summary icon missing");
+        }
+        const summaryLinks = byClass("summary-link");
+        if (summaryLinks.some((node) => node.tagName !== "BUTTON")) {
+          throw new Error("overview summary is not keyboard-clickable");
+        }
+        summaryLinks[0].fire("click");
+        if (panel._activeSection !== "climate") {
+          throw new Error("temperature summary did not open climate");
+        }
+        panel._shell.tabs.overview.fire("click");
+        const overviewAfterReturn = panel._shell.sectionNodes.overview;
+        const deviceLink = findAll(overviewAfterReturn, (node) =>
+          String(node.className).split(" ").includes("summary-link")
+          && String(node["aria-label"]).includes("Активные устройства"))[0];
+        deviceLink.fire("click");
+        if (panel._activeSection !== "devices") {
+          throw new Error("device summary did not open devices");
+        }
+        panel._shell.tabs.overview.fire("click");
+        const roomCard = findAll(panel._shell.sectionNodes.overview, (node) =>
+          String(node.className).split(" ").includes("overview-room-card")
+          && String(node["aria-label"]).includes("Гостиная"))[0];
+        roomCard.fire("click");
+        if (panel._activeSection !== "rooms") {
+          throw new Error("overview room did not open rooms");
+        }
+        const expandedRoom = findAll(panel._shell.homeSections.rooms, (node) =>
+          String(node.className).split(" ").includes("room-inventory-card")
+          && node.open === true)[0];
+        if (!expandedRoom || !textOf(expandedRoom).includes("Гостиная")) {
+          throw new Error("selected room was not expanded after navigation");
         }
             """,
         )
@@ -1124,7 +1249,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           || !clipboardWrites[0].includes("HausmanHub — техническая сводка")
           || clipboardWrites[0].includes("ready")
           || clipboardWrites[0].includes("homeassistant.local")) {
-          throw new Error("redacted technical summary copy mismatch");
+          throw new Error("redacted technical summary copy mismatch: " + JSON.stringify(clipboardWrites));
         }
         screen = panel._shell.settings;
         findAll(screen, (node) => node.tagName === "BUTTON"

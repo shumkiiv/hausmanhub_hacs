@@ -24,12 +24,14 @@ HOME_SECTIONS_JS = PANEL_JS.with_name("hausman-hub-home-sections.js")
 ROOM_SETUP_JS = PANEL_JS.with_name("hausman-hub-room-setup.js")
 DEVICE_INVENTORY_JS = PANEL_JS.with_name("hausman-hub-device-inventory.js")
 AREA_BINDING_JS = PANEL_JS.with_name("hausman-hub-area-binding.js")
+NAVIGATION_JS = PANEL_JS.with_name("hausman-hub-navigation.js")
 SETTINGS_CSS = PANEL_JS.with_name("hausman-hub-settings.css")
 MAX_PANEL_JS_BYTES = 268 * 1024
 MAX_HOME_SECTIONS_JS_BYTES = 16 * 1024
 MAX_ROOM_SETUP_JS_BYTES = 24 * 1024
 MAX_DEVICE_INVENTORY_JS_BYTES = 16 * 1024
 MAX_AREA_BINDING_JS_BYTES = 24 * 1024
+MAX_NAVIGATION_JS_BYTES = 16 * 1024
 MAX_PANEL_CSS_BYTES = 56 * 1024
 MAX_SETTINGS_CSS_BYTES = 24 * 1024
 
@@ -43,6 +45,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         room_setup = ROOM_SETUP_JS.read_text(encoding="utf-8")
         device_inventory = DEVICE_INVENTORY_JS.read_text(encoding="utf-8")
         area_binding = AREA_BINDING_JS.read_text(encoding="utf-8")
+        navigation = NAVIGATION_JS.read_text(encoding="utf-8")
 
         self.assertLessEqual(len(content.encode("utf-8")), MAX_PANEL_JS_BYTES)
         self.assertLessEqual(
@@ -57,10 +60,12 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertLessEqual(
             len(area_binding.encode("utf-8")), MAX_AREA_BINDING_JS_BYTES
         )
+        self.assertLessEqual(len(navigation.encode("utf-8")), MAX_NAVIGATION_JS_BYTES)
         self.assertIn("renderHomeSection", home_sections)
         self.assertIn("renderFirstRunRoom", room_setup)
         self.assertIn("renderDeviceInventory", device_inventory)
         self.assertIn("renderFirstRunAreaBinding", area_binding)
+        self.assertIn("writeNavigationRoute", navigation)
         self.assertIn('customElements.get?.("hausman-hub-panel")', content)
         self.assertIn('customElements.define("hausman-hub-panel"', content)
 
@@ -77,6 +82,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             "hausman-hub-room-setup.js",
             "hausman-hub-device-inventory.js",
             "hausman-hub-area-binding.js",
+            "hausman-hub-navigation.js",
         ):
             self.assertIn(f'./{module}?v={manifest["version"]}', content)
 
@@ -90,7 +96,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             len(settings_styles.encode("utf-8")), MAX_SETTINGS_CSS_BYTES
         )
         self.assertIn('"/api/hausman_hub/panel/hausman-hub-panel.css"', content)
-        self.assertIn('hausman-hub-settings.css?v=1.46.5', styles)
+        self.assertIn('hausman-hub-settings.css?v=1.46.6', styles)
         self.assertIn("--hmh-bg:#0B0F14", styles)
         self.assertIn("--hmh-bg:#EEF1F6", styles)
         self.assertIn(".page-header", styles)
@@ -256,6 +262,10 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             {{ filename: {str(AREA_BINDING_JS)!r} }}
           );
           vm.runInThisContext(
+            fs.readFileSync({str(NAVIGATION_JS)!r}, "utf8").replace(/export /g, ""),
+            {{ filename: {str(NAVIGATION_JS)!r} }}
+          );
+          vm.runInThisContext(
             fs.readFileSync({str(PANEL_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, ""),
             {{ filename: {str(PANEL_JS)!r} }}
           );
@@ -398,6 +408,10 @@ THEME_TEST_HARNESS = """
     { filename: __AREA_BINDING_JS__ }
   );
   vm.runInThisContext(
+    fs.readFileSync(__NAVIGATION_JS__, "utf8").replace(/export /g, ""),
+    { filename: __NAVIGATION_JS__ }
+  );
+  vm.runInThisContext(
     fs.readFileSync(__PANEL_JS__, "utf8").replace(/^import .*;\\s*/gm, ""),
     { filename: __PANEL_JS__ }
   );
@@ -420,6 +434,7 @@ class PanelThemeSwitcherTest(unittest.TestCase):
             .replace("__ROOM_SETUP_JS__", repr(str(ROOM_SETUP_JS)))
             .replace("__DEVICE_INVENTORY_JS__", repr(str(DEVICE_INVENTORY_JS)))
             .replace("__AREA_BINDING_JS__", repr(str(AREA_BINDING_JS)))) + body
+        script = script.replace("__NAVIGATION_JS__", repr(str(NAVIGATION_JS)))
         return subprocess.run(
             ("node", "--input-type=commonjs", "--eval", script),
             check=False,
@@ -613,7 +628,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.46.5",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.46.6",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },

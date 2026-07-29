@@ -1,7 +1,8 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.46.5";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.46.5";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.46.5";
-import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.46.5";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.46.6";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.46.6";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.46.6";
+import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.46.6";
+import { openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.46.6";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css";
@@ -85,28 +86,6 @@ const CENTRAL_HEATING_IDENTITY_PATTERN =
   /central.{0,12}heat|heating|boiler|heat.{0,12}(pump|supply)|circulat.{0,12}pump|централ.{0,12}отоп|отоплен|кот[её]л|теплоснаб|(насос|подач).{0,12}(отоп|тепл)|(отоп|тепл).{0,12}(насос|подач)/;
 const CENTRAL_HEATING_ACCESSORY_PATTERN =
   /(^|[^a-z0-9])trv([^a-z0-9]|$)|thermostatic.{0,12}radiator|radiator.{0,12}valve|термоголов|увлажн|humidifier/;
-const PANEL_SECTIONS = [
-  { id: "overview", label: "Главная", icon: "dashboard" },
-  { id: "lighting", label: "Освещение", icon: "lightbulb" },
-  { id: "climate", label: "Климат", icon: "thermometer" },
-  { id: "rooms", label: "Комнаты", icon: "rooms" },
-  { id: "media", label: "Медиа", icon: "media" },
-  { id: "security", label: "Безопасность", icon: "shield" },
-  { id: "devices", label: "Устройства", icon: "device" },
-  { id: "scenarios", label: "Сценарии", icon: "bolt" },
-  { id: "settings", label: "Настройки", icon: "settings" },
-];
-const SECTION_SUBTITLES = {
-  overview: "Состояние и управление домом",
-  lighting: "Свет по комнатам и отдельным клавишам",
-  climate: "Климатический контур и комфорт",
-  rooms: "Все комнаты и устройства внутри",
-  media: "Телевизоры, колонки и медиаплееры",
-  security: "Датчики, доступ и тревоги",
-  devices: "Все физические устройства дома",
-  scenarios: "Управление сценариями дома",
-  settings: "Подключение и параметры системы",
-};
 const CLIMATE_VIEWS = [
   { id: "contour", label: "Контур", subtitle: "Контур и управление климатом" },
   { id: "profiles", label: "Профили", subtitle: "Профили и расписание комфорта" },
@@ -364,6 +343,11 @@ class HausmanHubPanel extends HTMLElement {
     this._onVisible = () => {
       if (!document.hidden) this._load();
     };
+    this._onNavigationPop = () => {
+      restoreNavigationFromLocation(this, true, PANEL_SECTIONS, CLIMATE_VIEWS, SETTINGS_VIEWS);
+      this._render();
+      this._loadActiveNavigationView();
+    };
   }
 
   set hass(value) {
@@ -374,18 +358,37 @@ class HausmanHubPanel extends HTMLElement {
     if (first) {
       this._load();
     }
+    this._loadActiveNavigationView();
   }
 
   connectedCallback() {
+    restoreNavigationFromLocation(this, false, PANEL_SECTIONS, CLIMATE_VIEWS, SETTINGS_VIEWS);
     this._timer = setInterval(() => this._load(), REFRESH_MS);
     document.addEventListener("visibilitychange", this._onVisible);
+    if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+      window.addEventListener("popstate", this._onNavigationPop);
+    }
     this._render();
+    this._loadActiveNavigationView();
   }
 
   disconnectedCallback() {
     if (this._timer) clearInterval(this._timer);
     this._timer = null;
     document.removeEventListener("visibilitychange", this._onVisible);
+    if (typeof window !== "undefined" && typeof window.removeEventListener === "function") {
+      window.removeEventListener("popstate", this._onNavigationPop);
+    }
+  }
+
+  _loadActiveNavigationView() {
+    if (
+      this._activeSection === "climate"
+      && this._activeClimateView === "assistant"
+      && !this._assistant.loaded
+    ) {
+      this._loadAssistant();
+    }
   }
 
   _applyThemeMode() {
@@ -863,6 +866,7 @@ class HausmanHubPanel extends HTMLElement {
 
   _activateSection(section, focus = false) {
     if (!PANEL_SECTIONS.some((item) => item.id === section)) return;
+    const changed = this._activeSection !== section;
     this._activeSection = section;
     this._syncSectionVisibility();
     if (section === "climate") {
@@ -883,17 +887,20 @@ class HausmanHubPanel extends HTMLElement {
     if (this._shell.homeSections && this._shell.homeSections[section]) {
       this._renderHomeSection(section, this._shell.homeSections[section]);
     }
+    if (changed) writeNavigationRoute(this);
     if (focus) focusNode(this._shell && this._shell.tabs[section]);
   }
 
   _activateClimateView(viewId, focus = false) {
     if (!CLIMATE_VIEWS.some((view) => view.id === viewId)) return;
+    const changed = this._activeClimateView !== viewId;
     this._activeClimateView = viewId;
     this._syncClimateVisibility();
     if (viewId === "assistant") {
       this._renderAssistant(this._shell.assistant);
       if (!this._assistant.loaded) this._loadAssistant();
     }
+    if (changed && this._activeSection === "climate") writeNavigationRoute(this);
     if (focus) focusNode(this._shell && this._shell.climateTabs[viewId]);
   }
 
@@ -975,28 +982,9 @@ class HausmanHubPanel extends HTMLElement {
   _renderOverviewSummary(container, setup, snapshot) {
     container.innerHTML = "";
     if (!setup && !snapshot) return;
-    const metrics = this._overviewMetrics(snapshot);
-    const heading = el("div", "overview-section-heading");
-    heading.appendChild(el("h2", null, "Сводка"));
-    heading.appendChild(el("p", "section-intro", "Основные показатели дома"));
-    container.appendChild(heading);
-    const summary = el("div", "overview-summary");
-    [
-      ["thermometer", "Температура", metrics.temperature],
-      ["water", "Влажность", metrics.humidity],
-      ["device", "Активные устройства", `${metrics.activeDevices} из ${metrics.deviceCount}`],
-    ].forEach(([iconName, label, value]) => {
-      const item = el("div", "summary-item");
-      const icon = el("span", "summary-icon");
-      icon.appendChild(svgIcon(iconName));
-      item.appendChild(icon);
-      const copy = el("div", "summary-copy");
-      copy.appendChild(el("span", "assistant-field-label", label));
-      copy.appendChild(el("strong", "summary-value", value));
-      item.appendChild(copy);
-      summary.appendChild(item);
+    renderOverviewNavigationSummary(this, container, this._overviewMetrics(snapshot), {
+      el, setAttr, svgIcon, sections: PANEL_SECTIONS,
     });
-    container.appendChild(summary);
   }
 
   _overviewMetrics(snapshot) {
@@ -1573,7 +1561,10 @@ class HausmanHubPanel extends HTMLElement {
     container.appendChild(heading);
     const grid = el("div", "cards overview-room-grid");
     (snapshot.rooms || []).forEach((room) => {
-      const card = el("div", "card overview-room-card");
+      const card = el("button", "card overview-room-card");
+      card.type = "button";
+      setAttr(card, "aria-label", `Открыть комнату ${room.name}`);
+      card.addEventListener("click", () => openRoomFromOverview(this, room));
       const cardHead = el("div", "overview-room-head");
       const roomCopy = el("div");
       roomCopy.appendChild(el("h3", null, room.name));
@@ -5435,9 +5426,11 @@ class HausmanHubPanel extends HTMLElement {
 
   _activateSettingsView(viewId) {
     if (!SETTINGS_VIEWS.some((view) => view.id === viewId)) return;
+    const changed = this._activeSettingsView !== viewId;
     this._activeSettingsView = viewId;
     this._resetArmed = false;
     this._render();
+    if (changed && this._activeSection === "settings") writeNavigationRoute(this);
   }
 
   _settingsOverviewLink({ viewId, icon, title, description, value, status }) {
