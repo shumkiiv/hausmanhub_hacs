@@ -200,8 +200,62 @@ class ClimateSignalSettingsValidationTest(unittest.TestCase):
                 device_class=None,
                 entity_category=None,
                 attributes={"friendly_name": "Центральное отопление"},
+                friendly_name="Центральное отопление",
             )
         )
+
+    def test_central_heating_requires_an_associative_identity(self) -> None:
+        for domain, device_class, entity_id, friendly_name in (
+            ("switch", None, "switch.living_left", "Выключатель гостиная"),
+            ("switch", None, "switch.trv_child_lock", "Термоголовка блокировка"),
+            ("switch", None, "switch.trv_heating", "TRV heating"),
+            ("binary_sensor", "power", "binary_sensor.tv_power", "Телевизор питание"),
+            ("input_boolean", None, "input_boolean.manual", "Ручной режим"),
+        ):
+            with self.subTest(entity_id=entity_id):
+                self.assertFalse(
+                    signal_candidate_is_suitable(
+                        CENTRAL_HEATING_SIGNAL,
+                        domain=domain,
+                        device_class=device_class,
+                        entity_category=None,
+                        attributes={},
+                        entity_id=entity_id,
+                        friendly_name=friendly_name,
+                    )
+                )
+        for domain, device_class, entity_id, friendly_name in (
+            (
+                "input_boolean",
+                None,
+                "input_boolean.central_heating",
+                "Центральное отопление",
+            ),
+            (
+                "binary_sensor",
+                "running",
+                "binary_sensor.heating_pump",
+                "Насос отопления",
+            ),
+            (
+                "switch",
+                None,
+                "switch.boiler",
+                "Котёл",
+            ),
+        ):
+            with self.subTest(entity_id=entity_id):
+                self.assertTrue(
+                    signal_candidate_is_suitable(
+                        CENTRAL_HEATING_SIGNAL,
+                        domain=domain,
+                        device_class=device_class,
+                        entity_category=None,
+                        attributes={},
+                        entity_id=entity_id,
+                        friendly_name=friendly_name,
+                    )
+                )
 
     def test_outdoor_temperature_rejects_indoor_room_sensors(self) -> None:
         self.assertFalse(

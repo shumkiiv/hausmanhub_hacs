@@ -53,6 +53,19 @@ _OUTDOOR_IDENTITY = re.compile(
     r"улич|улиц|наруж|внешн|двор|погод)",
     re.IGNORECASE,
 )
+_CENTRAL_HEATING_IDENTITY = re.compile(
+    r"(?:central.{0,12}heat|heating|boiler|heat.{0,12}(?:pump|supply)|"
+    r"circulat.{0,12}pump|"
+    r"централ.{0,12}отоп|отоплен|кот[её]л|теплоснаб|"
+    r"(?:насос|подач).{0,12}(?:отоп|тепл)|"
+    r"(?:отоп|тепл).{0,12}(?:насос|подач))",
+    re.IGNORECASE,
+)
+_CENTRAL_HEATING_ACCESSORY_IDENTITY = re.compile(
+    r"(?:(?:^|[^a-z0-9])trv(?:[^a-z0-9]|$)|thermostatic.{0,12}radiator|radiator.{0,12}valve|"
+    r"термоголов|увлажн|humidifier)",
+    re.IGNORECASE,
+)
 
 HOME_ENVIRONMENT_FIELDS = frozenset(
     {
@@ -116,9 +129,19 @@ def signal_candidate_is_suitable(
             and device_class in PRESENCE_DEVICE_CLASSES
         )
     if signal_kind == CENTRAL_HEATING_SIGNAL:
-        return domain in {"switch", "input_boolean"} or (
-            domain == "binary_sensor"
-            and device_class in CENTRAL_HEATING_DEVICE_CLASSES
+        identity = " ".join(
+            value
+            for value in (entity_id, friendly_name, room_name)
+            if isinstance(value, str)
+        )
+        return (
+            domain in CENTRAL_HEATING_DOMAINS
+            and bool(_CENTRAL_HEATING_IDENTITY.search(identity))
+            and not _CENTRAL_HEATING_ACCESSORY_IDENTITY.search(identity)
+            and (
+                domain in {"switch", "input_boolean"}
+                or device_class in CENTRAL_HEATING_DEVICE_CLASSES
+            )
         )
     if signal_kind == WINDOW_SIGNAL:
         return domain == "binary_sensor" and device_class in WINDOW_DEVICE_CLASSES

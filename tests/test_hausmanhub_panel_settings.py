@@ -1508,6 +1508,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const candidates = [
           { entity_id: "switch.living_left", name: "Выключатель гостиная", domain: "switch" },
           { entity_id: "switch.trv_child_lock", name: "Термоголовка блокировка", domain: "switch" },
+          { entity_id: "switch.trv_heating", name: "TRV heating", domain: "switch" },
           { entity_id: "input_boolean.central_heating", name: "Центральное отопление", domain: "input_boolean" },
           { entity_id: "binary_sensor.boiler_heat", name: "Нагрев", domain: "binary_sensor", device_class: "heat" },
         ];

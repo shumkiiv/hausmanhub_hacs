@@ -53,6 +53,22 @@ _TRV_MARKERS = (
     "trvzb",
 )
 _TRV_TOKEN = re.compile(r"\btrv\b", re.IGNORECASE)
+_FLOOR_HEATING_MARKERS = (
+    "тёплый пол",
+    "теплый пол",
+    "подогрев пола",
+    "underfloor heating",
+    "floor heating",
+    "heated floor",
+)
+_AIR_CONDITIONER_MARKERS = (
+    "кондиционер",
+    "air conditioner",
+    "air conditioning",
+    "split system",
+    "mini split",
+)
+_AIR_CONDITIONER_TOKEN = re.compile(r"\bac\b", re.IGNORECASE)
 
 
 class ClimateNativeSetupViolation(ValueError):
@@ -315,18 +331,18 @@ def _unbound_command_types(entry: ClimateHaCatalogEntry) -> tuple[str, ...]:
 
 
 def _unbound_suggested_kinds(entry: ClimateHaCatalogEntry) -> tuple[ClimateDeviceKind, ...]:
+    if entry.entity_category is not None:
+        return ()
     if entry.domain == "climate":
-        if entry.hvac_modes:
-            if "cool" in entry.hvac_modes:
-                return (ClimateDeviceKind.AIR_CONDITIONER,)
-            if "heat" in entry.hvac_modes:
-                return (ClimateDeviceKind.RADIATOR_THERMOSTAT,)
-            if _is_trv(entry):
-                return (ClimateDeviceKind.RADIATOR_THERMOSTAT,)
-            return ()
         if _is_trv(entry):
             return (ClimateDeviceKind.RADIATOR_THERMOSTAT,)
-        return (ClimateDeviceKind.AIR_CONDITIONER,)
+        if _is_floor_heating(entry):
+            return (ClimateDeviceKind.FLOOR_HEATING,)
+        if "cool" in entry.hvac_modes or "heat_cool" in entry.hvac_modes:
+            return (ClimateDeviceKind.AIR_CONDITIONER,)
+        if not entry.hvac_modes and _is_air_conditioner(entry):
+            return (ClimateDeviceKind.AIR_CONDITIONER,)
+        return ()
     if entry.domain == "humidifier":
         return (ClimateDeviceKind.HUMIDIFIER,)
     if entry.device_class == "temperature":
@@ -337,10 +353,30 @@ def _unbound_suggested_kinds(entry: ClimateHaCatalogEntry) -> tuple[ClimateDevic
 
 
 def _is_trv(entry: ClimateHaCatalogEntry) -> bool:
+    text = _entry_identity(entry)
+    return any(marker in text for marker in _TRV_MARKERS) or bool(_TRV_TOKEN.search(text))
+
+
+def _is_floor_heating(entry: ClimateHaCatalogEntry) -> bool:
+    return any(marker in _entry_identity(entry) for marker in _FLOOR_HEATING_MARKERS)
+
+
+def _is_air_conditioner(entry: ClimateHaCatalogEntry) -> bool:
+    text = _entry_identity(entry)
+    return any(marker in text for marker in _AIR_CONDITIONER_MARKERS) or bool(
+        _AIR_CONDITIONER_TOKEN.search(text)
+    )
+
+
+def _entry_identity(entry: ClimateHaCatalogEntry) -> str:
     values = (
+        entry.entity_id,
         entry.friendly_name,
         entry.device_name,
         entry.model,
     )
-    text = " ".join(value for value in values if value is not None).casefold()
-    return any(marker in text for marker in _TRV_MARKERS) or bool(_TRV_TOKEN.search(text))
+    return re.sub(
+        r"[_./:-]+",
+        " ",
+        " ".join(value for value in values if value is not None).casefold(),
+    )

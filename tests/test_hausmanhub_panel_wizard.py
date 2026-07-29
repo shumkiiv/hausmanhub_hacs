@@ -490,6 +490,53 @@ class PanelContourWizardTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
+    def test_one_physical_device_shows_each_climate_purpose_once(self) -> None:
+        options = copy.deepcopy(DRAFT_OPTIONS)
+        duplicate = copy.deepcopy(
+            next(
+                candidate
+                for candidate in options["devices"]
+                if candidate["candidate_id"] == "candidate_temp_1"
+            )
+        )
+        duplicate["candidate_id"] = "candidate_temp_external"
+        duplicate["candidate_key"] = "candidate_temp_external"
+        duplicate["name"] = "Внешняя температура у окна"
+        options["devices"].append(duplicate)
+        script = panel_script(
+            get_payloads(options=options),
+            {},
+            """
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать настройку")[0].fire("click");
+        await tick();
+        panel._firstRunFields.rooms.living.include.checked = true;
+        panel._firstRunFields.rooms.living.include.fire("change");
+        panel._firstRunFields.rooms.living.configure.fire("click");
+        const fields = panel._firstRunFields.room.devices;
+        const physical = fields.filter((choice) => [
+          "candidate_temp_1:temperature_sensor",
+          "candidate_temp_external:temperature_sensor",
+          "candidate_humidity:humidity_sensor",
+        ].includes(choice.key));
+        if (physical.length !== 2
+          || !physical.some((choice) => choice.key === "candidate_temp_1:temperature_sensor")
+          || !physical.some((choice) => choice.key === "candidate_humidity:humidity_sensor")) {
+          throw new Error("physical device purposes were not canonicalized: "
+            + JSON.stringify(physical.map((choice) => choice.key)));
+        }
+        const card = findAll(panel.shadowRoot, (node) =>
+          node["data-device-group-id"] === "device_0123456789abcdef")[0];
+        if (!card || !textOf(card).includes("Датчик температуры")
+          || !textOf(card).includes("Датчик влажности")
+          || textOf(card).includes("Внешняя температура у окна")) {
+          throw new Error("duplicate purpose is still visible inside the device card");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
 
 class PanelFirstRunWizardTest(unittest.TestCase):
     def test_home_signal_draft_and_open_chooser_survive_background_render(self) -> None:

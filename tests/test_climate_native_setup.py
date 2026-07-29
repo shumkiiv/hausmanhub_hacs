@@ -52,6 +52,7 @@ def _entry(
     model: str | None = None,
     image_url: str | None = None,
     hvac_modes: tuple[str, ...] = (),
+    entity_category: str | None = None,
 ) -> ClimateHaCatalogEntry:
     domain = entity_id.split(".", 1)[0]
     return ClimateHaCatalogEntry(
@@ -70,6 +71,7 @@ def _entry(
         model=model,
         image_url=image_url,
         hvac_modes=hvac_modes,
+        entity_category=entity_category,
     )
 
 
@@ -230,6 +232,16 @@ class NativeSetupSnapshotTest(unittest.TestCase):
                     "climate.legacy_facade",
                     friendly_name="Климат гостиной",
                 ),
+                _entry(
+                    "climate.bath_floor",
+                    friendly_name="Тёплый пол ванной",
+                    hvac_modes=("off", "heat"),
+                ),
+                _entry(
+                    "climate.generic_heater",
+                    friendly_name="Термостат",
+                    hvac_modes=("off", "heat"),
+                ),
             ]
         )
 
@@ -256,8 +268,16 @@ class NativeSetupSnapshotTest(unittest.TestCase):
             snapshot.device("climate.marker_trv").suggested_kinds,
         )
         self.assertEqual(
-            (ClimateDeviceKind.AIR_CONDITIONER,),
+            (),
             snapshot.device("climate.legacy_facade").suggested_kinds,
+        )
+        self.assertEqual(
+            (ClimateDeviceKind.FLOOR_HEATING,),
+            snapshot.device("climate.bath_floor").suggested_kinds,
+        )
+        self.assertEqual(
+            (),
+            snapshot.device("climate.generic_heater").suggested_kinds,
         )
 
     def test_uninformative_hvac_modes_still_fall_back_to_trv_markers(self) -> None:
@@ -334,8 +354,41 @@ class NativeSetupSnapshotTest(unittest.TestCase):
                     snapshot.device(entity_id).suggested_kinds,
                 )
         self.assertEqual(
-            (ClimateDeviceKind.AIR_CONDITIONER,),
+            (),
             snapshot.device("climate.not_token").suggested_kinds,
+        )
+
+    def test_configuration_entities_never_become_device_choices(self) -> None:
+        registry, contours, _ = _setup()
+        _, observation = _native_observation(registry, contours)
+        snapshot = build_native_climate_setup_snapshot(
+            ClimateRegistry(),
+            observation,
+            _catalog(
+                [
+                    _entry(
+                        "climate.calibration",
+                        friendly_name="Кондиционер: калибровка",
+                        hvac_modes=("cool", "off"),
+                        entity_category="config",
+                    ),
+                    _entry(
+                        "sensor.temperature_offset",
+                        device_class="temperature",
+                        friendly_name="Поправка температуры",
+                        entity_category="config",
+                    ),
+                ]
+            ),
+        )
+
+        self.assertEqual(
+            (),
+            snapshot.device("climate.calibration").suggested_kinds,
+        )
+        self.assertEqual(
+            (),
+            snapshot.device("sensor.temperature_offset").suggested_kinds,
         )
 
     def test_trv_candidate_creates_a_ready_draft(self) -> None:

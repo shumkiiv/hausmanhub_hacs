@@ -1,7 +1,7 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.46.3";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.46.3";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.46.3";
-import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.46.3";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.46.4";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.46.4";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.46.4";
+import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.46.4";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css";
@@ -78,6 +78,12 @@ const FIRST_RUN_STEPS = [
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 const ZIGBEE2MQTT_IMAGE_PATTERN =
   /^https:\/\/www\.zigbee2mqtt\.io\/images\/devices\/(?:[A-Za-z0-9._~-]|%[0-9A-F]{2})+\.png$/;
+const OUTDOOR_IDENTITY_PATTERN =
+  /outdoor|outside|external|exterior|street|yard|улич|улиц|наруж|внешн|двор|погод/;
+const CENTRAL_HEATING_IDENTITY_PATTERN =
+  /central.{0,12}heat|heating|boiler|heat.{0,12}(pump|supply)|circulat.{0,12}pump|централ.{0,12}отоп|отоплен|кот[её]л|теплоснаб|(насос|подач).{0,12}(отоп|тепл)|(отоп|тепл).{0,12}(насос|подач)/;
+const CENTRAL_HEATING_ACCESSORY_PATTERN =
+  /(^|[^a-z0-9])trv([^a-z0-9]|$)|thermostatic.{0,12}radiator|radiator.{0,12}valve|термоголов|увлажн|humidifier/;
 const PANEL_SECTIONS = [
   { id: "overview", label: "Главная", icon: "dashboard" },
   { id: "lighting", label: "Освещение", icon: "lightbulb" },
@@ -1582,12 +1588,6 @@ class HausmanHubPanel extends HTMLElement {
     ));
   }
 
-  _firstRunUnassignedCandidates() {
-    return (this._firstRun.options && this._firstRun.options.devices || []).filter((candidate) => (
-      candidate.can_add === true && candidate.room_id === ""
-    ));
-  }
-
   _firstRunAreaCandidates() {
     return (this._firstRun.options && this._firstRun.options.devices || []).filter(
       (candidate) => candidate.configured === true
@@ -1731,7 +1731,44 @@ class HausmanHubPanel extends HTMLElement {
         choices.push({ candidate, device, key, order: candidateIndex * 10 + typeIndex, type });
       });
     });
-    return choices;
+    return this._firstRunDistinctPurposeChoices(choices);
+  }
+
+  _firstRunDistinctPurposeChoices(choices) {
+    const grouped = new Map();
+    choices.forEach((choice) => {
+      const physicalId = choice.candidate.device_group_id;
+      const key = physicalId
+        ? `${physicalId}:${choice.type || "unknown"}`
+        : `candidate:${choice.candidate.candidate_id}:${choice.type || "unknown"}`;
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key).push(choice);
+    });
+    const result = [];
+    grouped.forEach((alternatives) => {
+      alternatives.sort((left, right) => {
+        const score = (choice) => (
+          Number(choice.device.selected === true) * 10000
+          + Number(choice.candidate.configured === true) * 2000
+          + Number(choice.candidate.status === "already_configured") * 1000
+          + Number(choice.candidate.status === "available") * 500
+          + Number(choice.candidate.status === "unavailable") * 200
+          + Number(choice.candidate.recommended_type === choice.type) * 50
+        );
+        return score(right) - score(left)
+          || String(left.candidate.name || "").length - String(right.candidate.name || "").length
+          || String(left.candidate.candidate_id).localeCompare(
+            String(right.candidate.candidate_id), "ru"
+          );
+      });
+      const selected = alternatives[0];
+      alternatives.slice(1).forEach((duplicate) => {
+        duplicate.device.selected = false;
+        duplicate.device.channel = null;
+      });
+      result.push(selected);
+    });
+    return result.sort((left, right) => left.order - right.order);
   }
 
   _firstRunDeviceGroups(choiceList, room, fields, allChoices, searchable) {
@@ -4410,24 +4447,40 @@ class HausmanHubPanel extends HTMLElement {
         if (candidate.missing || candidate.domain === "weather") return true;
         return candidate.domain === "sensor"
           && candidate.device_class === "temperature"
-          && /outdoor|outside|external|exterior|street|yard|улич|улиц|наруж|внешн|двор|погод/.test(identity);
+          && OUTDOOR_IDENTITY_PATTERN.test(identity);
       }
       if (signalKind !== "central_heating") return true;
-      return (candidate.domain === "binary_sensor" && candidate.device_class === "heat")
-        || /централ.*отоп|отоплен|кот[её]л|теплоснаб|central.*heat|heating|boiler/.test(identity);
+      return ["binary_sensor", "switch", "input_boolean"].includes(candidate.domain)
+        && (candidate.domain !== "binary_sensor"
+          || ["heat", "running", "power"].includes(candidate.device_class))
+        && CENTRAL_HEATING_IDENTITY_PATTERN.test(identity)
+        && !CENTRAL_HEATING_ACCESSORY_PATTERN.test(identity);
     }).forEach((candidate) => {
-      const key = candidate.device_group_id && candidate.name
-        ? `${candidate.device_group_id}:${normalizedText(candidate.name)}` : candidate.entity_id;
+      const key = candidate.device_group_id
+        ? `${candidate.device_group_id}:${signalKind}` : candidate.entity_id;
       const existing = grouped.get(key);
-      if (
-        !existing || candidate.entity_id === current
-        || (existing.entity_id !== current && existing.available === false && candidate.available !== false)
-        || (existing.entity_id !== current && signalKind === "outdoor_temperature"
-          && /(?:external|outdoor)_temperature/.test(candidate.entity_id)
-          && !/(?:external|outdoor)_temperature/.test(existing.entity_id))
-      ) grouped.set(key, candidate);
+      if (!existing || this._signalCandidateRank(candidate, current, signalKind)
+          > this._signalCandidateRank(existing, current, signalKind)) {
+        grouped.set(key, candidate);
+      }
     });
     return [...grouped.values()];
+  }
+
+  _signalCandidateRank(candidate, current, signalKind) {
+    const classRank = {
+      presence: { presence: 60, occupancy: 50, motion: 30 },
+      room_presence: { presence: 60, occupancy: 50, motion: 30 },
+      window: { window: 60, opening: 50, door: 40, garage_door: 30 },
+      central_heating: { heat: 60, running: 50, power: 40 },
+    };
+    const entityId = String(candidate.entity_id || "");
+    return Number(entityId === current) * 10000
+      + Number(candidate.available !== false) * 1000
+      + ((classRank[signalKind] || {})[candidate.device_class] || 0)
+      + Number(signalKind === "outdoor_temperature"
+        && /(?:external|outdoor)_temperature/.test(entityId)) * 80
+      - Math.min(entityId.length, 255) / 1000;
   }
 
   _signalCandidateDisplayName(candidate) {
