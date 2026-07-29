@@ -246,6 +246,34 @@
             }
           }
         },
+        "event_stream": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available",
+            "path",
+            "method",
+            "transport",
+            "response_contract",
+            "heartbeat_seconds"
+          ],
+          "properties": {
+            "available": { "const": true },
+            "path": { "const": "/api/hausman_hub/v1/events" },
+            "method": { "const": "GET" },
+            "transport": { "const": "text/event-stream" },
+            "response_contract": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "version"],
+              "properties": {
+                "name": { "const": "hausman-hub-event" },
+                "version": { "const": 1 }
+              }
+            },
+            "heartbeat_seconds": { "type": "integer", "minimum": 5, "maximum": 120 }
+          }
+        },
         "scenarios": {
           "type": "object",
           "additionalProperties": false,

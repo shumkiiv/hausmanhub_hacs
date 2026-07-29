@@ -1,0 +1,12 @@
+{
+  "contract": {
+    "name": "hausman-hub-event",
+    "version": 1
+  },
+  "id": "evt-42",
+  "type": "snapshot_invalidated",
+  "occurred_at": "2026-07-29T12:34:56Z",
+  "data": {
+    "reason": "state_changed"
+  }
+}

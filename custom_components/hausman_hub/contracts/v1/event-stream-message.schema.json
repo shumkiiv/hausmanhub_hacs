@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hausmanhub/contracts/v1/event-stream-message.schema.json",
+  "title": "HausmanHub server-sent event message v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "id", "type", "occurred_at", "data"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "hausman-hub-event" },
+        "version": { "const": 1 }
+      }
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "type": {
+      "enum": ["hello", "snapshot_invalidated", "critical_alert", "heartbeat"]
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "data": {
+      "oneOf": [
+        { "$ref": "#/$defs/hello" },
+        { "$ref": "#/$defs/snapshot_invalidated" },
+        { "$ref": "#/$defs/critical_alert" },
+        { "$ref": "#/$defs/heartbeat" }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "type": { "const": "hello" } } },
+      "then": { "properties": { "data": { "$ref": "#/$defs/hello" } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "snapshot_invalidated" } } },
+      "then": { "properties": { "data": { "$ref": "#/$defs/snapshot_invalidated" } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "critical_alert" } } },
+      "then": { "properties": { "data": { "$ref": "#/$defs/critical_alert" } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "heartbeat" } } },
+      "then": { "properties": { "data": { "$ref": "#/$defs/heartbeat" } } }
+    }
+  ],
+  "$defs": {
+    "hello": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["api_major_version", "heartbeat_seconds"],
+      "properties": {
+        "api_major_version": { "const": 1 },
+        "heartbeat_seconds": { "type": "integer", "minimum": 5, "maximum": 120 }
+      }
+    },
+    "snapshot_invalidated": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason"],
+      "properties": {
+        "reason": {
+          "enum": ["state_changed", "registry_changed", "scenario_changed", "settings_changed"]
+        }
+      }
+    },
+    "critical_alert": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["alert_id", "kind", "severity", "title", "message", "active"],
+      "properties": {
+        "alert_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "kind": { "enum": ["leak", "smoke", "gas", "security", "other"] },
+        "severity": { "enum": ["warning", "critical"] },
+        "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "message": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "room": { "type": ["string", "null"], "maxLength": 120 },
+        "device": { "type": ["string", "null"], "maxLength": 120 },
+        "active": { "type": "boolean" }
+      }
+    },
+    "heartbeat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sequence"],
+      "properties": {
+        "sequence": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

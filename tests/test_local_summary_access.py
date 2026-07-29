@@ -1740,7 +1740,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.32.0", panel.payload["integration_version"])
+        self.assertEqual("1.33.0", panel.payload["integration_version"])
 
     def test_admin_panel_accepts_ipv6_link_local_admin_from_mdns(self) -> None:
         """A local admin may open the panel when mDNS selects IPv6 link-local."""
@@ -2312,7 +2312,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertFalse(hasattr(self.view, method))
 
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
-        self.assertEqual(48, len(self.hass.http.views))
+        self.assertEqual(49, len(self.hass.http.views))
         self.assertEqual(
             1,
             sum(
@@ -2355,6 +2355,30 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
         self.assertEqual(503, response.status)
         self.assertEqual({"message"}, set(response.payload))
+
+    def test_realtime_leak_alert_is_immediate_and_hides_entity_id(self) -> None:
+        runtime = self.hass.data["hausman_hub"]["event_stream_runtime"]
+        queue = runtime.broker.subscribe()
+        runtime._publish_critical_alert(
+            "binary_sensor.synthetic_private_leak",
+            SimpleNamespace(state="off", attributes={}),
+            SimpleNamespace(
+                state="on",
+                attributes={
+                    "device_class": "moisture",
+                    "friendly_name": "Датчик протечки",
+                    "area_name": "Ванная",
+                },
+            ),
+        )
+
+        message = asyncio.run(queue.get())
+
+        self.assertEqual("critical_alert", message["type"])
+        self.assertEqual("leak", message["data"]["kind"])
+        self.assertTrue(message["data"]["active"])
+        self.assertEqual("Ванная", message["data"]["room"])
+        self.assertNotIn("entity_id", json.dumps(message, ensure_ascii=False))
 
     def test_closed_optional_page_request_does_not_read_the_home(self) -> None:
         """The page request remains closed even with a stale runtime pointer."""
@@ -2601,11 +2625,12 @@ class LocalSummaryAccessTest(unittest.TestCase):
             [(closed_entry, ("sensor", "switch"))],
             closed_hass.config_entries.forwarded,
         )
-        self.assertEqual(47, len(closed_hass.http.views))
+        self.assertEqual(48, len(closed_hass.http.views))
         self.assertEqual(
             {
                 "/api/hausman_hub/v1/capabilities",
                 "/api/hausman_hub/v1/dashboard",
+                "/api/hausman_hub/v1/events",
                 "/api/hausman_hub/v1/device-actions",
                 "/api/hausman_hub/v1/home",
                 "/api/hausman_hub/v1/contours",

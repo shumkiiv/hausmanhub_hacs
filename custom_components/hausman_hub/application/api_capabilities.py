@@ -27,6 +27,7 @@ API_BASE_PATH = "/api/hausman_hub/v1"
 CAPABILITIES_PATH = f"{API_BASE_PATH}/capabilities"
 HOME_PATH = f"{API_BASE_PATH}/home"
 DASHBOARD_PATH = f"{API_BASE_PATH}/dashboard"
+EVENT_STREAM_PATH = f"{API_BASE_PATH}/events"
 DEVICE_ACTIONS_PATH = f"{API_BASE_PATH}/device-actions"
 CONTOURS_PATH = f"{API_BASE_PATH}/contours"
 CONTOUR_APPLY_PREVIEW_PATH = f"{CONTOURS_PATH}/apply-preview"
@@ -141,6 +142,17 @@ def api_capabilities_snapshot(
                     "name": CLIMATE_CONTROL_RECEIPT_CONTRACT_NAME,
                     "version": CLIMATE_CONTROL_RECEIPT_CONTRACT_VERSION,
                 },
+            },
+            "event_stream": {
+                "available": True,
+                "path": EVENT_STREAM_PATH,
+                "method": "GET",
+                "transport": "text/event-stream",
+                "response_contract": {
+                    "name": "hausman-hub-event",
+                    "version": 1,
+                },
+                "heartbeat_seconds": 30,
             },
             "scenarios": {
                 "available": True,
