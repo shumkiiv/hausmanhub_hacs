@@ -1253,7 +1253,13 @@ class ClimateAdminHomeEnvironmentView(_ClimateView):
             result = await runtime.async_update_home_environment(home)
         except Exception:
             return self._unavailable()
-        return self.json({"home": result.get("home")}, headers=NO_STORE_HEADERS)
+        return self.json(
+            {
+                "home": result.get("home"),
+                "setup_revision": result.get("setup_revision"),
+            },
+            headers=NO_STORE_HEADERS,
+        )
 
 
 class ClimateAdminRoomSignalsView(_ClimateView):

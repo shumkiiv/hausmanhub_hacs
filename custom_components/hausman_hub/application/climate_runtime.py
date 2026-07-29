@@ -101,6 +101,7 @@ from .climate_setup import (
     build_climate_contour_draft_setup,
     climate_draft_save_receipt,
     climate_ir_code_bindings,
+    climate_setup_revision,
     climate_setup_options,
     create_climate_contour_draft,
     current_climate_contour_setup,
@@ -1524,7 +1525,9 @@ class ClimateRuntime:
             await self._registry_store.async_save(registry)
             self._registry = registry
             self.last_error = None
-            return registry_to_payload(registry)
+            result = registry_to_payload(registry)
+            result["setup_revision"] = climate_setup_revision(registry, self._contours)
+            return result
 
     async def async_update_room_window(
         self,

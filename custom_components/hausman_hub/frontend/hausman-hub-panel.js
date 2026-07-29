@@ -1,4 +1,3 @@
-/* HausmanHub admin panel: climate overview, management, and full settings. */
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css";
 const MODE_API = "hausman_hub/v1/admin/climate-mode";
@@ -115,7 +114,6 @@ function setAttr(node, name, value) {
   else node[name] = String(value);
 }
 
-// Namespace URI is split so the module contains no absolute URL literals.
 const SVG_NAMESPACE = "http" + "://www.w3.org/2000/svg";
 
 const ICON_PATHS = {
@@ -2198,13 +2196,13 @@ class HausmanHubPanel extends HTMLElement {
     this._firstRun.homeError = "";
     this._render();
     try {
-      await this._hass.callApi("POST", HOME_API, {
+      this._firstRun.setupRevision = (await this._hass.callApi("POST", HOME_API, {
         central_heating_entity_id: home.central_heating_entity_id || null,
         heating_lockout_high: high,
         heating_lockout_low: low,
         outdoor_temperature_entity_id: home.outdoor_temperature_entity_id || null,
         presence_entity_id: home.presence_entity_id || null,
-      });
+      })).setup_revision;
       this._firstRun.step = "validation";
     } catch (error) {
       this._firstRun.homeError = "Сигналы дома сохранить не удалось. Проверьте значения и повторите.";
@@ -2231,7 +2229,9 @@ class HausmanHubPanel extends HTMLElement {
       this._firstRun.validation = validation;
     } catch (error) {
       this._firstRun.draft = null;
-      this._firstRun.issues = [{ message: "Полная проверка не выполнена. Повторите попытку." }];
+      this._firstRun.issues = [{ message: error?.status === 409
+        ? "Конфигурация изменилась. Вернитесь назад и повторите."
+        : "Проверка недоступна. Обновите мастер." }];
       this._firstRun.validation = { save_allowed: false, status: "blocked" };
     } finally {
       this._busy = false;

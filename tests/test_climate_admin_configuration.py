@@ -1218,6 +1218,7 @@ class ClimateAdminConfigurationRoutesTest(unittest.TestCase):
             saved.payload["home"]["outdoor_temperature_entity_id"],
         )
         self.assertEqual(19.0, saved.payload["home"]["heating_lockout_high"])
+        self.assertIsInstance(saved.payload["setup_revision"], int)
 
         weather_saved = self._post(
             path,
@@ -1234,6 +1235,10 @@ class ClimateAdminConfigurationRoutesTest(unittest.TestCase):
         self.assertEqual(
             "weather.synthetic_home",
             weather_saved.payload["home"]["outdoor_temperature_entity_id"],
+        )
+        self.assertNotEqual(
+            saved.payload["setup_revision"],
+            weather_saved.payload["setup_revision"],
         )
 
         for payload in (

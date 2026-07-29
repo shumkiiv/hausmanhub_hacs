@@ -26,6 +26,7 @@ PANEL_PAYLOAD = {
 }
 MODE_PAYLOAD = {"mode": "disabled", "contour_configured": False}
 HOME_PAYLOAD = {
+    "setup_revision": 5,
     "home": {
         "outdoor_temperature_entity_id": None,
         "presence_entity_id": None,
@@ -470,6 +471,46 @@ class PanelContourWizardTest(unittest.TestCase):
 
 
 class PanelFirstRunWizardTest(unittest.TestCase):
+    def test_home_save_refreshes_revision_used_by_full_validation(self) -> None:
+        script = panel_script(
+            get_payloads(),
+            {
+                "hausman_hub/v1/admin/home-environment": {
+                    "home": HOME_PAYLOAD["home"],
+                    "setup_revision": 6,
+                }
+            },
+            """
+        panel._firstRun.setupRevision = 5;
+        panel._firstRun.home = {
+          central_heating_entity_id: null, heating_lockout_high: 18,
+          heating_lockout_low: 16, outdoor_temperature_entity_id: null,
+          presence_entity_id: null
+        };
+        await panel._saveFirstRunHome();
+        if (panel._firstRun.setupRevision !== 6 || panel._firstRun.step !== "validation") {
+          throw new Error("home save did not refresh the setup revision before validation");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_full_validation_explains_revision_conflict(self) -> None:
+        script = panel_script(
+            get_payloads(),
+            {"hausman_hub/v1/admin/climate-drafts": {"__fail": 409}},
+            """
+        panel._firstRunPayload = () => ({payload: {}});
+        await panel._validateFirstRun();
+        if (!panel._firstRun.issues[0].message.includes("Конфигурация изменилась")) {
+          throw new Error("revision conflict explanation missing");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_default_room_catalog_hides_only_unavailable_shadow_duplicate(self) -> None:
         options = copy.deepcopy(DRAFT_OPTIONS)
         shared = {
@@ -1291,6 +1332,7 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         script = panel_script(
             get_payloads(),
             {
+                "hausman_hub/v1/admin/home-environment": HOME_PAYLOAD,
                 "hausman_hub/v1/admin/climate-drafts": [draft, draft],
                 "hausman_hub/v1/admin/climate-drafts/validate": [ready_validation(draft), ready_validation(draft)],
                 "hausman_hub/v1/admin/climate-drafts/save": {
