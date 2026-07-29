@@ -105,6 +105,14 @@ class AiAssistantService:
         async with self._lock:
             return self._state
 
+    async def async_reset_state(self) -> None:
+        """Clear stored assistant advice and usage without a provider call."""
+
+        async with self._lock:
+            state = AiAssistantState()
+            await self._store.async_save(state)
+            self._state = state
+
     async def async_refresh(self) -> AiAdvisory:
         async with self._lock:
             short_circuit = self._short_circuit_status()

@@ -19,7 +19,7 @@ PANEL_JS = (
     / "hausman-hub-panel.js"
 )
 PANEL_CSS = PANEL_JS.with_name("hausman-hub-panel.css")
-MAX_PANEL_JS_BYTES = 230 * 1024
+MAX_PANEL_JS_BYTES = 240 * 1024
 MAX_PANEL_CSS_BYTES = 48 * 1024
 
 
@@ -98,6 +98,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             '"hausman_hub/v1/admin/scenarios/delete"',
             '"hausman_hub/v1/admin/scenarios/run"',
             '"hausman_hub/v1/admin/connection-settings"',
+            '"hausman_hub/v1/admin/reset"',
         ):
             with self.subTest(approved=approved):
                 self.assertIn(approved, content)
@@ -493,7 +494,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.44.9",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.45.0",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },

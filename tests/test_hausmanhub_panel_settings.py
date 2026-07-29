@@ -785,7 +785,10 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         }
         script = panel_script(
             payloads,
-            {"hausman_hub/v1/admin/connection-settings": {"status": "success"}},
+            {
+                "hausman_hub/v1/admin/connection-settings": {"status": "success"},
+                "hausman_hub/v1/admin/reset": {"status": "reset"},
+            },
             """
         panel._shell.tabs.settings.fire("click");
         await tick();
@@ -793,7 +796,8 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         let text = textOf(screen);
         for (const label of [
           "Настройки", "Подключение", "Интерфейс", "Тема панели", "Уменьшить анимацию",
-          "Показывать подсказки", "О системе", "Версия", "Единый интерфейс с планшетом HausmanHub",
+          "Показывать подсказки", "Сброс HausmanHub", "О системе", "Версия",
+          "Единый интерфейс с планшетом HausmanHub",
         ]) {
           if (!text.includes(label)) throw new Error("settings text missing: " + label);
         }
@@ -845,6 +849,22 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         motionToggle.fire("change");
         if (panel._settingsPrefs.reduced_motion !== true) {
           throw new Error("reduced motion preference did not apply");
+        }
+        screen = panel._shell.settings;
+        findAll(screen, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Подготовить полный сброс")[0].fire("click");
+        screen = panel._shell.settings;
+        const confirmReset = findAll(screen, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Сбросить все настройки")[0];
+        if (!confirmReset || !textOf(screen).includes("Home Assistant останутся без изменений")) {
+          throw new Error("safe reset confirmation is incomplete");
+        }
+        confirmReset.fire("click");
+        await tick();
+        const resetPost = calls.find((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/admin/reset");
+        if (!resetPost || resetPost.payload.confirmation !== "RESET_HAUSMANHUB") {
+          throw new Error("full reset confirmation contract mismatch");
         }
             """,
         )

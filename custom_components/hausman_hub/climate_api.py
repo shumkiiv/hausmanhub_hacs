@@ -70,6 +70,7 @@ from .application.climate_runtime import (
 )
 from .application.climate_setup import ClimateSetupViolation
 from .domain.ai_assistant import AiAdvisoryStatus, AiAssistantViolation
+from .domain.hub_settings import HausmanHubSettings
 from .dashboard_ha_snapshot import async_dashboard_snapshot
 
 if TYPE_CHECKING:
@@ -127,6 +128,7 @@ ADMIN_AI_ASSISTANT_PATH = "/api/hausman_hub/v1/admin/ai-assistant"
 ADMIN_AI_ASSISTANT_SETTINGS_PATH = f"{ADMIN_AI_ASSISTANT_PATH}/settings"
 ADMIN_AI_ASSISTANT_REFRESH_PATH = f"{ADMIN_AI_ASSISTANT_PATH}/refresh"
 ADMIN_CONNECTION_SETTINGS_PATH = "/api/hausman_hub/v1/admin/connection-settings"
+ADMIN_RESET_PATH = "/api/hausman_hub/v1/admin/reset"
 NO_STORE_HEADERS = {"Cache-Control": "no-store"}
 MAX_ACTION_BODY_BYTES = 16 * 1024
 MAX_CLIMATE_SETUP_BODY_BYTES = 256 * 1024
@@ -192,6 +194,7 @@ def register_climate_api(
             ClimateAdminAiAssistantSettingsView(hass),
             ClimateAdminAiAssistantRefreshView(hass),
             ClimateAdminConnectionSettingsView(hass),
+            ClimateAdminResetView(hass),
         ]
         if scenario_service is not None:
             from .scenario_api import scenario_api_views
@@ -1516,6 +1519,7 @@ class ClimateAdminConnectionSettingsView(_ClimateView):
             headers=NO_STORE_HEADERS,
         )
 
+
     async def post(self, request: Any) -> Any:
         if not _is_exact_request(request, ADMIN_CONNECTION_SETTINGS_PATH):
             return _not_found(self)
@@ -1589,6 +1593,73 @@ class ClimateAdminConnectionSettingsView(_ClimateView):
                 ),
                 "smart_home_center_url": options.get(SMART_HOME_CENTER_URL_FIELD),
                 "home_assistant_url": options.get(HOME_ASSISTANT_URL_FIELD),
+            },
+            headers=NO_STORE_HEADERS,
+        )
+
+
+class ClimateAdminResetView(_ClimateView):
+    """Reset HausmanHub-owned settings without changing Home Assistant devices."""
+
+    url = ADMIN_RESET_PATH
+    name = "api:hausman_hub:climate_admin_reset"
+
+    async def post(self, request: Any) -> Any:
+        if not _is_exact_request(request, ADMIN_RESET_PATH):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        try:
+            payload = await _request_json(request)
+        except ValueError:
+            payload = None
+        if not isinstance(payload, Mapping) or payload.get("confirmation") != "RESET_HAUSMANHUB":
+            return self.json_message(
+                "Для полного сброса требуется явное подтверждение.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        runtime = self._runtime()
+        entry = _single_hausmanhub_entry(self._hass)
+        data = self._hass.data.get(DOMAIN, {})
+        scenario_service = data.get("scenario_service")
+        ir_code_service = data.get("ir_code_service")
+        settings_service = data.get("settings_service")
+        assistant = self._ai_assistant()
+        if any(item is None for item in (
+            runtime, entry, scenario_service, ir_code_service, settings_service, assistant,
+        )):
+            return self._unavailable()
+        try:
+            current = effective_configuration(entry.data, entry.options)
+            await runtime.async_reset_configuration()
+            await scenario_service.async_reset()
+            await ir_code_service.async_reset()
+            await settings_service.async_replace(HausmanHubSettings())
+            await assistant.async_reset_state()
+            self._hass.config_entries.async_update_entry(
+                entry,
+                data=ai_assistant_entry_data(
+                    entry.data,
+                    AiAssistantBinding(None, None),
+                ),
+                options=create_options(mode_value=current.mode),
+            )
+        except Exception:
+            return self._unavailable()
+        return self.json(
+            {
+                "status": "reset",
+                "reset": [
+                    "climate",
+                    "device_bindings",
+                    "home_signals",
+                    "scenarios",
+                    "ir_codes",
+                    "assistant",
+                    "connection",
+                ],
+                "preserved": ["home_assistant_areas", "home_assistant_devices"],
             },
             headers=NO_STORE_HEADERS,
         )

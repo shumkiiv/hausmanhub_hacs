@@ -116,6 +116,18 @@ class IRCodeService:
             raise IRCodeServiceError("no registry loaded", status=500)
         await self._repository.async_save(self._registry)
 
+    async def async_reset(self) -> None:
+        """Remove every HausmanHub IR binding without touching the transmitter."""
+
+        async with self._lock:
+            previous = self._registry
+            self._registry = IRCodeRegistry()
+            try:
+                await self.async_save()
+            except Exception:
+                self._registry = previous
+                raise
+
     def set_binding_validator(self, validator: IRCodeBindingValidator) -> None:
         """Attach the saved-contour binding boundary after runtime startup wiring."""
 

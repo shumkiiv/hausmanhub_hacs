@@ -522,6 +522,36 @@ class ClimateRuntime:
         async with self._lock:
             return contour_registry_to_payload(self._contours)
 
+    async def async_reset_configuration(self) -> dict[str, object]:
+        """Reset every climate setting without sending commands to devices."""
+
+        async with self._lock:
+            previous_registry = self._registry
+            previous_contours = self._contours
+            previous_protection = self._protection_memory
+            registry = ClimateRegistry()
+            contours = ContourRegistry()
+            await self._async_persist_contour_setup_unlocked(registry, contours)
+            protection = empty_climate_protection_memory(updated_at=self._safe_now())
+            try:
+                await self._async_save_protection(protection)
+            except Exception:
+                await self._async_persist_contour_setup_unlocked(
+                    previous_registry,
+                    previous_contours,
+                )
+                self._protection_memory = previous_protection
+                raise
+            self._protection_memory = protection
+            self._protection_restart_after = None
+            self._weather_heating_lockout = None
+            return {
+                "status": "reset",
+                "room_count": 0,
+                "device_count": 0,
+                "contour_count": 0,
+            }
+
     async def async_contours_snapshot(self) -> dict[str, object]:
         """Return public contour status using the existing climate engine."""
 

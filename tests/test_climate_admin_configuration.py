@@ -804,9 +804,17 @@ class ClimateAdminConfigurationRoutesTest(unittest.TestCase):
         self.views = {view.url: view for view in self.hass.http.views}
         self.updated_options: list[tuple[object, object]] = []
 
-        def async_update_entry(entry: object, *, options: object = None) -> None:
-            self.updated_options.append((entry, options))
-            entry.options = dict(options)
+        def async_update_entry(
+            entry: object,
+            *,
+            data: object = None,
+            options: object = None,
+        ) -> None:
+            if data is not None:
+                entry.data = dict(data)
+            if options is not None:
+                self.updated_options.append((entry, options))
+                entry.options = dict(options)
 
         self.hass.config_entries.async_update_entry = async_update_entry
         from datetime import datetime as dt
@@ -1273,6 +1281,41 @@ class ClimateAdminConfigurationRoutesTest(unittest.TestCase):
         ):
             with self.subTest(payload=payload):
                 self.assertEqual(400, self._post(path, self._admin(), payload).status)
+
+    def test_full_reset_requires_confirmation_and_preserves_ha_inventory(self) -> None:
+        path = "/api/hausman_hub/v1/admin/reset"
+        self.assertIn(path, self.views)
+        self._inject_runtime(configured=True)
+        self.assertEqual(400, self._post(path, self._admin(), {}).status)
+        self.assertEqual(
+            403,
+            self._post(
+                path,
+                self._tablet(),
+                {"confirmation": "RESET_HAUSMANHUB"},
+            ).status,
+        )
+
+        response = self._post(
+            path,
+            self._admin(),
+            {"confirmation": "RESET_HAUSMANHUB"},
+        )
+        self.assertEqual(200, response.status)
+        self.assertEqual("reset", response.payload["status"])
+        self.assertEqual(
+            ["home_assistant_areas", "home_assistant_devices"],
+            response.payload["preserved"],
+        )
+        runtime = self.hass.data["hausman_hub"]["climate_runtime"]
+        registry = asyncio.run(runtime.async_registry_payload())
+        contours = asyncio.run(runtime.async_contour_registry_payload())
+        self.assertEqual([], registry["rooms"])
+        self.assertEqual([], registry["devices"])
+        self.assertEqual([], contours["contours"])
+        self.assertEqual("read-only", self.entry.options["mode"])
+        self.assertNotIn("smart_home_center_url", self.entry.options)
+        self.assertEqual(2, len(self.hass.area_registry.async_list_areas()))
 
     def test_room_signals_get_update_and_clear(self) -> None:
         path = "/api/hausman_hub/v1/admin/climate-room-signals"

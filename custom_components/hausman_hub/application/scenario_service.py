@@ -100,6 +100,14 @@ class ScenarioService:
             raise ScenarioServiceError("Store does not support save", status=500)
         await save(registry)
 
+    async def async_reset(self) -> None:
+        """Remove every user scenario without executing it."""
+
+        async with self._lock:
+            registry = ScenarioRegistry()
+            await self.async_save(registry)
+            self._registry = registry
+
     def _ensure_loaded(self) -> ScenarioRegistry:
         if self._registry is None:
             raise ScenarioServiceError("Service not loaded", status=500)

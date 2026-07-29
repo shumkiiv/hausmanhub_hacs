@@ -559,7 +559,7 @@ class PanelFirstRunWizardTest(unittest.TestCase):
           throw new Error("default room catalog did not suppress the unavailable shadow duplicate");
         }
         const showAll = findAll(panel.shadowRoot, (node) => node.tagName === "LABEL"
-          && textOf(node).includes("Показать все устройства"))[0].children[0];
+          && textOf(node).includes("Показать устройства из других комнат"))[0].children[0];
         showAll.checked = true;
         showAll.fire("change");
         const allKeys = panel._firstRunFields.room.devices.map((item) => item.key);
@@ -694,7 +694,7 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         panel._firstRunFields.rooms.living.configure.fire("click");
         const toggle = findAll(panel.shadowRoot, (node) => node.tagName === "LABEL"
           && String(node.className).includes("checkbox-field")
-          && textOf(node).includes("Показать все устройства"))[0].children[0];
+          && textOf(node).includes("Показать устройства из других комнат"))[0].children[0];
         toggle.checked = true;
         toggle.fire("change");
         const text = textOf(panel.shadowRoot);
@@ -739,7 +739,7 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         panel._firstRunFields.rooms.living.configure.fire("click");
         const toggle = findAll(panel.shadowRoot, (node) => node.tagName === "LABEL"
           && String(node.className).includes("checkbox-field")
-          && textOf(node).includes("Показать все устройства"))[0].children[0];
+          && textOf(node).includes("Показать устройства из других комнат"))[0].children[0];
         toggle.checked = true;
         toggle.fire("change");
         const unknown = panel._firstRunFields.room.devices.find((item) =>
@@ -768,7 +768,7 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         panel._firstRunFields.rooms.living.configure.fire("click");
         const toggle = findAll(panel.shadowRoot, (node) => node.tagName === "LABEL"
           && String(node.className).includes("checkbox-field")
-          && textOf(node).includes("Показать все устройства"))[0].children[0];
+          && textOf(node).includes("Показать устройства из других комнат"))[0].children[0];
         toggle.checked = true;
         toggle.fire("change");
         const text = textOf(panel.shadowRoot);
@@ -930,23 +930,35 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
-    def test_rooms_step_warns_about_roomless_candidate_count(self) -> None:
+    def test_binding_step_lists_and_quickly_assigns_roomless_physical_device(self) -> None:
+        options = roomless_options()
+        options["devices"][-1]["suggested_room_id"] = "living"
+        options["devices"][-1]["suggested_room_name"] = "Гостиная"
         script = panel_script(
-            get_payloads(options=roomless_options()),
+            get_payloads(options=options),
             {},
             """
         findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
           && node.textContent === "Начать настройку")[0].fire("click");
         await tick();
-        const warnings = findAll(panel.shadowRoot, (node) =>
-          String(node.className).split(" ").includes("wizard-warning"));
-        if (warnings.length !== 1) {
-          throw new Error("rooms step must show one roomless warning");
+        const text = textOf(panel.shadowRoot);
+        if (!text.includes("Привязка комнат и устройств")
+          || !text.includes("Устройства без комнаты")
+          || !text.includes("Komanchi Living SmartIR")) {
+          throw new Error("binding inventory is incomplete: " + text);
         }
-        const expected = "Устройства без комнаты: 1. Они доступны на шаге комнаты "
-          + "в секции «Устройства без комнаты» или после назначения зоны в Home Assistant.";
-        if (warnings[0].textContent !== expected) {
-          throw new Error("rooms-step roomless count mismatch: " + warnings[0].textContent);
+        const rows = findAll(panel.shadowRoot, (node) =>
+          String(node.className).split(" ").includes("binding-device-row"));
+        const target = rows.find((row) => textOf(row).includes("Komanchi Living SmartIR"));
+        if (!target) throw new Error("suggested but unassigned physical device is missing");
+        const picker = findAll(target, (node) => node.tagName === "SELECT")[0];
+        if (!picker || picker.value !== "") throw new Error("room picker missing or preselected");
+        picker.value = "living";
+        picker.fire("change");
+        const state = panel._firstRun.rooms.living;
+        const device = state.devices["candidate_smartir:air_conditioner"];
+        if (!state.included || !device.selected) {
+          throw new Error("quick room assignment did not update the HausmanHub draft");
         }
             """,
         )
@@ -1073,11 +1085,9 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         if (panel._activeSection !== "overview") {
           throw new Error("first-run exposed an ordinary section");
         }
-        const activeStep = findAll(panel.shadowRoot, (node) =>
-          node["aria-current"] === "step");
-        if (activeStep.length !== 1 || activeStep[0].textContent !== "Инструкция") {
-          throw new Error("active wizard step is not announced semantically");
-        }
+        const progress = findAll(panel.shadowRoot, (node) =>
+          String(node.className).split(" ").includes("wizard-progress"));
+        if (progress.length) throw new Error("welcome screen must not masquerade as a setup step");
         const getCount = calls.filter((call) => call.method === "GET").length;
         const later = findAll(panel.shadowRoot, (node) =>
           node.tagName === "BUTTON" && node.textContent === "Настроить позже")[0];
