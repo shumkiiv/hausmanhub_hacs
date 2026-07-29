@@ -1192,13 +1192,13 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual("1", room_form["description_placeholders"]["room_number"])
         self.assertEqual("1", room_form["description_placeholders"]["room_count"])
-        # Unassigned native candidates are assigned to the room on this step.
+        # HA areas are authoritative, so the selected device is already tied
+        # to this room and no second room-only selector is exposed.
         self.assertEqual(
             {
                 "contour_target_temperature",
                 "contour_target_humidity",
                 "contour_strategy",
-                "contour_room_devices",
             },
             {marker.key for marker in room_form["schema"].fields},
         )
@@ -1207,7 +1207,6 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
                 "contour_target_temperature": "25.0",
                 "contour_target_humidity": "45",
                 "contour_strategy": "normal",
-                "contour_room_devices": ["climate.synthetic_ac_source_living"],
             }
         )
 
@@ -2111,8 +2110,8 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
             field.key: selector for field, selector in ac_form["schema"].fields.items()
         }
         self.assertNotIn("climate_device_source_id", ac_fields)
-        # Native candidates are unassigned: the wizard must ask for the room.
-        self.assertIn("climate_device_room", ac_fields)
+        # The candidate inherits its authoritative room from Home Assistant.
+        self.assertNotIn("climate_device_room", ac_fields)
         self.assertEqual(
             "climate",
             ac_fields["climate_device_control_entity"].config.domain,
@@ -2122,7 +2121,6 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
                 "climate_device_id": "living_ac",
                 "climate_device_name": "Living AC",
                 "climate_device_kind": "air_conditioner",
-                "climate_device_room": "living",
                 "climate_device_control_scope": "canary",
                 "climate_device_control_owner": "climate_core",
                 "climate_device_control_entity": "climate.synthetic_ac_source_living",
@@ -2156,7 +2154,6 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
                 "climate_device_id": "kids_humidifier",
                 "climate_device_name": "Kids humidifier",
                 "climate_device_kind": "humidifier",
-                "climate_device_room": "kids",
                 "climate_device_control_scope": "observed",
                 "climate_device_control_owner": "observed",
                 "climate_device_control_entity": "humidifier.synthetic_humidifier_source_kids",
@@ -2177,12 +2174,12 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
             ["living", "kids"],
             [room.room_id for room in store.saved[0].rooms],
         )
-        # Native candidates receive a fresh private source id on import;
-        # the entity id itself is never copied into the registry binding.
+        # Candidates already placed in HA keep the same internal entity-backed
+        # source as their control endpoint; it remains absent from public APIs.
         self.assertEqual(
             [
-                "hausmanhub-native-climate.synthetic_ac_source_living",
-                "hausmanhub-native-humidifier.synthetic_humidifier_source_kids",
+                "climate.synthetic_ac_source_living",
+                "humidifier.synthetic_humidifier_source_kids",
             ],
             [device.source_id for device in store.saved[0].devices],
         )

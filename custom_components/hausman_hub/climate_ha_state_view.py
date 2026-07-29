@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import importlib
-import re
 from typing import TYPE_CHECKING
 from urllib.parse import quote
 
@@ -25,6 +24,7 @@ from .application.climate_signal_settings import (
     SIGNAL_KINDS,
     signal_candidate_is_suitable,
 )
+from .ha_area_ids import stable_area_room_id
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -38,7 +38,6 @@ _OBSERVED_ATTRIBUTES = frozenset(
         "humidity",
     }
 )
-_STABLE_ROOM_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _ZIGBEE2MQTT_IMAGE_BASE = "https://www.zigbee2mqtt.io/images/devices/"
 _MAX_DEVICE_DETAIL_LENGTH = 160
 
@@ -201,7 +200,7 @@ class HomeAssistantClimateStateView:
         used_room_ids: set[str] = set()
         for area in area_entries:
             source_area_id = str(area.id)
-            room_id = _stable_area_room_id(source_area_id, used_room_ids)
+            room_id = stable_area_room_id(source_area_id, used_room_ids)
             used_room_ids.add(room_id)
             area_room_ids[source_area_id] = room_id
             rooms.append(
@@ -368,21 +367,6 @@ class HomeAssistantClimateStateView:
             ),
             rooms=rooms,
         )
-
-
-def _stable_area_room_id(area_id: str, used: set[str]) -> str:
-    """Keep normal HA area ids and derive a bounded stable fallback otherwise."""
-
-    if _STABLE_ROOM_ID.fullmatch(area_id) and area_id not in used:
-        return area_id
-    attempt = 0
-    while True:
-        material = area_id if attempt == 0 else f"{area_id}:{attempt}"
-        digest = hashlib.sha256(material.encode("utf-8")).hexdigest()[:40]
-        candidate = f"ha_{digest}"
-        if candidate not in used:
-            return candidate
-        attempt += 1
 
 
 def _bounded_area_name(value: object, room_id: str) -> str:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
 import json
 from pathlib import Path
 import unittest
@@ -818,6 +819,27 @@ class ClimateSetupDraftTest(unittest.TestCase):
                 self.registry,  # type: ignore[arg-type]
                 self.snapshot,
                 moved,
+            )
+
+        roomless_snapshot = replace(
+            self.snapshot,
+            devices=tuple(
+                replace(device, room_id="")
+                if device.room_id == "kids"
+                else device
+                for device in self.snapshot.devices
+            ),
+        )
+        roomless = copy.deepcopy(self.request)
+        roomless["snapshot_revision"] = climate_setup_options(
+            self.registry,  # type: ignore[arg-type]
+            roomless_snapshot,
+        )["snapshot_revision"]
+        with self.assertRaisesRegex(ClimateSetupViolation, "room differs"):
+            create_climate_contour_draft(
+                self.registry,  # type: ignore[arg-type]
+                roomless_snapshot,
+                roomless,
             )
 
     def test_only_detected_device_type_and_valid_comfort_values_are_accepted(self) -> None:

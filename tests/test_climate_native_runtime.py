@@ -91,10 +91,12 @@ class CountingStateView:
     def entity_catalog(self):
         from custom_components.hausman_hub.application.climate_native_setup import (
             ClimateHaCatalogEntry,
+            ClimateHaCatalogRoom,
             ClimateHaEntityCatalog,
         )
 
         return ClimateHaEntityCatalog(
+            rooms=(ClimateHaCatalogRoom(room_id="living", name="Living room"),),
             entries=tuple(
                 ClimateHaCatalogEntry(
                     entity_id=state.entity_id,
@@ -105,6 +107,7 @@ class CountingStateView:
                     friendly_name=state.entity_id,
                     available=state.state not in {"", "unavailable", "unknown"},
                     last_updated_ms=state.last_updated_ms,
+                    room_id="living",
                 )
                 for state in sorted(
                     self._states.values(), key=lambda state: state.entity_id
@@ -1886,9 +1889,7 @@ class NativeProjectionSwitchTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("saved", receipt["status"])
         saved_registry = registry_store.saved[-1]
         device = saved_registry.devices[0]
-        self.assertEqual(
-            "hausmanhub-native-climate.living_ac", device.source_id
-        )
+        self.assertEqual("climate.living_ac", device.source_id)
         self.assertEqual("living", device.room_id)
         self.assertEqual("living_air_conditioner", device.device_id)
 

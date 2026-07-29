@@ -1295,7 +1295,6 @@ class ClimateAdminConfigurationRoutesTest(unittest.TestCase):
                 {"confirmation": "RESET_HAUSMANHUB"},
             ).status,
         )
-
         response = self._post(
             path,
             self._admin(),
@@ -1316,6 +1315,29 @@ class ClimateAdminConfigurationRoutesTest(unittest.TestCase):
         self.assertEqual("read-only", self.entry.options["mode"])
         self.assertNotIn("smart_home_center_url", self.entry.options)
         self.assertEqual(2, len(self.hass.area_registry.async_list_areas()))
+
+    def test_device_area_assignment_route_is_explicit_and_guarded(self) -> None:
+        from tests.test_local_summary_access import FakeJsonRequest, reader_user
+
+        path = "/api/hausman_hub/v1/admin/device-area-assignments"
+        self.assertIn(path, self.views)
+        payload = {"snapshot_revision": 0, "assignments": []}
+        for user, remote in (
+            (self._tablet(), "192.168.1.20"),
+            (reader_user("system-read-only"), "192.168.1.20"),
+            (self._admin(), "8.8.8.8"),
+        ):
+            with self.subTest(user=user, remote=remote):
+                self.assertEqual(403, self._post(path, user, payload, remote).status)
+        with_query = FakeJsonRequest(
+            "192.168.1.20",
+            self._admin(),
+            path,
+            payload,
+        )
+        with_query.query_string = "unexpected=1"
+        self.assertEqual(404, asyncio.run(self.views[path].post(with_query)).status)
+        self.assertEqual(409, self._post(path, self._admin(), payload).status)
 
     def test_room_signals_get_update_and_clear(self) -> None:
         path = "/api/hausman_hub/v1/admin/climate-room-signals"

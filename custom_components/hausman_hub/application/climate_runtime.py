@@ -40,6 +40,10 @@ from ..domain.contours import ContourDefinition, ContourMode, ContourRegistry
 from ..domain.native_climate import NativeClimatePolicy, preview_native_climate
 from ..domain.climate_targets import ClimateTargetSnapshot
 from .climate_application import ClimateDesiredStateChanges
+from .climate_area_assignment import (
+    ClimateAreaAssignmentPort,
+    climate_area_assignment_targets,
+)
 from .climate_equipment import build_climate_equipment_snapshot
 from .ai_assistant_evidence import ai_evidence_from_observation
 from .climate_ha_adapters import build_climate_ha_call_plan
@@ -214,6 +218,7 @@ class ClimateRuntime:
         protection_store: ClimateProtectionStorage | None = None,
         strict_ha_call_executor: ClimateStrictHaCallExecutor | None = None,
         ha_state_view: ClimateHaStateView | None = None,
+        ha_area_assignment: ClimateAreaAssignmentPort | None = None,
         ir_code_service: IRCodeService | None = None,
         operation_id_factory: Callable[[], str] | None = None,
         now_ms: Callable[[], int] | None = None,
@@ -226,6 +231,7 @@ class ClimateRuntime:
         self._protection_store = protection_store
         self._strict_ha_call_executor = strict_ha_call_executor
         self._ha_state_view = ha_state_view
+        self._ha_area_assignment = ha_area_assignment
         self._ir_code_service = ir_code_service
         self._now_ms = now_ms or (lambda: int(time.time() * 1000))
         self._local_now = local_now or (lambda: datetime.now().astimezone())
@@ -366,6 +372,23 @@ class ClimateRuntime:
                 snapshot,
                 self._ha_state_view.ir_remote_catalog(),
             )
+
+    async def async_assign_home_assistant_areas(
+        self,
+        payload: object,
+    ) -> dict[str, object]:
+        """Validate and atomically persist physical room assignments in HA."""
+
+        async with self._lock:
+            if self._ha_area_assignment is None:
+                raise ClimateRuntimeUnavailable("HA area assignment is unavailable")
+            snapshot = await self._async_native_setup_snapshot_unlocked()
+            targets = climate_area_assignment_targets(
+                self._registry,
+                snapshot,
+                payload,
+            )
+            return await self._ha_area_assignment.async_assign(targets)
 
     async def async_current_contour_setup(self) -> dict[str, object]:
         """Return saved editor values without persistence or commands."""

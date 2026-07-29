@@ -54,6 +54,7 @@ from .application.climate_signal_settings import (
     validate_room_window_update,
 )
 from .application.climate_comparison import climate_comparison_to_payload
+from .application.climate_area_assignment import ClimateAreaAssignmentViolation
 from .application.contour_apply import ContourApplyViolation
 from .application.contour_override import TemporaryTemperatureViolation
 from .application.home_climate_targets import HomeClimateTargetsViolation
@@ -109,6 +110,9 @@ ADMIN_DRAFT_PATH = "/api/hausman_hub/v1/admin/climate-drafts"
 ADMIN_DRAFT_CURRENT_PATH = "/api/hausman_hub/v1/admin/climate-drafts/current"
 ADMIN_DRAFT_VALIDATION_PATH = "/api/hausman_hub/v1/admin/climate-drafts/validate"
 ADMIN_DRAFT_SAVE_PATH = "/api/hausman_hub/v1/admin/climate-drafts/save"
+ADMIN_DEVICE_AREA_ASSIGNMENTS_PATH = (
+    "/api/hausman_hub/v1/admin/device-area-assignments"
+)
 ADMIN_PROFILE_UPDATE_PATH = "/api/hausman_hub/v1/admin/climate-profiles"
 ADMIN_SCHEDULE_UPDATE_PATH = "/api/hausman_hub/v1/admin/climate-schedule"
 ADMIN_REGISTRY_PATH = "/api/hausman_hub/v1/admin/climate-registry"
@@ -178,6 +182,7 @@ def register_climate_api(
             ClimateAdminDraftCurrentView(hass),
             ClimateAdminDraftValidationView(hass),
             ClimateAdminDraftSaveView(hass),
+            ClimateAdminDeviceAreaAssignmentsView(hass),
             ClimateAdminProfileUpdateView(hass),
             ClimateAdminScheduleUpdateView(hass),
             ClimateAdminRegistryView(hass),
@@ -625,6 +630,54 @@ class ClimateAdminDraftView(_ClimateView):
         except ValueError:
             return self.json_message(
                 "Запрос черновика климатического контура заполнен неверно.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        except ClimateRuntimeUnavailable:
+            return self._unavailable()
+        except Exception:
+            return self._unavailable()
+        return self.json(result, headers=NO_STORE_HEADERS)
+
+
+class ClimateAdminDeviceAreaAssignmentsView(_ClimateView):
+    """Persist one explicit batch of room assignments in Home Assistant."""
+
+    url = ADMIN_DEVICE_AREA_ASSIGNMENTS_PATH
+    name = "api:hausman_hub:climate_admin_device_area_assignments"
+
+    async def post(self, request: Any) -> Any:
+        if not _is_exact_request(request, ADMIN_DEVICE_AREA_ASSIGNMENTS_PATH):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        runtime = self._runtime()
+        if runtime is None:
+            return self._unavailable()
+        try:
+            payload = await _request_json(
+                request,
+                maximum_bytes=MAX_CLIMATE_SETUP_BODY_BYTES,
+            )
+            result = await runtime.async_assign_home_assistant_areas(payload)
+        except ClimateAreaAssignmentViolation as error:
+            status = (
+                HTTPStatus.CONFLICT
+                if error.code == "snapshot_changed"
+                else (
+                    HTTPStatus.SERVICE_UNAVAILABLE
+                    if error.code == "registry_unavailable"
+                    else HTTPStatus.BAD_REQUEST
+                )
+            )
+            return self.json_message(
+                "Не удалось сохранить привязки комнат в Home Assistant.",
+                status,
+                headers=NO_STORE_HEADERS,
+            )
+        except ValueError:
+            return self.json_message(
+                "Запрос привязки комнат заполнен неверно.",
                 HTTPStatus.BAD_REQUEST,
                 headers=NO_STORE_HEADERS,
             )

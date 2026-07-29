@@ -930,13 +930,15 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
-    def test_binding_step_lists_and_quickly_assigns_roomless_physical_device(self) -> None:
+    def test_binding_step_saves_roomless_physical_device_to_home_assistant(self) -> None:
         options = roomless_options()
         options["devices"][-1]["suggested_room_id"] = "living"
         options["devices"][-1]["suggested_room_name"] = "Гостиная"
         script = panel_script(
             get_payloads(options=options),
-            {},
+            {"hausman_hub/v1/admin/device-area-assignments": {
+                "status": "saved", "updated_devices": 1, "updated_entities": 0,
+            }},
             """
         findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
           && node.textContent === "Начать настройку")[0].fire("click");
@@ -955,17 +957,32 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         if (!picker || picker.value !== "") throw new Error("room picker missing or preselected");
         picker.value = "living";
         picker.fire("change");
-        const state = panel._firstRun.rooms.living;
-        const device = state.devices["candidate_smartir:air_conditioner"];
-        if (!state.included || !device.selected) {
-          throw new Error("quick room assignment did not update the HausmanHub draft");
+        if (panel._firstRun.rooms.living.included
+          || panel._firstRun.rooms.living.devices["candidate_smartir:air_conditioner"].selected) {
+          throw new Error("area draft leaked into the climate contour draft");
+        }
+        const save = findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Сохранить привязки в Home Assistant")[0];
+        if (!save || save.disabled) throw new Error("explicit HA save action is unavailable");
+        save.fire("click");
+        await tick(4);
+        const request = calls.find((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/admin/device-area-assignments");
+        if (!request || request.payload.snapshot_revision !== 77
+          || request.payload.assignments.length !== 1
+          || request.payload.assignments[0].room_id !== "living"
+          || request.payload.assignments[0].candidate_ids[0] !== "candidate_smartir") {
+          throw new Error("HA area assignment payload mismatch: " + JSON.stringify(request));
+        }
+        if (!textOf(panel.shadowRoot).includes("Привязки комнат сохранены")) {
+          throw new Error("successful HA assignment feedback is missing");
         }
             """,
         )
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
-    def test_roomless_devices_bind_to_the_room_in_hausmanhub_only(self) -> None:
+    def test_roomless_devices_require_home_assistant_assignment_first(self) -> None:
         script = panel_script(
             get_payloads(options=roomless_options()),
             {},
@@ -979,8 +996,8 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         if (!textOf(panel.shadowRoot).includes("Устройства без комнаты")) {
           throw new Error("roomless device group is missing");
         }
-        if (!textOf(panel.shadowRoot).includes("только в HausmanHub")) {
-          throw new Error("roomless note does not promise untouched HA areas");
+        if (!textOf(panel.shadowRoot).includes("сохраните область устройства в Home Assistant")) {
+          throw new Error("roomless note does not explain the HA source of truth");
         }
         const entry = panel._firstRunFields.room.devices.find((item) =>
           item.key === "candidate_smartir:air_conditioner");
@@ -988,16 +1005,37 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         if (entry.checkbox.checked) {
           throw new Error("roomless candidate must stay unselected by default");
         }
-        entry.checkbox.checked = true;
-        entry.checkbox.fire("change");
-        const built = panel._firstRunPayload(["living"]);
-        if (built.error) throw new Error("payload failed: " + built.error);
-        const living = built.payload.rooms.find((room) => room.room_id === "living");
-        const bound = living.devices.find((device) =>
-          device.candidate_id === "candidate_smartir");
-        if (!bound || bound.type !== "air_conditioner"
-          || !("control_channel" in bound)) {
-          throw new Error("roomless candidate was not bound into the room draft");
+        if (!entry.checkbox.disabled) {
+          throw new Error("roomless candidate can bypass the HA area registry");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_failed_home_assistant_assignment_preserves_the_draft(self) -> None:
+        script = panel_script(
+            get_payloads(options=roomless_options()),
+            {"hausman_hub/v1/admin/device-area-assignments": {"__fail": 500}},
+            """
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать настройку")[0].fire("click");
+        await tick();
+        const row = findAll(panel.shadowRoot, (node) =>
+          String(node.className).split(" ").includes("binding-device-row"))
+          .find((node) => textOf(node).includes("Komanchi Living SmartIR"));
+        const picker = findAll(row, (node) => node.tagName === "SELECT")[0];
+        picker.value = "living";
+        picker.fire("change");
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Сохранить привязки в Home Assistant")[0].fire("click");
+        await tick(3);
+        const preservedAssignments = Object.values(panel._firstRun.areaAssignments);
+        if (preservedAssignments.length !== 1 || preservedAssignments[0] !== "living") {
+          throw new Error("failed save discarded the assignment draft");
+        }
+        if (!textOf(panel.shadowRoot).includes("Выбор не потерян")) {
+          throw new Error("failed save did not explain that the draft is preserved");
         }
             """,
         )
@@ -1334,7 +1372,6 @@ class PanelFirstRunWizardTest(unittest.TestCase):
                         "control_channel": "direct_wifi",
                     },
                     {"candidate_id": "candidate_temp_1", "type": "temperature_sensor"},
-                    {"candidate_id": "candidate_temp_2", "type": "temperature_sensor"},
                     {"candidate_id": "candidate_humidity", "type": "humidity_sensor"},
                 ],
             }],

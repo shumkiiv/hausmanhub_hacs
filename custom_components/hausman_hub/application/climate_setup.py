@@ -670,7 +670,7 @@ def create_climate_contour_draft(
             )
             if candidate["selectable"] is not True and not kept_configured:
                 raise ClimateSetupViolation("climate draft candidate is unavailable")
-            if candidate["room_id"] not in {room_id, UNASSIGNED_CANDIDATE_ROOM}:
+            if candidate["room_id"] != room_id:
                 raise ClimateSetupViolation("climate draft candidate room differs")
             if (
                 not isinstance(selected_type, str)
@@ -755,13 +755,7 @@ def climate_setup_options(
         suggestion["candidate_id"]: suggestion
         for suggestion in suggestions_payload["suggestions"]  # type: ignore[index]
     }
-    candidate_sources = {
-        f"candidate_{index:04d}": source_id
-        for index, source_id in enumerate(
-            _ordered_candidate_source_ids(registry, snapshot),
-            start=1,
-        )
-    }
+    candidate_sources = climate_setup_candidate_sources(registry, snapshot)
     devices: list[dict[str, object]] = []
     for candidate in candidates_payload["candidates"]:  # type: ignore[index]
         suggestion = suggestions[candidate["candidate_id"]]
@@ -2079,6 +2073,21 @@ def _ordered_candidate_source_ids(
         return (room_id, name.casefold(), source_id)
 
     return tuple(sorted(source_ids, key=sort_key))
+
+
+def climate_setup_candidate_sources(
+    registry: ClimateRegistry,
+    snapshot: ClimateImportSnapshot,
+) -> dict[str, str]:
+    """Resolve response-local candidate ids to private source ids internally."""
+
+    return {
+        f"candidate_{index:04d}": source_id
+        for index, source_id in enumerate(
+            _ordered_candidate_source_ids(registry, snapshot),
+            start=1,
+        )
+    }
 
 
 def _exact_mapping(

@@ -7,6 +7,7 @@ const DRAFT_API = "hausman_hub/v1/admin/climate-drafts";
 const SETUP_API = "hausman_hub/v1/admin/climate-drafts/current";
 const DRAFT_VALIDATE_API = `${DRAFT_API}/validate`;
 const DRAFT_SAVE_API = `${DRAFT_API}/save`;
+const AREA_ASSIGNMENTS_API = "hausman_hub/v1/admin/device-area-assignments";
 const PROFILES_API = "hausman_hub/v1/admin/climate-profiles";
 const SCHEDULE_API = "hausman_hub/v1/admin/climate-schedule";
 const AI_ASSISTANT_API = "hausman_hub/v1/admin/ai-assistant";
@@ -230,6 +231,9 @@ class HausmanHubPanel extends HTMLElement {
     this._wizardIssues = null;
     this._wizardButtons = null;
     this._firstRun = {
+      areaAssignments: {},
+      areaSaveError: "",
+      areaSaveStatus: "",
       completed: false,
       contourSaved: false,
       conflict: false,
@@ -1477,49 +1481,30 @@ class HausmanHubPanel extends HTMLElement {
     return Array.from(groups.values());
   }
 
+  _firstRunPhysicalGroupId(group) {
+    const first = group && group[0];
+    return first ? (first.device_group_id || `candidate:${first.candidate_id}`) : "";
+  }
+
   _firstRunGroupRoom(group) {
-    for (const room of (this._firstRun.options.rooms || [])) {
-      const state = this._firstRunRoomState(room);
-      if (group.some((candidate) => {
-        const key = candidate.candidate_key || candidate.candidate_id;
-        return Object.values(state.devices).some((device) => (
-          device.candidateKey === key && device.selected
-        ));
-      })) return room.id;
+    const groupId = this._firstRunPhysicalGroupId(group);
+    if (Object.prototype.hasOwnProperty.call(this._firstRun.areaAssignments, groupId)) {
+      return this._firstRun.areaAssignments[groupId];
     }
-    return "";
+    return (group && group[0] && group[0].room_id) || "";
   }
 
   _assignFirstRunGroup(group, roomId) {
-    const keys = new Set(group.map((candidate) => candidate.candidate_key || candidate.candidate_id));
-    (this._firstRun.options.rooms || []).forEach((room) => {
-      const state = this._firstRunRoomState(room);
-      Object.values(state.devices).forEach((device) => {
-        if (keys.has(device.candidateKey)) {
-          device.selected = false;
-          device.channel = null;
-        }
-      });
-      this._firstRunInvalidate(room.id);
-    });
-    if (!roomId) return;
-    const room = this._firstRun.options.rooms.find((item) => item.id === roomId);
-    if (!room) return;
-    const state = this._firstRunRoomState(room);
-    group.forEach((candidate) => {
-      const type = candidate.recommended_type || (candidate.suggested_types || [])[0];
-      const key = `${candidate.candidate_key || candidate.candidate_id}:${type}`;
-      if (type && state.devices[key]) state.devices[key].selected = true;
-    });
-    state.included = true;
+    const groupId = this._firstRunPhysicalGroupId(group);
+    if (!groupId) return;
+    if (roomId) this._firstRun.areaAssignments[groupId] = roomId;
+    else delete this._firstRun.areaAssignments[groupId];
+    this._firstRun.areaSaveError = "";
+    this._firstRun.areaSaveStatus = "";
   }
 
   _firstRunCandidateSelectable(candidate, room) {
-    return candidate.can_add === true && (
-      candidate.room_id === room.id
-      || (candidate.room_id === ""
-        && (candidate.suggested_room_id === room.id || !candidate.suggested_room_id))
-    );
+    return candidate.can_add === true && candidate.room_id === room.id;
   }
 
   _firstRunRoomNameRoot(name) {
@@ -1576,6 +1561,9 @@ class HausmanHubPanel extends HTMLElement {
     }
     if (candidate.room_id && candidate.room_id !== room.id) {
       return `Сейчас относится к зоне «${this._firstRunCandidateRoomName(candidate)}». Если это неверно, переназначьте область в Home Assistant.`;
+    }
+    if (!candidate.room_id) {
+      return "Сначала назначьте устройству комнату на первом шаге и сохраните привязку в Home Assistant.";
     }
     return "Это устройство сейчас нельзя добавить в комнату.";
   }
@@ -2163,6 +2151,12 @@ class HausmanHubPanel extends HTMLElement {
     this._render();
     try {
       this._firstRun.options = await this._hass.callApi("GET", DRAFT_API);
+      const currentGroupIds = new Set(this._firstRunPhysicalGroups(
+        this._firstRunUnassignedCandidates()
+      ).map((group) => this._firstRunPhysicalGroupId(group)));
+      Object.keys(this._firstRun.areaAssignments).forEach((groupId) => {
+        if (!currentGroupIds.has(groupId)) delete this._firstRun.areaAssignments[groupId];
+      });
       Object.keys(this._firstRun.rooms).forEach((roomId) => {
         const room = (this._firstRun.options.rooms || []).find((item) => item.id === roomId);
         if (room) this._firstRunRoomState(room);
@@ -2180,6 +2174,45 @@ class HausmanHubPanel extends HTMLElement {
       this._firstRun.loading = false;
     }
     this._render();
+  }
+
+  async _saveFirstRunAreaAssignments() {
+    if (this._busy || !this._firstRun.options) return;
+    const assignments = [];
+    const groups = this._firstRunPhysicalGroups(this._firstRunUnassignedCandidates());
+    groups.forEach((group) => {
+      const roomId = this._firstRun.areaAssignments[this._firstRunPhysicalGroupId(group)];
+      if (!roomId) return;
+      assignments.push({
+        candidate_ids: group.map((candidate) => candidate.candidate_id),
+        room_id: roomId,
+      });
+    });
+    if (!assignments.length) return;
+    this._busy = true;
+    this._firstRun.areaSaveError = "";
+    this._firstRun.areaSaveStatus = "Сохраняю привязки в Home Assistant…";
+    this._render();
+    try {
+      const receipt = await this._hass.callApi("POST", AREA_ASSIGNMENTS_API, {
+        snapshot_revision: this._firstRun.options.snapshot_revision,
+        assignments,
+      });
+      const deviceCount = Number(receipt && receipt.updated_devices) || 0;
+      const entityCount = Number(receipt && receipt.updated_entities) || 0;
+      this._firstRun.areaAssignments = {};
+      this._firstRun.areaSaveStatus = `Сохранено в Home Assistant: устройств — ${deviceCount}, отдельных сущностей — ${entityCount}.`;
+      this._notice = "Привязки комнат сохранены в Home Assistant.";
+      await this._loadFirstRunOptions(true);
+    } catch (error) {
+      this._firstRun.areaSaveStatus = "";
+      this._firstRun.areaSaveError = error && error.status === 409
+        ? "Инвентаризация Home Assistant изменилась. Обновите список и повторите выбор."
+        : "Не удалось сохранить привязки. Выбор не потерян; проверьте области устройств в Home Assistant и повторите попытку.";
+    } finally {
+      this._busy = false;
+      this._render();
+    }
   }
 
   _deferFirstRun() {
@@ -2469,7 +2502,7 @@ class HausmanHubPanel extends HTMLElement {
     const rooms = options.rooms || [];
     const roomlessGroups = this._firstRunPhysicalGroups(this._firstRunUnassignedCandidates());
     card.appendChild(el("h2", null, "Привязка комнат и устройств"));
-    card.appendChild(el("div", "section-intro", "Сначала проверьте инвентаризацию. Непривязанные устройства можно сразу назначить комнате только внутри HausmanHub."));
+    card.appendChild(el("div", "section-intro", "Home Assistant — единый источник комнат. Выберите новые привязки, затем сохраните их одной явной операцией."));
     const summary = el("div", "binding-summary");
     [["Комнат", rooms.length], ["Без комнаты", roomlessGroups.length]].forEach(([label, value]) => {
       const metric = el("div");
@@ -2549,7 +2582,7 @@ class HausmanHubPanel extends HTMLElement {
     }
     card.appendChild(list);
     card.appendChild(el("h3", "binding-heading", "Устройства без комнаты"));
-    card.appendChild(el("div", "muted binding-help", "Выберите комнату — привязка сохранится в черновике HausmanHub и не изменит область устройства в Home Assistant."));
+    card.appendChild(el("div", "muted binding-help", "Выбор остаётся черновиком до нажатия «Сохранить привязки». После сохранения физическое устройство и его сущности будут использовать область Home Assistant."));
     const unassigned = el("div", "binding-device-list");
     roomlessGroups.forEach((group) => {
       const first = group[0];
@@ -2597,6 +2630,38 @@ class HausmanHubPanel extends HTMLElement {
       unassigned.appendChild(el("div", "card empty-state muted", "Все найденные устройства уже распределены по комнатам."));
     }
     card.appendChild(unassigned);
+    const pendingAssignments = Object.keys(this._firstRun.areaAssignments).length;
+    const saveBar = el("div", "binding-save-bar");
+    const saveCopy = el("div", "binding-save-copy");
+    saveCopy.appendChild(el("strong", null, pendingAssignments
+      ? `Подготовлено изменений: ${pendingAssignments}`
+      : "Нет несохранённых привязок"));
+    saveCopy.appendChild(el("small", "muted", pendingAssignments
+      ? "Home Assistant изменится только после сохранения."
+      : "Назначьте комнату хотя бы одному устройству без области."));
+    saveBar.appendChild(saveCopy);
+    const saveActions = el("div", "actions compact-actions");
+    const clearAssignments = el("button", "secondary", "Сбросить выбор");
+    clearAssignments.disabled = this._busy || pendingAssignments === 0;
+    clearAssignments.addEventListener("click", () => {
+      this._firstRun.areaAssignments = {};
+      this._firstRun.areaSaveError = "";
+      this._firstRun.areaSaveStatus = "";
+      this._render();
+    });
+    const saveAssignments = el("button", null, "Сохранить привязки в Home Assistant");
+    saveAssignments.disabled = this._busy || pendingAssignments === 0;
+    saveAssignments.addEventListener("click", () => this._saveFirstRunAreaAssignments());
+    saveActions.appendChild(clearAssignments);
+    saveActions.appendChild(saveAssignments);
+    saveBar.appendChild(saveActions);
+    if (this._firstRun.areaSaveStatus) {
+      saveBar.appendChild(el("div", "binding-save-status", this._firstRun.areaSaveStatus));
+    }
+    if (this._firstRun.areaSaveError) {
+      saveBar.appendChild(el("div", "field-error binding-save-error", this._firstRun.areaSaveError));
+    }
+    card.appendChild(saveBar);
     showDevices.addEventListener("change", () => {
       this._firstRun.showRoomDevices = showDevices.checked === true;
       this._render();
@@ -2830,7 +2895,7 @@ class HausmanHubPanel extends HTMLElement {
       if (roomlessChoices.length) {
         devicesSection.appendChild(this._collapsibleDeviceSection(
           "Устройства без комнаты",
-          "Эти устройства не привязаны ни к одной зоне Home Assistant. Отметьте нужные, чтобы привязать их к этой комнате только в HausmanHub: зоны Home Assistant не изменятся.",
+          "Сначала вернитесь к привязке комнат и сохраните область устройства в Home Assistant. После обновления его можно будет добавить в климатический контур.",
           this._firstRunDeviceGroups(roomlessChoices, room, fields, choices, searchable),
           false
         ));

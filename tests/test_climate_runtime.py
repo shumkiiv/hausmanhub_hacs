@@ -301,6 +301,7 @@ class SnapshotStateView:
     def entity_catalog(self):
         from custom_components.hausman_hub.application.climate_native_setup import (
             ClimateHaCatalogEntry,
+            ClimateHaCatalogRoom,
             ClimateHaEntityCatalog,
         )
 
@@ -331,6 +332,7 @@ class SnapshotStateView:
                         friendly_name=device.name,
                         available=imported is not None and imported.available,
                         last_updated_ms=self._bridge.snapshot.generated_at,
+                        room_id=device.room_id,
                     )
                 )
         bound_entities = {
@@ -360,10 +362,15 @@ class SnapshotStateView:
                     friendly_name=imported.name,
                     available=imported.available,
                     last_updated_ms=self._bridge.snapshot.generated_at,
+                    room_id=imported.room_id,
                 )
             )
         entries.extend(self.extra_catalog_entries)
         return ClimateHaEntityCatalog(
+            rooms=tuple(
+                ClimateHaCatalogRoom(room_id=room.room_id, name=room.name)
+                for room in self._bridge.snapshot.rooms
+            ),
             entries=tuple(sorted(entries, key=lambda entry: entry.entity_id))
         )
 
