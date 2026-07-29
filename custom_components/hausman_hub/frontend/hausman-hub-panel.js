@@ -28,6 +28,28 @@ const IR_CODES_DELETE_API = `${IR_CODES_API}/delete`;
 const IR_CODE_BINDINGS_API = `${IR_CODES_API}/bindings`;
 const REFRESH_MS = 30000;
 const LOCKOUT_HELP = "Теплее верхнего порога — нагрев запрещён; холоднее нижнего — разрешён. Между ними режим не меняется.";
+const HOME_SIGNAL_BINDINGS = [
+  {
+    key: "outdoor_temperature_entity_id", kind: "outdoor_temperature",
+    title: "Наружная температура",
+    helper: "Источник температуры именно на улице, а не в одной из комнат.",
+    purpose: "Нужен для погодной блокировки отопления и оценки нагрузки на климат.",
+    recommendation: "Выберите исправный уличный датчик. Если его нет — погодный сервис. Комнатные термодатчики, увлажнители и термоголовки не подходят.",
+  },
+  {
+    key: "presence_entity_id", kind: "presence", title: "Общее присутствие дома",
+    helper: "Один общий статус всего дома, а не датчик отдельной комнаты.",
+    purpose: "Переключает общую политику между режимами «кто-то дома» и «никого нет».",
+    recommendation: "Выберите профиль человека или телефон со стабильным статусом «дома / не дома». Датчики комнат настраиваются отдельно.",
+  },
+  {
+    key: "central_heating_entity_id", kind: "central_heating",
+    title: "Центральное отопление",
+    helper: "Нужен сигнал «работает», а не температура батареи.",
+    purpose: "Позволяет контуру понимать, работает ли котёл, насос или общая подача тепла.",
+    recommendation: "Нужен сигнал «работает / не работает». Температура батареи и обычные клавиши выключателей не подходят.",
+  },
+];
 
 const PROFILE_CONTRACT = { name: "hausman-hub-climate-profile-update-request", version: 1 };
 const SCHEDULE_CONTRACT = { name: "hausman-hub-climate-schedule-update-request", version: 1 };
@@ -213,6 +235,7 @@ class HausmanHubPanel extends HTMLElement {
     this._activeSection = null;
     this._activeClimateView = "contour";
     this._expandedWizardRooms = new Set();
+    this._openSignalPickers = new Set();
     this._dirty = {
       wizard: false, home: false, windows: false, profiles: false, schedule: false, mode: false,
       assistant: false,
@@ -3018,17 +3041,16 @@ class HausmanHubPanel extends HTMLElement {
     const home = this._firstRun.home;
     const candidates = (this._settings.home && this._settings.home.candidates) || {};
     const pickers = {};
-    [
-      ["outdoor_temperature_entity_id", "Наружная температура", "sensor с температурой или погодный сервис Home Assistant.", "outdoor_temperature"],
-      ["presence_entity_id", "Общее присутствие дома", "Этот сигнал задаёт политику «дома/нет дома» для всего дома.", "presence"],
-      ["central_heating_entity_id", "Центральное отопление", "Нужен сигнал «работает», а не температура батареи.", "central_heating"],
-    ].forEach(([key, title, helper, kind]) => {
+    HOME_SIGNAL_BINDINGS.forEach(({ key, title, helper, purpose, recommendation, kind }) => {
       const picker = this._singleChoicePicker({
         candidates: candidates[kind] || [],
         current: home[key],
         helper,
-        onChange: () => {
-          home[key] = picker.value() || null;
+        purpose,
+        recommendation,
+        pickerId: `first-run-home-${key}`,
+        onChange: (value) => {
+          home[key] = value || null;
         },
         signalKind: kind,
         title,
@@ -3036,6 +3058,12 @@ class HausmanHubPanel extends HTMLElement {
       card.appendChild(picker.root);
       pickers[key] = picker;
     });
+    card.appendChild(el("h3", "threshold-heading", "Погодная блокировка отопления"));
+    card.appendChild(el(
+      "div",
+      "muted threshold-intro",
+      "Необязательная защита: HausmanHub меняет разрешение на нагрев только после пересечения указанных порогов."
+    ));
     const clearError = () => { this._firstRun.homeError = ""; card.querySelector(".field-error")?.remove(); };
     const high = numberField(home.heating_lockout_high, -40, 60, 0.5, () => {
       home.heating_lockout_high = high.value;
@@ -4748,10 +4776,16 @@ class HausmanHubPanel extends HTMLElement {
   _signalCandidatesForPicker(candidates, current, signalKind) {
     const grouped = new Map();
     this._candidateWithCurrent(candidates, current).filter((candidate) => {
-      if (signalKind !== "central_heating") return true;
       const identity = normalizedText([
-        candidate.name, candidate.entity_id, candidate.device_name,
+        candidate.name, candidate.entity_id, candidate.device_name, candidate.room_name,
       ].join(" "));
+      if (signalKind === "outdoor_temperature") {
+        if (candidate.missing || candidate.domain === "weather") return true;
+        return candidate.domain === "sensor"
+          && candidate.device_class === "temperature"
+          && /outdoor|outside|external|exterior|street|yard|улич|улиц|наруж|внешн|двор|погод/.test(identity);
+      }
+      if (signalKind !== "central_heating") return true;
       return (candidate.domain === "binary_sensor" && candidate.device_class === "heat")
         || /централ.*отоп|отоплен|кот[её]л|теплоснаб|central.*heat|heating|boiler/.test(identity);
     }).forEach((candidate) => {
@@ -4769,175 +4803,173 @@ class HausmanHubPanel extends HTMLElement {
     return [...grouped.values()];
   }
 
-  _singleChoicePicker({
-    title, helper, candidates, current, signalKind, onChange, groupByRoom = true,
-  }) {
-    const fieldset = el("fieldset", "signal-picker");
-    fieldset.appendChild(el("legend", null, title));
-    if (helper) fieldset.appendChild(el("div", "muted signal-picker-help", helper));
-    const search = el("input", "entity-search");
-    search.type = "search";
-    search.placeholder = "Найти подходящее устройство";
-    setAttr(search, "aria-label", `Поиск: ${title.toLocaleLowerCase("ru")}`);
-    fieldset.appendChild(search);
-    const list = el("div", "signal-picker-list");
-    fieldset.appendChild(list);
-    const radioName = requestId("signal");
-    const radios = [];
-    const optionNodes = [];
-    const groups = new Map();
-    const visible = this._signalCandidatesForPicker(candidates, current, signalKind);
+  _signalCandidateDisplayName(candidate) {
+    if (!candidate) return "Источник не выбран";
+    if (candidate.domain === "person") {
+      return `${candidate.name || candidate.entity_id} · профиль пользователя`;
+    }
+    return candidate.device_name || candidate.name || candidate.entity_id;
+  }
 
+  _signalCandidateExplanation(candidate, signalKind) {
+    if (!candidate) {
+      const disabledEffects = {
+        outdoor_temperature: "Погодная блокировка отопления работать не будет.",
+        presence: "HausmanHub не сможет автоматически определить, дома ли кто-нибудь.",
+        central_heating: "Состояние центрального отопления останется неизвестным.",
+        window: "Состояние окна не будет учитываться для этой комнаты.",
+      };
+      return disabledEffects[signalKind] || "Этот сигнал не будет использоваться.";
+    }
+    if (candidate.missing) {
+      return signalKind === "outdoor_temperature"
+        ? "Выбранное ранее значение не подходит для наружной температуры или сейчас недоступно. Выберите другой источник."
+        : "Ранее выбранный источник сейчас недоступен.";
+    }
+    if (candidate.available === false) return "Источник сейчас недоступен и может не обновлять состояние.";
+    if (candidate.domain === "weather") return "Текущая температура из погодной интеграции Home Assistant.";
+    if (candidate.domain === "person") return "профиль пользователя: дома / не дома. Это общий статус всего дома.";
+    if (candidate.domain === "device_tracker") return "Телефон или трекер передаёт геолокационный статус «дома / не дома».";
+    if (signalKind === "outdoor_temperature") return "Используется только показание температуры наружного воздуха.";
+    if (signalKind === "central_heating") return "Используется состояние «работает / не работает», а не температура устройства.";
+    if (signalKind === "window") return "Используется состояние «открыто / закрыто» этой комнаты.";
+    return "Физический датчик сообщает о движении или присутствии.";
+  }
+
+  _singleChoicePicker({
+    title, helper, purpose, recommendation, candidates, current, signalKind, onChange,
+    groupByRoom = true, pickerId = "",
+  }) {
+    const put = (parent, ...children) => {
+      children.filter(Boolean).forEach((child) => parent.appendChild(child));
+      return parent;
+    };
+    const fieldset = el("fieldset", "signal-picker");
+    put(fieldset, el("legend", null, title), helper && el("div", "muted signal-picker-help", helper));
+    if (purpose || recommendation) {
+      const guide = el("div", "signal-picker-guide");
+      [["Зачем это нужно", purpose], ["Как выбрать", recommendation]].forEach(([label, copy]) => {
+        if (copy) put(guide, put(el("div"), el("strong", null, label), el("span", null, copy)));
+      });
+      put(fieldset, guide);
+    }
+    let selectedValue = current || "";
+    const visible = this._signalCandidatesForPicker(candidates, current, signalKind);
+    if (!visible.some((candidate) => candidate.entity_id === selectedValue)) selectedValue = "";
+    const selectedCandidate = () => visible.find(({ entity_id }) => entity_id === selectedValue) || null;
+    const currentCard = el("div", "signal-current");
+    const currentCopy = el("div", "signal-current-copy");
+    const currentName = el("strong");
+    const currentMeta = el("small");
+    const currentStatus = el("span", "status-badge");
+    put(currentCopy, el("span", "signal-current-label", "Сейчас выбрано"), currentName, currentMeta);
+    put(currentCard, currentCopy, currentStatus);
+    const refresh = () => {
+      const candidate = selectedCandidate();
+      currentName.textContent = this._signalCandidateDisplayName(candidate);
+      currentMeta.textContent = this._signalCandidateExplanation(candidate, signalKind);
+      currentStatus.textContent = candidate ? "Выбрано" : "Не настроено";
+      currentStatus.className = `status-badge ${candidate ? "is-ready" : "is-attention"}`;
+    };
+    refresh();
+    put(fieldset, currentCard);
+    const chooser = el("details", "signal-chooser");
+    chooser.open = Boolean(pickerId && this._openSignalPickers.has(pickerId));
+    const chooserSummary = el("summary", "signal-chooser-summary");
+    const chooserTitle = el("strong", null, selectedValue ? "Изменить источник" : "Выбрать источник");
+    const last = visible.length % 10, lastTwo = visible.length % 100;
+    const variantWord = last === 1 && lastTwo !== 11 ? "вариант"
+      : last >= 2 && last <= 4 && (lastTwo < 12 || lastTwo > 14) ? "варианта" : "вариантов";
+    put(chooserSummary, chooserTitle, el("span", "muted", `${visible.length} ${variantWord}`));
+    put(chooser, chooserSummary);
+    if (pickerId) chooser.addEventListener("toggle", () => {
+      this._openSignalPickers[chooser.open ? "add" : "delete"](pickerId);
+    });
+    const search = el("input", "entity-search");
+    Object.assign(search, { type: "search", placeholder: "Найти подходящее устройство" });
+    setAttr(search, "aria-label", `Поиск: ${title.toLocaleLowerCase("ru")}`);
+    const list = el("div", "signal-picker-list");
+    put(chooser, search, list);
+    put(fieldset, chooser);
+    const radioName = requestId("signal");
+    const radios = [], optionNodes = [];
+    const groups = new Map();
     const addRadio = (container, candidate, value, label, meta) => {
       const radio = el("input");
-      radio.type = "radio";
-      radio.name = radioName;
-      radio.value = value;
-      radio.checked = value === current || (!value && !visible.some((item) => item.entity_id === current));
+      Object.assign(radio, { type: "radio", name: radioName, value, checked: value === selectedValue });
       const option = el("label", "signal-option");
       if (radio.checked) option.className += " is-selected";
-      option.appendChild(radio);
+      put(option, radio);
+      let hasThumb = false;
       if (candidate && candidate.image_url
           && ZIGBEE2MQTT_IMAGE_PATTERN.test(candidate.image_url)) {
+        hasThumb = true;
         option.className += " has-thumb";
         const thumb = el("span", "signal-option-thumb");
         const image = el("img");
-        image.src = candidate.image_url;
-        image.alt = "";
+        Object.assign(image, { src: candidate.image_url, alt: "" });
         setAttr(image, "loading", "lazy");
         setAttr(image, "decoding", "async");
         setAttr(image, "referrerpolicy", "no-referrer");
         image.addEventListener("error", () => { thumb.hidden = true; });
-        thumb.appendChild(image);
-        option.appendChild(thumb);
+        put(option, put(thumb, image));
       }
       const identity = el("span", "entity-label");
-      identity.appendChild(el("strong", null, label));
-      if (meta) identity.appendChild(el("small", null, meta));
-      option.appendChild(identity);
+      put(identity, el("strong", null, label), meta && el("small", null, meta));
+      put(option, identity);
       radio.addEventListener("change", () => {
         if (!radio.checked) return;
         radios.forEach((peer) => {
           peer.radio.checked = peer.radio === radio;
-          peer.option.className = [
-            "signal-option",
-            peer.hasThumb ? "has-thumb" : "",
-            peer.radio.checked ? "is-selected" : "",
-          ].filter(Boolean).join(" ");
+          peer.option.className = `signal-option${peer.hasThumb ? " has-thumb" : ""}${peer.radio.checked ? " is-selected" : ""}`;
         });
-        onChange();
+        selectedValue = radio.value;
+        chooserTitle.textContent = selectedValue ? "Изменить источник" : "Выбрать источник";
+        refresh();
+        onChange(selectedValue);
       });
-      container.appendChild(option);
-      radios.push({ radio, option, hasThumb: option.className.includes("has-thumb") });
+      put(container, option);
+      const item = { radio, option, hasThumb };
+      radios.push(item);
       if (candidate) {
-        optionNodes.push({
-          node: option,
-          group: container,
-          searchText: normalizedText([
-            candidate.name,
-            candidate.entity_id,
-            candidate.room_name,
-            candidate.device_name,
-            candidate.manufacturer,
-            candidate.model,
-            this._signalCandidateType(candidate, signalKind),
-          ].join(" ")),
-        });
+        item.node = option;
+        item.searchText = normalizedText([
+          candidate.name, candidate.entity_id, candidate.room_name, candidate.device_name,
+          candidate.manufacturer, candidate.model, this._signalCandidateType(candidate, signalKind),
+        ].join(" "));
+        optionNodes.push(item);
       }
     };
-
     const noneGroup = el("div", "signal-type-options");
-    addRadio(noneGroup, null, "", "Не привязано", "Источник можно выбрать позже");
-    list.appendChild(noneGroup);
-    visible
-      .sort((left, right) => (
-        Number(right.entity_id === current) - Number(left.entity_id === current)
-        || String(left.room_name || "").localeCompare(String(right.room_name || ""), "ru")
-        || this._signalCandidateType(left, signalKind)
-          .localeCompare(this._signalCandidateType(right, signalKind), "ru")
-        || String(left.name).localeCompare(String(right.name), "ru")
-      ))
-      .forEach((candidate) => {
-        const roomLabel = candidate.missing
-          ? "Ранее выбранное"
-          : (
-            candidate.domain === "weather"
-              ? "Погодные сервисы"
-              : (
-                candidate.domain === "person" || candidate.domain === "device_tracker"
-                  ? "Присутствие дома"
-                  : (candidate.room_name || (candidate.room_id ? candidate.room_id : "Без комнаты"))
-              )
-          );
+    addRadio(noneGroup, null, "", "Не привязано — не использовать", this._signalCandidateExplanation(null, signalKind));
+    put(list, noneGroup);
+    visible.sort((a, b) => String(a.room_name || "").localeCompare(String(b.room_name || ""), "ru")
+      || String(a.name).localeCompare(String(b.name), "ru")).forEach((candidate) => {
+        const roomLabel = candidate.missing ? "Ранее выбранное"
+          : candidate.domain === "weather" ? "Погодные сервисы"
+          : signalKind === "outdoor_temperature" ? "Уличные датчики"
+          : ["person", "device_tracker"].includes(candidate.domain) ? "Присутствие дома"
+          : candidate.room_name || candidate.room_id || "Без комнаты";
         const roomKey = groupByRoom ? roomLabel : "room";
         if (!groups.has(roomKey)) {
-          const roomGroup = el("section", "signal-room-group");
-          if (groupByRoom) roomGroup.appendChild(el("h4", null, roomLabel));
-          const typeGroups = el("div", "signal-type-groups");
-          roomGroup.appendChild(typeGroups);
-          list.appendChild(roomGroup);
-          groups.set(roomKey, { roomGroup, typeGroups, types: new Map() });
+          const root = el("section", "signal-room-group");
+          const options = el("div", "signal-type-options");
+          put(root, groupByRoom && el("h4", null, roomLabel), options);
+          put(list, root);
+          groups.set(roomKey, { root, options, items: [] });
         }
-        const roomGroup = groups.get(roomKey);
-        const typeLabel = this._signalCandidateType(candidate, signalKind);
-        if (!roomGroup.types.has(typeLabel)) {
-          const typeGroup = el("div", "signal-type-group");
-          typeGroup.appendChild(el("h5", null, typeLabel));
-          const typeOptions = el("div", "signal-type-options");
-          typeGroup.appendChild(typeOptions);
-          roomGroup.typeGroups.appendChild(typeGroup);
-          roomGroup.types.set(typeLabel, { typeGroup, typeOptions });
-        }
-        const typeGroup = roomGroup.types.get(typeLabel);
-        const details = [
-          candidate.domain === "person"
-            ? "профиль пользователя: дома / не дома"
-            : "",
-          candidate.domain === "device_tracker"
-            ? "геолокационный статус устройства"
-            : "",
-          candidate.entity_id,
-          candidate.missing && signalKind === "outdoor_temperature"
-            ? "не подходит для наружной температуры или сейчас недоступно"
-            : candidate.missing
-              ? "ранее выбранная сущность сейчас недоступна"
-              : "",
-          candidate.available === false && !candidate.missing ? "сейчас недоступно" : "",
-        ].filter(Boolean).join(" · ");
-        addRadio(
-          typeGroup.typeOptions,
-          candidate,
-          candidate.entity_id,
-          candidate.domain === "person"
-            ? `${candidate.name || candidate.entity_id} · профиль пользователя`
-            : (candidate.device_name || candidate.name || candidate.entity_id),
-          details
-        );
+        const group = groups.get(roomKey);
+        const meta = `${this._signalCandidateType(candidate, signalKind)} · ${this._signalCandidateExplanation(candidate, signalKind)}`;
+        addRadio(group.options, candidate, candidate.entity_id, this._signalCandidateDisplayName(candidate), meta);
+        group.items.push(optionNodes.at(-1));
       });
-    if (!optionNodes.length) {
-      list.appendChild(el("div", "muted", "Подходящих устройств пока не найдено."));
-    }
+    if (!optionNodes.length) put(list, el("div", "muted", "Подходящих устройств пока не найдено."));
     search.addEventListener("input", () => {
       const query = normalizedText(search.value);
-      optionNodes.forEach((option) => {
-        option.node.hidden = Boolean(query) && !option.searchText.includes(query);
-      });
-      groups.forEach((roomGroup) => {
-        roomGroup.types.forEach(({ typeGroup, typeOptions }) => {
-          typeGroup.hidden = Array.from(typeOptions.children).every((node) => node.hidden);
-        });
-        roomGroup.roomGroup.hidden = Array.from(roomGroup.types.values())
-          .every(({ typeGroup }) => typeGroup.hidden);
-      });
+      optionNodes.forEach((item) => { item.node.hidden = Boolean(query) && !item.searchText.includes(query); });
+      groups.forEach((group) => { group.root.hidden = group.items.every((item) => item.node.hidden); });
     });
-    return {
-      root: fieldset,
-      value: () => {
-        const selected = radios.find(({ radio }) => radio.checked);
-        return selected ? selected.radio.value : "";
-      },
-      radios,
-    };
+    return { root: fieldset, value: () => selectedValue, radios };
   }
 
   _renderHome(container, home) {
@@ -4955,37 +4987,17 @@ class HausmanHubPanel extends HTMLElement {
     const card = el("div", "card home-signals-card");
     const values = home.home || {};
     const candidates = home.candidates || {};
-    const bindings = [
-      {
-        key: "outdoor_temperature_entity_id",
-        label: "Наружная температура",
-        helper: "Можно выбрать уличный датчик температуры или погодный сервис Home Assistant.",
-        signalKind: "outdoor_temperature",
-        options: candidates.outdoor_temperature || [],
-      },
-      {
-        key: "presence_entity_id",
-        label: "Общее присутствие дома",
-        helper: "Профиль человека или трекер передаёт статус «дома/не дома». Датчик присутствия сообщает, есть ли кто-то в доме. Это не комнатная настройка.",
-        signalKind: "presence",
-        options: candidates.presence || [],
-      },
-      {
-        key: "central_heating_entity_id",
-        label: "Центральное отопление",
-        helper: "Нужен сигнал «работает», а не температура батареи.",
-        signalKind: "central_heating",
-        options: candidates.central_heating || [],
-      },
-    ];
     const pickers = {};
-    bindings.forEach((binding) => {
+    HOME_SIGNAL_BINDINGS.forEach((binding) => {
       const picker = this._singleChoicePicker({
-        title: binding.label,
+        title: binding.title,
         helper: binding.helper,
-        candidates: binding.options,
+        purpose: binding.purpose,
+        recommendation: binding.recommendation,
+        candidates: candidates[binding.kind] || [],
         current: values[binding.key],
-        signalKind: binding.signalKind,
+        signalKind: binding.kind,
+        pickerId: `home-${binding.key}`,
         onChange: () => {
           this._markDirty("home", dirtyNotice);
         },
@@ -4993,6 +5005,12 @@ class HausmanHubPanel extends HTMLElement {
       card.appendChild(picker.root);
       pickers[binding.key] = picker;
     });
+    card.appendChild(el("h3", "threshold-heading", "Погодная блокировка отопления"));
+    card.appendChild(el(
+      "div",
+      "muted threshold-intro",
+      "Необязательная защита: HausmanHub меняет разрешение на нагрев только после пересечения указанных порогов."
+    ));
     const high = numberField(
       values.heating_lockout_high, -40, 60, 0.5,
       () => { validationError.textContent = ""; this._markDirty("home", dirtyNotice); }
@@ -5104,10 +5122,13 @@ class HausmanHubPanel extends HTMLElement {
       const windowPicker = this._singleChoicePicker({
         title: "Датчик окна",
         helper: "Показаны только датчики открытия, назначенные этой комнате.",
+        purpose: "Открытое окно может временно ограничить климатическое управление в комнате.",
+        recommendation: "Выберите физический датчик именно этого окна. Если датчика нет, оставьте источник непривязанным.",
         candidates: roomWindows,
         current: room.window_entity_id,
         signalKind: "window",
         groupByRoom: false,
+        pickerId: `room-window-${room.id}`,
         onChange: () => {
           this._markDirty("windows", dirtyNotice);
         },

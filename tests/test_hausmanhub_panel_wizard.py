@@ -169,13 +169,14 @@ def get_payloads(
     setup: dict | None = None,
     options: dict | None = None,
     panel: dict | None = None,
+    home: dict | None = None,
     windows: dict | None = None,
     bindings: dict | None = None,
 ) -> dict:
     return {
         "hausman_hub/v1/admin/panel": panel or PANEL_PAYLOAD,
         "hausman_hub/v1/admin/climate-mode": MODE_PAYLOAD,
-        "hausman_hub/v1/admin/home-environment": HOME_PAYLOAD,
+        "hausman_hub/v1/admin/home-environment": home or HOME_PAYLOAD,
         "hausman_hub/v1/admin/climate-room-signals": windows or WINDOWS_PAYLOAD,
         "hausman_hub/v1/admin/climate-drafts/current": setup or NOT_CONFIGURED_SETUP,
         "hausman_hub/v1/admin/ir-codes/bindings": bindings or {"bindings": []},
@@ -471,6 +472,84 @@ class PanelContourWizardTest(unittest.TestCase):
 
 
 class PanelFirstRunWizardTest(unittest.TestCase):
+    def test_home_signal_draft_and_open_chooser_survive_background_render(self) -> None:
+        home_payload = copy.deepcopy(HOME_PAYLOAD)
+        home_payload["candidates"] = {
+            "outdoor_temperature": [
+                {
+                    "entity_id": "weather.home",
+                    "name": "Погода дома",
+                    "domain": "weather",
+                    "available": True,
+                    "room_id": "",
+                }
+            ],
+            "presence": [
+                {
+                    "entity_id": "person.owner",
+                    "name": "Владелец",
+                    "domain": "person",
+                    "available": True,
+                    "room_id": "",
+                }
+            ],
+            "central_heating": [
+                {
+                    "entity_id": "binary_sensor.boiler_heat",
+                    "name": "Работа котла",
+                    "domain": "binary_sensor",
+                    "device_class": "heat",
+                    "available": True,
+                    "room_id": "",
+                }
+            ],
+        }
+        script = panel_script(
+            get_payloads(home=home_payload),
+            {},
+            """
+        panel._firstRun.home = {
+          central_heating_entity_id: null, heating_lockout_high: 18,
+          heating_lockout_low: 16, outdoor_temperature_entity_id: null,
+          presence_entity_id: null,
+        };
+        const firstCard = document.createElement("div");
+        panel._renderFirstRunHome(firstCard);
+        const choose = (value) => {
+          const radio = findAll(firstCard, (node) => node.type === "radio" && node.value === value)[0];
+          if (!radio) throw new Error("choice missing: " + value);
+          radio.checked = true;
+          radio.fire("change");
+        };
+        choose("weather.home");
+        choose("person.owner");
+        choose("binary_sensor.boiler_heat");
+        const details = findAll(firstCard, (node) => node.tagName === "DETAILS")[0];
+        details.open = true;
+        details.fire("toggle");
+        const secondCard = document.createElement("div");
+        panel._renderFirstRunHome(secondCard);
+        const selected = findAll(secondCard, (node) => node.type === "radio" && node.checked)
+          .map((node) => node.value).filter(Boolean).sort();
+        const expected = ["binary_sensor.boiler_heat", "person.owner", "weather.home"].sort();
+        if (JSON.stringify(selected) !== JSON.stringify(expected)) {
+          throw new Error("background render lost the signal draft: " + JSON.stringify(selected));
+        }
+        const reopened = findAll(secondCard, (node) => node.tagName === "DETAILS")[0];
+        if (!reopened.open) throw new Error("open chooser collapsed after background render");
+        for (const expectedText of [
+          "Зачем это нужно", "Как выбрать", "Источник температуры именно на улице",
+          "Один общий статус всего дома", "Температура батареи",
+        ]) {
+          if (!textOf(secondCard).includes(expectedText)) {
+            throw new Error("wizard explanation missing: " + expectedText);
+          }
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_home_save_refreshes_revision_used_by_full_validation(self) -> None:
         script = panel_script(
             get_payloads(),

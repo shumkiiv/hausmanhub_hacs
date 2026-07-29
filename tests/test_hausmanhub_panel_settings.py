@@ -980,7 +980,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           && node.value === "binary_sensor.kids_window"
           && node.checked);
         if (savedWindow.length !== 1) throw new Error("saved window binding not selected");
-        if (!text.includes("ранее выбранная сущность сейчас недоступна")) {
+        if (!text.includes("Ранее выбранный источник сейчас недоступен")) {
           throw new Error("missing candidate fallback absent");
         }
             """,
@@ -998,7 +998,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           textOf(node).includes("Наружная температура"));
         if (!outdoor) throw new Error("outdoor card picker missing");
         const outdoorText = textOf(outdoor);
-        for (const label of ["Улица", "Погодные сервисы", "Датчик температуры", "Погодный сервис"]) {
+        for (const label of ["Уличные датчики", "Погодные сервисы", "Датчик температуры", "Погодный сервис"]) {
           if (!outdoorText.includes(label)) throw new Error("outdoor grouping missing: " + label);
         }
         if (outdoorText.includes("Детская") || outdoorText.includes("Гостиная")) {
@@ -1157,6 +1157,52 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
+    def test_outdoor_picker_excludes_indoor_sources_and_uses_semantic_group(self) -> None:
+        script = panel_script(
+            GET_PATHS,
+            {},
+            """
+        const candidates = [
+          { entity_id: "sensor.kitchen_temperature", name: "Климат кухня",
+            device_name: "Климат Kojima кухня", domain: "sensor",
+            device_class: "temperature", room_id: "kitchen", room_name: "Кухня" },
+          { entity_id: "sensor.humidifier_temperature", name: "Увлажнитель гостиная",
+            device_name: "Увлажнитель гостиная", domain: "sensor",
+            device_class: "temperature", room_id: "living", room_name: "Гостиная" },
+          { entity_id: "sensor.outdoor_temperature", name: "Внешний датчик температуры",
+            device_name: "Внешний датчик температуры", domain: "sensor",
+            device_class: "temperature", room_id: "kitchen", room_name: "Кухня" },
+          { entity_id: "sensor.terrace_temperature", name: "Температура",
+            device_name: "Датчик температуры", domain: "sensor",
+            device_class: "temperature", room_id: "outside", room_name: "Улица" },
+          { entity_id: "weather.home", name: "Прогноз дома", domain: "weather" },
+        ];
+        const picker = panel._singleChoicePicker({
+          title: "Наружная температура", candidates, current: null,
+          signalKind: "outdoor_temperature", onChange: () => {},
+        });
+        const values = picker.radios.map(({ radio }) => radio.value);
+        if (values.includes("sensor.kitchen_temperature")
+          || values.includes("sensor.humidifier_temperature")) {
+          throw new Error("indoor sources leaked into the outdoor-temperature picker");
+        }
+        if (!values.includes("sensor.outdoor_temperature")
+          || !values.includes("sensor.terrace_temperature")
+          || !values.includes("weather.home")) {
+          throw new Error("valid outdoor sources are missing");
+        }
+        const text = textOf(picker.root);
+        if (!text.includes("Уличные датчики") || text.includes("КУХНЯ")) {
+          throw new Error("outdoor source is grouped by an accidental HA room");
+        }
+        if (!text.includes("3 варианта")) {
+          throw new Error("candidate count has incorrect Russian plural form");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_central_heating_picker_keeps_only_associative_signals(self) -> None:
         script = panel_script(
             GET_PATHS,
@@ -1185,6 +1231,51 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           current: "switch.living_left", signalKind: "central_heating", onChange: () => {},
         });
         if (picker.value() !== "") throw new Error("stale signal was not reset in the picker");
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_single_choice_picker_keeps_stable_order_and_updates_summary(self) -> None:
+        script = panel_script(
+            GET_PATHS,
+            {},
+            """
+        const candidates = [
+          { entity_id: "sensor.outdoor_b", name: "Уличный датчик Б", domain: "sensor",
+            device_class: "temperature", room_id: "outside", room_name: "Улица", available: true },
+          { entity_id: "sensor.outdoor_a", name: "Уличный датчик А", domain: "sensor",
+            device_class: "temperature", room_id: "outside", room_name: "Улица", available: true },
+        ];
+        const changes = [];
+        const first = panel._singleChoicePicker({
+          title: "Наружная температура", candidates,
+          current: "sensor.outdoor_b", signalKind: "outdoor_temperature",
+          pickerId: "stable-test", purpose: "Проверка назначения.",
+          recommendation: "Проверка рекомендации.", onChange: (value) => changes.push(value),
+        });
+        const second = panel._singleChoicePicker({
+          title: "Наружная температура", candidates,
+          current: "sensor.outdoor_a", signalKind: "outdoor_temperature",
+          pickerId: "stable-test-2", onChange: () => {},
+        });
+        const order = (picker) => picker.radios.map(({ radio }) => radio.value);
+        if (JSON.stringify(order(first)) !== JSON.stringify(order(second))) {
+          throw new Error("selected value changed the visual order");
+        }
+        const target = first.radios.find(({ radio }) => radio.value === "sensor.outdoor_a");
+        target.radio.checked = true;
+        target.radio.fire("change");
+        if (first.value() !== "sensor.outdoor_a" || changes.at(-1) !== "sensor.outdoor_a") {
+          throw new Error("picker draft did not update atomically");
+        }
+        const text = textOf(first.root);
+        for (const expected of [
+          "Сейчас выбрано", "Уличный датчик А", "Зачем это нужно", "Как выбрать",
+          "Изменить источник",
+        ]) {
+          if (!text.includes(expected)) throw new Error("clear picker copy missing: " + expected);
+        }
             """,
         )
         completed = run_panel_script(script)
