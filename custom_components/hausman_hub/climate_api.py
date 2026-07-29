@@ -53,6 +53,7 @@ from .application.climate_signal_settings import (
     validate_room_signal_updates,
     validate_room_window_update,
 )
+from .application.climate_comparison import climate_comparison_to_payload
 from .application.contour_apply import ContourApplyViolation
 from .application.contour_override import TemporaryTemperatureViolation
 from .application.home_climate_targets import HomeClimateTargetsViolation
@@ -112,7 +113,9 @@ ADMIN_SCHEDULE_UPDATE_PATH = "/api/hausman_hub/v1/admin/climate-schedule"
 ADMIN_REGISTRY_PATH = "/api/hausman_hub/v1/admin/climate-registry"
 ADMIN_REGISTRY_PREVIEW_PATH = "/api/hausman_hub/v1/admin/climate-registry-preview"
 ADMIN_READINESS_PATH = "/api/hausman_hub/v1/admin/climate-readiness"
-ADMIN_SHADOW_EVIDENCE_PATH = "/api/hausman_hub/v1/admin/climate-shadow-evidence"
+ADMIN_SHADOW_COMPARISON_PATH = (
+    "/api/hausman_hub/v1/admin/climate-shadow-comparison"
+)
 ADMIN_CANARY_PREFLIGHT_PATH = "/api/hausman_hub/v1/admin/climate-canary-preflight"
 ADMIN_PANEL_PATH = "/api/hausman_hub/v1/admin/panel"
 ADMIN_PANEL_APPLY_PATH = "/api/hausman_hub/v1/admin/panel/apply"
@@ -178,6 +181,7 @@ def register_climate_api(
             ClimateAdminRegistryView(hass),
             ClimateAdminRegistryPreviewView(hass),
             ClimateAdminReadinessView(hass),
+            ClimateAdminShadowComparisonView(hass),
             ClimateAdminPanelView(hass),
             ClimateAdminPanelApplyView(hass),
             ClimateAdminPanelTemporaryView(hass),
@@ -913,6 +917,30 @@ class ClimateAdminReadinessView(_ClimateView):
             return self._unavailable()
         try:
             result = await runtime.async_readiness()
+        except Exception:
+            return self._unavailable()
+        return self.json(result, headers=NO_STORE_HEADERS)
+
+
+class ClimateAdminShadowComparisonView(_ClimateView):
+    """Expose one redacted command-free climate comparison to a local admin."""
+
+    url = ADMIN_SHADOW_COMPARISON_PATH
+    name = "api:hausman_hub:climate_admin_shadow_comparison"
+
+    async def get(self, request: Any) -> Any:
+        if not _is_exact_request(request, ADMIN_SHADOW_COMPARISON_PATH):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        runtime = self._runtime()
+        if runtime is None:
+            return self._unavailable()
+        try:
+            comparison = await runtime.async_native_climate_comparison()
+            if comparison is None:
+                return self._unavailable()
+            result = climate_comparison_to_payload(comparison)
         except Exception:
             return self._unavailable()
         return self.json(result, headers=NO_STORE_HEADERS)

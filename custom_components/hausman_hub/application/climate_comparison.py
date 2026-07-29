@@ -113,6 +113,59 @@ def build_climate_comparison_snapshot(
     )
 
 
+def climate_comparison_to_payload(
+    comparison: ClimateComparisonSnapshot,
+) -> dict[str, object]:
+    """Project one typed comparison through the redacted admin contract."""
+
+    if not isinstance(comparison, ClimateComparisonSnapshot):
+        raise ClimateComparisonViolation("validated climate comparison is required")
+    return {
+        "contract": {
+            "name": "hausman-hub-climate-shadow-comparison",
+            "version": 1,
+        },
+        "contour_id": comparison.contour_id,
+        "contour_mode": comparison.contour_mode.value,
+        "observed_at": comparison.observed_at,
+        "summary": {
+            "room_count": len(comparison.rooms),
+            "aligned_room_count": comparison.aligned_room_count,
+            "diverged_room_count": len(comparison.diverged_room_ids),
+            "not_comparable_room_count": len(comparison.not_comparable_room_ids),
+        },
+        "rooms": [
+            {
+                "room_id": room.room_id,
+                "status": room.status.value,
+                "reasons": [reason.value for reason in room.reasons],
+                "planned_policy": (
+                    None if room.planned_policy is None else room.planned_policy.value
+                ),
+                "planned_action": (
+                    None if room.planned_action is None else room.planned_action.value
+                ),
+                "observed_mode": room.observed_mode.value,
+                "devices": [
+                    {
+                        "device_id": device.device_id,
+                        "kind": device.kind.value,
+                        "status": device.status.value,
+                        "reasons": [reason.value for reason in device.reasons],
+                        "planned_action": device.planned_action.value,
+                        "observed_activity": device.observed_activity.value,
+                    }
+                    for device in room.devices
+                ],
+            }
+            for room in comparison.rooms
+        ],
+        "commands_enabled": False,
+        "physical_commands_sent": False,
+        "write_performed": False,
+    }
+
+
 def climate_reference_comparison(case_id: str) -> ClimateComparisonSnapshot:
     """Compare the native plan with the frozen module decision of one case."""
 

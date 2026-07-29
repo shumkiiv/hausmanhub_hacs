@@ -1,0 +1,38 @@
+{
+  "contract": {
+    "name": "hausman-hub-climate-shadow-comparison",
+    "version": 1
+  },
+  "contour_id": "climate",
+  "contour_mode": "automatic",
+  "observed_at": 1785330000000,
+  "summary": {
+    "room_count": 1,
+    "aligned_room_count": 1,
+    "diverged_room_count": 0,
+    "not_comparable_room_count": 0
+  },
+  "rooms": [
+    {
+      "room_id": "living",
+      "status": "aligned",
+      "reasons": [],
+      "planned_policy": "auto",
+      "planned_action": "cool",
+      "observed_mode": "auto",
+      "devices": [
+        {
+          "device_id": "living_air_conditioner",
+          "kind": "air_conditioner",
+          "status": "aligned",
+          "reasons": [],
+          "planned_action": "cool",
+          "observed_activity": "cooling"
+        }
+      ]
+    }
+  ],
+  "commands_enabled": false,
+  "physical_commands_sent": false,
+  "write_performed": false
+}

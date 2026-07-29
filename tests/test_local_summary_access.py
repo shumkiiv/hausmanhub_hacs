@@ -676,6 +676,56 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 )
                 self.assertEqual(403, forbidden.status)
 
+    def test_climate_shadow_comparison_is_local_admin_only_and_read_only(self) -> None:
+        path = "/api/hausman_hub/v1/admin/climate-shadow-comparison"
+        view = next(item for item in self.hass.http.views if item.url == path)
+        runtime = self.hass.data["hausman_hub"]["climate_runtime"]
+        original_contours = runtime._contours
+
+        unavailable = asyncio.run(
+            view.get(
+                FakeRequest(
+                    "127.0.0.1",
+                    reader_user(admin=True),
+                    path=path,
+                )
+            )
+        )
+
+        self.assertEqual(503, unavailable.status)
+        self.assertEqual("no-store", unavailable.headers["Cache-Control"])
+        self.assertEqual(original_contours, runtime._contours)
+        from custom_components.hausman_hub.application.climate_comparison import (
+            climate_reference_comparison,
+        )
+
+        async def reference_comparison():
+            return climate_reference_comparison("stopped_ac_starts_at_default_gap")
+
+        runtime.async_native_climate_comparison = reference_comparison
+        response = asyncio.run(
+            view.get(
+                FakeRequest(
+                    "127.0.0.1",
+                    reader_user(admin=True),
+                    path=path,
+                )
+            )
+        )
+        self.assertEqual(200, response.status)
+        self.assertFalse(response.payload["commands_enabled"])
+        self.assertFalse(response.payload["physical_commands_sent"])
+        self.assertFalse(response.payload["write_performed"])
+        for remote, user in (
+            ("203.0.113.7", reader_user(admin=True)),
+            ("127.0.0.1", reader_user("system-read-only")),
+        ):
+            with self.subTest(remote=remote, user=user):
+                forbidden = asyncio.run(
+                    view.get(FakeRequest(remote, user, path=path))
+                )
+                self.assertEqual(403, forbidden.status)
+
     def test_view_returns_exactly_nine_counts_for_a_local_read_only_user(self) -> None:
         response = asyncio.run(
             self.view.get(FakeRequest("127.0.0.1", reader_user("system-read-only")))
@@ -1854,7 +1904,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.36.0", panel.payload["integration_version"])
+        self.assertEqual("1.37.0", panel.payload["integration_version"])
 
     def test_admin_panel_accepts_ipv6_link_local_admin_from_mdns(self) -> None:
         """A local admin may open the panel when mDNS selects IPv6 link-local."""
@@ -2426,7 +2476,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertFalse(hasattr(self.view, method))
 
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
-        self.assertEqual(51, len(self.hass.http.views))
+        self.assertEqual(52, len(self.hass.http.views))
         self.assertEqual(
             1,
             sum(
@@ -2740,7 +2790,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             [(closed_entry, ("sensor", "switch"))],
             closed_hass.config_entries.forwarded,
         )
-        self.assertEqual(50, len(closed_hass.http.views))
+        self.assertEqual(51, len(closed_hass.http.views))
         self.assertEqual(
             {
                 "/api/hausman_hub/v1/capabilities",
@@ -2756,6 +2806,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 "/api/hausman_hub/v1/admin/climate-import",
                 "/api/hausman_hub/v1/admin/legacy-settings/preview",
                 "/api/hausman_hub/v1/admin/legacy-settings/apply",
+                "/api/hausman_hub/v1/admin/climate-shadow-comparison",
                 "/api/hausman_hub/v1/admin/climate-drafts",
                 "/api/hausman_hub/v1/admin/climate-drafts/current",
                 "/api/hausman_hub/v1/admin/climate-drafts/validate",

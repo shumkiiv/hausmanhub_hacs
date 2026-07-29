@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hausmanhub/contracts/v1/climate-shadow-comparison.schema.json",
+  "title": "HausmanHub climate shadow comparison v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "contour_id", "contour_mode", "observed_at", "summary", "rooms", "commands_enabled", "physical_commands_sent", "write_performed"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-climate-shadow-comparison"},
+        "version": {"const": 1}
+      }
+    },
+    "contour_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+    "contour_mode": {"enum": ["disabled", "observe", "automatic"]},
+    "observed_at": {"type": "integer", "minimum": 0},
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["room_count", "aligned_room_count", "diverged_room_count", "not_comparable_room_count"],
+      "properties": {
+        "room_count": {"type": "integer", "minimum": 1, "maximum": 128},
+        "aligned_room_count": {"type": "integer", "minimum": 0, "maximum": 128},
+        "diverged_room_count": {"type": "integer", "minimum": 0, "maximum": 128},
+        "not_comparable_room_count": {"type": "integer", "minimum": 0, "maximum": 128}
+      }
+    },
+    "rooms": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "items": {"$ref": "#/$defs/room"}
+    },
+    "commands_enabled": {"const": false},
+    "physical_commands_sent": {"const": false},
+    "write_performed": {"const": false}
+  },
+  "$defs": {
+    "status": {"enum": ["aligned", "diverged", "not_comparable"]},
+    "reason": {"enum": ["observation_stale", "room_policy_missing", "room_data_unavailable", "manual_observe", "planned_observe", "device_unobserved", "device_unavailable", "device_activity_unknown", "device_setting_unobserved", "device_activity_mismatch", "device_setting_mismatch"]},
+    "reasons": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 11,
+      "items": {"$ref": "#/$defs/reason"}
+    },
+    "room": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["room_id", "status", "reasons", "planned_policy", "planned_action", "observed_mode", "devices"],
+      "properties": {
+        "room_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+        "status": {"$ref": "#/$defs/status"},
+        "reasons": {"$ref": "#/$defs/reasons"},
+        "planned_policy": {"type": ["string", "null"], "enum": [null, "away", "safety_lockout", "freshness_guard", "forced_auto_only", "manual", "auto"]},
+        "planned_action": {"type": ["string", "null"], "enum": [null, "cool", "maintain", "off", "safe_off", "observe"]},
+        "observed_mode": {"enum": ["auto", "manual", "forced_auto_only", "unknown"]},
+        "devices": {
+          "type": "array",
+          "maxItems": 512,
+          "items": {"$ref": "#/$defs/device"}
+        }
+      }
+    },
+    "device": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["device_id", "kind", "status", "reasons", "planned_action", "observed_activity"],
+      "properties": {
+        "device_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+        "kind": {"enum": ["air_conditioner", "radiator_thermostat", "humidifier", "floor_heating", "temperature_sensor", "humidity_sensor", "curtains"]},
+        "status": {"$ref": "#/$defs/status"},
+        "reasons": {"$ref": "#/$defs/reasons"},
+        "planned_action": {"enum": ["cool", "maintain", "off", "safe_off", "humidify", "heat", "set_temperature", "hold", "observe", "unavailable"]},
+        "observed_activity": {"enum": ["running", "stopped", "idle", "cooling", "heating", "humidifying", "unknown"]}
+      }
+    }
+  }
+}

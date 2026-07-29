@@ -69,6 +69,7 @@ CONTRACT_PATHS = tuple(
         "climate-registry.schema.json",
         "climate-shadow-candidate-query.schema.json",
         "climate-shadow-evidence.schema.json",
+        "climate-shadow-comparison.schema.json",
         "contour-apply-preview.schema.json",
         "contour-apply-receipt.schema.json",
         "contour-apply-request.schema.json",

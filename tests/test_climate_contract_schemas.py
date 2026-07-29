@@ -83,6 +83,7 @@ class ClimateContractSchemasTest(unittest.TestCase):
             "hausmanhub_legacy_settings_v1/preview.json": "v1/legacy-settings-preview.schema.json",
             "hausmanhub_legacy_settings_v1/apply-request.json": "v1/legacy-settings-apply-request.schema.json",
             "hausmanhub_legacy_settings_v1/apply-receipt.json": "v1/legacy-settings-apply-receipt.schema.json",
+            "hausmanhub_climate_shadow_v1/comparison.json": "v1/climate-shadow-comparison.schema.json",
             "hausmanhub_dashboard_v1/dashboard.json": "v1/dashboard-snapshot.schema.json",
             "hausmanhub_device_actions_v1/request.json": "v1/device-action-request.schema.json",
             "hausmanhub_device_actions_v1/confirmed.json": "v1/device-action-receipt.schema.json",

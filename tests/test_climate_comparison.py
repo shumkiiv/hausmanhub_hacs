@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from dataclasses import asdict, replace
 import json
+from pathlib import Path
 import unittest
+
+from jsonschema import Draft202012Validator
 
 from custom_components.hausman_hub.application.climate_comparison import (
     build_climate_comparison_snapshot,
+    climate_comparison_to_payload,
     climate_reference_comparison,
 )
 from tests.climate_bridge_fixture import (
@@ -56,6 +60,7 @@ from tests.test_contours import source_payload
 NOW = 1_800_000_000_000
 LIVING = ["living"]
 LIVING_AC = ["synthetic-ac-source-living"]
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _setup(payload):
@@ -110,6 +115,44 @@ def _close_windows(observation):
 
 
 class ClimateComparisonBuilderTest(unittest.TestCase):
+    def test_admin_projection_matches_contract_and_stays_command_free(self) -> None:
+        source = source_payload()
+        source["devices"][0]["state"] = "off"  # type: ignore[index]
+        comparison, _ = _comparison(source)
+
+        payload = climate_comparison_to_payload(comparison)
+
+        schema = json.loads(
+            (
+                ROOT
+                / "custom_components"
+                / "hausman_hub"
+                / "contracts"
+                / "v1"
+                / "climate-shadow-comparison.schema.json"
+            ).read_text(encoding="utf-8")
+        )
+        Draft202012Validator(schema).validate(payload)
+        self.assertEqual(
+            {
+                "room_count": 1,
+                "aligned_room_count": 1,
+                "diverged_room_count": 0,
+                "not_comparable_room_count": 0,
+            },
+            payload["summary"],
+        )
+        serialized = json.dumps(payload, sort_keys=True)
+        for forbidden in (
+            "entity_id",
+            "source_id",
+            "service_data",
+            "backend_payload",
+            "target_temperature",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, serialized)
+
     def test_aligned_room_and_device_report_no_reasons(self) -> None:
         payload = source_payload()
         payload["devices"][0]["state"] = "off"  # type: ignore[index]
