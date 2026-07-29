@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hausmanhub/contracts/v1/legacy-settings-preview.schema.json",
+  "title": "HausmanHub legacy settings import preview v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "preview_id",
+    "migratable",
+    "recognized_pending",
+    "ignored_runtime",
+    "rejected_sensitive",
+    "unknown",
+    "warnings",
+    "write_performed"
+  ],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-legacy-settings-preview"},
+        "version": {"const": 1}
+      }
+    },
+    "preview_id": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{16}$"
+    },
+    "migratable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rooms"],
+      "properties": {
+        "home_target_temperature": {
+          "type": "number",
+          "minimum": 22,
+          "maximum": 28,
+          "multipleOf": 0.1
+        },
+        "rooms": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["legacy_room_id"],
+            "properties": {
+              "legacy_room_id": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+              },
+              "target_temperature": {
+                "type": "number",
+                "minimum": 16,
+                "maximum": 32,
+                "multipleOf": 0.1
+              },
+              "target_humidity": {
+                "type": "integer",
+                "minimum": 30,
+                "maximum": 70
+              }
+            },
+            "anyOf": [
+              {"required": ["target_temperature"]},
+              {"required": ["target_humidity"]}
+            ]
+          }
+        }
+      }
+    },
+    "recognized_pending": {"$ref": "#/$defs/key_list"},
+    "ignored_runtime": {"$ref": "#/$defs/key_list"},
+    "rejected_sensitive": {"$ref": "#/$defs/key_list"},
+    "unknown": {"$ref": "#/$defs/key_list"},
+    "warnings": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 8,
+      "items": {
+        "enum": [
+          "derived_room_targets_require_confirmation",
+          "recognized_settings_need_native_storage",
+          "runtime_values_ignored",
+          "sensitive_values_rejected",
+          "unknown_values_ignored",
+          "nothing_to_migrate"
+        ]
+      }
+    },
+    "write_performed": {"const": false}
+  },
+  "$defs": {
+    "key_list": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 128,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 80
+      }
+    }
+  }
+}

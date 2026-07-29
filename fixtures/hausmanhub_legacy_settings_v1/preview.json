@@ -1,0 +1,28 @@
+{
+  "contract": {
+    "name": "hausman-hub-legacy-settings-preview",
+    "version": 1
+  },
+  "preview_id": "0123456789abcdef",
+  "migratable": {
+    "home_target_temperature": 25,
+    "rooms": [
+      {
+        "legacy_room_id": "living",
+        "target_temperature": 25,
+        "target_humidity": 45
+      }
+    ]
+  },
+  "recognized_pending": ["smart_home_light_preset"],
+  "ignored_runtime": ["ac_pause_until"],
+  "rejected_sensitive": ["max_alert_user_ids"],
+  "unknown": [],
+  "warnings": [
+    "derived_room_targets_require_confirmation",
+    "recognized_settings_need_native_storage",
+    "runtime_values_ignored",
+    "sensitive_values_rejected"
+  ],
+  "write_performed": false
+}

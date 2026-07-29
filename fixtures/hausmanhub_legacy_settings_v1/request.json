@@ -1,0 +1,20 @@
+{
+  "contract": {
+    "name": "hausman-hub-legacy-settings-export",
+    "version": 1
+  },
+  "globals": {
+    "home_target_temp": 25,
+    "climate_rooms": {
+      "living": {
+        "comfortTemp": 25,
+        "targetHumidity": 45,
+        "manualControl": false,
+        "temp": 24.7
+      }
+    },
+    "smart_home_light_preset": ["light.living_ceiling"],
+    "ac_pause_until": 0,
+    "max_alert_user_ids": [12345]
+  }
+}

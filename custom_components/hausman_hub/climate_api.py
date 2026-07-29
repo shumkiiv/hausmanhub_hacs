@@ -56,6 +56,10 @@ from .application.climate_signal_settings import (
 from .application.contour_apply import ContourApplyViolation
 from .application.contour_override import TemporaryTemperatureViolation
 from .application.home_climate_targets import HomeClimateTargetsViolation
+from .application.legacy_settings_import import (
+    LegacySettingsImportViolation,
+    preview_legacy_settings,
+)
 from .application.climate_registry import ClimateRegistryViolation
 from .application.climate_runtime import (
     ClimateRuntime,
@@ -94,6 +98,9 @@ def _integration_version() -> str | None:
 
 
 ADMIN_IMPORT_PATH = "/api/hausman_hub/v1/admin/climate-import"
+ADMIN_LEGACY_SETTINGS_PREVIEW_PATH = (
+    "/api/hausman_hub/v1/admin/legacy-settings/preview"
+)
 ADMIN_DRAFT_PATH = "/api/hausman_hub/v1/admin/climate-drafts"
 ADMIN_DRAFT_CURRENT_PATH = "/api/hausman_hub/v1/admin/climate-drafts/current"
 ADMIN_DRAFT_VALIDATION_PATH = "/api/hausman_hub/v1/admin/climate-drafts/validate"
@@ -158,6 +165,7 @@ def register_climate_api(
             TemporaryTemperatureView(hass),
             HomeClimateTargetsView(hass),
             ClimateAdminImportView(hass),
+            LegacySettingsPreviewView(hass),
             ClimateAdminDraftView(hass),
             ClimateAdminDraftCurrentView(hass),
             ClimateAdminDraftValidationView(hass),
@@ -478,6 +486,32 @@ class ClimateAdminImportView(_ClimateView):
         except Exception:
             return self._unavailable()
         return self.json(payload, headers=NO_STORE_HEADERS)
+
+
+class LegacySettingsPreviewView(_ClimateView):
+    """Preview one explicit Node-RED settings export without persistence."""
+
+    url = ADMIN_LEGACY_SETTINGS_PREVIEW_PATH
+    name = "api:hausman_hub:legacy_settings_preview"
+
+    async def post(self, request: Any) -> Any:
+        if not _is_exact_request(request, ADMIN_LEGACY_SETTINGS_PREVIEW_PATH):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        try:
+            payload = await _request_json(
+                request,
+                maximum_bytes=MAX_CLIMATE_SETUP_BODY_BYTES,
+            )
+            result = preview_legacy_settings(payload)
+        except (LegacySettingsImportViolation, ValueError):
+            return self.json_message(
+                "Экспорт настроек Node-RED заполнен неверно.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        return self.json(result, headers=NO_STORE_HEADERS)
 
 
 class ClimateAdminDraftView(_ClimateView):

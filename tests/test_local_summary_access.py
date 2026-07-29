@@ -562,6 +562,71 @@ class LocalSummaryAccessTest(unittest.TestCase):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, serialized)
 
+    def test_legacy_settings_preview_is_local_admin_only_and_read_only(self) -> None:
+        path = "/api/hausman_hub/v1/admin/legacy-settings/preview"
+        view = next(item for item in self.hass.http.views if item.url == path)
+        payload = {
+            "contract": {
+                "name": "hausman-hub-legacy-settings-export",
+                "version": 1,
+            },
+            "globals": {
+                "home_target_temp": 25,
+                "ac_pause_until": 123,
+                "max_alert_user_ids": [12345],
+            },
+        }
+        original_data = copy.deepcopy(self.entry.data)
+        original_options = copy.deepcopy(self.entry.options)
+
+        response = asyncio.run(
+            view.post(
+                FakeJsonRequest(
+                    "127.0.0.1",
+                    reader_user(admin=True),
+                    path,
+                    payload,
+                )
+            )
+        )
+
+        self.assertEqual(200, response.status)
+        self.assertFalse(response.payload["write_performed"])
+        self.assertEqual("no-store", response.headers["Cache-Control"])
+        self.assertEqual(original_data, self.entry.data)
+        self.assertEqual(original_options, self.entry.options)
+        self.assertEqual(
+            ["max_alert_user_ids"],
+            response.payload["rejected_sensitive"],
+        )
+
+        for remote, user in (
+            ("203.0.113.7", reader_user(admin=True)),
+            ("127.0.0.1", reader_user("system-read-only")),
+        ):
+            with self.subTest(remote=remote, user=user):
+                forbidden = asyncio.run(
+                    view.post(FakeJsonRequest(remote, user, path, payload))
+                )
+                self.assertEqual(403, forbidden.status)
+
+    def test_legacy_settings_preview_rejects_an_invalid_export(self) -> None:
+        path = "/api/hausman_hub/v1/admin/legacy-settings/preview"
+        view = next(item for item in self.hass.http.views if item.url == path)
+        response = asyncio.run(
+            view.post(
+                FakeJsonRequest(
+                    "127.0.0.1",
+                    reader_user(admin=True),
+                    path,
+                    {"globals": {"home_target_temp": 25}},
+                )
+            )
+        )
+
+        self.assertEqual(400, response.status)
+        self.assertEqual({"message"}, set(response.payload))
+
     def test_view_returns_exactly_nine_counts_for_a_local_read_only_user(self) -> None:
         response = asyncio.run(
             self.view.get(FakeRequest("127.0.0.1", reader_user("system-read-only")))
@@ -1740,7 +1805,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.33.0", panel.payload["integration_version"])
+        self.assertEqual("1.34.0", panel.payload["integration_version"])
 
     def test_admin_panel_accepts_ipv6_link_local_admin_from_mdns(self) -> None:
         """A local admin may open the panel when mDNS selects IPv6 link-local."""
@@ -2312,7 +2377,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertFalse(hasattr(self.view, method))
 
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
-        self.assertEqual(49, len(self.hass.http.views))
+        self.assertEqual(50, len(self.hass.http.views))
         self.assertEqual(
             1,
             sum(
@@ -2625,7 +2690,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             [(closed_entry, ("sensor", "switch"))],
             closed_hass.config_entries.forwarded,
         )
-        self.assertEqual(48, len(closed_hass.http.views))
+        self.assertEqual(49, len(closed_hass.http.views))
         self.assertEqual(
             {
                 "/api/hausman_hub/v1/capabilities",
@@ -2639,6 +2704,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 "/api/hausman_hub/v1/contours/temporary-temperature",
                 "/api/hausman_hub/v1/contours/home-targets",
                 "/api/hausman_hub/v1/admin/climate-import",
+                "/api/hausman_hub/v1/admin/legacy-settings/preview",
                 "/api/hausman_hub/v1/admin/climate-drafts",
                 "/api/hausman_hub/v1/admin/climate-drafts/current",
                 "/api/hausman_hub/v1/admin/climate-drafts/validate",

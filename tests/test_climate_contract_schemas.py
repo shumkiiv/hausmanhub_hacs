@@ -79,6 +79,8 @@ class ClimateContractSchemasTest(unittest.TestCase):
         pairs = {
             "hausmanhub_capabilities_v1/capabilities.json": "v1/api-capabilities.schema.json",
             "hausmanhub_event_stream_v1/message.json": "v1/event-stream-message.schema.json",
+            "hausmanhub_legacy_settings_v1/request.json": "v1/legacy-settings-preview-request.schema.json",
+            "hausmanhub_legacy_settings_v1/preview.json": "v1/legacy-settings-preview.schema.json",
             "hausmanhub_dashboard_v1/dashboard.json": "v1/dashboard-snapshot.schema.json",
             "hausmanhub_device_actions_v1/request.json": "v1/device-action-request.schema.json",
             "hausmanhub_device_actions_v1/confirmed.json": "v1/device-action-receipt.schema.json",
