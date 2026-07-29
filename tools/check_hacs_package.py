@@ -76,6 +76,8 @@ CONTRACT_PATHS = tuple(
         "temporary-temperature-request.schema.json",
         "legacy-settings-preview-request.schema.json",
         "legacy-settings-preview.schema.json",
+        "legacy-settings-apply-request.schema.json",
+        "legacy-settings-apply-receipt.schema.json",
     )
 ) + (
     INTEGRATION_DIRECTORY / "contracts" / "v2" / "climate-home.schema.json",

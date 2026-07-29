@@ -64,6 +64,8 @@ from .climate_migration import (
     ClimateMigrationReceipt,
     rollback_migrated_setup,
 )
+from .legacy_settings_apply import build_legacy_settings_apply
+from .settings_service import HausmanHubSettingsService
 from .climate_native_setup import build_native_climate_setup_snapshot
 from .climate_comparison import build_climate_comparison_snapshot
 from .climate_demands import build_climate_demand_snapshot
@@ -1699,6 +1701,48 @@ class ClimateRuntime:
             self._contours = contours
             self.last_error = None
             return contour_registry_to_payload(contours)
+
+    async def async_apply_legacy_settings(
+        self,
+        payload: object,
+        settings_service: HausmanHubSettingsService,
+    ) -> dict[str, object]:
+        """Persist one unchanged legacy preview without physical commands."""
+
+        async with self._lock:
+            if self._contour_store is None:
+                raise ClimateRuntimeUnavailable("contour storage is unavailable")
+            current_settings = settings_service.current
+            plan = build_legacy_settings_apply(
+                payload,
+                current_settings=current_settings,
+                current_contours=self._contours,
+            )
+            contours_changed = plan.contours != self._contours
+            settings_changed = plan.settings != current_settings
+            previous_contours = self._contours
+            contours_saved = False
+            try:
+                if contours_changed:
+                    await self._contour_store.async_save(plan.contours)
+                    contours_saved = True
+                if settings_changed:
+                    await settings_service.async_replace(plan.settings)
+            except Exception as error:
+                if contours_saved:
+                    try:
+                        await self._contour_store.async_save(previous_contours)
+                    except Exception as rollback_error:
+                        self.last_error = type(rollback_error).__name__
+                        raise ClimateRuntimeUnavailable(
+                            "legacy settings rollback failed"
+                        ) from rollback_error
+                self._contours = previous_contours
+                self.last_error = type(error).__name__
+                raise
+            self._contours = plan.contours
+            self.last_error = None
+            return plan.receipt
 
     async def async_rollback_climate_migration(
         self,

@@ -60,6 +60,7 @@ from .application.legacy_settings_import import (
     LegacySettingsImportViolation,
     preview_legacy_settings,
 )
+from .application.legacy_settings_apply import LegacySettingsApplyViolation
 from .application.climate_registry import ClimateRegistryViolation
 from .application.climate_runtime import (
     ClimateRuntime,
@@ -101,6 +102,7 @@ ADMIN_IMPORT_PATH = "/api/hausman_hub/v1/admin/climate-import"
 ADMIN_LEGACY_SETTINGS_PREVIEW_PATH = (
     "/api/hausman_hub/v1/admin/legacy-settings/preview"
 )
+ADMIN_LEGACY_SETTINGS_APPLY_PATH = "/api/hausman_hub/v1/admin/legacy-settings/apply"
 ADMIN_DRAFT_PATH = "/api/hausman_hub/v1/admin/climate-drafts"
 ADMIN_DRAFT_CURRENT_PATH = "/api/hausman_hub/v1/admin/climate-drafts/current"
 ADMIN_DRAFT_VALIDATION_PATH = "/api/hausman_hub/v1/admin/climate-drafts/validate"
@@ -166,6 +168,7 @@ def register_climate_api(
             HomeClimateTargetsView(hass),
             ClimateAdminImportView(hass),
             LegacySettingsPreviewView(hass),
+            LegacySettingsApplyView(hass),
             ClimateAdminDraftView(hass),
             ClimateAdminDraftCurrentView(hass),
             ClimateAdminDraftValidationView(hass),
@@ -512,6 +515,55 @@ class LegacySettingsPreviewView(_ClimateView):
                 HTTPStatus.BAD_REQUEST,
                 headers=NO_STORE_HEADERS,
             )
+        return self.json(result, headers=NO_STORE_HEADERS)
+
+
+class LegacySettingsApplyView(_ClimateView):
+    """Apply one unchanged preview to native stores without device commands."""
+
+    url = ADMIN_LEGACY_SETTINGS_APPLY_PATH
+    name = "api:hausman_hub:legacy_settings_apply"
+
+    async def post(self, request: Any) -> Any:
+        if not _is_exact_request(request, ADMIN_LEGACY_SETTINGS_APPLY_PATH):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        runtime = self._runtime()
+        data = self._hass.data.get(DOMAIN, {})
+        settings_service = data.get("settings_service")
+        if runtime is None or settings_service is None:
+            return self._unavailable()
+        try:
+            payload = await _request_json(
+                request,
+                maximum_bytes=MAX_CLIMATE_SETUP_BODY_BYTES,
+            )
+            result = await runtime.async_apply_legacy_settings(
+                payload,
+                settings_service,
+            )
+        except LegacySettingsApplyViolation as error:
+            status = (
+                HTTPStatus.CONFLICT
+                if error.code in {"preview_changed", "climate_not_configured"}
+                else HTTPStatus.BAD_REQUEST
+            )
+            return self.json_message(
+                "Не удалось применить экспорт настроек Node-RED.",
+                status,
+                headers=NO_STORE_HEADERS,
+            )
+        except ClimateRuntimeUnavailable:
+            return self._unavailable()
+        except ValueError:
+            return self.json_message(
+                "Экспорт настроек Node-RED заполнен неверно.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        except Exception:
+            return self._unavailable()
         return self.json(result, headers=NO_STORE_HEADERS)
 
 

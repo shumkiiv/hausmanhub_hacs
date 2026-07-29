@@ -20,7 +20,7 @@
   "unknown": [],
   "warnings": [
     "derived_room_targets_require_confirmation",
-    "recognized_settings_need_native_storage",
+    "recognized_settings_require_apply",
     "runtime_values_ignored",
     "sensitive_values_rejected"
   ],

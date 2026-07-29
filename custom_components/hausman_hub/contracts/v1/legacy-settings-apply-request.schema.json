@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hausmanhub/contracts/v1/legacy-settings-apply-request.schema.json",
+  "title": "HausmanHub legacy settings apply request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "preview_id", "confirm", "export", "room_mappings"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-legacy-settings-apply"},
+        "version": {"const": 1}
+      }
+    },
+    "preview_id": {"type": "string", "pattern": "^[a-f0-9]{16}$"},
+    "confirm": {"const": true},
+    "export": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract", "globals"],
+      "properties": {
+        "contract": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "version"],
+          "properties": {
+            "name": {"const": "hausman-hub-legacy-settings-export"},
+            "version": {"const": 1}
+          }
+        },
+        "globals": {
+          "type": "object",
+          "maxProperties": 128,
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "additionalProperties": true
+        }
+      }
+    },
+    "room_mappings": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["legacy_room_id", "room_id"],
+        "properties": {
+          "legacy_room_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"},
+          "room_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"}
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "contract": {
+    "name": "hausman-hub-legacy-settings-apply-receipt",
+    "version": 1
+  },
+  "preview_id": "0123456789abcdef",
+  "status": "applied",
+  "settings_updated": ["light_on_entities"],
+  "climate_rooms_updated": ["living"],
+  "ignored_runtime_count": 1,
+  "rejected_sensitive_count": 1,
+  "unknown_count": 0,
+  "physical_commands_sent": false,
+  "write_performed": true
+}

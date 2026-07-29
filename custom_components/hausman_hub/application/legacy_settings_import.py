@@ -2,7 +2,7 @@
 
 The parser is deliberately detached from storage and network adapters.  It
 accepts only an explicitly supplied, bounded export and returns a redacted
-plan.  Applying that plan is a separate future operation.
+plan.  Applying that plan is a separate, explicitly confirmed operation.
 """
 
 from __future__ import annotations
@@ -23,9 +23,8 @@ MAX_ROOMS = 32
 _KEY = re.compile(r"^[A-Za-z0-9_.-]{1,80}$")
 _ROOM_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
-# These settings are real user choices, but no matching native storage exists
-# yet.  Previewing them prevents silent loss while keeping this increment
-# strictly read-only.
+# These settings are real user choices stored natively only after an explicit
+# apply of the unchanged preview.
 RECOGNIZED_PENDING_KEYS = frozenset(
     {
         "climate_telegram_reports_enabled",
@@ -125,7 +124,7 @@ def preview_legacy_settings(payload: object) -> dict[str, object]:
     if migratable["rooms"]:
         warnings.append("derived_room_targets_require_confirmation")
     if recognized_pending:
-        warnings.append("recognized_settings_need_native_storage")
+        warnings.append("recognized_settings_require_apply")
     if ignored_runtime:
         warnings.append("runtime_values_ignored")
     if rejected_sensitive:

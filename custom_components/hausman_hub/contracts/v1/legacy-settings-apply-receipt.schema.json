@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hausmanhub/contracts/v1/legacy-settings-apply-receipt.schema.json",
+  "title": "HausmanHub legacy settings apply receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "preview_id",
+    "status",
+    "settings_updated",
+    "climate_rooms_updated",
+    "ignored_runtime_count",
+    "rejected_sensitive_count",
+    "unknown_count",
+    "physical_commands_sent",
+    "write_performed"
+  ],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-legacy-settings-apply-receipt"},
+        "version": {"const": 1}
+      }
+    },
+    "preview_id": {"type": "string", "pattern": "^[a-f0-9]{16}$"},
+    "status": {"const": "applied"},
+    "settings_updated": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 5,
+      "items": {
+        "enum": [
+          "climate_reports_enabled",
+          "curtain_holidays",
+          "light_off_entities",
+          "light_on_entities",
+          "tv_off_entities"
+        ]
+      }
+    },
+    "climate_rooms_updated": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 32,
+      "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"}
+    },
+    "ignored_runtime_count": {"type": "integer", "minimum": 0, "maximum": 128},
+    "rejected_sensitive_count": {"type": "integer", "minimum": 0, "maximum": 128},
+    "unknown_count": {"type": "integer", "minimum": 0, "maximum": 128},
+    "physical_commands_sent": {"const": false},
+    "write_performed": {"const": true}
+  }
+}

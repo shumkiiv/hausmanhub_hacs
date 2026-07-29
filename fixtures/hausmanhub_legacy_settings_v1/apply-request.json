@@ -1,0 +1,32 @@
+{
+  "contract": {
+    "name": "hausman-hub-legacy-settings-apply",
+    "version": 1
+  },
+  "preview_id": "0123456789abcdef",
+  "confirm": true,
+  "export": {
+    "contract": {
+      "name": "hausman-hub-legacy-settings-export",
+      "version": 1
+    },
+    "globals": {
+      "home_target_temp": 25,
+      "climate_rooms": {
+        "living": {
+          "comfortTemp": 25,
+          "targetHumidity": 45
+        }
+      },
+      "smart_home_light_preset": ["light.living_ceiling"],
+      "ac_pause_until": 0,
+      "max_alert_user_ids": [12345]
+    }
+  },
+  "room_mappings": [
+    {
+      "legacy_room_id": "living",
+      "room_id": "living"
+    }
+  ]
+}
