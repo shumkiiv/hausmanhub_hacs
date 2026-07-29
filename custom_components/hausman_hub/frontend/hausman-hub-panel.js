@@ -26,6 +26,7 @@ const IR_CODES_TEST_API = `${IR_CODES_API}/test`;
 const IR_CODES_DELETE_API = `${IR_CODES_API}/delete`;
 const IR_CODE_BINDINGS_API = `${IR_CODES_API}/bindings`;
 const REFRESH_MS = 30000;
+const LOCKOUT_HELP = "Теплее верхнего порога — отопление выключено; холоднее нижнего — разрешено. Между ними режим не меняется.";
 
 const PROFILE_CONTRACT = { name: "hausman-hub-climate-profile-update-request", version: 1 };
 const SCHEDULE_CONTRACT = { name: "hausman-hub-climate-schedule-update-request", version: 1 };
@@ -2797,20 +2798,22 @@ class HausmanHubPanel extends HTMLElement {
       card.appendChild(picker.root);
       pickers[key] = picker;
     });
+    const clearError = () => { this._firstRun.homeError = ""; card.querySelector(".field-error")?.remove(); };
     const high = numberField(home.heating_lockout_high, -40, 60, 0.5, () => {
       home.heating_lockout_high = high.value;
+      clearError();
     });
-    const highRow = el("label", "form-field", "Не греть выше, °C");
+    const highRow = el("label", "form-field", "Отключать отопление теплее, °C");
     highRow.appendChild(high);
     card.appendChild(highRow);
-    card.appendChild(el("div", "muted field-help", "Выше этого порога на улице отопление не включается: дома уже достаточно тепло."));
     const low = numberField(home.heating_lockout_low, -40, 60, 0.5, () => {
       home.heating_lockout_low = low.value;
+      clearError();
     });
-    const lowRow = el("label", "form-field", "Аварийная защита ниже, °C");
+    const lowRow = el("label", "form-field", "Разрешать отопление холоднее, °C");
     lowRow.appendChild(low);
     card.appendChild(lowRow);
-    card.appendChild(el("div", "muted field-help", "Ниже этого порога защита снова разрешает отопление даже после тёплого периода."));
+    card.appendChild(el("div", "muted field-help", LOCKOUT_HELP));
     if (this._firstRun.homeError) card.appendChild(el("div", "field-error", this._firstRun.homeError));
     const actions = el("div", "actions");
     const back = el("button", "secondary", "Назад к комнатам");
@@ -4731,22 +4734,22 @@ class HausmanHubPanel extends HTMLElement {
     });
     const high = numberField(
       values.heating_lockout_high, -40, 60, 0.5,
-      () => this._markDirty("home", dirtyNotice)
+      () => { validationError.textContent = ""; this._markDirty("home", dirtyNotice); }
     );
-    const highRow = el("label", "form-field", "Блокировка отопления выше, °C");
+    const highRow = el("label", "form-field", "Отключать отопление теплее, °C");
     highRow.appendChild(high);
     const low = numberField(
       values.heating_lockout_low, -40, 60, 0.5,
-      () => this._markDirty("home", dirtyNotice)
+      () => { validationError.textContent = ""; this._markDirty("home", dirtyNotice); }
     );
-    const lowRow = el("label", "form-field", "Разблокировка отопления ниже, °C");
+    const lowRow = el("label", "form-field", "Разрешать отопление холоднее, °C");
     lowRow.appendChild(low);
     const thresholds = el("div", "home-threshold-grid");
     thresholds.appendChild(highRow);
     thresholds.appendChild(lowRow);
     card.appendChild(thresholds);
     card.appendChild(
-      el("div", "muted", "Пороги допустимы от −40 до 60 °C; нижний должен быть строго меньше верхнего.")
+      el("div", "muted", LOCKOUT_HELP)
     );
     const validationError = el("div", "field-error");
     setAttr(validationError, "role", "alert");

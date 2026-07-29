@@ -1489,6 +1489,13 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         if (calls.some((call) => call.method === "POST" && call.path === "hausman_hub/v1/admin/home-environment")) {
           throw new Error("blank threshold reached POST");
         }
+        high.value = "18";
+        high.fire("input");
+        text = textOf(panel.shadowRoot);
+        if (text.includes("Проверьте пороги")) throw new Error("corrected thresholds kept a stale error");
+        if (!text.includes("Между ними режим не меняется")) {
+          throw new Error("threshold behavior explanation missing");
+        }
             """,
         )
         completed = run_panel_script(script)
