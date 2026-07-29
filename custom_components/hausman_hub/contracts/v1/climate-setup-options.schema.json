@@ -411,6 +411,9 @@
         "status": {
           "$ref": "#/$defs/device_status"
         },
+        "configured": {
+          "type": "boolean"
+        },
         "suggested_room_id": {
           "$ref": "#/$defs/nullable_stable_id"
         },

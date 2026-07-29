@@ -19,6 +19,7 @@ PANEL_CSS = PANEL_JS.with_name("hausman-hub-panel.css")
 HOME_SECTIONS_JS = PANEL_JS.with_name("hausman-hub-home-sections.js")
 ROOM_SETUP_JS = PANEL_JS.with_name("hausman-hub-room-setup.js")
 DEVICE_INVENTORY_JS = PANEL_JS.with_name("hausman-hub-device-inventory.js")
+AREA_BINDING_JS = PANEL_JS.with_name("hausman-hub-area-binding.js")
 SETTINGS_CSS = PANEL_JS.with_name("hausman-hub-settings.css")
 
 PANEL_PAYLOAD = {
@@ -320,6 +321,10 @@ def panel_script(get_payloads: dict, post_table: dict, assertions: str) -> str:
       vm.runInThisContext(
         fs.readFileSync({str(DEVICE_INVENTORY_JS)!r}, "utf8").replace("export function renderDeviceInventory", "function renderDeviceInventory"),
         {{ filename: {str(DEVICE_INVENTORY_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(AREA_BINDING_JS)!r}, "utf8").replace("export function renderFirstRunAreaBinding", "function renderFirstRunAreaBinding"),
+        {{ filename: {str(AREA_BINDING_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(PANEL_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, ""),

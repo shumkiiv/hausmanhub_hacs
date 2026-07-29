@@ -17,6 +17,7 @@ PANEL_JS = (
 HOME_SECTIONS_JS = PANEL_JS.with_name("hausman-hub-home-sections.js")
 ROOM_SETUP_JS = PANEL_JS.with_name("hausman-hub-room-setup.js")
 DEVICE_INVENTORY_JS = PANEL_JS.with_name("hausman-hub-device-inventory.js")
+AREA_BINDING_JS = PANEL_JS.with_name("hausman-hub-area-binding.js")
 
 PANEL_PAYLOAD = {
     "contract": {"name": "hausman-hub-admin-panel", "version": 2},
@@ -287,6 +288,10 @@ def panel_script(get_table: dict, post_table: dict, assertions: str) -> str:
       vm.runInThisContext(
         fs.readFileSync({str(DEVICE_INVENTORY_JS)!r}, "utf8").replace("export function renderDeviceInventory", "function renderDeviceInventory"),
         {{ filename: {str(DEVICE_INVENTORY_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(AREA_BINDING_JS)!r}, "utf8").replace("export function renderFirstRunAreaBinding", "function renderFirstRunAreaBinding"),
+        {{ filename: {str(AREA_BINDING_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(PANEL_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, ""),
@@ -1070,6 +1075,98 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         }
         if (!textOf(panel.shadowRoot).includes("Привязки комнат сохранены")) {
           throw new Error("successful HA assignment feedback is missing");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_binding_step_moves_or_clears_devices_already_in_rooms(self) -> None:
+        script = panel_script(
+            get_payloads(),
+            {"hausman_hub/v1/admin/device-area-assignments": {
+                "status": "saved",
+                "updated_devices": 2,
+                "updated_entities": 0,
+                "cleared_assignments": 1,
+            }},
+            """
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать настройку")[0].fire("click");
+        await tick();
+        const showLabel = findAll(panel.shadowRoot, (node) =>
+          String(node.className).split(" ").includes("checkbox-field")
+          && textOf(node).includes("Показать устройства, уже привязанные"))[0];
+        const showAssigned = findAll(showLabel, (node) => node.type === "checkbox")[0];
+        showAssigned.checked = true;
+        showAssigned.fire("change");
+        const rows = findAll(panel.shadowRoot, (node) =>
+          String(node.className).split(" ").includes("binding-device-row"));
+        const trv = rows.find((row) => textOf(row).includes("Батарея детской"));
+        const ac = rows.find((row) => textOf(row).includes("Кондиционер"));
+        if (!trv || !ac || !textOf(panel.shadowRoot).includes("Устройства в комнатах")) {
+          throw new Error("assigned device inventory is missing");
+        }
+        const trvRoom = findAll(trv, (node) => node.tagName === "SELECT")[0];
+        const acRoom = findAll(ac, (node) => node.tagName === "SELECT")[0];
+        if (trvRoom.value !== "kids" || acRoom.value !== "living") {
+          throw new Error("current Home Assistant areas are not selected");
+        }
+        trvRoom.value = "living";
+        trvRoom.fire("change");
+        const refreshedRows = findAll(panel.shadowRoot, (node) =>
+          String(node.className).split(" ").includes("binding-device-row"));
+        const refreshedAc = refreshedRows.find((row) => textOf(row).includes("Кондиционер"));
+        const refreshedAcRoom = findAll(refreshedAc, (node) => node.tagName === "SELECT")[0];
+        refreshedAcRoom.value = "";
+        refreshedAcRoom.fire("change");
+        const save = findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Сохранить привязки в Home Assistant")[0];
+        if (save.disabled || !textOf(panel.shadowRoot).includes("Подготовлено изменений: 2")) {
+          throw new Error("move and clear changes were not retained");
+        }
+        save.fire("click");
+        await tick(4);
+        const request = calls.find((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/admin/device-area-assignments");
+        const byCandidate = Object.fromEntries(request.payload.assignments.map(
+          (assignment) => [assignment.candidate_ids[0], assignment.room_id]
+        ));
+        if (byCandidate.candidate_trv !== "living" || byCandidate.candidate_ac !== "") {
+          throw new Error("move/clear area payload mismatch: " + JSON.stringify(request));
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_binding_step_protects_unavailable_configured_device(self) -> None:
+        options = copy.deepcopy(DRAFT_OPTIONS)
+        configured = next(
+            device for device in options["devices"]
+            if device["candidate_id"] == "candidate_ac"
+        )
+        configured["configured"] = True
+        configured["status"] = "unavailable"
+        script = panel_script(
+            get_payloads(options=options),
+            {},
+            """
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать настройку")[0].fire("click");
+        await tick();
+        const showLabel = findAll(panel.shadowRoot, (node) =>
+          String(node.className).split(" ").includes("checkbox-field")
+          && textOf(node).includes("Показать устройства, уже привязанные"))[0];
+        const showAssigned = findAll(showLabel, (node) => node.type === "checkbox")[0];
+        showAssigned.checked = true;
+        showAssigned.fire("change");
+        const row = findAll(panel.shadowRoot, (node) =>
+          String(node.className).split(" ").includes("binding-device-row"))
+          .find((node) => textOf(node).includes("Кондиционер"));
+        const picker = findAll(row, (node) => node.tagName === "SELECT")[0];
+        if (!picker.disabled || !textOf(row).includes("уже используется контуром")) {
+          throw new Error("configured unavailable device is not protected");
         }
             """,
         )

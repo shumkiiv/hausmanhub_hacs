@@ -767,6 +767,7 @@ def climate_setup_options(
             "suggested_types": candidate["suggested_types"],
             "recommended_type": candidate["recommended_type"],
             "status": candidate["status"],
+            "configured": candidate["configured"],
             "suggested_room_id": suggestion["suggested_room_id"],
             "suggested_room_name": suggestion["suggested_room_name"],
             "reason": suggestion["reason"],

@@ -1,6 +1,7 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.46.2";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.46.2";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.46.2";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.46.3";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.46.3";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.46.3";
+import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.46.3";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css";
@@ -1587,6 +1588,13 @@ class HausmanHubPanel extends HTMLElement {
     ));
   }
 
+  _firstRunAreaCandidates() {
+    return (this._firstRun.options && this._firstRun.options.devices || []).filter(
+      (candidate) => candidate.configured === true
+        || ["available", "unavailable"].includes(candidate.status)
+    );
+  }
+
   _firstRunPhysicalGroups(candidates) {
     const groups = new Map();
     this._firstRunDistinctCandidates(candidates).forEach((candidate) => {
@@ -1629,8 +1637,9 @@ class HausmanHubPanel extends HTMLElement {
   _assignFirstRunGroup(group, roomId) {
     const groupId = this._firstRunPhysicalGroupId(group);
     if (!groupId) return;
-    if (roomId) this._firstRun.areaAssignments[groupId] = roomId;
-    else delete this._firstRun.areaAssignments[groupId];
+    const originalRoomId = (group && group[0] && group[0].room_id) || "";
+    if (roomId === originalRoomId) delete this._firstRun.areaAssignments[groupId];
+    else this._firstRun.areaAssignments[groupId] = roomId;
     this._firstRun.areaSaveError = "";
     this._firstRun.areaSaveStatus = "";
   }
@@ -2284,7 +2293,7 @@ class HausmanHubPanel extends HTMLElement {
     try {
       this._firstRun.options = await this._hass.callApi("GET", DRAFT_API);
       const currentGroupIds = new Set(this._firstRunPhysicalGroups(
-        this._firstRunUnassignedCandidates()
+        this._firstRunAreaCandidates()
       ).map((group) => this._firstRunPhysicalGroupId(group)));
       Object.keys(this._firstRun.areaAssignments).forEach((groupId) => {
         if (!currentGroupIds.has(groupId)) delete this._firstRun.areaAssignments[groupId];
@@ -2311,10 +2320,11 @@ class HausmanHubPanel extends HTMLElement {
   async _saveFirstRunAreaAssignments() {
     if (this._busy || !this._firstRun.options) return;
     const assignments = [];
-    const groups = this._firstRunPhysicalGroups(this._firstRunUnassignedCandidates());
+    const groups = this._firstRunPhysicalGroups(this._firstRunAreaCandidates());
     groups.forEach((group) => {
-      const roomId = this._firstRun.areaAssignments[this._firstRunPhysicalGroupId(group)];
-      if (!roomId) return;
+      const groupId = this._firstRunPhysicalGroupId(group);
+      if (!Object.prototype.hasOwnProperty.call(this._firstRun.areaAssignments, groupId)) return;
+      const roomId = this._firstRun.areaAssignments[groupId];
       assignments.push({
         candidate_ids: group.map((candidate) => candidate.candidate_id),
         room_id: roomId,
@@ -2631,228 +2641,9 @@ class HausmanHubPanel extends HTMLElement {
   }
 
   _renderFirstRunRooms(card) {
-    const options = this._firstRun.options;
-    const rooms = options.rooms || [];
-    const roomlessGroups = this._firstRunPhysicalGroups(this._firstRunUnassignedCandidates());
-    card.appendChild(el("h2", null, "Привязка комнат и устройств"));
-    card.appendChild(el("div", "section-intro", "Home Assistant — единый источник комнат. Выберите новые привязки, затем сохраните их одной явной операцией."));
-    const summary = el("div", "binding-summary");
-    [["Комнат", rooms.length], ["Без комнаты", roomlessGroups.length]].forEach(([label, value]) => {
-      const metric = el("div");
-      metric.appendChild(el("strong", null, value));
-      metric.appendChild(el("span", "muted", label));
-      summary.appendChild(metric);
+    renderFirstRunAreaBinding.call(this, card, {
+      el, normalizedText, selectField, svgIcon, ZIGBEE2MQTT_IMAGE_PATTERN,
     });
-    card.appendChild(summary);
-    const tools = el("div", "binding-tools");
-    const refresh = el("button", "secondary", "Обновить инвентаризацию");
-    refresh.disabled = this._busy || this._firstRun.loading;
-    refresh.addEventListener("click", () => this._loadFirstRunOptions(true));
-    tools.appendChild(refresh);
-    const showDevices = el("input");
-    showDevices.type = "checkbox";
-    showDevices.checked = this._firstRun.showRoomDevices === true;
-    const showLabel = el("label", "checkbox-field");
-    showLabel.appendChild(showDevices);
-    showLabel.appendChild(el("span", null, "Показать устройства во всех комнатах"));
-    tools.appendChild(showLabel);
-    card.appendChild(tools);
-    card.appendChild(el("h3", "binding-heading", "Комнаты"));
-    const fields = { rooms: {} };
-    const list = el("div", "first-run-room-list");
-    rooms.forEach((room) => {
-      const state = this._firstRunRoomState(room);
-      const candidates = this._firstRunRoomCandidates(room.id);
-      const physical = this._firstRunPhysicalGroups(candidates);
-      const roomCard = el("article", "card first-run-room");
-      const heading = el("div", "binding-room-heading");
-      heading.appendChild(el("h3", null, room.name || room.id));
-      heading.appendChild(el("span", "status-badge", `${physical.length} устр.`));
-      roomCard.appendChild(heading);
-      const include = el("input");
-      include.type = "checkbox";
-      include.checked = state.included;
-      include.disabled = room.selectable !== true || this._busy;
-      const includeLabel = el("label", "checkbox-field");
-      includeLabel.appendChild(include);
-      includeLabel.appendChild(el("span", null, "Использовать в климатическом контуре"));
-      roomCard.appendChild(includeLabel);
-      if (this._firstRun.showRoomDevices) {
-        const names = el("div", "binding-room-devices");
-        physical.forEach((group) => names.appendChild(el(
-          "span", "chip", group[0].device_name || group[0].name || group[0].candidate_id
-        )));
-        if (!physical.length) names.appendChild(el("span", "muted", "Устройства не найдены"));
-        roomCard.appendChild(names);
-      }
-      const badge = el("span", "status-badge");
-      if (this._firstRun.validRooms.has(room.id)) {
-        badge.textContent = "Настроена";
-        badge.className += " is-ready";
-      } else if (state.report && (state.report.issues || []).length) {
-        badge.textContent = "Требует внимания";
-        badge.className += " is-attention";
-      } else {
-        badge.textContent = "Не настроена";
-      }
-      roomCard.appendChild(badge);
-      const actions = el("div", "actions");
-      const configure = el("button", "secondary", "Настроить");
-      configure.disabled = include.disabled;
-      configure.addEventListener("click", () => this._openFirstRunRoom(room.id));
-      actions.appendChild(configure);
-      roomCard.appendChild(actions);
-      include.addEventListener("change", () => {
-        state.included = include.checked;
-        this._firstRunInvalidate(room.id);
-        this._render();
-      });
-      fields.rooms[room.id] = { configure, include };
-      list.appendChild(roomCard);
-    });
-    if (!rooms.length) {
-      list.appendChild(el("div", "card empty-state muted", "Home Assistant пока не передал ни одной области."));
-    }
-    card.appendChild(list);
-    card.appendChild(el("h3", "binding-heading", "Устройства без комнаты"));
-    card.appendChild(el("div", "muted binding-help", "Выбор остаётся черновиком до нажатия «Сохранить привязки». После сохранения физическое устройство и его сущности будут использовать область Home Assistant."));
-    const unassigned = el("div", "binding-device-list");
-    const roomlessNames = new Map();
-    roomlessGroups.forEach((group) => {
-      const first = group[0];
-      const name = normalizedText(first.device_name || first.name || "");
-      if (name) roomlessNames.set(name, (roomlessNames.get(name) || 0) + 1);
-    });
-    roomlessGroups.forEach((group) => {
-      const first = group[0];
-      const virtualYandex = this._firstRunIsYandexVirtual(first);
-      const available = this._firstRunGroupAvailable(group);
-      const displayName = virtualYandex
-        ? (first.name || first.device_name || first.candidate_id)
-        : (first.device_name || first.name || first.candidate_id);
-      const duplicateName = (roomlessNames.get(normalizedText(first.device_name || first.name || "")) || 0) > 1;
-      const row = el("article", "binding-device-row");
-      if (virtualYandex) row.className += available ? " is-virtual" : " is-virtual is-unavailable";
-      const thumb = el("div", "device-thumb");
-      const fallback = el("span", "device-thumb-fallback");
-      fallback.appendChild(svgIcon("device"));
-      if (first.image_url && ZIGBEE2MQTT_IMAGE_PATTERN.test(first.image_url)) {
-        const image = el("img");
-        image.src = first.image_url;
-        image.alt = "";
-        image.addEventListener("error", () => { image.hidden = true; fallback.hidden = false; });
-        fallback.hidden = true;
-        thumb.appendChild(image);
-      }
-      thumb.appendChild(fallback);
-      row.appendChild(thumb);
-      const copy = el("div", "binding-device-copy");
-      copy.appendChild(el("strong", null, displayName));
-      const details = virtualYandex
-        ? `Виртуальное устройство Яндекса · № ${this._firstRunPublicIdentity(first)}`
-        : [first.manufacturer, first.model].filter(Boolean).join(" · ");
-      if (details) copy.appendChild(el("small", "muted", details));
-      if (virtualYandex) {
-        copy.appendChild(el(
-          "span",
-          `status-badge ${available ? "is-ready" : "is-attention"}`,
-          available ? "Доступно" : "Недоступно"
-        ));
-      }
-      const types = new Set();
-      group.forEach((candidate) => (candidate.suggested_types || []).forEach((type) => types.add(type)));
-      const chips = el("div", "device-card-chips");
-      const typeNames = (options.display_names || {}).device_types || {};
-      types.forEach((type) => chips.appendChild(el("span", "chip", typeNames[type] || type)));
-      copy.appendChild(chips);
-      if (virtualYandex && duplicateName) {
-        copy.appendChild(el(
-          "small",
-          "virtual-device-hint",
-          available
-            ? "Имя совпадает с другим виртуальным устройством. Назначайте комнату только после проверки объекта в Home Assistant."
-            : "Недоступный объект с таким же именем может быть устаревшей виртуальной сущностью. Проверьте его в Home Assistant перед привязкой."
-        ));
-      }
-      row.appendChild(copy);
-      const picker = selectField(
-        [{ label: "Не привязано", value: "" }].concat(rooms.map((room) => ({
-          label: room.name || room.id, value: room.id,
-        }))),
-        this._firstRunGroupRoom(group),
-        () => {
-          this._assignFirstRunGroup(group, picker.value);
-          this._render();
-        }
-      );
-      const pickerLabel = el("label", "binding-room-picker", "Комната");
-      pickerLabel.appendChild(picker);
-      row.appendChild(pickerLabel);
-      unassigned.appendChild(row);
-    });
-    if (!roomlessGroups.length) {
-      unassigned.appendChild(el("div", "card empty-state muted", "Все найденные устройства уже распределены по комнатам."));
-    }
-    card.appendChild(unassigned);
-    const pendingAssignments = Object.keys(this._firstRun.areaAssignments).length;
-    const saveBar = el("div", "binding-save-bar");
-    const saveCopy = el("div", "binding-save-copy");
-    saveCopy.appendChild(el("strong", null, pendingAssignments
-      ? `Подготовлено изменений: ${pendingAssignments}`
-      : "Нет несохранённых привязок"));
-    saveCopy.appendChild(el("small", "muted", pendingAssignments
-      ? "Home Assistant изменится только после сохранения."
-      : "Назначьте комнату хотя бы одному устройству без области."));
-    saveBar.appendChild(saveCopy);
-    const saveActions = el("div", "actions compact-actions");
-    const clearAssignments = el("button", "secondary", "Сбросить выбор");
-    clearAssignments.disabled = this._busy || pendingAssignments === 0;
-    clearAssignments.addEventListener("click", () => {
-      this._firstRun.areaAssignments = {};
-      this._firstRun.areaSaveError = "";
-      this._firstRun.areaSaveStatus = "";
-      this._render();
-    });
-    const saveAssignments = el("button", null, "Сохранить привязки в Home Assistant");
-    saveAssignments.disabled = this._busy || pendingAssignments === 0;
-    saveAssignments.addEventListener("click", () => this._saveFirstRunAreaAssignments());
-    saveActions.appendChild(clearAssignments);
-    saveActions.appendChild(saveAssignments);
-    saveBar.appendChild(saveActions);
-    if (this._firstRun.areaSaveStatus) {
-      saveBar.appendChild(el("div", "binding-save-status", this._firstRun.areaSaveStatus));
-    }
-    if (this._firstRun.areaSaveError) {
-      saveBar.appendChild(el("div", "field-error binding-save-error", this._firstRun.areaSaveError));
-    }
-    card.appendChild(saveBar);
-    showDevices.addEventListener("change", () => {
-      this._firstRun.showRoomDevices = showDevices.checked === true;
-      this._render();
-    });
-    const actions = el("div", "actions");
-    const back = el("button", "secondary", "Назад к началу");
-    back.disabled = this._busy;
-    back.addEventListener("click", () => {
-      this._firstRun.step = "instructions";
-      this._render();
-    });
-    const finish = el("button", null, "Завершить настройку");
-    finish.disabled = this._busy || this._firstRun.validRooms.size === 0;
-    finish.title = finish.disabled
-      ? "Сначала успешно проверьте хотя бы одну комнату."
-      : "Перейти к параметрам дома и общей проверке.";
-    finish.addEventListener("click", () => {
-      this._firstRun.step = "home";
-      this._render();
-    });
-    actions.appendChild(back);
-    actions.appendChild(finish);
-    card.appendChild(actions);
-    if (finish.disabled) {
-      card.appendChild(el("div", "muted action-help", "Кнопка станет доступна после успешной проверки хотя бы одной комнаты."));
-    }
-    this._firstRunFields = fields;
   }
 
   _renderFirstRunRoom(card) {

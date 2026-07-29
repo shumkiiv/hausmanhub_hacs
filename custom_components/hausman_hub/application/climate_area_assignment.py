@@ -30,6 +30,7 @@ class ClimateAreaAssignmentViolation(ValueError):
 class ClimateAreaAssignmentTarget:
     """Private entity targets resolved from response-local candidate ids."""
 
+    # An empty room id explicitly clears the Home Assistant area.
     room_id: str
     entity_ids: tuple[str, ...]
 
@@ -81,6 +82,12 @@ def climate_area_assignment_targets(
         if room["selectable"] is True
     }
     candidates = {candidate["candidate_id"]: candidate for candidate in options["devices"]}
+    protected_group_ids = {
+        candidate.get("device_group_id")
+        for candidate in options["devices"]
+        if candidate.get("configured") is True
+        and candidate.get("device_group_id") is not None
+    }
     sources = climate_setup_candidate_sources(registry, snapshot)
     used_candidates: set[str] = set()
     used_groups: set[str] = set()
@@ -90,7 +97,7 @@ def climate_area_assignment_targets(
             raise ClimateAreaAssignmentViolation("area assignment item is invalid")
         room_id = value["room_id"]
         candidate_ids = value["candidate_ids"]
-        if not isinstance(room_id, str) or room_id not in rooms:
+        if not isinstance(room_id, str) or (room_id and room_id not in rooms):
             raise ClimateAreaAssignmentViolation("area assignment room is unavailable")
         if (
             not isinstance(candidate_ids, list)
@@ -107,8 +114,9 @@ def climate_area_assignment_targets(
             candidate = candidates.get(candidate_id)
             if (
                 candidate is None
-                or candidate["can_add"] is not True
-                or candidate["room_id"] != ""
+                or candidate["status"] not in {"available", "unavailable"}
+                or candidate.get("configured") is True
+                or candidate["room_id"] == room_id
             ):
                 raise ClimateAreaAssignmentViolation(
                     "area assignment candidate is unavailable",
@@ -119,6 +127,10 @@ def climate_area_assignment_targets(
         if len(group_ids) != 1:
             raise ClimateAreaAssignmentViolation("physical device group is mixed")
         group_id = next(iter(group_ids))
+        if group_id in protected_group_ids:
+            raise ClimateAreaAssignmentViolation(
+                "configured physical device cannot change area"
+            )
         if group_id is None and len(selected) != 1:
             raise ClimateAreaAssignmentViolation("entity-only assignment must be singular")
         group_key = group_id or f"candidate:{candidate_ids[0]}"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 import sys
@@ -19,28 +20,50 @@ from custom_components.hausman_hub.application.climate_discovery import (
     ImportedClimateRoom,
 )
 from custom_components.hausman_hub.application.climate_setup import climate_setup_options
-from custom_components.hausman_hub.domain.climate import ClimateDeviceKind, ClimateRegistry
+from custom_components.hausman_hub.domain.climate import (
+    ClimateControlOwner,
+    ClimateControlScope,
+    ClimateDevice,
+    ClimateDeviceKind,
+    ClimateEndpoint,
+    ClimateEndpointRole,
+    ClimateRegistry,
+    ClimateRoom,
+)
 from custom_components.hausman_hub.ha_area_assignment import (
     HomeAssistantAreaAssignmentService,
 )
 
 
 def _snapshot() -> ClimateImportSnapshot:
-    room = ImportedClimateRoom(
-        room_id="kids",
-        name="Детская",
-        temperature=22.0,
-        humidity=45.0,
-        target_temperature=None,
-        target_humidity=None,
-        target_strategy=None,
-        mode="auto",
-        authority_eligible=True,
+    rooms = (
+        ImportedClimateRoom(
+            room_id="kids",
+            name="Детская",
+            temperature=22.0,
+            humidity=45.0,
+            target_temperature=None,
+            target_humidity=None,
+            target_strategy=None,
+            mode="auto",
+            authority_eligible=True,
+        ),
+        ImportedClimateRoom(
+            room_id="living",
+            name="Гостиная",
+            temperature=23.0,
+            humidity=42.0,
+            target_temperature=None,
+            target_humidity=None,
+            target_strategy=None,
+            mode="auto",
+            authority_eligible=True,
+        ),
     )
     return ClimateImportSnapshot(
         generated_at=100,
         runtime_fresh=True,
-        rooms=(room,),
+        rooms=rooms,
         devices=(
             ImportedClimateDevice(
                 source_id="sensor.device_temperature",
@@ -76,6 +99,18 @@ def _snapshot() -> ClimateImportSnapshot:
                 available=True,
                 command_types=(),
                 suggested_kinds=(ClimateDeviceKind.TEMPERATURE_SENSOR,),
+            ),
+            ImportedClimateDevice(
+                source_id="sensor.assigned",
+                name="Датчик в детской",
+                room_id="kids",
+                domain="sensor",
+                category="temperature",
+                state="22",
+                available=True,
+                command_types=(),
+                suggested_kinds=(ClimateDeviceKind.TEMPERATURE_SENSOR,),
+                device_group_id="physical-assigned",
             ),
         ),
     )
@@ -152,6 +187,84 @@ class ClimateAreaAssignmentValidationTests(unittest.TestCase):
                                 self.by_source["Отдельный датчик"],
                             ],
                             "room_id": "kids",
+                        }
+                    ],
+                },
+            )
+
+    def test_moves_or_clears_an_existing_home_assistant_area(self) -> None:
+        candidate_id = self.by_source["Датчик в детской"]
+        moved = climate_area_assignment_targets(
+            self.registry,
+            self.snapshot,
+            {
+                "snapshot_revision": self.revision,
+                "assignments": [
+                    {"candidate_ids": [candidate_id], "room_id": "living"}
+                ],
+            },
+        )
+        cleared = climate_area_assignment_targets(
+            self.registry,
+            self.snapshot,
+            {
+                "snapshot_revision": self.revision,
+                "assignments": [
+                    {"candidate_ids": [candidate_id], "room_id": ""}
+                ],
+            },
+        )
+        self.assertEqual("living", moved[0].room_id)
+        self.assertEqual("", cleared[0].room_id)
+        self.assertEqual(("sensor.assigned",), moved[0].entity_ids)
+
+    def test_unavailable_configured_device_cannot_be_moved(self) -> None:
+        registry = ClimateRegistry(
+            rooms=(ClimateRoom("kids", "Детская"),),
+            devices=(
+                ClimateDevice(
+                    device_id="configured_sensor",
+                    name="Датчик в детской",
+                    room_id="kids",
+                    kind=ClimateDeviceKind.TEMPERATURE_SENSOR,
+                    source_id="sensor.assigned",
+                    control_scope=ClimateControlScope.OBSERVED,
+                    control_owner=ClimateControlOwner.OBSERVED,
+                    capabilities=(),
+                    endpoints=(
+                        ClimateEndpoint(
+                            ClimateEndpointRole.TEMPERATURE,
+                            "sensor.assigned",
+                        ),
+                    ),
+                ),
+            ),
+        )
+        snapshot = replace(
+            self.snapshot,
+            devices=tuple(
+                replace(device, available=False)
+                if device.source_id == "sensor.assigned"
+                else device
+                for device in self.snapshot.devices
+            ),
+        )
+        options = climate_setup_options(registry, snapshot)
+        candidate = next(
+            item for item in options["devices"] if item["name"] == "Датчик в детской"
+        )
+        self.assertTrue(candidate["configured"])
+        self.assertEqual("unavailable", candidate["status"])
+        with self.assertRaises(ClimateAreaAssignmentViolation):
+            climate_area_assignment_targets(
+                registry,
+                snapshot,
+                {
+                    "snapshot_revision": options["snapshot_revision"],
+                    "assignments": [
+                        {
+                            "candidate_ids": [candidate["candidate_id"]],
+                            "room_id": "living",
                         }
                     ],
                 },
@@ -252,6 +365,23 @@ class HomeAssistantAreaAssignmentServiceTests(unittest.TestCase):
         self.assertEqual("old", hass.entity_registry.entities["one"].area_id)
         self.assertEqual("override", hass.entity_registry.entities["two"].area_id)
         self.assertIsNone(hass.entity_registry.entities["solo"].area_id)
+
+    def test_clears_device_and_entity_only_areas_explicitly(self) -> None:
+        hass = self._hass()
+        hass.device_registry.devices["dev1"].area_id = "kids"
+        hass.entity_registry.entities["solo"].area_id = "kids"
+        with patch.dict(sys.modules, _fake_registry_modules(hass)):
+            receipt = asyncio.run(
+                HomeAssistantAreaAssignmentService(hass).async_assign(
+                    (
+                        ClimateAreaAssignmentTarget("", ("sensor.one",)),
+                        ClimateAreaAssignmentTarget("", ("sensor.solo",)),
+                    )
+                )
+            )
+        self.assertIsNone(hass.device_registry.devices["dev1"].area_id)
+        self.assertIsNone(hass.entity_registry.entities["solo"].area_id)
+        self.assertEqual(2, receipt["cleared_assignments"])
 
 
 if __name__ == "__main__":

@@ -57,11 +57,15 @@ class HomeAssistantAreaAssignmentService:
             if isinstance(getattr(entry, "id", None), str)
         }
 
-        device_targets: dict[str, str] = {}
-        entity_targets: dict[str, str] = {}
+        device_targets: dict[str, str | None] = {}
+        entity_targets: dict[str, str | None] = {}
         for target in targets:
-            area_id = area_by_room.get(target.room_id)
-            if area_id is None:
+            area_id = (
+                area_by_room.get(target.room_id)
+                if target.room_id
+                else None
+            )
+            if target.room_id and area_id is None:
                 raise ClimateAreaAssignmentViolation(
                     "Home Assistant area no longer exists",
                     code="snapshot_changed",
@@ -145,7 +149,8 @@ class HomeAssistantAreaAssignmentService:
             "status": "saved",
             "updated_devices": len(device_targets),
             "updated_entities": len(entity_targets),
-            "room_ids": sorted({target.room_id for target in targets}),
+            "room_ids": sorted({target.room_id for target in targets if target.room_id}),
+            "cleared_assignments": sum(not target.room_id for target in targets),
         }
 
 
