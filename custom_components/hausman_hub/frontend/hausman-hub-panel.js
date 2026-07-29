@@ -4504,7 +4504,7 @@ class HausmanHubPanel extends HTMLElement {
   _signalCandidatesForPicker(candidates, current, signalKind) {
     const grouped = new Map();
     this._candidateWithCurrent(candidates, current).filter((candidate) => {
-      if (signalKind !== "central_heating" || candidate.entity_id === current) return true;
+      if (signalKind !== "central_heating") return true;
       const identity = normalizedText([
         candidate.name, candidate.entity_id, candidate.device_name,
       ].join(" "));
@@ -4542,13 +4542,14 @@ class HausmanHubPanel extends HTMLElement {
     const radios = [];
     const optionNodes = [];
     const groups = new Map();
+    const visible = this._signalCandidatesForPicker(candidates, current, signalKind);
 
     const addRadio = (container, candidate, value, label, meta) => {
       const radio = el("input");
       radio.type = "radio";
       radio.name = radioName;
       radio.value = value;
-      radio.checked = current ? value === current : value === "";
+      radio.checked = value === current || (!value && !visible.some((item) => item.entity_id === current));
       const option = el("label", "signal-option");
       if (radio.checked) option.className += " is-selected";
       option.appendChild(radio);
@@ -4604,7 +4605,7 @@ class HausmanHubPanel extends HTMLElement {
     const noneGroup = el("div", "signal-type-options");
     addRadio(noneGroup, null, "", "Не привязано", "Источник можно выбрать позже");
     list.appendChild(noneGroup);
-    this._signalCandidatesForPicker(candidates, current, signalKind)
+    visible
       .sort((left, right) => (
         Number(right.entity_id === current) - Number(left.entity_id === current)
         || String(left.room_name || "").localeCompare(String(right.room_name || ""), "ru")

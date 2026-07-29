@@ -1098,9 +1098,14 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const retained = panel._signalCandidatesForPicker(
           candidates, "switch.living_left", "central_heating"
         ).map((candidate) => candidate.entity_id);
-        if (!retained.includes("switch.living_left")) {
-          throw new Error("a previously saved signal disappeared before correction");
+        if (retained.includes("switch.living_left")) {
+          throw new Error("a stale unrelated signal remained selectable");
         }
+        const picker = panel._singleChoicePicker({
+          title: "Центральное отопление", candidates,
+          current: "switch.living_left", signalKind: "central_heating", onChange: () => {},
+        });
+        if (picker.value() !== "") throw new Error("stale signal was not reset in the picker");
             """,
         )
         completed = run_panel_script(script)

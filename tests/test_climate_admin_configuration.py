@@ -21,12 +21,14 @@ from custom_components.hausman_hub.application.climate_runtime import (
 )
 from custom_components.hausman_hub.application.climate_signal_settings import (
     CENTRAL_HEATING_DOMAINS,
+    CENTRAL_HEATING_SIGNAL,
     OUTDOOR_TEMPERATURE_DOMAINS,
     PRESENCE_DOMAINS,
     ROOM_PRESENCE_DOMAINS,
     WINDOW_DOMAINS,
     WINDOW_SIGNAL,
     ClimateSignalSettingsViolation,
+    signal_candidate_is_suitable,
     validate_climate_mode_update,
     validate_home_environment_update,
     validate_optional_signal_entity,
@@ -174,6 +176,26 @@ def build_runtime(
 
 class ClimateSignalSettingsValidationTest(unittest.TestCase):
     """Lock the exact payload rules of the new admin configuration routes."""
+
+    def test_signal_catalog_rejects_device_configuration_entities(self) -> None:
+        self.assertFalse(
+            signal_candidate_is_suitable(
+                CENTRAL_HEATING_SIGNAL,
+                domain="switch",
+                device_class=None,
+                entity_category="config",
+                attributes={"friendly_name": "Увлажнитель детская Alarm"},
+            )
+        )
+        self.assertTrue(
+            signal_candidate_is_suitable(
+                CENTRAL_HEATING_SIGNAL,
+                domain="switch",
+                device_class=None,
+                entity_category=None,
+                attributes={"friendly_name": "Центральное отопление"},
+            )
+        )
 
     def test_optional_signal_entity_accepts_none_and_known_ids(self) -> None:
         known = {"binary_sensor.living_window"}

@@ -84,7 +84,7 @@ def signal_candidate_is_suitable(
 ) -> bool:
     """Return whether one HA entity is semantically suitable for a binding."""
 
-    if signal_kind not in SIGNAL_KINDS or entity_category == "diagnostic":
+    if signal_kind not in SIGNAL_KINDS or entity_category is not None:
         return False
     if signal_kind == OUTDOOR_TEMPERATURE_SIGNAL:
         if domain == "sensor":
