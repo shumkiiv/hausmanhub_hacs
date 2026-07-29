@@ -1078,6 +1078,34 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
+    def test_central_heating_picker_keeps_only_associative_signals(self) -> None:
+        script = panel_script(
+            GET_PATHS,
+            {},
+            """
+        const candidates = [
+          { entity_id: "switch.living_left", name: "Выключатель гостиная", domain: "switch" },
+          { entity_id: "switch.trv_child_lock", name: "Термоголовка блокировка", domain: "switch" },
+          { entity_id: "input_boolean.central_heating", name: "Центральное отопление", domain: "input_boolean" },
+          { entity_id: "binary_sensor.boiler_heat", name: "Нагрев", domain: "binary_sensor", device_class: "heat" },
+        ];
+        const filtered = panel._signalCandidatesForPicker(candidates, null, "central_heating")
+          .map((candidate) => candidate.entity_id).sort();
+        const expected = ["binary_sensor.boiler_heat", "input_boolean.central_heating"].sort();
+        if (JSON.stringify(filtered) !== JSON.stringify(expected)) {
+          throw new Error("central heating picker exposed unrelated devices: " + JSON.stringify(filtered));
+        }
+        const retained = panel._signalCandidatesForPicker(
+          candidates, "switch.living_left", "central_heating"
+        ).map((candidate) => candidate.entity_id);
+        if (!retained.includes("switch.living_left")) {
+          throw new Error("a previously saved signal disappeared before correction");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_mode_switch_posts_exact_payload(self) -> None:
         script = panel_script(
             GET_PATHS,

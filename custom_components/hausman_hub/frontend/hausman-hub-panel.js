@@ -2364,7 +2364,7 @@ class HausmanHubPanel extends HTMLElement {
     container.appendChild(card);
     if (this._firstRun.step === "instructions") {
       card.appendChild(el("h2", null, "Первичная настройка климата"));
-      card.appendChild(el("p", "section-intro", "Сначала назначьте устройства и датчики областям Home Assistant. Мастер использует области как состав комнат и не создаёт отдельные комнаты."));
+      card.appendChild(el("p", "section-intro", "Сначала назначьте устройства областям Home Assistant: мастер использует их как комнаты."));
       const list = el("ol", "reasons");
       [
         "Откройте Настройки Home Assistant → Устройства и службы → Устройства и назначьте каждому устройству область.",
@@ -2621,7 +2621,7 @@ class HausmanHubPanel extends HTMLElement {
 
     const devicesSection = el("section", "wizard-section");
     devicesSection.appendChild(el("h3", null, "Устройства и датчики"));
-    devicesSection.appendChild(el("div", "muted", "Канал определяет способ управления. Климатическая обёртка Home Assistant выполняет команды напрямую; отдельный ИК-пульт без обёртки остаётся в наблюдении."));
+    devicesSection.appendChild(el("div", "muted", "Канал определяет способ управления. Без climate-обёртки Home Assistant ИК-пульт остаётся в наблюдении."));
     const roomlessCandidates = this._firstRunRoomlessCandidates();
     if (roomlessCandidates.length) {
       const visibleNames = roomlessCandidates.slice(0, 5).map((candidate) => (
@@ -2663,7 +2663,7 @@ class HausmanHubPanel extends HTMLElement {
     ));
     if (irRemotes.length && !hasClimateFacade) {
       const names = irRemotes.map((remote) => `«${remote.name}»`).join(", ");
-      devicesSection.appendChild(el("div", "wizard-hint", `Найден ИК-пульт ${names}, но нет климатической обёртки. Создайте SmartIR climate в Home Assistant, назначьте этой зоне и обновите список.`));
+      devicesSection.appendChild(el("div", "wizard-hint", `Для ${names} нет обёртки. Создайте SmartIR climate, назначьте зоне и обновите список.`));
     }
     const search = el("input", "entity-search");
     search.type = "search";
@@ -2890,7 +2890,7 @@ class HausmanHubPanel extends HTMLElement {
     const devices = this._firstRunIrDevices();
     const device = this._firstRunActiveIrDevice();
     card.appendChild(el("h2", null, "Источник IR-кодов"));
-    card.appendChild(el("div", "section-intro", "Добавьте коды для ИК-пульта из базы, сохранённых команд Broadlink или через обучение. Коды привязаны к уже сохранённому устройству контура."));
+    card.appendChild(el("div", "section-intro", "Добавьте ИК-коды из базы, Broadlink или через обучение."));
     if (!device) {
       card.appendChild(el("div", "wizard-hint", "Для устройств с каналом universal_ir не найден безопасный remote entity id. Источники ИК-кодов пропущены."));
       const next = el("button", null, "Продолжить к подключению планшета");
@@ -4503,7 +4503,14 @@ class HausmanHubPanel extends HTMLElement {
 
   _signalCandidatesForPicker(candidates, current, signalKind) {
     const grouped = new Map();
-    this._candidateWithCurrent(candidates, current).forEach((candidate) => {
+    this._candidateWithCurrent(candidates, current).filter((candidate) => {
+      if (signalKind !== "central_heating" || candidate.entity_id === current) return true;
+      const identity = normalizedText([
+        candidate.name, candidate.entity_id, candidate.device_name,
+      ].join(" "));
+      return (candidate.domain === "binary_sensor" && candidate.device_class === "heat")
+        || /централ.*отоп|отоплен|кот[её]л|теплоснаб|central.*heat|heating|boiler/.test(identity);
+    }).forEach((candidate) => {
       const key = candidate.device_group_id && candidate.name
         ? `${candidate.device_group_id}:${normalizedText(candidate.name)}` : candidate.entity_id;
       const existing = grouped.get(key);
