@@ -221,6 +221,7 @@ class FakeHomeAssistant:
 
     def __init__(self, unload_succeeds: bool = True) -> None:
         self.data: dict[str, dict[str, object]] = {}
+        self.executor_jobs: list[tuple[object, tuple[object, ...]]] = []
         self.http = FakeHttp()
         self.config_entries = FakeConfigEntries(unload_succeeds)
         self.area_registry = SimpleNamespace(areas={"synthetic-area": object()})
@@ -229,6 +230,12 @@ class FakeHomeAssistant:
         )
         self.entity_registry = FakeEntityRegistry()
         self.states = FakeStates()
+
+    async def async_add_executor_job(self, target, *args):
+        """Run a blocking helper outside the synthetic event-loop boundary."""
+
+        self.executor_jobs.append((target, args))
+        return target(*args)
 
 
 class FakeRequest(dict[str, object]):
@@ -1897,6 +1904,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         admin = reader_user("system-admin", admin=True)
         panel_path = "/api/hausman_hub/v1/admin/panel"
 
+        jobs_before = len(self.hass.executor_jobs)
         panel = asyncio.run(
             views[panel_path].get(
                 FakeRequest("192.168.1.20", admin, path=panel_path)
@@ -1904,7 +1912,12 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.42.0", panel.payload["integration_version"])
+        self.assertEqual("1.42.1", panel.payload["integration_version"])
+        self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
+        self.assertEqual(
+            "_integration_version",
+            self.hass.executor_jobs[-1][0].__name__,
+        )
 
     def test_admin_panel_accepts_ipv6_link_local_admin_from_mdns(self) -> None:
         """A local admin may open the panel when mDNS selects IPv6 link-local."""

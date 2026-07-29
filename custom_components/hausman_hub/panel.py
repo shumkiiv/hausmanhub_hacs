@@ -59,13 +59,14 @@ async def async_register_hausmanhub_panel(hass: HomeAssistant) -> None:
         data[_DATA_STATIC_REGISTERED] = True
     if frontend.async_panel_exists(hass, PANEL_URL_PATH):
         return
+    module_url = await hass.async_add_executor_job(_panel_module_url)
     await async_register_panel(
         hass,
         frontend_url_path=PANEL_URL_PATH,
         webcomponent_name=PANEL_WEBCOMPONENT_NAME,
         sidebar_title="HausmanHub",
         sidebar_icon="mdi:thermostat",
-        module_url=_panel_module_url(),
+        module_url=module_url,
         require_admin=True,
         config_panel_domain="hausman_hub",
     )

@@ -394,6 +394,7 @@ class PanelRegistrationTest(unittest.TestCase):
         self.registered_panels: list[dict[str, object]] = []
         self.removed_panels: list[tuple[str, bool]] = []
         self.existing_panels: set[str] = set()
+        self.executor_jobs: list[object] = []
         async def register_panel(hass, **kwargs):
             self._register_panel(kwargs)
 
@@ -441,8 +442,13 @@ class PanelRegistrationTest(unittest.TestCase):
         self.registered_panels.append(kwargs)
 
     def _hass(self, static_configs: list[object]) -> object:
+        async def run_executor_job(target, *args):
+            self.executor_jobs.append(target)
+            return target(*args)
+
         return SimpleNamespace(
             data={},
+            async_add_executor_job=run_executor_job,
             http=SimpleNamespace(
                 async_register_static_paths=lambda configs: _record(
                     static_configs, configs
@@ -468,12 +474,13 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.42.0",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.42.1",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },
             self.registered_panels[0],
         )
+        self.assertEqual([self.panel._panel_module_url], self.executor_jobs)
 
     def test_unregister_removes_the_panel_without_warnings(self) -> None:
         self.panel.unregister_hausmanhub_panel(SimpleNamespace())

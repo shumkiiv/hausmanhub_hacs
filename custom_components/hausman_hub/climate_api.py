@@ -971,7 +971,9 @@ class ClimateAdminPanelView(_ClimateView):
                 snapshot = None
         except Exception:
             return self._unavailable()
-        integration_version = _integration_version()
+        integration_version = await self._hass.async_add_executor_job(
+            _integration_version
+        )
         return self.json(
             {
                 "contract": {
