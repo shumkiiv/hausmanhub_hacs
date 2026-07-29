@@ -4464,7 +4464,7 @@ class HausmanHubPanel extends HTMLElement {
     const deviceClassLabels = {
       temperature: "Датчик температуры",
       motion: "Датчик движения",
-      occupancy: "Датчик занятости",
+      occupancy: "Датчик присутствия",
       presence: "Датчик присутствия",
       window: "Датчик окна",
       door: "Датчик двери",
@@ -4694,7 +4694,7 @@ class HausmanHubPanel extends HTMLElement {
       {
         key: "presence_entity_id",
         label: "Общее присутствие дома",
-        helper: "Только люди, трекеры и датчики движения, занятости или присутствия.",
+        helper: "Только люди, трекеры и датчики движения или присутствия.",
         signalKind: "presence",
         options: candidates.presence || [],
       },
@@ -4797,7 +4797,7 @@ class HausmanHubPanel extends HTMLElement {
     container.appendChild(el(
       "div",
       "section-intro",
-      "Окно - одиночная привязка. Комнатное присутствие - набор датчиков и пока не меняет температуру мгновенно: для этого нужна отдельная политика занятости."
+      "Окно - одиночная привязка. Комнатное присутствие - набор датчиков и пока не меняет температуру мгновенно: для этого нужна отдельная политика присутствия."
     ));
     if (!windows) {
       container.appendChild(
@@ -4843,7 +4843,7 @@ class HausmanHubPanel extends HTMLElement {
       block.appendChild(windowPicker.root);
       block.appendChild(el("h4", null, "Датчики присутствия"));
       block.appendChild(
-        el("div", "muted", "Можно выбрать несколько датчиков движения или занятости; один датчик относится только к одной комнате.")
+        el("div", "muted", "Можно выбрать несколько датчиков движения или присутствия; один датчик относится только к одной комнате.")
       );
       const selected = new Set(room.presence_entity_ids || []);
       const roomPresenceById = new Map(
@@ -4875,7 +4875,7 @@ class HausmanHubPanel extends HTMLElement {
       const optionNodes = [];
       const classNames = {
         motion: "Движение",
-        occupancy: "Занятость",
+        occupancy: "Присутствие",
         presence: "Присутствие",
         other: "Шаблонные датчики",
       };

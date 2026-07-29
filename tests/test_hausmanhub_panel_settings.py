@@ -976,6 +976,12 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         if (findAll(outdoor, (node) => node.tagName === "SELECT").length) {
           throw new Error("outdoor source is still a dropdown");
         }
+        const occupancyLabel = panel._signalCandidateType(
+          { domain: "binary_sensor", device_class: "occupancy" }, "presence"
+        );
+        if (occupancyLabel !== "Датчик присутствия") {
+          throw new Error("occupancy device class has an unnatural Russian label");
+        }
         const roomCards = findAll(panel.shadowRoot, (node) =>
           String(node.className).split(" ").includes("signal-room"));
         const living = roomCards.find((node) => textOf(node).includes("Гостиная"));
