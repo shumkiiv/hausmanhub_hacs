@@ -59,6 +59,14 @@ const SECTION_SUBTITLES = {
   scenarios: "Управление сценариями дома",
   settings: "Подключение и параметры системы",
 };
+const CLIMATE_VIEWS = [
+  { id: "contour", label: "Контур", subtitle: "Контур и управление климатом" },
+  { id: "profiles", label: "Профили", subtitle: "Профили и расписание комфорта" },
+  { id: "schedule", label: "Расписание", subtitle: "Границы профилей и автоматизация" },
+  { id: "home", label: "Сигналы дома", subtitle: "Сигналы дома и отопление" },
+  { id: "windows", label: "Сигналы комнат", subtitle: "Окна и присутствие по комнатам" },
+  { id: "assistant", label: "AI-помощник", subtitle: "Советы и статистика AI" },
+];
 const READINESS_LABELS = {
   ready: "Система готова к управлению",
   not_ready: "Нужна настройка системы",
@@ -198,6 +206,7 @@ class HausmanHubPanel extends HTMLElement {
     this._timer = null;
     this._shell = null;
     this._activeSection = null;
+    this._activeClimateView = "contour";
     this._expandedWizardRooms = new Set();
     this._dirty = {
       wizard: false, home: false, windows: false, profiles: false, schedule: false, mode: false,
@@ -483,7 +492,9 @@ class HausmanHubPanel extends HTMLElement {
     if (!this._dirty.schedule) this._renderSchedule(shell.schedule, this._settings);
     if (!this._dirty.home) this._renderHome(shell.home, this._settings.home);
     if (!this._dirty.windows) this._renderWindows(shell.windows, this._settings.windows);
-    if (this._activeSection === "climate") this._renderAssistant(shell.assistant);
+    if (this._activeSection === "climate" && this._activeClimateView === "assistant") {
+      this._renderAssistant(shell.assistant);
+    }
     if (this._activeSection === "scenarios") this._renderScenarios(shell.scenarios);
     if (this._activeSection === "settings") this._renderSettings(shell.settings);
     this._syncSectionVisibility();
@@ -570,18 +581,30 @@ class HausmanHubPanel extends HTMLElement {
     sectionNodes.overview.appendChild(summary);
     sectionNodes.overview.appendChild(rooms);
     const climate = sectionNodes.climate;
-    const contour = el("div");
-    const profiles = el("div");
-    const schedule = el("div");
-    const home = el("div");
-    const windows = el("div");
-    const assistant = el("div");
-    climate.appendChild(contour);
-    climate.appendChild(profiles);
-    climate.appendChild(schedule);
-    climate.appendChild(home);
-    climate.appendChild(windows);
-    climate.appendChild(assistant);
+    const climateNav = el("nav", "climate-subnav");
+    setAttr(climateNav, "aria-label", "Экраны климата");
+    setAttr(climateNav, "role", "tablist");
+    const climateTabs = {};
+    const climateViews = {};
+    CLIMATE_VIEWS.forEach((view, index) => {
+      const button = el("button", "climate-subtab", view.label);
+      button.type = "button";
+      button.id = `hausman-climate-tab-${view.id}`;
+      setAttr(button, "role", "tab");
+      setAttr(button, "aria-controls", `hausman-climate-${view.id}`);
+      button.addEventListener("click", () => this._activateClimateView(view.id));
+      button.addEventListener("keydown", (event) => this._handleClimateTabKey(event, index));
+      climateNav.appendChild(button);
+      climateTabs[view.id] = button;
+      const node = el("div", "climate-view");
+      node.id = `hausman-climate-${view.id}`;
+      setAttr(node, "role", "tabpanel");
+      setAttr(node, "aria-labelledby", button.id);
+      climateViews[view.id] = node;
+    });
+    climate.appendChild(climateNav);
+    CLIMATE_VIEWS.forEach((view) => climate.appendChild(climateViews[view.id]));
+    const { contour, profiles, schedule, home, windows, assistant } = climateViews;
     const scenarios = el("div");
     sectionNodes.scenarios.appendChild(scenarios);
     const settings = el("div");
@@ -589,7 +612,7 @@ class HausmanHubPanel extends HTMLElement {
     this._shell = {
       banner, notice, loading, brandSubtitle, statusPill, versionBadge, themeButton, tabs, nav, sectionNodes, wizard,
       readiness, summary, rooms,
-      contour, profiles, schedule, home, windows, assistant,
+      climateNav, climateTabs, climateViews, contour, profiles, schedule, home, windows, assistant,
       scenarios, settings,
     };
     this._updateThemeSwitcher();
@@ -616,8 +639,11 @@ class HausmanHubPanel extends HTMLElement {
     this._activeSection = section;
     this._syncSectionVisibility();
     if (section === "climate") {
-      this._renderAssistant(this._shell.assistant);
-      if (!this._assistant.loaded) this._loadAssistant();
+      this._syncClimateVisibility();
+      if (this._activeClimateView === "assistant") {
+        this._renderAssistant(this._shell.assistant);
+        if (!this._assistant.loaded) this._loadAssistant();
+      }
     }
     if (section === "scenarios") {
       this._renderScenarios(this._shell.scenarios);
@@ -627,6 +653,29 @@ class HausmanHubPanel extends HTMLElement {
       this._loadSettings();
     }
     if (focus) focusNode(this._shell && this._shell.tabs[section]);
+  }
+
+  _activateClimateView(viewId, focus = false) {
+    if (!CLIMATE_VIEWS.some((view) => view.id === viewId)) return;
+    this._activeClimateView = viewId;
+    this._syncClimateVisibility();
+    if (viewId === "assistant") {
+      this._renderAssistant(this._shell.assistant);
+      if (!this._assistant.loaded) this._loadAssistant();
+    }
+    if (focus) focusNode(this._shell && this._shell.climateTabs[viewId]);
+  }
+
+  _handleClimateTabKey(event, index) {
+    const key = event && event.key;
+    let next = null;
+    if (key === "ArrowRight") next = (index + 1) % CLIMATE_VIEWS.length;
+    if (key === "ArrowLeft") next = (index - 1 + CLIMATE_VIEWS.length) % CLIMATE_VIEWS.length;
+    if (key === "Home") next = 0;
+    if (key === "End") next = CLIMATE_VIEWS.length - 1;
+    if (next === null) return;
+    if (event && typeof event.preventDefault === "function") event.preventDefault();
+    this._activateClimateView(CLIMATE_VIEWS[next].id, true);
   }
 
   _handleTabKey(event, index) {
@@ -643,8 +692,10 @@ class HausmanHubPanel extends HTMLElement {
 
   _syncSectionVisibility() {
     if (!this._shell) return;
-    this._shell.brandSubtitle.textContent = SECTION_SUBTITLES[this._activeSection]
-      || "Настройка HausmanHub";
+    const climateView = CLIMATE_VIEWS.find((view) => view.id === this._activeClimateView);
+    this._shell.brandSubtitle.textContent = this._activeSection === "climate" && climateView
+      ? climateView.subtitle
+      : (SECTION_SUBTITLES[this._activeSection] || "Настройка HausmanHub");
     const climateDirty = this._dirty.wizard || this._dirty.profiles || this._dirty.schedule || this._dirty.home || this._dirty.windows || this._dirty.assistant;
     const dirtyBySection = {
       climate: climateDirty,
@@ -660,6 +711,23 @@ class HausmanHubPanel extends HTMLElement {
       const dirty = dirtyBySection[section.id];
       tab.className = `tab${dirty ? " is-dirty" : ""}`;
       tab.title = dirty ? "Есть несохранённые изменения" : "";
+    });
+    this._syncClimateVisibility();
+  }
+
+  _syncClimateVisibility() {
+    if (!this._shell || !this._shell.climateViews) return;
+    const activeView = CLIMATE_VIEWS.find((view) => view.id === this._activeClimateView);
+    if (this._activeSection === "climate" && activeView) {
+      this._shell.brandSubtitle.textContent = activeView.subtitle;
+    }
+    CLIMATE_VIEWS.forEach((view) => {
+      const active = view.id === this._activeClimateView;
+      this._shell.climateViews[view.id].hidden = !active;
+      const tab = this._shell.climateTabs[view.id];
+      setAttr(tab, "aria-selected", active ? "true" : "false");
+      setAttr(tab, "tabindex", active ? "0" : "-1");
+      tab.className = `climate-subtab${active ? " is-active" : ""}`;
     });
   }
 
@@ -758,6 +826,39 @@ class HausmanHubPanel extends HTMLElement {
       eco: "Экономичный",
     };
     return labels[code] || "Индивидуальный";
+  }
+
+  _contourStatusName(code) {
+    const translated = this._names("contour_statuses", code);
+    if (translated && translated !== code) return translated;
+    const labels = {
+      normal: "Норма",
+      ready: "Готов",
+      active: "Работает",
+      disabled: "Выключен",
+      warning: "Нужно внимание",
+      unavailable: "Недоступен",
+    };
+    return labels[code] || "Состояние уточняется";
+  }
+
+  _contourModeName(code) {
+    const translated = this._names("contour_modes", code);
+    if (translated && translated !== code) return translated;
+    return this._roomModeName(code);
+  }
+
+  _roomName(roomId) {
+    if (!roomId) return "";
+    const setupRooms = this._settings && this._settings.setup && this._settings.setup.rooms || [];
+    const snapshotRooms = this._data && this._data.snapshot && this._data.snapshot.rooms || [];
+    const room = [...setupRooms, ...snapshotRooms].find((item) => item && item.id === roomId);
+    if (room && room.name) return room.name;
+    const fallbacks = {
+      living: "Гостиная", living_room: "Гостиная", bedroom: "Спальня",
+      kitchen: "Кухня", bathroom: "Ванная", kids: "Детская", kids_room: "Детская",
+    };
+    return fallbacks[roomId] || "Комната";
   }
 
   _dataStatusName(code) {
@@ -1111,7 +1212,7 @@ class HausmanHubPanel extends HTMLElement {
       if (recommendations.length) {
         const list = el("ul", "advisory-list is-recommendation");
         recommendations.forEach((item) => {
-          const room = item.room_id ? ` (${item.room_id})` : "";
+          const room = item.room_id ? ` · ${this._roomName(item.room_id)}` : "";
           list.appendChild(el("li", null, `${this._assistantRecommendationName(item.code)}${room}`));
         });
         card.appendChild(list);
@@ -1122,7 +1223,7 @@ class HausmanHubPanel extends HTMLElement {
       if (risks.length) {
         const list = el("ul", "advisory-list is-risk");
         risks.forEach((item) => {
-          const room = item.room_id ? ` (${item.room_id})` : "";
+          const room = item.room_id ? ` · ${this._roomName(item.room_id)}` : "";
           list.appendChild(el("li", null, `${this._assistantRiskName(item.code)}${room}`));
         });
         card.appendChild(list);
@@ -3069,26 +3170,39 @@ class HausmanHubPanel extends HTMLElement {
     }
     const configured = setup.status !== "not_configured";
     if (configured && !this._wizard.open) {
-      const card = el("div", "card");
-      card.appendChild(el("h3", null, setup.name || "Климатический контур"));
+      const card = el("div", "card contour-config-card");
+      const head = el("div", "contour-card-head");
+      const icon = el("span", "contour-card-icon");
+      icon.appendChild(svgIcon("thermometer"));
+      head.appendChild(icon);
+      const copy = el("div", "contour-card-copy");
+      copy.appendChild(el("h3", null, setup.name || "Климатический контур"));
+      copy.appendChild(el("p", "muted", "Текущая конфигурация сохранена и доступна для редактирования"));
+      head.appendChild(copy);
+      head.appendChild(el("span", "status-badge is-ready", "Настроен"));
+      card.appendChild(head);
       const modes = (setup.display_names && setup.display_names.modes) || {};
-      this._row(card, "Режим", modes[setup.mode] || setup.mode);
+      const facts = el("div", "contour-facts");
+      this._row(facts, "Режим", modes[setup.mode] || this._roomModeName(setup.mode));
       const summary = setup.summary || {};
-      this._row(card, "Комнат", summary.room_count || 0);
-      this._row(card, "Устройств", summary.device_count || 0);
+      this._row(facts, "Комнат", summary.room_count || 0);
+      this._row(facts, "Устройств", summary.device_count || 0);
+      card.appendChild(facts);
       (setup.issues || []).forEach((issue) => {
         if (issue && issue.message) card.appendChild(el("div", "wizard-issues", issue.message));
       });
       const edit = el("button", null, "Изменить контур");
       edit.disabled = this._busy || setup.editing_allowed !== true;
       edit.addEventListener("click", () => this._openWizard(setup));
-      card.appendChild(edit);
+      const actions = el("div", "actions contour-card-actions");
+      actions.appendChild(edit);
       if (this._firstRunIrDevices().length) {
         const irCodes = el("button", "secondary", "Настроить IR-коды");
         irCodes.disabled = this._busy;
         irCodes.addEventListener("click", () => this._openSavedIrCodeSetup());
-        card.appendChild(irCodes);
+        actions.appendChild(irCodes);
       }
+      card.appendChild(actions);
       if (setup.editing_allowed !== true) {
         card.appendChild(
           el("div", "muted", "Редактирование недоступно: данные устройств устарели или изменились.")
@@ -3931,16 +4045,26 @@ class HausmanHubPanel extends HTMLElement {
     const contours = (snapshot.contours || []).filter((item) => item.kind === "climate");
     if (!contours.length) return;
     contours.forEach((contour) => {
-      const card = el("div", "card");
-      card.appendChild(el("h3", null, contour.name));
-      this._row(card, "Статус", this._names("contour_statuses", contour.status));
-      this._row(card, "Режим", this._names("contour_modes", contour.mode));
+      const card = el("div", "card contour-state-card");
+      const head = el("div", "contour-card-head");
+      head.appendChild(el("h3", null, contour.name));
+      const healthy = ["normal", "ready", "active"].includes(contour.status);
+      head.appendChild(el(
+        "span",
+        `status-badge ${healthy ? "is-ready" : "is-attention"}`,
+        healthy ? "Система в норме" : "Нужно внимание"
+      ));
+      card.appendChild(head);
+      const facts = el("div", "contour-facts");
+      this._row(facts, "Статус", this._contourStatusName(contour.status));
+      this._row(facts, "Режим", this._contourModeName(contour.mode));
       if (contour.schedule && contour.schedule.enabled) {
         const next = contour.schedule.next_profile
           ? `${this._profileName(contour.schedule.next_profile)} · ${contour.schedule.next_change_at || ""}`
           : "Расписание включено";
-        this._row(card, "Расписание", next);
+        this._row(facts, "Расписание", next);
       }
+      card.appendChild(facts);
       if (Array.isArray(contour.reasons) && contour.reasons.length) {
         const reasons = el("div", "reasons");
         contour.reasons.forEach((reason) => {
@@ -3964,12 +4088,31 @@ class HausmanHubPanel extends HTMLElement {
           "Применить сохранённые настройки климата для всех комнат контура?"
         );
       });
-      card.appendChild(applyButton);
+      const cardActions = el("div", "actions contour-card-actions");
+      cardActions.appendChild(applyButton);
+      card.appendChild(cardActions);
+      container.appendChild(card);
 
       const temporary = execution.temporary_temperature || {};
+      const roomGrid = el("div", "contour-room-grid");
       (contour.rooms || []).forEach((room) => {
-        const block = el("div");
-        block.appendChild(el("div", "muted", room.name || room.id));
+        const block = el("article", "card contour-room-card");
+        const roomHead = el("div", "contour-room-head");
+        roomHead.appendChild(el("h3", null, room.name || room.id));
+        const temporaryActive = room.temporary_temperature && room.temporary_temperature.active;
+        roomHead.appendChild(el(
+          "span",
+          `status-badge ${temporaryActive ? "is-attention" : ""}`,
+          temporaryActive ? "Временная цель" : "По расписанию"
+        ));
+        block.appendChild(roomHead);
+        const targets = room.targets || {};
+        const meta = el("p", "muted contour-room-meta");
+        const target = typeof targets.temperature === "number" ? `${targets.temperature.toFixed(1)} °C` : "нет цели";
+        const devices = Array.isArray(room.devices) ? room.devices.length : (room.device_count || 0);
+        meta.textContent = `Цель профиля: ${target} · Устройств: ${devices}`;
+        block.appendChild(meta);
+        const controls = el("div", "contour-room-controls");
         const input = el("input");
         input.type = "number";
         input.min = temporary.minimum;
@@ -3979,7 +4122,8 @@ class HausmanHubPanel extends HTMLElement {
           ? room.temporary_temperature.temperature
           : room.targets && room.targets.temperature;
         input.value = current;
-        block.appendChild(input);
+        setAttr(input, "aria-label", `Временная температура, ${room.name || room.id}`);
+        controls.appendChild(input);
         const setButton = el("button", "secondary", "Временная температура");
         setButton.disabled = this._busy || !room.temporary_temperature || room.temporary_temperature.available !== true;
         setButton.addEventListener("click", () => {
@@ -3996,8 +4140,8 @@ class HausmanHubPanel extends HTMLElement {
             `Установить временную температуру ${input.value} °C в комнате «${room.name || room.id}» до следующей границы расписания?`
           );
         });
-        block.appendChild(setButton);
-        if (room.temporary_temperature && room.temporary_temperature.active) {
+        controls.appendChild(setButton);
+        if (temporaryActive) {
           const clearButton = el("button", "secondary", "Вернуться к расписанию");
           clearButton.disabled = this._busy;
           clearButton.addEventListener("click", () => {
@@ -4014,29 +4158,30 @@ class HausmanHubPanel extends HTMLElement {
               `Вернуть комнату «${room.name || room.id}» к расписанию?`
             );
           });
-          block.appendChild(clearButton);
+          controls.appendChild(clearButton);
           block.appendChild(
             el("div", "muted", `Действует временная температура ${room.temporary_temperature.temperature} °C`)
           );
         }
-        card.appendChild(block);
+        block.appendChild(controls);
+        roomGrid.appendChild(block);
       });
-      container.appendChild(card);
+      container.appendChild(roomGrid);
     });
   }
 
   _renderProfiles(container, setup) {
     container.innerHTML = "";
     if (!setup) {
-      container.appendChild(el("h2", null, "Профили «День» и «Ночь»"));
+      container.appendChild(el("h2", null, "Профили климата"));
       container.appendChild(el("div", "card empty-state muted", "Настройки профилей временно недоступны."));
       return;
     }
-    container.appendChild(el("h2", null, "Профили «День» и «Ночь»"));
+    container.appendChild(el("h2", null, "Профили климата"));
     container.appendChild(el(
       "div",
       "section-intro",
-      "Комфортные цели каждой комнаты для дневного и ночного периодов."
+      "Настройте целевые значения каждой комнаты для дня и ночи."
     ));
     if (setup.status === "not_configured") {
       const card = el("div", "card empty-state");
@@ -4053,7 +4198,7 @@ class HausmanHubPanel extends HTMLElement {
     const editable = setup.editing_allowed === true;
     const strategies = (setup.display_names && setup.display_names.strategies) || {};
     const fields = {};
-    const grid = el("div");
+    const grid = el("div", "profile-room-grid");
     (setup.rooms || []).forEach((room) => {
       const card = el("article", "card profile-room");
       card.appendChild(el("h3", null, room.name || room.id));
@@ -4063,9 +4208,17 @@ class HausmanHubPanel extends HTMLElement {
       ["day", "night"].forEach((profile) => {
         const values = (room.profiles && room.profiles[profile]) || {};
         const title = (setup.display_names && setup.display_names.profiles
-          && setup.display_names.profiles[profile]) || profile;
-        const profileBlock = el("div", "profile-block");
-        profileBlock.appendChild(el("h4", null, title));
+          && setup.display_names.profiles[profile]) || this._profileName(profile);
+        const profileBlock = el("div", `profile-block is-${profile}`);
+        const profileHead = el("div", "profile-block-head");
+        const profileIcon = el("span", "profile-icon");
+        profileIcon.appendChild(svgIcon(profile === "day" ? "sun" : "moon"));
+        profileHead.appendChild(profileIcon);
+        const profileCopy = el("div");
+        profileCopy.appendChild(el("h4", "profile-block-title", title));
+        profileCopy.appendChild(el("p", "muted", profile === "day" ? "Активный комфорт" : "Спокойный сон"));
+        profileHead.appendChild(profileCopy);
+        profileBlock.appendChild(profileHead);
         const temperature = numberField(
           values.target_temperature, 18, 28, 0.5,
           () => this._markDirty("profiles", dirtyNotice)
@@ -4189,7 +4342,7 @@ class HausmanHubPanel extends HTMLElement {
       );
       return;
     }
-    const card = el("div", "card");
+    const card = el("div", "card schedule-card");
     const schedule = setup.schedule || {};
     const managed = settings.mode && settings.mode.mode === "managed";
     const enabledBox = el("input");
@@ -4214,13 +4367,15 @@ class HausmanHubPanel extends HTMLElement {
     dayStart.value = schedule.day_start || "07:00";
     const dayRow = el("label", "form-field", "Начало дня");
     dayRow.appendChild(dayStart);
-    card.appendChild(dayRow);
     const nightStart = el("input");
     nightStart.type = "time";
     nightStart.value = schedule.night_start || "23:00";
     const nightRow = el("label", "form-field", "Начало ночи");
     nightRow.appendChild(nightStart);
-    card.appendChild(nightRow);
+    const timeGrid = el("div", "schedule-time-grid");
+    timeGrid.appendChild(dayRow);
+    timeGrid.appendChild(nightRow);
+    card.appendChild(timeGrid);
     const validationError = el("div", "field-error");
     setAttr(validationError, "role", "alert");
     card.appendChild(validationError);
@@ -4259,7 +4414,7 @@ class HausmanHubPanel extends HTMLElement {
         "Настройки изменились в другом окне. Данные обновлены, повторите сохранение."
       );
     });
-    const actions = el("div", "actions");
+    const actions = el("div", "actions schedule-actions");
     actions.appendChild(saveButton);
     card.appendChild(actions);
     container.appendChild(card);
@@ -4468,7 +4623,7 @@ class HausmanHubPanel extends HTMLElement {
       container.appendChild(el("div", "card empty-state muted", "Сигналы дома временно недоступны."));
       return;
     }
-    const card = el("div", "card");
+    const card = el("div", "card home-signals-card");
     const values = home.home || {};
     const candidates = home.candidates || {};
     const bindings = [
@@ -4515,14 +4670,16 @@ class HausmanHubPanel extends HTMLElement {
     );
     const highRow = el("label", "form-field", "Блокировка отопления выше, °C");
     highRow.appendChild(high);
-    card.appendChild(highRow);
     const low = numberField(
       values.heating_lockout_low, -40, 60, 0.5,
       () => this._markDirty("home", dirtyNotice)
     );
     const lowRow = el("label", "form-field", "Разблокировка отопления ниже, °C");
     lowRow.appendChild(low);
-    card.appendChild(lowRow);
+    const thresholds = el("div", "home-threshold-grid");
+    thresholds.appendChild(highRow);
+    thresholds.appendChild(lowRow);
+    card.appendChild(thresholds);
     card.appendChild(
       el("div", "muted", "Пороги допустимы от −40 до 60 °C; нижний должен быть строго меньше верхнего.")
     );
@@ -4571,7 +4728,7 @@ class HausmanHubPanel extends HTMLElement {
         "Настройки изменились в другом окне. Данные обновлены, повторите сохранение."
       );
     });
-    const actions = el("div", "actions");
+    const actions = el("div", "actions climate-form-actions");
     actions.appendChild(saveButton);
     card.appendChild(actions);
     container.appendChild(card);
@@ -4607,7 +4764,7 @@ class HausmanHubPanel extends HTMLElement {
     const presenceBoxes = {};
     const dirtyNotice = el("div", "unsaved", "Есть несохранённые изменения");
     dirtyNotice.hidden = !this._dirty.windows;
-    const grid = el("div", "room-card-grid");
+    const grid = el("div", "room-card-grid room-signals-grid");
     rooms.forEach((room) => {
       const block = el("article", "card signal-room");
       block.appendChild(el("h3", null, room.name || room.id));
@@ -4784,7 +4941,7 @@ class HausmanHubPanel extends HTMLElement {
       await this._load();
     });
     container.appendChild(dirtyNotice);
-    const actions = el("div", "actions");
+    const actions = el("div", "actions climate-form-actions");
     actions.appendChild(saveButton);
     container.appendChild(actions);
   }

@@ -528,6 +528,52 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
+    def test_climate_screens_are_separate_accessible_views(self) -> None:
+        script = panel_script(
+            GET_PATHS,
+            {},
+            """
+        const climateMainTab = panel._shell.tabs.climate;
+        climateMainTab.fire("click");
+        const subtabs = Object.values(panel._shell.climateTabs);
+        const expected = ["Контур", "Профили", "Расписание", "Сигналы дома", "Сигналы комнат", "AI-помощник"];
+        if (JSON.stringify(subtabs.map((node) => node.textContent)) !== JSON.stringify(expected)) {
+          throw new Error("climate subtab labels mismatch");
+        }
+        const visible = () => Object.entries(panel._shell.climateViews)
+          .filter(([, node]) => !node.hidden).map(([name]) => name);
+        if (JSON.stringify(visible()) !== JSON.stringify(["contour"])) {
+          throw new Error("climate default view is not isolated");
+        }
+        panel._shell.climateTabs.profiles.fire("click");
+        if (JSON.stringify(visible()) !== JSON.stringify(["profiles"])) {
+          throw new Error("profile view is not isolated");
+        }
+        if (panel._shell.brandSubtitle.textContent !== "Профили и расписание комфорта") {
+          throw new Error("climate view subtitle did not follow the selected screen");
+        }
+        if (panel._shell.climateTabs.profiles["aria-selected"] !== "true"
+          || panel._shell.climateTabs.contour["aria-selected"] !== "false") {
+          throw new Error("climate subtab accessibility state missing");
+        }
+        let prevented = false;
+        panel._shell.climateTabs.profiles.fire("keydown", {
+          key: "ArrowRight",
+          preventDefault: () => { prevented = true; },
+        });
+        if (!prevented || panel._activeClimateView !== "schedule"
+          || !panel._shell.climateTabs.schedule.focused) {
+          throw new Error("climate keyboard navigation failed");
+        }
+        if (calls.some((call) => call.method === "GET"
+          && call.path === "hausman_hub/v1/admin/ai-assistant")) {
+          throw new Error("AI assistant loaded before opening its screen");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_assistant_loads_lazily_saves_settings_and_refreshes_advisory(self) -> None:
         script = panel_script(
             GET_PATHS | {AI_ASSISTANT_PATH: AI_ASSISTANT_PAYLOAD},
@@ -554,6 +600,9 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("assistant loaded eagerly");
         }
         climateTab.fire("click");
+        const assistantTab = panel._shell.climateTabs.assistant;
+        if (!assistantTab) throw new Error("assistant climate subtab missing");
+        assistantTab.fire("click");
         await tick();
         const assistantGets = calls.filter((call) =>
           call.method === "GET" && call.path === "hausman_hub/v1/admin/ai-assistant");
@@ -562,11 +611,12 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const text = textOf(assistant);
         for (const label of [
           "Поставщик AI", "Ключ сохранён", "Последний совет", "Статистика вызовов",
-          "Проверьте расхождение температур", "Превышение комфортного диапазона",
+          "Проверьте расхождение температур", "Превышение комфортного диапазона", "Гостиная",
           "Таймаут", "Готово",
         ]) {
           if (!text.includes(label)) throw new Error("assistant text missing: " + label);
         }
+        if (text.includes("(living)")) throw new Error("raw room id exposed in assistant advice");
         const byClass = (name) => findAll(assistant, (node) =>
           String(node.className).split(" ").includes(name));
         if (byClass("assistant-form-grid").length !== 1) {
@@ -712,7 +762,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
             {},
             """
         const text = textOf(panel.shadowRoot);
-        if (!text.includes("Профили «День» и «Ночь»")) throw new Error("profiles heading missing");
+        if (!text.includes("Профили климата")) throw new Error("profiles heading missing");
         if (!text.includes("Расписание")) throw new Error("schedule heading missing");
         if (!text.includes("Сигналы дома")) throw new Error("home heading missing");
         if (!text.includes("Сигналы комнат")) throw new Error("room signals heading missing");

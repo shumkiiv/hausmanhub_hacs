@@ -21,7 +21,7 @@
       document.documentElement.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       document.body.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       panel._data = {
-        integration_version: "1.39.0",
+        integration_version: "1.40.0",
         readiness: { status: "ready", bridge_mode: "native", reasons: [] },
         snapshot: {
           rooms: [
@@ -60,14 +60,109 @@
               ],
             },
           ],
+          contours: [
+            {
+              id: "climate", kind: "climate", name: "Климат", status: "normal", mode: "automatic",
+              schedule: { enabled: true, next_profile: "night", next_change_at: "23:00" },
+              execution: {
+                settings_apply: { available: true },
+                temporary_temperature: { minimum: 18, maximum: 28, step: 0.5 },
+              },
+              rooms: [
+                {
+                  id: "living", name: "Гостиная", device_count: 3,
+                  targets: { temperature: 24.5 },
+                  temporary_temperature: { active: true, available: true, temperature: 24.5 },
+                },
+                {
+                  id: "bedroom", name: "Спальня", device_count: 2,
+                  targets: { temperature: 22 },
+                  temporary_temperature: { active: false, available: true },
+                },
+                {
+                  id: "kitchen", name: "Кухня", device_count: 2,
+                  targets: { temperature: 23 },
+                  temporary_temperature: { active: false, available: true },
+                },
+              ],
+            },
+          ],
         },
       };
-      panel._settings.setup = { status: "configured" };
+      panel._settings.mode = { mode: "managed", contour_configured: true };
+      panel._settings.setup = {
+        status: "configured", editing_allowed: true, setup_revision: 14,
+        name: "Климатический контур", mode: "automatic",
+        summary: { room_count: 3, device_count: 7 },
+        schedule: { enabled: true, day_start: "07:00", night_start: "23:00" },
+        display_names: {
+          modes: { automatic: "Управляемый" },
+          profiles: { day: "День", night: "Ночь" },
+          strategies: { soft: "Плавная", normal: "Обычная", aggressive: "Быстрая" },
+        },
+        rooms: [
+          {
+            id: "living", name: "Гостиная",
+            profiles: {
+              day: { target_temperature: 25, target_humidity: 53, strategy: "normal" },
+              night: { target_temperature: 24, target_humidity: 48, strategy: "soft" },
+            },
+          },
+          {
+            id: "bedroom", name: "Спальня",
+            profiles: {
+              day: { target_temperature: 24, target_humidity: 48, strategy: "normal" },
+              night: { target_temperature: 22, target_humidity: 45, strategy: "soft" },
+            },
+          },
+        ],
+      };
+      panel._settings.home = {
+        home: {
+          outdoor_temperature_entity_id: "sensor.outdoor_temperature",
+          presence_entity_id: "binary_sensor.home_presence",
+          central_heating_entity_id: "switch.central_heating",
+          heating_lockout_high: 16,
+          heating_lockout_low: 14,
+        },
+        candidates: {
+          outdoor_temperature: [
+            { entity_id: "sensor.outdoor_temperature", name: "Температура на улице", device_name: "Температура на улице", domain: "sensor", device_class: "temperature", available: true },
+          ],
+          presence: [
+            { entity_id: "binary_sensor.home_presence", name: "Дом занят", device_name: "Дом занят", domain: "binary_sensor", device_class: "occupancy", available: true },
+          ],
+          central_heating: [
+            { entity_id: "switch.central_heating", name: "Центральное отопление", device_name: "Центральное отопление", domain: "switch", available: true },
+          ],
+        },
+      };
+      panel._settings.windows = {
+        rooms: [
+          { id: "living", name: "Гостиная", window_entity_id: "binary_sensor.living_window", presence_entity_ids: ["binary_sensor.living_motion"] },
+          { id: "bedroom", name: "Спальня", window_entity_id: "binary_sensor.bedroom_window", presence_entity_ids: ["binary_sensor.bedroom_occupancy"] },
+          { id: "kids", name: "Детская", window_entity_id: "binary_sensor.kids_window", presence_entity_ids: ["binary_sensor.kids_motion"] },
+        ],
+        candidates: [
+          { entity_id: "binary_sensor.living_window", name: "Окно в гостиной", room_id: "living", device_class: "window", available: true },
+          { entity_id: "binary_sensor.bedroom_window", name: "Окно в спальне", room_id: "bedroom", device_class: "window", available: true },
+          { entity_id: "binary_sensor.kids_window", name: "Окно в детской", room_id: "kids", device_class: "window", available: true },
+        ],
+        presence_candidates: [
+          { entity_id: "binary_sensor.living_motion", name: "Датчик движения", room_id: "living", device_class: "motion", available: true },
+          { entity_id: "binary_sensor.bedroom_occupancy", name: "Датчик занятости", room_id: "bedroom", device_class: "occupancy", available: true },
+          { entity_id: "binary_sensor.kids_motion", name: "Датчик движения", room_id: "kids", device_class: "motion", available: true },
+        ],
+      };
       panel._activeSection = params.get("section") || "overview";
+      const screen = params.get("screen");
+      if (["contour", "profiles", "schedule", "home", "windows", "assistant"].includes(screen)) {
+        panel._activeClimateView = screen;
+      }
       panel._render();
       panel.shadowRoot.querySelector("link").href =
         "../../custom_components/hausman_hub/frontend/hausman-hub-panel.css";
-      if (params.get("screen") === "assistant") {
+      if (screen === "assistant") {
         panel._assistant = {
           loaded: true,
           loading: false,
@@ -101,10 +196,6 @@
             },
           },
         };
-        for (const name of ["contour", "profiles", "schedule", "home", "windows"]) {
-          panel._shell[name].hidden = true;
-        }
-        panel._shell.brandSubtitle.textContent = "Советы и статистика AI";
         panel._renderAssistant(panel._shell.assistant);
       }
     </script>
