@@ -21,7 +21,7 @@
       document.documentElement.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       document.body.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       panel._data = {
-        integration_version: "1.41.0",
+        integration_version: "1.42.0",
         readiness: { status: "ready", bridge_mode: "native", reasons: [] },
         snapshot: {
           rooms: [
@@ -164,6 +164,12 @@
           ],
         },
       };
+      panel._settingsData = {
+        connection_mode: "center",
+        smart_home_center_url: "http://hausmanhub.local:8099",
+        home_assistant_url: "https://homeassistant.local",
+      };
+      panel._settingsBaseline = { ...panel._settingsData };
       panel._activeSection = params.get("section") || "overview";
       const screen = params.get("screen");
       if (["contour", "profiles", "schedule", "home", "windows", "assistant"].includes(screen)) {

@@ -767,6 +767,81 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
+    def test_settings_match_figma_and_controls_have_real_behavior(self) -> None:
+        payloads = dict(GET_PATHS)
+        payloads["hausman_hub/v1/admin/connection-settings"] = {
+            "connection_mode": "center",
+            "smart_home_center_url": "http://hausmanhub.local:8099",
+            "home_assistant_url": "https://homeassistant.local",
+        }
+        script = panel_script(
+            payloads,
+            {"hausman_hub/v1/admin/connection-settings": {"status": "success"}},
+            """
+        panel._shell.tabs.settings.fire("click");
+        await tick();
+        let screen = panel._shell.settings;
+        let text = textOf(screen);
+        for (const label of [
+          "Настройки", "Подключение", "Интерфейс", "Тема панели", "Уменьшить анимацию",
+          "Показывать подсказки", "О системе", "Версия",
+        ]) {
+          if (!text.includes(label)) throw new Error("settings text missing: " + label);
+        }
+        if (text.includes("Центр умного дома")) throw new Error("obsolete Smart Home Center label exposed");
+        const urls = findAll(screen, (node) => node.type === "url");
+        const toggles = findAll(screen, (node) => String(node.className).split(" ").includes("settings-toggle"));
+        if (urls.length !== 2 || toggles.length !== 2) throw new Error("settings controls mismatch");
+        const panelGets = calls.filter((call) => call.method === "GET"
+          && call.path === "hausman_hub/v1/admin/panel").length;
+        findAll(screen, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Проверить подключение")[0].fire("click");
+        await tick();
+        if (calls.filter((call) => call.method === "GET"
+          && call.path === "hausman_hub/v1/admin/panel").length !== panelGets + 1) {
+          throw new Error("connection check did not call the live panel API");
+        }
+        screen = panel._shell.settings;
+        const mode = findAll(screen, (node) => node.tagName === "SELECT")[0];
+        mode.value = "home_assistant";
+        mode.fire("change");
+        screen = panel._shell.settings;
+        const centerField = findAll(screen, (node) =>
+          String(node.className).split(" ").includes("settings-field")
+          && textOf(node).includes("Адрес HausmanHub"))[0];
+        if (!centerField.hidden) throw new Error("HausmanHub URL remains visible in HA-only mode");
+        const haUrl = findAll(screen, (node) => node.type === "url")[0];
+        haUrl.value = "https://ha.example.test";
+        haUrl.fire("input");
+        screen = panel._shell.settings;
+        const save = findAll(screen, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Сохранить настройки")[0];
+        if (save.disabled) throw new Error("settings save stayed disabled after edit");
+        save.fire("click");
+        await tick();
+        const post = calls.find((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/admin/connection-settings");
+        const expected = {
+          connection_mode: "home_assistant",
+          smart_home_center_url: "http://hausmanhub.local:8099",
+          home_assistant_url: "https://ha.example.test",
+        };
+        if (!post || JSON.stringify(post.payload) !== JSON.stringify(expected)) {
+          throw new Error("settings payload mismatch: " + JSON.stringify(post && post.payload));
+        }
+        screen = panel._shell.settings;
+        const motionToggle = findAll(screen, (node) =>
+          String(node.className).split(" ").includes("settings-toggle"))[0];
+        motionToggle.checked = true;
+        motionToggle.fire("change");
+        if (panel._settingsPrefs.reduced_motion !== true) {
+          throw new Error("reduced motion preference did not apply");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_panel_shell_has_status_accessibility_and_responsive_rules(self) -> None:
         css = PANEL_CSS.read_text(encoding="utf-8")
         for rule in (
