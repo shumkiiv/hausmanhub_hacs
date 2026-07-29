@@ -470,6 +470,67 @@ class PanelContourWizardTest(unittest.TestCase):
 
 
 class PanelFirstRunWizardTest(unittest.TestCase):
+    def test_default_room_catalog_hides_only_unavailable_shadow_duplicate(self) -> None:
+        options = copy.deepcopy(DRAFT_OPTIONS)
+        shared = {
+            "name": "Кондиционер",
+            "room_id": "kids",
+            "suggested_types": ["air_conditioner"],
+            "recommended_type": "air_conditioner",
+            "suggested_room_id": "kids",
+            "suggested_room_name": "Детская",
+            "reason": "detected_room",
+            "can_add": True,
+            "device_name": "Кондиционер",
+            "manufacturer": "Yandex",
+            "model": "YNDX-0006",
+        }
+        options["devices"].extend(
+            [
+                {
+                    **shared,
+                    "candidate_id": "candidate_kids_ac_live",
+                    "candidate_key": "candidate_kids_ac_live",
+                    "device_group_id": "device_live",
+                    "status": "available",
+                },
+                {
+                    **shared,
+                    "candidate_id": "candidate_kids_ac_stale",
+                    "candidate_key": "candidate_kids_ac_stale",
+                    "device_group_id": "device_stale",
+                    "status": "unavailable",
+                    "reason": "device_unavailable",
+                },
+            ]
+        )
+        script = panel_script(
+            get_payloads(options=options),
+            {},
+            """
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать настройку")[0].fire("click");
+        await tick();
+        panel._firstRunFields.rooms.kids.configure.fire("click");
+        const visibleKeys = panel._firstRunFields.room.devices.map((item) => item.key);
+        if (!visibleKeys.includes("candidate_kids_ac_live:air_conditioner")
+          || visibleKeys.includes("candidate_kids_ac_stale:air_conditioner")) {
+          throw new Error("default room catalog did not suppress the unavailable shadow duplicate");
+        }
+        const showAll = findAll(panel.shadowRoot, (node) => node.tagName === "LABEL"
+          && textOf(node).includes("Показать все устройства"))[0].children[0];
+        showAll.checked = true;
+        showAll.fire("change");
+        const allKeys = panel._firstRunFields.room.devices.map((item) => item.key);
+        if (!allKeys.includes("candidate_kids_ac_live:air_conditioner")
+          || !allKeys.includes("candidate_kids_ac_stale:air_conditioner")) {
+          throw new Error("show-all catalog must preserve both HA registry records for audit");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_unavailable_room_device_stays_selectable_with_badge_and_warning(self) -> None:
         options = copy.deepcopy(DRAFT_OPTIONS)
         options["display_names"]["device_status"] = {"unavailable": "Недоступно"}

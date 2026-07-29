@@ -1417,11 +1417,39 @@ class HausmanHubPanel extends HTMLElement {
   }
 
   _firstRunRoomCandidates(roomId) {
-    return (this._firstRun.options && this._firstRun.options.devices || []).filter((candidate) => (
+    const candidates = (this._firstRun.options && this._firstRun.options.devices || []).filter((candidate) => (
       candidate.room_id === roomId
       || (candidate.can_add === true
         && candidate.room_id === "" && candidate.suggested_room_id === roomId)
     ));
+    return this._firstRunWithoutShadowedDuplicates(candidates);
+  }
+
+  _firstRunCandidateDuplicateIdentity(candidate) {
+    const types = (candidate.suggested_types || [])
+      .filter((type) => ACTIVE_DEVICE_TYPES.has(type))
+      .sort();
+    const roomId = candidate.room_id || candidate.suggested_room_id || "";
+    const name = normalizedText(candidate.name || "");
+    const deviceName = normalizedText(candidate.device_name || candidate.name || "");
+    const maker = normalizedText(candidate.manufacturer || "");
+    const model = normalizedText(candidate.model || "");
+    if (!types.length || ![roomId, name, deviceName, maker, model].every(Boolean)) return null;
+    return [roomId, name, deviceName, maker, model, types.join(",")].join("|");
+  }
+
+  _firstRunWithoutShadowedDuplicates(candidates) {
+    const availableIdentities = new Set();
+    candidates.forEach((candidate) => {
+      if (!["available", "already_configured"].includes(candidate.status)) return;
+      const identity = this._firstRunCandidateDuplicateIdentity(candidate);
+      if (identity) availableIdentities.add(identity);
+    });
+    return candidates.filter((candidate) => {
+      if (candidate.status !== "unavailable") return true;
+      const identity = this._firstRunCandidateDuplicateIdentity(candidate);
+      return !identity || !availableIdentities.has(identity);
+    });
   }
 
   _firstRunRoomlessCandidates() {
