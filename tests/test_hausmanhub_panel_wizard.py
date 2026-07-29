@@ -1520,7 +1520,7 @@ class PanelFirstRunWizardTest(unittest.TestCase):
           throw new Error("configured summary fetched options eagerly");
         }
         const initial = textOf(panel.shadowRoot);
-        const order = ["Главная", "Сценарии", "Климат", "Свет", "Комнаты", "Медиа", "Безопасность", "Устройства", "Настройки"];
+        const order = ["Обзор", "Климат", "Сценарии", "Настройки"];
         let cursor = -1;
         order.forEach((heading) => {
           const next = initial.indexOf(heading, cursor + 1);

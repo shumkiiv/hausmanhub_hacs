@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>HausmanHub panel visual harness</title>
+    <style>
+      html, body { min-height: 100%; margin: 0; background: #eef1f6; }
+      hausman-hub-panel { min-height: 100vh; }
+    </style>
+  </head>
+  <body>
+    <hausman-hub-panel id="panel"></hausman-hub-panel>
+    <script src="../../custom_components/hausman_hub/frontend/hausman-hub-panel.js"></script>
+    <script>
+      const params = new URLSearchParams(window.location.search);
+      const panel = document.getElementById("panel");
+      const theme = params.get("theme") === "dark" ? "dark" : "light";
+      panel._themeMode = theme;
+      panel.classList.toggle("theme-light", theme === "light");
+      document.documentElement.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
+      document.body.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
+      panel._data = {
+        integration_version: "1.38.0",
+        readiness: { status: "ready", bridge_mode: "native", reasons: [] },
+        snapshot: null,
+      };
+      panel._settings.setup = { status: "configured" };
+      panel._activeSection = params.get("section") || "overview";
+      panel._render();
+      panel.shadowRoot.querySelector("link").href =
+        "../../custom_components/hausman_hub/frontend/hausman-hub-panel.css";
+    </script>
+  </body>
+</html>

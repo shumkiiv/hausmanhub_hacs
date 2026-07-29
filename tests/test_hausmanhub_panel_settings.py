@@ -15,6 +15,7 @@ PANEL_JS = (
     / "frontend"
     / "hausman-hub-panel.js"
 )
+PANEL_CSS = PANEL_JS.with_name("hausman-hub-panel.css")
 
 PANEL_PAYLOAD = {
     "contract": {"name": "hausman-hub-admin-panel", "version": 2},
@@ -400,7 +401,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
-    def test_nine_tabs_switch_locally_keep_dirty_values_and_support_keyboard(self) -> None:
+    def test_four_tabs_switch_locally_keep_dirty_values_and_support_keyboard(self) -> None:
         script = panel_script(
             GET_PATHS,
             {},
@@ -408,7 +409,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const tabs = findAll(panel.shadowRoot, (node) =>
           node.tagName === "BUTTON" && String(node.className).split(" ").includes("tab"));
         const labels = tabs.map((node) => node.textContent);
-        const expected = ["Главная", "Сценарии", "Климат", "Свет", "Комнаты", "Медиа", "Безопасность", "Устройства", "Настройки"];
+        const expected = ["Обзор", "Климат", "Сценарии", "Настройки"];
         if (JSON.stringify(labels) !== JSON.stringify(expected)) {
           throw new Error("tab labels mismatch: " + JSON.stringify(labels));
         }
@@ -422,30 +423,30 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("tab accessibility semantics missing");
         }
         const getCount = calls.filter((call) => call.method === "GET").length;
-        tabs[2].fire("click");
+        tabs[1].fire("click");
         await tick();
         const climateLoadedCount = calls.filter((call) => call.method === "GET").length;
         const dayTemperature = findAll(panel.shadowRoot, (node) => node.type === "number")
           .find((node) => String(node.value) === "23");
         dayTemperature.value = "24.5";
         dayTemperature.fire("input");
-        tabs[4].fire("click");
-        tabs[2].fire("click");
+        tabs[0].fire("click");
+        tabs[1].fire("click");
         if (dayTemperature.value !== "24.5" || panel._dirty.profiles !== true) {
           throw new Error("tab switch discarded dirty profile value");
         }
-        if (!String(tabs[2].className).includes("is-dirty")) {
+        if (!String(tabs[1].className).includes("is-dirty")) {
           throw new Error("dirty tab indicator missing");
         }
         if (calls.filter((call) => call.method === "GET").length !== climateLoadedCount) {
           throw new Error("tab switch called an API");
         }
         let prevented = false;
-        tabs[2].fire("keydown", {
+        tabs[1].fire("keydown", {
           key: "ArrowRight",
           preventDefault: () => { prevented = true; },
         });
-        if (!prevented || panel._activeSection !== "lights" || !tabs[3].focused) {
+        if (!prevented || panel._activeSection !== "scenarios" || !tabs[2].focused) {
           throw new Error("keyboard tab navigation failed");
         }
             """,
@@ -547,28 +548,30 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         self.assertEqual(0, completed.returncode, completed.stderr)
 
     def test_panel_shell_has_status_accessibility_and_responsive_rules(self) -> None:
+        css = PANEL_CSS.read_text(encoding="utf-8")
+        for rule in (
+            "max-width:1440px",
+            "overflow-x:auto",
+            "@media (max-width:640px)",
+            "@media (max-width:380px)",
+            "grid-template-columns:minmax(0,1fr)",
+            ":focus-visible",
+        ):
+            self.assertIn(rule, css)
         script = panel_script(
             GET_PATHS,
             {},
             """
         const text = textOf(panel.shadowRoot);
-        if (!text.includes("Климат, комнаты и сценарии в одном месте")) {
+        if (!text.includes("Состояние и управление домом")) {
           throw new Error("header subtitle missing");
         }
         if (!text.includes("Управление климатом выключено")) {
           throw new Error("translated status missing");
         }
-        const style = findAll(panel.shadowRoot, (node) => node.tagName === "STYLE")[0];
-        const css = String(style.textContent);
-        for (const rule of [
-          "max-width:1440px",
-          "overflow-x:auto",
-          "@media (max-width:640px)",
-          "@media (max-width:380px)",
-          "grid-template-columns:minmax(0,1fr)",
-          ":focus-visible",
-        ]) {
-          if (!css.includes(rule)) throw new Error("responsive/accessibility CSS missing: " + rule);
+        const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
+        if (!stylesheet || !String(stylesheet.href).endsWith("hausman-hub-panel.css")) {
+          throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;
         const hidden = Object.entries(panel._shell.sectionNodes)

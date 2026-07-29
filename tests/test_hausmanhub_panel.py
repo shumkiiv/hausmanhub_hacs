@@ -18,17 +18,29 @@ PANEL_JS = (
     / "frontend"
     / "hausman-hub-panel.js"
 )
+PANEL_CSS = PANEL_JS.with_name("hausman-hub-panel.css")
 MAX_PANEL_JS_BYTES = 230 * 1024
+MAX_PANEL_CSS_BYTES = 48 * 1024
 
 
 class PanelJavaScriptContractTest(unittest.TestCase):
-    """The panel module stays self-contained and loadable."""
+    """The local panel assets stay bounded and loadable."""
 
     def test_panel_script_exists_and_stays_bounded(self) -> None:
         content = PANEL_JS.read_text(encoding="utf-8")
 
         self.assertLessEqual(len(content.encode("utf-8")), MAX_PANEL_JS_BYTES)
         self.assertIn('customElements.define("hausman-hub-panel"', content)
+
+    def test_panel_styles_are_local_and_stay_bounded(self) -> None:
+        content = PANEL_JS.read_text(encoding="utf-8")
+        styles = PANEL_CSS.read_text(encoding="utf-8")
+
+        self.assertLessEqual(len(styles.encode("utf-8")), MAX_PANEL_CSS_BYTES)
+        self.assertIn('"/api/hausman_hub/panel/hausman-hub-panel.css"', content)
+        self.assertIn("--hmh-bg:#0B0F14", styles)
+        self.assertIn("--hmh-bg:#EEF1F6", styles)
+        self.assertIn(".page-header", styles)
 
     def test_panel_script_uses_only_relative_local_api_paths(self) -> None:
         content = PANEL_JS.read_text(encoding="utf-8")
@@ -158,7 +170,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
           }};
           visitVisible(panel.shadowRoot);
           const text = visible.map((node) => node.textContent).join("\\n");
-          if (!text.includes("Главная")) throw new Error("home heading missing");
+          if (!text.includes("Обзор")) throw new Error("overview heading missing");
           if (!text.includes("Управление климатом выключено")) {{
             throw new Error("disabled readiness missing");
           }}
@@ -169,7 +181,13 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             throw new Error("contour rendered without snapshot");
           }}
           const tabs = visible.filter((node) => String(node.className).split(" ").includes("tab"));
-          if (tabs.length !== 9) throw new Error("nine persistent tabs missing");
+          if (tabs.length !== 4) throw new Error("four canonical tabs missing");
+          const tabLabels = tabs.map((node) => node.textContent).join("|");
+          if (tabLabels !== "Обзор|Климат|Сценарии|Настройки") {{
+            throw new Error("canonical tab order mismatch: " + tabLabels);
+          }}
+          const marks = visible.filter((node) => String(node.className).split(" ").includes("brand-mark"));
+          if (marks.length !== 1) throw new Error("HausmanHub brand mark missing");
           if (visible.some((node) => (
             node.tagName === "BUTTON"
             && !String(node.className).split(" ").includes("tab")
@@ -450,7 +468,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.37.0",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.38.0",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },
