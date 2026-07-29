@@ -21,7 +21,7 @@
       document.documentElement.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       document.body.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       panel._data = {
-        integration_version: "1.40.0",
+        integration_version: "1.41.0",
         readiness: { status: "ready", bridge_mode: "native", reasons: [] },
         snapshot: {
           rooms: [
@@ -153,6 +153,16 @@
           { entity_id: "binary_sensor.bedroom_occupancy", name: "Датчик занятости", room_id: "bedroom", device_class: "occupancy", available: true },
           { entity_id: "binary_sensor.kids_motion", name: "Датчик движения", room_id: "kids", device_class: "motion", available: true },
         ],
+      };
+      panel._scenarios = {
+        loading: false, error: false, catalog: { devices: [] },
+        list: {
+          scenarios: [
+            { id: "scenario.good_morning", title: "Доброе утро", icon: "mdi:weather-sunset-up", enabled: true, requiresConfirmation: false },
+            { id: "scenario.leaving_home", title: "Уходим из дома", icon: "mdi:home-export-outline", enabled: true, requiresConfirmation: true },
+            { id: "scenario.night_mode", title: "Ночной режим", icon: "mdi:weather-night", enabled: false, requiresConfirmation: false },
+          ],
+        },
       };
       panel._activeSection = params.get("section") || "overview";
       const screen = params.get("screen");

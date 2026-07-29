@@ -336,6 +336,23 @@ label.signal-option > input[type="radio"] { grid-column:1; width:18px; min-heigh
 .climate-form-actions { justify-content:flex-end; }
 .room-signals-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
 .signal-room { margin-bottom:0; background:var(--hmh-surface,#12171D); }
+.scenarios-card { padding:24px; background:var(--hmh-surface,#12171D); }
+.scenarios-heading { display:flex; align-items:flex-end; justify-content:space-between; gap:16px; margin-bottom:18px; }
+.scenarios-heading h2 { margin:0; }
+.scenarios-heading .section-intro { margin:4px 0 0; }
+.scenario-list { display:grid; gap:16px; }
+.scenario-row { display:grid; grid-template-columns:44px minmax(0,1fr) auto; align-items:center; gap:16px;
+  min-width:0; min-height:78px; padding:14px 16px; border:1px solid var(--hmh-border,#2F3845);
+  border-radius:14px; background:var(--hmh-field,#181E26); }
+.scenario-row.is-disabled { opacity:.82; }
+.scenario-icon { display:grid; place-items:center; width:44px; height:44px; border-radius:13px;
+  color:var(--hmh-text,#E7ECF3); background:var(--hmh-raised,#181E26); }
+.scenario-icon .icon { width:22px; height:22px; }
+.scenario-copy { min-width:0; }
+.scenario-copy h3 { overflow-wrap:anywhere; }
+.scenario-copy p { margin:4px 0 0; overflow-wrap:anywhere; }
+.scenario-actions { display:flex; align-items:center; justify-content:flex-end; gap:8px; }
+.scenario-actions button { min-height:42px; margin:0; padding:10px 16px; }
  .empty-state { padding:22px; text-align:center; }
 .assistant-screen { display:grid; gap:32px; margin-top:32px; }
 .section-heading { display:flex; flex-direction:column; gap:6px; }
@@ -401,6 +418,9 @@ label.signal-option > input[type="radio"] { grid-column:1; width:18px; min-heigh
   .contour-room-controls button { width:100%; }
   .schedule-time-grid { grid-template-columns:minmax(0,1fr); }
   .home-threshold-grid, .room-signals-grid { grid-template-columns:minmax(0,1fr); }
+  .scenario-row { grid-template-columns:44px minmax(0,1fr); align-items:start; }
+  .scenario-actions { grid-column:1 / -1; justify-content:stretch; }
+  .scenario-actions button { flex:1 1 0; }
   label.form-field { grid-template-columns:minmax(0,1fr); gap:5px; }
   .field-help { grid-column:1; margin-top:-2px; }
   label.form-field > input, label.form-field > select { width:100%; max-width:none; }

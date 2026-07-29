@@ -682,6 +682,91 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
+    def test_scenario_rows_match_figma_and_all_actions_call_the_api(self) -> None:
+        scenarios = {
+            "scenarios": [
+                {
+                    "id": "scenario.good_morning",
+                    "title": "Доброе утро",
+                    "icon": "mdi:weather-sunset-up",
+                    "enabled": True,
+                    "requiresConfirmation": False,
+                },
+                {
+                    "id": "scenario.leaving_home",
+                    "title": "Уходим из дома",
+                    "icon": "mdi:home-export-outline",
+                    "enabled": True,
+                    "requiresConfirmation": True,
+                },
+                {
+                    "id": "scenario.night_mode",
+                    "title": "Ночной режим",
+                    "icon": "mdi:weather-night",
+                    "enabled": False,
+                    "requiresConfirmation": False,
+                },
+            ]
+        }
+        payloads = dict(GET_PATHS)
+        payloads["hausman_hub/v1/admin/scenarios"] = scenarios
+        payloads["hausman_hub/v1/admin/scenarios/catalog"] = {"devices": []}
+        script = panel_script(
+            payloads,
+            {
+                "hausman_hub/v1/admin/scenarios/run": {"status": "confirmed"},
+                "hausman_hub/v1/admin/scenarios/test": {"ok": True},
+                "hausman_hub/v1/admin/scenarios/delete": {"status": "confirmed"},
+            },
+            """
+        panel._shell.tabs.scenarios.fire("click");
+        await tick();
+        const screen = panel._shell.scenarios;
+        const text = textOf(screen);
+        for (const label of ["Доброе утро", "Уходим из дома", "Ночной режим", "требуется подтверждение", "выключен"]) {
+          if (!text.includes(label)) throw new Error("scenario text missing: " + label);
+        }
+        if (text.includes("mdi:")) throw new Error("raw MDI icon name exposed");
+        const rows = findAll(screen, (node) => String(node.className).split(" ").includes("scenario-row"));
+        const icons = findAll(screen, (node) => String(node.className).split(" ").includes("scenario-icon"));
+        if (rows.length !== 3 || icons.length !== 3 || icons.some((node) => node.children.length !== 1)) {
+          throw new Error("scenario Figma row hierarchy mismatch");
+        }
+        const rowButtons = (row) => findAll(row, (node) => node.tagName === "BUTTON");
+        if (rowButtons(rows[0]).length !== 3 || rowButtons(rows[2]).length !== 2) {
+          throw new Error("enabled/disabled scenario actions mismatch");
+        }
+        let confirmation = "";
+        window.confirm = (message) => { confirmation = message; return true; };
+        rowButtons(rows[1]).find((node) => node.textContent === "Запустить").fire("click");
+        await tick();
+        if (!confirmation.includes("Уходим из дома")) throw new Error("camelCase confirmation flag ignored");
+        const run = calls.find((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/admin/scenarios/run");
+        if (!run || run.payload.scenario_id !== "scenario.leaving_home") {
+          throw new Error("scenario run payload mismatch");
+        }
+        panel._shell.tabs.scenarios.fire("click");
+        await tick();
+        const refreshedRows = findAll(panel._shell.scenarios, (node) =>
+          String(node.className).split(" ").includes("scenario-row"));
+        rowButtons(refreshedRows[0]).find((node) => node.textContent === "Проверить").fire("click");
+        await tick();
+        if (!calls.some((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/admin/scenarios/test")) {
+          throw new Error("scenario test API missing");
+        }
+        rowButtons(refreshedRows[0]).find((node) => node.textContent === "Удалить").fire("click");
+        await tick();
+        if (!calls.some((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/admin/scenarios/delete")) {
+          throw new Error("scenario delete API missing");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_panel_shell_has_status_accessibility_and_responsive_rules(self) -> None:
         css = PANEL_CSS.read_text(encoding="utf-8")
         for rule in (

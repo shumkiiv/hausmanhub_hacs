@@ -128,6 +128,7 @@ const ICON_PATHS = {
   home: "M12 3 2 12h3v9h6v-6h2v6h6v-9h3L12 3zm0 2.69L18 11v8h-3v-6H9v6H6v-8l6-5.31z",
   thermometer: "M15 13V5a3 3 0 0 0-6 0v8a5 5 0 1 0 6 0zm-3 6a3 3 0 0 1-1-5.83V5a1 1 0 0 1 2 0v8.17A3 3 0 0 1 12 19z",
   water: "M12 2.69 6.35 8.34A8 8 0 0 0 4 14a8 8 0 0 0 16 0c0-2.21-.9-4.21-2.35-5.66L12 2.69zM12 20a6 6 0 0 1-4.24-10.24L12 5.52l4.24 4.24A6 6 0 0 1 12 20z",
+  bolt: "M11 21h-1l1-7H7.5c-.88 0-.33-.75-.31-.78C8.46 10.97 10.37 7.63 13 3h1l-1 7h3.5c.4 0 .62.19.4.66C12.97 17.53 11 21 11 21z",
 };
 
 const THEME_MODES = ["auto", "light", "dark"];
@@ -4961,10 +4962,23 @@ class HausmanHubPanel extends HTMLElement {
     return typeof value === "number" ? `${Math.round(value)} %` : "Нет данных";
   }
 
+  _scenarioIconName(scenario) {
+    const source = normalizedText(`${scenario && scenario.icon} ${scenario && scenario.title}`);
+    if (source.includes("morning") || source.includes("утр") || source.includes("sun")) return "sun";
+    if (source.includes("night") || source.includes("ноч") || source.includes("moon")) return "moon";
+    if (source.includes("home") || source.includes("дом")) return "home";
+    return "bolt";
+  }
+
   _renderScenarios(container) {
     container.innerHTML = "";
-    const card = el("div", "card");
-    card.appendChild(el("h2", null, "Сценарии"));
+    const card = el("div", "card scenarios-card");
+    const heading = el("div", "scenarios-heading");
+    const headingCopy = el("div");
+    headingCopy.appendChild(el("h2", null, "Сценарии"));
+    headingCopy.appendChild(el("p", "section-intro", "Запускайте, проверяйте и обслуживайте сценарии дома"));
+    heading.appendChild(headingCopy);
+    card.appendChild(heading);
     if (this._scenarios.loading && !this._scenarios.list) {
       card.appendChild(el("div", "muted", "Загрузка сценариев…"));
       container.appendChild(card);
@@ -4979,28 +4993,42 @@ class HausmanHubPanel extends HTMLElement {
     if (!items.length) {
       card.appendChild(el("div", "muted", "Нет сохранённых сценариев."));
     }
+    const list = el("div", "scenario-list");
     items.forEach((scenario) => {
-      const row = el("div", "row");
-      row.style.alignItems = "center";
-      const title = el("span", null, `${scenario.icon || "mdi:script"} ${scenario.title || scenario.id}`);
-      row.appendChild(title);
-      const actions = el("span");
-      actions.style.display = "flex";
-      actions.style.gap = "8px";
+      const requiresConfirmation = scenario.requiresConfirmation === true
+        || scenario.requires_confirmation === true;
+      const row = el("article", `scenario-row${scenario.enabled ? "" : " is-disabled"}`);
+      const icon = el("span", "scenario-icon");
+      icon.appendChild(svgIcon(this._scenarioIconName(scenario)));
+      row.appendChild(icon);
+      const copy = el("div", "scenario-copy");
+      copy.appendChild(el("h3", null, scenario.title || scenario.id));
+      const meta = [
+        scenario.id,
+        requiresConfirmation ? "требуется подтверждение" : "",
+        scenario.enabled ? "" : "выключен",
+      ].filter(Boolean).join(" · ");
+      copy.appendChild(el("p", "muted", meta));
+      row.appendChild(copy);
+      const actions = el("div", "scenario-actions");
       if (scenario.enabled) {
         const runBtn = el("button", null, "Запустить");
-        runBtn.addEventListener("click", () => this._post(SCENARIOS_RUN_API, { scenario_id: scenario.id }, scenario.requires_confirmation ? `Запустить сценарий "${scenario.title}"?` : null));
+        runBtn.disabled = this._busy;
+        runBtn.addEventListener("click", () => this._post(SCENARIOS_RUN_API, { scenario_id: scenario.id }, requiresConfirmation ? `Запустить сценарий "${scenario.title}"?` : null));
         actions.appendChild(runBtn);
       }
       const testBtn = el("button", "secondary", "Проверить");
+      testBtn.disabled = this._busy;
       testBtn.addEventListener("click", () => this._scenarioTest(scenario));
       actions.appendChild(testBtn);
       const delBtn = el("button", "secondary", "Удалить");
+      delBtn.disabled = this._busy;
       delBtn.addEventListener("click", () => this._post(SCENARIOS_DELETE_API, { scenario_id: scenario.id }, `Удалить сценарий "${scenario.title}"?`));
       actions.appendChild(delBtn);
       row.appendChild(actions);
-      card.appendChild(row);
+      list.appendChild(row);
     });
+    card.appendChild(list);
     container.appendChild(card);
   }
 
