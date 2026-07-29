@@ -23,6 +23,27 @@ def _non_empty_string(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+def _enum_string(value: object) -> str | None:
+    """Return a compact enum/string value without importing HA enum types."""
+
+    raw = getattr(value, "value", value)
+    return raw if isinstance(raw, str) and raw else None
+
+
+def _device_integrations(device: object) -> tuple[str, ...]:
+    """Project only integration domains, never registry identifiers."""
+
+    integrations = {
+        identifier[0]
+        for identifier in (getattr(device, "identifiers", ()) or ())
+        if isinstance(identifier, (tuple, list))
+        and len(identifier) == 2
+        and isinstance(identifier[0], str)
+        and identifier[0]
+    }
+    return tuple(sorted(integrations))
+
+
 def _friendly_name(state: object, registry_entry: object) -> str:
     attributes = getattr(state, "attributes", {})
     friendly_name = attributes.get("friendly_name")
@@ -160,6 +181,9 @@ async def async_dashboard_snapshot(
             area_id=_non_empty_string(getattr(device, "area_id", None)),
             model=_non_empty_string(getattr(device, "model", None)),
             manufacturer=_non_empty_string(getattr(device, "manufacturer", None)),
+            entry_type=_enum_string(getattr(device, "entry_type", None)),
+            integrations=_device_integrations(device),
+            disabled=getattr(device, "disabled_by", None) is not None,
         )
         for device in devices.devices.values()
     )

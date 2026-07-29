@@ -22,10 +22,12 @@ PANEL_JS = (
 PANEL_CSS = PANEL_JS.with_name("hausman-hub-panel.css")
 HOME_SECTIONS_JS = PANEL_JS.with_name("hausman-hub-home-sections.js")
 ROOM_SETUP_JS = PANEL_JS.with_name("hausman-hub-room-setup.js")
+DEVICE_INVENTORY_JS = PANEL_JS.with_name("hausman-hub-device-inventory.js")
 SETTINGS_CSS = PANEL_JS.with_name("hausman-hub-settings.css")
 MAX_PANEL_JS_BYTES = 268 * 1024
 MAX_HOME_SECTIONS_JS_BYTES = 16 * 1024
 MAX_ROOM_SETUP_JS_BYTES = 24 * 1024
+MAX_DEVICE_INVENTORY_JS_BYTES = 16 * 1024
 MAX_PANEL_CSS_BYTES = 56 * 1024
 MAX_SETTINGS_CSS_BYTES = 24 * 1024
 
@@ -37,6 +39,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         content = PANEL_JS.read_text(encoding="utf-8")
         home_sections = HOME_SECTIONS_JS.read_text(encoding="utf-8")
         room_setup = ROOM_SETUP_JS.read_text(encoding="utf-8")
+        device_inventory = DEVICE_INVENTORY_JS.read_text(encoding="utf-8")
 
         self.assertLessEqual(len(content.encode("utf-8")), MAX_PANEL_JS_BYTES)
         self.assertLessEqual(
@@ -45,12 +48,16 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertLessEqual(
             len(room_setup.encode("utf-8")), MAX_ROOM_SETUP_JS_BYTES
         )
+        self.assertLessEqual(
+            len(device_inventory.encode("utf-8")), MAX_DEVICE_INVENTORY_JS_BYTES
+        )
         self.assertIn("renderHomeSection", home_sections)
         self.assertIn("renderFirstRunRoom", room_setup)
+        self.assertIn("renderDeviceInventory", device_inventory)
         self.assertIn('customElements.get?.("hausman-hub-panel")', content)
         self.assertIn('customElements.define("hausman-hub-panel"', content)
 
-    def test_home_sections_cache_version_matches_manifest(self) -> None:
+    def test_frontend_module_cache_versions_match_manifest(self) -> None:
         content = PANEL_JS.read_text(encoding="utf-8")
         manifest = json.loads(
             (ROOT / "custom_components" / "hausman_hub" / "manifest.json").read_text(
@@ -58,9 +65,12 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             )
         )
 
-        self.assertIn(
-            f'./hausman-hub-home-sections.js?v={manifest["version"]}', content
-        )
+        for module in (
+            "hausman-hub-home-sections.js",
+            "hausman-hub-room-setup.js",
+            "hausman-hub-device-inventory.js",
+        ):
+            self.assertIn(f'./{module}?v={manifest["version"]}', content)
 
     def test_panel_styles_are_local_and_stay_bounded(self) -> None:
         content = PANEL_JS.read_text(encoding="utf-8")
@@ -72,7 +82,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             len(settings_styles.encode("utf-8")), MAX_SETTINGS_CSS_BYTES
         )
         self.assertIn('"/api/hausman_hub/panel/hausman-hub-panel.css"', content)
-        self.assertIn('hausman-hub-settings.css?v=1.46.1', styles)
+        self.assertIn('hausman-hub-settings.css?v=1.46.2', styles)
         self.assertIn("--hmh-bg:#0B0F14", styles)
         self.assertIn("--hmh-bg:#EEF1F6", styles)
         self.assertIn(".page-header", styles)
@@ -230,6 +240,10 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             {{ filename: {str(ROOM_SETUP_JS)!r} }}
           );
           vm.runInThisContext(
+            fs.readFileSync({str(DEVICE_INVENTORY_JS)!r}, "utf8").replace("export function renderDeviceInventory", "function renderDeviceInventory"),
+            {{ filename: {str(DEVICE_INVENTORY_JS)!r} }}
+          );
+          vm.runInThisContext(
             fs.readFileSync({str(PANEL_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, ""),
             {{ filename: {str(PANEL_JS)!r} }}
           );
@@ -364,6 +378,10 @@ THEME_TEST_HARNESS = """
     { filename: __ROOM_SETUP_JS__ }
   );
   vm.runInThisContext(
+    fs.readFileSync(__DEVICE_INVENTORY_JS__, "utf8").replace("export function renderDeviceInventory", "function renderDeviceInventory"),
+    { filename: __DEVICE_INVENTORY_JS__ }
+  );
+  vm.runInThisContext(
     fs.readFileSync(__PANEL_JS__, "utf8").replace(/^import .*;\\s*/gm, ""),
     { filename: __PANEL_JS__ }
   );
@@ -383,7 +401,8 @@ class PanelThemeSwitcherTest(unittest.TestCase):
         script = (THEME_TEST_HARNESS
             .replace("__PANEL_JS__", repr(str(PANEL_JS)))
             .replace("__HOME_SECTIONS_JS__", repr(str(HOME_SECTIONS_JS)))
-            .replace("__ROOM_SETUP_JS__", repr(str(ROOM_SETUP_JS)))) + body
+            .replace("__ROOM_SETUP_JS__", repr(str(ROOM_SETUP_JS)))
+            .replace("__DEVICE_INVENTORY_JS__", repr(str(DEVICE_INVENTORY_JS)))) + body
         return subprocess.run(
             ("node", "--input-type=commonjs", "--eval", script),
             check=False,
@@ -577,7 +596,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.46.1",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.46.2",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },

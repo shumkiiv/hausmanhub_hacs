@@ -1,5 +1,6 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.46.1";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.46.1";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.46.2";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.46.2";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.46.2";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css";
@@ -5575,6 +5576,7 @@ class HausmanHubPanel extends HTMLElement {
     edit.addEventListener("click", () => this._openWizard(setup));
     intro.appendChild(edit);
     container.appendChild(intro);
+    renderDeviceInventory(this, container, { el, normalizedText });
 
     const roomGrid = el("div", "settings-room-grid");
     rooms.forEach((room) => {

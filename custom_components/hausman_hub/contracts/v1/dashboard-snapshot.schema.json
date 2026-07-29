@@ -49,6 +49,9 @@
       "type": "array",
       "items": { "$ref": "#/$defs/device" }
     },
+    "inventory": {
+      "$ref": "#/$defs/inventory"
+    },
     "scenarios": {
       "type": "array",
       "items": { "$ref": "#/$defs/scenario" }
@@ -134,6 +137,73 @@
         }
       },
       "additionalProperties": true
+    },
+    "inventory": {
+      "type": "object",
+      "required": ["summary", "devices"],
+      "properties": {
+        "summary": {
+          "type": "object",
+          "required": [
+            "registeredCount",
+            "canonicalDeviceCount",
+            "virtualCount",
+            "unassignedCount",
+            "unavailableCount",
+            "emptyCount",
+            "duplicateGroupCount",
+            "attentionCount"
+          ],
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        },
+        "devices": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/inventoryDevice" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "inventoryDevice": {
+      "type": "object",
+      "required": [
+        "id",
+        "canonicalId",
+        "name",
+        "kind",
+        "status",
+        "canonical",
+        "possibleDuplicate",
+        "entityCount",
+        "domains",
+        "integrations",
+        "disabled"
+      ],
+      "properties": {
+        "id": { "type": "string" },
+        "canonicalId": { "type": "string" },
+        "name": { "type": "string" },
+        "roomId": { "type": ["string", "null"] },
+        "roomName": { "type": ["string", "null"] },
+        "kind": { "enum": ["physical", "virtual", "entity_only"] },
+        "status": { "enum": ["available", "unavailable", "empty", "disabled"] },
+        "canonical": { "type": "boolean" },
+        "possibleDuplicate": { "type": "boolean" },
+        "duplicateOf": { "type": ["string", "null"] },
+        "entityCount": { "type": "integer", "minimum": 0 },
+        "domains": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "model": { "type": ["string", "null"] },
+        "manufacturer": { "type": ["string", "null"] },
+        "integrations": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "disabled": { "type": "boolean" },
+        "reason": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
     },
     "scenario": {
       "type": "object",

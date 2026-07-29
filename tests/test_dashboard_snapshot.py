@@ -196,6 +196,118 @@ class DashboardSnapshotTest(unittest.TestCase):
         self.assertEqual("bad", alarm["level"])
         self.assertEqual("kitchen", alarm["roomId"])
 
+    def test_inventory_canonicalizes_only_probable_virtual_duplicates(self) -> None:
+        snapshot = build_dashboard_snapshot(
+            areas=(DashboardArea("kids", "Детская"), DashboardArea("living", "Гостиная")),
+            devices=(
+                DashboardDevice(
+                    "yandex-ac-live",
+                    "Кондиционер",
+                    "kids",
+                    "YNDX-0006",
+                    "Yandex",
+                    integrations=("yandex_smart_home",),
+                ),
+                DashboardDevice(
+                    "yandex-ac-shadow",
+                    "Кондиционер",
+                    "kids",
+                    "YNDX-0006",
+                    "Yandex",
+                    integrations=("yandex_smart_home",),
+                ),
+                DashboardDevice(
+                    "switch-left",
+                    "Выключатель гостиная",
+                    "living",
+                    "TS0012",
+                    "Tuya",
+                    integrations=("mqtt",),
+                ),
+                DashboardDevice(
+                    "switch-right",
+                    "Выключатель гостиная",
+                    "living",
+                    "TS0012",
+                    "Tuya",
+                    integrations=("mqtt",),
+                ),
+                DashboardDevice(
+                    "empty-registry-device",
+                    "Старое устройство",
+                    None,
+                    integrations=("mqtt",),
+                ),
+            ),
+            entities=(
+                DashboardEntity(
+                    "climate.kids_live",
+                    "climate",
+                    "cool",
+                    "Кондиционер",
+                    {"temperature": 24},
+                    "yandex-ac-live",
+                    "kids",
+                ),
+                DashboardEntity(
+                    "climate.kids_shadow",
+                    "climate",
+                    "unavailable",
+                    "Кондиционер",
+                    {"temperature": 24},
+                    "yandex-ac-shadow",
+                    "kids",
+                ),
+                DashboardEntity(
+                    "switch.living_left",
+                    "switch",
+                    "off",
+                    "Левая клавиша",
+                    {},
+                    "switch-left",
+                    "living",
+                ),
+                DashboardEntity(
+                    "switch.living_right",
+                    "switch",
+                    "off",
+                    "Правая клавиша",
+                    {},
+                    "switch-right",
+                    "living",
+                ),
+            ),
+            generated_at_ms=1,
+            local_iso="2026-07-30T12:00:00+06:00",
+        )
+
+        visible_names = [device["name"] for device in snapshot["devices"]]
+        self.assertEqual(1, visible_names.count("Кондиционер"))
+        self.assertEqual(2, visible_names.count("Выключатель гостиная"))
+
+        inventory = snapshot["inventory"]
+        self.assertEqual(5, inventory["summary"]["registeredCount"])
+        self.assertEqual(1, inventory["summary"]["duplicateGroupCount"])
+        self.assertEqual(1, inventory["summary"]["emptyCount"])
+        air_conditioners = [
+            item for item in inventory["devices"] if item["name"] == "Кондиционер"
+        ]
+        self.assertEqual(2, len(air_conditioners))
+        self.assertEqual(1, sum(item["canonical"] for item in air_conditioners))
+        shadow = next(item for item in air_conditioners if not item["canonical"])
+        self.assertTrue(shadow["possibleDuplicate"])
+        self.assertIsNotNone(shadow["duplicateOf"])
+
+        serialized = json.dumps(inventory, ensure_ascii=False)
+        for source_id in (
+            "yandex-ac-live",
+            "yandex-ac-shadow",
+            "switch-left",
+            "switch-right",
+            "empty-registry-device",
+        ):
+            self.assertNotIn(source_id, serialized)
+
 
 if __name__ == "__main__":
     unittest.main()

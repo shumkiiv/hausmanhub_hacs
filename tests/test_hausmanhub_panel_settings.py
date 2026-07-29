@@ -18,6 +18,7 @@ PANEL_JS = (
 PANEL_CSS = PANEL_JS.with_name("hausman-hub-panel.css")
 HOME_SECTIONS_JS = PANEL_JS.with_name("hausman-hub-home-sections.js")
 ROOM_SETUP_JS = PANEL_JS.with_name("hausman-hub-room-setup.js")
+DEVICE_INVENTORY_JS = PANEL_JS.with_name("hausman-hub-device-inventory.js")
 SETTINGS_CSS = PANEL_JS.with_name("hausman-hub-settings.css")
 
 PANEL_PAYLOAD = {
@@ -315,6 +316,10 @@ def panel_script(get_payloads: dict, post_table: dict, assertions: str) -> str:
       vm.runInThisContext(
         fs.readFileSync({str(ROOM_SETUP_JS)!r}, "utf8").replace("export function renderFirstRunRoom", "function renderFirstRunRoom"),
         {{ filename: {str(ROOM_SETUP_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(DEVICE_INVENTORY_JS)!r}, "utf8").replace("export function renderDeviceInventory", "function renderDeviceInventory"),
+        {{ filename: {str(DEVICE_INVENTORY_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(PANEL_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, ""),
@@ -1058,6 +1063,108 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           && call.path === "hausman_hub/v1/admin/reset");
         if (!resetPost || resetPost.payload.confirmation !== "RESET_HAUSMANHUB") {
           throw new Error("full reset confirmation contract mismatch");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_settings_show_canonical_device_inventory_with_working_filters(self) -> None:
+        payloads = dict(GET_PATHS)
+        payloads["hausman_hub/v1/dashboard"] = {
+            "rooms": [],
+            "devices": [],
+            "alarms": [],
+            "inventory": {
+                "summary": {
+                    "registeredCount": 3,
+                    "canonicalDeviceCount": 2,
+                    "virtualCount": 2,
+                    "unassignedCount": 1,
+                    "unavailableCount": 1,
+                    "emptyCount": 0,
+                    "duplicateGroupCount": 1,
+                    "attentionCount": 2,
+                },
+                "devices": [
+                    {
+                        "id": "inventory-1",
+                        "canonicalId": "device-1",
+                        "name": "Кондиционер",
+                        "roomId": "kids",
+                        "roomName": "Детская",
+                        "kind": "virtual",
+                        "status": "available",
+                        "canonical": True,
+                        "possibleDuplicate": False,
+                        "entityCount": 1,
+                        "domains": ["climate"],
+                        "manufacturer": "Yandex",
+                        "model": "YNDX-0006",
+                    },
+                    {
+                        "id": "inventory-2",
+                        "canonicalId": "device-1",
+                        "name": "Кондиционер",
+                        "roomId": "kids",
+                        "roomName": "Детская",
+                        "kind": "virtual",
+                        "status": "unavailable",
+                        "canonical": False,
+                        "possibleDuplicate": True,
+                        "entityCount": 1,
+                        "domains": ["climate"],
+                        "reason": "Похожий виртуальный контур уже представлен одной основной карточкой.",
+                    },
+                    {
+                        "id": "inventory-3",
+                        "canonicalId": "device-3",
+                        "name": "Датчик температуры",
+                        "roomId": None,
+                        "roomName": None,
+                        "kind": "physical",
+                        "status": "available",
+                        "canonical": True,
+                        "possibleDuplicate": False,
+                        "entityCount": 2,
+                        "domains": ["sensor"],
+                        "manufacturer": "Tuya",
+                    },
+                ],
+            },
+        }
+        script = panel_script(
+            payloads,
+            {},
+            """
+        panel._shell.tabs.settings.fire("click");
+        await tick();
+        let screen = panel._shell.settings;
+        findAll(screen, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Комнаты")[0].fire("click");
+        screen = panel._shell.settings;
+        let text = textOf(screen);
+        for (const label of [
+          "Что Home Assistant считает устройствами", "основных устройств",
+          "Возможный дубль", "Не привязано",
+        ]) {
+          if (!text.includes(label)) throw new Error("inventory text missing: " + label);
+        }
+        const all = findAll(screen, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Все")[0];
+        all.fire("click");
+        if (findAll(screen, (node) =>
+          String(node.className).split(" ").includes("device-inventory-row")).length !== 3) {
+          throw new Error("all inventory filter did not expose every registry record");
+        }
+        const search = findAll(screen, (node) =>
+          String(node.className).split(" ").includes("device-inventory-search"))[0];
+        search.value = "датчик";
+        search.fire("input");
+        const rows = findAll(screen, (node) =>
+          String(node.className).split(" ").includes("device-inventory-row"));
+        if (rows.length !== 1 || !textOf(rows[0]).includes("Датчик температуры")) {
+          throw new Error("device inventory search mismatch");
         }
             """,
         )

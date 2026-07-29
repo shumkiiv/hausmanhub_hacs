@@ -60,6 +60,42 @@
 .settings-room-card p { margin:14px 0 0; font-size:14px; line-height:1.45; }
 .settings-empty-state { grid-column:1 / -1; padding:24px; }
 .settings-empty-state p { margin:7px 0 0; }
+.device-inventory { margin-top:14px; padding:22px; }
+.device-inventory-heading h3 { margin:0; font-size:22px; line-height:1.3; }
+.device-inventory-heading p { max-width:920px; margin:7px 0 0; font-size:14px; line-height:1.55; }
+.device-inventory-metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:9px; margin-top:18px; }
+.device-inventory-metric { display:flex; align-items:baseline; gap:9px; min-width:0; padding:13px 15px;
+  border-radius:13px; background:var(--hmh-raised,#181E26); }
+.device-inventory-metric strong { font-size:22px; line-height:1; }
+.device-inventory-metric span { color:var(--hmh-text-dim,#9AA7B4); font-size:13px; line-height:1.35; }
+.device-inventory-metric.is-warning strong { color:var(--warning-color,#E4A11B); }
+.device-inventory-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:16px; }
+.device-inventory-filters { display:flex; gap:6px; min-width:0; overflow-x:auto; }
+.device-inventory-filters button { min-height:38px; margin:0; padding:7px 12px; white-space:nowrap; color:var(--hmh-text-dim,#9AA7B4);
+  border-color:transparent; background:transparent; box-shadow:none; }
+.device-inventory-filters button.is-current { color:var(--hmh-text,#E7ECF3); border-color:var(--hmh-border,#2F3845);
+  background:var(--hmh-raised,#181E26); }
+.device-inventory-search { flex:0 0 245px; width:245px; min-height:42px; }
+.device-inventory-list { display:grid; gap:8px; margin-top:14px; }
+.device-inventory-row { display:grid; grid-template-columns:minmax(210px,1.4fr) minmax(130px,.7fr) minmax(150px,.75fr) minmax(240px,1.25fr);
+  align-items:center; gap:14px; min-height:78px; padding:12px 14px; border:1px solid color-mix(in srgb,var(--hmh-border,#2F3845) 76%,transparent);
+  border-radius:14px; background:color-mix(in srgb,var(--hmh-raised,#181E26) 70%,transparent); }
+.device-inventory-row.needs-attention { border-color:color-mix(in srgb,var(--warning-color,#E4A11B) 30%,var(--hmh-border,#2F3845)); }
+.device-inventory-identity strong, .device-inventory-identity small,
+.device-inventory-room span, .device-inventory-room strong,
+.device-inventory-composition span, .device-inventory-composition strong,
+.device-inventory-status strong, .device-inventory-status small { display:block; min-width:0; }
+.device-inventory-identity strong { font-size:16px; line-height:1.35; }
+.device-inventory-identity small { margin-top:4px; font-size:12px; line-height:1.35; }
+.device-inventory-label { margin-bottom:4px; color:var(--hmh-text-dim,#9AA7B4); font-size:11px; letter-spacing:.04em; text-transform:uppercase; }
+.device-inventory-room strong, .device-inventory-composition strong { font-size:14px; }
+.device-inventory-status { padding:9px 11px; border-radius:11px; background:var(--hmh-surface,#12171D); }
+.device-inventory-status strong { font-size:13px; }
+.device-inventory-status small { margin-top:4px; color:var(--hmh-text-dim,#9AA7B4); font-size:11px; line-height:1.4; }
+.device-inventory-status.is-unavailable strong, .device-inventory-status.is-empty strong,
+.device-inventory-status.is-disabled strong { color:var(--warning-color,#E4A11B); }
+.device-inventory-empty { padding:24px; text-align:center; border:1px dashed var(--hmh-border,#2F3845); border-radius:14px; }
+.device-inventory-empty p { margin:5px 0 0; }
 .settings-guide-card { padding:22px; }
 .settings-guide-card h3 { font-size:20px; }
 .settings-guide-steps { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:9px; margin-top:16px; }
@@ -171,3 +207,13 @@ button.danger-button { color:#fff; border-color:color-mix(in srgb,var(--error-co
   border-top:1px solid color-mix(in srgb,var(--hmh-border,#2F3845) 70%,transparent); }
 .room-setup-footer-steps { display:flex; gap:9px; }
 .room-setup-footer button { min-height:46px; margin:0; }
+@media (max-width:1050px) {
+  .device-inventory-row { grid-template-columns:minmax(210px,1.4fr) minmax(140px,.8fr) minmax(220px,1.2fr); }
+  .device-inventory-composition { display:none; }
+}
+@media (max-width:760px) {
+  .device-inventory-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .device-inventory-toolbar { align-items:stretch; flex-direction:column; }
+  .device-inventory-search { flex:auto; width:100%; }
+  .device-inventory-row { grid-template-columns:1fr; gap:9px; }
+}

@@ -52,6 +52,16 @@ _ACTIVE_STATES = frozenset(
     {"on", "open", "opening", "playing", "cleaning", "heat", "cool", "dry", "fan_only"}
 )
 _UNAVAILABLE_STATES = frozenset({"unknown", "unavailable"})
+_VIRTUAL_DEVICE_INTEGRATIONS = frozenset(
+    {
+        "climate_group",
+        "smartir",
+        "template",
+        "yandex_smart_home",
+        "yandex_station",
+    }
+)
+_VIRTUAL_FACADE_DOMAINS = frozenset({"climate", "humidifier", "remote"})
 _ALLOWLISTED_ATTRIBUTES = (
     "brightness",
     "current_position",
@@ -82,6 +92,9 @@ class DashboardDevice:
     area_id: str | None = None
     model: str | None = None
     manufacturer: str | None = None
+    entry_type: str | None = None
+    integrations: tuple[str, ...] = ()
+    disabled: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -277,6 +290,56 @@ def _weather_summary(entities: Iterable[DashboardEntity]) -> dict[str, object]:
     }
 
 
+def _normalized_fingerprint_part(value: str | None) -> str:
+    return "".join(character for character in (value or "").casefold() if character.isalnum())
+
+
+def _is_virtual_device(
+    device: DashboardDevice, members: Iterable[DashboardEntity]
+) -> bool:
+    domains = {member.domain for member in members}
+    return device.entry_type == "service" or (
+        bool(domains)
+        and domains.issubset(_VIRTUAL_FACADE_DOMAINS)
+        and bool(set(device.integrations) & _VIRTUAL_DEVICE_INTEGRATIONS)
+    )
+
+
+def _device_status(
+    device: DashboardDevice | None, members: Iterable[DashboardEntity]
+) -> str:
+    collected = tuple(members)
+    if device is not None and device.disabled:
+        return "disabled"
+    if not collected:
+        return "empty"
+    if all(member.state in _UNAVAILABLE_STATES for member in collected):
+        return "unavailable"
+    return "available"
+
+
+def _inventory_reason(
+    *,
+    kind: str,
+    status: str,
+    area_id: str | None,
+    possible_duplicate: bool,
+) -> str | None:
+    if possible_duplicate:
+        return "Похожий виртуальный контур уже представлен одной основной карточкой."
+    if status == "disabled":
+        return "Устройство отключено в реестре Home Assistant."
+    if status == "empty":
+        return "В реестре нет доступных сущностей этого устройства."
+    if status == "unavailable":
+        return "Все сущности устройства сейчас недоступны."
+    if area_id is None:
+        return "Устройство не привязано к комнате Home Assistant."
+    if kind == "virtual":
+        return "Виртуальный контур управления, а не отдельное физическое устройство."
+    return None
+
+
 def build_dashboard_snapshot(
     *,
     areas: Iterable[DashboardArea],
@@ -306,8 +369,133 @@ def build_dashboard_snapshot(
             group_sources[group_key] = None
             grouped[group_key].append(entity)
 
+    registry_members: dict[str, list[DashboardEntity]] = {
+        device_id: sorted(
+            grouped.get(f"device:{device_id}", []),
+            key=lambda item: (
+                _PRIMARY_DOMAIN_ORDER.get(item.domain, 999), item.entity_id
+            ),
+        )
+        for device_id in device_by_id
+    }
+    virtual_groups: dict[tuple[object, ...], list[str]] = defaultdict(list)
+    for device_id, device in device_by_id.items():
+        members = registry_members[device_id]
+        if not _is_virtual_device(device, members):
+            continue
+        domains = tuple(sorted({member.domain for member in members}))
+        fingerprint = (
+            device.area_id or next((member.area_id for member in members if member.area_id), None),
+            _normalized_fingerprint_part(device.name),
+            _normalized_fingerprint_part(device.manufacturer),
+            _normalized_fingerprint_part(device.model),
+            tuple(sorted(device.integrations)),
+            domains,
+        )
+        virtual_groups[fingerprint].append(device_id)
+
+    canonical_source: dict[str, str] = {device_id: device_id for device_id in device_by_id}
+    duplicate_groups = 0
+    for group in virtual_groups.values():
+        if len(group) < 2:
+            continue
+        duplicate_groups += 1
+        canonical = min(
+            group,
+            key=lambda device_id: (
+                device_by_id[device_id].disabled,
+                _device_status(device_by_id[device_id], registry_members[device_id])
+                != "available",
+                -len(registry_members[device_id]),
+                device_id,
+            ),
+        )
+        canonical_source.update({device_id: canonical for device_id in group})
+
+    source_to_public: dict[str, str] = {
+        device_id: _opaque_id("device", f"device:{canonical_source[device_id]}")
+        for device_id in device_by_id
+    }
+    inventory_payloads: list[dict[str, object]] = []
+    for device_id, device in device_by_id.items():
+        members = registry_members[device_id]
+        primary = members[0] if members else None
+        area_id = (
+            primary.area_id if primary is not None and primary.area_id else device.area_id
+        )
+        area = area_by_id.get(area_id) if area_id is not None else None
+        kind = "virtual" if _is_virtual_device(device, members) else "physical"
+        status = _device_status(device, members)
+        canonical_id = canonical_source[device_id]
+        is_canonical = canonical_id == device_id
+        inventory_payloads.append(
+            {
+                "id": _opaque_id("inventory", f"device:{device_id}"),
+                "canonicalId": source_to_public[device_id],
+                "name": device.name,
+                "roomId": area.area_id if area is not None else None,
+                "roomName": area.name if area is not None else None,
+                "kind": kind,
+                "status": status,
+                "canonical": is_canonical,
+                "possibleDuplicate": not is_canonical,
+                "duplicateOf": None
+                if is_canonical
+                else source_to_public[canonical_id],
+                "entityCount": len(members),
+                "domains": sorted({member.domain for member in members}),
+                "model": device.model,
+                "manufacturer": device.manufacturer,
+                "integrations": list(device.integrations),
+                "disabled": device.disabled,
+                "reason": _inventory_reason(
+                    kind=kind,
+                    status=status,
+                    area_id=area_id,
+                    possible_duplicate=not is_canonical,
+                ),
+            }
+        )
+    for group_key, members in grouped.items():
+        if group_sources[group_key] is not None:
+            continue
+        primary = sorted(
+            members,
+            key=lambda item: (
+                _PRIMARY_DOMAIN_ORDER.get(item.domain, 999), item.entity_id
+            ),
+        )[0]
+        area = area_by_id.get(primary.area_id) if primary.area_id is not None else None
+        status = _device_status(None, members)
+        public_id = _opaque_id("device", group_key)
+        inventory_payloads.append(
+            {
+                "id": _opaque_id("inventory", group_key),
+                "canonicalId": public_id,
+                "name": primary.name,
+                "roomId": area.area_id if area is not None else None,
+                "roomName": area.name if area is not None else None,
+                "kind": "entity_only",
+                "status": status,
+                "canonical": True,
+                "possibleDuplicate": False,
+                "duplicateOf": None,
+                "entityCount": len(members),
+                "domains": sorted({member.domain for member in members}),
+                "model": None,
+                "manufacturer": None,
+                "integrations": [],
+                "disabled": False,
+                "reason": _inventory_reason(
+                    kind="entity_only",
+                    status=status,
+                    area_id=primary.area_id,
+                    possible_duplicate=False,
+                ),
+            }
+        )
+
     device_payloads: list[dict[str, object]] = []
-    source_to_public: dict[str, str] = {}
     for group_key, members in grouped.items():
         members.sort(
             key=lambda item: (
@@ -316,12 +504,15 @@ def build_dashboard_snapshot(
         )
         primary = members[0]
         source_device_id = group_sources[group_key]
+        if (
+            source_device_id is not None
+            and canonical_source[source_device_id] != source_device_id
+        ):
+            continue
         registry_device = (
             device_by_id.get(source_device_id) if source_device_id is not None else None
         )
         public_id = _opaque_id("device", group_key)
-        if source_device_id is not None:
-            source_to_public[source_device_id] = public_id
         area_id = primary.area_id or (
             registry_device.area_id if registry_device is not None else None
         )
@@ -482,6 +673,33 @@ def build_dashboard_snapshot(
         }
         for scenario in scenarios
     ]
+    inventory_payloads.sort(
+        key=lambda item: (
+            str(item.get("roomName") or "Я"),
+            str(item.get("name") or ""),
+            str(item.get("id") or ""),
+        )
+    )
+    inventory_summary = {
+        "registeredCount": len(inventory_payloads),
+        "canonicalDeviceCount": sum(
+            bool(item["canonical"]) and int(item["entityCount"]) > 0
+            for item in inventory_payloads
+        ),
+        "virtualCount": sum(item["kind"] == "virtual" for item in inventory_payloads),
+        "unassignedCount": sum(item["roomId"] is None for item in inventory_payloads),
+        "unavailableCount": sum(
+            item["status"] == "unavailable" for item in inventory_payloads
+        ),
+        "emptyCount": sum(item["status"] == "empty" for item in inventory_payloads),
+        "duplicateGroupCount": duplicate_groups,
+        "attentionCount": sum(
+            item["possibleDuplicate"]
+            or item["roomId"] is None
+            or item["status"] != "available"
+            for item in inventory_payloads
+        ),
+    }
     return {
         "contract": {
             "name": DASHBOARD_CONTRACT_NAME,
@@ -495,6 +713,10 @@ def build_dashboard_snapshot(
         "summary": summary,
         "rooms": sorted(room_payloads, key=lambda item: str(item["name"])),
         "devices": sorted(device_payloads, key=lambda item: str(item["name"])),
+        "inventory": {
+            "summary": inventory_summary,
+            "devices": inventory_payloads,
+        },
         "scenarios": sorted(scenario_payloads, key=lambda item: str(item["title"])),
         "alarms": alarms,
         "events": [],
