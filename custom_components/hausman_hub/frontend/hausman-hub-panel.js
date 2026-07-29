@@ -2782,7 +2782,7 @@ class HausmanHubPanel extends HTMLElement {
     [
       ["outdoor_temperature_entity_id", "Наружная температура", "sensor с температурой или погодный сервис Home Assistant.", "outdoor_temperature"],
       ["presence_entity_id", "Общее присутствие дома", "Этот сигнал задаёт политику «дома/нет дома» для всего дома.", "presence"],
-      ["central_heating_entity_id", "Центральное отопление", "Сигнал показывает работу центрального отопления.", "central_heating"],
+      ["central_heating_entity_id", "Центральное отопление", "Нужен сигнал «работает», а не температура батареи.", "central_heating"],
     ].forEach(([key, title, helper, kind]) => {
       const picker = this._singleChoicePicker({
         candidates: candidates[kind] || [],
@@ -4701,7 +4701,7 @@ class HausmanHubPanel extends HTMLElement {
       {
         key: "central_heating_entity_id",
         label: "Центральное отопление",
-        helper: "Выключатель отопления или подходящий датчик его работы.",
+        helper: "Нужен сигнал «работает», а не температура батареи.",
         signalKind: "central_heating",
         options: candidates.central_heating || [],
       },

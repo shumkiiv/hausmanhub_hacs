@@ -935,6 +935,9 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         if (!text.includes("Расписание")) throw new Error("schedule heading missing");
         if (!text.includes("Сигналы дома")) throw new Error("home heading missing");
         if (!text.includes("Сигналы комнат")) throw new Error("room signals heading missing");
+        if (!text.includes("Нужен сигнал «работает», а не температура батареи.")) {
+          throw new Error("central heating helper does not explain the binary signal");
+        }
         if (!text.includes("Общее присутствие дома")) throw new Error("general presence label missing");
         if (!text.includes("Датчики присутствия")) throw new Error("room presence label missing");
         const numbers = findAll(panel.shadowRoot, (node) => node.type === "number");
