@@ -891,14 +891,17 @@ class HausmanHubPanel extends HTMLElement {
   _renderAssistant(container) {
     if (!container) return;
     container.innerHTML = "";
-    container.appendChild(el("h2", null, "Помощник AI"));
-    container.appendChild(el("p", "section-intro", "Настройте поставщика и получайте советы по климату."));
+    container.className = "assistant-screen";
+    const heading = el("div", "section-heading");
+    heading.appendChild(el("h2", null, "Помощник AI"));
+    heading.appendChild(el("p", "section-intro", "Настройте поставщика и получайте советы по климату."));
+    container.appendChild(heading);
     if (this._assistant.loading) {
-      container.appendChild(el("div", "card muted", "Загрузка настроек помощника…"));
+      container.appendChild(el("div", "card assistant-card muted", "Загрузка настроек помощника…"));
       return;
     }
     if (this._assistant.error || !this._assistant.loaded || !this._assistant.data) {
-      const card = el("div", "card");
+      const card = el("div", "card assistant-card empty-state");
       card.appendChild(el("p", null, "Настройки помощника недоступны."));
       const retry = el("button", "secondary", "Повторить");
       retry.type = "button";
@@ -911,9 +914,9 @@ class HausmanHubPanel extends HTMLElement {
     const fields = this._assistant.fields || this._assistantFields(this._assistant.data.settings);
     this._assistant.fields = fields;
     const settings = this._assistant.data.settings || {};
-    const connection = el("div", "card");
+    const connection = el("div", "card assistant-card assistant-connection");
     connection.appendChild(el("h3", null, "Подключение"));
-    const enabledLabel = el("label", "checkbox-field");
+    const enabledLabel = el("label", "checkbox-field assistant-enabled");
     const enabled = el("input");
     enabled.type = "checkbox";
     enabled.checked = fields.enabled;
@@ -924,10 +927,11 @@ class HausmanHubPanel extends HTMLElement {
     enabledLabel.appendChild(enabled);
     enabledLabel.appendChild(el("span", null, "Включить помощник"));
     connection.appendChild(enabledLabel);
+    const formGrid = el("div", "assistant-form-grid");
     let baseUrl;
     let model;
-    const presetLabel = el("label", "form-field");
-    presetLabel.appendChild(el("span", null, "Поставщик AI"));
+    const presetLabel = el("label", "assistant-field");
+    presetLabel.appendChild(el("span", "assistant-field-label", "Поставщик AI"));
     const preset = selectField([
       { value: "deepseek", label: "DeepSeek" },
       { value: "openai", label: "OpenAI compatible" },
@@ -937,9 +941,9 @@ class HausmanHubPanel extends HTMLElement {
       this._markDirty("assistant");
     });
     presetLabel.appendChild(preset);
-    connection.appendChild(presetLabel);
-    const baseLabel = el("label", "form-field");
-    baseLabel.appendChild(el("span", null, "Базовый URL"));
+    formGrid.appendChild(presetLabel);
+    const baseLabel = el("label", "assistant-field");
+    baseLabel.appendChild(el("span", "assistant-field-label", "Базовый URL"));
     baseUrl = el("input");
     baseUrl.type = "text";
     baseUrl.value = fields.base_url;
@@ -948,9 +952,9 @@ class HausmanHubPanel extends HTMLElement {
       this._markDirty("assistant");
     });
     baseLabel.appendChild(baseUrl);
-    connection.appendChild(baseLabel);
-    const modelLabel = el("label", "form-field");
-    modelLabel.appendChild(el("span", null, "Модель"));
+    formGrid.appendChild(baseLabel);
+    const modelLabel = el("label", "assistant-field");
+    modelLabel.appendChild(el("span", "assistant-field-label", "Модель"));
     model = el("input");
     model.type = "text";
     model.value = fields.model;
@@ -959,9 +963,9 @@ class HausmanHubPanel extends HTMLElement {
       this._markDirty("assistant");
     });
     modelLabel.appendChild(model);
-    connection.appendChild(modelLabel);
-    const keyLabel = el("label", "form-field");
-    keyLabel.appendChild(el("span", null, "Новый ключ API"));
+    formGrid.appendChild(modelLabel);
+    const keyLabel = el("label", "assistant-field");
+    keyLabel.appendChild(el("span", "assistant-field-label", "Новый ключ API"));
     const apiKey = el("input");
     apiKey.type = "password";
     apiKey.value = "";
@@ -971,12 +975,14 @@ class HausmanHubPanel extends HTMLElement {
       this._markDirty("assistant");
     });
     keyLabel.appendChild(apiKey);
-    connection.appendChild(keyLabel);
+    formGrid.appendChild(keyLabel);
+    connection.appendChild(formGrid);
     connection.appendChild(el(
       "p",
-      "muted",
+      "muted assistant-key-status",
       fields.clear_key ? "Ключ будет удалён после сохранения." : (settings.key_set ? "Ключ сохранён" : "Ключ не задан")
     ));
+    const actions = el("div", "assistant-actions");
     if (settings.key_set || fields.clear_key) {
       const clear = el("button", "secondary", fields.clear_key ? "Не удалять ключ" : "Удалить сохранённый ключ");
       clear.type = "button";
@@ -987,20 +993,21 @@ class HausmanHubPanel extends HTMLElement {
         this._markDirty("assistant");
         this._render();
       });
-      connection.appendChild(clear);
+      actions.appendChild(clear);
     }
     const save = el("button", null, "Сохранить настройки");
     save.type = "button";
     save.disabled = this._busy;
     save.addEventListener("click", () => this._saveAssistant());
-    connection.appendChild(save);
+    actions.appendChild(save);
+    connection.appendChild(actions);
     container.appendChild(connection);
     this._renderAssistantStats(container, this._assistant.data.stats || {});
     this._renderAssistantAdvisory(container, this._assistant.data.last_advisory);
   }
 
   _renderAssistantStats(container, stats) {
-    const card = el("div", "card");
+    const card = el("div", "card assistant-card");
     card.appendChild(el("h3", null, "Статистика вызовов"));
     const aggregates = Array.isArray(stats.aggregates) ? stats.aggregates : [];
     const total = aggregates.reduce((sum, item) => ({
@@ -1012,10 +1019,10 @@ class HausmanHubPanel extends HTMLElement {
     }), { calls: 0, successes: 0, prompt: 0, completion: 0, latency: 0 });
     const grid = el("div", "assistant-grid");
     [
-      ["Вызовы", total.calls],
-      ["Успешно", total.successes],
-      ["Prompt tokens", total.prompt],
-      ["Completion tokens", total.completion],
+      ["Вызовы", this._assistantNumber(total.calls)],
+      ["Успешно", this._assistantNumber(total.successes)],
+      ["Prompt tokens", this._assistantNumber(total.prompt)],
+      ["Completion tokens", this._assistantNumber(total.completion)],
       ["Средняя задержка", total.calls ? `${Math.round(total.latency / total.calls)} мс` : "Нет данных"],
     ].forEach(([label, value]) => {
       const item = el("div", "assistant-stat");
@@ -1025,7 +1032,7 @@ class HausmanHubPanel extends HTMLElement {
     });
     card.appendChild(grid);
     const calls = Array.isArray(stats.recent_calls) ? stats.recent_calls : [];
-    card.appendChild(el("h4", null, "Последние вызовы"));
+    card.appendChild(el("h4", "assistant-subheading", "Последние вызовы"));
     if (!calls.length) {
       card.appendChild(el("p", "muted", "Вызовов пока нет."));
     } else {
@@ -1037,9 +1044,12 @@ class HausmanHubPanel extends HTMLElement {
         details.appendChild(timestamp);
         details.appendChild(el("div", "muted", `${call.preset || "Поставщик"}: ${call.model || "Модель"}`));
         row.appendChild(details);
-        row.appendChild(el("div", "assistant-call-status", call.error_class
-          ? this._assistantErrorName(call.error_class)
-          : this._assistantStatusName(call.status)));
+        const failed = Boolean(call.error_class);
+        row.appendChild(el(
+          "span",
+          `status-badge assistant-call-status ${failed ? "is-attention" : "is-ready"}`,
+          failed ? this._assistantErrorName(call.error_class) : this._assistantStatusName(call.status)
+        ));
         list.appendChild(row);
       });
       card.appendChild(list);
@@ -1048,18 +1058,18 @@ class HausmanHubPanel extends HTMLElement {
   }
 
   _renderAssistantAdvisory(container, advisory) {
-    const card = el("div", "card");
+    const card = el("div", "card assistant-card assistant-advisory");
     card.appendChild(el("h3", null, "Последний совет"));
     if (!advisory) {
       card.appendChild(el("p", "muted", "Советов пока нет."));
     } else {
-      card.appendChild(el("span", "status-badge", this._assistantStatusName(advisory.status)));
+      card.appendChild(el("span", "status-badge is-ready", this._assistantStatusName(advisory.status)));
       card.appendChild(el("p", "muted", `Сформирован: ${this._assistantDate(advisory.generated_at)}`));
       const recommendations = Array.isArray(advisory.recommendations) ? advisory.recommendations : [];
       const risks = Array.isArray(advisory.risk_flags) ? advisory.risk_flags : [];
-      card.appendChild(el("h4", null, "Рекомендации"));
+      card.appendChild(el("h4", "assistant-subheading", "Рекомендации"));
       if (recommendations.length) {
-        const list = el("ul", "advisory-list");
+        const list = el("ul", "advisory-list is-recommendation");
         recommendations.forEach((item) => {
           const room = item.room_id ? ` (${item.room_id})` : "";
           list.appendChild(el("li", null, `${this._assistantRecommendationName(item.code)}${room}`));
@@ -1068,9 +1078,9 @@ class HausmanHubPanel extends HTMLElement {
       } else {
         card.appendChild(el("p", "muted", "Рекомендаций нет."));
       }
-      card.appendChild(el("h4", null, "Риски"));
+      card.appendChild(el("h4", "assistant-subheading", "Риски"));
       if (risks.length) {
-        const list = el("ul", "advisory-list");
+        const list = el("ul", "advisory-list is-risk");
         risks.forEach((item) => {
           const room = item.room_id ? ` (${item.room_id})` : "";
           list.appendChild(el("li", null, `${this._assistantRiskName(item.code)}${room}`));
@@ -1084,8 +1094,14 @@ class HausmanHubPanel extends HTMLElement {
     refresh.type = "button";
     refresh.disabled = this._busy;
     refresh.addEventListener("click", () => this._refreshAssistant());
-    card.appendChild(refresh);
+    const actions = el("div", "assistant-actions");
+    actions.appendChild(refresh);
+    card.appendChild(actions);
     container.appendChild(card);
+  }
+
+  _assistantNumber(value) {
+    return new Intl.NumberFormat("ru-RU").format(Number(value || 0));
   }
 
   _renderReadiness(container, readiness) {

@@ -21,7 +21,7 @@
       document.documentElement.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       document.body.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       panel._data = {
-        integration_version: "1.38.0",
+        integration_version: "1.38.1",
         readiness: { status: "ready", bridge_mode: "native", reasons: [] },
         snapshot: null,
       };
@@ -30,6 +30,46 @@
       panel._render();
       panel.shadowRoot.querySelector("link").href =
         "../../custom_components/hausman_hub/frontend/hausman-hub-panel.css";
+      if (params.get("screen") === "assistant") {
+        panel._assistant = {
+          loaded: true,
+          loading: false,
+          error: false,
+          fields: null,
+          data: {
+            settings: {
+              enabled: true,
+              preset: "deepseek",
+              base_url: "https://api.deepseek.com",
+              model: "deepseek-chat",
+              key_set: true,
+            },
+            stats: {
+              aggregates: [
+                { calls: 24, successes: 23, prompt_tokens: 18420, completion_tokens: 4880, latency_ms: 20208 },
+              ],
+              recent_calls: [
+                { ts: 1785241920000, preset: "DeepSeek", model: "deepseek-chat", status: "ready" },
+                { ts: 1785229500000, preset: "DeepSeek", model: "deepseek-chat", status: "ready" },
+              ],
+            },
+            last_advisory: {
+              status: "ready",
+              generated_at: 1785241920000,
+              recommendations: [
+                { code: "review_temperature_gap", room_id: "living_room" },
+                { code: "verify_window_state", room_id: "bedroom" },
+              ],
+              risk_flags: [{ code: "temperature_outside_comfort_band", room_id: "bathroom" }],
+            },
+          },
+        };
+        for (const name of ["contour", "profiles", "schedule", "home", "windows"]) {
+          panel._shell[name].hidden = true;
+        }
+        panel._shell.brandSubtitle.textContent = "Советы и статистика AI";
+        panel._renderAssistant(panel._shell.assistant);
+      }
     </script>
   </body>
 </html>

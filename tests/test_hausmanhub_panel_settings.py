@@ -493,6 +493,17 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         ]) {
           if (!text.includes(label)) throw new Error("assistant text missing: " + label);
         }
+        const byClass = (name) => findAll(assistant, (node) =>
+          String(node.className).split(" ").includes(name));
+        if (byClass("assistant-form-grid").length !== 1) {
+          throw new Error("assistant two-column form grid missing");
+        }
+        if (byClass("assistant-stat").length !== 5) {
+          throw new Error("assistant metric grid must contain five metrics");
+        }
+        if (byClass("assistant-call").length < 1 || byClass("assistant-actions").length !== 2) {
+          throw new Error("assistant calls or aligned action groups missing");
+        }
         const inputs = findAll(assistant, (node) => node.tagName === "INPUT");
         const enabled = inputs.find((node) => node.type === "checkbox");
         const baseUrl = inputs.find((node) => node.type === "text" && node.value === "https://api.deepseek.com");
