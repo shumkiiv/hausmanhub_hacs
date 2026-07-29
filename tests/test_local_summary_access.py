@@ -1805,7 +1805,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.34.0", panel.payload["integration_version"])
+        self.assertEqual("1.35.0", panel.payload["integration_version"])
 
     def test_admin_panel_accepts_ipv6_link_local_admin_from_mdns(self) -> None:
         """A local admin may open the panel when mDNS selects IPv6 link-local."""
@@ -2607,6 +2607,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
 
         self.assertEqual([hausmanhub_state], self.hass.states.removed)
         self.assertNotIn(hausmanhub_state, self.hass.states.values)
+        self.assertNotIn("settings_service", self.hass.data["hausman_hub"])
         self.assertIn("hausmanhub-owned", self.hass.entity_registry.entities)
         self.assertEqual([], self.hass.entity_registry.removed)
         self.assertIn("sensor.synthetic_private_temperature", self.hass.states.values)

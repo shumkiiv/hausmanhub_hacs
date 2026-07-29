@@ -213,6 +213,7 @@ def clear_climate_api(hass: HomeAssistant, entry_id: str) -> None:
         data.pop(DATA_AI_ASSISTANT, None)
         data.pop("scenario_service", None)
         data.pop("ir_code_service", None)
+        data.pop("settings_service", None)
 
 
 class _ClimateView(HomeAssistantView):
