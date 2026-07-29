@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import json
 from pathlib import Path
 import subprocess
 from types import ModuleType, SimpleNamespace
@@ -19,8 +20,10 @@ PANEL_JS = (
     / "hausman-hub-panel.js"
 )
 PANEL_CSS = PANEL_JS.with_name("hausman-hub-panel.css")
-MAX_PANEL_JS_BYTES = 252 * 1024
-MAX_PANEL_CSS_BYTES = 48 * 1024
+HOME_SECTIONS_JS = PANEL_JS.with_name("hausman-hub-home-sections.js")
+MAX_PANEL_JS_BYTES = 268 * 1024
+MAX_HOME_SECTIONS_JS_BYTES = 16 * 1024
+MAX_PANEL_CSS_BYTES = 56 * 1024
 
 
 class PanelJavaScriptContractTest(unittest.TestCase):
@@ -28,10 +31,27 @@ class PanelJavaScriptContractTest(unittest.TestCase):
 
     def test_panel_script_exists_and_stays_bounded(self) -> None:
         content = PANEL_JS.read_text(encoding="utf-8")
+        home_sections = HOME_SECTIONS_JS.read_text(encoding="utf-8")
 
         self.assertLessEqual(len(content.encode("utf-8")), MAX_PANEL_JS_BYTES)
+        self.assertLessEqual(
+            len(home_sections.encode("utf-8")), MAX_HOME_SECTIONS_JS_BYTES
+        )
+        self.assertIn("renderHomeSection", home_sections)
         self.assertIn('customElements.get?.("hausman-hub-panel")', content)
         self.assertIn('customElements.define("hausman-hub-panel"', content)
+
+    def test_home_sections_cache_version_matches_manifest(self) -> None:
+        content = PANEL_JS.read_text(encoding="utf-8")
+        manifest = json.loads(
+            (ROOT / "custom_components" / "hausman_hub" / "manifest.json").read_text(
+                encoding="utf-8"
+            )
+        )
+
+        self.assertIn(
+            f'./hausman-hub-home-sections.js?v={manifest["version"]}', content
+        )
 
     def test_panel_styles_are_local_and_stay_bounded(self) -> None:
         content = PANEL_JS.read_text(encoding="utf-8")
@@ -42,6 +62,8 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn("--hmh-bg:#0B0F14", styles)
         self.assertIn("--hmh-bg:#EEF1F6", styles)
         self.assertIn(".page-header", styles)
+        self.assertIn("main.setup-shell { grid-template-columns:minmax(0,1fr); }", styles)
+        self.assertIn("main.setup-shell > :not(.app-sidebar) { grid-column:1; }", styles)
 
     def test_disabled_buttons_use_semantic_surface_border_and_text_tokens(self) -> None:
         styles = PANEL_CSS.read_text(encoding="utf-8")
@@ -186,7 +208,11 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             define: (name, value) => registry.set(name, value),
           }};
           vm.runInThisContext(
-            fs.readFileSync({str(PANEL_JS)!r}, "utf8"),
+            fs.readFileSync({str(HOME_SECTIONS_JS)!r}, "utf8").replace("export function renderHomeSection", "function renderHomeSection"),
+            {{ filename: {str(HOME_SECTIONS_JS)!r} }}
+          );
+          vm.runInThisContext(
+            fs.readFileSync({str(PANEL_JS)!r}, "utf8").replace(/^import .*hausman-hub-home-sections.*;\\s*/m, ""),
             {{ filename: {str(PANEL_JS)!r} }}
           );
 
@@ -218,7 +244,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
           }};
           visitVisible(panel.shadowRoot);
           const text = visible.map((node) => node.textContent).join("\\n");
-          if (!text.includes("Обзор")) throw new Error("overview heading missing");
+          if (!text.includes("Главная")) throw new Error("main heading missing");
           if (!text.includes("Управление климатом выключено")) {{
             throw new Error("disabled readiness missing");
           }}
@@ -229,13 +255,13 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             throw new Error("contour rendered without snapshot");
           }}
           const tabs = visible.filter((node) => String(node.className).split(" ").includes("tab"));
-          if (tabs.length !== 4) throw new Error("four canonical tabs missing");
-          const tabLabels = tabs.map((node) => node.textContent).join("|");
-          if (tabLabels !== "Обзор|Климат|Сценарии|Настройки") {{
+          if (tabs.length !== 9) throw new Error("nine tablet sections missing");
+          const tabLabels = tabs.map((node) => node["aria-label"]).join("|");
+          if (tabLabels !== "Главная|Освещение|Климат|Комнаты|Медиа|Безопасность|Устройства|Сценарии|Настройки") {{
             throw new Error("canonical tab order mismatch: " + tabLabels);
           }}
           const marks = visible.filter((node) => String(node.className).split(" ").includes("brand-mark"));
-          if (marks.length !== 1) throw new Error("HausmanHub brand mark missing");
+          if (marks.length < 1) throw new Error("HausmanHub brand mark missing");
           if (visible.some((node) => (
             node.tagName === "BUTTON"
             && !String(node.className).split(" ").includes("tab")
@@ -312,7 +338,11 @@ THEME_TEST_HARNESS = """
     define: (name, value) => registry.set(name, value),
   };
   vm.runInThisContext(
-    fs.readFileSync(__PANEL_JS__, "utf8"),
+    fs.readFileSync(__HOME_SECTIONS_JS__, "utf8").replace("export function renderHomeSection", "function renderHomeSection"),
+    { filename: __HOME_SECTIONS_JS__ }
+  );
+  vm.runInThisContext(
+    fs.readFileSync(__PANEL_JS__, "utf8").replace(/^import .*hausman-hub-home-sections.*;\\s*/m, ""),
     { filename: __PANEL_JS__ }
   );
 
@@ -328,7 +358,9 @@ class PanelThemeSwitcherTest(unittest.TestCase):
     """The panel cycles auto/light/dark and follows the HA theme in auto mode."""
 
     def _run_script(self, body: str) -> subprocess.CompletedProcess[str]:
-        script = THEME_TEST_HARNESS.replace("__PANEL_JS__", repr(str(PANEL_JS))) + body
+        script = (THEME_TEST_HARNESS
+            .replace("__PANEL_JS__", repr(str(PANEL_JS)))
+            .replace("__HOME_SECTIONS_JS__", repr(str(HOME_SECTIONS_JS)))) + body
         return subprocess.run(
             ("node", "--input-type=commonjs", "--eval", script),
             check=False,
@@ -522,7 +554,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.45.6",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.46.0",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },

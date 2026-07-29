@@ -11,8 +11,8 @@
   </head>
   <body>
     <hausman-hub-panel id="panel"></hausman-hub-panel>
-    <script src="../../custom_components/hausman_hub/frontend/hausman-hub-panel.js"></script>
-    <script>
+    <script type="module">
+      import "../../custom_components/hausman_hub/frontend/hausman-hub-panel.js";
       const params = new URLSearchParams(window.location.search);
       const panel = document.getElementById("panel");
       const theme = params.get("theme") === "dark" ? "dark" : "light";
@@ -21,7 +21,7 @@
       document.documentElement.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       document.body.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       panel._data = {
-        integration_version: "1.44.0",
+        integration_version: "1.46.0",
         readiness: { status: "ready", bridge_mode: "native", reasons: [] },
         snapshot: {
           rooms: [
@@ -163,6 +163,21 @@
             { id: "scenario.night_mode", title: "Ночной режим", icon: "mdi:weather-night", enabled: false, requiresConfirmation: false },
           ],
         },
+      };
+      panel._homeDashboard = {
+        rooms: [
+          { id: "living", name: "Гостиная", temp: 24.8, humidity: 46 },
+          { id: "bedroom", name: "Спальня", temp: 24.2, humidity: 49 },
+          { id: "kitchen", name: "Кухня", temp: 25.1, humidity: 43 },
+        ],
+        devices: [
+          { id: "light-living", physicalId: "light-living", entityId: "light.living", name: "Основной свет", roomId: "living", roomName: "Гостиная", domain: "light", category: "lighting", stateLabel: "Включён", tone: "good", details: [{ entityId: "light.living", label: "Основной свет", value: "Включён" }] },
+          { id: "media-living", physicalId: "media-living", entityId: "media_player.living", name: "Телевизор", roomId: "living", roomName: "Гостиная", domain: "media_player", category: "media", stateLabel: "Выключен", tone: "neutral", details: [{ entityId: "media_player.living", label: "Питание", value: "Выключено" }] },
+          { id: "lock-entry", physicalId: "lock-entry", entityId: "lock.entry", name: "Входная дверь", roomId: null, roomName: null, domain: "lock", category: "security", stateLabel: "Закрыта", tone: "good", details: [{ entityId: "lock.entry", label: "Замок", value: "Закрыт" }] },
+        ],
+        alarms: [
+          { id: "leak-bathroom", title: "Датчик протечки", active: false, roomId: "bathroom" },
+        ],
       };
       panel._settingsData = {
         connection_mode: "center",

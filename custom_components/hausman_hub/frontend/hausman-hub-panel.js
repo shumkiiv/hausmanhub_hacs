@@ -1,5 +1,9 @@
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.46.0";
+
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css";
+const DASHBOARD_API = "hausman_hub/v1/dashboard";
+const DEVICE_ACTIONS_API = "hausman_hub/v1/device-actions";
 const MODE_API = "hausman_hub/v1/admin/climate-mode";
 const HOME_API = "hausman_hub/v1/admin/home-environment";
 const WINDOWS_API = "hausman_hub/v1/admin/climate-room-signals";
@@ -72,14 +76,24 @@ const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 const ZIGBEE2MQTT_IMAGE_PATTERN =
   /^https:\/\/www\.zigbee2mqtt\.io\/images\/devices\/(?:[A-Za-z0-9._~-]|%[0-9A-F]{2})+\.png$/;
 const PANEL_SECTIONS = [
-  { id: "overview", label: "Обзор" },
-  { id: "climate", label: "Климат" },
-  { id: "scenarios", label: "Сценарии" },
-  { id: "settings", label: "Настройки" },
+  { id: "overview", label: "Главная", icon: "dashboard" },
+  { id: "lighting", label: "Освещение", icon: "lightbulb" },
+  { id: "climate", label: "Климат", icon: "thermometer" },
+  { id: "rooms", label: "Комнаты", icon: "rooms" },
+  { id: "media", label: "Медиа", icon: "media" },
+  { id: "security", label: "Безопасность", icon: "shield" },
+  { id: "devices", label: "Устройства", icon: "device" },
+  { id: "scenarios", label: "Сценарии", icon: "bolt" },
+  { id: "settings", label: "Настройки", icon: "settings" },
 ];
 const SECTION_SUBTITLES = {
   overview: "Состояние и управление домом",
+  lighting: "Свет по комнатам и отдельным клавишам",
   climate: "Климатический контур и комфорт",
+  rooms: "Все комнаты и устройства внутри",
+  media: "Телевизоры, колонки и медиаплееры",
+  security: "Датчики, доступ и тревоги",
+  devices: "Все физические устройства дома",
   scenarios: "Управление сценариями дома",
   settings: "Подключение и параметры системы",
 };
@@ -150,6 +164,12 @@ function setAttr(node, name, value) {
 const SVG_NAMESPACE = "http" + "://www.w3.org/2000/svg";
 
 const ICON_PATHS = {
+  dashboard: "M3 13h8V3H3zm0 8h8v-6H3zm10 0h8V11h-8zm0-18v6h8V3z",
+  lightbulb: "M9 21h6v-1H9zm3-19a7 7 0 0 0-4 12.74V17h8v-2.26A7 7 0 0 0 12 2zm2.85 11.1-.85.51V15h-4v-1.39l-.85-.51A5 5 0 1 1 14.85 13.1z",
+  rooms: "M3 21V3h10v4h8v14h-2v-2h-4v2h-2v-8H5v8zm2-10h6V5H5zm10 6h4v-2h-4zm0-4h4v-2h-4z",
+  media: "M4 6h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2m0 2v10h16V8zm6 2 5 3-5 3z",
+  shield: "M12 2 4 5v6c0 5.05 3.41 9.74 8 11 4.59-1.26 8-5.95 8-11V5zm0 2.18L18 6.43V11c0 3.93-2.55 7.76-6 8.92C8.55 18.76 6 14.93 6 11V6.43z",
+  settings: "M19.43 12.98c.04-.32.07-.65.07-.98s-.03-.66-.08-.98l2.11-1.65-2-3.46-2.49 1a7.2 7.2 0 0 0-1.69-.98L15 3.27h-4l-.35 2.66c-.61.25-1.17.59-1.69.98l-2.49-1-2 3.46 2.11 1.65c-.05.32-.08.66-.08.98s.03.66.08.98l-2.11 1.65 2 3.46 2.49-1c.52.4 1.08.73 1.69.98L11 20.73h4l.35-2.66c.61-.25 1.17-.58 1.69-.98l2.49 1 2-3.46zM13 17a5 5 0 1 1 0-10 5 5 0 0 1 0 10m0-3a2 2 0 1 0 0-4 2 2 0 0 0 0 4",
   chevron: "M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z",
   device: "M4 6h18V4H4c-1.1 0-2 .9-2 2v11H0v3h14v-3H4zm19 2h-6c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h6c.55 0 1-.45 1-1V9c0-.55-.45-1-1-1m-1 9h-4v-7h4z",
   warning: "M1 21h22L12 2zm12-3h-2v-2h2zm0-4h-2v-4h2z",
@@ -225,6 +245,7 @@ class HausmanHubPanel extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._hass = null;
     this._data = null;
+    this._homeDashboard = null;
     this._settings = { mode: null, home: null, windows: null, setup: null };
     this._assistant = {
       data: null, error: false, fields: null, loaded: false, loading: false,
@@ -245,6 +266,7 @@ class HausmanHubPanel extends HTMLElement {
     this._activeClimateView = "contour";
     this._expandedWizardRooms = new Set();
     this._openSignalPickers = new Set();
+    this._openHomeCards = new Set();
     this._dirty = {
       wizard: false, home: false, windows: false, profiles: false, schedule: false, mode: false,
       assistant: false,
@@ -365,6 +387,7 @@ class HausmanHubPanel extends HTMLElement {
         this._hass.callApi("GET", WINDOWS_API).catch(() => null),
         this._hass.callApi("GET", SETUP_API).catch(() => null),
         this._hass.callApi("GET", IR_CODE_BINDINGS_API).catch(() => ({ bindings: [] })),
+        this._hass.callApi("GET", DASHBOARD_API).catch(() => null),
       ]);
       this._data = results[0];
       this._settings = {
@@ -374,6 +397,7 @@ class HausmanHubPanel extends HTMLElement {
         setup: results[4],
         irBindings: results[5],
       };
+      this._homeDashboard = results[6];
       this._loadScenarios();
       this._loadSettings();
       this._error = false;
@@ -492,6 +516,8 @@ class HausmanHubPanel extends HTMLElement {
     if (!this.shadowRoot) return;
     this._ensureShell();
     const shell = this._shell;
+    shell.container.className = this._isFirstRunActive() || this._isFirstRunDeferred()
+      ? "setup-shell" : "";
     shell.notice.textContent = "";
     shell.notice.style.display = "none";
     if (this._error) {
@@ -515,6 +541,7 @@ class HausmanHubPanel extends HTMLElement {
       this._activeSection = "overview";
       shell.brandSubtitle.textContent = "Первичная настройка дома";
       shell.nav.hidden = true;
+      shell.sidebar.hidden = true;
       shell.wizard.hidden = false;
       PANEL_SECTIONS.forEach((section) => { shell.sectionNodes[section.id].hidden = true; });
       this._renderFirstRun(shell.wizard, this._settings.setup);
@@ -524,6 +551,7 @@ class HausmanHubPanel extends HTMLElement {
     shell.wizard.innerHTML = "";
     if (this._isFirstRunDeferred()) {
       shell.nav.hidden = true;
+      shell.sidebar.hidden = true;
       this._activeSection = "overview";
       shell.brandSubtitle.textContent = SECTION_SUBTITLES.overview;
       this._renderHeaderStatus(this._data.readiness);
@@ -536,6 +564,7 @@ class HausmanHubPanel extends HTMLElement {
       return;
     }
     shell.nav.hidden = false;
+    shell.sidebar.hidden = false;
     this._chooseInitialSection();
     this._renderReadiness(shell.readiness, this._data.readiness, this._data.snapshot);
     const snapshot = this._data.snapshot;
@@ -553,6 +582,9 @@ class HausmanHubPanel extends HTMLElement {
     }
     if (this._activeSection === "scenarios") this._renderScenarios(shell.scenarios);
     if (this._activeSection === "settings") this._renderSettings(shell.settings);
+    if (shell.homeSections && shell.homeSections[this._activeSection]) {
+      this._renderHomeSection(this._activeSection, shell.homeSections[this._activeSection]);
+    }
     this._syncSectionVisibility();
   }
 
@@ -603,23 +635,39 @@ class HausmanHubPanel extends HTMLElement {
     setAttr(wizard, "aria-label", "Мастер первичной настройки HausmanHub");
     wizard.hidden = true;
     container.appendChild(wizard);
+    const sidebar = el("aside", "app-sidebar");
+    const sidebarBrand = el("div", "sidebar-brand");
+    sidebarBrand.appendChild(brandMark());
+    const sidebarBrandCopy = el("div", "sidebar-brand-copy");
+    sidebarBrandCopy.appendChild(el("strong", null, "HAUSMANHUB"));
+    sidebarBrandCopy.appendChild(el("small", null, "Управление домом"));
+    sidebarBrand.appendChild(sidebarBrandCopy);
+    sidebar.appendChild(sidebarBrand);
     const nav = el("nav", "tab-bar");
     setAttr(nav, "aria-label", "Разделы HausmanHub");
     setAttr(nav, "role", "tablist");
     const tabs = {};
     PANEL_SECTIONS.forEach((section, index) => {
-      const button = el("button", "tab", section.label);
+      const button = el("button", "tab");
       button.type = "button";
       button.id = `hausman-tab-${section.id}`;
       setAttr(button, "data-section", section.id);
       setAttr(button, "role", "tab");
+      setAttr(button, "aria-label", section.label);
       setAttr(button, "aria-controls", `hausman-${section.id}`);
       button.addEventListener("click", () => this._activateSection(section.id));
       button.addEventListener("keydown", (event) => this._handleTabKey(event, index));
+      button.appendChild(svgIcon(section.icon, "tab-icon"));
+      button.appendChild(el("span", "tab-label", section.label));
       nav.appendChild(button);
       tabs[section.id] = button;
     });
-    container.appendChild(nav);
+    sidebar.appendChild(nav);
+    const sidebarFooter = el("div", "sidebar-footer");
+    const sidebarVersion = el("span", "sidebar-version", "Версия —");
+    sidebarFooter.appendChild(sidebarVersion);
+    sidebar.appendChild(sidebarFooter);
+    container.appendChild(sidebar);
     const sectionNodes = {};
     PANEL_SECTIONS.forEach((section) => {
       const node = el("section");
@@ -665,11 +713,19 @@ class HausmanHubPanel extends HTMLElement {
     sectionNodes.scenarios.appendChild(scenarios);
     const settings = el("div");
     sectionNodes.settings.appendChild(settings);
+    const homeSections = {};
+    ["lighting", "rooms", "media", "security", "devices"].forEach((sectionId) => {
+      const content = el("div", "home-section-content");
+      sectionNodes[sectionId].appendChild(content);
+      homeSections[sectionId] = content;
+    });
     this._shell = {
-      banner, notice, loading, brandSubtitle, statusPill, versionBadge, themeButton, tabs, nav, sectionNodes, wizard,
+      container,
+      banner, notice, loading, brandSubtitle, statusPill, versionBadge, themeButton, tabs, nav, sidebar, sidebarVersion, sectionNodes, wizard,
       readiness, summary, rooms,
       climateNav, climateTabs, climateViews, contour, profiles, schedule, home, windows, assistant,
       scenarios, settings,
+      homeSections,
     };
     this._updateThemeSwitcher();
   }
@@ -708,6 +764,9 @@ class HausmanHubPanel extends HTMLElement {
     if (section === "settings") {
       this._loadSettings();
     }
+    if (this._shell.homeSections && this._shell.homeSections[section]) {
+      this._renderHomeSection(section, this._shell.homeSections[section]);
+    }
     if (focus) focusNode(this._shell && this._shell.tabs[section]);
   }
 
@@ -737,8 +796,8 @@ class HausmanHubPanel extends HTMLElement {
   _handleTabKey(event, index) {
     const key = event && event.key;
     let next = null;
-    if (key === "ArrowRight") next = (index + 1) % PANEL_SECTIONS.length;
-    if (key === "ArrowLeft") next = (index - 1 + PANEL_SECTIONS.length) % PANEL_SECTIONS.length;
+    if (key === "ArrowRight" || key === "ArrowDown") next = (index + 1) % PANEL_SECTIONS.length;
+    if (key === "ArrowLeft" || key === "ArrowUp") next = (index - 1 + PANEL_SECTIONS.length) % PANEL_SECTIONS.length;
     if (key === "Home") next = 0;
     if (key === "End") next = PANEL_SECTIONS.length - 1;
     if (next === null) return;
@@ -794,6 +853,7 @@ class HausmanHubPanel extends HTMLElement {
     const version = this._data && this._data.integration_version;
     this._shell.versionBadge.textContent = version ? `Версия ${version}` : "";
     this._shell.versionBadge.style.display = version ? "" : "none";
+    if (this._shell.sidebarVersion) this._shell.sidebarVersion.textContent = version ? `Версия ${version}` : "Версия —";
   }
 
   _renderOverviewSummary(container, setup, snapshot) {
@@ -5324,6 +5384,270 @@ class HausmanHubPanel extends HTMLElement {
 
   _humidity(value) {
     return typeof value === "number" ? `${Math.round(value)} %` : "Нет данных";
+  }
+
+  _deviceIcon(device) {
+    const domain = String(device && device.domain || "");
+    const category = String(device && device.category || "");
+    if (domain === "light" || category === "lighting") return "lightbulb";
+    if (domain === "media_player" || category === "media") return "media";
+    if (["lock", "camera", "alarm_control_panel"].includes(domain) || category === "security") return "shield";
+    if (domain === "climate" || ["climate", "air"].includes(category)) return "thermometer";
+    return "device";
+  }
+
+  _deviceCategoryName(device) {
+    const names = {
+      lighting: "Освещение", climate: "Климат", air: "Воздух", media: "Медиа",
+      security: "Безопасность", cover: "Шторы и ворота", appliance: "Техника", other: "Другое",
+    };
+    return names[device && device.category] || "Устройство";
+  }
+
+  _homeDevices(sectionId) {
+    const devices = this._homeDashboard && Array.isArray(this._homeDashboard.devices)
+      ? this._homeDashboard.devices : [];
+    if (sectionId === "devices" || sectionId === "rooms") return devices;
+    return devices.filter((device) => {
+      const domain = String(device.domain || "");
+      const category = String(device.category || "");
+      const identity = normalizedText(`${device.name} ${device.stateLabel}`);
+      if (sectionId === "lighting") {
+        return domain === "light" || category === "lighting"
+          || (domain === "switch" && /(свет|ламп|люстр|подсвет)/.test(identity));
+      }
+      if (sectionId === "media") return domain === "media_player" || category === "media";
+      if (sectionId === "security") {
+        return category === "security" || ["lock", "camera", "alarm_control_panel"].includes(domain);
+      }
+      return false;
+    });
+  }
+
+  _catalogTargets(device) {
+    const catalog = this._scenarios.catalog && Array.isArray(this._scenarios.catalog.devices)
+      ? this._scenarios.catalog.devices : [];
+    const entityIds = new Set([device.entityId].concat(
+      Array.isArray(device.details) ? device.details.map((item) => item.entityId) : []
+    ).filter(Boolean));
+    return catalog.filter((target) => entityIds.has(target.entity_id));
+  }
+
+  _renderHomeSection(sectionId, container) {
+    renderHomeSection(this, sectionId, container, {
+      el, svgIcon, normalizedText,
+      sections: PANEL_SECTIONS,
+      subtitles: SECTION_SUBTITLES,
+    });
+  }
+
+  _deviceCountWord(count) {
+    const tail = count % 100;
+    if (tail >= 11 && tail <= 14) return "устройств";
+    if (count % 10 === 1) return "устройство";
+    if (count % 10 >= 2 && count % 10 <= 4) return "устройства";
+    return "устройств";
+  }
+
+  _renderRoomInventory(container) {
+    const rooms = Array.isArray(this._homeDashboard.rooms) ? this._homeDashboard.rooms : [];
+    const devices = this._homeDevices("rooms");
+    if (!rooms.length) {
+      container.appendChild(el("div", "card empty-state", "Комнаты Home Assistant не найдены."));
+      return;
+    }
+    const grid = el("div", "room-inventory-grid");
+    rooms.forEach((room) => {
+      const roomDevices = devices.filter((device) => device.roomId === room.id);
+      const card = el("details", "card room-inventory-card");
+      const openKey = `room:${room.id}`;
+      card.open = this._openHomeCards.has(openKey);
+      card.addEventListener("toggle", () => {
+        if (card.open) this._openHomeCards.add(openKey);
+        else this._openHomeCards.delete(openKey);
+      });
+      const summary = el("summary", "room-inventory-summary");
+      const icon = el("span", "inventory-device-icon");
+      icon.appendChild(svgIcon("rooms"));
+      summary.appendChild(icon);
+      const copy = el("span", "room-inventory-copy");
+      copy.appendChild(el("strong", null, room.name));
+      copy.appendChild(el("small", null, `${roomDevices.length} ${this._deviceCountWord(roomDevices.length)} · ${this._temp(room.temp)} · ${this._humidity(room.humidity)}`));
+      summary.appendChild(copy);
+      summary.appendChild(el("span", "room-inventory-open", "Открыть"));
+      card.appendChild(summary);
+      const body = el("div", "room-inventory-body");
+      if (roomDevices.length) {
+        const deviceGrid = el("div", "inventory-device-grid");
+        roomDevices.forEach((device) => deviceGrid.appendChild(this._deviceInventoryCard(device)));
+        body.appendChild(deviceGrid);
+      } else {
+        body.appendChild(el("p", "muted", "В этой комнате пока нет физических устройств."));
+      }
+      card.appendChild(body);
+      grid.appendChild(card);
+    });
+    container.appendChild(grid);
+  }
+
+  _renderAlarmSummary(container) {
+    const alarms = Array.isArray(this._homeDashboard.alarms) ? this._homeDashboard.alarms : [];
+    if (!alarms.length) return;
+    const active = alarms.filter((alarm) => alarm.active === true);
+    const card = el("div", `security-summary${active.length ? " has-alert" : ""}`);
+    const icon = el("span", "home-section-icon");
+    icon.appendChild(svgIcon("shield"));
+    card.appendChild(icon);
+    const copy = el("div");
+    copy.appendChild(el("strong", null, active.length ? `Активных тревог: ${active.length}` : "Активных тревог нет"));
+    copy.appendChild(el("span", "muted", `${alarms.length} датчиков безопасности под наблюдением`));
+    card.appendChild(copy);
+    container.appendChild(card);
+  }
+
+  _deviceInventoryCard(device) {
+    const card = el("details", `inventory-device-card${device.unavailable ? " is-unavailable" : ""}`);
+    const openKey = `device:${device.id || device.physicalId || device.entityId}`;
+    card.open = this._openHomeCards.has(openKey);
+    card.addEventListener("toggle", () => {
+      if (card.open) this._openHomeCards.add(openKey);
+      else this._openHomeCards.delete(openKey);
+    });
+    const summary = el("summary", "inventory-device-summary");
+    const icon = el("span", "inventory-device-icon");
+    icon.appendChild(svgIcon(this._deviceIcon(device)));
+    summary.appendChild(icon);
+    const copy = el("span", "inventory-device-copy");
+    copy.appendChild(el("strong", null, device.name || "Устройство"));
+    copy.appendChild(el("small", null, `${this._deviceCategoryName(device)} · ${device.stateLabel || "Состояние неизвестно"}`));
+    summary.appendChild(copy);
+    summary.appendChild(el("span", `device-state-dot ${device.tone || "neutral"}`));
+    card.appendChild(summary);
+    const body = el("div", "inventory-device-body");
+    const details = Array.isArray(device.details) ? device.details : [];
+    if (details.length) {
+      const detailGrid = el("dl", "device-detail-grid");
+      details.forEach((detail) => {
+        const row = el("div", "device-detail-row");
+        row.appendChild(el("dt", null, detail.label || "Показатель"));
+        row.appendChild(el("dd", null, detail.value || "Нет данных"));
+        detailGrid.appendChild(row);
+      });
+      body.appendChild(detailGrid);
+    }
+    const targets = this._catalogTargets(device);
+    if (!targets.length) {
+      body.appendChild(el("p", "muted", device.unavailable
+        ? "Устройство сейчас недоступно. Управление появится после восстановления связи."
+        : "Для устройства доступны только просмотр состояния и диагностические показатели."));
+    } else {
+      targets.forEach((target) => body.appendChild(this._deviceTargetControls(target, device)));
+    }
+    card.appendChild(body);
+    return card;
+  }
+
+  _deviceActionInitialValue(device, target, action) {
+    const details = Array.isArray(device && device.details) ? device.details : [];
+    const detail = details.find((item) => item.entityId === target.entity_id);
+    const attributes = device && device.entityId === target.entity_id && device.attributes
+      ? device.attributes : {};
+    const numeric = (...values) => {
+      const value = values.find((candidate) => (
+        candidate !== null && candidate !== undefined && candidate !== ""
+        && Number.isFinite(Number(candidate))
+      ));
+      return value === undefined ? null : Number(value);
+    };
+    if (action.action_id === "set_temperature") {
+      return numeric(attributes.temperature, device && device.primaryValue, detail && detail.state);
+    }
+    if (action.action_id === "set_brightness") {
+      return numeric(attributes.brightness, detail && detail.state);
+    }
+    if (action.action_id === "set_position") {
+      return numeric(attributes.current_position, detail && detail.state);
+    }
+    if (action.action_id === "set_hvac_mode") {
+      return String((detail && detail.state) || (device && device.state) || "").trim() || null;
+    }
+    if (action.action_id === "set_fan_mode") {
+      return String(attributes.fan_mode || "").trim() || null;
+    }
+    return null;
+  }
+
+  _deviceTargetControls(target, device) {
+    const row = el("div", "device-target-controls");
+    row.appendChild(el("strong", "device-target-name", target.name || "Управление"));
+    const actions = el("div", "device-action-list");
+    (target.actions || []).forEach((action) => {
+      const fields = Array.isArray(action.allowed_fields) ? action.allowed_fields : [];
+      if (!fields.includes("value")) {
+        const button = el("button", "secondary device-action", action.title);
+        button.type = "button";
+        button.disabled = this._busy;
+        button.addEventListener("click", (event) => {
+          event.preventDefault();
+          this._executeDeviceAction(target.target_id, action.action_id, null);
+        });
+        actions.appendChild(button);
+        return;
+      }
+      const valueRow = el("label", "device-value-action");
+      valueRow.appendChild(el("span", null, action.title));
+      const input = el("input");
+      const numericAction = ["set_temperature", "set_brightness", "set_position"]
+        .includes(action.action_id);
+      input.type = numericAction ? "number" : "text";
+      if (numericAction) {
+        input.min = action.action_id === "set_temperature" ? "10" : "0";
+        input.max = action.action_id === "set_brightness" ? "255"
+          : (action.action_id === "set_temperature" ? "35" : "100");
+        input.step = action.action_id === "set_temperature" ? "0.5" : "1";
+      }
+      const initialValue = this._deviceActionInitialValue(device, target, action);
+      input.value = initialValue === null ? "" : String(initialValue);
+      input.placeholder = numericAction ? "Укажите значение" : "Укажите режим";
+      valueRow.appendChild(input);
+      const apply = el("button", "secondary", "Применить");
+      apply.type = "button";
+      const syncApplyState = () => {
+        apply.disabled = this._busy || (numericAction
+          ? !Number.isFinite(Number(input.value)) || input.value === ""
+          : !String(input.value || "").trim());
+      };
+      syncApplyState();
+      input.addEventListener("input", syncApplyState);
+      apply.addEventListener("click", (event) => {
+        event.preventDefault();
+        const value = numericAction ? Number(input.value) : String(input.value).trim();
+        this._executeDeviceAction(target.target_id, action.action_id, value);
+      });
+      valueRow.appendChild(apply);
+      actions.appendChild(valueRow);
+    });
+    row.appendChild(actions);
+    return row;
+  }
+
+  async _executeDeviceAction(targetId, actionId, value) {
+    if (this._busy || !this._hass) return;
+    this._busy = true;
+    this._notice = "";
+    this._render();
+    try {
+      const payload = { targetId, actionId };
+      if (value !== null && value !== undefined) payload.value = value;
+      const receipt = await this._hass.callApi("POST", DEVICE_ACTIONS_API, payload);
+      this._notice = this._receiptText(receipt);
+      this._error = false;
+    } catch (error) {
+      this._notice = "Команда устройству не выполнена. Откройте карточку и проверьте доступность.";
+    } finally {
+      this._busy = false;
+      await this._load();
+    }
   }
 
   _scenarioIconName(scenario) {

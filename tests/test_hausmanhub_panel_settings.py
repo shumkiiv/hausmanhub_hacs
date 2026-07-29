@@ -16,6 +16,7 @@ PANEL_JS = (
     / "hausman-hub-panel.js"
 )
 PANEL_CSS = PANEL_JS.with_name("hausman-hub-panel.css")
+HOME_SECTIONS_JS = PANEL_JS.with_name("hausman-hub-home-sections.js")
 
 PANEL_PAYLOAD = {
     "contract": {"name": "hausman-hub-admin-panel", "version": 2},
@@ -306,7 +307,11 @@ def panel_script(get_payloads: dict, post_table: dict, assertions: str) -> str:
         define: (name, value) => registry.set(name, value),
       }};
       vm.runInThisContext(
-        fs.readFileSync({str(PANEL_JS)!r}, "utf8"),
+        fs.readFileSync({str(HOME_SECTIONS_JS)!r}, "utf8").replace("export function renderHomeSection", "function renderHomeSection"),
+        {{ filename: {str(HOME_SECTIONS_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(PANEL_JS)!r}, "utf8").replace(/^import .*hausman-hub-home-sections.*;\\s*/m, ""),
         {{ filename: {str(PANEL_JS)!r} }}
       );
 
@@ -409,15 +414,18 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
-    def test_four_tabs_switch_locally_keep_dirty_values_and_support_keyboard(self) -> None:
+    def test_tablet_sections_switch_locally_keep_dirty_values_and_support_keyboard(self) -> None:
         script = panel_script(
             GET_PATHS,
             {},
             """
         const tabs = findAll(panel.shadowRoot, (node) =>
           node.tagName === "BUTTON" && String(node.className).split(" ").includes("tab"));
-        const labels = tabs.map((node) => node.textContent);
-        const expected = ["Обзор", "Климат", "Сценарии", "Настройки"];
+        const labels = tabs.map((node) => node["aria-label"]);
+        const expected = [
+          "Главная", "Освещение", "Климат", "Комнаты", "Медиа",
+          "Безопасность", "Устройства", "Сценарии", "Настройки",
+        ];
         if (JSON.stringify(labels) !== JSON.stringify(expected)) {
           throw new Error("tab labels mismatch: " + JSON.stringify(labels));
         }
@@ -431,7 +439,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("tab accessibility semantics missing");
         }
         const getCount = calls.filter((call) => call.method === "GET").length;
-        tabs[1].fire("click");
+        tabs[2].fire("click");
         await tick();
         const climateLoadedCount = calls.filter((call) => call.method === "GET").length;
         const dayTemperature = findAll(panel.shadowRoot, (node) => node.type === "number")
@@ -439,22 +447,22 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         dayTemperature.value = "24.5";
         dayTemperature.fire("input");
         tabs[0].fire("click");
-        tabs[1].fire("click");
+        tabs[2].fire("click");
         if (dayTemperature.value !== "24.5" || panel._dirty.profiles !== true) {
           throw new Error("tab switch discarded dirty profile value");
         }
-        if (!String(tabs[1].className).includes("is-dirty")) {
+        if (!String(tabs[2].className).includes("is-dirty")) {
           throw new Error("dirty tab indicator missing");
         }
         if (calls.filter((call) => call.method === "GET").length !== climateLoadedCount) {
           throw new Error("tab switch called an API");
         }
         let prevented = false;
-        tabs[1].fire("keydown", {
+        tabs[2].fire("keydown", {
           key: "ArrowRight",
           preventDefault: () => { prevented = true; },
         });
-        if (!prevented || panel._activeSection !== "scenarios" || !tabs[2].focused) {
+        if (!prevented || panel._activeSection !== "rooms" || !tabs[3].focused) {
           throw new Error("keyboard tab navigation failed");
         }
             """,
@@ -530,6 +538,132 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         }
         if (byClass("summary-icon").some((node) => node.children.length !== 1)) {
           throw new Error("overview summary icon missing");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_tablet_device_sections_group_physical_device_and_execute_action(self) -> None:
+        payloads = dict(GET_PATHS)
+        payloads["hausman_hub/v1/dashboard"] = {
+            "rooms": [
+                {
+                    "id": "living",
+                    "name": "Гостиная",
+                    "temp": 24.5,
+                    "humidity": 46,
+                }
+            ],
+            "devices": [
+                {
+                    "id": "device-light",
+                    "physicalId": "device-light",
+                    "entityId": "light.living_main",
+                    "name": "Выключатель гостиная",
+                    "roomId": "living",
+                    "roomName": "Гостиная",
+                    "domain": "light",
+                    "category": "lighting",
+                    "stateLabel": "Включён",
+                    "tone": "good",
+                    "unavailable": False,
+                    "attributes": {"brightness": 178},
+                    "details": [
+                        {
+                            "entityId": "light.living_main",
+                            "label": "Основной свет",
+                            "value": "Включён",
+                        },
+                        {
+                            "entityId": "sensor.living_power",
+                            "label": "Мощность",
+                            "value": "12 Вт",
+                        },
+                    ],
+                }
+            ],
+            "alarms": [],
+        }
+        payloads["hausman_hub/v1/admin/scenarios/catalog"] = {
+            "devices": [
+                {
+                    "target_id": "target-living-main",
+                    "entity_id": "light.living_main",
+                    "name": "Основной свет",
+                    "actions": [
+                        {
+                            "action_id": "turn_on",
+                            "title": "Включить",
+                            "allowed_fields": [],
+                        },
+                        {
+                            "action_id": "set_brightness",
+                            "title": "Яркость",
+                            "allowed_fields": ["value"],
+                        }
+                    ],
+                }
+            ]
+        }
+        script = panel_script(
+            payloads,
+            {"hausman_hub/v1/device-actions": {"status": "confirmed"}},
+            """
+        await tick();
+        panel._shell.tabs.lighting.fire("click");
+        const lighting = panel._shell.homeSections.lighting;
+        const cards = findAll(lighting, (node) =>
+          String(node.className).split(" ").includes("inventory-device-card"));
+        if (cards.length !== 1) {
+          throw new Error("one physical device rendered as " + cards.length + " cards");
+        }
+        const text = textOf(lighting);
+        if (!text.includes("Выключатель гостиная") || !text.includes("Основной свет")
+          || !text.includes("Мощность") || !text.includes("12 Вт")) {
+          throw new Error("device or its function missing from lighting section");
+        }
+        const valueInput = findAll(lighting, (node) => node.tagName === "INPUT")[0];
+        if (!valueInput || valueInput.value !== "178") {
+          throw new Error("device action did not use current brightness");
+        }
+        cards[0].open = true;
+        cards[0].fire("toggle");
+        const on = findAll(lighting, (node) =>
+          node.tagName === "BUTTON" && node.textContent === "Включить")[0];
+        if (!on) throw new Error("device action control missing");
+        on.fire("click", { preventDefault() {} });
+        await tick(10);
+        const post = calls.find((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/device-actions");
+        if (!post || post.payload.targetId !== "target-living-main"
+          || post.payload.actionId !== "turn_on") {
+          throw new Error("device action payload mismatch: " + JSON.stringify(post));
+        }
+        const refreshedLighting = panel._shell.homeSections.lighting;
+        const refreshedCard = findAll(refreshedLighting, (node) =>
+          String(node.className).split(" ").includes("inventory-device-card"))[0];
+        if (!refreshedCard || refreshedCard.open !== true) {
+          throw new Error("expanded device card collapsed after confirmed action");
+        }
+        const refreshedInput = findAll(refreshedLighting, (node) => node.tagName === "INPUT")[0];
+        const apply = findAll(refreshedLighting, (node) =>
+          node.tagName === "BUTTON" && node.textContent === "Применить")[0];
+        if (!refreshedInput || !apply || apply.disabled) {
+          throw new Error("current value action is not available");
+        }
+        apply.fire("click", { preventDefault() {} });
+        await tick(10);
+        const brightnessPost = calls.find((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/device-actions"
+          && call.payload.actionId === "set_brightness");
+        if (!brightnessPost || brightnessPost.payload.value !== 178) {
+          throw new Error("current brightness payload mismatch: " + JSON.stringify(brightnessPost));
+        }
+        panel._shell.tabs.rooms.fire("click");
+        const roomText = textOf(panel._shell.homeSections.rooms);
+        if (!roomText.includes("Гостиная") || !roomText.includes("1 устройство")) {
+          throw new Error("room inventory does not match tablet navigation");
         }
             """,
         )
@@ -629,7 +763,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
             """
         const tabs = findAll(panel.shadowRoot, (node) =>
           node.tagName === "BUTTON" && String(node.className).split(" ").includes("tab"));
-        const climateTab = tabs.find((node) => node.textContent === "Климат");
+        const climateTab = tabs.find((node) => node["aria-label"] === "Климат");
         if (!climateTab) throw new Error("climate tab missing");
         if (calls.some((call) => call.method === "GET" && call.path === "hausman_hub/v1/admin/ai-assistant")) {
           throw new Error("assistant loaded eagerly");

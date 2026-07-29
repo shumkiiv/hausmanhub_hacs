@@ -20,7 +20,8 @@ http://127.0.0.1:8765/tests/visual/hausman-hub-panel-harness.html
 
 Поддерживаемые параметры:
 
-- `section`: `overview`, `climate`, `scenarios`, `settings`;
+- `section`: `overview`, `lighting`, `climate`, `rooms`, `media`, `security`,
+  `devices`, `scenarios`, `settings`;
 - `screen` для раздела климата: `contour`, `profiles`, `schedule`, `home`,
   `windows`, `assistant`;
 - `theme`: `light` или `dark`.
@@ -37,6 +38,11 @@ http://127.0.0.1:8765/tests/visual/hausman-hub-panel-harness.html?section=climat
 | --- | --- |
 | Обзор, светлая тема | 1440 × 1200 |
 | Обзор, тёмная тема | 1440 × 1200 |
+| Освещение | 1440 × 1200 |
+| Комнаты | 1440 × 1200 |
+| Медиа | 1440 × 1200 |
+| Безопасность | 1440 × 1200 |
+| Устройства | 1440 × 1200 |
 | Климат: контур | 1440 × 1400 |
 | Климат: профили | 1440 × 1500 |
 | Климат: расписание | 1440 × 900 |

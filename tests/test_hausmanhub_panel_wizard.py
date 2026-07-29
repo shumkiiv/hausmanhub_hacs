@@ -14,6 +14,7 @@ PANEL_JS = (
     / "frontend"
     / "hausman-hub-panel.js"
 )
+HOME_SECTIONS_JS = PANEL_JS.with_name("hausman-hub-home-sections.js")
 
 PANEL_PAYLOAD = {
     "contract": {"name": "hausman-hub-admin-panel", "version": 2},
@@ -274,7 +275,11 @@ def panel_script(get_table: dict, post_table: dict, assertions: str) -> str:
         define: (name, value) => registry.set(name, value),
       }};
       vm.runInThisContext(
-        fs.readFileSync({str(PANEL_JS)!r}, "utf8"),
+        fs.readFileSync({str(HOME_SECTIONS_JS)!r}, "utf8").replace("export function renderHomeSection", "function renderHomeSection"),
+        {{ filename: {str(HOME_SECTIONS_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(PANEL_JS)!r}, "utf8").replace(/^import .*hausman-hub-home-sections.*;\\s*/m, ""),
         {{ filename: {str(PANEL_JS)!r} }}
       );
 
@@ -1914,7 +1919,10 @@ class PanelFirstRunWizardTest(unittest.TestCase):
           throw new Error("configured summary fetched options eagerly");
         }
         const initial = textOf(panel.shadowRoot);
-        const order = ["Обзор", "Климат", "Сценарии", "Настройки"];
+        const order = [
+          "Главная", "Освещение", "Климат", "Комнаты", "Медиа",
+          "Безопасность", "Устройства", "Сценарии", "Настройки",
+        ];
         let cursor = -1;
         order.forEach((heading) => {
           const next = initial.indexOf(heading, cursor + 1);
