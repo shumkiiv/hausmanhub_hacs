@@ -99,6 +99,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             '"hausman_hub/v1/admin/scenarios/run"',
             '"hausman_hub/v1/admin/connection-settings"',
             '"hausman_hub/v1/admin/reset"',
+            '"hausman_hub/v1/admin/device-area-assignments"',
         ):
             with self.subTest(approved=approved):
                 self.assertIn(approved, content)
@@ -115,6 +116,16 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         ):
             with self.subTest(retired=retired):
                 self.assertNotIn(retired, content)
+
+    def test_room_assignment_copy_names_home_assistant_as_source_of_truth(self) -> None:
+        content = PANEL_JS.read_text(encoding="utf-8")
+
+        self.assertIn("Комната устройства хранится в Home Assistant", content)
+        self.assertIn("Сохранить привязки в Home Assistant", content)
+        self.assertNotIn(
+            "Локальная привязка не изменяет области и устройства Home Assistant",
+            content,
+        )
 
     def test_panel_script_tolerates_an_unavailable_climate_snapshot(self) -> None:
         script = f"""
@@ -494,7 +505,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.45.1",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.45.2",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },

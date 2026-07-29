@@ -2457,11 +2457,11 @@ class HausmanHubPanel extends HTMLElement {
       const list = el("ol", "reasons");
       [
         "Сначала проверьте найденные комнаты и физические устройства.",
-        "Устройства без области можно локально привязать прямо в HausmanHub.",
+        "Устройства без области сначала сохраните в комнате Home Assistant — эта привязка станет общей для HA и HausmanHub.",
         "Затем откройте каждую используемую комнату и проверьте функции устройства.",
       ].forEach((text) => list.appendChild(el("li", null, text)));
       card.appendChild(list);
-      card.appendChild(el("div", "candidate-room-warning", "Локальная привязка не изменяет области и устройства Home Assistant."));
+      card.appendChild(el("div", "candidate-room-warning", "Комната устройства хранится в Home Assistant. Изменения применятся только после нажатия «Сохранить привязки в Home Assistant»."));
       const actions = el("div", "actions");
       const start = el("button", null, "Начать настройку");
       start.disabled = this._busy;
