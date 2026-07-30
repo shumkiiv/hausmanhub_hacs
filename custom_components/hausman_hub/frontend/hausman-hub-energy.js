@@ -241,12 +241,10 @@ export function renderEnergySection(panel, container, deps) {
   copy.appendChild(el("h2", null, "Энергия"));
   copy.appendChild(el("p", "section-intro", "Текущая нагрузка, напряжение, статистика и управление устройствами"));
   heading.appendChild(copy);
-  const configure = el("button", "secondary energy-configure", "Настроить карточку");
-  configure.type = "button";
-  configure.addEventListener("click", () => { panel._energySettingsOpen = !panel._energySettingsOpen; panel._render(); });
-  heading.appendChild(configure);
   container.appendChild(heading);
   if (panel._energySettingsOpen) container.appendChild(settingsPanel(panel, energy, deps));
+  const pageLayout = el("div", "energy-page-layout");
+  const mainColumn = el("div", "energy-main-column");
   const hero = el("section", "card energy-hero");
   const main = el("div", "energy-hero-primary");
   main.appendChild(el("span", "assistant-field-label", "Потребление сейчас"));
@@ -258,10 +256,8 @@ export function renderEnergySection(panel, container, deps) {
   if (energy.settings.displayUnits !== "amps") metrics.appendChild(energyMetric(deps, "Мощность", sourceMetric(energy, "currentPowerW", "Вт"), "is-accent"));
   if (energy.settings.displayUnits !== "watts") metrics.appendChild(energyMetric(deps, "Ток", sourceMetric(energy, "currentA", "А", 2), "is-accent"));
   if (energy.settings.showVoltage) metrics.appendChild(energyMetric(deps, "Напряжение", sourceMetric(energy, "voltageV", "В")));
-  metrics.appendChild(energyMetric(deps, "Накоплено", sourceMetric(energy, "totalKwh", "кВт·ч", 3)));
-  metrics.appendChild(energyMetric(deps, "Источники", String(selectedSources(energy).length)));
   hero.appendChild(metrics);
-  container.appendChild(hero);
+  mainColumn.appendChild(hero);
   const selected = selectedSources(energy);
   const allSources = energy.sources;
   const chartCard = el("section", "card energy-load-card");
@@ -286,11 +282,11 @@ export function renderEnergySection(panel, container, deps) {
     bars.appendChild(row);
   });
   chartCard.appendChild(bars);
-  container.appendChild(chartCard);
+  mainColumn.appendChild(chartCard);
   const devicesHead = el("div", "energy-card-head energy-devices-head");
   devicesHead.appendChild(el("h3", null, "Устройства"));
   devicesHead.appendChild(el("span", "muted", `${allSources.length} доступно · ${selected.length} на главной`));
-  container.appendChild(devicesHead);
+  mainColumn.appendChild(devicesHead);
   const grid = el("div", "energy-device-grid");
   allSources.forEach((item) => {
     const card = el("button", `energy-device-card${item.available ? "" : " is-unavailable"}`);
@@ -310,7 +306,45 @@ export function renderEnergySection(panel, container, deps) {
     card.appendChild(el("span", "energy-overview-chevron", "›"));
     grid.appendChild(card);
   });
-  container.appendChild(grid);
+  mainColumn.appendChild(grid);
+  pageLayout.appendChild(mainColumn);
+
+  const sidebar = el("aside", "energy-sidebar");
+  const summary = el("section", "card energy-sidebar-summary");
+  summary.appendChild(el("h3", null, "Сводка"));
+  const availableCount = allSources.filter((item) => item.available).length;
+  [
+    ["Источники", String(allSources.length), ""],
+    ["Доступны", String(availableCount), "is-success"],
+    ["Накоплено", sourceMetric(energy, "totalKwh", "кВт·ч", 3), ""],
+  ].forEach(([label, value, tone]) => {
+    const row = el("div", `energy-sidebar-row${tone ? ` ${tone}` : ""}`);
+    row.appendChild(el("span", null, label));
+    row.appendChild(el("strong", null, value));
+    summary.appendChild(row);
+  });
+  sidebar.appendChild(summary);
+
+  const truth = el("section", "card energy-truth-card");
+  const truthIcon = el("span", "energy-truth-icon");
+  truthIcon.appendChild(svgIcon("energy"));
+  truth.appendChild(truthIcon);
+  truth.appendChild(el("h3", null, "Единый источник истины"));
+  truth.appendChild(el("p", null, "Выбор устройств и единиц хранится в Home Assistant и одинаков для планшета и панели HausmanHub."));
+  sidebar.appendChild(truth);
+
+  const configure = el("button", "secondary energy-sidebar-configure", "Настроить карточку");
+  configure.type = "button";
+  configure.addEventListener("click", () => {
+    panel._energySettingsOpen = !panel._energySettingsOpen;
+    panel._render();
+  });
+  const configureIcon = el("span", "energy-sidebar-configure-icon");
+  configureIcon.appendChild(svgIcon("settings"));
+  configure.appendChild(configureIcon);
+  sidebar.appendChild(configure);
+  pageLayout.appendChild(sidebar);
+  container.appendChild(pageLayout);
 }
 
 export async function loadEnergyHistory(panel) {

@@ -11,7 +11,23 @@
 .energy-overview-copy > small { display:block; margin-top:7px; color:var(--hmh-text-dim); font-size:14px; }
 .energy-overview-chevron { flex:0 0 auto; color:var(--hmh-text-dim); font-size:30px; font-weight:300; }
 .energy-section-heading { align-items:center; }
-.energy-configure { margin:0 0 0 auto; }
+.energy-page-layout { display:grid; grid-template-columns:minmax(0,1fr) 288px; align-items:stretch; gap:24px; }
+.energy-main-column { min-width:0; }
+.energy-sidebar { display:flex; flex-direction:column; min-width:0; }
+.energy-sidebar-summary { padding:22px 20px; }
+.energy-sidebar-summary h3, .energy-truth-card h3 { margin:0; font-size:22px; line-height:1.18; }
+.energy-sidebar-row { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-top:22px; }
+.energy-sidebar-row span { color:var(--hmh-text-dim); font-size:15px; }
+.energy-sidebar-row strong { max-width:142px; text-align:right; font-size:16px; line-height:1.3; }
+.energy-sidebar-row.is-success strong { color:#41D17D; }
+.energy-truth-card { flex:1 1 auto; min-height:310px; margin-top:18px; padding:22px 20px; }
+.energy-truth-icon { display:grid; place-items:center; width:46px; height:46px; margin-bottom:22px; color:var(--hmh-accent);
+  border-radius:13px; background:color-mix(in srgb,var(--hmh-accent) 13%,var(--hmh-raised)); }
+.energy-truth-icon .icon { width:24px; height:24px; }
+.energy-truth-card p { margin:26px 0 0; color:var(--hmh-text-dim); font-size:16px; line-height:1.45; }
+.energy-sidebar-configure { display:flex; align-items:center; justify-content:center; gap:12px; width:100%; min-height:62px; margin:18px 0 0; }
+.energy-sidebar-configure-icon { display:grid; place-items:center; order:-1; }
+.energy-sidebar-configure-icon .icon { width:22px; height:22px; }
 .energy-hero { display:grid; grid-template-columns:minmax(260px,.72fr) minmax(0,1.8fr); align-items:stretch; gap:24px;
   margin-bottom:18px; padding:28px; border-color:color-mix(in srgb,var(--hmh-accent) 26%,var(--hmh-border));
   background:linear-gradient(120deg,color-mix(in srgb,var(--hmh-accent) 9%,var(--hmh-surface)),var(--hmh-surface) 55%); }
@@ -96,8 +112,17 @@
 .energy-settings-actions button { margin:0; }
 
 @media (max-width:900px) {
+  .energy-page-layout { grid-template-columns:1fr; }
+  .energy-sidebar { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+  .energy-truth-card { min-height:0; margin-top:0; }
+  .energy-sidebar-configure { grid-column:1 / -1; margin-top:0; }
   .energy-hero { grid-template-columns:1fr; }
   .energy-settings-grid { grid-template-columns:1fr; }
   .energy-load-row { grid-template-columns:minmax(120px,1fr) 78px; }
   .energy-load-track { grid-column:1 / -1; grid-row:2; }
+}
+
+@media (max-width:620px) {
+  .energy-sidebar { grid-template-columns:1fr; }
+  .energy-sidebar-configure { grid-column:auto; }
 }

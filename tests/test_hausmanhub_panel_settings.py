@@ -723,7 +723,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         panel._shell.tabs.energy.fire("click");
         await tick();
         let text = textOf(panel._shell.homeSections.energy);
-        if (!text.includes("Энергия") || !text.includes("850") || !text.includes("230,1") || !text.includes("Торшер") || !text.includes("2 доступно · 1 на главной")) {
+        if (!text.includes("Энергия") || !text.includes("850") || !text.includes("230,1") || !text.includes("Торшер") || !text.includes("2 доступно · 1 на главной") || !text.includes("Единый источник истины")) {
           throw new Error("energy summary is incomplete: " + text);
         }
         const configure = findAll(panel._shell.homeSections.energy, (node) =>
