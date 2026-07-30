@@ -1,4 +1,5 @@
-@import url("./hausman-hub-settings.css?v=1.47.1");
+@import url("./hausman-hub-settings.css?v=1.47.2");
+@import url("./hausman-hub-device-bindings.css?v=1.47.2");
 
 :host { display:block; box-sizing:border-box; width:100%; min-height:100%; overflow-x:hidden;
   --hmh-bg:#0B0F14; --hmh-surface:#12171D; --hmh-raised:#181E26; --hmh-field:#181E26; --hmh-hover:#1F2630;
@@ -555,8 +556,7 @@ label.signal-option > input[type="radio"] { grid-column:1; width:18px; min-heigh
   .sidebar-footer { display:flex; min-height:58px; align-items:center; padding:14px 18px;
     border-top:1px solid color-mix(in srgb,var(--hmh-border,#2F3845) 72%,transparent); color:var(--hmh-text-dim,#9AA7B4); }
   .sidebar-version { font-size:12px; }
-  .page-header { min-height:52px; margin-bottom:24px; }
-  .page-header .page-brand { display:none; }
+  .page-header { display:none; }
 }
 @media (max-width:1200px) {
   .assistant-grid { grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); }

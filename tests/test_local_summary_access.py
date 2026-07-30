@@ -163,6 +163,11 @@ class FakeStates:
     def get(self, entity_id: str) -> SimpleNamespace | None:
         return self.values.get(entity_id)
 
+    def async_all(self) -> list[SimpleNamespace]:
+        """The native binding catalogue sees no synthetic HA entities here."""
+
+        return []
+
     def async_remove(self, entity_id: str) -> None:
         self.removed.append(entity_id)
         self.values.pop(entity_id, None)
@@ -1026,6 +1031,89 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
         self.assertEqual(403, tablet_response.status)
 
+        bindings_path = "/api/hausman_hub/v1/admin/climate-device-bindings"
+        bindings = views[bindings_path]
+        bindings_response = asyncio.run(
+            bindings.get(
+                FakeRequest("127.0.0.1", admin, path=bindings_path)
+            )
+        )
+        self.assertEqual(200, bindings_response.status)
+        self.assertEqual(0, bindings_response.payload["summary"]["device_count"])
+        self.assertEqual(
+            403,
+            asyncio.run(
+                bindings.get(
+                    FakeRequest("127.0.0.1", tablet, path=bindings_path)
+                )
+            ).status,
+        )
+        self.assertEqual(
+            403,
+            asyncio.run(
+                bindings.post(
+                    FakeJsonRequest("127.0.0.1", tablet, bindings_path, {})
+                )
+            ).status,
+        )
+        preview_path = f"{bindings_path}/preview"
+        preview_view = views[preview_path]
+        self.assertEqual(
+            403,
+            asyncio.run(
+                preview_view.post(
+                    FakeJsonRequest("127.0.0.1", tablet, preview_path, {})
+                )
+            ).status,
+        )
+        self.assertEqual(
+            400,
+            asyncio.run(
+                preview_view.post(
+                    FakeJsonRequest(
+                        "127.0.0.1",
+                        admin,
+                        preview_path,
+                        {
+                            "snapshot_revision": bindings_response.payload[
+                                "snapshot_revision"
+                            ],
+                            "bindings": [],
+                        },
+                    )
+                )
+            ).status,
+        )
+        stale_binding = {
+            "snapshot_revision": bindings_response.payload["snapshot_revision"] + 1,
+            "bindings": [
+                {"device_id": "missing", "entity_id": "sensor.missing"}
+            ],
+        }
+        self.assertEqual(
+            409,
+            asyncio.run(
+                preview_view.post(
+                    FakeJsonRequest(
+                        "127.0.0.1", admin, preview_path, stale_binding
+                    )
+                )
+            ).status,
+        )
+        self.assertEqual(
+            409,
+            asyncio.run(
+                bindings.post(
+                    FakeJsonRequest(
+                        "127.0.0.1",
+                        admin,
+                        bindings_path,
+                        {**stale_binding, "preview_revision": 1},
+                    )
+                )
+            ).status,
+        )
+
         draft_path = "/api/hausman_hub/v1/admin/climate-drafts"
         draft = views[draft_path]
         draft_request = {
@@ -1035,7 +1123,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             "rooms": [],
         }
         self.assertEqual(
-            503,
+            409,
             asyncio.run(
                 draft.post(
                     FakeJsonRequest(
@@ -1064,7 +1152,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         current_path = "/api/hausman_hub/v1/admin/climate-drafts/current"
         current_view = views[current_path]
         self.assertEqual(
-            503,
+            200,
             asyncio.run(
                 current_view.get(
                     FakeRequest(
@@ -1091,7 +1179,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         save_path = "/api/hausman_hub/v1/admin/climate-drafts/save"
         save_view = views[save_path]
         self.assertEqual(
-            503,
+            400,
             asyncio.run(
                 save_view.post(
                     FakeJsonRequest(
@@ -1945,7 +2033,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.47.1", panel.payload["integration_version"])
+        self.assertEqual("1.47.2", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
@@ -2522,7 +2610,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertFalse(hasattr(self.view, method))
 
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
-        self.assertEqual(55, len(self.hass.http.views))
+        self.assertEqual(57, len(self.hass.http.views))
         self.assertEqual(
             1,
             sum(
@@ -2836,7 +2924,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             [(closed_entry, ("sensor", "switch"))],
             closed_hass.config_entries.forwarded,
         )
-        self.assertEqual(54, len(closed_hass.http.views))
+        self.assertEqual(56, len(closed_hass.http.views))
         self.assertEqual(
             {
                 "/api/hausman_hub/v1/capabilities",
@@ -2859,6 +2947,8 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 "/api/hausman_hub/v1/admin/climate-drafts/validate",
                 "/api/hausman_hub/v1/admin/climate-drafts/save",
                 "/api/hausman_hub/v1/admin/device-area-assignments",
+                "/api/hausman_hub/v1/admin/climate-device-bindings",
+                "/api/hausman_hub/v1/admin/climate-device-bindings/preview",
                 "/api/hausman_hub/v1/admin/climate-profiles",
                 "/api/hausman_hub/v1/admin/climate-schedule",
                 "/api/hausman_hub/v1/admin/climate-registry",

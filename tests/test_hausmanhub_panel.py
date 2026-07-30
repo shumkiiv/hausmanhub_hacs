@@ -23,6 +23,7 @@ PANEL_CSS = PANEL_JS.with_name("hausman-hub-panel.css")
 HOME_SECTIONS_JS = PANEL_JS.with_name("hausman-hub-home-sections.js")
 ROOM_SETUP_JS = PANEL_JS.with_name("hausman-hub-room-setup.js")
 DEVICE_INVENTORY_JS = PANEL_JS.with_name("hausman-hub-device-inventory.js")
+DEVICE_BINDINGS_JS = PANEL_JS.with_name("hausman-hub-device-bindings.js")
 AREA_BINDING_JS = PANEL_JS.with_name("hausman-hub-area-binding.js")
 NAVIGATION_JS = PANEL_JS.with_name("hausman-hub-navigation.js")
 SETTINGS_CSS = PANEL_JS.with_name("hausman-hub-settings.css")
@@ -30,6 +31,7 @@ MAX_PANEL_JS_BYTES = 268 * 1024
 MAX_HOME_SECTIONS_JS_BYTES = 16 * 1024
 MAX_ROOM_SETUP_JS_BYTES = 24 * 1024
 MAX_DEVICE_INVENTORY_JS_BYTES = 16 * 1024
+MAX_DEVICE_BINDINGS_JS_BYTES = 20 * 1024
 MAX_AREA_BINDING_JS_BYTES = 24 * 1024
 MAX_NAVIGATION_JS_BYTES = 16 * 1024
 MAX_PANEL_CSS_BYTES = 56 * 1024
@@ -44,6 +46,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         home_sections = HOME_SECTIONS_JS.read_text(encoding="utf-8")
         room_setup = ROOM_SETUP_JS.read_text(encoding="utf-8")
         device_inventory = DEVICE_INVENTORY_JS.read_text(encoding="utf-8")
+        device_bindings = DEVICE_BINDINGS_JS.read_text(encoding="utf-8")
         area_binding = AREA_BINDING_JS.read_text(encoding="utf-8")
         navigation = NAVIGATION_JS.read_text(encoding="utf-8")
 
@@ -58,12 +61,20 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             len(device_inventory.encode("utf-8")), MAX_DEVICE_INVENTORY_JS_BYTES
         )
         self.assertLessEqual(
+            len(device_bindings.encode("utf-8")), MAX_DEVICE_BINDINGS_JS_BYTES
+        )
+        self.assertLessEqual(
             len(area_binding.encode("utf-8")), MAX_AREA_BINDING_JS_BYTES
         )
         self.assertLessEqual(len(navigation.encode("utf-8")), MAX_NAVIGATION_JS_BYTES)
         self.assertIn("renderHomeSection", home_sections)
         self.assertIn("renderFirstRunRoom", room_setup)
         self.assertIn("renderDeviceInventory", device_inventory)
+        self.assertIn("renderDeviceBindings", device_bindings)
+        self.assertIn(
+            "if (error && error.status === 409) state.preview = null;",
+            device_bindings,
+        )
         self.assertIn("renderFirstRunAreaBinding", area_binding)
         self.assertIn("writeNavigationRoute", navigation)
         self.assertIn('customElements.get?.("hausman-hub-panel")', content)
@@ -81,6 +92,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             "hausman-hub-home-sections.js",
             "hausman-hub-room-setup.js",
             "hausman-hub-device-inventory.js",
+            "hausman-hub-device-bindings.js",
             "hausman-hub-area-binding.js",
             "hausman-hub-navigation.js",
         ):
@@ -96,12 +108,14 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             len(settings_styles.encode("utf-8")), MAX_SETTINGS_CSS_BYTES
         )
         self.assertIn('"/api/hausman_hub/panel/hausman-hub-panel.css"', content)
-        self.assertIn('hausman-hub-settings.css?v=1.47.1', styles)
+        self.assertIn('hausman-hub-settings.css?v=1.47.2', styles)
         self.assertIn("--hmh-bg:#0B0F14", styles)
         self.assertIn("--hmh-bg:#EEF1F6", styles)
         self.assertIn(".page-header", styles)
+        self.assertIn(".page-header { display:none; }", styles)
         self.assertIn("main.setup-shell { grid-template-columns:minmax(0,1fr); }", styles)
         self.assertIn("main.setup-shell > :not(.app-sidebar) { grid-column:1; }", styles)
+        self.assertIn("&& !this._deviceBindings.error", content)
 
     def test_disabled_buttons_use_semantic_surface_border_and_text_tokens(self) -> None:
         styles = PANEL_CSS.read_text(encoding="utf-8")
@@ -258,6 +272,10 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             {{ filename: {str(DEVICE_INVENTORY_JS)!r} }}
           );
           vm.runInThisContext(
+            fs.readFileSync({str(DEVICE_BINDINGS_JS)!r}, "utf8").replace(/export /g, ""),
+            {{ filename: {str(DEVICE_BINDINGS_JS)!r} }}
+          );
+          vm.runInThisContext(
             fs.readFileSync({str(AREA_BINDING_JS)!r}, "utf8").replace("export function renderFirstRunAreaBinding", "function renderFirstRunAreaBinding"),
             {{ filename: {str(AREA_BINDING_JS)!r} }}
           );
@@ -404,6 +422,10 @@ THEME_TEST_HARNESS = """
     { filename: __DEVICE_INVENTORY_JS__ }
   );
   vm.runInThisContext(
+    fs.readFileSync(__DEVICE_BINDINGS_JS__, "utf8").replace(/export /g, ""),
+    { filename: __DEVICE_BINDINGS_JS__ }
+  );
+  vm.runInThisContext(
     fs.readFileSync(__AREA_BINDING_JS__, "utf8").replace("export function renderFirstRunAreaBinding", "function renderFirstRunAreaBinding"),
     { filename: __AREA_BINDING_JS__ }
   );
@@ -433,6 +455,7 @@ class PanelThemeSwitcherTest(unittest.TestCase):
             .replace("__HOME_SECTIONS_JS__", repr(str(HOME_SECTIONS_JS)))
             .replace("__ROOM_SETUP_JS__", repr(str(ROOM_SETUP_JS)))
             .replace("__DEVICE_INVENTORY_JS__", repr(str(DEVICE_INVENTORY_JS)))
+            .replace("__DEVICE_BINDINGS_JS__", repr(str(DEVICE_BINDINGS_JS)))
             .replace("__AREA_BINDING_JS__", repr(str(AREA_BINDING_JS)))) + body
         script = script.replace("__NAVIGATION_JS__", repr(str(NAVIGATION_JS)))
         return subprocess.run(
@@ -628,7 +651,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.47.1",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.47.2",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },

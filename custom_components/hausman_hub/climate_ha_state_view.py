@@ -81,10 +81,25 @@ class HomeAssistantClimateStateView:
     def entity_catalog(self) -> ClimateHaEntityCatalog:
         """Enumerate climate-relevant entities for native setup discovery."""
 
+        return self._climate_entity_catalog(CLIMATE_HA_CATALOG_DOMAINS)
+
+    def binding_entity_catalog(self) -> ClimateHaEntityCatalog:
+        """Include compatible switches only for explicit saved-device binding."""
+
+        return self._climate_entity_catalog(
+            CLIMATE_HA_CATALOG_DOMAINS | {"switch"}
+        )
+
+    def _climate_entity_catalog(
+        self,
+        domains: frozenset[str],
+    ) -> ClimateHaEntityCatalog:
+        """Build one bounded catalog for the requested climate domains."""
+
         states = []
         for state in self._hass.states.async_all():
             domain = state.entity_id.split(".", 1)[0]
-            if domain not in CLIMATE_HA_CATALOG_DOMAINS:
+            if domain not in domains:
                 continue
             device_class = state.attributes.get("device_class")
             if (

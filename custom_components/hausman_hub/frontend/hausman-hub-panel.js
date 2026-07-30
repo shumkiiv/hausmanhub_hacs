@@ -1,8 +1,9 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.47.1";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.47.1";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.47.1";
-import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.47.1";
-import { openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.47.1";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.47.2";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.47.2";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.47.2";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.47.2";
+import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.47.2";
+import { openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.47.2";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css";
@@ -97,6 +98,7 @@ const CLIMATE_VIEWS = [
 const SETTINGS_VIEWS = [
   { id: "overview", label: "Обзор", description: "Главные параметры и состояние" },
   { id: "rooms", label: "Комнаты", description: "Комнаты, устройства и датчики" },
+  { id: "bindings", label: "Привязки", description: "Сущности Home Assistant" },
   { id: "connection", label: "Подключение", description: "Связь с Home Assistant" },
   { id: "appearance", label: "Интерфейс", description: "Тема, анимация и подсказки" },
   { id: "system", label: "Система", description: "Версия и безопасный сброс" },
@@ -270,6 +272,10 @@ class HausmanHubPanel extends HTMLElement {
     this._settingsBaseline = { ...this._settingsData };
     this._settingsPrefs = { large_text: false, reduced_motion: false, show_hints: true };
     this._settingsDirty = false;
+    this._deviceBindings = {
+      data:null, error:false, loading: false, preview: null, selections: {},
+      showOtherRooms: false, status: "",
+    };
     this._resetArmed = false;
     this._error = false;
     this._busy = false;
@@ -388,6 +394,15 @@ class HausmanHubPanel extends HTMLElement {
       && !this._assistant.loaded
     ) {
       this._loadAssistant();
+    }
+    if (
+      this._activeSection === "settings"
+      && this._activeSettingsView === "bindings"
+      && !this._deviceBindings.data
+      && !this._deviceBindings.loading
+      && !this._deviceBindings.error
+    ) {
+      loadDeviceBindings(this);
     }
   }
 
@@ -5430,6 +5445,7 @@ class HausmanHubPanel extends HTMLElement {
     this._activeSettingsView = viewId;
     this._resetArmed = false;
     this._render();
+    this._loadActiveNavigationView();
     if (changed && this._activeSection === "settings") writeNavigationRoute(this);
   }
 
@@ -5504,6 +5520,7 @@ class HausmanHubPanel extends HTMLElement {
     edit.addEventListener("click", () => this._openWizard(setup));
     intro.appendChild(edit);
     container.appendChild(intro);
+    renderDeviceBindingCallout(this, container, { el, svgIcon });
     renderDeviceInventory(this, container, { el, normalizedText });
 
     const roomGrid = el("div", "settings-room-grid");
@@ -5908,6 +5925,10 @@ class HausmanHubPanel extends HTMLElement {
     }
     if (activeView.id === "rooms") {
       this._renderSettingsRooms(container);
+      return;
+    }
+    if (activeView.id === "bindings") {
+      renderDeviceBindings(this, container, { el, svgIcon });
       return;
     }
     if (activeView.id === "connection") this._renderConnectionSettings(container);

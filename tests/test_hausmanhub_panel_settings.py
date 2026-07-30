@@ -19,9 +19,11 @@ PANEL_CSS = PANEL_JS.with_name("hausman-hub-panel.css")
 HOME_SECTIONS_JS = PANEL_JS.with_name("hausman-hub-home-sections.js")
 ROOM_SETUP_JS = PANEL_JS.with_name("hausman-hub-room-setup.js")
 DEVICE_INVENTORY_JS = PANEL_JS.with_name("hausman-hub-device-inventory.js")
+DEVICE_BINDINGS_JS = PANEL_JS.with_name("hausman-hub-device-bindings.js")
 AREA_BINDING_JS = PANEL_JS.with_name("hausman-hub-area-binding.js")
 NAVIGATION_JS = PANEL_JS.with_name("hausman-hub-navigation.js")
 SETTINGS_CSS = PANEL_JS.with_name("hausman-hub-settings.css")
+DEVICE_BINDINGS_CSS = PANEL_JS.with_name("hausman-hub-device-bindings.css")
 
 PANEL_PAYLOAD = {
     "contract": {"name": "hausman-hub-admin-panel", "version": 2},
@@ -188,6 +190,56 @@ GET_PATHS = {
     "hausman_hub/v1/admin/home-environment": HOME_PAYLOAD,
     "hausman_hub/v1/admin/climate-room-signals": WINDOWS_PAYLOAD,
     "hausman_hub/v1/admin/climate-drafts/current": CONFIGURED_SETUP,
+}
+DEVICE_BINDINGS_PAYLOAD = {
+    "contract": {"name": "hausman-hub-climate-device-binding-options", "version": 1},
+    "snapshot_revision": 456,
+    "rooms": [
+        {
+            "id": "living",
+            "name": "Гостиная",
+            "devices": [
+                {
+                    "device_id": "living_ac",
+                    "name": "Кондиционер гостиная",
+                    "room_id": "living",
+                    "room_name": "Гостиная",
+                    "kind": "air_conditioner",
+                    "kind_name": "Кондиционер",
+                    "role": "control",
+                    "current_entity_id": None,
+                    "current_available": False,
+                    "candidates": [
+                        {
+                            "entity_id": "climate.living_ac",
+                            "name": "Кондиционер гостиная",
+                            "room_id": "living",
+                            "room_name": "Гостиная",
+                            "same_room": True,
+                            "available": True,
+                            "device_name": "Кондиционер гостиная",
+                            "manufacturer": "Yandex",
+                            "model": "YNDX-0006",
+                            "image_url": None,
+                        },
+                        {
+                            "entity_id": "climate.kids_ac",
+                            "name": "Кондиционер детская",
+                            "room_id": "kids",
+                            "room_name": "Детская",
+                            "same_room": False,
+                            "available": True,
+                            "device_name": "Кондиционер детская",
+                            "manufacturer": "Yandex",
+                            "model": "YNDX-0006",
+                            "image_url": None,
+                        },
+                    ],
+                }
+            ],
+        }
+    ],
+    "summary": {"device_count": 1, "bound_count": 0, "missing_count": 1, "candidate_count": 2},
 }
 AI_ASSISTANT_PATH = "hausman_hub/v1/admin/ai-assistant"
 AI_ASSISTANT_SETTINGS_PATH = f"{AI_ASSISTANT_PATH}/settings"
@@ -362,6 +414,10 @@ def panel_script(
       vm.runInThisContext(
         fs.readFileSync({str(DEVICE_INVENTORY_JS)!r}, "utf8").replace("export function renderDeviceInventory", "function renderDeviceInventory"),
         {{ filename: {str(DEVICE_INVENTORY_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(DEVICE_BINDINGS_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(DEVICE_BINDINGS_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(AREA_BINDING_JS)!r}, "utf8").replace("export function renderFirstRunAreaBinding", "function renderFirstRunAreaBinding"),
@@ -1266,6 +1322,101 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           && call.path === "hausman_hub/v1/admin/reset");
         if (!resetPost || resetPost.payload.confirmation !== "RESET_HAUSMANHUB") {
           throw new Error("full reset confirmation contract mismatch");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_native_device_binding_wizard_previews_before_safe_save(self) -> None:
+        payloads = dict(GET_PATHS)
+        payloads[
+            "hausman_hub/v1/admin/climate-device-bindings"
+        ] = DEVICE_BINDINGS_PAYLOAD
+        script = panel_script(
+            payloads,
+            {
+                "hausman_hub/v1/admin/climate-device-bindings/preview": {
+                    "snapshot_revision": 456,
+                    "preview_revision": 789,
+                    "save_allowed": True,
+                    "commands_sent": False,
+                    "issues": [],
+                    "summary": {"selected_count": 1, "ready_count": 1},
+                },
+                "hausman_hub/v1/admin/climate-device-bindings": {
+                    "status": "saved",
+                    "updated_devices": 1,
+                    "commands_sent": False,
+                    "restart_required": False,
+                },
+            },
+            """
+        panel._shell.tabs.settings.fire("click");
+        await tick();
+        let screen = panel._shell.settings;
+        findAll(screen, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Привязки")[0].fire("click");
+        await tick();
+        screen = panel._shell.settings;
+        const text = textOf(screen);
+        for (const label of [
+          "Привязка к сущностям Home Assistant", "HausmanHub не выбирает дубли автоматически",
+          "Кондиционер гостиная", "Не привязано", "Проверить", "Сохранить привязки",
+        ]) {
+          if (!text.includes(label)) throw new Error("binding wizard text missing: " + label);
+        }
+        let select = findAll(screen, (node) => node.tagName === "SELECT")[0];
+        if (!select || select.value !== "" || select.children.length !== 2) {
+          throw new Error("wizard auto-selected or exposed another-room entity");
+        }
+        const otherToggle = findAll(screen, (node) => node.type === "checkbox")[0];
+        otherToggle.checked = true;
+        otherToggle.fire("change");
+        screen = panel._shell.settings;
+        select = findAll(screen, (node) => node.tagName === "SELECT")[0];
+        if (select.children.length !== 3 || select.children[2].disabled !== true) {
+          throw new Error("other-room diagnostic option is not visibly fail-closed");
+        }
+        select.value = "climate.living_ac";
+        select.fire("change");
+        screen = panel._shell.settings;
+        const check = findAll(screen, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Проверить")[0];
+        const saveBefore = findAll(screen, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Сохранить привязки")[0];
+        if (!check || check.disabled || !saveBefore.disabled) {
+          throw new Error("preview/save gate is incorrect before validation");
+        }
+        check.fire("click");
+        await tick();
+        const previewPost = calls.find((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/admin/climate-device-bindings/preview");
+        const expectedPreview = {
+          snapshot_revision: 456,
+          bindings: [{ device_id: "living_ac", entity_id: "climate.living_ac" }],
+        };
+        if (!previewPost || JSON.stringify(previewPost.payload) !== JSON.stringify(expectedPreview)) {
+          throw new Error("binding preview payload mismatch: " + JSON.stringify(previewPost));
+        }
+        screen = panel._shell.settings;
+        const save = findAll(screen, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Сохранить привязки")[0];
+        if (save.disabled) throw new Error("save stayed disabled after successful preview");
+        save.fire("click");
+        await tick(10);
+        const savePost = calls.find((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/admin/climate-device-bindings");
+        const expectedSave = {
+          snapshot_revision: 456,
+          preview_revision: 789,
+          bindings: expectedPreview.bindings,
+        };
+        if (!savePost || JSON.stringify(savePost.payload) !== JSON.stringify(expectedSave)) {
+          throw new Error("binding save payload mismatch: " + JSON.stringify(savePost));
+        }
+        if (!panel._notice.includes("Команды устройствам не отправлялись")) {
+          throw new Error("command-free receipt is not explained");
         }
             """,
         )

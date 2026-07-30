@@ -56,6 +56,7 @@ from .application.climate_signal_settings import (
 from .application.climate_comparison import climate_comparison_to_payload
 from .application.climate_shadow_window import ClimateShadowWindowService
 from .application.climate_area_assignment import ClimateAreaAssignmentViolation
+from .application.climate_device_bindings import ClimateDeviceBindingViolation
 from .application.contour_apply import ContourApplyViolation
 from .application.contour_override import TemporaryTemperatureViolation
 from .application.home_climate_targets import HomeClimateTargetsViolation
@@ -115,6 +116,8 @@ ADMIN_DRAFT_SAVE_PATH = "/api/hausman_hub/v1/admin/climate-drafts/save"
 ADMIN_DEVICE_AREA_ASSIGNMENTS_PATH = (
     "/api/hausman_hub/v1/admin/device-area-assignments"
 )
+ADMIN_DEVICE_BINDINGS_PATH = "/api/hausman_hub/v1/admin/climate-device-bindings"
+ADMIN_DEVICE_BINDINGS_PREVIEW_PATH = f"{ADMIN_DEVICE_BINDINGS_PATH}/preview"
 ADMIN_PROFILE_UPDATE_PATH = "/api/hausman_hub/v1/admin/climate-profiles"
 ADMIN_SCHEDULE_UPDATE_PATH = "/api/hausman_hub/v1/admin/climate-schedule"
 ADMIN_REGISTRY_PATH = "/api/hausman_hub/v1/admin/climate-registry"
@@ -189,6 +192,8 @@ def register_climate_api(
             ClimateAdminDraftValidationView(hass),
             ClimateAdminDraftSaveView(hass),
             ClimateAdminDeviceAreaAssignmentsView(hass),
+            ClimateAdminDeviceBindingsView(hass),
+            ClimateAdminDeviceBindingsPreviewView(hass),
             ClimateAdminProfileUpdateView(hass),
             ClimateAdminScheduleUpdateView(hass),
             ClimateAdminRegistryView(hass),
@@ -701,6 +706,104 @@ class ClimateAdminDeviceAreaAssignmentsView(_ClimateView):
             )
         except ClimateRuntimeUnavailable:
             return self._unavailable()
+        except Exception:
+            return self._unavailable()
+        return self.json(result, headers=NO_STORE_HEADERS)
+
+
+class ClimateAdminDeviceBindingsView(_ClimateView):
+    """List and atomically save explicit native HA device bindings."""
+
+    url = ADMIN_DEVICE_BINDINGS_PATH
+    name = "api:hausman_hub:climate_admin_device_bindings"
+
+    async def get(self, request: Any) -> Any:
+        if not _is_exact_request(request, ADMIN_DEVICE_BINDINGS_PATH):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        runtime = self._runtime()
+        if runtime is None:
+            return self._unavailable()
+        try:
+            result = await runtime.async_climate_device_binding_options()
+        except Exception:
+            return self._unavailable()
+        return self.json(result, headers=NO_STORE_HEADERS)
+
+    async def post(self, request: Any) -> Any:
+        if not _is_exact_request(request, ADMIN_DEVICE_BINDINGS_PATH):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        runtime = self._runtime()
+        if runtime is None:
+            return self._unavailable()
+        try:
+            payload = await _request_json(
+                request,
+                maximum_bytes=MAX_CLIMATE_SETUP_BODY_BYTES,
+            )
+            result = await runtime.async_save_climate_device_bindings(payload)
+        except ClimateDeviceBindingViolation as error:
+            status = (
+                HTTPStatus.CONFLICT
+                if error.code in {"snapshot_changed", "preview_changed"}
+                else HTTPStatus.BAD_REQUEST
+            )
+            return self.json_message(
+                "Не удалось сохранить привязки устройств.",
+                status,
+                headers=NO_STORE_HEADERS,
+            )
+        except ValueError:
+            return self.json_message(
+                "Привязки устройств заполнены неверно.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        except Exception:
+            return self._unavailable()
+        return self.json(result, headers=NO_STORE_HEADERS)
+
+
+class ClimateAdminDeviceBindingsPreviewView(_ClimateView):
+    """Check explicit native bindings without persistence or commands."""
+
+    url = ADMIN_DEVICE_BINDINGS_PREVIEW_PATH
+    name = "api:hausman_hub:climate_admin_device_bindings_preview"
+
+    async def post(self, request: Any) -> Any:
+        if not _is_exact_request(request, ADMIN_DEVICE_BINDINGS_PREVIEW_PATH):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        runtime = self._runtime()
+        if runtime is None:
+            return self._unavailable()
+        try:
+            payload = await _request_json(
+                request,
+                maximum_bytes=MAX_CLIMATE_SETUP_BODY_BYTES,
+            )
+            result = await runtime.async_preview_climate_device_bindings(payload)
+        except ClimateDeviceBindingViolation as error:
+            status = (
+                HTTPStatus.CONFLICT
+                if error.code == "snapshot_changed"
+                else HTTPStatus.BAD_REQUEST
+            )
+            return self.json_message(
+                "Не удалось проверить привязки устройств.",
+                status,
+                headers=NO_STORE_HEADERS,
+            )
+        except ValueError:
+            return self.json_message(
+                "Привязки устройств заполнены неверно.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
         except Exception:
             return self._unavailable()
         return self.json(result, headers=NO_STORE_HEADERS)

@@ -299,7 +299,7 @@ def _unbound_device(entry: ClimateHaCatalogEntry) -> ImportedClimateDevice:
         state=entry.state,
         available=entry.available,
         command_types=_unbound_command_types(entry),
-        suggested_kinds=_unbound_suggested_kinds(entry),
+        suggested_kinds=native_candidate_kinds(entry),
         device_group_id=entry.device_group_id,
         device_name=entry.device_name,
         manufacturer=entry.manufacturer,
@@ -330,7 +330,9 @@ def _unbound_command_types(entry: ClimateHaCatalogEntry) -> tuple[str, ...]:
     )
 
 
-def _unbound_suggested_kinds(entry: ClimateHaCatalogEntry) -> tuple[ClimateDeviceKind, ...]:
+def native_candidate_kinds(entry: ClimateHaCatalogEntry) -> tuple[ClimateDeviceKind, ...]:
+    """Return device kinds compatible with one native HA entity candidate."""
+
     if entry.entity_category is not None:
         return ()
     if entry.domain == "climate":
@@ -345,6 +347,8 @@ def _unbound_suggested_kinds(entry: ClimateHaCatalogEntry) -> tuple[ClimateDevic
         return ()
     if entry.domain == "humidifier":
         return (ClimateDeviceKind.HUMIDIFIER,)
+    if entry.domain == "switch" and _is_floor_heating(entry):
+        return (ClimateDeviceKind.FLOOR_HEATING,)
     if entry.device_class == "temperature":
         return (ClimateDeviceKind.TEMPERATURE_SENSOR,)
     if entry.device_class == "humidity":

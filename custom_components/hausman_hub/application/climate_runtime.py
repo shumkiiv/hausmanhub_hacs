@@ -44,6 +44,11 @@ from .climate_area_assignment import (
     ClimateAreaAssignmentPort,
     climate_area_assignment_targets,
 )
+from .climate_device_bindings import (
+    apply_climate_device_bindings,
+    climate_device_binding_options,
+    preview_climate_device_bindings,
+)
 from .climate_equipment import build_climate_equipment_snapshot
 from .ai_assistant_evidence import ai_evidence_from_observation
 from .climate_ha_adapters import build_climate_ha_call_plan
@@ -372,6 +377,46 @@ class ClimateRuntime:
                 snapshot,
                 self._ha_state_view.ir_remote_catalog(),
             )
+
+    async def async_climate_device_binding_options(self) -> dict[str, object]:
+        """Return explicit native HA entity choices for saved devices."""
+
+        async with self._lock:
+            return climate_device_binding_options(
+                self._registry,
+                self._native_entity_catalog_unlocked(),
+            )
+
+    async def async_preview_climate_device_bindings(
+        self,
+        payload: object,
+    ) -> dict[str, object]:
+        """Check native HA bindings without persistence or commands."""
+
+        async with self._lock:
+            return preview_climate_device_bindings(
+                self._registry,
+                self._native_entity_catalog_unlocked(),
+                payload,
+            )
+
+    async def async_save_climate_device_bindings(
+        self,
+        payload: object,
+    ) -> dict[str, object]:
+        """Persist one unchanged checked binding set without commands."""
+
+        async with self._lock:
+            registry, receipt = apply_climate_device_bindings(
+                self._registry,
+                self._native_entity_catalog_unlocked(),
+                payload,
+            )
+            validate_contour_bindings(self._contours, registry)
+            await self._registry_store.async_save(registry)
+            self._registry = registry
+            self.last_error = None
+            return receipt
 
     async def async_assign_home_assistant_areas(
         self,
@@ -1992,6 +2037,19 @@ class ClimateRuntime:
             observation,
             catalog,
         )
+
+    def _native_entity_catalog_unlocked(self):
+        """Read the bounded native entity catalog behind the runtime lock."""
+
+        view = self._ha_state_view
+        catalog = getattr(view, "binding_entity_catalog", None)
+        if not callable(catalog):
+            catalog = getattr(view, "entity_catalog", None)
+        if view is None or not callable(catalog):
+            raise ClimateRuntimeUnavailable(
+                "the native Home Assistant entity catalog is unavailable"
+            )
+        return catalog()
 
     def _safe_now(self) -> int:
         value = self._now_ms()
