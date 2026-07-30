@@ -858,6 +858,6 @@ def build_dashboard_snapshot(
                 any(source[key] is not None for key in ("currentPowerW", "currentA", "voltageV", "totalKwh"))
                 for source in energy_sources
             ),
-            "energyHistory": False,
+            "energyHistory": True,
         },
     }

@@ -61,7 +61,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         self.assertEqual("hausman_hub", manifest["domain"])
         self.assertTrue(manifest["config_flow"])
         self.assertTrue(manifest["single_config_entry"])
-        self.assertEqual("1.47.9", manifest["version"])
+        self.assertEqual("1.48.0", manifest["version"])
 
     def test_current_manifest_version_has_a_plain_change_note(self) -> None:
         manifest = json.loads((INTEGRATION / "manifest.json").read_text(encoding="utf-8"))
@@ -2221,6 +2221,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             "climate_ha_executor.py",
             "ir_code_gateway.py",
             "ir_code_service.py",
+            "weather_ha_gateway.py",
         }
         source = "\n".join(
             path.read_text(encoding="utf-8").lower()

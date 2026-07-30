@@ -50,6 +50,7 @@
       "items": { "$ref": "#/$defs/device" }
     },
     "energy": { "$ref": "#/$defs/energy" },
+    "weather": { "$ref": "#/$defs/weather" },
     "inventory": {
       "$ref": "#/$defs/inventory"
     },
@@ -75,6 +76,64 @@
     }
   },
   "$defs": {
+    "weather": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["available", "condition", "temperatureC", "feelsLikeC", "humidityPercent", "pressureHpa", "visibilityKm", "windSpeedMps", "windGustMps", "windBearing", "cloudCoveragePercent", "uvIndex", "updatedAt", "climateLoad", "dailyForecast", "hourlyForecast"],
+      "properties": {
+        "available": { "type": "boolean" },
+        "condition": { "type": ["string", "null"] },
+        "temperatureC": { "type": ["number", "null"] },
+        "feelsLikeC": { "type": ["number", "null"] },
+        "humidityPercent": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+        "pressureHpa": { "type": ["number", "null"] },
+        "visibilityKm": { "type": ["number", "null"], "minimum": 0 },
+        "windSpeedMps": { "type": ["number", "null"], "minimum": 0 },
+        "windGustMps": { "type": ["number", "null"], "minimum": 0 },
+        "windBearing": { "type": ["number", "string", "null"] },
+        "cloudCoveragePercent": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+        "uvIndex": { "type": ["number", "null"], "minimum": 0 },
+        "updatedAt": { "type": ["string", "null"], "format": "date-time" },
+        "climateLoad": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["level", "score", "factors"],
+          "properties": {
+            "level": { "enum": ["negligible", "weak", "strong", "unknown"] },
+            "score": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+            "factors": {
+              "type": "array",
+              "maxItems": 8,
+              "uniqueItems": true,
+              "items": { "enum": ["temperature", "wind", "humidity", "sun", "precipitation"] }
+            }
+          }
+        },
+        "dailyForecast": { "type": "array", "maxItems": 10, "items": { "$ref": "#/$defs/weatherForecast" } },
+        "hourlyForecast": { "type": "array", "maxItems": 24, "items": { "$ref": "#/$defs/weatherForecast" } }
+      }
+    },
+    "weatherForecast": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["at", "condition", "temperatureC", "lowTemperatureC", "feelsLikeC", "humidityPercent", "precipitationProbabilityPercent", "precipitationMm", "windSpeedMps", "windGustMps", "windBearing", "pressureHpa", "cloudCoveragePercent", "uvIndex"],
+      "properties": {
+        "at": { "type": "string", "format": "date-time" },
+        "condition": { "type": ["string", "null"] },
+        "temperatureC": { "type": ["number", "null"] },
+        "lowTemperatureC": { "type": ["number", "null"] },
+        "feelsLikeC": { "type": ["number", "null"] },
+        "humidityPercent": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+        "precipitationProbabilityPercent": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+        "precipitationMm": { "type": ["number", "null"], "minimum": 0 },
+        "windSpeedMps": { "type": ["number", "null"], "minimum": 0 },
+        "windGustMps": { "type": ["number", "null"], "minimum": 0 },
+        "windBearing": { "type": ["number", "string", "null"] },
+        "pressureHpa": { "type": ["number", "null"] },
+        "cloudCoveragePercent": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+        "uvIndex": { "type": ["number", "null"], "minimum": 0 }
+      }
+    },
     "room": {
       "type": "object",
       "required": ["id", "name"],

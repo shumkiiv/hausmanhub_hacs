@@ -27,6 +27,9 @@ API_BASE_PATH = "/api/hausman_hub/v1"
 CAPABILITIES_PATH = f"{API_BASE_PATH}/capabilities"
 HOME_PATH = f"{API_BASE_PATH}/home"
 DASHBOARD_PATH = f"{API_BASE_PATH}/dashboard"
+TABLET_PROFILE_PATH = f"{API_BASE_PATH}/tablet-profile"
+ENERGY_SETTINGS_PATH = f"{API_BASE_PATH}/energy-settings"
+ENERGY_HISTORY_PATH = f"{API_BASE_PATH}/energy/history"
 EVENT_STREAM_PATH = f"{API_BASE_PATH}/events"
 DEVICE_ACTIONS_PATH = f"{API_BASE_PATH}/device-actions"
 CONTOURS_PATH = f"{API_BASE_PATH}/contours"
@@ -141,6 +144,36 @@ def api_capabilities_snapshot(
                 "response_contract": {
                     "name": CLIMATE_CONTROL_RECEIPT_CONTRACT_NAME,
                     "version": CLIMATE_CONTROL_RECEIPT_CONTRACT_VERSION,
+                },
+            },
+            "tablet_profile": {
+                "available": False,
+                "path": TABLET_PROFILE_PATH,
+                "methods": ["GET", "PUT"],
+                "optimistic_locking": True,
+                "response_contract": {
+                    "name": "hausman-hub-tablet-profile",
+                    "version": 1,
+                },
+            },
+            "energy_settings": {
+                "available": False,
+                "path": ENERGY_SETTINGS_PATH,
+                "methods": ["GET", "PUT"],
+                "optimistic_locking": True,
+                "response_contract": {
+                    "name": "hausman-hub-energy-settings",
+                    "version": 1,
+                },
+            },
+            "energy_history": {
+                "available": True,
+                "path": ENERGY_HISTORY_PATH,
+                "method": "GET",
+                "read_only": True,
+                "response_contract": {
+                    "name": "hausman-hub-energy-history",
+                    "version": 1,
                 },
             },
             "event_stream": {

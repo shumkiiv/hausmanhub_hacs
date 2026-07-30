@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -13,7 +14,12 @@ from .application.dashboard_snapshot import (
     build_dashboard_snapshot,
 )
 from .application.device_presentation import zigbee2mqtt_image_url
+from .application.weather_read_model import (
+    build_weather_read_model,
+    unavailable_weather_read_model,
+)
 from .domain.hub_settings import HausmanHubSettings
+from .weather_ha_gateway import async_weather_forecast
 
 
 _PUBLIC_DIAGNOSTIC_DEVICE_CLASSES = frozenset(
@@ -277,5 +283,46 @@ async def async_dashboard_snapshot(
         or "Дом",
         energy_settings=energy_settings,
     )
+    weather_entity = next(
+        (entity for entity in entity_values if entity.domain == "weather"), None
+    )
+    if weather_entity is None:
+        weather_payload = unavailable_weather_read_model()
+    else:
+        daily, hourly = await asyncio.gather(
+            async_weather_forecast(hass, weather_entity.entity_id, "daily"),
+            async_weather_forecast(hass, weather_entity.entity_id, "hourly"),
+        )
+        weather_state = hass.states.get(weather_entity.entity_id)
+        last_updated = getattr(weather_state, "last_updated", None)
+        target_temperature = payload.get("summary", {}).get("targetTemp")
+        weather_payload = build_weather_read_model(
+            condition=weather_entity.state,
+            attributes=weather_entity.attributes,
+            daily=daily,
+            hourly=hourly,
+            target_temperature_c=(
+                float(target_temperature)
+                if isinstance(target_temperature, (int, float))
+                and not isinstance(target_temperature, bool)
+                else None
+            ),
+            updated_at=(
+                last_updated.isoformat()
+                if isinstance(last_updated, datetime)
+                else None
+            ),
+        )
+    payload["weather"] = weather_payload
+    summary = payload.get("summary")
+    if isinstance(summary, dict):
+        summary["outdoorTemp"] = weather_payload["temperatureC"]
+        summary["weatherFeelsLike"] = weather_payload["feelsLikeC"]
+        summary["weatherHumidity"] = weather_payload["humidityPercent"]
+        summary["weatherWindSpeed"] = weather_payload["windSpeedMps"]
+        summary["weatherWindSpeedUnit"] = "m/s"
+    capabilities = payload.get("capabilities")
+    if isinstance(capabilities, dict):
+        capabilities["weatherDetails"] = bool(weather_payload["available"])
     _attach_catalog_actions(payload, scenario_service)
     return payload

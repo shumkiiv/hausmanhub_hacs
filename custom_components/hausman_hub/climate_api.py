@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import replace
+from datetime import timedelta
 from http import HTTPStatus
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network, ip_address
 import json
@@ -19,6 +20,7 @@ from .application.api_capabilities import (
     CONTOUR_APPLY_PATH,
     CONTOUR_APPLY_PREVIEW_PATH,
     DASHBOARD_PATH,
+    ENERGY_HISTORY_PATH,
     HOME_PATH,
     HOME_CLIMATE_TARGETS_PATH,
     TEMPORARY_TEMPERATURE_PATH,
@@ -77,6 +79,7 @@ from .domain.ai_assistant import AiAdvisoryStatus, AiAssistantViolation
 from .domain.hub_settings import HausmanHubSettings
 from .domain.hub_settings import HausmanHubSettingsViolation
 from .dashboard_ha_snapshot import async_dashboard_snapshot
+from .energy_history_ha import async_energy_history
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -181,6 +184,7 @@ def register_climate_api(
         views = [
             ClimateCapabilitiesView(hass),
             DashboardView(hass),
+            EnergyHistoryView(hass),
             ClimateHomeView(hass),
             ContoursView(hass),
             ContourApplyPreviewView(hass),
@@ -363,6 +367,79 @@ class DashboardView(_ClimateView):
                 self._hass,
                 scenario_service if scenario_service is not None else None,
                 settings_service.current if settings_service is not None else None,
+            )
+        except Exception:
+            return self._unavailable()
+        return self.json(payload, headers=NO_STORE_HEADERS)
+
+
+class EnergyHistoryView(_ClimateView):
+    """Serve bounded Recorder-backed energy history to tablet and local admin."""
+
+    url = ENERGY_HISTORY_PATH
+    name = "api:hausman_hub:energy_history"
+
+    async def get(self, request: Any) -> Any:
+        if getattr(request, "path", None) != ENERGY_HISTORY_PATH:
+            return _not_found(self)
+        if not _is_local_dashboard_request(request):
+            return _forbidden(self)
+        if self._runtime() is None:
+            return self._unavailable()
+        query = getattr(request, "query", None)
+        if query is None:
+            return self.json_message(
+                "Параметры истории энергии заполнены неверно.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        start = dt_util.parse_datetime(query.get("from", ""))
+        end = dt_util.parse_datetime(query.get("to", ""))
+        interval = query.get("interval")
+        if (
+            start is None
+            or end is None
+            or start.tzinfo is None
+            or end.tzinfo is None
+            or end <= start
+            or end - start > timedelta(days=31)
+            or interval not in {"5m", "15m", "1h", "1d"}
+        ):
+            return self.json_message(
+                "Диапазон истории энергии должен быть корректным и не длиннее 31 дня.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        getall = getattr(query, "getall", None)
+        requested_values = getall("deviceId", []) if callable(getall) else []
+        if (
+            not isinstance(requested_values, list)
+            or len(requested_values) > 128
+            or any(
+                not isinstance(value, str) or not value or len(value) > 128
+                for value in requested_values
+            )
+        ):
+            return self.json_message(
+                "Список устройств истории энергии заполнен неверно.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        data = self._hass.data.get(DOMAIN, {})
+        settings_service = data.get("settings_service")
+        try:
+            dashboard = await async_dashboard_snapshot(
+                self._hass,
+                data.get("scenario_service"),
+                settings_service.current if settings_service is not None else None,
+            )
+            payload = await async_energy_history(
+                self._hass,
+                dashboard=dashboard,
+                start=start,
+                end=end,
+                interval=interval,
+                requested_device_ids=frozenset(requested_values),
             )
         except Exception:
             return self._unavailable()

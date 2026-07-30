@@ -435,6 +435,9 @@ def fake_home_assistant_modules() -> dict[str, ModuleType]:
     util = ModuleType("homeassistant.util")
     dt = ModuleType("homeassistant.util.dt")
     dt.now = lambda: datetime(2026, 7, 19, 12, 0)  # type: ignore[attr-defined]
+    dt.parse_datetime = (  # type: ignore[attr-defined]
+        lambda value: datetime.fromisoformat(value) if value else None
+    )
 
     homeassistant.auth = auth  # type: ignore[attr-defined]
     homeassistant.components = components  # type: ignore[attr-defined]
@@ -756,6 +759,72 @@ class LocalSummaryAccessTest(unittest.TestCase):
                     self.assertEqual(403, response.status)
         finally:
             method_globals["async_dashboard_snapshot"] = original_snapshot
+
+    def test_energy_history_is_bounded_and_available_to_tablet_and_admin(self) -> None:
+        path = "/api/hausman_hub/v1/energy/history"
+        view = next(item for item in self.hass.http.views if item.url == path)
+
+        class Query(dict[str, str]):
+            def getall(self, key: str, default: list[str]) -> list[str]:
+                return ["device_0123456789abcdef"] if key == "deviceId" else default
+
+        async def dashboard_snapshot(*_args: object) -> dict[str, object]:
+            return {"energy": {"sources": []}, "devices": []}
+
+        async def energy_history(*_args: object, **kwargs: object) -> dict[str, object]:
+            return {
+                "contract": {"name": "hausman-hub-energy-history", "version": 1},
+                "from": kwargs["start"].isoformat(),
+                "to": kwargs["end"].isoformat(),
+                "interval": kwargs["interval"],
+                "series": [],
+            }
+
+        method_globals = view.get.__func__.__globals__
+        original_dashboard = method_globals["async_dashboard_snapshot"]
+        original_history = method_globals["async_energy_history"]
+        method_globals["async_dashboard_snapshot"] = dashboard_snapshot
+        method_globals["async_energy_history"] = energy_history
+        try:
+            for user in (
+                reader_user("system-users"),
+                reader_user("system-admin", admin=True),
+            ):
+                request = FakeRequest(
+                    "127.0.0.1",
+                    user,
+                    path=path,
+                    query_string="from=...",
+                )
+                request.query = Query(
+                    {
+                        "from": "2026-07-30T00:00:00+00:00",
+                        "to": "2026-07-31T00:00:00+00:00",
+                        "interval": "15m",
+                    }
+                )
+                response = asyncio.run(view.get(request))
+                self.assertEqual(200, response.status)
+                self.assertEqual("15m", response.payload["interval"])
+                self.assertEqual("no-store", response.headers["Cache-Control"])
+
+            invalid = FakeRequest(
+                "127.0.0.1",
+                reader_user("system-users"),
+                path=path,
+                query_string="from=...",
+            )
+            invalid.query = Query(
+                {
+                    "from": "2026-06-01T00:00:00+00:00",
+                    "to": "2026-07-31T00:00:00+00:00",
+                    "interval": "15m",
+                }
+            )
+            self.assertEqual(400, asyncio.run(view.get(invalid)).status)
+        finally:
+            method_globals["async_dashboard_snapshot"] = original_dashboard
+            method_globals["async_energy_history"] = original_history
 
     def test_climate_shadow_comparison_is_local_admin_only_and_read_only(self) -> None:
         path = "/api/hausman_hub/v1/admin/climate-shadow-comparison"
@@ -2102,7 +2171,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.47.9", panel.payload["integration_version"])
+        self.assertEqual("1.48.0", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
@@ -2679,7 +2748,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertFalse(hasattr(self.view, method))
 
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
-        self.assertEqual(58, len(self.hass.http.views))
+        self.assertEqual(59, len(self.hass.http.views))
         self.assertEqual(
             1,
             sum(
@@ -2993,13 +3062,14 @@ class LocalSummaryAccessTest(unittest.TestCase):
             [(closed_entry, ("sensor", "switch"))],
             closed_hass.config_entries.forwarded,
         )
-        self.assertEqual(57, len(closed_hass.http.views))
+        self.assertEqual(58, len(closed_hass.http.views))
         self.assertEqual(
             {
                 "/api/hausman_hub/v1/capabilities",
                 "/api/hausman_hub/v1/dashboard",
                 "/api/hausman_hub/v1/events",
                 "/api/hausman_hub/v1/device-actions",
+                "/api/hausman_hub/v1/energy/history",
                 "/api/hausman_hub/v1/home",
                 "/api/hausman_hub/v1/contours",
                 "/api/hausman_hub/v1/contours/apply-preview",

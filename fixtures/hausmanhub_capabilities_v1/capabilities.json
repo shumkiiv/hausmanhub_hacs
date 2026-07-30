@@ -94,6 +94,36 @@
         "version": 1
       }
     },
+    "tablet_profile": {
+      "available": false,
+      "path": "/api/hausman_hub/v1/tablet-profile",
+      "methods": ["GET", "PUT"],
+      "optimistic_locking": true,
+      "response_contract": {
+        "name": "hausman-hub-tablet-profile",
+        "version": 1
+      }
+    },
+    "energy_settings": {
+      "available": false,
+      "path": "/api/hausman_hub/v1/energy-settings",
+      "methods": ["GET", "PUT"],
+      "optimistic_locking": true,
+      "response_contract": {
+        "name": "hausman-hub-energy-settings",
+        "version": 1
+      }
+    },
+    "energy_history": {
+      "available": true,
+      "path": "/api/hausman_hub/v1/energy/history",
+      "method": "GET",
+      "read_only": true,
+      "response_contract": {
+        "name": "hausman-hub-energy-history",
+        "version": 1
+      }
+    },
     "event_stream": {
       "available": true,
       "path": "/api/hausman_hub/v1/events",

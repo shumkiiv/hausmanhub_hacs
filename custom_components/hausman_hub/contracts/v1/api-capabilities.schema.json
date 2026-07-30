@@ -53,6 +53,9 @@
         "contour_settings_apply",
         "temporary_room_temperature",
         "home_climate_targets",
+        "tablet_profile",
+        "energy_settings",
+        "energy_history",
         "scenarios"
       ],
       "properties": {
@@ -243,6 +246,78 @@
             },
             "response_contract": {
               "$ref": "#/$defs/climate_control_receipt_contract"
+            }
+          }
+        },
+        "tablet_profile": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["available", "path", "methods", "optimistic_locking", "response_contract"],
+          "properties": {
+            "available": { "type": "boolean" },
+            "path": { "const": "/api/hausman_hub/v1/tablet-profile" },
+            "methods": {
+              "type": "array",
+              "prefixItems": [{ "const": "GET" }, { "const": "PUT" }],
+              "items": false,
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "optimistic_locking": { "const": true },
+            "response_contract": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "version"],
+              "properties": {
+                "name": { "const": "hausman-hub-tablet-profile" },
+                "version": { "const": 1 }
+              }
+            }
+          }
+        },
+        "energy_settings": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["available", "path", "methods", "optimistic_locking", "response_contract"],
+          "properties": {
+            "available": { "type": "boolean" },
+            "path": { "const": "/api/hausman_hub/v1/energy-settings" },
+            "methods": {
+              "type": "array",
+              "prefixItems": [{ "const": "GET" }, { "const": "PUT" }],
+              "items": false,
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "optimistic_locking": { "const": true },
+            "response_contract": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "version"],
+              "properties": {
+                "name": { "const": "hausman-hub-energy-settings" },
+                "version": { "const": 1 }
+              }
+            }
+          }
+        },
+        "energy_history": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["available", "path", "method", "read_only", "response_contract"],
+          "properties": {
+            "available": { "type": "boolean" },
+            "path": { "const": "/api/hausman_hub/v1/energy/history" },
+            "method": { "const": "GET" },
+            "read_only": { "const": true },
+            "response_contract": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "version"],
+              "properties": {
+                "name": { "const": "hausman-hub-energy-history" },
+                "version": { "const": 1 }
+              }
             }
           }
         },

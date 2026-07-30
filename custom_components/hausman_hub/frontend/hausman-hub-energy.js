@@ -351,28 +351,29 @@ export async function loadEnergyHistory(panel) {
   if (!panel._hass || panel._energyHistoryLoading) return;
   const energy = panel._homeDashboard && panel._homeDashboard.energy;
   if (!energy || !Array.isArray(energy.sources)) return;
-  const mappings = [];
-  energy.sources.forEach((source) => {
-    const device = panel._homeDashboard.devices.find((item) => item.id === source.deviceId);
-    const detail = device && Array.isArray(device.details)
-      ? device.details.find((item) => item.label === "Мощность") : null;
-    if (detail && detail.entityId) mappings.push([source.id, detail.entityId]);
-  });
-  if (!mappings.length || !panel._hass.connection || typeof panel._hass.connection.sendMessagePromise !== "function") return;
+  if (typeof panel._hass.callApi !== "function") return;
   panel._energyHistoryLoading = true;
   try {
     const end = new Date();
     const start = new Date(end.getTime() - 24 * 60 * 60 * 1000);
-    const response = await panel._hass.connection.sendMessagePromise({
-      type: "recorder/statistics_during_period",
-      start_time: start.toISOString(),
-      end_time: end.toISOString(),
-      statistic_ids: mappings.map(([, entityId]) => entityId),
-      period: "hour",
-      types: ["mean"],
+    const params = new URLSearchParams({
+      from: start.toISOString(),
+      to: end.toISOString(),
+      interval: "1h",
     });
+    energy.sources.forEach((source) => params.append("deviceId", source.deviceId));
+    const response = await panel._hass.callApi(
+      "GET", `hausman_hub/v1/energy/history?${params.toString()}`,
+    );
     const history = {};
-    mappings.forEach(([sourceId, entityId]) => { history[sourceId] = response && response[entityId] || []; });
+    (response && Array.isArray(response.series) ? response.series : [])
+      .filter((series) => series.unit === "W")
+      .forEach((series) => {
+        history[series.deviceId] = (series.points || []).map((point) => ({
+          start: point.at,
+          mean: point.value,
+        }));
+      });
     panel._energyHistory = history;
   } catch (error) {
     panel._energyHistory = panel._energyHistory || {};

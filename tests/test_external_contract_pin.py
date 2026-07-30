@@ -1,4 +1,4 @@
-"""Keep the HACS runtime explicitly pinned to one external contract draft."""
+"""Keep the HACS runtime explicitly pinned to the canonical contract."""
 
 from __future__ import annotations
 
@@ -10,13 +10,13 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 PIN_PATH = REPOSITORY_ROOT / "hausmanhub-contracts.json"
 
 
-def test_external_contract_pin_is_explicit_and_noncanonical() -> None:
+def test_external_contract_pin_is_explicit_and_canonical() -> None:
     pin = json.loads(PIN_PATH.read_text(encoding="utf-8"))
 
     assert pin == {
         "repository": "shumkiiv/hausmanhub-contracts",
-        "version": "0.14.2",
-        "commit": "248a6bb",
-        "canonical": False,
-        "role": "runtime-source",
+        "version": "0.15.1",
+        "commit": "1f53c7e",
+        "canonical": True,
+        "role": "runtime-consumer",
     }
