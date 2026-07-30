@@ -99,6 +99,7 @@ class DashboardDevice:
     entry_type: str | None = None
     integrations: tuple[str, ...] = ()
     disabled: bool = False
+    image_url: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -611,6 +612,9 @@ def build_dashboard_snapshot(
                 "source": "home-assistant",
                 "model": registry_device.model if registry_device is not None else None,
                 "manufacturer": registry_device.manufacturer
+                if registry_device is not None
+                else None,
+                "imageUrl": registry_device.image_url
                 if registry_device is not None
                 else None,
                 "attributes": _safe_attributes(primary),

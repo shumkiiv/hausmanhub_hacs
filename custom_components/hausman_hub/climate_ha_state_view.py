@@ -6,7 +6,6 @@ from dataclasses import dataclass
 import hashlib
 import importlib
 from typing import TYPE_CHECKING
-from urllib.parse import quote
 
 from .application.climate_ha_observations import (
     MAX_STATE_LENGTH,
@@ -25,6 +24,7 @@ from .application.climate_signal_settings import (
     signal_candidate_is_suitable,
 )
 from .ha_area_ids import stable_area_room_id
+from .application.device_presentation import zigbee2mqtt_image_url
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -38,7 +38,6 @@ _OBSERVED_ATTRIBUTES = frozenset(
         "humidity",
     }
 )
-_ZIGBEE2MQTT_IMAGE_BASE = "https://www.zigbee2mqtt.io/images/devices/"
 _MAX_DEVICE_DETAIL_LENGTH = 160
 
 
@@ -455,19 +454,7 @@ def _device_presentation(
     model = _bounded_device_detail(getattr(device_entry, "model", None))
     model_id = _bounded_device_detail(getattr(device_entry, "model_id", None))
     identifiers = getattr(device_entry, "identifiers", ()) or ()
-    is_zigbee2mqtt = any(
-        isinstance(identifier, (tuple, list))
-        and len(identifier) == 2
-        and identifier[0] == "mqtt"
-        and isinstance(identifier[1], str)
-        and identifier[1].startswith("zigbee2mqtt_")
-        for identifier in identifiers
-    )
-    image_url = (
-        f"{_ZIGBEE2MQTT_IMAGE_BASE}{quote(model_id, safe='')}.png"
-        if is_zigbee2mqtt and model_id is not None
-        else None
-    )
+    image_url = zigbee2mqtt_image_url(model_id, identifiers)
     return _EntityDevicePresentation(
         group_id=f"device_{group_digest}",
         name=name,

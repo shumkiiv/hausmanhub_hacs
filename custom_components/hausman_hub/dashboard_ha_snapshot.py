@@ -12,7 +12,29 @@ from .application.dashboard_snapshot import (
     DashboardScenario,
     build_dashboard_snapshot,
 )
+from .application.device_presentation import zigbee2mqtt_image_url
 from .domain.hub_settings import HausmanHubSettings
+
+
+_PUBLIC_DIAGNOSTIC_DEVICE_CLASSES = frozenset(
+    {
+        "battery",
+        "carbon_dioxide",
+        "current",
+        "energy",
+        "gas",
+        "humidity",
+        "moisture",
+        "power",
+        "smoke",
+        "temperature",
+        "volatile_organic_compounds",
+        "pm1",
+        "pm10",
+        "pm25",
+        "voltage",
+    }
+)
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -55,6 +77,26 @@ def _friendly_name(state: object, registry_entry: object) -> str:
         if isinstance(value, str) and value:
             return value
     return getattr(state, "entity_id", "")
+
+
+def _entity_is_public(entry: object, attributes: dict[str, Any]) -> bool:
+    """Keep device cards operational and remove HA maintenance controls.
+
+    Configuration entities such as indicator LEDs, power-outage memory and
+    alarm toggles are capabilities of their owning device, not separate tablet
+    controls. Diagnostic measurements remain visible only when they convey a
+    user-facing environmental, battery, safety, or energy value.
+    """
+
+    if getattr(entry, "hidden_by", None) is not None:
+        return False
+    category = _enum_string(getattr(entry, "entity_category", None))
+    if category == "config":
+        return False
+    if category != "diagnostic":
+        return True
+    device_class = _enum_string(attributes.get("device_class"))
+    return device_class in _PUBLIC_DIAGNOSTIC_DEVICE_CLASSES
 
 
 def _registry_snapshot(hass: HomeAssistant) -> tuple[object, object, object]:
@@ -186,6 +228,10 @@ async def async_dashboard_snapshot(
             entry_type=_enum_string(getattr(device, "entry_type", None)),
             integrations=_device_integrations(device),
             disabled=getattr(device, "disabled_by", None) is not None,
+            image_url=zigbee2mqtt_image_url(
+                getattr(device, "model_id", None),
+                getattr(device, "identifiers", ()) or (),
+            ),
         )
         for device in devices.devices.values()
     )
@@ -203,6 +249,8 @@ async def async_dashboard_snapshot(
         attributes = getattr(state, "attributes", {})
         if not isinstance(attributes, dict):
             attributes = dict(attributes) if attributes is not None else {}
+        if not _entity_is_public(entry, attributes):
+            continue
         device_id = _non_empty_string(getattr(entry, "device_id", None))
         explicit_area_id = _non_empty_string(getattr(entry, "area_id", None))
         entity_values.append(

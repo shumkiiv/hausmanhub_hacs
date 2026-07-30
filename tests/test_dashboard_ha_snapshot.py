@@ -142,5 +142,117 @@ class DashboardHaSnapshotTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(["welcome"], [item["id"] for item in payload["scenarios"]])
         self.assertEqual(int(now.timestamp() * 1000), payload["generatedAt"])
 
+    async def test_adapter_hides_maintenance_entities_and_prefers_z2m_image(self) -> None:
+        area = SimpleNamespace(id="living", name="Гостиная", icon=None)
+        device = SimpleNamespace(
+            id="zigbee-switch",
+            name_by_user="Выключатель гостиная",
+            name="TS0012",
+            area_id="living",
+            model="TS0012",
+            model_id="TS0012",
+            manufacturer="Tuya",
+            identifiers=(("mqtt", "zigbee2mqtt_0x00124b"),),
+            entry_type=None,
+            disabled_by=None,
+        )
+
+        def entry(
+            entity_id: str,
+            *,
+            category: str | None = None,
+            hidden_by: str | None = None,
+        ) -> object:
+            return SimpleNamespace(
+                entity_id=entity_id,
+                device_id=device.id,
+                area_id=None,
+                disabled_by=None,
+                hidden_by=hidden_by,
+                entity_category=category,
+                name=None,
+                original_name=entity_id,
+            )
+
+        state_values = {
+            "switch.living_left": SimpleNamespace(
+                entity_id="switch.living_left",
+                state="on",
+                attributes={"friendly_name": "Левая клавиша"},
+            ),
+            "switch.living_indicator": SimpleNamespace(
+                entity_id="switch.living_indicator",
+                state="off",
+                attributes={"friendly_name": "Индикатор"},
+            ),
+            "select.living_power_outage_memory": SimpleNamespace(
+                entity_id="select.living_power_outage_memory",
+                state="restore",
+                attributes={"friendly_name": "Память питания"},
+            ),
+            "sensor.living_linkquality": SimpleNamespace(
+                entity_id="sensor.living_linkquality",
+                state="72",
+                attributes={
+                    "friendly_name": "Качество связи",
+                    "device_class": "signal_strength",
+                },
+            ),
+            "sensor.living_battery": SimpleNamespace(
+                entity_id="sensor.living_battery",
+                state="55",
+                attributes={
+                    "friendly_name": "Заряд",
+                    "device_class": "battery",
+                    "unit_of_measurement": "%",
+                },
+            ),
+        }
+        entries = {
+            "switch.living_left": entry("switch.living_left"),
+            "switch.living_indicator": entry(
+                "switch.living_indicator", category="config"
+            ),
+            "select.living_power_outage_memory": entry(
+                "select.living_power_outage_memory", category="config"
+            ),
+            "sensor.living_linkquality": entry(
+                "sensor.living_linkquality", category="diagnostic"
+            ),
+            "sensor.living_battery": entry(
+                "sensor.living_battery", category="diagnostic"
+            ),
+        }
+        hass = SimpleNamespace(
+            config=SimpleNamespace(location_name="Дом"),
+            states=_States(state_values),
+        )
+        now = datetime(2026, 7, 31, 10, 0, tzinfo=timezone.utc)
+        with (
+            patch.object(
+                dashboard_ha_snapshot,
+                "_registry_snapshot",
+                return_value=(
+                    SimpleNamespace(areas={area.id: area}),
+                    SimpleNamespace(devices={device.id: device}),
+                    SimpleNamespace(entities=entries),
+                ),
+            ),
+            patch.object(dashboard_ha_snapshot, "_local_now", return_value=now),
+        ):
+            payload = await dashboard_ha_snapshot.async_dashboard_snapshot(hass)
+
+        self.assertEqual(1, len(payload["devices"]))
+        card = payload["devices"][0]
+        self.assertEqual(
+            "https://www.zigbee2mqtt.io/images/devices/TS0012.png",
+            card["imageUrl"],
+        )
+        self.assertEqual(
+            {"switch.living_left", "sensor.living_battery"},
+            {detail["entityId"] for detail in card["details"]},
+        )
+        self.assertEqual(2, payload["inventory"]["devices"][0]["entityCount"])
+
 if __name__ == "__main__":
     unittest.main()
