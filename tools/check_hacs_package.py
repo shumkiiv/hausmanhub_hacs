@@ -74,6 +74,7 @@ CONTRACT_PATHS = tuple(
         "contour-apply-receipt.schema.json",
         "contour-apply-request.schema.json",
         "contours.schema.json",
+        "energy-settings.schema.json",
         "temporary-temperature-request.schema.json",
         "legacy-settings-preview-request.schema.json",
         "legacy-settings-preview.schema.json",

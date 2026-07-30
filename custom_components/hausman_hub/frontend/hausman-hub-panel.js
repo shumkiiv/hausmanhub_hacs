@@ -1,9 +1,10 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.47.2";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.47.2";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.47.2";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.47.2";
-import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.47.2";
-import { openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.47.2";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.47.3";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.47.3";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.47.3";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.47.3";
+import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.47.3";
+import { openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.47.3";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection } from "./hausman-hub-energy.js?v=1.47.3";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css";
@@ -28,6 +29,7 @@ const SCENARIOS_TEST_API = "hausman_hub/v1/admin/scenarios/test";
 const SCENARIOS_DELETE_API = "hausman_hub/v1/admin/scenarios/delete";
 const SCENARIOS_RUN_API = "hausman_hub/v1/admin/scenarios/run";
 const CONNECTION_SETTINGS_API = "hausman_hub/v1/admin/connection-settings";
+const ENERGY_SETTINGS_API = "hausman_hub/v1/admin/energy-settings";
 const RESET_API = "hausman_hub/v1/admin/reset";
 const USER_PREFERENCES_KEY = "hausman_hub";
 const IR_CODES_API = "hausman_hub/v1/admin/ir-codes";
@@ -198,6 +200,7 @@ const ICON_PATHS = {
   thermometer: "M15 13V5a3 3 0 0 0-6 0v8a5 5 0 1 0 6 0zm-3 6a3 3 0 0 1-1-5.83V5a1 1 0 0 1 2 0v8.17A3 3 0 0 1 12 19z",
   water: "M12 2.69 6.35 8.34A8 8 0 0 0 4 14a8 8 0 0 0 16 0c0-2.21-.9-4.21-2.35-5.66L12 2.69zM12 20a6 6 0 0 1-4.24-10.24L12 5.52l4.24 4.24A6 6 0 0 1 12 20z",
   bolt: "M11 21h-1l1-7H7.5c-.88 0-.33-.75-.31-.78C8.46 10.97 10.37 7.63 13 3h1l-1 7h3.5c.4 0 .62.19.4.66C12.97 17.53 11 21 11 21z",
+  energy: "M13 2 4.5 13H11l-1 9 8.5-12H12z",
 };
 
 const THEME_MODES = ["auto", "light", "dark"];
@@ -272,6 +275,11 @@ class HausmanHubPanel extends HTMLElement {
     this._settingsBaseline = { ...this._settingsData };
     this._settingsPrefs = { large_text: false, reduced_motion: false, show_hints: true };
     this._settingsDirty = false;
+    this._energyDraft = null;
+    this._energySettingsOpen = false;
+    this._energySelectedDeviceId = null;
+    this._energyHistory = null;
+    this._energyHistoryLoading = false;
     this._deviceBindings = {
       data:null, error:false, loading: false, preview: null, selections: {},
       showOtherRooms: false, status: "",
@@ -847,7 +855,7 @@ class HausmanHubPanel extends HTMLElement {
     const settings = el("div");
     sectionNodes.settings.appendChild(settings);
     const homeSections = {};
-    ["lighting", "rooms", "media", "security", "devices"].forEach((sectionId) => {
+    ["lighting", "rooms", "media", "security", "devices", "energy"].forEach((sectionId) => {
       const content = el("div", "home-section-content");
       sectionNodes[sectionId].appendChild(content);
       homeSections[sectionId] = content;
@@ -899,6 +907,7 @@ class HausmanHubPanel extends HTMLElement {
       this._renderSettings(this._shell.settings);
       this._loadSettings();
     }
+    if (section === "energy") loadEnergyHistory(this);
     if (this._shell.homeSections && this._shell.homeSections[section]) {
       this._renderHomeSection(section, this._shell.homeSections[section]);
     }
@@ -1000,6 +1009,7 @@ class HausmanHubPanel extends HTMLElement {
     renderOverviewNavigationSummary(this, container, this._overviewMetrics(snapshot), {
       el, setAttr, svgIcon, sections: PANEL_SECTIONS,
     });
+    renderEnergyOverviewCard(this, container, { el, setAttr, svgIcon });
   }
 
   _overviewMetrics(snapshot) {
@@ -5141,6 +5151,30 @@ class HausmanHubPanel extends HTMLElement {
       sections: PANEL_SECTIONS,
       subtitles: SECTION_SUBTITLES,
     });
+  }
+
+  _renderEnergySection(container) {
+    renderEnergySection(this, container, { el, svgIcon, setAttr });
+  }
+
+  async _saveEnergySettings() {
+    if (this._busy || !this._energyDraft || !this._hass) return;
+    this._busy = true;
+    this._notice = "";
+    this._render();
+    try {
+      await this._hass.callApi("POST", ENERGY_SETTINGS_API, this._energyDraft);
+      this._energyDraft = null;
+      this._energySettingsOpen = false;
+      this._notice = "Настройка энергии сохранена в Home Assistant.";
+      this._error = false;
+      await this._load();
+    } catch (error) {
+      this._notice = "Настройку энергии сохранить не удалось. Выбранные устройства не изменены.";
+    } finally {
+      this._busy = false;
+      this._render();
+    }
   }
 
   _deviceCountWord(count) {

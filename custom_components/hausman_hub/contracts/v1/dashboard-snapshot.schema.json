@@ -49,6 +49,7 @@
       "type": "array",
       "items": { "$ref": "#/$defs/device" }
     },
+    "energy": { "$ref": "#/$defs/energy" },
     "inventory": {
       "$ref": "#/$defs/inventory"
     },
@@ -134,6 +135,12 @@
         "details": {
           "type": "array",
           "items": { "$ref": "#/$defs/deviceDetail" }
+        },
+        "energy": {
+          "anyOf": [
+            { "$ref": "#/$defs/energyMeasurements" },
+            { "type": "null" }
+          ]
         }
       },
       "additionalProperties": true
@@ -160,6 +167,67 @@
           "type": "array",
           "items": { "$ref": "#/$defs/inventoryDevice" }
         }
+      },
+      "additionalProperties": true
+    },
+    "energyMeasurements": {
+      "type": "object",
+      "required": ["currentPowerW", "currentA", "voltageV", "totalKwh"],
+      "properties": {
+        "currentPowerW": { "type": ["number", "null"] },
+        "currentA": { "type": ["number", "null"] },
+        "voltageV": { "type": ["number", "null"] },
+        "totalKwh": { "type": ["number", "null"] }
+      },
+      "additionalProperties": true
+    },
+    "energy": {
+      "type": "object",
+      "required": ["available", "currentPowerW", "currentA", "voltageV", "totalKwh", "sources", "selectedSourceIds", "settings"],
+      "properties": {
+        "available": { "type": "boolean" },
+        "currentPowerW": { "type": ["number", "null"] },
+        "currentA": { "type": ["number", "null"] },
+        "voltageV": { "type": ["number", "null"] },
+        "totalKwh": { "type": ["number", "null"] },
+        "sources": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/energySource" }
+        },
+        "selectedSourceIds": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true
+        },
+        "settings": { "$ref": "#/$defs/energySettings" }
+      },
+      "additionalProperties": false
+    },
+    "energySource": {
+      "allOf": [
+        { "$ref": "#/$defs/energyMeasurements" },
+        {
+          "type": "object",
+          "required": ["id", "deviceId", "name", "available"],
+          "properties": {
+            "id": { "type": "string" },
+            "deviceId": { "type": "string" },
+            "name": { "type": "string" },
+            "roomId": { "type": ["string", "null"] },
+            "roomName": { "type": ["string", "null"] },
+            "available": { "type": "boolean" }
+          }
+        }
+      ]
+    },
+    "energySettings": {
+      "type": "object",
+      "required": ["displayUnits", "showVoltage", "aggregation", "useAllDevices"],
+      "properties": {
+        "displayUnits": { "enum": ["watts", "amps", "both"] },
+        "showVoltage": { "type": "boolean" },
+        "aggregation": { "enum": ["combined", "separate"] },
+        "useAllDevices": { "type": "boolean" }
       },
       "additionalProperties": false
     },

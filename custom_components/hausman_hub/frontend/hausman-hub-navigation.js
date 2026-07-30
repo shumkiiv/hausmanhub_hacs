@@ -9,6 +9,7 @@ export const PANEL_SECTIONS = [
   { id: "media", label: "Медиа", icon: "media" },
   { id: "security", label: "Безопасность", icon: "shield" },
   { id: "devices", label: "Устройства", icon: "device" },
+  { id: "energy", label: "Энергия", icon: "energy" },
   { id: "scenarios", label: "Сценарии", icon: "bolt" },
   { id: "settings", label: "Настройки", icon: "settings" },
 ];
@@ -21,6 +22,7 @@ export const SECTION_SUBTITLES = {
   media: "Телевизоры, колонки и медиаплееры",
   security: "Датчики, доступ и тревоги",
   devices: "Все физические устройства дома",
+  energy: "Потребление, статистика и управление нагрузкой",
   scenarios: "Управление сценариями дома",
   settings: "Подключение и параметры системы",
 };

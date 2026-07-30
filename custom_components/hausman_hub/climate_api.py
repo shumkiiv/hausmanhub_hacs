@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from http import HTTPStatus
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network, ip_address
 import json
@@ -74,6 +75,7 @@ from .application.climate_runtime import (
 from .application.climate_setup import ClimateSetupViolation
 from .domain.ai_assistant import AiAdvisoryStatus, AiAssistantViolation
 from .domain.hub_settings import HausmanHubSettings
+from .domain.hub_settings import HausmanHubSettingsViolation
 from .dashboard_ha_snapshot import async_dashboard_snapshot
 
 if TYPE_CHECKING:
@@ -138,6 +140,7 @@ ADMIN_AI_ASSISTANT_PATH = "/api/hausman_hub/v1/admin/ai-assistant"
 ADMIN_AI_ASSISTANT_SETTINGS_PATH = f"{ADMIN_AI_ASSISTANT_PATH}/settings"
 ADMIN_AI_ASSISTANT_REFRESH_PATH = f"{ADMIN_AI_ASSISTANT_PATH}/refresh"
 ADMIN_CONNECTION_SETTINGS_PATH = "/api/hausman_hub/v1/admin/connection-settings"
+ADMIN_ENERGY_SETTINGS_PATH = "/api/hausman_hub/v1/admin/energy-settings"
 ADMIN_RESET_PATH = "/api/hausman_hub/v1/admin/reset"
 NO_STORE_HEADERS = {"Cache-Control": "no-store"}
 MAX_ACTION_BODY_BYTES = 16 * 1024
@@ -211,6 +214,7 @@ def register_climate_api(
             ClimateAdminAiAssistantSettingsView(hass),
             ClimateAdminAiAssistantRefreshView(hass),
             ClimateAdminConnectionSettingsView(hass),
+            ClimateAdminEnergySettingsView(hass),
             ClimateAdminResetView(hass),
         ]
         if scenario_service is not None:
@@ -349,10 +353,12 @@ class DashboardView(_ClimateView):
             return self._unavailable()
         data = self._hass.data.get(DOMAIN, {})
         scenario_service = data.get("scenario_service")
+        settings_service = data.get("settings_service")
         try:
             payload = await async_dashboard_snapshot(
                 self._hass,
                 scenario_service if scenario_service is not None else None,
+                settings_service.current if settings_service is not None else None,
             )
         except Exception:
             return self._unavailable()
@@ -1716,7 +1722,6 @@ class ClimateAdminConnectionSettingsView(_ClimateView):
             headers=NO_STORE_HEADERS,
         )
 
-
     async def post(self, request: Any) -> Any:
         if not _is_exact_request(request, ADMIN_CONNECTION_SETTINGS_PATH):
             return _not_found(self)
@@ -1743,9 +1748,7 @@ class ClimateAdminConnectionSettingsView(_ClimateView):
             current = effective_configuration(entry.data, entry.options)
         except Exception:
             return self._unavailable()
-        connection_mode = payload.get(
-            CONNECTION_MODE_FIELD, current.connection_mode
-        )
+        connection_mode = payload.get(CONNECTION_MODE_FIELD, current.connection_mode)
         smart_home_center_url = payload.get(
             SMART_HOME_CENTER_URL_FIELD, current.smart_home_center_url
         )
@@ -1768,9 +1771,7 @@ class ClimateAdminConnectionSettingsView(_ClimateView):
                 climate_canary_room_id_value=None,
                 native_climate_mode_value=current.native_climate_policy.mode.value,
                 native_climate_room_id_value=current.native_climate_policy.room_id,
-                native_target_temperature_value=(
-                    current.native_climate_policy.target_temperature
-                ),
+                native_target_temperature_value=current.native_climate_policy.target_temperature,
                 native_target_humidity_value=current.native_climate_policy.target_humidity,
                 connection_mode_value=connection_mode,
                 smart_home_center_url_value=smart_home_center_url,
@@ -1778,9 +1779,7 @@ class ClimateAdminConnectionSettingsView(_ClimateView):
             )
         except ConfigurationViolation as error:
             return self.json_message(
-                str(error),
-                HTTPStatus.BAD_REQUEST,
-                headers=NO_STORE_HEADERS,
+                str(error), HTTPStatus.BAD_REQUEST, headers=NO_STORE_HEADERS
             )
         self._hass.config_entries.async_update_entry(entry, options=options)
         return self.json(
@@ -1793,6 +1792,84 @@ class ClimateAdminConnectionSettingsView(_ClimateView):
             },
             headers=NO_STORE_HEADERS,
         )
+
+
+def _energy_settings_payload(settings: HausmanHubSettings) -> dict[str, object]:
+    return {
+        "displayUnits": settings.energy_display_units,
+        "showVoltage": settings.energy_show_voltage,
+        "aggregation": settings.energy_aggregation,
+        "useAllDevices": settings.energy_use_all_devices,
+        "selectedDeviceIds": list(settings.energy_selected_device_ids),
+    }
+
+
+class ClimateAdminEnergySettingsView(_ClimateView):
+    """Persist the shared dashboard energy presentation in Home Assistant."""
+
+    url = ADMIN_ENERGY_SETTINGS_PATH
+    name = "api:hausman_hub:climate_admin_energy_settings"
+
+    def _service(self) -> object | None:
+        if self._runtime() is None:
+            return None
+        return self._hass.data.get(DOMAIN, {}).get("settings_service")
+
+    async def get(self, request: Any) -> Any:
+        if not _is_exact_request(request, ADMIN_ENERGY_SETTINGS_PATH):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        service = self._service()
+        if service is None:
+            return self._unavailable()
+        return self.json(_energy_settings_payload(service.current), headers=NO_STORE_HEADERS)
+
+    async def post(self, request: Any) -> Any:
+        if not _is_exact_request(request, ADMIN_ENERGY_SETTINGS_PATH):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        service = self._service()
+        if service is None:
+            return self._unavailable()
+        try:
+            payload = await _request_json(request)
+        except ValueError:
+            payload = None
+        required = {
+            "displayUnits",
+            "showVoltage",
+            "aggregation",
+            "useAllDevices",
+            "selectedDeviceIds",
+        }
+        if not isinstance(payload, Mapping) or set(payload) != required:
+            return self.json_message(
+                "The energy settings body is invalid.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        selected = payload.get("selectedDeviceIds")
+        try:
+            updated = replace(
+                service.current,
+                energy_display_units=payload.get("displayUnits"),
+                energy_show_voltage=payload.get("showVoltage"),
+                energy_aggregation=payload.get("aggregation"),
+                energy_use_all_devices=payload.get("useAllDevices"),
+                energy_selected_device_ids=tuple(selected)
+                if isinstance(selected, list)
+                else selected,
+            )
+            await service.async_replace(updated)
+        except (HausmanHubSettingsViolation, TypeError):
+            return self.json_message(
+                "The energy settings values are invalid.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        return self.json(_energy_settings_payload(updated), headers=NO_STORE_HEADERS)
 
 
 class ClimateAdminResetView(_ClimateView):

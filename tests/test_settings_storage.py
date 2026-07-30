@@ -107,6 +107,41 @@ class HomeAssistantSettingsStoreTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(hub_settings_to_payload(HausmanHubSettings()), migrated)
         self.assertNotIn("unsafe", migrated)
 
+    async def test_version_one_storage_preserves_legacy_preferences(self) -> None:
+        store = self.make_store()
+        migrated = await store._store._async_migrate_func(
+            1,
+            0,
+            {
+                "version": 1,
+                "light_on_entities": ["light.living"],
+                "light_off_entities": [],
+                "tv_off_entities": ["media_player.tv"],
+                "climate_reports_enabled": False,
+                "curtain_holidays": ["2026-01-01"],
+            },
+        )
+
+        self.assertEqual(["light.living"], migrated["light_on_entities"])
+        self.assertEqual("watts", migrated["energy_display_units"])
+        self.assertFalse(migrated["energy_use_all_devices"])
+
+    async def test_damaged_version_one_storage_migrates_to_safe_defaults(self) -> None:
+        store = self.make_store()
+        migrated = await store._store._async_migrate_func(
+            1,
+            0,
+            {
+                "light_on_entities": 42,
+                "light_off_entities": [],
+                "tv_off_entities": [],
+                "climate_reports_enabled": True,
+                "curtain_holidays": [],
+            },
+        )
+
+        self.assertEqual(hub_settings_to_payload(HausmanHubSettings()), migrated)
+
 
 if __name__ == "__main__":
     unittest.main()

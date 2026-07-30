@@ -15,6 +15,7 @@ from custom_components.hausman_hub.application.dashboard_snapshot import (
     DashboardScenario,
     build_dashboard_snapshot,
 )
+from custom_components.hausman_hub.domain.hub_settings import HausmanHubSettings
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -83,6 +84,24 @@ class DashboardSnapshotTest(unittest.TestCase):
                     "kitchen",
                 ),
                 DashboardEntity(
+                    "sensor.kettle_current",
+                    "sensor",
+                    "8.04",
+                    "Ток",
+                    {"device_class": "current", "unit_of_measurement": "A"},
+                    "ha-device-kettle",
+                    "kitchen",
+                ),
+                DashboardEntity(
+                    "sensor.kettle_voltage",
+                    "sensor",
+                    "230.1",
+                    "Напряжение",
+                    {"device_class": "voltage", "unit_of_measurement": "V"},
+                    "ha-device-kettle",
+                    "kitchen",
+                ),
+                DashboardEntity(
                     "binary_sensor.kitchen_leak",
                     "binary_sensor",
                     "on",
@@ -133,6 +152,7 @@ class DashboardSnapshotTest(unittest.TestCase):
             generated_at_ms=1_782_225_600_000,
             local_iso="2026-06-23T20:00:00+03:00",
             state_revision=42,
+            energy_settings=HausmanHubSettings(energy_use_all_devices=True),
         )
 
     def test_snapshot_matches_public_schema(self) -> None:
@@ -163,7 +183,7 @@ class DashboardSnapshotTest(unittest.TestCase):
         )
 
         kettle = next(device for device in devices if device["name"] == "Чайник")
-        self.assertEqual(2, len(kettle["details"]))
+        self.assertEqual(4, len(kettle["details"]))
         self.assertNotIn(
             "sensor.orphan_diagnostic",
             {device["entityId"] for device in devices},
@@ -176,6 +196,46 @@ class DashboardSnapshotTest(unittest.TestCase):
         self.assertFalse(self.snapshot["capabilities"]["actions"])
         self.assertFalse(self.snapshot["capabilities"]["events"])
         self.assertTrue(all(not device["actions"] for device in self.snapshot["devices"]))
+
+    def test_energy_groups_measurements_by_physical_device(self) -> None:
+        energy = self.snapshot["energy"]
+        self.assertTrue(energy["available"])
+        self.assertEqual(1850.0, energy["currentPowerW"])
+        self.assertEqual(8.04, energy["currentA"])
+        self.assertEqual(230.1, energy["voltageV"])
+        self.assertEqual(1, len(energy["sources"]))
+        self.assertEqual("Чайник", energy["sources"][0]["name"])
+        self.assertEqual("watts", energy["settings"]["displayUnits"])
+
+    def test_default_energy_selection_avoids_implicit_double_counting(self) -> None:
+        snapshot = build_dashboard_snapshot(
+            areas=(),
+            devices=(),
+            entities=(
+                DashboardEntity(
+                    "sensor.whole_home_power",
+                    "sensor",
+                    "1000",
+                    "Общий счётчик",
+                    {"device_class": "power", "unit_of_measurement": "W"},
+                    "whole-home-meter",
+                ),
+                DashboardEntity(
+                    "sensor.plug_power",
+                    "sensor",
+                    "200",
+                    "Розетка",
+                    {"device_class": "power", "unit_of_measurement": "W"},
+                    "child-plug",
+                ),
+            ),
+            generated_at_ms=1,
+            local_iso="2026-07-30T12:00:00+06:00",
+        )
+
+        self.assertFalse(snapshot["energy"]["available"])
+        self.assertEqual([], snapshot["energy"]["selectedSourceIds"])
+        self.assertFalse(snapshot["energy"]["settings"]["useAllDevices"])
 
     def test_room_weather_alarm_and_summary_are_human_readable(self) -> None:
         living = next(room for room in self.snapshot["rooms"] if room["id"] == "living")

@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 import hashlib
 from typing import Any
 
+from ..domain.hub_settings import HausmanHubSettings
+
 
 DASHBOARD_CONTRACT_NAME = "universal-home"
 DASHBOARD_CONTRACT_VERSION = 1
@@ -72,6 +74,7 @@ _ALLOWLISTED_ATTRIBUTES = (
     "percentage",
     "temperature",
 )
+_ENERGY_DEVICE_CLASSES = frozenset({"power", "current", "voltage", "energy"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,6 +184,10 @@ def _detail_label(entity: DashboardEntity) -> str:
         "moisture": "Протечка",
         "smoke": "Дым",
         "gas": "Газ",
+        "power": "Мощность",
+        "current": "Ток",
+        "voltage": "Напряжение",
+        "energy": "Энергия",
     }
     if device_class in labels:
         return labels[device_class]
@@ -264,6 +271,40 @@ def _sensor_value(
         ),
         None,
     )
+
+
+def _measurement(
+    entities: Iterable[DashboardEntity], device_class: str
+) -> float | None:
+    """Return one canonical electrical measurement for a physical device."""
+
+    scales = {
+        "power": {"W": 1.0, "kW": 1000.0},
+        "current": {"A": 1.0, "mA": 0.001},
+        "voltage": {"V": 1.0, "mV": 0.001},
+        "energy": {"kWh": 1.0, "Wh": 0.001},
+    }
+    for entity in entities:
+        if _device_class(entity) != device_class:
+            continue
+        value = _number(entity.state)
+        unit = entity.attributes.get("unit_of_measurement")
+        if value is None or not isinstance(unit, str):
+            continue
+        scale = scales.get(device_class, {}).get(unit)
+        if scale is not None:
+            return round(value * scale, 3)
+    return None
+
+
+def _energy_measurements(entities: Iterable[DashboardEntity]) -> dict[str, float | None]:
+    collected = tuple(entities)
+    return {
+        "currentPowerW": _measurement(collected, "power"),
+        "currentA": _measurement(collected, "current"),
+        "voltageV": _measurement(collected, "voltage"),
+        "totalKwh": _measurement(collected, "energy"),
+    }
 
 
 def _room_climate(entities: Iterable[DashboardEntity]) -> DashboardEntity | None:
@@ -350,6 +391,7 @@ def build_dashboard_snapshot(
     local_iso: str,
     home_name: str = "Дом",
     state_revision: int | None = None,
+    energy_settings: HausmanHubSettings | None = None,
 ) -> dict[str, object]:
     """Project one immutable, read-only universal dashboard snapshot."""
 
@@ -496,6 +538,7 @@ def build_dashboard_snapshot(
         )
 
     device_payloads: list[dict[str, object]] = []
+    energy_sources: list[dict[str, object]] = []
     for group_key, members in grouped.items():
         members.sort(
             key=lambda item: (
@@ -530,6 +573,10 @@ def build_dashboard_snapshot(
             for member in members
         ]
         name = registry_device.name if registry_device is not None else primary.name
+        electrical = _energy_measurements(members)
+        has_energy = any(
+            _device_class(member) in _ENERGY_DEVICE_CLASSES for member in members
+        )
         device_payloads.append(
             {
                 "id": public_id,
@@ -557,8 +604,21 @@ def build_dashboard_snapshot(
                 "attributes": _safe_attributes(primary),
                 "actions": [],
                 "details": details,
+                "energy": electrical if has_energy else None,
             }
         )
+        if has_energy:
+            energy_sources.append(
+                {
+                    "id": public_id,
+                    "deviceId": public_id,
+                    "name": name,
+                    "roomId": area.area_id if area is not None else None,
+                    "roomName": area.name if area is not None else None,
+                    "available": not unavailable,
+                    **electrical,
+                }
+            )
 
     room_payloads: list[dict[str, object]] = []
     for area in area_by_id.values():
@@ -700,6 +760,54 @@ def build_dashboard_snapshot(
             for item in inventory_payloads
         ),
     }
+    saved_energy = energy_settings or HausmanHubSettings()
+    selected_ids = set(saved_energy.energy_selected_device_ids)
+    selected_sources = [
+        source
+        for source in energy_sources
+        if saved_energy.energy_use_all_devices or source["id"] in selected_ids
+    ]
+    power_values = [
+        float(source["currentPowerW"])
+        for source in selected_sources
+        if source["currentPowerW"] is not None
+    ]
+    current_values = [
+        float(source["currentA"])
+        for source in selected_sources
+        if source["currentA"] is not None
+    ]
+    voltage_values = [
+        float(source["voltageV"])
+        for source in selected_sources
+        if source["voltageV"] is not None
+    ]
+    energy_values = [
+        float(source["totalKwh"])
+        for source in selected_sources
+        if source["totalKwh"] is not None
+    ]
+    energy_payload = {
+        "available": any(
+            source["available"]
+            and any(source[key] is not None for key in ("currentPowerW", "currentA", "voltageV", "totalKwh"))
+            for source in selected_sources
+        ),
+        "currentPowerW": round(sum(power_values), 1) if power_values else None,
+        "currentA": round(sum(current_values), 3) if current_values else None,
+        "voltageV": round(sum(voltage_values) / len(voltage_values), 1)
+        if voltage_values
+        else None,
+        "totalKwh": round(sum(energy_values), 3) if energy_values else None,
+        "sources": energy_sources,
+        "selectedSourceIds": [source["id"] for source in selected_sources],
+        "settings": {
+            "displayUnits": saved_energy.energy_display_units,
+            "showVoltage": saved_energy.energy_show_voltage,
+            "aggregation": saved_energy.energy_aggregation,
+            "useAllDevices": saved_energy.energy_use_all_devices,
+        },
+    }
     return {
         "contract": {
             "name": DASHBOARD_CONTRACT_NAME,
@@ -713,6 +821,7 @@ def build_dashboard_snapshot(
         "summary": summary,
         "rooms": sorted(room_payloads, key=lambda item: str(item["name"])),
         "devices": sorted(device_payloads, key=lambda item: str(item["name"])),
+        "energy": energy_payload,
         "inventory": {
             "summary": inventory_summary,
             "devices": inventory_payloads,
@@ -729,5 +838,10 @@ def build_dashboard_snapshot(
             "smartClimate": any(room["hasClimateControl"] for room in room_payloads),
             "physicalDevices": True,
             "dashboardSnapshot": True,
+            "energy": any(
+                any(source[key] is not None for key in ("currentPowerW", "currentA", "voltageV", "totalKwh"))
+                for source in energy_sources
+            ),
+            "energyHistory": False,
         },
     }

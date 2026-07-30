@@ -20,6 +20,11 @@ def settings() -> HausmanHubSettings:
         tv_off_entities=("media_player.living_tv",),
         climate_reports_enabled=False,
         curtain_holidays=("2026-01-01", "2026-05-01"),
+        energy_display_units="both",
+        energy_show_voltage=False,
+        energy_aggregation="separate",
+        energy_use_all_devices=False,
+        energy_selected_device_ids=("device_0123456789abcdef",),
     )
 
 
@@ -36,6 +41,11 @@ class HausmanHubSettingsTest(unittest.TestCase):
                 "tv_off_entities",
                 "climate_reports_enabled",
                 "curtain_holidays",
+                "energy_display_units",
+                "energy_show_voltage",
+                "energy_aggregation",
+                "energy_use_all_devices",
+                "energy_selected_device_ids",
             },
             set(payload),
         )
@@ -81,6 +91,20 @@ class HausmanHubSettingsTest(unittest.TestCase):
             with self.subTest(values=values):
                 with self.assertRaises(HausmanHubSettingsViolation):
                     HausmanHubSettings(curtain_holidays=values)
+
+    def test_energy_preferences_are_bounded_and_typed(self) -> None:
+        invalid = (
+            {"energy_display_units": "kilowatts"},
+            {"energy_show_voltage": 1},
+            {"energy_aggregation": "rooms"},
+            {"energy_use_all_devices": "yes"},
+            {"energy_selected_device_ids": ("switch.private",)},
+            {"energy_selected_device_ids": ("device_0123456789abcdef",) * 2},
+        )
+        for update in invalid:
+            with self.subTest(update=update):
+                with self.assertRaises(HausmanHubSettingsViolation):
+                    HausmanHubSettings(**update)  # type: ignore[arg-type]
 
 
 if __name__ == "__main__":

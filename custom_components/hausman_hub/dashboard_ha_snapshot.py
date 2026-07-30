@@ -12,6 +12,7 @@ from .application.dashboard_snapshot import (
     DashboardScenario,
     build_dashboard_snapshot,
 )
+from .domain.hub_settings import HausmanHubSettings
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -157,6 +158,7 @@ def _attach_catalog_actions(
 async def async_dashboard_snapshot(
     hass: HomeAssistant,
     scenario_service: ScenarioService | None = None,
+    energy_settings: HausmanHubSettings | None = None,
 ) -> dict[str, object]:
     """Collect current HA registries and project one side-effect-free payload."""
 
@@ -225,6 +227,7 @@ async def async_dashboard_snapshot(
         local_iso=local_now.isoformat(),
         home_name=_non_empty_string(getattr(hass.config, "location_name", None))
         or "Дом",
+        energy_settings=energy_settings,
     )
     _attach_catalog_actions(payload, scenario_service)
     return payload

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hausmanhub/contracts/v1/energy-settings.schema.json",
+  "title": "HausmanHub shared energy settings v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "displayUnits",
+    "showVoltage",
+    "aggregation",
+    "useAllDevices",
+    "selectedDeviceIds"
+  ],
+  "properties": {
+    "displayUnits": { "enum": ["watts", "amps", "both"] },
+    "showVoltage": { "type": "boolean" },
+    "aggregation": { "enum": ["combined", "separate"] },
+    "useAllDevices": { "type": "boolean" },
+    "selectedDeviceIds": {
+      "type": "array",
+      "maxItems": 128,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^device_[0-9a-f]{16}$" }
+    }
+  }
+}

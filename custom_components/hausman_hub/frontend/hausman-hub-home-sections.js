@@ -3,6 +3,10 @@
 export function renderHomeSection(panel, sectionId, container, deps) {
   const { el, svgIcon, sections, subtitles } = deps;
   container.innerHTML = "";
+  if (sectionId === "energy") {
+    panel._renderEnergySection(container);
+    return;
+  }
   const meta = sections.find((section) => section.id === sectionId) || sections[0];
   const heading = el("div", "home-section-heading");
   const headingIcon = el("span", "home-section-icon");

@@ -8,11 +8,15 @@ import re
 from typing import Any
 
 
-HUB_SETTINGS_VERSION = 1
+HUB_SETTINGS_VERSION = 2
 MAX_LIGHT_PRESET_ENTITIES = 40
 MAX_TV_OFF_ENTITIES = 12
 MAX_CURTAIN_HOLIDAYS = 64
+MAX_ENERGY_DEVICES = 128
 _ENTITY_ID = re.compile(r"^[a-z][a-z0-9_]*\.[a-z0-9_]+$")
+_PUBLIC_DEVICE_ID = re.compile(r"^device_[0-9a-f]{16}$")
+ENERGY_DISPLAY_UNITS = frozenset({"watts", "amps", "both"})
+ENERGY_AGGREGATIONS = frozenset({"combined", "separate"})
 
 
 class HausmanHubSettingsViolation(ValueError):
@@ -28,6 +32,11 @@ class HausmanHubSettings:
     tv_off_entities: tuple[str, ...] = ()
     climate_reports_enabled: bool = True
     curtain_holidays: tuple[str, ...] = ()
+    energy_display_units: str = "watts"
+    energy_show_voltage: bool = True
+    energy_aggregation: str = "combined"
+    energy_use_all_devices: bool = False
+    energy_selected_device_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         _entities(
@@ -51,6 +60,15 @@ class HausmanHubSettings:
         if type(self.climate_reports_enabled) is not bool:
             raise HausmanHubSettingsViolation("climate reports flag must be boolean")
         _holidays(self.curtain_holidays)
+        if self.energy_display_units not in ENERGY_DISPLAY_UNITS:
+            raise HausmanHubSettingsViolation("energy display units are invalid")
+        if type(self.energy_show_voltage) is not bool:
+            raise HausmanHubSettingsViolation("energy voltage flag must be boolean")
+        if self.energy_aggregation not in ENERGY_AGGREGATIONS:
+            raise HausmanHubSettingsViolation("energy aggregation is invalid")
+        if type(self.energy_use_all_devices) is not bool:
+            raise HausmanHubSettingsViolation("energy all-devices flag must be boolean")
+        _public_device_ids(self.energy_selected_device_ids)
 
 
 def hub_settings_to_payload(settings: HausmanHubSettings) -> dict[str, object]:
@@ -65,6 +83,11 @@ def hub_settings_to_payload(settings: HausmanHubSettings) -> dict[str, object]:
         "tv_off_entities": list(settings.tv_off_entities),
         "climate_reports_enabled": settings.climate_reports_enabled,
         "curtain_holidays": list(settings.curtain_holidays),
+        "energy_display_units": settings.energy_display_units,
+        "energy_show_voltage": settings.energy_show_voltage,
+        "energy_aggregation": settings.energy_aggregation,
+        "energy_use_all_devices": settings.energy_use_all_devices,
+        "energy_selected_device_ids": list(settings.energy_selected_device_ids),
     }
 
 
@@ -80,6 +103,11 @@ def hub_settings_from_payload(payload: object) -> HausmanHubSettings:
         "tv_off_entities",
         "climate_reports_enabled",
         "curtain_holidays",
+        "energy_display_units",
+        "energy_show_voltage",
+        "energy_aggregation",
+        "energy_use_all_devices",
+        "energy_selected_device_ids",
     }
     if set(payload) != required:
         raise HausmanHubSettingsViolation("stored HausmanHub settings fields are invalid")
@@ -91,6 +119,13 @@ def hub_settings_from_payload(payload: object) -> HausmanHubSettings:
         tv_off_entities=_string_tuple(payload["tv_off_entities"], "TV off preset"),
         climate_reports_enabled=payload["climate_reports_enabled"],  # type: ignore[arg-type]
         curtain_holidays=_string_tuple(payload["curtain_holidays"], "curtain holidays"),
+        energy_display_units=payload["energy_display_units"],  # type: ignore[arg-type]
+        energy_show_voltage=payload["energy_show_voltage"],  # type: ignore[arg-type]
+        energy_aggregation=payload["energy_aggregation"],  # type: ignore[arg-type]
+        energy_use_all_devices=payload["energy_use_all_devices"],  # type: ignore[arg-type]
+        energy_selected_device_ids=_string_tuple(
+            payload["energy_selected_device_ids"], "energy selected devices"
+        ),
     )
 
 
@@ -134,3 +169,16 @@ def _holidays(values: tuple[str, ...]) -> None:
             raise HausmanHubSettingsViolation("curtain holiday must be an ISO date") from error
         if parsed.isoformat() != value:
             raise HausmanHubSettingsViolation("curtain holiday must be canonical")
+
+
+def _public_device_ids(values: tuple[str, ...]) -> None:
+    if (
+        type(values) is not tuple
+        or len(values) > MAX_ENERGY_DEVICES
+        or len(values) != len(set(values))
+        or any(
+            not isinstance(value, str) or not _PUBLIC_DEVICE_ID.fullmatch(value)
+            for value in values
+        )
+    ):
+        raise HausmanHubSettingsViolation("energy selected devices are invalid")

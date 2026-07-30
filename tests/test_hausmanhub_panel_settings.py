@@ -22,6 +22,7 @@ DEVICE_INVENTORY_JS = PANEL_JS.with_name("hausman-hub-device-inventory.js")
 DEVICE_BINDINGS_JS = PANEL_JS.with_name("hausman-hub-device-bindings.js")
 AREA_BINDING_JS = PANEL_JS.with_name("hausman-hub-area-binding.js")
 NAVIGATION_JS = PANEL_JS.with_name("hausman-hub-navigation.js")
+ENERGY_JS = PANEL_JS.with_name("hausman-hub-energy.js")
 SETTINGS_CSS = PANEL_JS.with_name("hausman-hub-settings.css")
 DEVICE_BINDINGS_CSS = PANEL_JS.with_name("hausman-hub-device-bindings.css")
 
@@ -428,6 +429,10 @@ def panel_script(
         {{ filename: {str(NAVIGATION_JS)!r} }}
       );
       vm.runInThisContext(
+        fs.readFileSync({str(ENERGY_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(ENERGY_JS)!r} }}
+      );
+      vm.runInThisContext(
         fs.readFileSync({str(PANEL_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, ""),
         {{ filename: {str(PANEL_JS)!r} }}
       );
@@ -515,6 +520,7 @@ def run_panel_script(script: str) -> subprocess.CompletedProcess[str]:
         check=False,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=60,
     )
 
@@ -561,7 +567,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const labels = tabs.map((node) => node["aria-label"]);
         const expected = [
           "Главная", "Освещение", "Климат", "Комнаты", "Медиа",
-          "Безопасность", "Устройства", "Сценарии", "Настройки",
+          "Безопасность", "Устройства", "Энергия", "Сценарии", "Настройки",
         ];
         if (JSON.stringify(labels) !== JSON.stringify(expected)) {
           throw new Error("tab labels mismatch: " + JSON.stringify(labels));
@@ -614,7 +620,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
             """
         const ordered = [
           "overview", "lighting", "climate", "rooms", "media",
-          "security", "devices", "scenarios", "settings",
+          "security", "devices", "energy", "scenarios", "settings",
         ];
         ordered.forEach((section) => {
           panel._shell.tabs[section].fire("click");
@@ -654,6 +660,78 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         panel._onNavigationPop();
         if (panel._activeSection !== "overview" || panel._shell.sectionNodes.overview.hidden) {
           throw new Error("route without HausmanHub params did not restore overview");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_energy_section_configures_units_and_opens_one_physical_device(self) -> None:
+        dashboard = {
+            "devices": [
+                {
+                    "id": "device_0123456789abcdef",
+                    "physicalId": "device_0123456789abcdef",
+                    "entityId": "switch.kettle",
+                    "name": "Чайник",
+                    "roomName": "Кухня",
+                    "domain": "switch",
+                    "category": "switch",
+                    "state": "on",
+                    "stateLabel": "включено",
+                    "tone": "good",
+                    "details": [
+                        {"label": "Мощность", "value": "1850 W", "entityId": "sensor.kettle_power", "domain": "sensor", "state": "1850"},
+                        {"label": "Ток", "value": "8.04 A", "entityId": "sensor.kettle_current", "domain": "sensor", "state": "8.04"},
+                    ],
+                    "actions": [],
+                }
+            ],
+            "energy": {
+                "available": True,
+                "currentPowerW": 1850,
+                "currentA": 8.04,
+                "voltageV": 230.1,
+                "totalKwh": 12.4,
+                "selectedSourceIds": ["device_0123456789abcdef"],
+                "settings": {"displayUnits": "watts", "showVoltage": True, "aggregation": "combined", "useAllDevices": True},
+                "sources": [
+                    {"id": "device_0123456789abcdef", "deviceId": "device_0123456789abcdef", "name": "Чайник", "roomName": "Кухня", "available": True, "currentPowerW": 1850, "currentA": 8.04, "voltageV": 230.1, "totalKwh": 12.4}
+                ],
+            },
+            "rooms": [], "alarms": [],
+        }
+        script = panel_script(
+            GET_PATHS | {"hausman_hub/v1/dashboard": dashboard},
+            {"hausman_hub/v1/admin/energy-settings": {"displayUnits": "both"}},
+            """
+        panel._shell.tabs.energy.fire("click");
+        await tick();
+        let text = textOf(panel._shell.homeSections.energy);
+        if (!text.includes("Энергия") || !text.includes("850") || !text.includes("230,1")) {
+          throw new Error("energy summary is incomplete: " + text);
+        }
+        const configure = findAll(panel._shell.homeSections.energy, (node) =>
+          node.tagName === "BUTTON" && node.textContent === "Настроить карточку")[0];
+        configure.fire("click");
+        const both = findAll(panel._shell.homeSections.energy, (node) =>
+          node.tagName === "BUTTON" && node.textContent === "Оба")[0];
+        both.fire("click");
+        const save = findAll(panel._shell.homeSections.energy, (node) =>
+          node.tagName === "BUTTON" && node.textContent === "Сохранить настройку")[0];
+        save.fire("click");
+        await tick(10);
+        const post = calls.find((call) => call.method === "POST" && call.path === "hausman_hub/v1/admin/energy-settings");
+        if (!post || post.payload.displayUnits !== "both" || post.payload.useAllDevices !== true) {
+          throw new Error("energy settings post mismatch: " + JSON.stringify(post));
+        }
+        panel._shell.tabs.energy.fire("click");
+        const device = findAll(panel._shell.homeSections.energy, (node) =>
+          node.tagName === "BUTTON" && String(node.className).includes("energy-device-card"))[0];
+        device.fire("click");
+        text = textOf(panel._shell.homeSections.energy);
+        if (!text.includes("Устройство и управление") || !text.includes("Чайник")) {
+          throw new Error("energy device detail did not open: " + text);
         }
             """,
         )

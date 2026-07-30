@@ -33,9 +33,27 @@ class HomeAssistantSettingsStore:
                 old_minor_version: int,
                 old_data: object,
             ) -> dict[str, object]:
-                del old_major_version
                 del old_minor_version
-                del old_data
+                if old_major_version == 1 and isinstance(old_data, dict):
+                    legacy_fields = {
+                        "light_on_entities",
+                        "light_off_entities",
+                        "tv_off_entities",
+                        "climate_reports_enabled",
+                        "curtain_holidays",
+                    }
+                    if legacy_fields.issubset(old_data):
+                        try:
+                            candidate = HausmanHubSettings(
+                                light_on_entities=tuple(old_data["light_on_entities"]),
+                                light_off_entities=tuple(old_data["light_off_entities"]),
+                                tv_off_entities=tuple(old_data["tv_off_entities"]),
+                                climate_reports_enabled=old_data["climate_reports_enabled"],
+                                curtain_holidays=tuple(old_data["curtain_holidays"]),
+                            )
+                        except (TypeError, HausmanHubSettingsViolation):
+                            candidate = HausmanHubSettings()
+                        return hub_settings_to_payload(candidate)
                 return hub_settings_to_payload(HausmanHubSettings())
 
         self._store: Store[dict[str, object]] = _MigratingSettingsStore(
