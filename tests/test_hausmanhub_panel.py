@@ -149,7 +149,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             len(settings_styles.encode("utf-8")), MAX_SETTINGS_CSS_BYTES
         )
         self.assertIn('"/api/hausman_hub/panel/hausman-hub-panel.css"', content)
-        self.assertIn('hausman-hub-settings.css?v=1.50.0', styles)
+        self.assertIn('hausman-hub-settings.css?v=1.51.0', styles)
         self.assertIn("--hmh-bg:#0B0F14", styles)
         self.assertIn("--hmh-bg:#EEF1F6", styles)
         self.assertIn(".page-header", styles)
@@ -248,6 +248,13 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         ):
             with self.subTest(retired=retired):
                 self.assertNotIn(retired, content)
+
+    def test_climate_start_control_is_presented_as_a_guarded_canary(self) -> None:
+        content = PANEL_JS.read_text(encoding="utf-8")
+
+        self.assertIn("Запустить пилотную комнату", content)
+        self.assertIn("rollout.enable_allowed !== true", content)
+        self.assertNotIn('managed ? "Остановить управление" : "Включить управление"', content)
 
     def test_room_assignment_copy_names_home_assistant_as_source_of_truth(self) -> None:
         content = PANEL_JS.read_text(encoding="utf-8")
@@ -702,7 +709,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.50.0",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.51.0",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },

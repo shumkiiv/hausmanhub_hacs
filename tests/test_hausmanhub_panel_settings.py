@@ -2069,12 +2069,18 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         self.assertEqual(0, completed.returncode, completed.stderr)
 
     def test_mode_switch_posts_exact_payload(self) -> None:
+        payloads = dict(GET_PATHS)
+        payloads["hausman_hub/v1/admin/climate-mode"] = {
+            "mode": "disabled",
+            "contour_configured": True,
+            "rollout": {"enable_allowed": True},
+        }
         script = panel_script(
-            GET_PATHS,
-            {"hausman_hub/v1/admin/climate-mode": {"mode": "managed", "contour_configured": True}},
+            payloads,
+            {"hausman_hub/v1/admin/climate-mode": {"mode": "managed"}},
             """
         const buttons = findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON");
-        const enable = buttons.find((node) => node.textContent === "Включить управление");
+        const enable = buttons.find((node) => node.textContent === "Запустить пилотную комнату");
         if (!enable || enable.disabled) throw new Error("enabled switch missing");
         enable.fire("click");
         await tick();

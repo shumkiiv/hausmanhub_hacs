@@ -1,10 +1,10 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.50.0";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.50.0";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.50.0";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.50.0";
-import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.50.0";
-import { openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.50.0";
-import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.50.0";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.0";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.0";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.0";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.0";
+import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.0";
+import { openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.0";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.0";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css";
@@ -1543,12 +1543,13 @@ class HausmanHubPanel extends HTMLElement {
     if (modeSettings) {
       const switchRow = el("div", "overview-hero-actions");
       const managed = modeSettings.mode === "managed";
+      const rollout = modeSettings.rollout || {};
       const button = el(
         "button",
         managed ? "secondary" : null,
-        managed ? "Выключить управление" : "Включить управление"
+        managed ? "Остановить управление" : "Запустить пилотную комнату"
       );
-      button.disabled = this._busy || (!managed && modeSettings.contour_configured !== true);
+      button.disabled = this._busy || (!managed && rollout.enable_allowed !== true);
       button.addEventListener("click", () => {
         const target = managed ? "disabled" : "managed";
         this._save(
@@ -1557,16 +1558,16 @@ class HausmanHubPanel extends HTMLElement {
           { mode: target, expected_mode: modeSettings.mode, confirm: managed ? null : true },
           managed
             ? "Выключить управление климатом? Устройства больше не будут получать команды от HausmanHub."
-            : "Включить управление климатом от HausmanHub? Убедитесь, что прежний модуль не управляет теми же устройствами.",
-          managed ? "Управление климатом выключено." : "Управление климатом включено.",
+            : "Запустить пилотную комнату? Старый контур не должен одновременно управлять её устройствами.",
+          managed ? "Управление климатом остановлено." : "Пилотная комната запущена.",
           "Режим уже изменён в другом окне. Данные обновлены, повторите действие."
         );
       });
       switchRow.appendChild(button);
       card.appendChild(switchRow);
-      if (!managed && modeSettings.contour_configured !== true) {
+      if (!managed && rollout.enable_allowed !== true) {
         card.appendChild(
-          el("div", "muted", "Включение станет доступно после настройки климатического контура.")
+          el("div", "muted", "Настройте контур и завершите shadow-проверку одной пилотной комнаты.")
         );
       }
     }

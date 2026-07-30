@@ -2837,7 +2837,10 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
                         self.config_entry.data,
                         self.config_entry.options,
                         {
-                            CLIMATE_BRIDGE_MODE_FIELD: ClimateControlMode.MANAGED.value,
+                            # Saving a contour only starts command-free shadow
+                            # collection. Physical control has a separate,
+                            # evidence-gated canary transition.
+                            CLIMATE_BRIDGE_MODE_FIELD: ClimateControlMode.DISABLED.value,
                             CLIMATE_BRIDGE_TARGET_FIELD: None,
                             CLIMATE_CANARY_ROOM_ID_FIELD: None,
                             NATIVE_CLIMATE_MODE_FIELD: NativeClimateMode.DISABLED.value,

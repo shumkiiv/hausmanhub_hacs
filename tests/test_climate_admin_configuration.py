@@ -1173,19 +1173,14 @@ class ClimateAdminConfigurationRoutesTest(unittest.TestCase):
     def test_mode_second_stale_post_loses_with_409(self) -> None:
         path = "/api/hausman_hub/v1/admin/climate-mode"
         self._inject_runtime(configured=True)
-        enabled = self._post(
-            path,
-            self._admin(),
-            {"mode": "managed", "expected_mode": "disabled", "confirm": True},
-        )
-        self.assertEqual(200, enabled.status)
+        self.entry.options = {"climate_bridge_mode": "managed"}
         stale = self._post(
             path,
             self._admin(),
             {"mode": "disabled", "expected_mode": "disabled", "confirm": None},
         )
         self.assertEqual(409, stale.status)
-        self.assertEqual(1, len(self.updated_options))
+        self.assertEqual(0, len(self.updated_options))
 
     def test_home_environment_error_payload_never_writes(self) -> None:
         path = "/api/hausman_hub/v1/admin/home-environment"
@@ -1208,10 +1203,10 @@ class ClimateAdminConfigurationRoutesTest(unittest.TestCase):
         path = "/api/hausman_hub/v1/admin/climate-mode"
         response = self._get(path, self._admin())
         self.assertEqual(200, response.status)
-        self.assertEqual(
-            {"mode": "disabled", "contour_configured": False},
-            response.payload,
-        )
+        self.assertEqual("disabled", response.payload["mode"])
+        self.assertFalse(response.payload["contour_configured"])
+        self.assertEqual("not_configured", response.payload["rollout"]["phase"])
+        self.assertFalse(response.payload["rollout"]["enable_allowed"])
         repost = self._post(
             path,
             self._admin(),
@@ -1253,16 +1248,83 @@ class ClimateAdminConfigurationRoutesTest(unittest.TestCase):
         self.assertEqual([], self.updated_options)
 
         self._inject_runtime(configured=True)
+        blocked_by_shadow = self._post(
+            path,
+            self._admin(),
+            {"mode": "managed", "expected_mode": "disabled", "confirm": True},
+        )
+        self.assertEqual(409, blocked_by_shadow.status)
+        self.assertEqual([], self.updated_options)
+
+    def test_climate_mode_starts_only_one_shadow_verified_canary_room(self) -> None:
+        from dataclasses import replace
+        from unittest.mock import AsyncMock
+
+        from custom_components.hausman_hub.domain.climate import (
+            ClimateControlOwner,
+            ClimateControlScope,
+            ClimateDeviceKind,
+            ClimateRegistry,
+        )
+        from tests.test_climate_runtime import native_application_inputs
+
+        path = "/api/hausman_hub/v1/admin/climate-mode"
+        self._inject_runtime(configured=True)
+        runtime = self.hass.data["hausman_hub"]["climate_runtime"]
+        native, state_view = native_application_inputs(runtime._registry)
+        runtime._registry = ClimateRegistry(
+            rooms=native.rooms,
+            devices=tuple(
+                replace(
+                    device,
+                    control_scope=(
+                        ClimateControlScope.OBSERVED
+                        if device.kind
+                        in {
+                            ClimateDeviceKind.TEMPERATURE_SENSOR,
+                            ClimateDeviceKind.HUMIDITY_SENSOR,
+                        }
+                        else ClimateControlScope.CANARY
+                    ),
+                    control_owner=(
+                        ClimateControlOwner.OBSERVED
+                        if device.kind
+                        in {
+                            ClimateDeviceKind.TEMPERATURE_SENSOR,
+                            ClimateDeviceKind.HUMIDITY_SENSOR,
+                        }
+                        else ClimateControlOwner.CLIMATE_CORE
+                    ),
+                )
+                for device in native.devices
+            ),
+            home=native.home,
+        )
+        runtime._ha_state_view = state_view
+        self.views[path]._climate_shadow = lambda: SimpleNamespace(
+            async_snapshot=AsyncMock(
+                return_value={
+                    "summary": {"sample_count": 24},
+                    "rooms": [
+                        {
+                            "room_id": "living",
+                            "verdict": "ready",
+                            "fresh": True,
+                        }
+                    ],
+                }
+            )
+        )
+
         enabled = self._post(
             path,
             self._admin(),
             {"mode": "managed", "expected_mode": "disabled", "confirm": True},
         )
+
         self.assertEqual(200, enabled.status)
-        self.assertEqual(
-            {"mode": "managed", "contour_configured": True},
-            enabled.payload,
-        )
+        self.assertEqual("canary", enabled.payload["rollout"]["phase"])
+        self.assertTrue(enabled.payload["rollout"]["commands_enabled"])
         _, options = self.updated_options[0]
         self.assertEqual("managed", options["climate_bridge_mode"])
 

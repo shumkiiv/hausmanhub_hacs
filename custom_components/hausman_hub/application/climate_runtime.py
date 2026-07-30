@@ -100,6 +100,7 @@ from .climate_ownership import (
     climate_ownership_skip_receipt,
     plan_room_promotion,
 )
+from .climate_rollout import climate_rollout_status
 from .climate_registry import (
     ClimateRegistryViolation,
     reconcile_climate_registry,
@@ -1730,6 +1731,20 @@ class ClimateRuntime:
                 "mode": self.configuration.climate_bridge_mode.value,
                 "contour_configured": contour is not None and bool(contour.rooms),
             }
+
+    async def async_climate_rollout_status(
+        self,
+        shadow_window: object,
+    ) -> dict[str, object]:
+        """Evaluate the command-free shadow-to-canary gate."""
+
+        async with self._lock:
+            return climate_rollout_status(
+                self._registry,
+                self._contours,
+                bridge_mode=self.configuration.climate_bridge_mode,
+                shadow_window=shadow_window,
+            )
 
     def signal_entity_known(self, entity_id: str) -> bool:
         """Answer whether one entity currently has any readable local state."""

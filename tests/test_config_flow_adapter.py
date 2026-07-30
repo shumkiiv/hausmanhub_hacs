@@ -1225,7 +1225,10 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual("create_entry", saved["type"])
-        self.assertEqual("managed", saved["data"]["climate_bridge_mode"])
+        self.assertEqual("disabled", saved["data"]["climate_bridge_mode"])
+        # The remainder exercises already-authorized managed operations. The
+        # production wizard no longer performs this separate rollout step.
+        saved["data"]["climate_bridge_mode"] = "managed"
         self.assertEqual(1, len(contour_store.registry.contours))
         self.assertEqual(1, len(climate_store.registry.rooms))
         self.assertEqual(1, len(climate_store.registry.devices))

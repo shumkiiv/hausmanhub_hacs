@@ -1492,6 +1492,17 @@ class ClimateAdminClimateModeView(_ClimateView):
     url = ADMIN_CLIMATE_MODE_PATH
     name = "api:hausman_hub:climate_admin_mode"
 
+    async def _status(self, runtime: Any) -> dict[str, object]:
+        status = await runtime.async_climate_mode_status()
+        service = self._climate_shadow()
+        shadow_window: object = None
+        if service is not None:
+            shadow_window = await service.async_snapshot(
+                generated_at=int(dt_util.now().timestamp() * 1000)
+            )
+        status["rollout"] = await runtime.async_climate_rollout_status(shadow_window)
+        return status
+
     async def get(self, request: Any) -> Any:
         if not _is_exact_request(request, ADMIN_CLIMATE_MODE_PATH):
             return _not_found(self)
@@ -1501,7 +1512,7 @@ class ClimateAdminClimateModeView(_ClimateView):
         if runtime is None:
             return self._unavailable()
         try:
-            status = await runtime.async_climate_mode_status()
+            status = await self._status(runtime)
         except Exception:
             return self._unavailable()
         return self.json(status, headers=NO_STORE_HEADERS)
@@ -1523,7 +1534,7 @@ class ClimateAdminClimateModeView(_ClimateView):
                 headers=NO_STORE_HEADERS,
             )
         try:
-            status = await runtime.async_climate_mode_status()
+            status = await self._status(runtime)
             mode = validate_climate_mode_update(status["mode"], payload)
         except ClimateSignalSettingsViolation as error:
             return self.json_message(
@@ -1540,6 +1551,19 @@ class ClimateAdminClimateModeView(_ClimateView):
         if mode == "managed" and status["contour_configured"] is not True:
             return self.json_message(
                 "Управляемый режим требует настроенного климатического контура.",
+                HTTPStatus.CONFLICT,
+                headers=NO_STORE_HEADERS,
+            )
+        rollout = status.get("rollout")
+        if (
+            mode == "managed"
+            and (
+                not isinstance(rollout, dict)
+                or rollout.get("enable_allowed") is not True
+            )
+        ):
+            return self.json_message(
+                "Сначала завершите shadow-проверку и подготовьте одну пилотную комнату.",
                 HTTPStatus.CONFLICT,
                 headers=NO_STORE_HEADERS,
             )
@@ -1591,6 +1615,16 @@ class ClimateAdminClimateModeView(_ClimateView):
             {
                 "mode": mode,
                 "contour_configured": status["contour_configured"],
+                "rollout": {
+                    **rollout,
+                    "phase": (
+                        "canary"
+                        if mode == "managed"
+                        else rollout.get("phase", "shadow")
+                    ),
+                    "enable_allowed": False,
+                    "commands_enabled": mode == "managed",
+                },
             },
             headers=NO_STORE_HEADERS,
         )
