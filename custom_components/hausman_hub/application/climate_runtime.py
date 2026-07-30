@@ -146,6 +146,9 @@ from .contour_apply import (
     local_desired_state_changes,
     parse_contour_apply_request,
 )
+
+_CLIMATE_READBACK_ATTEMPTS = 33
+_CLIMATE_READBACK_INTERVAL_SECONDS = 0.25
 from .contour_override import (
     TemporaryTemperatureAction,
     TemporaryTemperatureViolation,
@@ -1051,7 +1054,7 @@ class ClimateRuntime:
         accepted_count: int,
     ) -> ContourApplyReceipt:
         confirmed = 0
-        for attempt in range(11):
+        for attempt in range(_CLIMATE_READBACK_ATTEMPTS):
             try:
                 observation = await self._async_native_climate_observation_unlocked()
             except ClimateRuntimeUnavailable:
@@ -1087,8 +1090,8 @@ class ClimateRuntime:
                     confirmed_room_count=confirmed,
                     reasons=(),
                 ).receipt
-            if attempt < 10:
-                await asyncio.sleep(0.2)
+            if attempt + 1 < _CLIMATE_READBACK_ATTEMPTS:
+                await asyncio.sleep(_CLIMATE_READBACK_INTERVAL_SECONDS)
         return self._contour_applications.update(
             request_id,
             status=ContourApplyStatus.PENDING,

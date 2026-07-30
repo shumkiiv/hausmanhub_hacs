@@ -344,10 +344,20 @@ class ScenarioRunView(_ScenarioView):
                 headers=NO_STORE_HEADERS,
             )
         completed = result.get("status") == "completed"
+        confirmed = completed and result.get("confirmed") is True
         return self.json(
             {
                 "ok": completed,
+                "accepted": completed,
+                "confirmed": confirmed,
                 "status": "success" if completed else "failed",
+                "message": (
+                    "Сценарий выполнен и подтверждён."
+                    if confirmed
+                    else "Сценарий выполнен, но не все устройства подтвердили состояние."
+                    if completed
+                    else "Сценарий не выполнен."
+                ),
                 "result": result,
             },
             status=HTTPStatus.OK if completed else HTTPStatus.CONFLICT,
@@ -511,8 +521,22 @@ async def _run_scenario(
     except ScenarioServiceError as error:
         return view.json_message(error.message, error.status, headers=NO_STORE_HEADERS)
     completed = result.get("status") == "completed"
+    confirmed = completed and result.get("confirmed") is True
     return view.json(
-        {"ok": completed, "status": "success" if completed else "failed", "result": result},
+        {
+            "ok": completed,
+            "accepted": completed,
+            "confirmed": confirmed,
+            "status": "success" if completed else "failed",
+            "message": (
+                "Сценарий выполнен и подтверждён."
+                if confirmed
+                else "Сценарий выполнен, но не все устройства подтвердили состояние."
+                if completed
+                else "Сценарий не выполнен."
+            ),
+            "result": result,
+        },
         status=HTTPStatus.OK if completed else HTTPStatus.CONFLICT,
         headers=NO_STORE_HEADERS,
     )

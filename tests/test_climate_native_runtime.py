@@ -1046,7 +1046,7 @@ class NativeApplicationRuntimeTest(unittest.IsolatedAsyncioTestCase):
             self.fail("schedule did not produce a receipt")
         self.assertIs(receipt.status, ContourApplyStatus.PENDING)
         self.assertEqual(("state_not_confirmed",), receipt.reasons)
-        self.assertEqual(10, sleep.await_count)
+        self.assertEqual(32, sleep.await_count)
         self.assertEqual(1, len(executor.calls))
         self.assertIsNone(repeated)
 
@@ -1264,7 +1264,7 @@ class NativeApplicationRuntimeTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertIs(timed_out.status, ContourApplyStatus.PENDING)
         self.assertEqual(("state_not_confirmed",), timed_out.reasons)
-        self.assertEqual(10, sleep.await_count)
+        self.assertEqual(32, sleep.await_count)
         self.assertEqual(1, len(executor.calls))
 
         broken_view = MutableStateView(safe_stop_states())

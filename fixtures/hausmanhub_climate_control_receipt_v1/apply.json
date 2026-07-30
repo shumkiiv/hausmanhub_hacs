@@ -15,6 +15,16 @@
   },
   "status": "confirmed",
   "status_name": "Выполнено",
+  "accepted": true,
+  "confirmed": true,
+  "message": "Климатический контур подтвердил новые цели.",
+  "confirmation_window_ms": 8000,
+  "read_back": {
+    "attempted": true,
+    "matched": true,
+    "observed_at": 1800000000000,
+    "confirmed_room_count": 1
+  },
   "room_count": 1,
   "command_count": 1,
   "accepted_count": 1,

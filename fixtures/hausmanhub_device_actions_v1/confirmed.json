@@ -7,9 +7,19 @@
   "accepted": true,
   "confirmed": true,
   "status": "confirmed",
+  "statusName": "Выполнено",
   "targetId": "entity_0123456789abcdef",
   "actionId": "turn_on",
   "observedState": "on",
   "appliedAt": 1785268800000,
+  "message": "Устройство подтвердило новое состояние.",
+  "confirmationWindowMs": 8000,
+  "readBack": {
+    "attempted": true,
+    "matched": true,
+    "observedAt": 1785268800000,
+    "observedState": "on",
+    "attempts": 2
+  },
   "reason": null
 }

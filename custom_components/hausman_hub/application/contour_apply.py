@@ -235,6 +235,27 @@ class ContourApplyReceipt:
     def as_payload(self) -> dict[str, object]:
         """Return the exact public receipt shape."""
 
+        accepted = self.status in {
+            ContourApplyStatus.PENDING,
+            ContourApplyStatus.CONFIRMED,
+            ContourApplyStatus.PARTIAL,
+        }
+        confirmed = self.status is ContourApplyStatus.CONFIRMED
+        message = {
+            ContourApplyStatus.PENDING: (
+                "Команда принята; климатический контур ещё проверяет новые цели."
+            ),
+            ContourApplyStatus.CONFIRMED: (
+                "Климатический контур подтвердил новые цели."
+            ),
+            ContourApplyStatus.PARTIAL: (
+                "Часть комнат подтвердила новые цели; проверьте остальные."
+            ),
+            ContourApplyStatus.REJECTED: "Климатический контур отклонил команду.",
+            ContourApplyStatus.UNAVAILABLE: (
+                "Не удалось надёжно получить результат команды."
+            ),
+        }[self.status]
         return {
             "contract": {
                 "name": CLIMATE_CONTROL_RECEIPT_CONTRACT_NAME,
@@ -246,6 +267,16 @@ class ContourApplyReceipt:
             "action": self.context.as_payload(),
             "status": self.status.value,
             "status_name": _STATUS_NAMES[self.status],
+            "accepted": accepted,
+            "confirmed": confirmed,
+            "message": message,
+            "confirmation_window_ms": 8000,
+            "read_back": {
+                "attempted": self.command_count == 0 or self.accepted_count > 0,
+                "matched": confirmed,
+                "observed_at": self.updated_at,
+                "confirmed_room_count": self.confirmed_room_count,
+            },
             "room_count": self.room_count,
             "command_count": self.command_count,
             "accepted_count": self.accepted_count,

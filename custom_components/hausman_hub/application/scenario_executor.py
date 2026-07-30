@@ -25,8 +25,8 @@ if TYPE_CHECKING:
 
 
 _RUN_SCENARIO_DEPTH_LIMIT = 8
-_DEVICE_READBACK_ATTEMPTS = 10
-_DEVICE_READBACK_INTERVAL_SECONDS = 0.2
+_DEFAULT_DEVICE_READBACK_WINDOW_SECONDS = 8.0
+_DEFAULT_DEVICE_READBACK_INTERVAL_SECONDS = 0.25
 
 
 def _value_parameter_name(action_id: str, domain: str, service: str) -> str | None:
@@ -184,11 +184,19 @@ class ScenarioExecutor:
         run_callback: Callable[[str, frozenset[str] | None], Awaitable[dict[str, Any]]],
         *,
         notify_target: str = "",
+        readback_window_seconds: float = _DEFAULT_DEVICE_READBACK_WINDOW_SECONDS,
+        readback_interval_seconds: float = _DEFAULT_DEVICE_READBACK_INTERVAL_SECONDS,
     ):
+        if not 0.01 <= readback_window_seconds <= 30.0:
+            raise ValueError("readback window must be between 0.01 and 30 seconds")
+        if not 0.01 <= readback_interval_seconds <= readback_window_seconds:
+            raise ValueError("readback interval must fit inside the readback window")
         self._hass = hass
         self._catalog = catalog
         self._run_callback = run_callback
         self._notify_target = notify_target
+        self._readback_window_seconds = readback_window_seconds
+        self._readback_interval_seconds = readback_interval_seconds
 
     def new_run_id(self) -> str:
         """Generate a unique execution trace id."""
@@ -225,35 +233,95 @@ class ScenarioExecutor:
                 "accepted": False,
                 "confirmed": False,
                 "status": "failed",
+                "statusName": "Не выполнено",
                 "targetId": target_id,
                 "actionId": action_id,
+                "message": "Команда не была отправлена устройству.",
+                "confirmationWindowMs": self._confirmation_window_ms,
+                "readBack": {
+                    "attempted": False,
+                    "matched": False,
+                    "observedAt": None,
+                    "observedState": None,
+                    "attempts": 0,
+                },
                 "error": receipt.get("error", "device_action_failed"),
             }
 
         device = self._catalog.device(target_id)
-        observed_state: str | None = None
-        confirmed = False
-        if device is not None:
-            for attempt in range(_DEVICE_READBACK_ATTEMPTS):
-                state = self._hass.states.get(device.entity_id)
-                if state is not None:
-                    observed_state = str(getattr(state, "state", "unknown"))
-                    if _device_action_confirmed(state, action_id, value):
-                        confirmed = True
-                        break
-                if attempt + 1 < _DEVICE_READBACK_ATTEMPTS:
-                    await asyncio.sleep(_DEVICE_READBACK_INTERVAL_SECONDS)
+        read_back = receipt.get("read_back")
+        if not isinstance(read_back, dict):
+            read_back = await self._read_back_device(
+                getattr(device, "entity_id", None), action_id, value
+            )
+        confirmed = read_back["matched"] is True
+        observed_state = read_back["observedState"]
 
         return {
             "requestId": request_id,
             "accepted": True,
             "confirmed": confirmed,
             "status": "confirmed" if confirmed else "accepted",
+            "statusName": "Выполнено" if confirmed else "Проверяется",
             "targetId": target_id,
             "actionId": action_id,
             "observedState": observed_state,
             "appliedAt": int(time.time() * 1000),
+            "message": (
+                "Устройство подтвердило новое состояние."
+                if confirmed
+                else "Команда принята; устройство ещё не подтвердило новое состояние."
+            ),
+            "confirmationWindowMs": self._confirmation_window_ms,
+            "readBack": read_back,
             "reason": None if confirmed else "state_not_confirmed",
+        }
+
+    @property
+    def _confirmation_window_ms(self) -> int:
+        return int(self._readback_window_seconds * 1000)
+
+    async def _read_back_device(
+        self,
+        entity_id: object,
+        action_id: str,
+        value: object | None,
+    ) -> dict[str, object]:
+        """Poll one bounded HA state window and return explicit evidence."""
+
+        if not isinstance(entity_id, str) or not entity_id:
+            return {
+                "attempted": False,
+                "matched": False,
+                "observedAt": None,
+                "observedState": None,
+                "attempts": 0,
+            }
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self._readback_window_seconds
+        attempts = 0
+        observed_at: int | None = None
+        observed_state: str | None = None
+        matched = False
+        while True:
+            attempts += 1
+            state = self._hass.states.get(entity_id)
+            if state is not None:
+                observed_at = int(time.time() * 1000)
+                observed_state = str(getattr(state, "state", "unknown"))
+                if _device_action_confirmed(state, action_id, value):
+                    matched = True
+                    break
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                break
+            await asyncio.sleep(min(self._readback_interval_seconds, remaining))
+        return {
+            "attempted": True,
+            "matched": matched,
+            "observedAt": observed_at,
+            "observedState": observed_state,
+            "attempts": attempts,
         }
 
     async def async_execute(
@@ -318,6 +386,12 @@ class ScenarioExecutor:
             if receipt.get("status") == "failed":
                 break
 
+        completed = all(r.get("status") == "completed" for r in receipts)
+        confirmed = completed and all(
+            r.get("type") != ScenarioActionType.DEVICE_ACTION
+            or r.get("confirmed") is True
+            for r in receipts
+        )
         return {
             "run_id": run_id,
             "scenario_id": scenario_id,
@@ -326,11 +400,9 @@ class ScenarioExecutor:
             "finished_at_ms": int(time.time() * 1000),
             "condition_results": condition_results,
             "receipts": receipts,
-            "status": (
-                "completed"
-                if all(r.get("status") == "completed" for r in receipts)
-                else "failed"
-            ),
+            "accepted": completed,
+            "confirmed": confirmed,
+            "status": "completed" if completed else "failed",
         }
 
     async def _execute_action(
@@ -416,6 +488,15 @@ class ScenarioExecutor:
         }
         if dry_run:
             receipt["service_data"] = service_data
+        else:
+            read_back = await self._read_back_device(
+                device.entity_id, action.action_id, action.value
+            )
+            receipt["confirmed"] = read_back["matched"] is True
+            receipt["read_back"] = read_back
+            receipt["reason"] = (
+                None if read_back["matched"] is True else "state_not_confirmed"
+            )
         return receipt
 
     async def _run_scenario_receipt(

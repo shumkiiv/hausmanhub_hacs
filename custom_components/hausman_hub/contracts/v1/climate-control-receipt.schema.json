@@ -51,6 +51,29 @@
         "Результат неизвестен"
       ]
     },
+    "accepted": {"type": "boolean"},
+    "confirmed": {"type": "boolean"},
+    "message": {"type": ["string", "null"], "maxLength": 500},
+    "confirmation_window_ms": {
+      "type": "integer",
+      "minimum": 1000,
+      "maximum": 30000
+    },
+    "read_back": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attempted", "matched", "observed_at"],
+      "properties": {
+        "attempted": {"type": "boolean"},
+        "matched": {"type": "boolean"},
+        "observed_at": {"type": ["integer", "null"], "minimum": 0},
+        "confirmed_room_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 128
+        }
+      }
+    },
     "room_count": {"type": "integer", "minimum": 1, "maximum": 128},
     "command_count": {"type": "integer", "minimum": 0, "maximum": 384},
     "accepted_count": {"type": "integer", "minimum": 0, "maximum": 384},
@@ -94,31 +117,40 @@
     {
       "properties": {
         "status": {"const": "pending"},
-        "status_name": {"const": "Проверяется"}
+        "status_name": {"const": "Проверяется"},
+        "accepted": {"const": true},
+        "confirmed": {"const": false}
       }
     },
     {
       "properties": {
         "status": {"const": "confirmed"},
-        "status_name": {"const": "Выполнено"}
+        "status_name": {"const": "Выполнено"},
+        "accepted": {"const": true},
+        "confirmed": {"const": true}
       }
     },
     {
       "properties": {
         "status": {"const": "partial"},
-        "status_name": {"const": "Выполнено частично"}
+        "status_name": {"const": "Выполнено частично"},
+        "accepted": {"const": true},
+        "confirmed": {"const": false}
       }
     },
     {
       "properties": {
         "status": {"const": "rejected"},
-        "status_name": {"const": "Отклонено"}
+        "status_name": {"const": "Отклонено"},
+        "accepted": {"const": false},
+        "confirmed": {"const": false}
       }
     },
     {
       "properties": {
         "status": {"const": "unavailable"},
-        "status_name": {"const": "Результат неизвестен"}
+        "status_name": {"const": "Результат неизвестен"},
+        "confirmed": {"const": false}
       }
     }
   ],

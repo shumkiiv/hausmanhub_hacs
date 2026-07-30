@@ -121,6 +121,8 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             self.catalog,
             run_callback,
             notify_target="notify.mobile_app_tablet",
+            readback_window_seconds=0.02,
+            readback_interval_seconds=0.01,
         )
 
     async def test_device_action_calls_service(self) -> None:
@@ -267,6 +269,24 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(receipt["confirmed"])
         self.assertEqual("failed", receipt["status"])
         self.hass.services.async_call.assert_not_awaited()
+
+    async def test_public_device_action_reports_bounded_unconfirmed_read_back(self) -> None:
+        self.hass.states.get = lambda entity_id: SimpleNamespace(
+            state="off", attributes={}
+        )
+
+        receipt = await self.executor.async_execute_device_action(
+            "device_1", "turn_on"
+        )
+
+        self.assertTrue(receipt["accepted"])
+        self.assertFalse(receipt["confirmed"])
+        self.assertEqual("accepted", receipt["status"])
+        self.assertEqual("Проверяется", receipt["statusName"])
+        self.assertEqual(20, receipt["confirmationWindowMs"])
+        self.assertTrue(receipt["readBack"]["attempted"])
+        self.assertFalse(receipt["readBack"]["matched"])
+        self.assertEqual("state_not_confirmed", receipt["reason"])
 
 
 if __name__ == "__main__":

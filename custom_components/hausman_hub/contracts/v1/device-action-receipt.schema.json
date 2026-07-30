@@ -27,11 +27,63 @@
     "accepted": { "type": "boolean" },
     "confirmed": { "type": "boolean" },
     "status": { "enum": ["failed", "accepted", "confirmed"] },
+    "statusName": {
+      "enum": ["Не выполнено", "Проверяется", "Выполнено"]
+    },
     "targetId": { "type": "string", "minLength": 1 },
     "actionId": { "type": "string", "minLength": 1 },
     "observedState": { "type": ["string", "null"] },
     "appliedAt": { "type": ["integer", "null"] },
+    "message": { "type": ["string", "null"], "maxLength": 500 },
+    "confirmationWindowMs": {
+      "type": "integer",
+      "minimum": 1000,
+      "maximum": 30000
+    },
+    "readBack": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attempted", "matched", "observedAt"],
+      "properties": {
+        "attempted": { "type": "boolean" },
+        "matched": { "type": "boolean" },
+        "observedAt": { "type": ["integer", "null"], "minimum": 0 },
+        "observedState": { "type": ["string", "null"] },
+        "attempts": { "type": "integer", "minimum": 0, "maximum": 128 }
+      }
+    },
     "reason": { "type": ["string", "null"] },
     "error": { "type": ["string", "null"] }
-  }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "confirmed" } } },
+      "then": {
+        "properties": {
+          "accepted": { "const": true },
+          "confirmed": { "const": true },
+          "statusName": { "const": "Выполнено" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "status": { "const": "accepted" } } },
+      "then": {
+        "properties": {
+          "accepted": { "const": true },
+          "confirmed": { "const": false },
+          "statusName": { "const": "Проверяется" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "status": { "const": "failed" } } },
+      "then": {
+        "properties": {
+          "confirmed": { "const": false },
+          "statusName": { "const": "Не выполнено" }
+        }
+      }
+    }
+  ]
 }
