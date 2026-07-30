@@ -2223,7 +2223,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.49.0", panel.payload["integration_version"])
+        self.assertEqual("1.50.0", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
@@ -2866,6 +2866,55 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertEqual("leak", message["data"]["kind"])
         self.assertTrue(message["data"]["active"])
         self.assertEqual("Ванная", message["data"]["room"])
+        self.assertNotIn("entity_id", json.dumps(message, ensure_ascii=False))
+
+    def test_realtime_low_battery_alert_uses_profile_threshold_and_location(self) -> None:
+        runtime = self.hass.data["hausman_hub"]["event_stream_runtime"]
+        queue = runtime.broker.subscribe()
+        runtime._publish_low_battery_alert(
+            "sensor.synthetic_private_battery",
+            SimpleNamespace(state="9", attributes={}),
+            SimpleNamespace(
+                state="7",
+                attributes={
+                    "device_class": "battery",
+                    "friendly_name": "Датчик окна",
+                    "area_name": "Гостиная",
+                },
+            ),
+        )
+
+        message = asyncio.run(queue.get())
+
+        self.assertEqual("attention_alert", message["type"])
+        self.assertEqual("low_battery", message["data"]["kind"])
+        self.assertEqual("Датчик окна", message["data"]["device"])
+        self.assertEqual("Гостиная", message["data"]["room"])
+        self.assertEqual(7.0, message["data"]["value"])
+        self.assertNotIn("entity_id", json.dumps(message, ensure_ascii=False))
+
+    def test_command_receipt_is_published_without_private_entity_id(self) -> None:
+        from custom_components.hausman_hub.realtime_api import publish_command_receipt
+
+        runtime = self.hass.data["hausman_hub"]["event_stream_runtime"]
+        queue = runtime.broker.subscribe()
+
+        publish_command_receipt(
+            self.hass,
+            {
+                "requestId": "request-1",
+                "accepted": True,
+                "confirmed": True,
+                "targetId": "device_public_1",
+                "message": "Устройство подтвердило новое состояние.",
+            },
+            operation="device_action",
+        )
+        message = asyncio.run(queue.get())
+
+        self.assertEqual("command_receipt", message["type"])
+        self.assertEqual("request-1", message["data"]["request_id"])
+        self.assertEqual("confirmed", message["data"]["status"])
         self.assertNotIn("entity_id", json.dumps(message, ensure_ascii=False))
 
     def test_closed_optional_page_request_does_not_read_the_home(self) -> None:

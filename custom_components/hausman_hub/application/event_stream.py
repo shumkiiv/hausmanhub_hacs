@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 from datetime import datetime, timezone
 from itertools import count
 from typing import Final
@@ -12,6 +13,7 @@ EVENT_CONTRACT_NAME: Final = "hausman-hub-event"
 EVENT_CONTRACT_VERSION: Final = 1
 EVENT_STREAM_HEARTBEAT_SECONDS: Final = 30
 EVENT_STREAM_QUEUE_SIZE: Final = 32
+EVENT_STREAM_REPLAY_SIZE: Final = 128
 
 
 class EventStreamBroker:
@@ -20,20 +22,45 @@ class EventStreamBroker:
     def __init__(self) -> None:
         self._subscribers: set[asyncio.Queue[dict[str, object] | None]] = set()
         self._sequence = count(1)
+        self._replay: deque[dict[str, object]] = deque(maxlen=EVENT_STREAM_REPLAY_SIZE)
         self._closed = False
 
     @property
     def subscriber_count(self) -> int:
         return len(self._subscribers)
 
-    def subscribe(self) -> asyncio.Queue[dict[str, object] | None]:
+    def subscribe(
+        self, after_event_id: str | None = None
+    ) -> asyncio.Queue[dict[str, object] | None]:
         if self._closed:
             raise RuntimeError("event stream is closed")
         queue: asyncio.Queue[dict[str, object] | None] = asyncio.Queue(
             maxsize=EVENT_STREAM_QUEUE_SIZE
         )
+        for message in self.replay_after(after_event_id)[-EVENT_STREAM_QUEUE_SIZE:]:
+            queue.put_nowait(message)
         self._subscribers.add(queue)
         return queue
+
+    def replay_after(self, event_id: str | None) -> tuple[dict[str, object], ...]:
+        """Return retained events strictly after a known SSE event id."""
+
+        if event_id is None:
+            return ()
+        retained = tuple(self._replay)
+        for index, message in enumerate(retained):
+            if message.get("id") == event_id:
+                return retained[index + 1 :]
+        return ()
+
+    def can_resume(self, event_id: str | None) -> bool:
+        if event_id is None:
+            return True
+        retained = tuple(self._replay)
+        for index, message in enumerate(retained):
+            if message.get("id") == event_id:
+                return len(retained) - index - 1 <= EVENT_STREAM_QUEUE_SIZE
+        return False
 
     def unsubscribe(self, queue: asyncio.Queue[dict[str, object] | None]) -> None:
         self._subscribers.discard(queue)
@@ -55,6 +82,7 @@ class EventStreamBroker:
         message = self.event(event_type, data)
         if self._closed:
             return message
+        self._replay.append(message)
         for queue in tuple(self._subscribers):
             if queue.full():
                 queue.get_nowait()

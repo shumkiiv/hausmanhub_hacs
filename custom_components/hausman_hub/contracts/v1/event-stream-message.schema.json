@@ -21,7 +21,14 @@
       "maxLength": 128
     },
     "type": {
-      "enum": ["hello", "snapshot_invalidated", "critical_alert", "heartbeat"]
+      "enum": [
+        "hello",
+        "snapshot_invalidated",
+        "critical_alert",
+        "attention_alert",
+        "command_receipt",
+        "heartbeat"
+      ]
     },
     "occurred_at": {
       "type": "string",
@@ -32,6 +39,8 @@
         { "$ref": "#/$defs/hello" },
         { "$ref": "#/$defs/snapshot_invalidated" },
         { "$ref": "#/$defs/critical_alert" },
+        { "$ref": "#/$defs/attention_alert" },
+        { "$ref": "#/$defs/command_receipt" },
         { "$ref": "#/$defs/heartbeat" }
       ]
     }
@@ -48,6 +57,14 @@
     {
       "if": { "properties": { "type": { "const": "critical_alert" } } },
       "then": { "properties": { "data": { "$ref": "#/$defs/critical_alert" } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "attention_alert" } } },
+      "then": { "properties": { "data": { "$ref": "#/$defs/attention_alert" } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "command_receipt" } } },
+      "then": { "properties": { "data": { "$ref": "#/$defs/command_receipt" } } }
     },
     {
       "if": { "properties": { "type": { "const": "heartbeat" } } },
@@ -71,7 +88,8 @@
       "properties": {
         "reason": {
           "enum": ["state_changed", "registry_changed", "scenario_changed", "settings_changed"]
-        }
+        },
+        "state_revision": { "type": ["integer", "null"], "minimum": 0 }
       }
     },
     "critical_alert": {
@@ -87,6 +105,38 @@
         "room": { "type": ["string", "null"], "maxLength": 120 },
         "device": { "type": ["string", "null"], "maxLength": 120 },
         "active": { "type": "boolean" }
+      }
+    },
+    "attention_alert": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["alert_id", "kind", "severity", "title", "message", "active"],
+      "properties": {
+        "alert_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "kind": { "enum": ["low_battery", "device_unavailable", "maintenance", "other"] },
+        "severity": { "enum": ["info", "warning"] },
+        "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "message": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "room": { "type": ["string", "null"], "maxLength": 120 },
+        "device": { "type": ["string", "null"], "maxLength": 120 },
+        "value": { "type": ["number", "null"] },
+        "unit": { "type": ["string", "null"], "maxLength": 20 },
+        "active": { "type": "boolean" }
+      }
+    },
+    "command_receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request_id", "operation", "accepted", "confirmed", "status"],
+      "properties": {
+        "request_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "operation": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "accepted": { "type": "boolean" },
+        "confirmed": { "type": "boolean" },
+        "status": { "enum": ["failed", "accepted", "confirmed"] },
+        "target_id": { "type": ["string", "null"], "maxLength": 128 },
+        "reason": { "type": ["string", "null"], "maxLength": 500 },
+        "error_code": { "type": ["string", "null"], "maxLength": 128 }
       }
     },
     "heartbeat": {

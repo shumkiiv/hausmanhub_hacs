@@ -34,6 +34,7 @@ from .application.api_capabilities import (
     SCENARIOS_TEST_PATH,
 )
 from .domain.scenarios import ScenarioDefinition, _scenario_to_payload
+from .realtime_api import publish_command_receipt
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -345,21 +346,31 @@ class ScenarioRunView(_ScenarioView):
             )
         completed = result.get("status") == "completed"
         confirmed = completed and result.get("confirmed") is True
-        return self.json(
+        response = {
+            "ok": completed,
+            "accepted": completed,
+            "confirmed": confirmed,
+            "status": "success" if completed else "failed",
+            "message": (
+                "Сценарий выполнен и подтверждён."
+                if confirmed
+                else "Сценарий выполнен, но не все устройства подтвердили состояние."
+                if completed
+                else "Сценарий не выполнен."
+            ),
+            "result": result,
+        }
+        publish_command_receipt(
+            self._hass,
             {
-                "ok": completed,
-                "accepted": completed,
-                "confirmed": confirmed,
-                "status": "success" if completed else "failed",
-                "message": (
-                    "Сценарий выполнен и подтверждён."
-                    if confirmed
-                    else "Сценарий выполнен, но не все устройства подтвердили состояние."
-                    if completed
-                    else "Сценарий не выполнен."
-                ),
-                "result": result,
+                "requestId": result.get("run_id"),
+                "targetId": scenario_id,
+                **response,
             },
+            operation="scenario_run",
+        )
+        return self.json(
+            response,
             status=HTTPStatus.OK if completed else HTTPStatus.CONFLICT,
             headers=NO_STORE_HEADERS,
         )
@@ -522,21 +533,31 @@ async def _run_scenario(
         return view.json_message(error.message, error.status, headers=NO_STORE_HEADERS)
     completed = result.get("status") == "completed"
     confirmed = completed and result.get("confirmed") is True
-    return view.json(
+    response = {
+        "ok": completed,
+        "accepted": completed,
+        "confirmed": confirmed,
+        "status": "success" if completed else "failed",
+        "message": (
+            "Сценарий выполнен и подтверждён."
+            if confirmed
+            else "Сценарий выполнен, но не все устройства подтвердили состояние."
+            if completed
+            else "Сценарий не выполнен."
+        ),
+        "result": result,
+    }
+    publish_command_receipt(
+        view._hass,
         {
-            "ok": completed,
-            "accepted": completed,
-            "confirmed": confirmed,
-            "status": "success" if completed else "failed",
-            "message": (
-                "Сценарий выполнен и подтверждён."
-                if confirmed
-                else "Сценарий выполнен, но не все устройства подтвердили состояние."
-                if completed
-                else "Сценарий не выполнен."
-            ),
-            "result": result,
+            "requestId": result.get("run_id"),
+            "targetId": scenario_id,
+            **response,
         },
+        operation="scenario_run",
+    )
+    return view.json(
+        response,
         status=HTTPStatus.OK if completed else HTTPStatus.CONFLICT,
         headers=NO_STORE_HEADERS,
     )

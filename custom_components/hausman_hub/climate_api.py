@@ -85,6 +85,7 @@ from .domain.ai_assistant import AiAdvisoryStatus, AiAssistantViolation
 from .domain.hub_settings import HausmanHubSettings
 from .dashboard_ha_snapshot import async_dashboard_snapshot
 from .energy_history_ha import async_energy_history
+from .realtime_api import publish_command_receipt
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -644,7 +645,9 @@ class ContourApplyView(_ClimateView):
             return self._unavailable()
         except Exception:
             return self._unavailable()
-        return self.json(receipt.as_payload(), headers=NO_STORE_HEADERS)
+        response = receipt.as_payload()
+        publish_command_receipt(self._hass, response, operation="contour_apply")
+        return self.json(response, headers=NO_STORE_HEADERS)
 
 
 class TemporaryTemperatureView(_ClimateView):
@@ -683,7 +686,11 @@ class TemporaryTemperatureView(_ClimateView):
             return self._unavailable()
         except Exception:
             return self._unavailable()
-        return self.json(receipt.as_payload(), headers=NO_STORE_HEADERS)
+        response = receipt.as_payload()
+        publish_command_receipt(
+            self._hass, response, operation="temporary_temperature"
+        )
+        return self.json(response, headers=NO_STORE_HEADERS)
 
 
 class HomeClimateTargetsView(_ClimateView):
@@ -713,7 +720,9 @@ class HomeClimateTargetsView(_ClimateView):
             return self._unavailable()
         except Exception:
             return self._unavailable()
-        return self.json(receipt.as_payload(), headers=NO_STORE_HEADERS)
+        response = receipt.as_payload()
+        publish_command_receipt(self._hass, response, operation="home_climate_targets")
+        return self.json(response, headers=NO_STORE_HEADERS)
 
 
 class ClimateAdminImportView(_ClimateView):

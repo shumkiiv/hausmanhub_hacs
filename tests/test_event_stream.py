@@ -7,6 +7,7 @@ import unittest
 
 from custom_components.hausman_hub.application.event_stream import (
     EVENT_STREAM_QUEUE_SIZE,
+    EVENT_STREAM_REPLAY_SIZE,
     EventStreamBroker,
     heartbeat_event,
     hello_event,
@@ -49,6 +50,35 @@ class EventStreamBrokerTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(await queue.get())
         with self.assertRaisesRegex(RuntimeError, "closed"):
             broker.subscribe()
+
+    async def test_reconnect_replays_only_events_after_last_known_id(self) -> None:
+        broker = EventStreamBroker()
+        first = broker.publish("snapshot_invalidated", {"reason": "state_changed"})
+        expected = [
+            broker.publish("heartbeat", {"sequence": sequence})
+            for sequence in range(3)
+        ]
+
+        self.assertTrue(broker.can_resume(first["id"]))
+        queue = broker.subscribe(first["id"])
+
+        self.assertEqual(expected, [await queue.get() for _ in expected])
+
+    async def test_reconnect_fails_closed_when_gap_exceeds_client_queue(self) -> None:
+        broker = EventStreamBroker()
+        first = broker.publish("snapshot_invalidated", {"reason": "state_changed"})
+        for sequence in range(EVENT_STREAM_QUEUE_SIZE + 1):
+            broker.publish("heartbeat", {"sequence": sequence})
+
+        self.assertFalse(broker.can_resume(first["id"]))
+
+    async def test_replay_history_is_bounded(self) -> None:
+        broker = EventStreamBroker()
+        first = broker.publish("snapshot_invalidated", {"reason": "state_changed"})
+        for sequence in range(EVENT_STREAM_REPLAY_SIZE):
+            broker.publish("heartbeat", {"sequence": sequence})
+
+        self.assertFalse(broker.can_resume(first["id"]))
 
     async def test_hello_and_heartbeat_have_explicit_payloads(self) -> None:
         broker = EventStreamBroker()

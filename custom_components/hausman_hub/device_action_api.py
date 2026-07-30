@@ -19,6 +19,7 @@ from .climate_api import (
     _not_found,
     _request_json,
 )
+from .realtime_api import publish_command_receipt
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -88,6 +89,7 @@ class DeviceActionView(HomeAssistantView):
             },
             **result,
         }
+        publish_command_receipt(self._hass, response, operation="device_action")
         return self.json(
             response,
             status_code=(

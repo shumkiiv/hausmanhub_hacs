@@ -69,6 +69,7 @@ class EventStreamRuntime:
         if new_state is None and old_state is None:
             return
         self._publish_critical_alert(data.get("entity_id"), old_state, new_state)
+        self._publish_low_battery_alert(data.get("entity_id"), old_state, new_state)
         if self._pending_invalidation is None:
             self._pending_invalidation = self.hass.loop.call_later(
                 _INVALIDATION_DEBOUNCE_SECONDS,
@@ -95,8 +96,7 @@ class EventStreamRuntime:
         kind, active_title, cleared_title = alert_definition
         active = state == "on"
         title = active_title if active else cleared_title
-        device = attributes.get("friendly_name")
-        room = attributes.get("area_name")
+        device, room = self._device_and_room(entity_id, attributes)
         self.broker.publish(
             "critical_alert",
             {
@@ -112,6 +112,92 @@ class EventStreamRuntime:
                 "active": active,
             },
         )
+
+    def _publish_low_battery_alert(
+        self, entity_id: object, old_state: Any, new_state: Any
+    ) -> None:
+        if not isinstance(entity_id, str) or new_state is None:
+            return
+        attributes = getattr(new_state, "attributes", {})
+        if not isinstance(attributes, dict):
+            return
+        device_class = attributes.get("device_class")
+        if device_class != "battery" and "battery" not in entity_id:
+            return
+        try:
+            current = float(getattr(new_state, "state", "nan"))
+        except (TypeError, ValueError):
+            return
+        try:
+            previous = float(getattr(old_state, "state", "nan"))
+        except (TypeError, ValueError):
+            previous = float("nan")
+        threshold = self._low_battery_threshold()
+        active = current < threshold
+        previously_active = previous < threshold
+        if active == previously_active:
+            return
+        device, room = self._device_and_room(entity_id, attributes)
+        title = "Низкий заряд батареи" if active else "Заряд батареи восстановлен"
+        location = f" · {room}" if room else ""
+        name = device or "Устройство"
+        self.broker.publish(
+            "attention_alert",
+            {
+                "alert_id": sha256(f"battery:{entity_id}".encode("utf-8")).hexdigest()[:20],
+                "kind": "low_battery",
+                "severity": "warning" if active else "info",
+                "title": title,
+                "message": f"{name}{location}: {current:g}%",
+                "room": room,
+                "device": device,
+                "value": current,
+                "unit": "%",
+                "active": active,
+            },
+        )
+
+    def _low_battery_threshold(self) -> int:
+        service = self.hass.data.get(DOMAIN, {}).get("tablet_preferences_service")
+        try:
+            value = service.tablet["settings"]["alerts"][
+                "lowBatteryThresholdPercent"
+            ]
+        except (AttributeError, KeyError, TypeError):
+            return 8
+        return value if type(value) is int and 1 <= value <= 50 else 8
+
+    def _device_and_room(
+        self, entity_id: str, attributes: dict[str, object]
+    ) -> tuple[str | None, str | None]:
+        device = attributes.get("friendly_name")
+        room = attributes.get("area_name")
+        device_name = device if isinstance(device, str) and device else None
+        room_name = room if isinstance(room, str) and room else None
+        if room_name is not None:
+            return device_name, room_name
+        try:
+            from homeassistant.helpers import area_registry, device_registry, entity_registry
+
+            entities = entity_registry.async_get(self.hass)
+            entity = entities.async_get(entity_id)
+            area_id = getattr(entity, "area_id", None)
+            device_id = getattr(entity, "device_id", None)
+            if area_id is None and device_id is not None:
+                device_entry = device_registry.async_get(self.hass).async_get(device_id)
+                area_id = getattr(device_entry, "area_id", None)
+                if device_name is None:
+                    candidate = getattr(device_entry, "name_by_user", None) or getattr(
+                        device_entry, "name", None
+                    )
+                    device_name = candidate if isinstance(candidate, str) else None
+            if area_id is not None:
+                area = area_registry.async_get(self.hass).async_get_area(area_id)
+                candidate = getattr(area, "name", None)
+                room_name = candidate if isinstance(candidate, str) else None
+        except (AttributeError, ImportError, KeyError, TypeError):
+            pass
+        return device_name, room_name
 
 
 class EventStreamView(HomeAssistantView):
@@ -138,6 +224,10 @@ class EventStreamView(HomeAssistantView):
         if runtime is None:
             raise web.HTTPServiceUnavailable()
 
+        headers = getattr(request, "headers", {})
+        last_event_id = headers.get("Last-Event-ID") if hasattr(headers, "get") else None
+        last_event_id = last_event_id if isinstance(last_event_id, str) else None
+        resumable = runtime.broker.can_resume(last_event_id)
         response = web.StreamResponse(
             status=200,
             headers={
@@ -149,11 +239,20 @@ class EventStreamView(HomeAssistantView):
         response.content_type = "text/event-stream"
         response.charset = "utf-8"
         await response.prepare(request)
-        queue = runtime.broker.subscribe()
+        queue = runtime.broker.subscribe(last_event_id)
         heartbeat_sequence = 0
         try:
             await response.write(b"retry: 5000\n\n")
             await response.write(_encode_sse(hello_event(runtime.broker)))
+            if last_event_id is not None and not resumable:
+                await response.write(
+                    _encode_sse(
+                        runtime.broker.event(
+                            "snapshot_invalidated",
+                            {"reason": "state_changed", "state_revision": None},
+                        )
+                    )
+                )
             while True:
                 try:
                     message = await asyncio.wait_for(
@@ -200,6 +299,41 @@ def clear_event_stream(hass: HomeAssistant, entry_id: str) -> None:
     if isinstance(runtime, EventStreamRuntime) and runtime.entry_id == entry_id:
         runtime.close()
         data.pop(DATA_EVENT_STREAM_RUNTIME, None)
+
+
+def publish_command_receipt(
+    hass: HomeAssistant,
+    receipt: dict[str, object],
+    *,
+    operation: str,
+) -> dict[str, object] | None:
+    """Publish one normalized command outcome without exposing HA entity ids."""
+
+    runtime = _current_runtime(hass)
+    if runtime is None:
+        return None
+    request_id = receipt.get("requestId") or receipt.get("request_id")
+    if not isinstance(request_id, str) or not request_id:
+        return None
+    accepted = receipt.get("accepted") is True
+    confirmed = receipt.get("confirmed") is True
+    status = "confirmed" if confirmed else "accepted" if accepted else "failed"
+    target_id = receipt.get("targetId") or receipt.get("target_id")
+    reason = receipt.get("message") or receipt.get("reason")
+    error = receipt.get("error")
+    return runtime.broker.publish(
+        "command_receipt",
+        {
+            "request_id": request_id,
+            "operation": operation,
+            "accepted": accepted,
+            "confirmed": confirmed,
+            "status": status,
+            "target_id": target_id if isinstance(target_id, str) else None,
+            "reason": reason if isinstance(reason, str) else None,
+            "error_code": error if isinstance(error, str) else None,
+        },
+    )
 
 
 def _current_runtime(hass: HomeAssistant) -> EventStreamRuntime | None:
