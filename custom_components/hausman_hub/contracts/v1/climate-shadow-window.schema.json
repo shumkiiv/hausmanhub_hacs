@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hausmanhub/contracts/v1/climate-shadow-window.schema.json",
+  "title": "HausmanHub climate shadow observation window v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "generated_at", "window", "summary", "rooms", "samples", "commands_enabled", "physical_commands_sent"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-climate-shadow-window"},
+        "version": {"const": 1}
+      }
+    },
+    "generated_at": {"type": "integer", "minimum": 0},
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["collection_active", "sample_interval_seconds", "retention_seconds", "minimum_sample_count", "minimum_span_seconds", "freshness_seconds", "minimum_alignment_ratio"],
+      "properties": {
+        "collection_active": {"type": "boolean"},
+        "sample_interval_seconds": {"type": "integer", "minimum": 60, "maximum": 3600},
+        "retention_seconds": {"type": "integer", "minimum": 3600, "maximum": 2592000},
+        "minimum_sample_count": {"type": "integer", "minimum": 2, "maximum": 2016},
+        "minimum_span_seconds": {"type": "integer", "minimum": 60, "maximum": 2592000},
+        "freshness_seconds": {"type": "integer", "minimum": 60, "maximum": 86400},
+        "minimum_alignment_ratio": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sample_count", "room_count", "ready_room_count", "diverged_room_count", "insufficient_room_count", "first_observed_at", "latest_observed_at"],
+      "properties": {
+        "sample_count": {"type": "integer", "minimum": 0, "maximum": 2016},
+        "room_count": {"type": "integer", "minimum": 0, "maximum": 128},
+        "ready_room_count": {"type": "integer", "minimum": 0, "maximum": 128},
+        "diverged_room_count": {"type": "integer", "minimum": 0, "maximum": 128},
+        "insufficient_room_count": {"type": "integer", "minimum": 0, "maximum": 128},
+        "first_observed_at": {"type": ["integer", "null"], "minimum": 0},
+        "latest_observed_at": {"type": ["integer", "null"], "minimum": 0}
+      }
+    },
+    "rooms": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {"$ref": "#/$defs/roomVerdict"}
+    },
+    "samples": {
+      "type": "array",
+      "maxItems": 2016,
+      "items": {"$ref": "#/$defs/sample"}
+    },
+    "commands_enabled": {"const": false},
+    "physical_commands_sent": {"const": false}
+  },
+  "$defs": {
+    "comparisonStatus": {"enum": ["aligned", "diverged", "not_comparable"]},
+    "comparisonReason": {"enum": ["observation_stale", "room_policy_missing", "room_data_unavailable", "manual_observe", "planned_observe", "device_unobserved", "device_unavailable", "device_activity_unknown", "device_setting_unobserved", "device_activity_mismatch", "device_setting_mismatch"]},
+    "windowReason": {"enum": ["no_observations", "insufficient_observations", "insufficient_timespan", "latest_observation_stale", "divergence_observed", "alignment_below_threshold", "not_comparable_observations"]},
+    "roomVerdict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["room_id", "verdict", "reasons", "observation_count", "comparable_count", "aligned_count", "diverged_count", "not_comparable_count", "alignment_ratio", "first_observed_at", "latest_observed_at", "latest_status", "fresh"],
+      "properties": {
+        "room_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+        "verdict": {"enum": ["ready", "diverged", "insufficient_data"]},
+        "reasons": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 7,
+          "items": {"$ref": "#/$defs/windowReason"}
+        },
+        "observation_count": {"type": "integer", "minimum": 0, "maximum": 2016},
+        "comparable_count": {"type": "integer", "minimum": 0, "maximum": 2016},
+        "aligned_count": {"type": "integer", "minimum": 0, "maximum": 2016},
+        "diverged_count": {"type": "integer", "minimum": 0, "maximum": 2016},
+        "not_comparable_count": {"type": "integer", "minimum": 0, "maximum": 2016},
+        "alignment_ratio": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "first_observed_at": {"type": ["integer", "null"], "minimum": 0},
+        "latest_observed_at": {"type": ["integer", "null"], "minimum": 0},
+        "latest_status": {"anyOf": [{"$ref": "#/$defs/comparisonStatus"}, {"type": "null"}]},
+        "fresh": {"type": "boolean"}
+      }
+    },
+    "sampleRoom": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["room_id", "status", "reasons"],
+      "properties": {
+        "room_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+        "status": {"$ref": "#/$defs/comparisonStatus"},
+        "reasons": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 11,
+          "items": {"$ref": "#/$defs/comparisonReason"}
+        }
+      }
+    },
+    "sample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observed_at", "rooms"],
+      "properties": {
+        "observed_at": {"type": "integer", "minimum": 0},
+        "rooms": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "items": {"$ref": "#/$defs/sampleRoom"}
+        }
+      }
+    }
+  }
+}

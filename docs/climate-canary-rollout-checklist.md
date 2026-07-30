@@ -13,8 +13,9 @@
 - Реестр собран через явный выбор кандидатов, прошёл preview и сохранён только
   после отдельного подтверждения. Android видит только публичные HausmanHub ID.
 - Readiness не показывает missing, moved, stale или authority mismatch.
-- Для одной кандидатной комнаты evidence имеет `ready`: не менее трёх
-  разнесённых наблюдений, shadow-перевод target и room off, ноль аномалий.
+- Для одной кандидатной комнаты accumulated evidence имеет `ready`: не менее
+  24 сопоставимых наблюдений за интервал не короче шести часов, последнее
+  наблюдение не старше десяти минут и ноль подтверждённых расхождений.
 - Shadow-проверка измерила ноль Climate API command POST, а текущий
   climate-core остаётся владельцем policy, cooldown, safety и feedback.
 - Проверен обратимый возврат в `disabled`; он удаляет target и canary room и

@@ -733,6 +733,39 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 )
                 self.assertEqual(403, forbidden.status)
 
+    def test_climate_shadow_window_is_local_admin_only_and_command_free(self) -> None:
+        path = "/api/hausman_hub/v1/admin/climate-shadow-window"
+        view = next(item for item in self.hass.http.views if item.url == path)
+        runtime = self.hass.data["hausman_hub"]["climate_runtime"]
+        original_contours = runtime._contours
+
+        response = asyncio.run(
+            view.get(
+                FakeRequest(
+                    "127.0.0.1",
+                    reader_user(admin=True),
+                    path=path,
+                )
+            )
+        )
+
+        self.assertEqual(200, response.status)
+        self.assertEqual("no-store", response.headers["Cache-Control"])
+        self.assertEqual(0, response.payload["summary"]["sample_count"])
+        self.assertTrue(response.payload["window"]["collection_active"])
+        self.assertFalse(response.payload["commands_enabled"])
+        self.assertFalse(response.payload["physical_commands_sent"])
+        self.assertEqual(original_contours, runtime._contours)
+        for remote, user in (
+            ("203.0.113.7", reader_user(admin=True)),
+            ("127.0.0.1", reader_user("system-read-only")),
+        ):
+            with self.subTest(remote=remote, user=user):
+                forbidden = asyncio.run(
+                    view.get(FakeRequest(remote, user, path=path))
+                )
+                self.assertEqual(403, forbidden.status)
+
     def test_view_returns_exactly_nine_counts_for_a_local_read_only_user(self) -> None:
         response = asyncio.run(
             self.view.get(FakeRequest("127.0.0.1", reader_user("system-read-only")))
@@ -1912,7 +1945,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.46.7", panel.payload["integration_version"])
+        self.assertEqual("1.47.0", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
@@ -2489,7 +2522,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertFalse(hasattr(self.view, method))
 
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
-        self.assertEqual(54, len(self.hass.http.views))
+        self.assertEqual(55, len(self.hass.http.views))
         self.assertEqual(
             1,
             sum(
@@ -2803,7 +2836,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             [(closed_entry, ("sensor", "switch"))],
             closed_hass.config_entries.forwarded,
         )
-        self.assertEqual(53, len(closed_hass.http.views))
+        self.assertEqual(54, len(closed_hass.http.views))
         self.assertEqual(
             {
                 "/api/hausman_hub/v1/capabilities",
@@ -2820,6 +2853,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 "/api/hausman_hub/v1/admin/legacy-settings/preview",
                 "/api/hausman_hub/v1/admin/legacy-settings/apply",
                 "/api/hausman_hub/v1/admin/climate-shadow-comparison",
+                "/api/hausman_hub/v1/admin/climate-shadow-window",
                 "/api/hausman_hub/v1/admin/climate-drafts",
                 "/api/hausman_hub/v1/admin/climate-drafts/current",
                 "/api/hausman_hub/v1/admin/climate-drafts/validate",

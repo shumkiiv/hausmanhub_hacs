@@ -54,6 +54,7 @@ from .application.climate_signal_settings import (
     validate_room_window_update,
 )
 from .application.climate_comparison import climate_comparison_to_payload
+from .application.climate_shadow_window import ClimateShadowWindowService
 from .application.climate_area_assignment import ClimateAreaAssignmentViolation
 from .application.contour_apply import ContourApplyViolation
 from .application.contour_override import TemporaryTemperatureViolation
@@ -84,6 +85,7 @@ DOMAIN = "hausman_hub"
 DATA_CLIMATE_RUNTIME = "climate_runtime"
 DATA_CLIMATE_VIEWS = "climate_views"
 DATA_AI_ASSISTANT = "ai_assistant"
+DATA_CLIMATE_SHADOW = "climate_shadow"
 
 
 def _integration_version() -> str | None:
@@ -121,6 +123,7 @@ ADMIN_READINESS_PATH = "/api/hausman_hub/v1/admin/climate-readiness"
 ADMIN_SHADOW_COMPARISON_PATH = (
     "/api/hausman_hub/v1/admin/climate-shadow-comparison"
 )
+ADMIN_SHADOW_WINDOW_PATH = "/api/hausman_hub/v1/admin/climate-shadow-window"
 ADMIN_CANARY_PREFLIGHT_PATH = "/api/hausman_hub/v1/admin/climate-canary-preflight"
 ADMIN_PANEL_PATH = "/api/hausman_hub/v1/admin/panel"
 ADMIN_PANEL_APPLY_PATH = "/api/hausman_hub/v1/admin/panel/apply"
@@ -154,6 +157,7 @@ def register_climate_api(
     ai_assistant: AiAssistantService | None = None,
     scenario_service: ScenarioService | None = None,
     ir_code_service: object | None = None,
+    climate_shadow: ClimateShadowWindowService | None = None,
 ) -> None:
     """Register fixed routes once and point them at the loaded HausmanHub runtime."""
 
@@ -165,6 +169,8 @@ def register_climate_api(
         data["scenario_service"] = scenario_service
     if ir_code_service is not None:
         data["ir_code_service"] = ir_code_service
+    if climate_shadow is not None:
+        data[DATA_CLIMATE_SHADOW] = climate_shadow
     if DATA_CLIMATE_VIEWS not in data:
         views = [
             ClimateCapabilitiesView(hass),
@@ -189,6 +195,7 @@ def register_climate_api(
             ClimateAdminRegistryPreviewView(hass),
             ClimateAdminReadinessView(hass),
             ClimateAdminShadowComparisonView(hass),
+            ClimateAdminShadowWindowView(hass),
             ClimateAdminPanelView(hass),
             ClimateAdminPanelApplyView(hass),
             ClimateAdminPanelTemporaryView(hass),
@@ -229,6 +236,7 @@ def clear_climate_api(hass: HomeAssistant, entry_id: str) -> None:
         data.pop("scenario_service", None)
         data.pop("ir_code_service", None)
         data.pop("settings_service", None)
+        data.pop(DATA_CLIMATE_SHADOW, None)
 
 
 class _ClimateView(HomeAssistantView):
@@ -266,6 +274,16 @@ class _ClimateView(HomeAssistantView):
             return None
         candidate = self._hass.data.get(DOMAIN, {}).get(DATA_AI_ASSISTANT)
         return candidate if isinstance(candidate, AiAssistantService) else None
+
+    def _climate_shadow(self) -> ClimateShadowWindowService | None:
+        if self._runtime() is None:
+            return None
+        candidate = self._hass.data.get(DOMAIN, {}).get(DATA_CLIMATE_SHADOW)
+        return (
+            candidate
+            if isinstance(candidate, ClimateShadowWindowService)
+            else None
+        )
 
 
 class ClimateCapabilitiesView(_ClimateView):
@@ -997,6 +1015,29 @@ class ClimateAdminShadowComparisonView(_ClimateView):
             if comparison is None:
                 return self._unavailable()
             result = climate_comparison_to_payload(comparison)
+        except Exception:
+            return self._unavailable()
+        return self.json(result, headers=NO_STORE_HEADERS)
+
+
+class ClimateAdminShadowWindowView(_ClimateView):
+    """Expose bounded persisted shadow evidence to a local administrator."""
+
+    url = ADMIN_SHADOW_WINDOW_PATH
+    name = "api:hausman_hub:climate_admin_shadow_window"
+
+    async def get(self, request: Any) -> Any:
+        if not _is_exact_request(request, ADMIN_SHADOW_WINDOW_PATH):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        service = self._climate_shadow()
+        if service is None:
+            return self._unavailable()
+        try:
+            result = await service.async_snapshot(
+                generated_at=int(dt_util.now().timestamp() * 1000)
+            )
         except Exception:
             return self._unavailable()
         return self.json(result, headers=NO_STORE_HEADERS)

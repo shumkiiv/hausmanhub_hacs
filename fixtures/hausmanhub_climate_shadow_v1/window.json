@@ -1,0 +1,49 @@
+{
+  "contract": {
+    "name": "hausman-hub-climate-shadow-window",
+    "version": 1
+  },
+  "generated_at": 1785330720000,
+  "window": {
+    "collection_active": true,
+    "sample_interval_seconds": 300,
+    "retention_seconds": 604800,
+    "minimum_sample_count": 3,
+    "minimum_span_seconds": 600,
+    "freshness_seconds": 600,
+    "minimum_alignment_ratio": 1
+  },
+  "summary": {
+    "sample_count": 3,
+    "room_count": 1,
+    "ready_room_count": 1,
+    "diverged_room_count": 0,
+    "insufficient_room_count": 0,
+    "first_observed_at": 1785330000000,
+    "latest_observed_at": 1785330600000
+  },
+  "rooms": [
+    {
+      "room_id": "living",
+      "verdict": "ready",
+      "reasons": [],
+      "observation_count": 3,
+      "comparable_count": 3,
+      "aligned_count": 3,
+      "diverged_count": 0,
+      "not_comparable_count": 0,
+      "alignment_ratio": 1,
+      "first_observed_at": 1785330000000,
+      "latest_observed_at": 1785330600000,
+      "latest_status": "aligned",
+      "fresh": true
+    }
+  ],
+  "samples": [
+    {"observed_at": 1785330000000, "rooms": [{"room_id": "living", "status": "aligned", "reasons": []}]},
+    {"observed_at": 1785330300000, "rooms": [{"room_id": "living", "status": "aligned", "reasons": []}]},
+    {"observed_at": 1785330600000, "rooms": [{"room_id": "living", "status": "aligned", "reasons": []}]}
+  ],
+  "commands_enabled": false,
+  "physical_commands_sent": false
+}

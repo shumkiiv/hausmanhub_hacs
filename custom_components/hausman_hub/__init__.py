@@ -94,10 +94,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await climate_runtime.async_start()
     from .ai_assistant_setup import async_start_ai_assistant
     from .climate_schedule import async_start_climate_schedule
+    from .climate_shadow import async_start_climate_shadow
     from .climate_trial import async_start_climate_trial
 
     ai_assistant = await async_start_ai_assistant(hass, entry, climate_runtime)
     await async_start_climate_schedule(hass, entry, climate_runtime)
+    climate_shadow = await async_start_climate_shadow(hass, entry, climate_runtime)
     await async_start_climate_trial(hass, entry, climate_runtime)
 
     from .application.scenario_catalog import async_build_scenario_catalog
@@ -115,7 +117,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     scenario_service.set_executor(scenario_executor)
 
     register_climate_api(
-        hass, climate_runtime, ai_assistant, scenario_service, ir_code_service,
+        hass,
+        climate_runtime,
+        ai_assistant,
+        scenario_service,
+        ir_code_service,
+        climate_shadow,
     )
     from .realtime_api import register_event_stream
 
