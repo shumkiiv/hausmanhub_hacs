@@ -685,7 +685,21 @@ class PanelSettingsSectionsTest(unittest.TestCase):
                         {"label": "Ток", "value": "8.04 A", "entityId": "sensor.kettle_current", "domain": "sensor", "state": "8.04"},
                     ],
                     "actions": [],
-                }
+                },
+                {
+                    "id": "device_fedcba9876543210",
+                    "physicalId": "device_fedcba9876543210",
+                    "entityId": "light.floor_lamp",
+                    "name": "Торшер",
+                    "roomName": "Гостиная",
+                    "domain": "light",
+                    "category": "light",
+                    "state": "off",
+                    "stateLabel": "выключено",
+                    "tone": "neutral",
+                    "details": [{"label": "Мощность", "value": "0 W", "entityId": "sensor.floor_lamp_power", "domain": "sensor", "state": "0"}],
+                    "actions": [{"id": "turn_on", "label": "Включить"}],
+                },
             ],
             "energy": {
                 "available": True,
@@ -696,7 +710,8 @@ class PanelSettingsSectionsTest(unittest.TestCase):
                 "selectedSourceIds": ["device_0123456789abcdef"],
                 "settings": {"displayUnits": "watts", "showVoltage": True, "aggregation": "combined", "useAllDevices": True},
                 "sources": [
-                    {"id": "device_0123456789abcdef", "deviceId": "device_0123456789abcdef", "name": "Чайник", "roomName": "Кухня", "available": True, "currentPowerW": 1850, "currentA": 8.04, "voltageV": 230.1, "totalKwh": 12.4}
+                    {"id": "device_0123456789abcdef", "deviceId": "device_0123456789abcdef", "name": "Чайник", "roomName": "Кухня", "available": True, "currentPowerW": 1850, "currentA": 8.04, "voltageV": 230.1, "totalKwh": 12.4},
+                    {"id": "device_fedcba9876543210", "deviceId": "device_fedcba9876543210", "name": "Торшер", "roomName": "Гостиная", "available": True, "currentPowerW": 0, "currentA": 0, "voltageV": 230.0, "totalKwh": 2.1}
                 ],
             },
             "rooms": [], "alarms": [],
@@ -708,7 +723,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         panel._shell.tabs.energy.fire("click");
         await tick();
         let text = textOf(panel._shell.homeSections.energy);
-        if (!text.includes("Энергия") || !text.includes("850") || !text.includes("230,1")) {
+        if (!text.includes("Энергия") || !text.includes("850") || !text.includes("230,1") || !text.includes("Торшер") || !text.includes("2 доступно · 1 на главной")) {
           throw new Error("energy summary is incomplete: " + text);
         }
         const configure = findAll(panel._shell.homeSections.energy, (node) =>

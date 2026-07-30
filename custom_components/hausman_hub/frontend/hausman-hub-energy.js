@@ -263,6 +263,7 @@ export function renderEnergySection(panel, container, deps) {
   hero.appendChild(metrics);
   container.appendChild(hero);
   const selected = selectedSources(energy);
+  const allSources = energy.sources;
   const chartCard = el("section", "card energy-load-card");
   const chartHead = el("div", "energy-card-head");
   chartHead.appendChild(el("h3", null, "Распределение нагрузки"));
@@ -288,10 +289,10 @@ export function renderEnergySection(panel, container, deps) {
   container.appendChild(chartCard);
   const devicesHead = el("div", "energy-card-head energy-devices-head");
   devicesHead.appendChild(el("h3", null, "Устройства"));
-  devicesHead.appendChild(el("span", "muted", `${selected.length} выбрано`));
+  devicesHead.appendChild(el("span", "muted", `${allSources.length} доступно · ${selected.length} на главной`));
   container.appendChild(devicesHead);
   const grid = el("div", "energy-device-grid");
-  selected.forEach((item) => {
+  allSources.forEach((item) => {
     const card = el("button", `energy-device-card${item.available ? "" : " is-unavailable"}`);
     card.type = "button";
     card.addEventListener("click", () => { panel._energySelectedDeviceId = item.id; panel._render(); });
