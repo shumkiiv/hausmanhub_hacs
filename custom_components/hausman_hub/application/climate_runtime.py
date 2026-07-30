@@ -1198,7 +1198,9 @@ class ClimateRuntime:
             contour = self._contours.contour(CLIMATE_CONTOUR_ID)
             if contour is None:
                 return None
-            observation = await self._async_native_climate_observation_unlocked()
+            observation = await self._async_native_climate_observation_unlocked(
+                allow_disabled=True
+            )
             isolation = build_isolated_climate_policy_snapshot(contour, observation)
             return build_climate_comparison_snapshot(isolation, observation)
 
@@ -1408,11 +1410,16 @@ class ClimateRuntime:
 
     async def _async_native_climate_observation_unlocked(
         self,
+        *,
+        allow_disabled: bool = False,
     ) -> ClimateObservationSnapshot:
         """Read one observation without saving evidence or creating commands."""
 
         observed_at = self._safe_now()
-        observation = self._native_ha_observation(observed_at)
+        observation = self._native_ha_observation(
+            observed_at,
+            allow_disabled=allow_disabled,
+        )
         if observation is None:
             # Without a native state view the internal pipeline must not
             # observe at all: the external bridge is never a fallback.
@@ -1442,6 +1449,8 @@ class ClimateRuntime:
     def _native_ha_observation(
         self,
         observed_at: int,
+        *,
+        allow_disabled: bool = False,
     ) -> ClimateObservationSnapshot | None:
         """Build the native observation, or None when observation is absent.
 
@@ -1453,7 +1462,11 @@ class ClimateRuntime:
 
         if (
             self._ha_state_view is None
-            or self.configuration.climate_bridge_mode is ClimateControlMode.DISABLED
+            or (
+                self.configuration.climate_bridge_mode
+                is ClimateControlMode.DISABLED
+                and not allow_disabled
+            )
         ):
             return None
         try:

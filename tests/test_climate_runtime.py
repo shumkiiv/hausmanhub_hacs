@@ -2516,6 +2516,48 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(("living",), result.diverged_room_ids)  # type: ignore[union-attr]
         self.assertEqual([], bridge.executed)
 
+    async def test_native_climate_comparison_reads_states_while_control_disabled(
+        self,
+    ) -> None:
+        bridge = MemoryBridge()
+        registry, contours = build_climate_contour_setup(
+            bridge.snapshot,
+            room_ids=["living"],
+            source_ids=["synthetic-ac-source-living"],
+            name="Климат",
+            mode="automatic",
+            target_temperature=25.0,
+            target_humidity=45,
+            strategy="normal",
+        )
+        registry = with_native_observation_bindings(registry)
+        state_view = SnapshotStateView(registry, bridge)
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateControlMode.DISABLED),
+            registry_store=MemoryStore(registry),
+            contour_store=MemoryContourStore(contours),
+            ha_state_view=state_view,
+            now_ms=lambda: 1784280005000,
+        )
+        await runtime.async_start()
+        fetches_before = bridge.fetch_count
+        reads_before = state_view.reads
+
+        result = await runtime.async_native_climate_comparison()
+
+        self.assertIsNotNone(result)
+        self.assertGreater(state_view.reads, reads_before)
+        self.assertEqual(fetches_before, bridge.fetch_count)
+        self.assertFalse(result.commands_enabled)  # type: ignore[union-attr]
+        room = result.room("living")  # type: ignore[union-attr]
+        self.assertIs(room.status, ClimateComparisonStatus.DIVERGED)
+        self.assertNotIn(
+            ClimateComparisonReason.OBSERVATION_STALE,
+            room.reasons,
+        )
+        self.assertEqual([], bridge.executed)
+
     async def test_native_climate_ha_calls_stay_translation_only(self) -> None:
         bridge = MemoryBridge()
         registry, contours = build_climate_contour_setup(
