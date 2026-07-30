@@ -82,6 +82,10 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn("renderFirstRunAreaBinding", area_binding)
         self.assertIn("writeNavigationRoute", navigation)
         self.assertIn("renderEnergySection", energy)
+        self.assertIn('el("button", "sidebar-intercom")', content)
+        self.assertIn("openIntercomFromRail(this)", content)
+        self.assertIn("export function openIntercomFromRail(panel)", navigation)
+        self.assertIn('const preferences = ["open", "unlock", "turn_on", "press", "activate"]', navigation)
         self.assertIn('customElements.get?.("hausman-hub-panel")', content)
         self.assertIn('customElements.define("hausman-hub-panel"', content)
 
@@ -104,6 +108,31 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         ):
             self.assertIn(f'./{module}?v={manifest["version"]}', content)
 
+    def test_intercom_quick_action_resolves_physical_device_without_confirmation(self) -> None:
+        script = f"""
+          const vm = require("vm");
+          const fs = require("fs");
+          vm.runInThisContext(fs.readFileSync({str(NAVIGATION_JS)!r}, "utf8").replace(/export /g, ""));
+          const command = resolveIntercomQuickAction(
+            [{{ name: "Домофон", entityId: "switch.intercom" }}],
+            [{{ entity_id: "switch.intercom", target_id: "switch.intercom", actions: [{{ action_id: "turn_on", allowed_fields: [] }}] }}]
+          );
+          if (!command || command.targetId !== "switch.intercom" || command.actionId !== "turn_on") {{
+            throw new Error("intercom command was not resolved");
+          }}
+          if (resolveIntercomQuickAction([{{ name: "Чайник" }}], []) !== null) {{
+            throw new Error("unrelated device was classified as intercom");
+          }}
+        """
+        completed = subprocess.run(
+            ("node", "--input-type=commonjs", "--eval", script),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_panel_styles_are_local_and_stay_bounded(self) -> None:
         content = PANEL_JS.read_text(encoding="utf-8")
         styles = PANEL_CSS.read_text(encoding="utf-8")
@@ -114,7 +143,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             len(settings_styles.encode("utf-8")), MAX_SETTINGS_CSS_BYTES
         )
         self.assertIn('"/api/hausman_hub/panel/hausman-hub-panel.css"', content)
-        self.assertIn('hausman-hub-settings.css?v=1.47.7', styles)
+        self.assertIn('hausman-hub-settings.css?v=1.47.8', styles)
         self.assertIn("--hmh-bg:#0B0F14", styles)
         self.assertIn("--hmh-bg:#EEF1F6", styles)
         self.assertIn(".page-header", styles)
@@ -348,6 +377,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             node.tagName === "BUTTON"
             && !String(node.className).split(" ").includes("tab")
             && !String(node.className).split(" ").includes("theme-switch")
+            && !String(node.className).split(" ").includes("sidebar-intercom")
           ))) {{
             throw new Error("climate action rendered without settings");
           }}
@@ -666,7 +696,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.47.7",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.47.8",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },

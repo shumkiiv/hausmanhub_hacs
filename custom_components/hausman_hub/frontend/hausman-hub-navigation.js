@@ -120,3 +120,47 @@ export function openRoomFromOverview(panel, room) {
   if (roomId) panel._openHomeCards.add(`room:${roomId}`);
   panel._activateSection("rooms");
 }
+
+export function resolveIntercomQuickAction(devices, catalog) {
+  const normalized = (value) => String(value || "").trim().toLocaleLowerCase("ru");
+  const device = (Array.isArray(devices) ? devices : []).find((candidate) => {
+    const details = Array.isArray(candidate.details) ? candidate.details : [];
+    const identity = normalized([
+      candidate.name, candidate.entityId, candidate.physicalId, candidate.model,
+      ...details.flatMap((detail) => [detail.label, detail.entityId]),
+    ].filter(Boolean).join(" "));
+    return /(домофон|intercom|doorbell|глазок)/.test(identity);
+  });
+  if (!device) return null;
+  const entityIds = new Set([device.entityId].concat(
+    Array.isArray(device.details) ? device.details.map((item) => item.entityId) : []
+  ).filter(Boolean));
+  const targets = (Array.isArray(catalog) ? catalog : []).filter((target) => entityIds.has(target.entity_id));
+  const preferences = ["open", "unlock", "turn_on", "press", "activate"];
+  for (const actionId of preferences) {
+    for (const target of targets) {
+      const action = (target.actions || []).find((candidate) => candidate.action_id === actionId);
+      if (action && !(action.allowed_fields || []).includes("value")) {
+        return { device, targetId: target.target_id, actionId };
+      }
+    }
+  }
+  return { device, targetId: null, actionId: null };
+}
+
+export function openIntercomFromRail(panel) {
+  const catalog = panel._scenarios.catalog && Array.isArray(panel._scenarios.catalog.devices)
+    ? panel._scenarios.catalog.devices : [];
+  const command = resolveIntercomQuickAction(panel._homeDevices("devices"), catalog);
+  if (!command) {
+    panel._notice = "Домофон не найден среди устройств Home Assistant.";
+    panel._activateSection("security");
+    return;
+  }
+  if (!command.targetId || !command.actionId) {
+    panel._notice = `Для «${command.device.name || "Домофон"}» команда открытия пока не опубликована.`;
+    panel._activateSection("security");
+    return;
+  }
+  panel._executeDeviceAction(command.targetId, command.actionId, null);
+}
