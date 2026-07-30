@@ -147,7 +147,7 @@ def api_capabilities_snapshot(
                 },
             },
             "tablet_profile": {
-                "available": False,
+                "available": True,
                 "path": TABLET_PROFILE_PATH,
                 "methods": ["GET", "PUT"],
                 "optimistic_locking": True,
@@ -157,7 +157,7 @@ def api_capabilities_snapshot(
                 },
             },
             "energy_settings": {
-                "available": False,
+                "available": True,
                 "path": ENERGY_SETTINGS_PATH,
                 "methods": ["GET", "PUT"],
                 "optimistic_locking": True,

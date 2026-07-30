@@ -717,8 +717,14 @@ class PanelSettingsSectionsTest(unittest.TestCase):
             "rooms": [], "alarms": [],
         }
         script = panel_script(
-            GET_PATHS | {"hausman_hub/v1/dashboard": dashboard},
-            {"hausman_hub/v1/admin/energy-settings": {"displayUnits": "both"}},
+            GET_PATHS | {
+                "hausman_hub/v1/dashboard": dashboard,
+                "hausman_hub/v1/energy-settings": {
+                    "revision": 0,
+                    "settings": dashboard["energy"]["settings"],
+                },
+            },
+            {"hausman_hub/v1/energy-settings": {"revision": 1}},
             """
         panel._shell.tabs.energy.fire("click");
         await tick();
@@ -736,8 +742,8 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           node.tagName === "BUTTON" && node.textContent === "Сохранить настройку")[0];
         save.fire("click");
         await tick(10);
-        const post = calls.find((call) => call.method === "POST" && call.path === "hausman_hub/v1/admin/energy-settings");
-        if (!post || post.payload.displayUnits !== "both" || post.payload.useAllDevices !== true) {
+        const post = calls.find((call) => call.method === "PUT" && call.path === "hausman_hub/v1/energy-settings");
+        if (!post || post.payload.expectedRevision !== 0 || post.payload.settings.displayUnits !== "both" || post.payload.settings.useAllDevices !== true) {
           throw new Error("energy settings post mismatch: " + JSON.stringify(post));
         }
         panel._shell.tabs.energy.fire("click");

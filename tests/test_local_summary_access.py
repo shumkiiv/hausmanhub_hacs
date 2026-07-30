@@ -710,8 +710,22 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
         self.assertEqual(200, saved.status)
         self.assertEqual(payload, saved.payload)
-        current = self.hass.data["hausman_hub"]["settings_service"].current
-        self.assertEqual(("device_0123456789abcdef",), current.energy_selected_device_ids)
+        preferences = self.hass.data["hausman_hub"]["tablet_preferences_service"]
+        self.assertEqual(
+            ["device_0123456789abcdef"],
+            preferences.energy["settings"]["selectedDeviceIds"],
+        )
+        public_path = "/api/hausman_hub/v1/energy-settings"
+        public_view = next(
+            item for item in self.hass.http.views if item.url == public_path
+        )
+        public = asyncio.run(
+            public_view.get(
+                FakeRequest("127.0.0.1", reader_user("system-users"), path=public_path)
+            )
+        )
+        self.assertEqual(1, public.payload["revision"])
+        self.assertEqual(payload, public.payload["settings"])
         for remote, user in (
             ("203.0.113.7", admin),
             ("127.0.0.1", reader_user("system-read-only")),
@@ -721,6 +735,44 @@ class LocalSummaryAccessTest(unittest.TestCase):
                     view.post(FakeJsonRequest(remote, user, path, payload))
                 )
                 self.assertEqual(403, response.status)
+
+    def test_tablet_profile_is_atomic_shared_and_rejects_stale_writes(self) -> None:
+        path = "/api/hausman_hub/v1/tablet-profile"
+        view = next(item for item in self.hass.http.views if item.url == path)
+        tablet = reader_user("system-users")
+        initial = asyncio.run(view.get(FakeRequest("127.0.0.1", tablet, path=path)))
+        self.assertEqual(200, initial.status)
+        self.assertEqual(0, initial.payload["revision"])
+        settings = copy.deepcopy(initial.payload["settings"])
+        settings["startScreen"]["mode"] = "kiosk"
+
+        saved = asyncio.run(
+            view.put(
+                FakeJsonRequest(
+                    "127.0.0.1",
+                    tablet,
+                    path,
+                    {"expectedRevision": 0, "settings": settings},
+                )
+            )
+        )
+        self.assertEqual(200, saved.status)
+        self.assertEqual(1, saved.payload["revision"])
+        self.assertEqual("kiosk", saved.payload["settings"]["startScreen"]["mode"])
+
+        stale = asyncio.run(
+            view.put(
+                FakeJsonRequest(
+                    "127.0.0.1",
+                    tablet,
+                    path,
+                    {"expectedRevision": 0, "settings": initial.payload["settings"]},
+                )
+            )
+        )
+        self.assertEqual(409, stale.status)
+        current = asyncio.run(view.get(FakeRequest("127.0.0.1", tablet, path=path)))
+        self.assertEqual(saved.payload, current.payload)
 
     def test_dashboard_snapshot_is_available_to_local_tablet_and_admin(self) -> None:
         """The shared read model must feed both product surfaces without writes."""
@@ -2171,7 +2223,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.48.1", panel.payload["integration_version"])
+        self.assertEqual("1.49.0", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
@@ -2748,7 +2800,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertFalse(hasattr(self.view, method))
 
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
-        self.assertEqual(59, len(self.hass.http.views))
+        self.assertEqual(61, len(self.hass.http.views))
         self.assertEqual(
             1,
             sum(
@@ -3062,7 +3114,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             [(closed_entry, ("sensor", "switch"))],
             closed_hass.config_entries.forwarded,
         )
-        self.assertEqual(58, len(closed_hass.http.views))
+        self.assertEqual(60, len(closed_hass.http.views))
         self.assertEqual(
             {
                 "/api/hausman_hub/v1/capabilities",
@@ -3070,6 +3122,8 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 "/api/hausman_hub/v1/events",
                 "/api/hausman_hub/v1/device-actions",
                 "/api/hausman_hub/v1/energy/history",
+                "/api/hausman_hub/v1/energy-settings",
+                "/api/hausman_hub/v1/tablet-profile",
                 "/api/hausman_hub/v1/home",
                 "/api/hausman_hub/v1/contours",
                 "/api/hausman_hub/v1/contours/apply-preview",

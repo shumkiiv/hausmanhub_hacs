@@ -95,7 +95,7 @@
       }
     },
     "tablet_profile": {
-      "available": false,
+      "available": true,
       "path": "/api/hausman_hub/v1/tablet-profile",
       "methods": ["GET", "PUT"],
       "optimistic_locking": true,
@@ -105,7 +105,7 @@
       }
     },
     "energy_settings": {
-      "available": false,
+      "available": true,
       "path": "/api/hausman_hub/v1/energy-settings",
       "methods": ["GET", "PUT"],
       "optimistic_locking": true,

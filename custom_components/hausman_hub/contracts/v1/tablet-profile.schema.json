@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/tablet-profile.schema.json",
+  "title": "HausmanHub tablet profile v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "revision", "updatedAt", "settings"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "hausman-hub-tablet-profile" },
+        "version": { "const": 1 }
+      }
+    },
+    "revision": { "type": "integer", "minimum": 0 },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "settings": { "$ref": "#/$defs/settings" }
+  },
+  "$defs": {
+    "entityId": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+\\.[a-z0-9_]+$"
+    },
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "startScreen",
+        "kiosk",
+        "displayAutomation",
+        "dayNight",
+        "alerts",
+        "dashboard",
+        "intercom"
+      ],
+      "properties": {
+        "startScreen": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "heroTargetId"],
+          "properties": {
+            "mode": { "enum": ["dashboard", "kiosk"] },
+            "heroTargetId": { "type": ["string", "null"], "maxLength": 128 }
+          }
+        },
+        "kiosk": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "enterAfterIdleSeconds", "doubleTapToExit"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "enterAfterIdleSeconds": { "type": "integer", "minimum": 0, "maximum": 86400 },
+            "doubleTapToExit": { "type": "boolean" }
+          }
+        },
+        "displayAutomation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "sensorEntityIds",
+            "signalMode",
+            "wakeBrightnessPercent",
+            "dimBrightnessPercent",
+            "dimAfterSeconds",
+            "sleepAfterSeconds",
+            "unavailablePolicy"
+          ],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "sensorEntityIds": {
+              "type": "array",
+              "maxItems": 16,
+              "uniqueItems": true,
+              "items": { "$ref": "#/$defs/entityId" }
+            },
+            "signalMode": { "enum": ["any", "all"] },
+            "wakeBrightnessPercent": { "type": "integer", "minimum": 10, "maximum": 100 },
+            "dimBrightnessPercent": { "type": "integer", "minimum": 1, "maximum": 100 },
+            "dimAfterSeconds": { "type": "integer", "minimum": 0, "maximum": 3600 },
+            "sleepAfterSeconds": { "type": "integer", "minimum": 30, "maximum": 86400 },
+            "unavailablePolicy": { "enum": ["keep_awake", "use_timeouts", "sleep"] }
+          }
+        },
+        "dayNight": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "dayStartsAt",
+            "nightStartsAt",
+            "deepNightStartsAt",
+            "dayVolumePercent",
+            "nightVolumePercent",
+            "deepNightVolumePercent",
+            "appExitBrightnessPercent"
+          ],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "dayStartsAt": { "type": "string", "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$" },
+            "nightStartsAt": { "type": "string", "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$" },
+            "deepNightStartsAt": { "type": "string", "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$" },
+            "dayVolumePercent": { "type": "integer", "minimum": 0, "maximum": 100 },
+            "nightVolumePercent": { "type": "integer", "minimum": 0, "maximum": 100 },
+            "deepNightVolumePercent": { "type": "integer", "minimum": 0, "maximum": 100 },
+            "appExitBrightnessPercent": { "type": "integer", "minimum": 1, "maximum": 100 }
+          }
+        },
+        "alerts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "lowBatteryThresholdPercent",
+            "lowBatterySnoozeMinutes",
+            "criticalSoundEnabled",
+            "criticalVolumePercent"
+          ],
+          "properties": {
+            "lowBatteryThresholdPercent": { "type": "integer", "minimum": 1, "maximum": 50 },
+            "lowBatterySnoozeMinutes": { "type": "integer", "minimum": 1, "maximum": 1440 },
+            "criticalSoundEnabled": { "type": "boolean" },
+            "criticalVolumePercent": { "type": "integer", "minimum": 1, "maximum": 100 }
+          }
+        },
+        "dashboard": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["favoriteScenarioIds", "visibleDeviceIds"],
+          "properties": {
+            "favoriteScenarioIds": {
+              "type": "array",
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+            },
+            "visibleDeviceIds": {
+              "type": "array",
+              "maxItems": 128,
+              "uniqueItems": true,
+              "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+            }
+          }
+        },
+        "intercom": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["showQuickAccess", "deviceId"],
+          "properties": {
+            "showQuickAccess": { "type": "boolean" },
+            "deviceId": { "type": ["string", "null"], "maxLength": 128 }
+          }
+        }
+      }
+    }
+  }
+}

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import replace
 from datetime import timedelta
 from http import HTTPStatus
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network, ip_address
@@ -21,8 +20,10 @@ from .application.api_capabilities import (
     CONTOUR_APPLY_PREVIEW_PATH,
     DASHBOARD_PATH,
     ENERGY_HISTORY_PATH,
+    ENERGY_SETTINGS_PATH,
     HOME_PATH,
     HOME_CLIMATE_TARGETS_PATH,
+    TABLET_PROFILE_PATH,
     TEMPORARY_TEMPERATURE_PATH,
     api_capabilities_snapshot,
 )
@@ -63,6 +64,11 @@ from .application.climate_device_bindings import ClimateDeviceBindingViolation
 from .application.contour_apply import ContourApplyViolation
 from .application.contour_override import TemporaryTemperatureViolation
 from .application.home_climate_targets import HomeClimateTargetsViolation
+from .application.tablet_preferences import (
+    TabletPreferencesService,
+    TabletPreferencesViolation,
+    validate_energy_settings,
+)
 from .application.legacy_settings_import import (
     LegacySettingsImportViolation,
     preview_legacy_settings,
@@ -77,7 +83,6 @@ from .application.climate_runtime import (
 from .application.climate_setup import ClimateSetupViolation
 from .domain.ai_assistant import AiAdvisoryStatus, AiAssistantViolation
 from .domain.hub_settings import HausmanHubSettings
-from .domain.hub_settings import HausmanHubSettingsViolation
 from .dashboard_ha_snapshot import async_dashboard_snapshot
 from .energy_history_ha import async_energy_history
 
@@ -185,6 +190,8 @@ def register_climate_api(
             ClimateCapabilitiesView(hass),
             DashboardView(hass),
             EnergyHistoryView(hass),
+            TabletProfileView(hass),
+            EnergySettingsView(hass),
             ClimateHomeView(hass),
             ContoursView(hass),
             ContourApplyPreviewView(hass),
@@ -249,6 +256,7 @@ def clear_climate_api(hass: HomeAssistant, entry_id: str) -> None:
         data.pop("scenario_service", None)
         data.pop("ir_code_service", None)
         data.pop("settings_service", None)
+        data.pop("tablet_preferences_service", None)
         data.pop(DATA_CLIMATE_SHADOW, None)
 
 
@@ -361,12 +369,14 @@ class DashboardView(_ClimateView):
             return self._unavailable()
         data = self._hass.data.get(DOMAIN, {})
         scenario_service = data.get("scenario_service")
-        settings_service = data.get("settings_service")
+        preferences = data.get("tablet_preferences_service")
         try:
             payload = await async_dashboard_snapshot(
                 self._hass,
                 scenario_service if scenario_service is not None else None,
-                settings_service.current if settings_service is not None else None,
+                preferences.energy_for_dashboard
+                if isinstance(preferences, TabletPreferencesService)
+                else None,
             )
         except Exception:
             return self._unavailable()
@@ -426,12 +436,14 @@ class EnergyHistoryView(_ClimateView):
                 headers=NO_STORE_HEADERS,
             )
         data = self._hass.data.get(DOMAIN, {})
-        settings_service = data.get("settings_service")
+        preferences = data.get("tablet_preferences_service")
         try:
             dashboard = await async_dashboard_snapshot(
                 self._hass,
                 data.get("scenario_service"),
-                settings_service.current if settings_service is not None else None,
+                preferences.energy_for_dashboard
+                if isinstance(preferences, TabletPreferencesService)
+                else None,
             )
             payload = await async_energy_history(
                 self._hass,
@@ -444,6 +456,117 @@ class EnergyHistoryView(_ClimateView):
         except Exception:
             return self._unavailable()
         return self.json(payload, headers=NO_STORE_HEADERS)
+
+
+class _PublicPreferencesView(_ClimateView):
+    def _service(self) -> TabletPreferencesService | None:
+        if self._runtime() is None:
+            return None
+        service = self._hass.data.get(DOMAIN, {}).get("tablet_preferences_service")
+        return service if isinstance(service, TabletPreferencesService) else None
+
+    def _authorized(self, request: Any) -> bool:
+        return _is_local_dashboard_request(request)
+
+
+class TabletProfileView(_PublicPreferencesView):
+    """Read and atomically replace the HA-owned tablet profile."""
+
+    url = TABLET_PROFILE_PATH
+    name = "api:hausman_hub:tablet_profile"
+
+    async def get(self, request: Any) -> Any:
+        if not _is_exact_request(request, TABLET_PROFILE_PATH):
+            return _not_found(self)
+        if not self._authorized(request):
+            return _forbidden(self)
+        service = self._service()
+        if service is None:
+            return self._unavailable()
+        return self.json(service.tablet, headers=NO_STORE_HEADERS)
+
+    async def put(self, request: Any) -> Any:
+        if not _is_exact_request(request, TABLET_PROFILE_PATH):
+            return _not_found(self)
+        if not self._authorized(request):
+            return _forbidden(self)
+        service = self._service()
+        if service is None:
+            return self._unavailable()
+        try:
+            payload = await _request_json(request, maximum_bytes=MAX_ACTION_BODY_BYTES)
+            if not isinstance(payload, Mapping) or set(payload) != {
+                "expectedRevision", "settings"
+            }:
+                raise TabletPreferencesViolation("tablet profile body is invalid")
+            result = await service.async_replace_tablet(
+                payload["expectedRevision"], payload["settings"]
+            )
+        except TabletPreferencesViolation as error:
+            return self.json_message(
+                "Настройки уже изменились на другом клиенте. Обновите данные."
+                if error.stale
+                else "Настройки планшета заполнены неверно.",
+                HTTPStatus.CONFLICT if error.stale else HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        except ValueError:
+            return self.json_message(
+                "Настройки планшета заполнены неверно.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        return self.json(result, headers=NO_STORE_HEADERS)
+
+
+class EnergySettingsView(_PublicPreferencesView):
+    """Read and atomically replace shared energy presentation settings."""
+
+    url = ENERGY_SETTINGS_PATH
+    name = "api:hausman_hub:energy_settings"
+
+    async def get(self, request: Any) -> Any:
+        if not _is_exact_request(request, ENERGY_SETTINGS_PATH):
+            return _not_found(self)
+        if not self._authorized(request):
+            return _forbidden(self)
+        service = self._service()
+        if service is None:
+            return self._unavailable()
+        return self.json(service.energy, headers=NO_STORE_HEADERS)
+
+    async def put(self, request: Any) -> Any:
+        if not _is_exact_request(request, ENERGY_SETTINGS_PATH):
+            return _not_found(self)
+        if not self._authorized(request):
+            return _forbidden(self)
+        service = self._service()
+        if service is None:
+            return self._unavailable()
+        try:
+            payload = await _request_json(request, maximum_bytes=MAX_ACTION_BODY_BYTES)
+            if not isinstance(payload, Mapping) or set(payload) != {
+                "expectedRevision", "settings"
+            }:
+                raise TabletPreferencesViolation("energy settings body is invalid")
+            result = await service.async_replace_energy(
+                payload["expectedRevision"], payload["settings"]
+            )
+        except TabletPreferencesViolation as error:
+            return self.json_message(
+                "Настройки уже изменились на другом клиенте. Обновите данные."
+                if error.stale
+                else "Настройки энергии заполнены неверно.",
+                HTTPStatus.CONFLICT if error.stale else HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        except ValueError:
+            return self.json_message(
+                "Настройки энергии заполнены неверно.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        return self.json(result, headers=NO_STORE_HEADERS)
 
 
 class ContoursView(_ClimateView):
@@ -1875,16 +1998,6 @@ class ClimateAdminConnectionSettingsView(_ClimateView):
         )
 
 
-def _energy_settings_payload(settings: HausmanHubSettings) -> dict[str, object]:
-    return {
-        "displayUnits": settings.energy_display_units,
-        "showVoltage": settings.energy_show_voltage,
-        "aggregation": settings.energy_aggregation,
-        "useAllDevices": settings.energy_use_all_devices,
-        "selectedDeviceIds": list(settings.energy_selected_device_ids),
-    }
-
-
 class ClimateAdminEnergySettingsView(_ClimateView):
     """Persist the shared dashboard energy presentation in Home Assistant."""
 
@@ -1894,7 +2007,8 @@ class ClimateAdminEnergySettingsView(_ClimateView):
     def _service(self) -> object | None:
         if self._runtime() is None:
             return None
-        return self._hass.data.get(DOMAIN, {}).get("settings_service")
+        service = self._hass.data.get(DOMAIN, {}).get("tablet_preferences_service")
+        return service if isinstance(service, TabletPreferencesService) else None
 
     async def get(self, request: Any) -> Any:
         if not _is_exact_request(request, ADMIN_ENERGY_SETTINGS_PATH):
@@ -1904,7 +2018,7 @@ class ClimateAdminEnergySettingsView(_ClimateView):
         service = self._service()
         if service is None:
             return self._unavailable()
-        return self.json(_energy_settings_payload(service.current), headers=NO_STORE_HEADERS)
+        return self.json(service.energy["settings"], headers=NO_STORE_HEADERS)
 
     async def post(self, request: Any) -> Any:
         if not _is_exact_request(request, ADMIN_ENERGY_SETTINGS_PATH):
@@ -1931,26 +2045,19 @@ class ClimateAdminEnergySettingsView(_ClimateView):
                 HTTPStatus.BAD_REQUEST,
                 headers=NO_STORE_HEADERS,
             )
-        selected = payload.get("selectedDeviceIds")
         try:
-            updated = replace(
-                service.current,
-                energy_display_units=payload.get("displayUnits"),
-                energy_show_voltage=payload.get("showVoltage"),
-                energy_aggregation=payload.get("aggregation"),
-                energy_use_all_devices=payload.get("useAllDevices"),
-                energy_selected_device_ids=tuple(selected)
-                if isinstance(selected, list)
-                else selected,
+            settings = validate_energy_settings(payload)
+            current = service.energy
+            updated = await service.async_replace_energy(
+                current["revision"], settings
             )
-            await service.async_replace(updated)
-        except (HausmanHubSettingsViolation, TypeError):
+        except (TabletPreferencesViolation, TypeError):
             return self.json_message(
                 "The energy settings values are invalid.",
                 HTTPStatus.BAD_REQUEST,
                 headers=NO_STORE_HEADERS,
             )
-        return self.json(_energy_settings_payload(updated), headers=NO_STORE_HEADERS)
+        return self.json(updated["settings"], headers=NO_STORE_HEADERS)
 
 
 class ClimateAdminResetView(_ClimateView):
@@ -1980,9 +2087,11 @@ class ClimateAdminResetView(_ClimateView):
         scenario_service = data.get("scenario_service")
         ir_code_service = data.get("ir_code_service")
         settings_service = data.get("settings_service")
+        tablet_preferences_service = data.get("tablet_preferences_service")
         assistant = self._ai_assistant()
         if any(item is None for item in (
-            runtime, entry, scenario_service, ir_code_service, settings_service, assistant,
+            runtime, entry, scenario_service, ir_code_service, settings_service,
+            tablet_preferences_service, assistant,
         )):
             return self._unavailable()
         try:
@@ -1991,6 +2100,7 @@ class ClimateAdminResetView(_ClimateView):
             await scenario_service.async_reset()
             await ir_code_service.async_reset()
             await settings_service.async_replace(HausmanHubSettings())
+            await tablet_preferences_service.async_reset()
             await assistant.async_reset_state()
             self._hass.config_entries.async_update_entry(
                 entry,
@@ -2011,6 +2121,7 @@ class ClimateAdminResetView(_ClimateView):
                     "home_signals",
                     "scenarios",
                     "ir_codes",
+                    "tablet_preferences",
                     "assistant",
                     "connection",
                 ],

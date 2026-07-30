@@ -55,7 +55,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .ir_code_gateway import HomeAssistantIRCodeTransmitter
     from .ir_code_storage import HomeAssistantIRCodeStore
     from .application.settings_service import HausmanHubSettingsService
+    from .application.tablet_preferences import TabletPreferencesService
     from .settings_storage import HomeAssistantSettingsStore
+    from .tablet_preferences_storage import HomeAssistantTabletPreferencesStore
     from .local_summary import register_local_summary_access
 
     await hass.config_entries.async_forward_entry_setups(
@@ -75,7 +77,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         HomeAssistantSettingsStore(hass, entry.entry_id),
     )
     await settings_service.async_load()
-    hass.data.setdefault(entry.domain, {})["settings_service"] = settings_service
+    tablet_preferences_service = TabletPreferencesService(
+        HomeAssistantTabletPreferencesStore(hass, entry.entry_id)
+    )
+    await tablet_preferences_service.async_load(settings_service.current)
+    domain_data = hass.data.setdefault(entry.domain, {})
+    domain_data["settings_service"] = settings_service
+    domain_data["tablet_preferences_service"] = tablet_preferences_service
     if configuration.local_summary_enabled:
         register_local_summary_access(hass, entry)
     climate_runtime = ClimateRuntime(

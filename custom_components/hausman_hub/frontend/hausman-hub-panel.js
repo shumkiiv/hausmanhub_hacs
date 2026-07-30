@@ -1,10 +1,10 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.48.1";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.48.1";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.48.1";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.48.1";
-import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.48.1";
-import { openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.48.1";
-import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection } from "./hausman-hub-energy.js?v=1.48.1";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.49.0";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.49.0";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.49.0";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.49.0";
+import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.49.0";
+import { openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.49.0";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.49.0";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css";
@@ -29,7 +29,6 @@ const SCENARIOS_TEST_API = "hausman_hub/v1/admin/scenarios/test";
 const SCENARIOS_DELETE_API = "hausman_hub/v1/admin/scenarios/delete";
 const SCENARIOS_RUN_API = "hausman_hub/v1/admin/scenarios/run";
 const CONNECTION_SETTINGS_API = "hausman_hub/v1/admin/connection-settings";
-const ENERGY_SETTINGS_API = "hausman_hub/v1/admin/energy-settings";
 const RESET_API = "hausman_hub/v1/admin/reset";
 const USER_PREFERENCES_KEY = "hausman_hub";
 const IR_CODES_API = "hausman_hub/v1/admin/ir-codes";
@@ -5170,7 +5169,7 @@ class HausmanHubPanel extends HTMLElement {
     this._notice = "";
     this._render();
     try {
-      await this._hass.callApi("POST", ENERGY_SETTINGS_API, this._energyDraft);
+      await saveEnergySettings(this);
       this._energyDraft = null;
       this._energySettingsOpen = false;
       this._notice = "Настройка энергии сохранена в Home Assistant.";

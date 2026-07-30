@@ -382,3 +382,12 @@ export async function loadEnergyHistory(panel) {
     if (panel._activeSection === "energy") panel._render();
   }
 }
+
+export async function saveEnergySettings(panel) {
+  const path = "hausman_hub/v1/energy-settings";
+  const current = await panel._hass.callApi("GET", path);
+  return panel._hass.callApi("PUT", path, {
+    expectedRevision: current.revision,
+    settings: panel._energyDraft,
+  });
+}
