@@ -237,6 +237,44 @@ class DashboardSnapshotTest(unittest.TestCase):
         self.assertEqual([], snapshot["energy"]["selectedSourceIds"])
         self.assertFalse(snapshot["energy"]["settings"]["useAllDevices"])
 
+    def test_battery_voltage_does_not_create_an_energy_device(self) -> None:
+        """A lock or sensor battery is not a mains load merely because it reports volts."""
+
+        snapshot = build_dashboard_snapshot(
+            areas=(DashboardArea("hall", "Тамбур"),),
+            devices=(
+                DashboardDevice("lock", "Умный замок", "hall"),
+                DashboardDevice("meter", "Сетевой вольтметр", "hall"),
+            ),
+            entities=(
+                DashboardEntity(
+                    "sensor.lock_voltage",
+                    "sensor",
+                    "6",
+                    "Напряжение батареи",
+                    {"device_class": "voltage", "unit_of_measurement": "V"},
+                    "lock",
+                    "hall",
+                ),
+                DashboardEntity(
+                    "sensor.mains_voltage",
+                    "sensor",
+                    "223",
+                    "Напряжение сети",
+                    {"device_class": "voltage", "unit_of_measurement": "V"},
+                    "meter",
+                    "hall",
+                ),
+            ),
+            generated_at_ms=1,
+            local_iso="2026-07-30T18:00:00+06:00",
+            energy_settings=HausmanHubSettings(energy_use_all_devices=True),
+        )
+
+        sources = snapshot["energy"]["sources"]
+        self.assertEqual(["Сетевой вольтметр"], [source["name"] for source in sources])
+        self.assertEqual(223.0, snapshot["energy"]["voltageV"])
+
     def test_room_weather_alarm_and_summary_are_human_readable(self) -> None:
         living = next(room for room in self.snapshot["rooms"] if room["id"] == "living")
         self.assertEqual(25.4, living["temp"])

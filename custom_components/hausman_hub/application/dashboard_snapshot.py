@@ -74,7 +74,8 @@ _ALLOWLISTED_ATTRIBUTES = (
     "percentage",
     "temperature",
 )
-_ENERGY_DEVICE_CLASSES = frozenset({"power", "current", "voltage", "energy"})
+_ENERGY_USAGE_DEVICE_CLASSES = frozenset({"power", "current", "energy"})
+_MINIMUM_MAINS_VOLTAGE = 80.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -305,6 +306,19 @@ def _energy_measurements(entities: Iterable[DashboardEntity]) -> dict[str, float
         "voltageV": _measurement(collected, "voltage"),
         "totalKwh": _measurement(collected, "energy"),
     }
+
+
+def _is_energy_source(
+    entities: Iterable[DashboardEntity],
+    measurements: Mapping[str, float | None],
+) -> bool:
+    """Reject battery-voltage diagnostics while retaining real energy meters."""
+
+    device_classes = {_device_class(entity) for entity in entities}
+    if device_classes & _ENERGY_USAGE_DEVICE_CLASSES:
+        return True
+    voltage = measurements.get("voltageV")
+    return voltage is not None and voltage >= _MINIMUM_MAINS_VOLTAGE
 
 
 def _room_climate(entities: Iterable[DashboardEntity]) -> DashboardEntity | None:
@@ -574,9 +588,7 @@ def build_dashboard_snapshot(
         ]
         name = registry_device.name if registry_device is not None else primary.name
         electrical = _energy_measurements(members)
-        has_energy = any(
-            _device_class(member) in _ENERGY_DEVICE_CLASSES for member in members
-        )
+        has_energy = _is_energy_source(members, electrical)
         device_payloads.append(
             {
                 "id": public_id,

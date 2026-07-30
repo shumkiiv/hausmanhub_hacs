@@ -1,10 +1,10 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.47.5";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.47.5";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.47.5";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.47.5";
-import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.47.5";
-import { openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.47.5";
-import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection } from "./hausman-hub-energy.js?v=1.47.5";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.47.6";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.47.6";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.47.6";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.47.6";
+import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.47.6";
+import { openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.47.6";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection } from "./hausman-hub-energy.js?v=1.47.6";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css";
