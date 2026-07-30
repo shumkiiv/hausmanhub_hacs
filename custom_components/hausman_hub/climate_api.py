@@ -347,7 +347,11 @@ class DashboardView(_ClimateView):
     async def get(self, request: Any) -> Any:
         if not _is_exact_request(request, DASHBOARD_PATH):
             return _not_found(self)
-        if not _is_local_tablet_request(request):
+        # The same read-only physical-device snapshot feeds both the tablet
+        # application and HausmanHub's administrator panel.  Keeping the
+        # tablet-only guard here made the HACS panel silently lose every
+        # energy source for a perfectly valid local administrator session.
+        if not _is_local_dashboard_request(request):
             return _forbidden(self)
         if self._runtime() is None:
             return self._unavailable()
@@ -2093,6 +2097,12 @@ def _is_local_tablet_request(request: Any) -> bool:
     if not isinstance(groups, (frozenset, list, set, tuple)):
         return False
     return {getattr(group, "id", None) for group in groups} == {TABLET_GROUP_ID}
+
+
+def _is_local_dashboard_request(request: Any) -> bool:
+    """Allow the side-effect-free dashboard to a local tablet or local admin."""
+
+    return _is_local_tablet_request(request) or _is_local_admin_request(request)
 
 
 def _is_local_admin_request(request: Any) -> bool:

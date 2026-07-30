@@ -719,6 +719,44 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 )
                 self.assertEqual(403, response.status)
 
+    def test_dashboard_snapshot_is_available_to_local_tablet_and_admin(self) -> None:
+        """The shared read model must feed both product surfaces without writes."""
+
+        path = "/api/hausman_hub/v1/dashboard"
+        view = next(item for item in self.hass.http.views if item.url == path)
+
+        async def dashboard_snapshot(*_args: object) -> dict[str, object]:
+            return {"energy": {}, "devices": []}
+
+        method_globals = view.get.__func__.__globals__
+        original_snapshot = method_globals["async_dashboard_snapshot"]
+        method_globals["async_dashboard_snapshot"] = dashboard_snapshot
+        try:
+            for user in (
+                reader_user("system-users"),
+                reader_user("system-admin", admin=True),
+            ):
+                with self.subTest(user=user):
+                    response = asyncio.run(
+                        view.get(FakeRequest("127.0.0.1", user, path=path))
+                    )
+                    self.assertEqual(200, response.status)
+                    self.assertEqual("no-store", response.headers["Cache-Control"])
+                    self.assertIn("energy", response.payload)
+                    self.assertIn("devices", response.payload)
+
+            for remote, user in (
+                ("203.0.113.7", reader_user("system-admin", admin=True)),
+                ("127.0.0.1", reader_user("system-read-only")),
+            ):
+                with self.subTest(remote=remote, user=user):
+                    response = asyncio.run(
+                        view.get(FakeRequest(remote, user, path=path))
+                    )
+                    self.assertEqual(403, response.status)
+        finally:
+            method_globals["async_dashboard_snapshot"] = original_snapshot
+
     def test_climate_shadow_comparison_is_local_admin_only_and_read_only(self) -> None:
         path = "/api/hausman_hub/v1/admin/climate-shadow-comparison"
         view = next(item for item in self.hass.http.views if item.url == path)
@@ -2064,7 +2102,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.47.4", panel.payload["integration_version"])
+        self.assertEqual("1.47.5", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
