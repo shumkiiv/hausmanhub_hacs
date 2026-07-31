@@ -1,12 +1,13 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.11";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.11";
-import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.11";
-import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.11";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.11";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.11";
-import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.11";
-import { openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.11";
-import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.11";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.12";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.12";
+import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.12";
+import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.51.12";
+import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.12";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.12";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.12";
+import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.12";
+import { openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.12";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.12";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css";
@@ -76,7 +77,7 @@ const ROOM_PRESENCE_DEVICE_CLASSES = new Set(["motion", "occupancy", "presence"]
 const CONTROL_CHANNEL_LABELS = {
   universal_ir: "Универсальный ИК-пульт",
   yandex_remote: "Пульт Яндекса",
-  direct_wifi: "Прямое управление (WiFi)",
+  direct_wifi: "Напрямую через Home Assistant",
 };
 const FIRST_RUN_STEPS = [
   "rooms", "room", "home", "validation", "save", "code_source", "tablet", "completion", "success",
@@ -1892,6 +1893,64 @@ class HausmanHubPanel extends HTMLElement {
       ACTIVE_DEVICE_TYPES, CONTROL_CHANNEL_LABELS, ZIGBEE2MQTT_IMAGE_PATTERN,
       el, normalizedText, selectField, setAttr, svgIcon,
     });
+  }
+
+  async _testFirstRunControlChannel(choice) {
+    const plan = resolveControlChannelTest(this, choice);
+    if (!plan.ready || !this._hass) {
+      return {
+        status: "failed",
+        title: "Канал не проверен",
+        detail: plan.reason || "Нет безопасной команды для проверки.",
+      };
+    }
+    try {
+      const probe = await this._hass.callApi("POST", DEVICE_ACTIONS_API, {
+        targetId: plan.targetId,
+        actionId: plan.actionId,
+        value: plan.probeValue,
+      });
+      const restored = await this._hass.callApi("POST", DEVICE_ACTIONS_API, {
+        targetId: plan.targetId,
+        actionId: plan.actionId,
+        value: plan.value,
+      });
+      if (probe && probe.confirmed === true && restored && restored.confirmed === true) {
+        return {
+          status: "confirmed",
+          title: "Канал работает",
+          detail: "Устройство подтвердило тестовое значение и возврат исходной настройки.",
+        };
+      }
+      if (probe && probe.accepted === true && restored && restored.accepted === true) {
+        return {
+          status: "pending",
+          title: "Команды отправлены",
+          detail: "Home Assistant принял тест и возврат исходного значения, но устройство не подтвердило оба состояния.",
+        };
+      }
+      return {
+        status: "failed",
+        title: "Устройство не ответило",
+        detail: (probe && probe.message) || "Тест или возврат исходной настройки не подтверждён. Проверьте устройство.",
+      };
+    } catch (error) {
+      try {
+        await this._hass.callApi("POST", DEVICE_ACTIONS_API, {
+          targetId: plan.targetId,
+          actionId: plan.actionId,
+          value: plan.value,
+        });
+      } catch {
+        // The visible result remains failed; the user is told to verify the
+        // current setpoint before retrying.
+      }
+      return {
+        status: "failed",
+        title: "Проверка не выполнена",
+        detail: "Не удалось завершить тест. Проверьте текущее заданное значение устройства перед повтором.",
+      };
+    }
   }
 
   _firstRunClimateSources(room, fields, choices) {
@@ -5203,6 +5262,9 @@ class HausmanHubPanel extends HTMLElement {
     }
     if (action.action_id === "set_fan_mode") {
       return String(attributes.fan_mode || "").trim() || null;
+    }
+    if (action.action_id === "set_humidity") {
+      return numeric(attributes.humidity, device && device.primaryValue, detail && detail.state);
     }
     return null;
   }

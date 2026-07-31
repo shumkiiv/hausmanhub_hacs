@@ -1,6 +1,7 @@
-@import url("./hausman-hub-settings.css?v=1.51.11");
-@import url("./hausman-hub-device-bindings.css?v=1.51.11");
-@import url("./hausman-hub-energy.css?v=1.51.11");
+@import url("./hausman-hub-settings.css?v=1.51.12");
+@import url("./hausman-hub-device-bindings.css?v=1.51.12");
+@import url("./hausman-hub-energy.css?v=1.51.12");
+@import url("./hausman-hub-control-channel.css?v=1.51.12");
 
 :host { display:block; box-sizing:border-box; width:100%; min-height:100%; overflow-x:hidden;
   --hmh-bg:#0B0F14; --hmh-surface:#12171D; --hmh-raised:#181E26; --hmh-field:#181E26; --hmh-hover:#1F2630;
@@ -379,13 +380,6 @@ label.signal-option > input[type="radio"] { grid-column:1; width:18px; min-heigh
 .device-control-option .entity-label strong { font-size:14px; }
 .device-control-option .entity-label small { font-size:12px; }
 .device-control-warning { color:var(--warning-color,#ef6c00)!important; }
-.device-channel-field { display:grid; grid-template-columns:minmax(150px,.8fr) minmax(180px,1.2fr);
-  align-items:center; gap:12px; margin:10px 0 0; padding:11px; border-radius:11px;
-  background:var(--secondary-background-color,#f2f4f5); }
-.device-channel-copy strong, .device-channel-copy small { display:block; }
-.device-channel-copy strong { font-size:13px; }
-.device-channel-copy small { margin-top:3px; color:var(--secondary-text-color,#727272); font-size:11px; line-height:1.35; }
-.device-channel-field select { width:100%; max-width:none; }
 .collapsible-section { margin-top:14px; }
 .collapsible-toggle { display:inline-flex; align-items:center; gap:8px; margin:0;
   font-size:13px; text-transform:uppercase; letter-spacing:.05em;

@@ -997,7 +997,7 @@ class HomeAssistantEntityCatalogTest(unittest.TestCase):
         self.assertEqual("kids", by_id["sensor.kids_humidity"].room_id)
         self.assertEqual("", by_id["humidifier.mobile"].room_id)
         expected_group = "device_" + hashlib.sha256(
-            b"device_kids"
+            b"device:device_kids"
         ).hexdigest()[:16]
         for entity_id in (
             "sensor.kids_temperature",

@@ -441,8 +441,11 @@ def _device_presentation(
 ) -> _EntityDevicePresentation:
     """Project only display-safe facts and an opaque physical-device group."""
 
+    # Keep the public physical-device id identical to dashboard_snapshot.
+    # Both surfaces must be able to join the same HA device without exposing
+    # the private registry id to the browser.
     group_digest = hashlib.sha256(
-        registry_device_id.encode("utf-8")
+        f"device:{registry_device_id}".encode("utf-8")
     ).hexdigest()[:16]
     name = _bounded_device_detail(
         getattr(device_entry, "name_by_user", None)

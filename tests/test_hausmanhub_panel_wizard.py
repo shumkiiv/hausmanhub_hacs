@@ -17,6 +17,7 @@ PANEL_JS = (
 HOME_SECTIONS_JS = PANEL_JS.with_name("hausman-hub-home-sections.js")
 ROOM_SETUP_JS = PANEL_JS.with_name("hausman-hub-room-setup.js")
 ROOM_DEVICE_GROUPS_JS = PANEL_JS.with_name("hausman-hub-room-device-groups.js")
+CONTROL_CHANNEL_JS = PANEL_JS.with_name("hausman-hub-control-channel.js")
 ROOM_CLIMATE_SOURCES_JS = PANEL_JS.with_name("hausman-hub-room-climate-sources.js")
 DEVICE_INVENTORY_JS = PANEL_JS.with_name("hausman-hub-device-inventory.js")
 DEVICE_BINDINGS_JS = PANEL_JS.with_name("hausman-hub-device-bindings.js")
@@ -297,7 +298,12 @@ def panel_script(get_table: dict, post_table: dict, assertions: str) -> str:
         {{ filename: {str(ROOM_SETUP_JS)!r} }}
       );
       vm.runInThisContext(
-        fs.readFileSync({str(ROOM_DEVICE_GROUPS_JS)!r}, "utf8").replace(/export /g, ""),
+        fs.readFileSync({str(CONTROL_CHANNEL_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(CONTROL_CHANNEL_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(ROOM_DEVICE_GROUPS_JS)!r}, "utf8")
+          .replace(/^import .*;\\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(ROOM_DEVICE_GROUPS_JS)!r} }}
       );
       vm.runInThisContext(
@@ -456,6 +462,102 @@ def ready_validation(draft: dict) -> dict:
 
 
 class PanelContourWizardTest(unittest.TestCase):
+    def test_control_channel_is_explained_recommended_and_safely_confirmed(self) -> None:
+        options = copy.deepcopy(DRAFT_OPTIONS)
+        air_conditioner = next(
+            candidate
+            for candidate in options["devices"]
+            if candidate["candidate_id"] == "candidate_ac"
+        )
+        air_conditioner["device_group_id"] = "device_air_conditioner"
+        payloads = get_payloads(options=options)
+        payloads["hausman_hub/v1/dashboard"] = {
+            "devices": [
+                {
+                    "id": "device_air_conditioner",
+                    "physicalId": "device_air_conditioner",
+                    "entityId": "climate.living_room",
+                    "name": "Кондиционер",
+                    "attributes": {"temperature": 25.0},
+                    "details": [],
+                }
+            ]
+        }
+        payloads["hausman_hub/v1/admin/scenarios"] = {"scenarios": []}
+        payloads["hausman_hub/v1/admin/scenarios/catalog"] = {
+            "devices": [
+                {
+                    "target_id": "entity_air_conditioner",
+                    "entity_id": "climate.living_room",
+                    "name": "Кондиционер",
+                    "actions": [
+                        {
+                            "action_id": "set_temperature",
+                            "title": "Температура",
+                            "allowed_fields": ["value"],
+                        }
+                    ],
+                }
+            ]
+        }
+        script = panel_script(
+            payloads,
+            {
+                "hausman_hub/v1/device-actions": {
+                    "accepted": True,
+                    "confirmed": True,
+                    "status": "confirmed",
+                }
+            },
+            """
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать настройку")[0].fire("click");
+        await tick();
+        panel._firstRunFields.rooms.living.include.checked = true;
+        panel._firstRunFields.rooms.living.include.fire("change");
+        panel._firstRunFields.rooms.living.configure.fire("click");
+        await tick();
+        const field = panel._firstRunFields.room.devices.find((item) => item.key === "candidate_ac:air_conditioner");
+        field.checkbox.checked = true;
+        field.checkbox.fire("change");
+        const assistant = field.channelAssistant.node;
+        if (!textOf(assistant).includes("Рекомендуем: Напрямую через Home Assistant")
+          || !textOf(assistant).includes("Как выбрать способ управления")) {
+          throw new Error("channel recommendation or comparison help is missing");
+        }
+        field.controlChannel.value = "direct_wifi";
+        field.controlChannel.fire("change");
+        const testButton = findAll(assistant, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Проверить канал")[0];
+        if (!testButton || !textOf(assistant).includes("без изменения режима")) {
+          throw new Error("safe channel test is not offered");
+        }
+        testButton.fire("click");
+        await tick(16);
+        const commands = calls.filter((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/device-actions");
+        if (commands.length !== 2 || commands.some((command) => (
+          command.payload.targetId !== "entity_air_conditioner"
+          || command.payload.actionId !== "set_temperature"))
+          || commands[0].payload.value !== 25.5 || commands[1].payload.value !== 25) {
+          throw new Error("reversible channel test did not probe and restore the setpoint");
+        }
+        if (!textOf(assistant).includes("Канал работает")
+          || !textOf(assistant).includes("возврат исходной")) {
+          throw new Error("confirmed read-back was not shown honestly");
+        }
+        field.controlChannel.value = "universal_ir";
+        field.controlChannel.fire("change");
+        if (findAll(assistant, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Проверить канал").length
+          || !textOf(assistant).includes("физическую реакцию")) {
+          throw new Error("one-way IR channel was presented as automatically confirmable");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_not_configured_renders_rooms_multiple_sensors_and_keeps_dirty_form(self) -> None:
         script = panel_script(
             get_payloads(),

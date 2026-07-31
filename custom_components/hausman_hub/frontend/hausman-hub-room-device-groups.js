@@ -1,3 +1,5 @@
+import { createControlChannelAssistant, recommendControlChannel } from "./hausman-hub-control-channel.js?v=1.51.12";
+
 export function renderFirstRunDeviceGroups(owner, choiceList, room, fields, allChoices, searchable, deps) {
   const {
     ACTIVE_DEVICE_TYPES, CONTROL_CHANNEL_LABELS, ZIGBEE2MQTT_IMAGE_PATTERN,
@@ -95,15 +97,19 @@ export function renderFirstRunDeviceGroups(owner, choiceList, room, fields, allC
       options.appendChild(label);
       let controlChannel = null;
       let channelRow = null;
+      let channelAssistant = null;
       if (ACTIVE_DEVICE_TYPES.has(choice.type) && selectable) {
+        const recommendation = recommendControlChannel(owner, choice);
         controlChannel = selectField(
           [{ label: "Не выбран", value: "" }].concat((owner._firstRun.options.control_channels || []).map((channel) => ({
-            label: CONTROL_CHANNEL_LABELS[channel] || channel,
+            label: `${channel === recommendation.channel ? "Рекомендуем · " : ""}${CONTROL_CHANNEL_LABELS[channel] || channel}`,
             value: channel,
           }))),
           choice.device.channel,
           () => {
             choice.device.channel = controlChannel.value || null;
+            choice.device.channelTest = null;
+            if (channelAssistant) channelAssistant.refresh();
             owner._firstRunInvalidate(room.id);
           }
         );
@@ -115,6 +121,13 @@ export function renderFirstRunDeviceGroups(owner, choiceList, room, fields, allC
         channelRow.appendChild(controlChannel);
         channelRow.hidden = !choice.device.selected;
         options.appendChild(channelRow);
+
+        channelAssistant = createControlChannelAssistant(
+          owner, choice, controlChannel, recommendation, room, { CONTROL_CHANNEL_LABELS, el }
+        );
+        channelAssistant.refresh();
+        channelAssistant.node.hidden = !choice.device.selected;
+        options.appendChild(channelAssistant.node);
       }
       checkbox.addEventListener("change", () => {
         if (!selectable) return;
@@ -134,13 +147,14 @@ export function renderFirstRunDeviceGroups(owner, choiceList, room, fields, allC
           });
         }
         if (channelRow) channelRow.hidden = !checkbox.checked;
+        if (channelAssistant) channelAssistant.node.hidden = !checkbox.checked;
         if (unavailableWarning) unavailableWarning.hidden = !checkbox.checked;
         if (fields.refreshClimateSources) fields.refreshClimateSources();
         refreshGroup();
         owner._firstRunInvalidate(room.id);
       });
       fields.devices.push({
-        checkbox, choice, controlChannel, channelRow, key: choice.key, label, sourceBadge: null,
+        checkbox, choice, controlChannel, channelRow, channelAssistant, key: choice.key, label, sourceBadge: null,
         type: choice.type, unavailableWarning,
       });
       if (fields.refreshClimateSources) fields.refreshClimateSources();
