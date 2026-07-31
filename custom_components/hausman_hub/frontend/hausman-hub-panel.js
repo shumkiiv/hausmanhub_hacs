@@ -1,13 +1,13 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.12";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.12";
-import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.12";
-import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.51.12";
-import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.12";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.12";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.12";
-import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.12";
-import { openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.12";
-import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.12";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.13";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.13";
+import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.13";
+import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.51.13";
+import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.13";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.13";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.13";
+import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.13";
+import { openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.13";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.13";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css";
@@ -4543,12 +4543,38 @@ class HausmanHubPanel extends HTMLElement {
       - Math.min(entityId.length, 255) / 1000;
   }
 
-  _signalCandidateDisplayName(candidate) {
+  _weatherSourceDisplayName(entityId) {
+    const source = String(entityId || "").split(".", 2)[1] || "";
+    const normalized = source.replace(/^(?:weather|forecast)_/, "");
+    const known = {
+      home_assistant: "Home Assistant",
+      omsk: "Омск",
+      yandex: "Яндекс",
+      yandex_weather: "Яндекс Погода",
+      openweathermap: "OpenWeather",
+      met_no: "MET Norway",
+      home: "Дом",
+    };
+    if (known[normalized]) return known[normalized];
+    return normalized.split("_").filter(Boolean).map((part) => (
+      part.charAt(0).toLocaleUpperCase("ru-RU") + part.slice(1)
+    )).join(" ") || "Home Assistant";
+  }
+
+  _signalCandidateDisplayName(candidate, peers = []) {
     if (!candidate) return "Источник не выбран";
     if (candidate.domain === "person") {
       return `${candidate.name || candidate.entity_id} · профиль пользователя`;
     }
-    return candidate.device_name || candidate.name || candidate.entity_id;
+    const name = candidate.device_name || candidate.name || candidate.entity_id;
+    if (candidate.domain !== "weather") return name;
+    const duplicate = peers.filter((peer) => (
+      peer.domain === "weather" && normalizedText(peer.name || peer.entity_id) === normalizedText(candidate.name || candidate.entity_id)
+    )).length > 1;
+    const generic = /^(?:forecast|weather|прогноз|погода)$/i.test(String(candidate.name || "").trim());
+    if (!duplicate && !generic) return name;
+    const localized = /^(?:forecast|weather)$/i.test(String(name).trim()) ? "Погода" : name;
+    return `${localized} · ${this._weatherSourceDisplayName(candidate.entity_id)}`;
   }
 
   _signalCandidateExplanation(candidate, signalKind) {
@@ -4606,7 +4632,7 @@ class HausmanHubPanel extends HTMLElement {
     put(currentCard, currentCopy, currentStatus);
     const refresh = () => {
       const candidate = selectedCandidate();
-      currentName.textContent = this._signalCandidateDisplayName(candidate);
+      currentName.textContent = this._signalCandidateDisplayName(candidate, visible);
       currentMeta.textContent = this._signalCandidateExplanation(candidate, signalKind);
       currentStatus.textContent = candidate ? "Выбрано" : "Не настроено";
       currentStatus.className = `status-badge ${candidate ? "is-ready" : "is-attention"}`;
@@ -4700,7 +4726,7 @@ class HausmanHubPanel extends HTMLElement {
         }
         const group = groups.get(roomKey);
         const meta = `${this._signalCandidateType(candidate, signalKind)} · ${this._signalCandidateExplanation(candidate, signalKind)}`;
-        addRadio(group.options, candidate, candidate.entity_id, this._signalCandidateDisplayName(candidate), meta);
+        addRadio(group.options, candidate, candidate.entity_id, this._signalCandidateDisplayName(candidate, visible), meta);
         group.items.push(optionNodes.at(-1));
       });
     if (!optionNodes.length) put(list, el("div", "muted", "Подходящих устройств пока не найдено."));

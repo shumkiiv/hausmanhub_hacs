@@ -1907,6 +1907,36 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
+    def test_weather_sources_with_the_same_name_are_visually_distinct(self) -> None:
+        script = panel_script(
+            GET_PATHS,
+            {},
+            """
+        const candidates = [
+          { entity_id: "weather.forecast_home_assistant", name: "Forecast",
+            available: true, domain: "weather", room_id: "" },
+          { entity_id: "weather.forecast_omsk", name: "Forecast",
+            available: true, domain: "weather", room_id: "" },
+        ];
+        const picker = panel._singleChoicePicker({
+          title: "Наружная температура", candidates, current: null,
+          signalKind: "outdoor_temperature", onChange: () => {},
+        });
+        const text = textOf(picker.root);
+        if (!text.includes("Погода · Home Assistant") || !text.includes("Погода · Омск")) {
+          throw new Error("weather sources with identical friendly names are still ambiguous");
+        }
+        if (text.split("\\n").filter((part) => part === "Forecast").length) {
+          throw new Error("generic English weather label leaked into the Russian picker");
+        }
+        if (picker.radios.filter(({ radio }) => radio.value.startsWith("weather.")).length !== 2) {
+          throw new Error("distinct weather providers were incorrectly deduplicated");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_previously_selected_indoor_sensor_is_explained_as_unsuitable_outdoors(self) -> None:
         payloads = dict(GET_PATHS)
         home = json.loads(json.dumps(HOME_PAYLOAD))
