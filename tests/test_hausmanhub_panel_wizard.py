@@ -2504,6 +2504,19 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         if (!textOf(panel.shadowRoot).includes("Подключение планшета")) {{
           throw new Error("code-source continuation did not retain the wizard");
         }}
+        const tabletText = textOf(panel.shadowRoot);
+        [
+          "/api/hausman_hub/v1/capabilities",
+          "/api/hausman_hub/v1/dashboard",
+          "/api/hausman_hub/v1/events",
+          "/api/hausman_hub/v1/device-actions",
+        ].forEach((path) => {{
+          if (!tabletText.includes(path)) throw new Error(`tablet setup omitted ${{path}}`);
+        }});
+        if (tabletText.includes("/endpoint/smart-home-center")
+          || tabletText.includes("/endpoint/climate/api")) {{
+          throw new Error("tablet setup still advertises a legacy Center endpoint");
+        }}
         findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
           && node.textContent === "Перейти к завершению")[0].fire("click");
         if (!findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"

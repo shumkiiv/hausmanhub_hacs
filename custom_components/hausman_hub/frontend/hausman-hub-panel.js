@@ -1,10 +1,10 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.1";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.1";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.1";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.1";
-import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.1";
-import { openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.1";
-import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.1";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.2";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.2";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.2";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.2";
+import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.2";
+import { openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.2";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.2";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css";
@@ -3152,7 +3152,7 @@ class HausmanHubPanel extends HTMLElement {
 
   _renderFirstRunTablet(card) {
     card.appendChild(el("h2", null, "Подключение планшета"));
-    card.appendChild(el("div", "section-intro", "В приложении планшета укажите адрес этого Home Assistant и личный токен пользователя с нужными правами."));
+    card.appendChild(el("div", "section-intro", "Укажите адрес Home Assistant и личный токен отдельного пользователя планшета. Подключение идёт напрямую к HausmanHub."));
     const url = window.location && window.location.origin ? window.location.origin : "Адрес этого Home Assistant";
     const address = el("input", "wizard-tablet-url");
     address.type = "text";
@@ -3171,9 +3171,10 @@ class HausmanHubPanel extends HTMLElement {
     card.appendChild(copy);
     const endpoints = el("ul", "reasons");
     [
-      "GET /endpoint/smart-home-center/api для сводки дома.",
-      "POST /endpoint/smart-home-center/action для подтверждённых действий.",
-      "GET и POST /endpoint/climate/api/v1/state и command для климата.",
+      "GET /api/hausman_hub/v1/capabilities — возможности API.",
+      "GET /api/hausman_hub/v1/dashboard — сводка дома.",
+      "GET /api/hausman_hub/v1/events — живые события.",
+      "POST /api/hausman_hub/v1/device-actions — команды с подтверждением.",
     ].forEach((text) => endpoints.appendChild(el("li", null, text)));
     card.appendChild(endpoints);
     const actions = el("div", "actions");
