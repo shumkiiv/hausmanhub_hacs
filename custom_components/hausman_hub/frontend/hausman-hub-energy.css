@@ -44,6 +44,7 @@
 .energy-card-head { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:18px; }
 .energy-card-head h3 { font-size:20px; }
 .energy-load-card { margin-bottom:24px; }
+.energy-selection-history .energy-history { margin-top:0; padding-top:0; border-top:0; }
 .energy-load-bars { display:grid; gap:8px; }
 .energy-load-row { display:grid; grid-template-columns:minmax(150px,240px) minmax(140px,1fr) 90px; align-items:center; gap:16px;
   width:100%; min-height:48px; margin:0; padding:8px 10px; text-align:left; color:var(--hmh-text); background:transparent; }

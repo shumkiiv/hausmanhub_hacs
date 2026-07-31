@@ -260,6 +260,13 @@ export function renderEnergySection(panel, container, deps) {
   mainColumn.appendChild(hero);
   const selected = selectedSources(energy);
   const allSources = energy.sources;
+  const historyCard = el("section", "card energy-load-card energy-selection-history");
+  const historyHead = el("div", "energy-card-head");
+  historyHead.appendChild(el("h3", null, "Потребление за 24 часа"));
+  historyHead.appendChild(el("span", "status-badge", "Home Assistant"));
+  historyCard.appendChild(historyHead);
+  historyCard.appendChild(historyBars(panel, { id: "selection", name: "выбранных источников" }, deps));
+  mainColumn.appendChild(historyCard);
   const chartCard = el("section", "card energy-load-card");
   const chartHead = el("div", "energy-card-head");
   chartHead.appendChild(el("h3", null, "Распределение нагрузки"));
@@ -367,9 +374,11 @@ export async function loadEnergyHistory(panel) {
     );
     const history = {};
     (response && Array.isArray(response.series) ? response.series : [])
-      .filter((series) => series.unit === "W")
+      .filter((series) => series.unit === "W" && series.metric === "power")
       .forEach((series) => {
-        history[series.deviceId] = (series.points || []).map((point) => ({
+        const source = energy.sources.find((item) => item.deviceId === series.deviceId);
+        const key = series.scope === "selection" ? "selection" : (source && source.id || series.deviceId);
+        history[key] = (series.points || []).map((point) => ({
           start: point.at,
           mean: point.value,
         }));

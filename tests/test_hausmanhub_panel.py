@@ -111,6 +111,9 @@ class PanelJavaScriptContractTest(unittest.TestCase):
     def test_energy_history_uses_hausmanhub_api_not_raw_recorder_socket(self) -> None:
         content = ENERGY_JS.read_text(encoding="utf-8")
         self.assertIn("hausman_hub/v1/energy/history", content)
+        self.assertIn('series.metric === "power"', content)
+        self.assertIn('series.scope === "selection" ? "selection"', content)
+        self.assertIn('id: "selection", name: "выбранных источников"', content)
         self.assertNotIn("recorder/statistics_during_period", content)
         self.assertNotIn("detail.entityId", content)
 
@@ -149,7 +152,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             len(settings_styles.encode("utf-8")), MAX_SETTINGS_CSS_BYTES
         )
         self.assertIn('"/api/hausman_hub/panel/hausman-hub-panel.css"', content)
-        self.assertIn('hausman-hub-settings.css?v=1.51.5', styles)
+        self.assertIn('hausman-hub-settings.css?v=1.51.6', styles)
         self.assertIn("--hmh-bg:#0B0F14", styles)
         self.assertIn("--hmh-bg:#EEF1F6", styles)
         self.assertIn(".page-header", styles)
@@ -709,7 +712,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.51.5",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.51.6",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },
