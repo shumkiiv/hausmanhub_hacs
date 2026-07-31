@@ -1,14 +1,14 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.15";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.15";
-import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.15";
-import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.51.15";
-import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.15";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.15";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.15";
-import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.15";
-import { openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.15";
-import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.15";
-import { AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createPriorityChoicePicker, isAwayModeCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.51.15";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.16";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.16";
+import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.16";
+import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.51.16";
+import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.16";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.16";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.16";
+import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.16";
+import { openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.16";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.16";
+import { AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createPriorityChoicePicker, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.51.16";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css";
@@ -43,28 +43,6 @@ const IR_CODES_DELETE_API = `${IR_CODES_API}/delete`;
 const IR_CODE_BINDINGS_API = `${IR_CODES_API}/bindings`;
 const REFRESH_MS = 30000;
 const LOCKOUT_HELP = "Теплее верхнего порога — нагрев запрещён; холоднее нижнего — разрешён. Между ними режим не меняется.";
-const HOME_SIGNAL_BINDINGS = [
-  {
-    key: "outdoor_temperature_entity_id", kind: "outdoor_temperature",
-    title: "Наружная температура",
-    helper: "Источник температуры именно на улице, а не в одной из комнат.",
-    purpose: "Нужен для погодной блокировки отопления и оценки нагрузки на климат.",
-    recommendation: "Выберите исправный уличный датчик. Если его нет — погодный сервис. Комнатные термодатчики, увлажнители и термоголовки не подходят.",
-  },
-  {
-    key: "presence_entity_id", kind: "presence", title: "Общее присутствие дома",
-    helper: "Общий режим дома, не датчик отдельной комнаты.",
-    purpose: "Переключает общую политику между режимами «кто-то дома» и «никого нет».",
-    recommendation: "Выберите режим «дома / не дома», профиль или телефон. Комнатные датчики настраиваются отдельно.",
-  },
-  {
-    key: "central_heating_entity_id", kind: "central_heating",
-    title: "Центральное отопление",
-    helper: "Нужен сигнал «работает», а не температура батареи.",
-    purpose: "Позволяет контуру понимать, работает ли котёл, насос или общая подача тепла.",
-    recommendation: "Нужен сигнал «работает / не работает». Температура батареи и обычные клавиши выключателей не подходят.",
-  },
-];
 
 const PROFILE_CONTRACT = { name: "hausman-hub-climate-profile-update-request", version: 1 };
 const SCHEDULE_CONTRACT = { name: "hausman-hub-climate-schedule-update-request", version: 1 };
@@ -4526,6 +4504,10 @@ class HausmanHubPanel extends HTMLElement {
         return candidate.domain === "sensor"
           && candidate.device_class === "temperature"
           && OUTDOOR_IDENTITY_PATTERN.test(identity);
+      }
+      if (signalKind === "presence") {
+        return ["person", "device_tracker"].includes(candidate.domain)
+          || (candidate.domain === "binary_sensor" && isAwayModeCandidate(candidate));
       }
       if (signalKind !== "central_heating") return true;
       return ["binary_sensor", "switch", "input_boolean"].includes(candidate.domain)

@@ -24,6 +24,7 @@ from custom_components.hausman_hub.application.climate_signal_settings import (
     CENTRAL_HEATING_SIGNAL,
     OUTDOOR_TEMPERATURE_DOMAINS,
     PRESENCE_DOMAINS,
+    PRESENCE_SIGNAL,
     ROOM_PRESENCE_DOMAINS,
     WINDOW_DOMAINS,
     WINDOW_SIGNAL,
@@ -201,6 +202,46 @@ class ClimateSignalSettingsValidationTest(unittest.TestCase):
                 entity_category=None,
                 attributes={"friendly_name": "Центральное отопление"},
                 friendly_name="Центральное отопление",
+            )
+        )
+
+    def test_home_presence_excludes_room_sensors_and_keeps_home_modes(self) -> None:
+        for device_class, entity_id, friendly_name in (
+            ("motion", "binary_sensor.hall_motion", "Датчик движения прихожая"),
+            ("occupancy", "binary_sensor.toilet_occupancy", "Присутствие туалет"),
+        ):
+            with self.subTest(entity_id=entity_id):
+                self.assertFalse(
+                    signal_candidate_is_suitable(
+                        PRESENCE_SIGNAL,
+                        domain="binary_sensor",
+                        device_class=device_class,
+                        entity_category=None,
+                        attributes={},
+                        entity_id=entity_id,
+                        friendly_name=friendly_name,
+                    )
+                )
+        self.assertTrue(
+            signal_candidate_is_suitable(
+                PRESENCE_SIGNAL,
+                domain="binary_sensor",
+                device_class="occupancy",
+                entity_category=None,
+                attributes={},
+                entity_id="binary_sensor.a100_away",
+                friendly_name="A100 Away",
+            )
+        )
+        self.assertTrue(
+            signal_candidate_is_suitable(
+                PRESENCE_SIGNAL,
+                domain="person",
+                device_class=None,
+                entity_category=None,
+                attributes={},
+                entity_id="person.ivan",
+                friendly_name="Иван",
             )
         )
 
@@ -1389,11 +1430,7 @@ class ClimateAdminConfigurationRoutesTest(unittest.TestCase):
             [item["entity_id"] for item in candidate_groups["outdoor_temperature"]],
         )
         self.assertEqual(
-            [
-                "binary_sensor.synthetic_motion",
-                "binary_sensor.synthetic_occupancy",
-                "person.synthetic_ivan",
-            ],
+            ["person.synthetic_ivan"],
             [item["entity_id"] for item in candidate_groups["presence"]],
         )
         self.assertEqual(

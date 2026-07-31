@@ -56,6 +56,10 @@ _OUTDOOR_IDENTITY = re.compile(
     r"улич|улиц|наруж|внешн|двор|погод)",
     re.IGNORECASE,
 )
+_AWAY_MODE_IDENTITY = re.compile(
+    r"(?:away|not[ _-]?home|никого.{0,8}(?:нет|дома)|не.{0,4}дома)",
+    re.IGNORECASE,
+)
 _CENTRAL_HEATING_IDENTITY = re.compile(
     r"(?:central.{0,12}heat|heating|boiler|heat.{0,12}(?:pump|supply)|"
     r"circulat.{0,12}pump|"
@@ -128,9 +132,15 @@ def signal_candidate_is_suitable(
             and _finite_signal_number(attributes.get("temperature")) is not None
         )
     if signal_kind == PRESENCE_SIGNAL:
-        return domain in {"person", "device_tracker"} or (
-            domain == "binary_sensor"
-            and device_class in PRESENCE_DEVICE_CLASSES
+        if domain in {"person", "device_tracker"}:
+            return True
+        identity = " ".join(
+            value
+            for value in (entity_id, friendly_name)
+            if isinstance(value, str)
+        )
+        return domain == "binary_sensor" and bool(
+            _AWAY_MODE_IDENTITY.search(identity)
         )
     if signal_kind == CENTRAL_HEATING_SIGNAL:
         identity = " ".join(

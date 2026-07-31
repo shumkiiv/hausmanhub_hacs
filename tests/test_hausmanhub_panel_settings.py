@@ -2002,6 +2002,33 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
+    def test_home_presence_picker_excludes_room_motion_and_presence_sensors(self) -> None:
+        script = panel_script(
+            GET_PATHS,
+            {},
+            """
+        const candidates = [
+          { entity_id: "person.ivan", name: "Иван", domain: "person" },
+          { entity_id: "binary_sensor.a100_away", name: "A100 Away",
+            domain: "binary_sensor", device_class: "occupancy" },
+          { entity_id: "binary_sensor.hall_motion", name: "Движение прихожая",
+            domain: "binary_sensor", device_class: "motion", room_name: "Прихожая" },
+          { entity_id: "binary_sensor.toilet_occupancy", name: "Присутствие туалет",
+            domain: "binary_sensor", device_class: "occupancy", room_name: "Туалет" },
+        ];
+        const visible = panel._signalCandidatesForPicker(candidates, null, "presence");
+        const ids = visible.map(({ entity_id }) => entity_id);
+        if (!ids.includes("person.ivan") || !ids.includes("binary_sensor.a100_away")) {
+          throw new Error("home-wide presence sources were removed");
+        }
+        if (ids.includes("binary_sensor.hall_motion") || ids.includes("binary_sensor.toilet_occupancy")) {
+          throw new Error("room sensor leaked into home presence picker");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_previously_selected_indoor_sensor_is_explained_as_unsuitable_outdoors(self) -> None:
         payloads = dict(GET_PATHS)
         home = json.loads(json.dumps(HOME_PAYLOAD))

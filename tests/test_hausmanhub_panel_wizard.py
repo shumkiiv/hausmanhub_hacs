@@ -24,6 +24,7 @@ DEVICE_BINDINGS_JS = PANEL_JS.with_name("hausman-hub-device-bindings.js")
 AREA_BINDING_JS = PANEL_JS.with_name("hausman-hub-area-binding.js")
 NAVIGATION_JS = PANEL_JS.with_name("hausman-hub-navigation.js")
 ENERGY_JS = PANEL_JS.with_name("hausman-hub-energy.js")
+WEATHER_SOURCES_JS = PANEL_JS.with_name("hausman-hub-weather-sources.js")
 
 PANEL_PAYLOAD = {
     "contract": {"name": "hausman-hub-admin-panel", "version": 2},
@@ -329,6 +330,10 @@ def panel_script(get_table: dict, post_table: dict, assertions: str) -> str:
       vm.runInThisContext(
         fs.readFileSync({str(ENERGY_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(ENERGY_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(WEATHER_SOURCES_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(WEATHER_SOURCES_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(PANEL_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, ""),
@@ -735,10 +740,15 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         const firstCard = document.createElement("div");
         panel._renderFirstRunHome(firstCard);
         const choose = (value) => {
-          const radio = findAll(firstCard, (node) => node.type === "radio" && node.value === value)[0];
-          if (!radio) throw new Error("choice missing: " + value);
-          radio.checked = true;
-          radio.fire("change");
+          const control = findAll(firstCard, (node) => node.value === value
+            && (node.type === "radio" || node.tagName === "BUTTON"))[0];
+          if (!control) throw new Error("choice missing: " + value);
+          if (control.type === "radio") {
+            control.checked = true;
+            control.fire("change");
+          } else {
+            control.fire("click");
+          }
         };
         choose("weather.home");
         choose("person.owner");
@@ -748,8 +758,11 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         details.fire("toggle");
         const secondCard = document.createElement("div");
         panel._renderFirstRunHome(secondCard);
-        const selected = findAll(secondCard, (node) => node.type === "radio" && node.checked)
-          .map((node) => node.value).filter(Boolean).sort();
+        const selected = [
+          ...panel._firstRun.home.outdoor_temperature_entity_ids,
+          ...findAll(secondCard, (node) => node.type === "radio" && node.checked)
+            .map((node) => node.value).filter(Boolean),
+        ].sort();
         const expected = ["binary_sensor.boiler_heat", "person.owner", "weather.home"].sort();
         if (JSON.stringify(selected) !== JSON.stringify(expected)) {
           throw new Error("background render lost the signal draft: " + JSON.stringify(selected));
@@ -758,7 +771,7 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         if (!reopened.open) throw new Error("open chooser collapsed after background render");
         for (const expectedText of [
           "Зачем это нужно", "Как выбрать", "Источник температуры именно на улице",
-          "Один общий статус всего дома", "Температура батареи",
+          "Общий режим дома", "Температура батареи",
         ]) {
           if (!textOf(secondCard).includes(expectedText)) {
             throw new Error("wizard explanation missing: " + expectedText);

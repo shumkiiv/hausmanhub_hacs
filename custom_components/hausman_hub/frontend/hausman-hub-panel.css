@@ -1,8 +1,8 @@
-@import url("./hausman-hub-settings.css?v=1.51.15");
-@import url("./hausman-hub-device-bindings.css?v=1.51.15");
-@import url("./hausman-hub-energy.css?v=1.51.15");
-@import url("./hausman-hub-control-channel.css?v=1.51.15");
-@import url("./hausman-hub-weather-sources.css?v=1.51.15");
+@import url("./hausman-hub-settings.css?v=1.51.16");
+@import url("./hausman-hub-device-bindings.css?v=1.51.16");
+@import url("./hausman-hub-energy.css?v=1.51.16");
+@import url("./hausman-hub-control-channel.css?v=1.51.16");
+@import url("./hausman-hub-weather-sources.css?v=1.51.16");
 
 :host { display:block; box-sizing:border-box; width:100%; min-height:100%; overflow-x:hidden;
   --hmh-bg:#0B0F14; --hmh-surface:#12171D; --hmh-raised:#181E26; --hmh-field:#181E26; --hmh-hover:#1F2630;

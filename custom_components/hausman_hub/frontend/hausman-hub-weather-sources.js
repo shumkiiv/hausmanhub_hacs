@@ -1,3 +1,26 @@
+export const HOME_SIGNAL_BINDINGS = [
+  {
+    key: "outdoor_temperature_entity_id", kind: "outdoor_temperature",
+    title: "Наружная температура",
+    helper: "Источник температуры именно на улице, а не в одной из комнат.",
+    purpose: "Нужен для погодной блокировки отопления и оценки нагрузки на климат.",
+    recommendation: "Выберите исправный уличный датчик. Если его нет — погодный сервис. Комнатные термодатчики, увлажнители и термоголовки не подходят.",
+  },
+  {
+    key: "presence_entity_id", kind: "presence", title: "Общее присутствие дома",
+    helper: "Общий режим дома, не датчик отдельной комнаты.",
+    purpose: "Переключает общую политику между режимами «кто-то дома» и «никого нет».",
+    recommendation: "Выберите режим «дома / не дома», профиль или телефон. Комнатные датчики настраиваются отдельно.",
+  },
+  {
+    key: "central_heating_entity_id", kind: "central_heating",
+    title: "Центральное отопление",
+    helper: "Нужен сигнал «работает», а не температура батареи.",
+    purpose: "Позволяет контуру понимать, работает ли котёл, насос или общая подача тепла.",
+    recommendation: "Нужен сигнал «работает / не работает». Температура батареи и обычные клавиши выключателей не подходят.",
+  },
+];
+
 export function weatherSourceDisplayName(entityId) {
   const source = String(entityId || "").split(".", 2)[1] || "";
   const normalized = source.replace(/^(?:weather|forecast)_/, "");
