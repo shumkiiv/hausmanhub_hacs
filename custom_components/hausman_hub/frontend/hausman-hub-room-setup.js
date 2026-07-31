@@ -259,6 +259,7 @@ const { el, setAttr, numberField, selectField, normalizedText, STRATEGY_ORDER, R
   if (this._activeRoomSetupPane === "devices") card.appendChild(devicesSection);
 
   const report = state.report;
+  const roomReady = report && report.status === "ready" && report.save_allowed === true;
   const reviewSection = el("section", "wizard-section room-review-section");
   reviewSection.appendChild(el("h3", null, "Проверка комнаты"));
   reviewSection.appendChild(el("div", "settings-explainer", "Проверка не включает устройства. Она убеждается, что выбранные датчики, способы управления и границы не противоречат друг другу."));
@@ -278,8 +279,7 @@ const { el, setAttr, numberField, selectField, normalizedText, STRATEGY_ORDER, R
   reviewSection.appendChild(reviewGrid);
   if (report) {
     const reportBox = el("div", "wizard-report");
-    const ready = report.status === "ready" && report.save_allowed === true;
-    reportBox.appendChild(el("strong", null, ready ? "Комната проверена" : "Проверка требует внимания"));
+    reportBox.appendChild(el("strong", null, roomReady ? "Комната проверена" : "Проверка требует внимания"));
     const issues = report.issues || [];
     if (issues.length) {
       const list = el("ul");
@@ -289,7 +289,7 @@ const { el, setAttr, numberField, selectField, normalizedText, STRATEGY_ORDER, R
         issue.message || "Проверьте настройки комнаты."
       )));
       reportBox.appendChild(list);
-    } else if (ready) {
+    } else if (roomReady) {
       reportBox.appendChild(el("div", "muted", "Все выбранные устройства и цели прошли проверку."));
     }
     reviewSection.appendChild(reportBox);
@@ -321,11 +321,20 @@ const { el, setAttr, numberField, selectField, normalizedText, STRATEGY_ORDER, R
     });
     stepActions.appendChild(next);
   } else {
-    const check = el("button", null, "Проверить комнату");
-    check.disabled = this._busy || room.selectable !== true;
-    check.title = check.disabled ? "Комната недоступна для настройки." : "Проверить цели и выбранные привязки.";
-    check.addEventListener("click", () => this._checkFirstRunRoom(room.id));
-    stepActions.appendChild(check);
+    if (roomReady) {
+      const finish = el("button", null, "Завершить");
+      finish.type = "button";
+      finish.disabled = this._busy;
+      finish.title = "Завершить настройку комнаты и вернуться к списку комнат.";
+      finish.addEventListener("click", () => this._firstRunBackToRooms());
+      stepActions.appendChild(finish);
+    } else {
+      const check = el("button", null, "Проверить комнату");
+      check.disabled = this._busy || room.selectable !== true;
+      check.title = check.disabled ? "Комната недоступна для настройки." : "Проверить цели и выбранные привязки.";
+      check.addEventListener("click", () => this._checkFirstRunRoom(room.id));
+      stepActions.appendChild(check);
+    }
   }
   actions.appendChild(stepActions);
   card.appendChild(actions);
@@ -334,4 +343,3 @@ const { el, setAttr, numberField, selectField, normalizedText, STRATEGY_ORDER, R
   fields.room = room;
   this._firstRunFields = { room: fields };
 }
-

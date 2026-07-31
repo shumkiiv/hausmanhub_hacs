@@ -1497,11 +1497,18 @@ class PanelFirstRunWizardTest(unittest.TestCase):
             }],
             "summary": checked_draft["summary"],
         }
+        ready_with_warning = ready_validation(checked_draft)
+        ready_with_warning["issues"] = [{
+            "code": "device_unavailable",
+            "level": "warning",
+            "room_id": "living",
+            "message": "Устройство временно недоступно и будет применено после восстановления связи.",
+        }]
         script = panel_script(
             get_payloads(),
             {
                 "hausman_hub/v1/admin/climate-drafts": [checked_draft, checked_draft],
-                "hausman_hub/v1/admin/climate-drafts/validate": [blocked, ready_validation(checked_draft)],
+                "hausman_hub/v1/admin/climate-drafts/validate": [blocked, ready_with_warning],
             },
             """
         const start = findAll(panel.shadowRoot, (node) =>
@@ -1532,14 +1539,25 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         if (panel._firstRun.validRooms.has("living")) {
           throw new Error("blocked room became configured");
         }
-        check.fire("click");
+        if (findAll(panel.shadowRoot, (node) =>
+          node.tagName === "BUTTON" && node.textContent === "Завершить").length) {
+          throw new Error("blocked room exposed the finish action");
+        }
+        findAll(panel.shadowRoot, (node) =>
+          node.tagName === "BUTTON" && node.textContent === "Проверить комнату")[0].fire("click");
         await tick();
         if (!panel._firstRun.validRooms.has("living")) {
           throw new Error("checked room was not retained as configured");
         }
-        const back = findAll(panel.shadowRoot, (node) =>
-          node.tagName === "BUTTON" && node.textContent === "Назад к списку комнат")[0];
-        back.fire("click");
+        const roomFinish = findAll(panel.shadowRoot, (node) =>
+          node.tagName === "BUTTON" && node.textContent === "Завершить")[0];
+        if (!roomFinish || roomFinish.disabled) {
+          throw new Error("ready room with a warning did not expose the finish action");
+        }
+        roomFinish.fire("click");
+        if (panel._firstRun.step !== "rooms" || panel._firstRun.roomId !== null) {
+          throw new Error("room finish did not return to the room settings overview");
+        }
         const enabledFinish = findAll(panel.shadowRoot, (node) =>
           node.tagName === "BUTTON" && node.textContent === "Завершить настройку")[0];
         if (!enabledFinish || enabledFinish.disabled) {
