@@ -406,6 +406,129 @@ class DashboardSnapshotTest(unittest.TestCase):
         ):
             self.assertNotIn(source_id, serialized)
 
+    def test_media_appliance_merges_distinct_integration_facades(self) -> None:
+        snapshot = build_dashboard_snapshot(
+            areas=(DashboardArea("living", "Гостиная"),),
+            devices=(
+                DashboardDevice(
+                    "tv-cast", "58PUS8506/60", "living",
+                    "2021/22 Philips UHD Android TV", "TPV",
+                    integrations=("cast",),
+                ),
+                DashboardDevice(
+                    "tv-android", "58PUS8506/60", "living",
+                    "2021/22 Philips UHD Android TV", "TPV",
+                    integrations=("androidtv_remote",),
+                ),
+                DashboardDevice(
+                    "tv-philips", "58PUS8506/60", "living",
+                    "58PUS8506/60", "Philips",
+                    integrations=("philips_js",),
+                ),
+                DashboardDevice(
+                    "speaker-one", "Колонка", "living", "Audio 100", "Acme",
+                    integrations=("cast",),
+                ),
+                DashboardDevice(
+                    "speaker-two", "Колонка", "living", "Audio 100", "Acme",
+                    integrations=("cast",),
+                ),
+            ),
+            entities=(
+                DashboardEntity(
+                    "media_player.tv_cast", "media_player", "off", "Телевизор",
+                    {}, "tv-cast", "living",
+                ),
+                DashboardEntity(
+                    "media_player.tv_android", "media_player", "off", "Телевизор",
+                    {}, "tv-android", "living",
+                ),
+                DashboardEntity(
+                    "remote.tv_android", "remote", "on", "Пульт",
+                    {}, "tv-android", "living",
+                ),
+                DashboardEntity(
+                    "media_player.tv_philips", "media_player", "off", "Телевизор",
+                    {}, "tv-philips", "living",
+                ),
+                DashboardEntity(
+                    "light.tv_ambilight", "light", "off", "Ambilight",
+                    {}, "tv-philips", "living",
+                ),
+                DashboardEntity(
+                    "switch.tv_screen", "switch", "off", "Экран",
+                    {}, "tv-philips", "living",
+                ),
+                DashboardEntity(
+                    "media_player.speaker_one", "media_player", "off", "Колонка",
+                    {}, "speaker-one", "living",
+                ),
+                DashboardEntity(
+                    "media_player.speaker_two", "media_player", "off", "Колонка",
+                    {}, "speaker-two", "living",
+                ),
+            ),
+            generated_at_ms=1,
+            local_iso="2026-07-31T14:00:00+06:00",
+        )
+
+        television_cards = [
+            device for device in snapshot["devices"] if device["name"] == "58PUS8506/60"
+        ]
+        self.assertEqual(1, len(television_cards))
+        television = television_cards[0]
+        self.assertEqual("media_player", television["domain"])
+        self.assertEqual(6, len(television["details"]))
+        self.assertEqual(
+            {
+                "media_player.tv_cast",
+                "media_player.tv_android",
+                "remote.tv_android",
+                "media_player.tv_philips",
+                "light.tv_ambilight",
+                "switch.tv_screen",
+            },
+            {detail["entityId"] for detail in television["details"]},
+        )
+        speaker_cards = [
+            device for device in snapshot["devices"] if device["name"] == "Колонка"
+        ]
+        self.assertEqual(2, len(speaker_cards))
+        self.assertEqual(
+            {
+                frozenset({"media_player.speaker_one"}),
+                frozenset({"media_player.speaker_two"}),
+            },
+            {
+                frozenset(detail["entityId"] for detail in device["details"])
+                for device in speaker_cards
+            },
+        )
+
+        inventory = snapshot["inventory"]
+        self.assertEqual(1, inventory["summary"]["duplicateGroupCount"])
+        television_records = [
+            device for device in inventory["devices"] if device["name"] == "58PUS8506/60"
+        ]
+        self.assertEqual(3, len(television_records))
+        self.assertEqual(1, sum(device["canonical"] for device in television_records))
+        self.assertEqual(1, len({device["canonicalId"] for device in television_records}))
+        self.assertEqual(
+            {"cast", "androidtv_remote", "philips_js"},
+            {
+                integration
+                for device in television_records
+                for integration in device["integrations"]
+            },
+        )
+        speaker_records = [
+            device for device in inventory["devices"] if device["name"] == "Колонка"
+        ]
+        self.assertEqual(2, len(speaker_records))
+        self.assertTrue(all(device["canonical"] for device in speaker_records))
+        self.assertTrue(all(not device["possibleDuplicate"] for device in speaker_records))
+        self.assertEqual(2, len({device["canonicalId"] for device in speaker_records}))
+
 
 if __name__ == "__main__":
     unittest.main()

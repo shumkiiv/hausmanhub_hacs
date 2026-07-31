@@ -64,6 +64,9 @@ _VIRTUAL_DEVICE_INTEGRATIONS = frozenset(
     }
 )
 _VIRTUAL_FACADE_DOMAINS = frozenset({"climate", "humidifier", "remote"})
+_MEDIA_IDENTITY_NOISE = frozenset(
+    {"android", "device", "display", "media", "smart", "television", "uhd"}
+)
 _ALLOWLISTED_ATTRIBUTES = (
     "brightness",
     "current_position",
@@ -361,6 +364,63 @@ def _is_virtual_device(
     )
 
 
+def _media_identity_tokens(device: DashboardDevice) -> frozenset[str]:
+    """Return conservative brand/model words for cross-integration matching."""
+
+    source = f"{device.manufacturer or ''} {device.model or ''}".casefold()
+    normalized = "".join(character if character.isalnum() else " " for character in source)
+    return frozenset(
+        token
+        for token in normalized.split()
+        if len(token) >= 3
+        and not token.isdecimal()
+        and token not in _MEDIA_IDENTITY_NOISE
+    )
+
+
+def _media_duplicate_groups(
+    devices: Mapping[str, DashboardDevice],
+    registry_members: Mapping[str, list[DashboardEntity]],
+) -> tuple[tuple[str, ...], ...]:
+    """Match one media appliance exposed once by each distinct integration."""
+
+    candidates: dict[tuple[str, str], list[str]] = defaultdict(list)
+    for device_id, device in devices.items():
+        members = registry_members[device_id]
+        domains = {member.domain for member in members}
+        area_id = device.area_id or next(
+            (member.area_id for member in members if member.area_id), None
+        )
+        normalized_name = _normalized_fingerprint_part(device.name)
+        if (
+            _is_virtual_device(device, members)
+            or "media_player" not in domains
+            or not area_id
+            or not normalized_name
+            or not device.integrations
+            or not _media_identity_tokens(device)
+        ):
+            continue
+        candidates[(area_id, normalized_name)].append(device_id)
+
+    groups: list[tuple[str, ...]] = []
+    for candidate_ids in candidates.values():
+        if len(candidate_ids) < 2:
+            continue
+        integration_sets = [set(devices[item].integrations) for item in candidate_ids]
+        if any(
+            integration_sets[left] & integration_sets[right]
+            for left in range(len(integration_sets))
+            for right in range(left + 1, len(integration_sets))
+        ):
+            continue
+        identity_sets = [_media_identity_tokens(devices[item]) for item in candidate_ids]
+        if not set.intersection(*(set(tokens) for tokens in identity_sets)):
+            continue
+        groups.append(tuple(sorted(candidate_ids)))
+    return tuple(sorted(groups))
+
+
 def _device_status(
     device: DashboardDevice | None, members: Iterable[DashboardEntity]
 ) -> str:
@@ -452,22 +512,30 @@ def build_dashboard_snapshot(
         virtual_groups[fingerprint].append(device_id)
 
     canonical_source: dict[str, str] = {device_id: device_id for device_id in device_by_id}
+    merged_media_sources: dict[str, tuple[str, ...]] = {}
     duplicate_groups = 0
-    for group in virtual_groups.values():
-        if len(group) < 2:
-            continue
-        duplicate_groups += 1
-        canonical = min(
-            group,
-            key=lambda device_id: (
-                device_by_id[device_id].disabled,
-                _device_status(device_by_id[device_id], registry_members[device_id])
-                != "available",
-                -len(registry_members[device_id]),
-                device_id,
-            ),
-        )
-        canonical_source.update({device_id: canonical for device_id in group})
+    media_groups = _media_duplicate_groups(device_by_id, registry_members)
+    for groups, merge_members in (
+        (tuple(tuple(group) for group in virtual_groups.values()), False),
+        (media_groups, True),
+    ):
+        for group in groups:
+            if len(group) < 2:
+                continue
+            duplicate_groups += 1
+            canonical = min(
+                group,
+                key=lambda device_id: (
+                    device_by_id[device_id].disabled,
+                    _device_status(device_by_id[device_id], registry_members[device_id])
+                    != "available",
+                    -len(registry_members[device_id]),
+                    device_id,
+                ),
+            )
+            canonical_source.update({device_id: canonical for device_id in group})
+            if merge_members:
+                merged_media_sources[canonical] = group
 
     source_to_public: dict[str, str] = {
         device_id: _opaque_id("device", f"device:{canonical_source[device_id]}")
@@ -570,6 +638,22 @@ def build_dashboard_snapshot(
         registry_device = (
             device_by_id.get(source_device_id) if source_device_id is not None else None
         )
+        if source_device_id in merged_media_sources:
+            members = list(
+                {
+                    member.entity_id: member
+                    for merged_source in merged_media_sources[source_device_id]
+                    for member in registry_members[merged_source]
+                }.values()
+            )
+            members.sort(
+                key=lambda item: (
+                    item.domain != "media_player",
+                    _PRIMARY_DOMAIN_ORDER.get(item.domain, 999),
+                    item.entity_id,
+                )
+            )
+            primary = members[0]
         public_id = _opaque_id("device", group_key)
         area_id = primary.area_id or (
             registry_device.area_id if registry_device is not None else None
