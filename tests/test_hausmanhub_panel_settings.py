@@ -1479,16 +1479,15 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         }
         select.value = "climate.living_ac";
         select.fire("change");
+        await new Promise((resolve) => setTimeout(resolve, 400));
         screen = panel._shell.settings;
         const check = findAll(screen, (node) => node.tagName === "BUTTON"
           && node.textContent === "Проверить")[0];
         const saveBefore = findAll(screen, (node) => node.tagName === "BUTTON"
           && node.textContent === "Сохранить привязки")[0];
-        if (!check || check.disabled || !saveBefore.disabled) {
-          throw new Error("preview/save gate is incorrect before validation");
+        if (!check || check.disabled || saveBefore.disabled) {
+          throw new Error("automatic preview did not enable safe save");
         }
-        check.fire("click");
-        await tick();
         const previewPost = calls.find((call) => call.method === "POST"
           && call.path === "hausman_hub/v1/admin/climate-device-bindings/preview");
         const expectedPreview = {

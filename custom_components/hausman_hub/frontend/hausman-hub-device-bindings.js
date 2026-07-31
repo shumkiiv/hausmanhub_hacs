@@ -1,5 +1,6 @@
 const DEVICE_BINDINGS_API = "hausman_hub/v1/admin/climate-device-bindings";
 const DEVICE_BINDINGS_PREVIEW_API = `${DEVICE_BINDINGS_API}/preview`;
+const AUTO_PREVIEW_DELAY_MS = 350;
 
 export function renderDeviceBindingCallout(panel, container, helpers) {
   const { el, svgIcon } = helpers;
@@ -35,9 +36,26 @@ function changes(panel) {
   });
 }
 
+function cancelScheduledPreview(state) {
+  if (state.previewTimer === null) return;
+  clearTimeout(state.previewTimer);
+  state.previewTimer = null;
+}
+
+function schedulePreview(panel) {
+  const state = panel._deviceBindings;
+  cancelScheduledPreview(state);
+  if (!changes(panel).length) return;
+  state.previewTimer = setTimeout(() => {
+    state.previewTimer = null;
+    preview(panel);
+  }, AUTO_PREVIEW_DELAY_MS);
+}
+
 export async function loadDeviceBindings(panel, force = false) {
   const state = panel._deviceBindings;
   if (!panel._hass || state.loading || (isDirty(panel) && !force)) return;
+  cancelScheduledPreview(state);
   state.loading = true;
   state.error = false;
   panel._render();
@@ -61,6 +79,7 @@ export async function loadDeviceBindings(panel, force = false) {
 async function preview(panel) {
   const selected = changes(panel);
   const state = panel._deviceBindings;
+  cancelScheduledPreview(state);
   if (panel._busy || !state.data || !selected.length) return;
   panel._busy = true;
   state.status = "";
@@ -87,6 +106,7 @@ async function preview(panel) {
 async function save(panel) {
   const selected = changes(panel);
   const state = panel._deviceBindings;
+  cancelScheduledPreview(state);
   if (panel._busy || !state.data || !selected.length || state.preview?.save_allowed !== true) return;
   panel._busy = true;
   state.status = "Сохраняю привязки…";
@@ -193,6 +213,7 @@ function renderBindingDeviceRow(panel, list, device, helpers, usedSelections) {
     state.preview = null;
     state.status = "";
     panel._render();
+    schedulePreview(panel);
   });
   field.appendChild(select);
   const selectedCandidate = (device.candidates || []).find((candidate) => candidate.entity_id === currentValue);
@@ -240,6 +261,7 @@ function renderActions(panel, container, helpers) {
   const reset = el("button", "secondary", "Отменить выбор");
   reset.disabled = panel._busy || !isDirty(panel);
   reset.addEventListener("click", () => {
+    cancelScheduledPreview(state);
     state.selections = {};
     devices(panel).forEach((device) => { state.selections[device.device_id] = device.current_entity_id || ""; });
     state.preview = null;
@@ -248,7 +270,10 @@ function renderActions(panel, container, helpers) {
   });
   const check = el("button", "secondary", "Проверить");
   check.disabled = panel._busy || !changes(panel).length;
-  check.addEventListener("click", () => preview(panel));
+  check.addEventListener("click", () => {
+    cancelScheduledPreview(state);
+    preview(panel);
+  });
   const saveButton = el("button", null, "Сохранить привязки");
   saveButton.disabled = panel._busy || state.preview?.save_allowed !== true;
   saveButton.addEventListener("click", () => save(panel));

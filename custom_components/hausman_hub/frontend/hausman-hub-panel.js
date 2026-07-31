@@ -1,10 +1,10 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.7";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.7";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.7";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.7";
-import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.7";
-import { openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.7";
-import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.7";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.8";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.8";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.8";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.8";
+import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.8";
+import { openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.8";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.8";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css";
@@ -282,7 +282,7 @@ class HausmanHubPanel extends HTMLElement {
     this._energyHistoryLoading = false;
     this._deviceBindings = {
       data:null, error:false, loading: false, preview: null, selections: {},
-      showOtherRooms: false, status: "",
+      showOtherRooms: false, status: "", previewTimer: null,
     };
     this._resetArmed = false;
     this._error = false;
