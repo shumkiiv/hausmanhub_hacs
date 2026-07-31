@@ -289,6 +289,17 @@ class ClimateRegistryTest(unittest.TestCase):
             ClimateHomeEnvironment(),
             ClimateRegistry().home,
         )
+        prioritized = ClimateHomeEnvironment(
+            outdoor_temperature_entity_id="sensor.outdoor_temperature",
+            outdoor_temperature_entity_ids=(
+                "sensor.outdoor_temperature",
+                "weather.home",
+            ),
+        )
+        self.assertEqual(
+            ("sensor.outdoor_temperature", "weather.home"),
+            prioritized.prioritized_outdoor_temperature_entity_ids,
+        )
 
         with self.assertRaisesRegex(ClimateModelViolation, "outdoor temperature"):
             ClimateHomeEnvironment(

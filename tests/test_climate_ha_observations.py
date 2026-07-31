@@ -307,6 +307,54 @@ class NativeHaObservationTest(unittest.TestCase):
         self.assertEqual(7.5, observation.home.outdoor_temperature)
         self.assertEqual(7.5, observation.home.heat_load_temperature)
 
+    def test_outdoor_temperature_uses_the_first_available_source_by_priority(self) -> None:
+        registry = full_registry()
+        registry = replace(
+            registry,
+            home=replace(
+                registry.home,
+                outdoor_temperature_entity_id="sensor.outdoor_primary",
+                outdoor_temperature_entity_ids=(
+                    "sensor.outdoor_primary",
+                    "weather.home",
+                ),
+            ),
+        )
+        states = full_states()
+        states["sensor.outdoor_primary"] = ha_state(
+            "sensor.outdoor_primary", "unavailable"
+        )
+        states["weather.home"] = ha_state(
+            "weather.home", "cloudy", {"temperature": 6.5}
+        )
+
+        observation = self.build(registry=registry, states=states)
+
+        self.assertEqual(6.5, observation.home.outdoor_temperature)
+        self.assertEqual(6.5, observation.home.heat_load_temperature)
+
+    def test_outdoor_temperature_keeps_the_available_primary_source(self) -> None:
+        registry = full_registry()
+        registry = replace(
+            registry,
+            home=replace(
+                registry.home,
+                outdoor_temperature_entity_id="sensor.outdoor_temperature",
+                outdoor_temperature_entity_ids=(
+                    "sensor.outdoor_temperature",
+                    "weather.home",
+                ),
+            ),
+        )
+        states = full_states()
+        states["weather.home"] = ha_state(
+            "weather.home", "cloudy", {"temperature": 6.5}
+        )
+
+        observation = self.build(registry=registry, states=states)
+
+        self.assertEqual(30.5, observation.home.outdoor_temperature)
+
     def test_protection_memory_supplies_confirmed_transitions(self) -> None:
         protection = ClimateProtectionMemory(
             updated_at=NOW,

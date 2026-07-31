@@ -2218,7 +2218,7 @@ def _home_signals_suitable(
 ) -> bool:
     """Allow only purpose-specific candidates, retaining exact legacy bindings."""
 
-    return all(
+    ordinary_signals_suitable = all(
         _signal_suitable_or_current(
             runtime,
             signal_kind,
@@ -2226,10 +2226,35 @@ def _home_signals_suitable(
             current.get(field),
         )
         for field, signal_kind in (
-            ("outdoor_temperature_entity_id", OUTDOOR_TEMPERATURE_SIGNAL),
             ("presence_entity_id", PRESENCE_SIGNAL),
             ("central_heating_entity_id", CENTRAL_HEATING_SIGNAL),
         )
+    )
+    if not ordinary_signals_suitable:
+        return False
+    prioritized = home.get("outdoor_temperature_entity_ids")
+    if isinstance(prioritized, list):
+        retained = current.get("outdoor_temperature_entity_ids")
+        retained_sources = (
+            frozenset(retained)
+            if isinstance(retained, list)
+            else frozenset({current.get("outdoor_temperature_entity_id")})
+        )
+        return all(
+            isinstance(entity_id, str)
+            and (
+                entity_id in retained_sources
+                or runtime.signal_entity_suitable(
+                    OUTDOOR_TEMPERATURE_SIGNAL, entity_id
+                )
+            )
+            for entity_id in prioritized
+        )
+    return _signal_suitable_or_current(
+        runtime,
+        OUTDOOR_TEMPERATURE_SIGNAL,
+        home.get("outdoor_temperature_entity_id"),
+        current.get("outdoor_temperature_entity_id"),
     )
 
 

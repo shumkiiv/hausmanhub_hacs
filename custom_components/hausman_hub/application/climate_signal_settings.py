@@ -13,7 +13,10 @@ import re
 from collections.abc import Callable, Mapping
 from math import isfinite
 
-from ..domain.climate import MAX_ROOM_PRESENCE_ENTITIES
+from ..domain.climate import (
+    MAX_OUTDOOR_TEMPERATURE_SOURCES,
+    MAX_ROOM_PRESENCE_ENTITIES,
+)
 
 OUTDOOR_TEMPERATURE_DOMAINS = frozenset({"sensor", "weather"})
 PRESENCE_DOMAINS = frozenset({"binary_sensor", "person", "device_tracker"})
@@ -76,6 +79,7 @@ HOME_ENVIRONMENT_FIELDS = frozenset(
         "heating_lockout_low",
     }
 )
+OPTIONAL_HOME_ENVIRONMENT_FIELDS = frozenset({"outdoor_temperature_entity_ids"})
 ROOM_WINDOW_FIELDS = frozenset({"room_id", "window_entity_id"})
 ROOM_SIGNAL_FIELDS = frozenset(
     {"room_id", "window_entity_id", "presence_entity_ids"}
@@ -181,8 +185,12 @@ def validate_home_environment_update(
 ) -> dict[str, object]:
     """Validate the exact home environment block for the atomic registry write."""
 
-    if not isinstance(payload, Mapping) or set(payload.keys()) != set(
-        HOME_ENVIRONMENT_FIELDS
+    if (
+        not isinstance(payload, Mapping)
+        or not HOME_ENVIRONMENT_FIELDS.issubset(payload.keys())
+        or not set(payload.keys()).issubset(
+            HOME_ENVIRONMENT_FIELDS | OPTIONAL_HOME_ENVIRONMENT_FIELDS
+        )
     ):
         raise ClimateSignalSettingsViolation("invalid_home_environment")
     outdoor = validate_optional_signal_entity(
@@ -190,6 +198,32 @@ def validate_home_environment_update(
         allowed_domains=OUTDOOR_TEMPERATURE_DOMAINS,
         entity_known=entity_known,
     )
+    outdoor_sources_value = payload.get("outdoor_temperature_entity_ids")
+    outdoor_sources: tuple[str, ...] = ()
+    if outdoor_sources_value is not None:
+        if (
+            not isinstance(outdoor_sources_value, list)
+            or len(outdoor_sources_value) > MAX_OUTDOOR_TEMPERATURE_SOURCES
+        ):
+            raise ClimateSignalSettingsViolation("invalid_outdoor_sources")
+        validated_sources = [
+            validate_optional_signal_entity(
+                entity_id,
+                allowed_domains=OUTDOOR_TEMPERATURE_DOMAINS,
+                entity_known=entity_known,
+            )
+            for entity_id in outdoor_sources_value
+        ]
+        if any(entity_id is None for entity_id in validated_sources):
+            raise ClimateSignalSettingsViolation("invalid_outdoor_sources")
+        outdoor_sources = tuple(entity_id for entity_id in validated_sources if entity_id)
+        if len(set(outdoor_sources)) != len(outdoor_sources):
+            raise ClimateSignalSettingsViolation("duplicate_outdoor_source")
+        if outdoor_sources:
+            if outdoor != outdoor_sources[0]:
+                raise ClimateSignalSettingsViolation("invalid_outdoor_priority")
+        elif outdoor is not None:
+            raise ClimateSignalSettingsViolation("invalid_outdoor_priority")
     presence = validate_optional_signal_entity(
         payload["presence_entity_id"],
         allowed_domains=PRESENCE_DOMAINS,
@@ -204,13 +238,16 @@ def validate_home_environment_update(
     low = _lockout_threshold(payload["heating_lockout_low"])
     if low >= high:
         raise ClimateSignalSettingsViolation("invalid_lockout_order")
-    return {
+    result = {
         "outdoor_temperature_entity_id": outdoor,
         "presence_entity_id": presence,
         "central_heating_entity_id": central_heating,
         "heating_lockout_high": high,
         "heating_lockout_low": low,
     }
+    if outdoor_sources_value is not None:
+        result["outdoor_temperature_entity_ids"] = list(outdoor_sources)
+    return result
 
 
 def validate_room_window_update(

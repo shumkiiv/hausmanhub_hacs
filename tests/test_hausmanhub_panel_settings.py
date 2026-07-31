@@ -23,6 +23,7 @@ DEVICE_BINDINGS_JS = PANEL_JS.with_name("hausman-hub-device-bindings.js")
 AREA_BINDING_JS = PANEL_JS.with_name("hausman-hub-area-binding.js")
 NAVIGATION_JS = PANEL_JS.with_name("hausman-hub-navigation.js")
 ENERGY_JS = PANEL_JS.with_name("hausman-hub-energy.js")
+WEATHER_SOURCES_JS = PANEL_JS.with_name("hausman-hub-weather-sources.js")
 SETTINGS_CSS = PANEL_JS.with_name("hausman-hub-settings.css")
 DEVICE_BINDINGS_CSS = PANEL_JS.with_name("hausman-hub-device-bindings.css")
 
@@ -431,6 +432,10 @@ def panel_script(
       vm.runInThisContext(
         fs.readFileSync({str(ENERGY_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(ENERGY_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(WEATHER_SOURCES_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(WEATHER_SOURCES_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(PANEL_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, ""),
@@ -1790,7 +1795,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("indoor room leaked into the outdoor temperature picker");
         }
         const weather = findAll(outdoor, (node) =>
-          node.type === "radio" && node.value === "weather.home");
+          node.tagName === "BUTTON" && node.value === "weather.home");
         if (weather.length !== 1) throw new Error("weather source missing");
         if (findAll(outdoor, (node) => node.tagName === "SELECT").length) {
           throw new Error("outdoor source is still a dropdown");
@@ -1881,14 +1886,14 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const outdoor = fieldsets.find((node) =>
           textOf(node).includes("Наружная температура"));
         const physicalSensorChoices = findAll(outdoor, (node) =>
-          node.type === "radio"
+          node.tagName === "BUTTON"
           && String(node.value).startsWith("sensor.vneshnii_datchik_temperatury_"));
         if (physicalSensorChoices.length !== 1
           || physicalSensorChoices[0].value
             !== "sensor.vneshnii_datchik_temperatury_external_temperature") {
           throw new Error("duplicate entities of one physical sensor were not collapsed");
         }
-        const reserve = findAll(outdoor, (node) => node.type === "radio"
+        const reserve = findAll(outdoor, (node) => node.tagName === "BUTTON"
           && node.value === "sensor.rezervnyi_datchik_temperature");
         if (reserve.length !== 1) {
           throw new Error("a different physical sensor was incorrectly collapsed");
@@ -1931,6 +1936,43 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         }
         if (picker.radios.filter(({ radio }) => radio.value.startsWith("weather.")).length !== 2) {
           throw new Error("distinct weather providers were incorrectly deduplicated");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_outdoor_sources_can_be_prioritized_with_a_physical_reserve(self) -> None:
+        script = panel_script(
+            GET_PATHS,
+            {},
+            """
+        const candidates = [
+          { entity_id: "weather.forecast_omsk", name: "Forecast",
+            available: true, domain: "weather", room_id: "" },
+          { entity_id: "sensor.outdoor_temperature", name: "Внешний датчик температуры",
+            available: true, domain: "sensor", device_class: "temperature", room_id: "" },
+        ];
+        const changes = [];
+        const picker = panel._priorityChoicePicker({
+          title: "Наружная температура", candidates,
+          current: ["weather.forecast_omsk", "sensor.outdoor_temperature"],
+          signalKind: "outdoor_temperature", onChange: (value) => changes.push(value),
+        });
+        if (picker.value().join(",") !== "weather.forecast_omsk,sensor.outdoor_temperature") {
+          throw new Error("saved priority order was not restored");
+        }
+        const down = findAll(picker.root, (node) =>
+          node.tagName === "BUTTON" && node.textContent === "↓" && !node.disabled)[0];
+        if (!down) throw new Error("priority down control missing");
+        down.fire("click");
+        if (picker.value().join(",") !== "sensor.outdoor_temperature,weather.forecast_omsk") {
+          throw new Error("physical reserve could not be promoted to primary");
+        }
+        if (changes.length !== 1) throw new Error("priority change was not reported");
+        const text = textOf(picker.root);
+        for (const label of ["Основной источник", "Резерв 1", "Добавить резервный источник"]) {
+          if (!text.includes(label)) throw new Error("priority UI missing: " + label);
         }
             """,
         )
@@ -2193,7 +2235,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
-    def test_home_save_posts_exact_five_fields(self) -> None:
+    def test_home_save_posts_exact_priority_aware_fields(self) -> None:
         script = panel_script(
             GET_PATHS,
             {"hausman_hub/v1/admin/home-environment": {"home": {}}},
@@ -2207,6 +2249,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         if (!post) throw new Error("home POST missing");
         const expected = {
           outdoor_temperature_entity_id: null,
+          outdoor_temperature_entity_ids: [],
           presence_entity_id: null,
           central_heating_entity_id: null,
           heating_lockout_high: 18,

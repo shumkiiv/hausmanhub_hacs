@@ -27,6 +27,7 @@ _CENTRAL_HEATING_ENTITY_DOMAINS = frozenset(
 )
 _PASSIVE_OBSERVATION_ENTITY_DOMAINS = frozenset({"sensor"})
 MAX_ROOM_PRESENCE_ENTITIES = 32
+MAX_OUTDOOR_TEMPERATURE_SOURCES = 8
 
 
 class ClimateModelViolation(ValueError):
@@ -165,6 +166,7 @@ class ClimateHomeEnvironment:
     """
 
     outdoor_temperature_entity_id: str | None = None
+    outdoor_temperature_entity_ids: tuple[str, ...] = ()
     presence_entity_id: str | None = None
     central_heating_entity_id: str | None = None
     heating_lockout_high: float = 18.0
@@ -176,6 +178,30 @@ class ClimateHomeEnvironment:
             _OUTDOOR_TEMPERATURE_ENTITY_DOMAINS,
             "outdoor temperature entity",
         )
+        if type(self.outdoor_temperature_entity_ids) is not tuple:
+            raise ClimateModelViolation(
+                "outdoor temperature entities must be an immutable collection"
+            )
+        if len(self.outdoor_temperature_entity_ids) > MAX_OUTDOOR_TEMPERATURE_SOURCES:
+            raise ClimateModelViolation("outdoor temperature entities are too numerous")
+        _require_unique(
+            self.outdoor_temperature_entity_ids,
+            "outdoor temperature entities",
+        )
+        for entity_id in self.outdoor_temperature_entity_ids:
+            _require_entity_domain(
+                entity_id,
+                _OUTDOOR_TEMPERATURE_ENTITY_DOMAINS,
+                "outdoor temperature entity",
+            )
+        if (
+            self.outdoor_temperature_entity_ids
+            and self.outdoor_temperature_entity_id
+            != self.outdoor_temperature_entity_ids[0]
+        ):
+            raise ClimateModelViolation(
+                "primary outdoor temperature entity must have first priority"
+            )
         _optional_entity_domain(
             self.presence_entity_id,
             _PRESENCE_ENTITY_DOMAINS,
@@ -198,6 +224,16 @@ class ClimateHomeEnvironment:
             raise ClimateModelViolation(
                 "heating lockout low threshold must stay below the high threshold"
             )
+
+    @property
+    def prioritized_outdoor_temperature_entity_ids(self) -> tuple[str, ...]:
+        """Return configured outdoor sources in failover order."""
+
+        if self.outdoor_temperature_entity_ids:
+            return self.outdoor_temperature_entity_ids
+        if self.outdoor_temperature_entity_id is not None:
+            return (self.outdoor_temperature_entity_id,)
+        return ()
 
 
 @dataclass(frozen=True, slots=True)

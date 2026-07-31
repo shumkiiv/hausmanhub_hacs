@@ -13,6 +13,15 @@
       "required": ["outdoor_temperature_entity_id", "presence_entity_id", "central_heating_entity_id"],
       "properties": {
         "outdoor_temperature_entity_id": {"$ref": "#/$defs/optional_entity_id"},
+        "outdoor_temperature_entity_ids": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^(sensor|weather)\\.[a-z0-9_]+$"
+          }
+        },
         "presence_entity_id": {"$ref": "#/$defs/optional_entity_id"},
         "central_heating_entity_id": {"$ref": "#/$defs/optional_entity_id"}
       }

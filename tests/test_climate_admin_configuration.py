@@ -363,6 +363,42 @@ class ClimateSignalSettingsValidationTest(unittest.TestCase):
             weather["outdoor_temperature_entity_id"],
         )
 
+        prioritized = validate_home_environment_update(
+            {
+                "outdoor_temperature_entity_id": "sensor.outdoor_temperature",
+                "outdoor_temperature_entity_ids": [
+                    "sensor.outdoor_temperature",
+                    "weather.home",
+                ],
+                "presence_entity_id": "person.ivan",
+                "central_heating_entity_id": "switch.central_heating",
+                "heating_lockout_high": 19,
+                "heating_lockout_low": 15.5,
+            },
+            entity_known=known.__contains__,
+        )
+        self.assertEqual(
+            ["sensor.outdoor_temperature", "weather.home"],
+            prioritized["outdoor_temperature_entity_ids"],
+        )
+
+    def test_home_environment_update_rejects_inconsistent_priority(self) -> None:
+        known = {"sensor.outdoor_temperature", "weather.home"}
+        base = {
+            "outdoor_temperature_entity_id": "weather.home",
+            "outdoor_temperature_entity_ids": [
+                "sensor.outdoor_temperature",
+                "weather.home",
+            ],
+            "presence_entity_id": None,
+            "central_heating_entity_id": None,
+            "heating_lockout_high": 18,
+            "heating_lockout_low": 16,
+        }
+        with self.assertRaises(ClimateSignalSettingsViolation) as raised:
+            validate_home_environment_update(base, entity_known=known.__contains__)
+        self.assertEqual("invalid_outdoor_priority", raised.exception.code)
+
     def test_home_environment_update_rejects_bad_shapes_and_thresholds(self) -> None:
         lookup = {"sensor.outdoor_temperature"}.__contains__
         base = {

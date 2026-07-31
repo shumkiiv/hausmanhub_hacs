@@ -1,13 +1,14 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.13";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.13";
-import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.13";
-import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.51.13";
-import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.13";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.13";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.13";
-import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.13";
-import { openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.13";
-import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.13";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.14";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.14";
+import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.14";
+import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.51.14";
+import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.14";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.14";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.14";
+import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.14";
+import { openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.14";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.14";
+import { createPriorityChoicePicker, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.51.14";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css";
@@ -2529,6 +2530,7 @@ class HausmanHubPanel extends HTMLElement {
         heating_lockout_high: high,
         heating_lockout_low: low,
         outdoor_temperature_entity_id: home.outdoor_temperature_entity_id || null,
+        outdoor_temperature_entity_ids: home.outdoor_temperature_entity_ids || [],
         presence_entity_id: home.presence_entity_id || null,
       })).setup_revision;
       this._firstRun.step = "validation";
@@ -2758,6 +2760,10 @@ class HausmanHubPanel extends HTMLElement {
         heating_lockout_high: saved.heating_lockout_high === undefined ? 18 : saved.heating_lockout_high,
         heating_lockout_low: saved.heating_lockout_low === undefined ? 16 : saved.heating_lockout_low,
         outdoor_temperature_entity_id: saved.outdoor_temperature_entity_id || null,
+        outdoor_temperature_entity_ids: Array.isArray(saved.outdoor_temperature_entity_ids)
+          && saved.outdoor_temperature_entity_ids.length
+          ? saved.outdoor_temperature_entity_ids
+          : (saved.outdoor_temperature_entity_id ? [saved.outdoor_temperature_entity_id] : []),
         presence_entity_id: saved.presence_entity_id || null,
       };
     }
@@ -2765,7 +2771,20 @@ class HausmanHubPanel extends HTMLElement {
     const candidates = (this._settings.home && this._settings.home.candidates) || {};
     const pickers = {};
     HOME_SIGNAL_BINDINGS.forEach(({ key, title, helper, purpose, recommendation, kind }) => {
-      const picker = this._singleChoicePicker({
+      const picker = kind === "outdoor_temperature" ? this._priorityChoicePicker({
+        candidates: candidates[kind] || [],
+        current: home.outdoor_temperature_entity_ids,
+        helper,
+        purpose,
+        recommendation: "Источники проверяются сверху вниз. Первый доступный становится активным, остальные остаются резервными.",
+        pickerId: `first-run-home-${key}`,
+        onChange: (values) => {
+          home.outdoor_temperature_entity_ids = values;
+          home.outdoor_temperature_entity_id = values[0] || null;
+        },
+        signalKind: kind,
+        title,
+      }) : this._singleChoicePicker({
         candidates: candidates[kind] || [],
         current: home[key],
         helper,
@@ -2777,7 +2796,7 @@ class HausmanHubPanel extends HTMLElement {
         },
         signalKind: kind,
         title,
-      });
+        });
       card.appendChild(picker.root);
       pickers[key] = picker;
     });
@@ -4468,7 +4487,7 @@ class HausmanHubPanel extends HTMLElement {
       power: "Датчик питания",
     };
     if (candidate.missing && signalKind === "outdoor_temperature") {
-      return "Ранее выбранный источник";
+      return "Ранее выбранное — Ранее выбранный источник";
     }
     if (candidate.domain === "weather") return "Погодный сервис";
     if (candidate.domain === "person") return "Члены дома (геолокация)";
@@ -4543,38 +4562,8 @@ class HausmanHubPanel extends HTMLElement {
       - Math.min(entityId.length, 255) / 1000;
   }
 
-  _weatherSourceDisplayName(entityId) {
-    const source = String(entityId || "").split(".", 2)[1] || "";
-    const normalized = source.replace(/^(?:weather|forecast)_/, "");
-    const known = {
-      home_assistant: "Home Assistant",
-      omsk: "Омск",
-      yandex: "Яндекс",
-      yandex_weather: "Яндекс Погода",
-      openweathermap: "OpenWeather",
-      met_no: "MET Norway",
-      home: "Дом",
-    };
-    if (known[normalized]) return known[normalized];
-    return normalized.split("_").filter(Boolean).map((part) => (
-      part.charAt(0).toLocaleUpperCase("ru-RU") + part.slice(1)
-    )).join(" ") || "Home Assistant";
-  }
-
   _signalCandidateDisplayName(candidate, peers = []) {
-    if (!candidate) return "Источник не выбран";
-    if (candidate.domain === "person") {
-      return `${candidate.name || candidate.entity_id} · профиль пользователя`;
-    }
-    const name = candidate.device_name || candidate.name || candidate.entity_id;
-    if (candidate.domain !== "weather") return name;
-    const duplicate = peers.filter((peer) => (
-      peer.domain === "weather" && normalizedText(peer.name || peer.entity_id) === normalizedText(candidate.name || candidate.entity_id)
-    )).length > 1;
-    const generic = /^(?:forecast|weather|прогноз|погода)$/i.test(String(candidate.name || "").trim());
-    if (!duplicate && !generic) return name;
-    const localized = /^(?:forecast|weather)$/i.test(String(name).trim()) ? "Погода" : name;
-    return `${localized} · ${this._weatherSourceDisplayName(candidate.entity_id)}`;
+    return signalCandidateDisplayName(candidate, peers, normalizedText);
   }
 
   _signalCandidateExplanation(candidate, signalKind) {
@@ -4738,6 +4727,10 @@ class HausmanHubPanel extends HTMLElement {
     return { root: fieldset, value: () => selectedValue, radios };
   }
 
+  _priorityChoicePicker(config) {
+    return createPriorityChoicePicker(this, config, { el, setAttr });
+  }
+
   _renderHome(container, home) {
     container.innerHTML = "";
     container.appendChild(el("h2", null, "Сигналы дома"));
@@ -4755,7 +4748,21 @@ class HausmanHubPanel extends HTMLElement {
     const candidates = home.candidates || {};
     const pickers = {};
     HOME_SIGNAL_BINDINGS.forEach((binding) => {
-      const picker = this._singleChoicePicker({
+      const picker = binding.kind === "outdoor_temperature"
+        ? this._priorityChoicePicker({
+          title: binding.title,
+          helper: binding.helper,
+          purpose: binding.purpose,
+          recommendation: "Источники проверяются сверху вниз. Если основной недоступен или передаёт некорректное значение, HausmanHub автоматически использует следующий.",
+          candidates: candidates[binding.kind] || [],
+          current: Array.isArray(values.outdoor_temperature_entity_ids)
+            && values.outdoor_temperature_entity_ids.length
+            ? values.outdoor_temperature_entity_ids
+            : (values[binding.key] ? [values[binding.key]] : []),
+          signalKind: binding.kind,
+          pickerId: `home-${binding.key}`,
+          onChange: () => this._markDirty("home", dirtyNotice),
+        }) : this._singleChoicePicker({
         title: binding.title,
         helper: binding.helper,
         purpose: binding.purpose,
@@ -4767,7 +4774,7 @@ class HausmanHubPanel extends HTMLElement {
         onChange: () => {
           this._markDirty("home", dirtyNotice);
         },
-      });
+        });
       card.appendChild(picker.root);
       pickers[binding.key] = picker;
     });
@@ -4824,12 +4831,14 @@ class HausmanHubPanel extends HTMLElement {
         );
         return;
       }
+      const outdoorSources = pickers.outdoor_temperature_entity_id.value();
       this._save(
         "home",
         HOME_API,
         {
           outdoor_temperature_entity_id:
-            pickers.outdoor_temperature_entity_id.value() || null,
+            outdoorSources[0] || null,
+          outdoor_temperature_entity_ids: outdoorSources,
           presence_entity_id: pickers.presence_entity_id.value() || null,
           central_heating_entity_id:
             pickers.central_heating_entity_id.value() || null,

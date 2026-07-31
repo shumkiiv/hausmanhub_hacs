@@ -363,11 +363,10 @@ def _home_observation(
     previous_weather_lockout: bool | None,
 ) -> ClimateHomeObservation:
     home = registry.home
-    outdoor = _home_number(home.outdoor_temperature_entity_id, states)
-    heat_load = _heat_load_temperature(
-        home.outdoor_temperature_entity_id,
-        states,
-        observed_at,
+    outdoor_sources = home.prioritized_outdoor_temperature_entity_ids
+    outdoor = _prioritized_home_number(outdoor_sources, states)
+    heat_load = _prioritized_heat_load_temperature(
+        outdoor_sources, states, observed_at
     )
     return ClimateHomeObservation(
         season=ClimateSeason.UNKNOWN,
@@ -435,6 +434,19 @@ def _home_number(
     return value
 
 
+def _prioritized_home_number(
+    entity_ids: tuple[str, ...],
+    states: ClimateHaStateView,
+) -> float | None:
+    """Use the first available plausible outdoor source."""
+
+    for entity_id in entity_ids:
+        value = _home_number(entity_id, states)
+        if value is not None:
+            return value
+    return None
+
+
 def _heat_load_temperature(
     entity_id: str | None,
     states: ClimateHaStateView,
@@ -451,6 +463,20 @@ def _heat_load_temperature(
     if value is None or not -80.0 <= value <= 100.0:
         return None
     return value
+
+
+def _prioritized_heat_load_temperature(
+    entity_ids: tuple[str, ...],
+    states: ClimateHaStateView,
+    observed_at: int,
+) -> float | None:
+    """Use the first fresh outdoor source, falling back by saved priority."""
+
+    for entity_id in entity_ids:
+        value = _heat_load_temperature(entity_id, states, observed_at)
+        if value is not None:
+            return value
+    return None
 
 
 def _outdoor_temperature_value(state: ClimateHaEntityState) -> float | None:

@@ -16,6 +16,7 @@ from ..domain.climate import (
     ClimateEndpoint,
     ClimateEndpointRole,
     ClimateHomeEnvironment,
+    MAX_OUTDOOR_TEMPERATURE_SOURCES,
     MAX_ROOM_PRESENCE_ENTITIES,
     ClimateModelViolation,
     ClimateRegistry,
@@ -61,6 +62,10 @@ def registry_to_payload(registry: ClimateRegistry) -> dict[str, object]:
         "presence_entity_id": registry.home.presence_entity_id,
         "central_heating_entity_id": registry.home.central_heating_entity_id,
     }
+    if registry.home.outdoor_temperature_entity_ids:
+        home["outdoor_temperature_entity_ids"] = list(
+            registry.home.outdoor_temperature_entity_ids
+        )
     if registry.home.heating_lockout_high != 18.0:
         home["heating_lockout_high"] = registry.home.heating_lockout_high
     if registry.home.heating_lockout_low != 16.0:
@@ -111,13 +116,18 @@ def registry_from_payload(payload: object) -> ClimateRegistry:
         root["home"],
         {
             "outdoor_temperature_entity_id",
+            "outdoor_temperature_entity_ids",
             "presence_entity_id",
             "central_heating_entity_id",
             "heating_lockout_high",
             "heating_lockout_low",
         },
         "registry home",
-        optional={"heating_lockout_high", "heating_lockout_low"},
+        optional={
+            "outdoor_temperature_entity_ids",
+            "heating_lockout_high",
+            "heating_lockout_low",
+        },
     )
     rooms = _bounded_list(root["rooms"], "registry rooms", 128)
     devices = _bounded_list(root["devices"], "registry devices", 512)
@@ -128,6 +138,14 @@ def registry_from_payload(payload: object) -> ClimateRegistry:
                 outdoor_temperature_entity_id=_optional_entity(
                     home["outdoor_temperature_entity_id"],
                     "outdoor temperature entity",
+                ),
+                outdoor_temperature_entity_ids=tuple(
+                    _required_entity(entity_id, "outdoor temperature entity")
+                    for entity_id in _bounded_list(
+                        home.get("outdoor_temperature_entity_ids", []),
+                        "outdoor temperature entities",
+                        MAX_OUTDOOR_TEMPERATURE_SOURCES,
+                    )
                 ),
                 presence_entity_id=_optional_entity(
                     home["presence_entity_id"],
