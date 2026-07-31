@@ -31,16 +31,17 @@ class EventStreamBrokerTest(unittest.IsolatedAsyncioTestCase):
         broker.unsubscribe(second)
         self.assertEqual(1, broker.subscriber_count)
 
-    async def test_slow_subscriber_is_bounded_to_fresh_events(self) -> None:
+    async def test_slow_subscriber_receives_an_explicit_snapshot_gap(self) -> None:
         broker = EventStreamBroker()
         queue = broker.subscribe()
 
         for sequence in range(EVENT_STREAM_QUEUE_SIZE + 7):
             broker.publish("heartbeat", {"sequence": sequence})
 
-        self.assertEqual(EVENT_STREAM_QUEUE_SIZE, queue.qsize())
-        oldest = await queue.get()
-        self.assertEqual(7, oldest["data"]["sequence"])
+        messages = [await queue.get() for _ in range(queue.qsize())]
+        gap = next(message for message in messages if message["type"] == "snapshot_invalidated")
+        self.assertEqual("state_changed", gap["data"]["reason"])
+        self.assertLessEqual(len(messages), EVENT_STREAM_QUEUE_SIZE)
 
     async def test_close_releases_waiters_and_rejects_new_subscribers(self) -> None:
         broker = EventStreamBroker()
@@ -71,6 +72,11 @@ class EventStreamBrokerTest(unittest.IsolatedAsyncioTestCase):
             broker.publish("heartbeat", {"sequence": sequence})
 
         self.assertFalse(broker.can_resume(first["id"]))
+
+        queue, resumable = broker.subscribe_with_resume(first["id"])
+
+        self.assertFalse(resumable)
+        self.assertTrue(queue.empty())
 
     async def test_replay_history_is_bounded(self) -> None:
         broker = EventStreamBroker()

@@ -2223,7 +2223,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.51.0", panel.payload["integration_version"])
+        self.assertEqual("1.51.1", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
@@ -2892,6 +2892,24 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertEqual("Гостиная", message["data"]["room"])
         self.assertEqual(7.0, message["data"]["value"])
         self.assertNotIn("entity_id", json.dumps(message, ensure_ascii=False))
+
+    def test_realtime_battery_voltage_does_not_publish_a_percent_alert(self) -> None:
+        runtime = self.hass.data["hausman_hub"]["event_stream_runtime"]
+        queue = runtime.broker.subscribe()
+        runtime._publish_low_battery_alert(
+            "sensor.synthetic_private_battery_voltage",
+            SimpleNamespace(state="3.1", attributes={}),
+            SimpleNamespace(
+                state="3.0",
+                attributes={
+                    "device_class": "voltage",
+                    "unit_of_measurement": "V",
+                    "friendly_name": "Напряжение батареи",
+                },
+            ),
+        )
+
+        self.assertTrue(queue.empty())
 
     def test_command_receipt_is_published_without_private_entity_id(self) -> None:
         from custom_components.hausman_hub.realtime_api import publish_command_receipt

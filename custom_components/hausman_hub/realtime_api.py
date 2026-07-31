@@ -122,7 +122,8 @@ class EventStreamRuntime:
         if not isinstance(attributes, dict):
             return
         device_class = attributes.get("device_class")
-        if device_class != "battery" and "battery" not in entity_id:
+        unit = attributes.get("unit_of_measurement")
+        if device_class != "battery" and unit != "%":
             return
         try:
             current = float(getattr(new_state, "state", "nan"))
@@ -227,7 +228,6 @@ class EventStreamView(HomeAssistantView):
         headers = getattr(request, "headers", {})
         last_event_id = headers.get("Last-Event-ID") if hasattr(headers, "get") else None
         last_event_id = last_event_id if isinstance(last_event_id, str) else None
-        resumable = runtime.broker.can_resume(last_event_id)
         response = web.StreamResponse(
             status=200,
             headers={
@@ -239,7 +239,7 @@ class EventStreamView(HomeAssistantView):
         response.content_type = "text/event-stream"
         response.charset = "utf-8"
         await response.prepare(request)
-        queue = runtime.broker.subscribe(last_event_id)
+        queue, resumable = runtime.broker.subscribe_with_resume(last_event_id)
         heartbeat_sequence = 0
         try:
             await response.write(b"retry: 5000\n\n")

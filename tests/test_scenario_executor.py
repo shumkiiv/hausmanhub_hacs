@@ -171,6 +171,20 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             "light", "turn_on", {"entity_id": "light.living_room", "brightness": 128}, blocking=True
         )
 
+    async def test_normalized_brightness_value_is_confirmed_against_read_back(self) -> None:
+        self.hass.states.get = lambda entity_id: SimpleNamespace(
+            state="on", attributes={"brightness": 50}
+        )
+
+        receipt = await self.executor.async_execute_device_action(
+            "device_1", "set_brightness", "50%"
+        )
+
+        self.assertTrue(receipt["confirmed"])
+        self.hass.services.async_call.assert_awaited_once_with(
+            "light", "turn_on", {"entity_id": "light.living_room", "brightness": 50}, blocking=True
+        )
+
     async def test_delay_action_receipt(self) -> None:
         definition = _definition((
             ScenarioAction(

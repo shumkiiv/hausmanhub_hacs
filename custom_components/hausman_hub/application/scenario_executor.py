@@ -251,8 +251,14 @@ class ScenarioExecutor:
         device = self._catalog.device(target_id)
         read_back = receipt.get("read_back")
         if not isinstance(read_back, dict):
+            confirmation_value = value
+            allowed = device.action(action_id) if device is not None else None
+            if value is not None and allowed is not None:
+                param = _value_parameter_name(action_id, allowed.domain, allowed.service)
+                if param is not None:
+                    confirmation_value = _normalize_action_value(param, value)
             read_back = await self._read_back_device(
-                getattr(device, "entity_id", None), action_id, value
+                getattr(device, "entity_id", None), action_id, confirmation_value
             )
         confirmed = read_back["matched"] is True
         observed_state = read_back["observedState"]
@@ -459,6 +465,7 @@ class ScenarioExecutor:
                 "error": f"action {action.action_id} is not available for device {action.target_id}",
             }
         service_data: dict[str, Any] = {"entity_id": device.entity_id}
+        confirmation_value = action.value
         if action.value is not None:
             param = _value_parameter_name(action.action_id, allowed.domain, allowed.service)
             if param is None:
@@ -476,6 +483,7 @@ class ScenarioExecutor:
                     "error": str(error),
                 }
             service_data[param] = normalized
+            confirmation_value = normalized
         if not dry_run:
             await self._call_service(allowed.domain, allowed.service, service_data)
         receipt: dict[str, Any] = {
@@ -490,7 +498,7 @@ class ScenarioExecutor:
             receipt["service_data"] = service_data
         else:
             read_back = await self._read_back_device(
-                device.entity_id, action.action_id, action.value
+                device.entity_id, action.action_id, confirmation_value
             )
             receipt["confirmed"] = read_back["matched"] is True
             receipt["read_back"] = read_back

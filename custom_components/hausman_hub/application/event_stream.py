@@ -32,35 +32,47 @@ class EventStreamBroker:
     def subscribe(
         self, after_event_id: str | None = None
     ) -> asyncio.Queue[dict[str, object] | None]:
+        queue, _ = self.subscribe_with_resume(after_event_id)
+        return queue
+
+    def subscribe_with_resume(
+        self, after_event_id: str | None = None
+    ) -> tuple[asyncio.Queue[dict[str, object] | None], bool]:
+        """Subscribe and decide replayability atomically in the event loop."""
+
         if self._closed:
             raise RuntimeError("event stream is closed")
         queue: asyncio.Queue[dict[str, object] | None] = asyncio.Queue(
             maxsize=EVENT_STREAM_QUEUE_SIZE
         )
-        for message in self.replay_after(after_event_id)[-EVENT_STREAM_QUEUE_SIZE:]:
-            queue.put_nowait(message)
+        replay, resumable = self._resume_window(after_event_id)
+        if resumable:
+            for message in replay:
+                queue.put_nowait(message)
         self._subscribers.add(queue)
-        return queue
+        return queue, resumable
 
     def replay_after(self, event_id: str | None) -> tuple[dict[str, object], ...]:
         """Return retained events strictly after a known SSE event id."""
 
-        if event_id is None:
-            return ()
-        retained = tuple(self._replay)
-        for index, message in enumerate(retained):
-            if message.get("id") == event_id:
-                return retained[index + 1 :]
-        return ()
+        replay, _ = self._resume_window(event_id)
+        return replay
 
     def can_resume(self, event_id: str | None) -> bool:
+        _, resumable = self._resume_window(event_id)
+        return resumable
+
+    def _resume_window(
+        self, event_id: str | None
+    ) -> tuple[tuple[dict[str, object], ...], bool]:
         if event_id is None:
-            return True
+            return (), True
         retained = tuple(self._replay)
         for index, message in enumerate(retained):
             if message.get("id") == event_id:
-                return len(retained) - index - 1 <= EVENT_STREAM_QUEUE_SIZE
-        return False
+                replay = retained[index + 1 :]
+                return replay, len(replay) <= EVENT_STREAM_QUEUE_SIZE
+        return (), False
 
     def unsubscribe(self, queue: asyncio.Queue[dict[str, object] | None]) -> None:
         self._subscribers.discard(queue)
@@ -85,8 +97,20 @@ class EventStreamBroker:
         self._replay.append(message)
         for queue in tuple(self._subscribers):
             if queue.full():
-                queue.get_nowait()
-            queue.put_nowait(message)
+                while not queue.empty():
+                    queue.get_nowait()
+                queue.put_nowait(
+                    {
+                        **message,
+                        "type": "snapshot_invalidated",
+                        "data": {
+                            "reason": "state_changed",
+                            "state_revision": None,
+                        },
+                    }
+                )
+            else:
+                queue.put_nowait(message)
         return message
 
     def close(self) -> None:
