@@ -35,6 +35,9 @@
         "name": { "type": "string", "minLength": 1, "maxLength": 160 },
         "roomId": { "type": ["string", "null"], "maxLength": 128 },
         "unit": { "enum": ["W", "A", "V", "kWh"] },
+        "metric": { "enum": ["power", "current", "voltage", "energy"] },
+        "scope": { "enum": ["device", "selection"] },
+        "aggregation": { "enum": ["mean", "sum", "delta"] },
         "points": {
           "type": "array",
           "maxItems": 8928,

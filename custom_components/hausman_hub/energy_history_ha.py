@@ -98,9 +98,11 @@ def _descriptors(
                     unit=unit,
                     value_key=value_key,
                     scale=scale * base_scale,
+                    metric=device_class,
                 )
             )
-    return tuple(result[:128])
+    # Reserve four contract slots for server-owned selection aggregates.
+    return tuple(result[:124])
 
 
 async def async_energy_history(
