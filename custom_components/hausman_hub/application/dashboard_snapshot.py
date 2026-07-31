@@ -47,6 +47,36 @@ _PRIMARY_DOMAIN_ORDER = {
         )
     )
 }
+_PRIMARY_DEVICE_CLASS_ORDER = {
+    device_class: index
+    for index, device_class in enumerate(
+        (
+            "moisture",
+            "smoke",
+            "gas",
+            "carbon_monoxide",
+            "safety",
+            "problem",
+            "occupancy",
+            "presence",
+            "motion",
+            "opening",
+            "door",
+            "window",
+            "temperature",
+            "humidity",
+            "carbon_dioxide",
+            "volatile_organic_compounds",
+            "pm25",
+            "power",
+            "current",
+            "energy",
+            "voltage",
+            "distance",
+            "battery",
+        )
+    )
+}
 _ALARM_DEVICE_CLASSES = frozenset(
     {"moisture", "smoke", "gas", "carbon_monoxide", "safety", "problem"}
 )
@@ -60,10 +90,8 @@ _VIRTUAL_DEVICE_INTEGRATIONS = frozenset(
         "smartir",
         "template",
         "yandex_smart_home",
-        "yandex_station",
     }
 )
-_VIRTUAL_FACADE_DOMAINS = frozenset({"climate", "humidifier", "remote"})
 _MEDIA_IDENTITY_NOISE = frozenset(
     {"android", "device", "display", "media", "smart", "television", "uhd"}
 )
@@ -160,6 +188,45 @@ def _device_class(entity: DashboardEntity) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+def _primary_sort_key(entity: DashboardEntity) -> tuple[int, int, str]:
+    """Prefer a device's purpose over diagnostics such as battery charge."""
+
+    return (
+        _PRIMARY_DOMAIN_ORDER.get(entity.domain, 999),
+        _PRIMARY_DEVICE_CLASS_ORDER.get(_device_class(entity) or "", 998),
+        entity.entity_id,
+    )
+
+
+def _presentation_members(
+    entities: Iterable[DashboardEntity],
+) -> tuple[DashboardEntity, ...]:
+    """Keep one useful battery capability while preserving real device controls."""
+
+    collected = tuple(entities)
+    battery = [entity for entity in collected if _device_class(entity) == "battery"]
+    chosen_battery = min(
+        battery,
+        key=lambda entity: (
+            entity.attributes.get("unit_of_measurement") != "%",
+            entity.domain != "sensor",
+            _number(entity.state) is None,
+            entity.entity_id,
+        ),
+        default=None,
+    )
+    return tuple(
+        sorted(
+            (
+                entity
+                for entity in collected
+                if _device_class(entity) != "battery" or entity is chosen_battery
+            ),
+            key=_primary_sort_key,
+        )
+    )
+
+
 def _state_label(entity: DashboardEntity) -> str:
     labels = {
         "on": "включено",
@@ -233,7 +300,11 @@ def _category(domain: str, entity: DashboardEntity) -> str:
     if domain == "switch":
         return "switch"
     device_class = _device_class(entity)
-    return device_class or domain
+    if device_class in _PRIMARY_DEVICE_CLASS_ORDER:
+        return device_class
+    if domain in {"binary_sensor", "sensor"}:
+        return "other"
+    return domain
 
 
 def _primary_value(entity: DashboardEntity) -> str | None:
@@ -357,11 +428,39 @@ def _is_virtual_device(
     device: DashboardDevice, members: Iterable[DashboardEntity]
 ) -> bool:
     domains = {member.domain for member in members}
-    return device.entry_type == "service" or (
-        bool(domains)
-        and domains.issubset(_VIRTUAL_FACADE_DOMAINS)
-        and bool(set(device.integrations) & _VIRTUAL_DEVICE_INTEGRATIONS)
-    )
+    integrations = set(device.integrations)
+    if device.entry_type == "service":
+        return True
+    if integrations & _VIRTUAL_DEVICE_INTEGRATIONS:
+        return True
+    return "yandex_station" in integrations and "media_player" not in domains
+
+
+def _device_details(
+    device_name: str, entities: Iterable[DashboardEntity]
+) -> list[dict[str, object]]:
+    """Build readable, non-duplicated capability rows for one device card."""
+
+    members = _presentation_members(entities)
+    base_labels = [_detail_label(member) for member in members]
+    duplicate_labels = {
+        label for label in base_labels if base_labels.count(label) > 1
+    }
+    details: list[dict[str, object]] = []
+    for member, base_label in zip(members, base_labels, strict=True):
+        label = member.name if base_label in duplicate_labels else base_label
+        if label.casefold().startswith(f"{device_name} ".casefold()):
+            label = label[len(device_name) :].strip()
+        details.append(
+            {
+                "label": label or base_label,
+                "value": _detail_value(member),
+                "entityId": member.entity_id,
+                "domain": member.domain,
+                "state": member.state,
+            }
+        )
+    return details
 
 
 def _media_identity_tokens(device: DashboardDevice) -> frozenset[str]:
@@ -489,9 +588,7 @@ def build_dashboard_snapshot(
     registry_members: dict[str, list[DashboardEntity]] = {
         device_id: sorted(
             grouped.get(f"device:{device_id}", []),
-            key=lambda item: (
-                _PRIMARY_DOMAIN_ORDER.get(item.domain, 999), item.entity_id
-            ),
+            key=_primary_sort_key,
         )
         for device_id in device_by_id
     }
@@ -586,9 +683,7 @@ def build_dashboard_snapshot(
             continue
         primary = sorted(
             members,
-            key=lambda item: (
-                _PRIMARY_DOMAIN_ORDER.get(item.domain, 999), item.entity_id
-            ),
+            key=_primary_sort_key,
         )[0]
         area = area_by_id.get(primary.area_id) if primary.area_id is not None else None
         status = _device_status(None, members)
@@ -623,12 +718,9 @@ def build_dashboard_snapshot(
     device_payloads: list[dict[str, object]] = []
     energy_sources: list[dict[str, object]] = []
     for group_key, members in grouped.items():
-        members.sort(
-            key=lambda item: (
-                _PRIMARY_DOMAIN_ORDER.get(item.domain, 999), item.entity_id
-            )
-        )
-        primary = members[0]
+        members.sort(key=_primary_sort_key)
+        presentation_members = _presentation_members(members)
+        primary = presentation_members[0]
         source_device_id = group_sources[group_key]
         if (
             source_device_id is not None
@@ -638,6 +730,8 @@ def build_dashboard_snapshot(
         registry_device = (
             device_by_id.get(source_device_id) if source_device_id is not None else None
         )
+        if registry_device is not None and _is_virtual_device(registry_device, members):
+            continue
         if source_device_id in merged_media_sources:
             members = list(
                 {
@@ -649,8 +743,7 @@ def build_dashboard_snapshot(
             members.sort(
                 key=lambda item: (
                     item.domain != "media_player",
-                    _PRIMARY_DOMAIN_ORDER.get(item.domain, 999),
-                    item.entity_id,
+                    *_primary_sort_key(item),
                 )
             )
             primary = members[0]
@@ -661,17 +754,8 @@ def build_dashboard_snapshot(
         area = area_by_id.get(area_id) if area_id is not None else None
         unavailable = all(member.state in _UNAVAILABLE_STATES for member in members)
         active = any(member.state in _ACTIVE_STATES for member in members)
-        details = [
-            {
-                "label": _detail_label(member),
-                "value": _detail_value(member),
-                "entityId": member.entity_id,
-                "domain": member.domain,
-                "state": member.state,
-            }
-            for member in members
-        ]
         name = registry_device.name if registry_device is not None else primary.name
+        details = _device_details(name, members)
         electrical = _energy_measurements(members)
         has_energy = _is_energy_source(members, electrical)
         device_payloads.append(
@@ -721,6 +805,7 @@ def build_dashboard_snapshot(
             )
 
     room_payloads: list[dict[str, object]] = []
+    visible_device_ids = {str(device["id"]) for device in device_payloads}
     for area in area_by_id.values():
         room_entities = tuple(
             entity
@@ -747,6 +832,7 @@ def build_dashboard_snapshot(
                 source_to_public[entity.device_id]
                 for entity in room_entities
                 if entity.device_id in source_to_public
+                and source_to_public[entity.device_id] in visible_device_ids
             }
             | {
                 _opaque_id("device", f"entity:{entity.entity_id}")

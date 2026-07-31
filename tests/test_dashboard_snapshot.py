@@ -189,6 +189,164 @@ class DashboardSnapshotTest(unittest.TestCase):
             {device["entityId"] for device in devices},
         )
 
+    def test_cards_use_physical_purpose_instead_of_diagnostics_or_services(self) -> None:
+        snapshot = build_dashboard_snapshot(
+            areas=(DashboardArea("kitchen", "Кухня"),),
+            devices=(
+                DashboardDevice(
+                    "climate-sensor",
+                    "Климат кухни",
+                    "kitchen",
+                    "Temperature and humidity sensor",
+                    "Kojima",
+                    integrations=("mqtt",),
+                ),
+                DashboardDevice(
+                    "leak-sensor",
+                    "Датчик протечки",
+                    "kitchen",
+                    "Water leak sensor",
+                    "Tuya",
+                    integrations=("mqtt",),
+                ),
+                DashboardDevice(
+                    "backup-service",
+                    "Backup",
+                    entry_type="service",
+                    integrations=("backup",),
+                ),
+                DashboardDevice(
+                    "yandex-buttons",
+                    "Кондиционер 25",
+                    model="YNDX-0006",
+                    manufacturer="Yandex",
+                    integrations=("yandex_smart_home",),
+                ),
+                DashboardDevice(
+                    "yandex-speaker",
+                    "Станция Мини",
+                    "kitchen",
+                    "Станция Мини",
+                    "Яндекс",
+                    integrations=("yandex_station",),
+                ),
+            ),
+            entities=(
+                DashboardEntity(
+                    "sensor.kitchen_battery",
+                    "sensor",
+                    "100",
+                    "Климат кухни Батарея",
+                    {"device_class": "battery", "unit_of_measurement": "%"},
+                    "climate-sensor",
+                    "kitchen",
+                ),
+                DashboardEntity(
+                    "sensor.kitchen_humidity",
+                    "sensor",
+                    "53",
+                    "Климат кухни Влажность",
+                    {"device_class": "humidity", "unit_of_measurement": "%"},
+                    "climate-sensor",
+                    "kitchen",
+                ),
+                DashboardEntity(
+                    "sensor.kitchen_temperature",
+                    "sensor",
+                    "26.3",
+                    "Климат кухни Температура",
+                    {"device_class": "temperature", "unit_of_measurement": "°C"},
+                    "climate-sensor",
+                    "kitchen",
+                ),
+                DashboardEntity(
+                    "binary_sensor.leak_battery_low",
+                    "binary_sensor",
+                    "off",
+                    "Датчик протечки Батарея",
+                    {"device_class": "battery"},
+                    "leak-sensor",
+                    "kitchen",
+                ),
+                DashboardEntity(
+                    "binary_sensor.leak_water",
+                    "binary_sensor",
+                    "off",
+                    "Датчик протечки Влага",
+                    {"device_class": "moisture"},
+                    "leak-sensor",
+                    "kitchen",
+                ),
+                DashboardEntity(
+                    "sensor.leak_battery",
+                    "sensor",
+                    "37",
+                    "Датчик протечки Батарея",
+                    {"device_class": "battery", "unit_of_measurement": "%"},
+                    "leak-sensor",
+                    "kitchen",
+                ),
+                DashboardEntity(
+                    "sensor.backup_state",
+                    "sensor",
+                    "idle",
+                    "Backup Состояние",
+                    {"device_class": "enum"},
+                    "backup-service",
+                ),
+                DashboardEntity(
+                    "button.yandex_mute",
+                    "button",
+                    "unknown",
+                    "Кондиционер 25 Отключить звук",
+                    {},
+                    "yandex-buttons",
+                ),
+                DashboardEntity(
+                    "remote.yandex_ac",
+                    "remote",
+                    "unavailable",
+                    "Кондиционер 25",
+                    {},
+                    "yandex-buttons",
+                ),
+                DashboardEntity(
+                    "media_player.yandex_mini",
+                    "media_player",
+                    "idle",
+                    "Станция Мини",
+                    {},
+                    "yandex-speaker",
+                    "kitchen",
+                ),
+            ),
+            generated_at_ms=1,
+            local_iso="2026-07-31T16:00:00+06:00",
+        )
+
+        self.assertEqual(
+            {"Климат кухни", "Датчик протечки", "Станция Мини"},
+            {device["name"] for device in snapshot["devices"]},
+        )
+        climate = next(
+            device for device in snapshot["devices"] if device["name"] == "Климат кухни"
+        )
+        self.assertEqual("temperature", climate["category"])
+        self.assertEqual("sensor.kitchen_temperature", climate["entityId"])
+        leak = next(
+            device
+            for device in snapshot["devices"]
+            if device["name"] == "Датчик протечки"
+        )
+        self.assertEqual("moisture", leak["category"])
+        self.assertEqual("binary_sensor.leak_water", leak["entityId"])
+        self.assertEqual(1, sum(detail["label"] == "Заряд" for detail in leak["details"]))
+        self.assertEqual(
+            {"physical", "virtual"},
+            {device["kind"] for device in snapshot["inventory"]["devices"]},
+        )
+        self.assertEqual(2, snapshot["inventory"]["summary"]["virtualCount"])
+
     def test_snapshot_is_read_only_and_filters_private_attributes(self) -> None:
         serialized = json.dumps(self.snapshot, ensure_ascii=False)
         self.assertNotIn("access_token", serialized)
@@ -380,7 +538,7 @@ class DashboardSnapshotTest(unittest.TestCase):
         )
 
         visible_names = [device["name"] for device in snapshot["devices"]]
-        self.assertEqual(1, visible_names.count("Кондиционер"))
+        self.assertNotIn("Кондиционер", visible_names)
         self.assertEqual(2, visible_names.count("Выключатель гостиная"))
 
         inventory = snapshot["inventory"]
@@ -395,6 +553,11 @@ class DashboardSnapshotTest(unittest.TestCase):
         shadow = next(item for item in air_conditioners if not item["canonical"])
         self.assertTrue(shadow["possibleDuplicate"])
         self.assertIsNotNone(shadow["duplicateOf"])
+
+        living = next(room for room in snapshot["rooms"] if room["id"] == "living")
+        self.assertEqual(2, len(living["deviceIds"]))
+        kids = next(room for room in snapshot["rooms"] if room["id"] == "kids")
+        self.assertEqual([], kids["deviceIds"])
 
         serialized = json.dumps(inventory, ensure_ascii=False)
         for source_id in (
