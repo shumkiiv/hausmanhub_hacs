@@ -16,6 +16,7 @@ PANEL_JS = (
 )
 HOME_SECTIONS_JS = PANEL_JS.with_name("hausman-hub-home-sections.js")
 ROOM_SETUP_JS = PANEL_JS.with_name("hausman-hub-room-setup.js")
+ROOM_DEVICE_GROUPS_JS = PANEL_JS.with_name("hausman-hub-room-device-groups.js")
 DEVICE_INVENTORY_JS = PANEL_JS.with_name("hausman-hub-device-inventory.js")
 DEVICE_BINDINGS_JS = PANEL_JS.with_name("hausman-hub-device-bindings.js")
 AREA_BINDING_JS = PANEL_JS.with_name("hausman-hub-area-binding.js")
@@ -166,6 +167,12 @@ DRAFT_OPTIONS = {
             "status": "available", "suggested_room_id": "kids", "suggested_room_name": "Детская",
             "reason": "detected_room", "can_add": True,
         },
+        {
+            "candidate_id": "candidate_kids_humidity", "candidate_key": "candidate_kids_humidity", "name": "Влажность детской", "room_id": "kids",
+            "suggested_types": ["humidity_sensor"], "recommended_type": "humidity_sensor",
+            "status": "available", "suggested_room_id": "kids", "suggested_room_name": "Детская",
+            "reason": "detected_room", "can_add": True,
+        },
     ],
     "control_channels": ["universal_ir", "yandex_remote", "direct_wifi"],
 }
@@ -285,8 +292,12 @@ def panel_script(get_table: dict, post_table: dict, assertions: str) -> str:
         {{ filename: {str(HOME_SECTIONS_JS)!r} }}
       );
       vm.runInThisContext(
-        fs.readFileSync({str(ROOM_SETUP_JS)!r}, "utf8").replace("export function renderFirstRunRoom", "function renderFirstRunRoom"),
+        fs.readFileSync({str(ROOM_SETUP_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(ROOM_SETUP_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(ROOM_DEVICE_GROUPS_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(ROOM_DEVICE_GROUPS_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(DEVICE_INVENTORY_JS)!r}, "utf8").replace("export function renderDeviceInventory", "function renderDeviceInventory"),
@@ -475,10 +486,23 @@ class PanelContourWizardTest(unittest.TestCase):
         if (groupedChoices.length !== 2 || groupedChoices.some((choice) => choice.checkbox.checked)) {
           throw new Error("новые устройства должны быть не выбраны");
         }
+        if (groupedChoices.some((choice) => choice.checkbox.type !== "radio")) {
+          throw new Error("главные источники климата должны выбираться по одному");
+        }
+        const sourceSummary = findAll(panel.shadowRoot, (node) =>
+          String(node.className).split(" ").includes("climate-source-summary"))[0];
+        if (!sourceSummary || !textOf(sourceSummary).includes("Оба источника обязательны")
+          || !textOf(sourceSummary).includes("Не выбран")) {
+          throw new Error("обязательные главные источники не объяснены");
+        }
         groupedChoices.forEach((choice) => {
           choice.checkbox.checked = true;
           choice.checkbox.fire("change");
         });
+        if (!textOf(sourceSummary).includes("Климат Kojima Гостинная")
+          || groupedChoices.some((choice) => !choice.sourceBadge || choice.sourceBadge.hidden)) {
+          throw new Error("выбранные главные источники не выделены");
+        }
         if (groupedChoices.some((choice) => choice.controlChannel !== null)) {
           throw new Error("observed sensors exposed a control-channel selector");
         }
@@ -1018,6 +1042,11 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         before.checkbox.fire("change");
         before.controlChannel.value = "direct_wifi";
         before.controlChannel.fire("change");
+        ["temperature_sensor", "humidity_sensor"].forEach((type) => {
+          const source = panel._firstRunFields.room.devices.find((item) => item.type === type);
+          source.checkbox.checked = true;
+          source.checkbox.fire("change");
+        });
         panel._firstRun.rooms.living.report = {status: "ready", save_allowed: true};
         panel._firstRun.validRooms.add("living");
         panel._firstRun.validation = {status: "ready", save_allowed: true};
@@ -1527,6 +1556,11 @@ class PanelFirstRunWizardTest(unittest.TestCase):
           item.type === "air_conditioner");
         airConditioner.checkbox.checked = true;
         airConditioner.checkbox.fire("change");
+        ["temperature_sensor", "humidity_sensor"].forEach((type) => {
+          const source = panel._firstRunFields.room.devices.find((item) => item.type === type);
+          source.checkbox.checked = true;
+          source.checkbox.fire("change");
+        });
         panel._activeRoomSetupPane = "review";
         panel._render();
         const check = findAll(panel.shadowRoot, (node) =>
@@ -1568,6 +1602,73 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
+    def test_room_check_requires_one_main_temperature_and_humidity_source(self) -> None:
+        options = copy.deepcopy(DRAFT_OPTIONS)
+        options["devices"].append(
+            {
+                "candidate_id": "candidate_temp_extra",
+                "candidate_key": "candidate_temp_extra",
+                "name": "Резервная температура гостиной",
+                "room_id": "living",
+                "suggested_types": ["temperature_sensor"],
+                "recommended_type": "temperature_sensor",
+                "status": "available",
+                "suggested_room_id": "living",
+                "suggested_room_name": "Гостиная",
+                "reason": "detected_room",
+                "can_add": True,
+            }
+        )
+        script = panel_script(
+            get_payloads(options=options),
+            {},
+            """
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать настройку")[0].fire("click");
+        await tick();
+        panel._firstRunFields.rooms.living.include.checked = true;
+        panel._firstRunFields.rooms.living.include.fire("change");
+        panel._firstRunFields.rooms.living.configure.fire("click");
+        const airConditioner = panel._firstRunFields.room.devices.find((item) =>
+          item.type === "air_conditioner");
+        airConditioner.checkbox.checked = true;
+        airConditioner.checkbox.fire("change");
+        let collected = panel._firstRunPayload(["living"]);
+        if (!collected.error || !collected.error.includes("главный датчик температуры")) {
+          throw new Error("room check accepted a room without the main temperature source");
+        }
+        const temperature = panel._firstRunFields.room.devices.find((item) =>
+          item.type === "temperature_sensor");
+        temperature.checkbox.checked = true;
+        temperature.checkbox.fire("change");
+        const alternativeTemperature = panel._firstRunFields.room.devices.find((item) =>
+          item.key === "candidate_temp_extra:temperature_sensor");
+        alternativeTemperature.checkbox.checked = true;
+        alternativeTemperature.checkbox.fire("change");
+        if (temperature.checkbox.checked
+          || panel._firstRun.rooms.living.devices[temperature.key].selected) {
+          throw new Error("selecting another main temperature source kept the old source active");
+        }
+        collected = panel._firstRunPayload(["living"]);
+        if (!collected.error || !collected.error.includes("главный датчик влажности")) {
+          throw new Error("room check accepted a room without the main humidity source");
+        }
+        const humidity = panel._firstRunFields.room.devices.find((item) =>
+          item.type === "humidity_sensor");
+        humidity.checkbox.checked = true;
+        humidity.checkbox.fire("change");
+        collected = panel._firstRunPayload(["living"]);
+        if (!collected.payload || collected.payload.rooms[0].devices.length !== 3) {
+          throw new Error("room check rejected the complete climate source selection");
+        }
+        if (calls.some((call) => call.method === "POST")) {
+          throw new Error("local required-source checks unexpectedly sent commands");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_room_editor_is_split_into_clear_stable_steps(self) -> None:
         script = panel_script(
             get_payloads(),
@@ -1587,7 +1688,7 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         }
         let sections = findAll(panel.shadowRoot, (node) =>
           String(node.className).split(" ").includes("wizard-section"));
-        if (sections.length !== 1 || !textOf(sections[0]).includes("Сначала выберите датчик")) {
+        if (sections.length !== 1 || !textOf(sections[0]).includes("Сначала назначьте главные источники")) {
           throw new Error("device page is not the focused default");
         }
         const livingState = panel._firstRun.rooms.living;
@@ -1670,6 +1771,11 @@ class PanelFirstRunWizardTest(unittest.TestCase):
           item.type === "radiator_thermostat");
         kidsDevice.checkbox.checked = true;
         kidsDevice.checkbox.fire("change");
+        ["temperature_sensor", "humidity_sensor"].forEach((type) => {
+          const source = panel._firstRunFields.room.devices.find((item) => item.type === type);
+          source.checkbox.checked = true;
+          source.checkbox.fire("change");
+        });
         panel._activeRoomSetupPane = "review";
         panel._render();
         findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
@@ -1689,6 +1795,11 @@ class PanelFirstRunWizardTest(unittest.TestCase):
           item.type === "air_conditioner");
         livingDevice.checkbox.checked = true;
         livingDevice.checkbox.fire("change");
+        ["temperature_sensor", "humidity_sensor"].forEach((type) => {
+          const source = panel._firstRunFields.room.devices.find((item) => item.type === type);
+          source.checkbox.checked = true;
+          source.checkbox.fire("change");
+        });
         panel._activeRoomSetupPane = "review";
         panel._render();
         findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
@@ -1937,6 +2048,7 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         kids_devices = [
             {"candidate_id": "candidate_trv", "name": "Батарея детской", "type": "radiator_thermostat", "type_name": "Радиаторный термостат"},
             {"candidate_id": "candidate_kids_temp", "name": "Температура детской", "type": "temperature_sensor", "type_name": "Датчик температуры"},
+            {"candidate_id": "candidate_kids_humidity", "name": "Влажность детской", "type": "humidity_sensor", "type_name": "Датчик влажности"},
         ]
         draft = draft_for(
             [
@@ -1973,6 +2085,7 @@ class PanelFirstRunWizardTest(unittest.TestCase):
                     "devices": [
                         {"candidate_id": "candidate_trv", "type": "radiator_thermostat"},
                         {"candidate_id": "candidate_kids_temp", "type": "temperature_sensor"},
+                        {"candidate_id": "candidate_kids_humidity", "type": "humidity_sensor"},
                     ],
                 },
             ],

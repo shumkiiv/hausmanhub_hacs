@@ -35,7 +35,9 @@ const { el, setAttr, numberField, selectField, normalizedText, STRATEGY_ORDER, R
     roomNav.appendChild(button);
   });
   card.appendChild(roomNav);
-  const fields = { devices: [], maxTemperature: null, minTemperature: null, room: null };
+  const fields = {
+    climateSources: {}, devices: [], maxTemperature: null, minTemperature: null, room: null,
+  };
   const scheduleSection = el("section", "wizard-section");
   scheduleSection.appendChild(el("h3", null, "Расписание комнаты"));
   scheduleSection.appendChild(el("div", "settings-explainer", "HausmanHub будет сам переключать дневные и ночные цели в указанное время. Если автоматический режим выключен, профиль выбирается вручную."));
@@ -151,7 +153,7 @@ const { el, setAttr, numberField, selectField, normalizedText, STRATEGY_ORDER, R
 
   const devicesSection = el("section", "wizard-section");
   devicesSection.appendChild(el("h3", null, "Устройства и датчики"));
-  devicesSection.appendChild(el("div", "settings-explainer", "Сначала выберите датчик, которому доверяете, затем исполнительные устройства этой комнаты. Одно физическое устройство показывается одной карточкой, его возможности выбираются внутри."));
+  devicesSection.appendChild(el("div", "settings-explainer", "Сначала назначьте главные источники температуры и влажности, затем выберите исполнительные устройства комнаты. Контур принимает решения именно по двум главным показаниям. Одно физическое устройство показывается одной карточкой, его возможности выбираются внутри."));
   devicesSection.appendChild(el("div", "muted", "Канал определяет способ управления и показывает, как HausmanHub отправит команду: напрямую, через ИК-пульт или через Яндекс."));
   const roomlessCandidates = this._firstRunRoomlessCandidates();
   if (roomlessCandidates.length) {
@@ -196,6 +198,56 @@ const { el, setAttr, numberField, selectField, normalizedText, STRATEGY_ORDER, R
     const names = irRemotes.map((remote) => `«${remote.name}»`).join(", ");
     devicesSection.appendChild(el("div", "wizard-hint", `Для ${names} нет обёртки. Создайте SmartIR climate, назначьте зоне и обновите список.`));
   }
+  const climateSourceChoices = state.showAllDevices ? catalogChoices : choices;
+  const climateSourceSummary = el("section", "climate-source-summary");
+  const climateSourceHeading = el("div", "climate-source-summary-heading");
+  climateSourceHeading.appendChild(el("strong", null, "Главные данные комнаты"));
+  climateSourceHeading.appendChild(el("span", null, "Оба источника обязательны: без них проверка комнаты не пройдёт."));
+  climateSourceSummary.appendChild(climateSourceHeading);
+  const climateSourceGrid = el("div", "climate-source-summary-grid");
+  [
+    ["temperature_sensor", "Температура", "По этому датчику контур включает охлаждение и обогрев."],
+    ["humidity_sensor", "Влажность", "По этому датчику контур управляет увлажнением."],
+  ].forEach(([type, title, helper]) => {
+    const item = el("div", "climate-source-summary-item");
+    item.appendChild(el("span", "climate-source-summary-label", title));
+    const value = el("strong");
+    const detail = el("small");
+    item.appendChild(value);
+    item.appendChild(detail);
+    item.appendChild(el("small", "climate-source-summary-help", helper));
+    fields.climateSources[type] = { detail, item, value };
+    climateSourceGrid.appendChild(item);
+  });
+  climateSourceSummary.appendChild(climateSourceGrid);
+  fields.refreshClimateSources = () => {
+    const sourceNames = {
+      humidity_sensor: "главный датчик влажности",
+      temperature_sensor: "главный датчик температуры",
+    };
+    Object.entries(sourceNames).forEach(([type, missingName]) => {
+      const selected = climateSourceChoices.filter((choice) => choice.type === type && choice.device.selected);
+      const summary = fields.climateSources[type];
+      summary.item.className = `climate-source-summary-item${selected.length === 1 ? " is-ready" : " is-missing"}`;
+      if (selected.length === 1) {
+        const candidate = selected[0].candidate;
+        summary.value.textContent = candidate.device_name || candidate.name;
+        summary.detail.textContent = candidate.name === candidate.device_name
+          ? "Выбран для управления климатом" : candidate.name;
+      } else {
+        summary.value.textContent = selected.length ? "Выбрано несколько источников" : "Не выбран";
+        summary.detail.textContent = selected.length
+          ? "Оставьте только один главный датчик." : `Выберите ${missingName} ниже.`;
+      }
+    });
+    fields.devices.forEach((field) => {
+      if (field.type !== "temperature_sensor" && field.type !== "humidity_sensor") return;
+      field.label.className = `device-option${field.checkbox.disabled ? " is-disabled" : ""}${field.choice.device.selected ? " is-climate-source" : ""}`;
+      if (field.sourceBadge) field.sourceBadge.hidden = !field.choice.device.selected;
+    });
+  };
+  fields.refreshClimateSources();
+  devicesSection.appendChild(climateSourceSummary);
   const search = el("input", "entity-search");
   search.type = "search";
   search.placeholder = "Найти устройство или датчик";

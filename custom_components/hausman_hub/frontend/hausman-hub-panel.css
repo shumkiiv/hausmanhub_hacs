@@ -1,6 +1,6 @@
-@import url("./hausman-hub-settings.css?v=1.51.9");
-@import url("./hausman-hub-device-bindings.css?v=1.51.9");
-@import url("./hausman-hub-energy.css?v=1.51.9");
+@import url("./hausman-hub-settings.css?v=1.51.10");
+@import url("./hausman-hub-device-bindings.css?v=1.51.10");
+@import url("./hausman-hub-energy.css?v=1.51.10");
 
 :host { display:block; box-sizing:border-box; width:100%; min-height:100%; overflow-x:hidden;
   --hmh-bg:#0B0F14; --hmh-surface:#12171D; --hmh-raised:#181E26; --hmh-field:#181E26; --hmh-hover:#1F2630;
@@ -220,7 +220,7 @@ input, select { min-height:46px; max-width:100%; padding:11px 14px; border:1px s
 input[type="number"] { width:110px; }
 input[type="text"], input[type="search"] { width:min(420px,100%); }
 input[type="time"] { width:150px; }
-input[type="checkbox"] { width:18px; min-height:18px; height:18px; margin:2px 0 0; padding:0; accent-color:var(--primary-color,#03a9f4); }
+input[type="checkbox"], input[type="radio"] { width:18px; min-height:18px; height:18px; margin:2px 0 0; padding:0; accent-color:var(--primary-color,#03a9f4); }
 select { width:min(420px,100%); }
 label { display:block; margin:8px 0 2px; font-size:14px; }
 label.form-field { display:grid; grid-template-columns:minmax(180px,290px) minmax(0,420px);
@@ -229,6 +229,33 @@ label.checkbox-field, label.device-option { display:flex; align-items:flex-start
 label.checkbox-field > input, label.device-option > input { order:-1; flex:0 0 auto; }
 label.device-option.is-disabled { opacity:.7; cursor:not-allowed; }
 label.device-option.is-disabled > input { cursor:not-allowed; }
+label.device-option.is-climate-source { margin-inline:-5px; padding:10px 8px;
+  border:1px solid color-mix(in srgb,var(--primary-color,#03a9f4) 54%,var(--divider-color,#ddd));
+  border-radius:12px; background:color-mix(in srgb,var(--primary-color,#03a9f4) 8%,var(--card-background-color,#fff)); }
+.climate-source-badge { width:max-content; max-width:100%; margin-top:7px!important; padding:4px 8px;
+  border-radius:999px; color:var(--success-color,#43a047)!important;
+  background:color-mix(in srgb,var(--success-color,#43a047) 12%,transparent); font-weight:700; }
+.climate-source-summary { margin:16px 0 12px; padding:16px;
+  border:1px solid color-mix(in srgb,var(--primary-color,#03a9f4) 28%,var(--divider-color,#ddd));
+  border-radius:16px; background:color-mix(in srgb,var(--primary-color,#03a9f4) 4%,var(--card-background-color,#fff)); }
+.climate-source-summary-heading { display:flex; flex-wrap:wrap; align-items:baseline; justify-content:space-between;
+  gap:6px 18px; margin-bottom:12px; }
+.climate-source-summary-heading > strong { font-size:17px; }
+.climate-source-summary-heading > span { color:var(--secondary-text-color,#727272); font-size:13px; }
+.climate-source-summary-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+.climate-source-summary-item { position:relative; min-width:0; min-height:112px; padding:13px 15px 13px 18px;
+  border:1px solid var(--divider-color,#ddd); border-radius:13px; background:var(--card-background-color,#fff); }
+.climate-source-summary-item::before { content:""; position:absolute; inset:12px auto 12px 0; width:3px;
+  border-radius:0 4px 4px 0; background:var(--error-color,#E5534B); }
+.climate-source-summary-item.is-ready::before { background:var(--success-color,#43a047); }
+.climate-source-summary-item > span, .climate-source-summary-item > strong,
+.climate-source-summary-item > small { display:block; overflow-wrap:anywhere; }
+.climate-source-summary-label { color:var(--secondary-text-color,#727272); font-size:12px;
+  font-weight:750; letter-spacing:.04em; text-transform:uppercase; }
+.climate-source-summary-item > strong { margin-top:5px; font-size:16px; line-height:1.35; }
+.climate-source-summary-item > small { margin-top:3px; color:var(--secondary-text-color,#727272);
+  font-size:12px; line-height:1.4; }
+.climate-source-summary-help { margin-top:8px!important; }
 .field-help { grid-column:2; margin-top:-7px; }
 .reasons { margin:10px 0 0; font-size:13px; }
 .chip { display:inline-flex; align-items:center; min-height:25px; margin:2px 5px 2px 0; padding:3px 9px;
@@ -615,6 +642,7 @@ label.signal-option > input[type="radio"] { grid-column:1; width:18px; min-heigh
   .room-setup-nav { display:flex; overflow-x:auto; }
   .room-setup-step { flex:0 0 176px; }
   .room-review-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .climate-source-summary-grid { grid-template-columns:minmax(0,1fr); }
   .room-setup-footer { align-items:stretch; flex-direction:column; }
   .room-setup-footer-steps, .room-setup-footer-steps button { width:100%; }
   .room-setup-footer-steps button { flex:1 1 0; }

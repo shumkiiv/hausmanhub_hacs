@@ -22,6 +22,7 @@ PANEL_JS = (
 PANEL_CSS = PANEL_JS.with_name("hausman-hub-panel.css")
 HOME_SECTIONS_JS = PANEL_JS.with_name("hausman-hub-home-sections.js")
 ROOM_SETUP_JS = PANEL_JS.with_name("hausman-hub-room-setup.js")
+ROOM_DEVICE_GROUPS_JS = PANEL_JS.with_name("hausman-hub-room-device-groups.js")
 DEVICE_INVENTORY_JS = PANEL_JS.with_name("hausman-hub-device-inventory.js")
 DEVICE_BINDINGS_JS = PANEL_JS.with_name("hausman-hub-device-bindings.js")
 AREA_BINDING_JS = PANEL_JS.with_name("hausman-hub-area-binding.js")
@@ -31,6 +32,7 @@ SETTINGS_CSS = PANEL_JS.with_name("hausman-hub-settings.css")
 MAX_PANEL_JS_BYTES = 270 * 1024
 MAX_HOME_SECTIONS_JS_BYTES = 16 * 1024
 MAX_ROOM_SETUP_JS_BYTES = 24 * 1024
+MAX_ROOM_DEVICE_GROUPS_JS_BYTES = 12 * 1024
 MAX_DEVICE_INVENTORY_JS_BYTES = 16 * 1024
 MAX_DEVICE_BINDINGS_JS_BYTES = 20 * 1024
 MAX_AREA_BINDING_JS_BYTES = 24 * 1024
@@ -47,6 +49,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         content = PANEL_JS.read_text(encoding="utf-8")
         home_sections = HOME_SECTIONS_JS.read_text(encoding="utf-8")
         room_setup = ROOM_SETUP_JS.read_text(encoding="utf-8")
+        room_device_groups = ROOM_DEVICE_GROUPS_JS.read_text(encoding="utf-8")
         device_inventory = DEVICE_INVENTORY_JS.read_text(encoding="utf-8")
         device_bindings = DEVICE_BINDINGS_JS.read_text(encoding="utf-8")
         area_binding = AREA_BINDING_JS.read_text(encoding="utf-8")
@@ -61,6 +64,9 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             len(room_setup.encode("utf-8")), MAX_ROOM_SETUP_JS_BYTES
         )
         self.assertLessEqual(
+            len(room_device_groups.encode("utf-8")), MAX_ROOM_DEVICE_GROUPS_JS_BYTES
+        )
+        self.assertLessEqual(
             len(device_inventory.encode("utf-8")), MAX_DEVICE_INVENTORY_JS_BYTES
         )
         self.assertLessEqual(
@@ -73,6 +79,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertLessEqual(len(energy.encode("utf-8")), MAX_ENERGY_JS_BYTES)
         self.assertIn("renderHomeSection", home_sections)
         self.assertIn("renderFirstRunRoom", room_setup)
+        self.assertIn("renderFirstRunDeviceGroups", room_device_groups)
         self.assertIn("renderDeviceInventory", device_inventory)
         self.assertIn("renderDeviceBindings", device_bindings)
         self.assertIn(
@@ -100,6 +107,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         for module in (
             "hausman-hub-home-sections.js",
             "hausman-hub-room-setup.js",
+            "hausman-hub-room-device-groups.js",
             "hausman-hub-device-inventory.js",
             "hausman-hub-device-bindings.js",
             "hausman-hub-area-binding.js",
@@ -152,7 +160,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             len(settings_styles.encode("utf-8")), MAX_SETTINGS_CSS_BYTES
         )
         self.assertIn('"/api/hausman_hub/panel/hausman-hub-panel.css"', content)
-        self.assertIn('hausman-hub-settings.css?v=1.51.9', styles)
+        self.assertIn('hausman-hub-settings.css?v=1.51.10', styles)
         self.assertIn("--hmh-bg:#0B0F14", styles)
         self.assertIn("--hmh-bg:#EEF1F6", styles)
         self.assertIn(".page-header", styles)
@@ -712,7 +720,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.51.9",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.51.10",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },
