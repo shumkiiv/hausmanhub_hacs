@@ -1,6 +1,6 @@
 export function renderFirstRunDeviceGroups(owner, choiceList, room, fields, allChoices, searchable, deps) {
   const {
-    ACTIVE_DEVICE_TYPES, CONTROL_CHANNEL_LABELS, SENSOR_DEVICE_TYPES, ZIGBEE2MQTT_IMAGE_PATTERN,
+    ACTIVE_DEVICE_TYPES, CONTROL_CHANNEL_LABELS, ZIGBEE2MQTT_IMAGE_PATTERN,
     el, normalizedText, selectField, setAttr, svgIcon,
   } = deps;
   const groups = el("div", "entity-groups");
@@ -12,7 +12,7 @@ export function renderFirstRunDeviceGroups(owner, choiceList, room, fields, allC
   });
   Array.from(grouped.entries()).forEach(([groupId, groupChoices]) => {
     const first = groupChoices[0].candidate;
-    const group = el("div", "entity-group device-card");
+    const group = el("div", `entity-group device-card${groupChoices.some((choice) => choice.device.selected) ? " is-selected" : ""}`);
     setAttr(group, "data-device-group-id", groupId);
     const header = el("div", "device-card-header");
     const thumb = el("div", "device-thumb");
@@ -50,6 +50,8 @@ export function renderFirstRunDeviceGroups(owner, choiceList, room, fields, allC
       identity.appendChild(chips);
     }
     header.appendChild(identity);
+    const selectionState = el("span", "device-card-selection");
+    header.appendChild(selectionState);
     group.appendChild(header);
     const options = el("div", "device-card-options");
     groupChoices.sort((left, right) => left.order - right.order).forEach((choice) => {
@@ -58,36 +60,26 @@ export function renderFirstRunDeviceGroups(owner, choiceList, room, fields, allC
         choice.device.selected = false;
         choice.device.channel = null;
       }
-      const isClimateSource = SENSOR_DEVICE_TYPES.has(choice.type);
       const checkbox = el("input");
-      checkbox.type = isClimateSource ? "radio" : "checkbox";
-      if (isClimateSource) checkbox.name = `climate-source-${room.id}-${choice.type}`;
+      checkbox.type = "checkbox";
       checkbox.checked = choice.device.selected;
       checkbox.value = choice.candidate.candidate_id;
       checkbox.disabled = !selectable || owner._busy;
-      const label = el("label", selectable ? "device-option" : "device-option is-disabled");
+      const label = el("label", selectable ? "device-option device-control-option" : "device-option device-control-option is-disabled");
       label.appendChild(checkbox);
       const labelText = el("span", "entity-label");
       const deviceName = choice.pseudo
         ? "Тип не определён"
         : ((owner._firstRun.options.display_names || {}).device_types || {})[choice.type] || choice.type;
-      labelText.appendChild(el("strong", null, deviceName));
-      labelText.appendChild(el("small", null, choice.candidate.name));
-      const sourceBadge = isClimateSource
-        ? el("small", "climate-source-badge", choice.type === "temperature_sensor"
-          ? "Главный источник температуры" : "Главный источник влажности")
-        : null;
-      if (sourceBadge) {
-        sourceBadge.hidden = !choice.device.selected;
-        labelText.appendChild(sourceBadge);
+      labelText.appendChild(el("strong", null, "Использовать в контуре"));
+      labelText.appendChild(el("small", null, deviceName));
+      if (choice.candidate.status !== "available" && choice.candidate.status !== "already_configured") {
+        const status = el("small", "device-control-warning");
+        status.textContent = choice.candidate.status === "unavailable"
+          ? "Сейчас недоступно" : owner._firstRunCandidateStatusName(choice.candidate);
+        labelText.appendChild(status);
+        labelText.appendChild(el("small", "device-control-warning", owner._firstRunCandidateReasonName(choice.candidate)));
       }
-      const status = el("small", choice.candidate.status === "available" ? "status-badge is-ready" : "status-badge is-attention");
-      status.textContent = choice.candidate.status === "unavailable"
-        ? "Сейчас недоступно" : owner._firstRunCandidateStatusName(choice.candidate);
-      labelText.appendChild(status);
-      const reason = el("small", "status-badge is-attention");
-      reason.textContent = owner._firstRunCandidateReasonName(choice.candidate);
-      labelText.appendChild(reason);
       if (choice.candidate.room_id && choice.candidate.room_id !== room.id) {
         labelText.appendChild(el("small", "status-badge is-attention", `Сейчас: ${owner._firstRunCandidateRoomName(choice.candidate)}`));
       }
@@ -115,7 +107,11 @@ export function renderFirstRunDeviceGroups(owner, choiceList, room, fields, allC
             owner._firstRunInvalidate(room.id);
           }
         );
-        channelRow = el("label", "form-field", "Канал управления");
+        channelRow = el("label", "device-channel-field");
+        const channelCopy = el("span", "device-channel-copy");
+        channelCopy.appendChild(el("strong", null, "Способ управления"));
+        channelCopy.appendChild(el("small", null, "Как HausmanHub отправляет команды устройству"));
+        channelRow.appendChild(channelCopy);
         channelRow.appendChild(controlChannel);
         channelRow.hidden = !choice.device.selected;
         options.appendChild(channelRow);
@@ -125,9 +121,8 @@ export function renderFirstRunDeviceGroups(owner, choiceList, room, fields, allC
         choice.device.selected = checkbox.checked;
         if (checkbox.checked) {
           allChoices.forEach((peer) => {
-            const sameClimateSource = isClimateSource && peer.type === choice.type;
             const sameEntity = peer.candidate.candidate_id === choice.candidate.candidate_id;
-            if (peer !== choice && (sameClimateSource || sameEntity)) {
+            if (peer !== choice && sameEntity) {
               peer.device.selected = false;
               const peerField = fields.devices.find((item) => item.key === peer.key);
               if (peerField) {
@@ -141,14 +136,22 @@ export function renderFirstRunDeviceGroups(owner, choiceList, room, fields, allC
         if (channelRow) channelRow.hidden = !checkbox.checked;
         if (unavailableWarning) unavailableWarning.hidden = !checkbox.checked;
         if (fields.refreshClimateSources) fields.refreshClimateSources();
+        refreshGroup();
         owner._firstRunInvalidate(room.id);
       });
       fields.devices.push({
-        checkbox, choice, controlChannel, channelRow, key: choice.key, label, sourceBadge,
+        checkbox, choice, controlChannel, channelRow, key: choice.key, label, sourceBadge: null,
         type: choice.type, unavailableWarning,
       });
       if (fields.refreshClimateSources) fields.refreshClimateSources();
     });
+    const refreshGroup = () => {
+      const selected = groupChoices.some((choice) => choice.device.selected);
+      group.className = `entity-group device-card${selected ? " is-selected" : ""}`;
+      selectionState.className = `device-card-selection${selected ? " is-selected" : ""}`;
+      selectionState.textContent = selected ? "В контуре" : "Не используется";
+    };
+    refreshGroup();
     group.appendChild(options);
     groups.appendChild(group);
     searchable.push({

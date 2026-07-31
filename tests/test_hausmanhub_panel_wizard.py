@@ -17,6 +17,7 @@ PANEL_JS = (
 HOME_SECTIONS_JS = PANEL_JS.with_name("hausman-hub-home-sections.js")
 ROOM_SETUP_JS = PANEL_JS.with_name("hausman-hub-room-setup.js")
 ROOM_DEVICE_GROUPS_JS = PANEL_JS.with_name("hausman-hub-room-device-groups.js")
+ROOM_CLIMATE_SOURCES_JS = PANEL_JS.with_name("hausman-hub-room-climate-sources.js")
 DEVICE_INVENTORY_JS = PANEL_JS.with_name("hausman-hub-device-inventory.js")
 DEVICE_BINDINGS_JS = PANEL_JS.with_name("hausman-hub-device-bindings.js")
 AREA_BINDING_JS = PANEL_JS.with_name("hausman-hub-area-binding.js")
@@ -300,6 +301,10 @@ def panel_script(get_table: dict, post_table: dict, assertions: str) -> str:
         {{ filename: {str(ROOM_DEVICE_GROUPS_JS)!r} }}
       );
       vm.runInThisContext(
+        fs.readFileSync({str(ROOM_CLIMATE_SOURCES_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(ROOM_CLIMATE_SOURCES_JS)!r} }}
+      );
+      vm.runInThisContext(
         fs.readFileSync({str(DEVICE_INVENTORY_JS)!r}, "utf8").replace("export function renderDeviceInventory", "function renderDeviceInventory"),
         {{ filename: {str(DEVICE_INVENTORY_JS)!r} }}
       );
@@ -463,20 +468,18 @@ class PanelContourWizardTest(unittest.TestCase):
         panel._firstRunFields.rooms.living.include.fire("change");
         panel._firstRunFields.rooms.living.configure.fire("click");
         const fields = panel._firstRunFields.room;
-        const groups = findAll(panel.shadowRoot, (node) =>
-          String(node.className).split(" ").includes("entity-group"));
-        const physicalDevice = groups.find((node) =>
-          node["data-device-group-id"] === "device_0123456789abcdef");
-        if (!physicalDevice) throw new Error("physical HA device group missing");
-        const image = findAll(physicalDevice, (node) => node.tagName === "IMG")[0];
+        const sourceStage = findAll(panel.shadowRoot, (node) =>
+          String(node.className).split(" ").includes("climate-source-stage"))[0];
+        if (!sourceStage) throw new Error("main climate source stage missing");
+        const image = findAll(sourceStage, (node) => node.tagName === "IMG")[0];
         if (!image
           || image.src !== "https://www.zigbee2mqtt.io/images/devices/KOJIMA-THS-ZG-LCD.png"
           || image.loading !== "lazy"
           || image.referrerpolicy !== "no-referrer") {
           throw new Error("official Zigbee2MQTT image is not configured safely");
         }
-        const fallback = findAll(physicalDevice, (node) =>
-          String(node.className).includes("device-thumb-fallback"))[0];
+        const fallback = findAll(sourceStage, (node) =>
+          String(node.className).includes("climate-source-thumb-fallback"))[0];
         image.fire("error");
         if (!image.hidden || fallback.hidden) {
           throw new Error("broken device image did not reveal local fallback");
@@ -491,8 +494,8 @@ class PanelContourWizardTest(unittest.TestCase):
         }
         const sourceSummary = findAll(panel.shadowRoot, (node) =>
           String(node.className).split(" ").includes("climate-source-summary"))[0];
-        if (!sourceSummary || !textOf(sourceSummary).includes("Оба источника обязательны")
-          || !textOf(sourceSummary).includes("Не выбран")) {
+        if (!sourceSummary || !textOf(sourceSummary).includes("Главные показания комнаты")
+          || !textOf(sourceSummary).includes("Обязательно")) {
           throw new Error("обязательные главные источники не объяснены");
         }
         groupedChoices.forEach((choice) => {
@@ -500,23 +503,25 @@ class PanelContourWizardTest(unittest.TestCase):
           choice.checkbox.fire("change");
         });
         if (!textOf(sourceSummary).includes("Климат Kojima Гостинная")
-          || groupedChoices.some((choice) => !choice.sourceBadge || choice.sourceBadge.hidden)) {
+          || groupedChoices.some((choice) => !choice.selectedMark || choice.selectedMark.hidden)) {
           throw new Error("выбранные главные источники не выделены");
         }
         if (groupedChoices.some((choice) => choice.controlChannel !== null)) {
           throw new Error("observed sensors exposed a control-channel selector");
         }
-        const sensorSearch = findAll(panel.shadowRoot, (node) => node.type === "search")[0];
-        sensorSearch.value = "KOJIMA";
-        sensorSearch.fire("input");
-        if (physicalDevice.hidden) throw new Error("device metadata search hid the matching group");
-        const ungroupedSensor = groups.find((node) =>
-          node["data-device-group-id"] === "candidate:candidate_temp_2");
-        if (!ungroupedSensor || !ungroupedSensor.hidden) {
-          throw new Error("device search did not filter a non-matching group");
+        const deviceCards = findAll(panel.shadowRoot, (node) =>
+          String(node.className).split(" ").includes("device-card"));
+        if (deviceCards.some((card) => textOf(card).includes("Датчик температуры")
+          || textOf(card).includes("Датчик влажности"))) {
+          throw new Error("sensor choices leaked into actuator cards");
         }
-        sensorSearch.value = "";
-        sensorSearch.fire("input");
+        const airConditionerCard = deviceCards.find((card) => textOf(card).includes("Кондиционер"));
+        if (!airConditionerCard || !textOf(airConditionerCard).includes("Использовать в контуре")
+          || !textOf(airConditionerCard).includes("Способ управления")
+          || textOf(airConditionerCard).includes("Можно добавить")
+          || textOf(airConditionerCard).includes("Устройство найдено в этой комнате")) {
+          throw new Error("actuator card is not structured or still shows routine technical statuses");
+        }
         const groupedPayload = panel._firstRunPayload(["living"]);
         const livingPayload = groupedPayload.payload.rooms.find((room) => room.room_id === "living");
         if (!livingPayload
@@ -564,12 +569,18 @@ class PanelContourWizardTest(unittest.TestCase):
           throw new Error("physical device purposes were not canonicalized: "
             + JSON.stringify(physical.map((choice) => choice.key)));
         }
-        const card = findAll(panel.shadowRoot, (node) =>
-          node["data-device-group-id"] === "device_0123456789abcdef")[0];
-        if (!card || !textOf(card).includes("Датчик температуры")
-          || !textOf(card).includes("Датчик влажности")
-          || textOf(card).includes("Внешняя температура у окна")) {
-          throw new Error("duplicate purpose is still visible inside the device card");
+        const sourceStage = findAll(panel.shadowRoot, (node) =>
+          String(node.className).split(" ").includes("climate-source-stage"))[0];
+        if (!sourceStage || !textOf(sourceStage).includes("Температура комнаты")
+          || !textOf(sourceStage).includes("Влажность комнаты")
+          || textOf(sourceStage).includes("Внешняя температура у окна")) {
+          throw new Error("duplicate purpose is still visible in the source picker");
+        }
+        const deviceCards = findAll(panel.shadowRoot, (node) =>
+          String(node.className).split(" ").includes("device-card"));
+        if (deviceCards.some((card) => textOf(card).includes("Датчик температуры")
+          || textOf(card).includes("Датчик влажности"))) {
+          throw new Error("sensor purpose leaked into an actuator card");
         }
             """,
         )
@@ -791,21 +802,14 @@ class PanelFirstRunWizardTest(unittest.TestCase):
           throw new Error("unavailable room candidate must stay selectable and unchecked");
         }
         const text = textOf(panel.shadowRoot);
-        if (!text.includes("Сейчас недоступно") || !text.includes("Устройство недоступно")) {
-          throw new Error("unavailable candidate badge or reason missing: " + text);
-        }
-        const warning = findAll(panel.shadowRoot, (node) =>
-          String(node.className).includes("device-unavailable-warning"))[0];
-        if (!warning || !warning.hidden) {
-          throw new Error("unavailable warning must stay hidden until the candidate is selected");
+        if (!text.includes("Сейчас недоступен")) {
+          throw new Error("unavailable source status missing: " + text);
         }
         offline.checkbox.checked = true;
         offline.checkbox.fire("change");
-        if (warning.hidden) {
-          throw new Error("unavailable warning must appear after selecting the candidate");
-        }
-        if (!warning.textContent.includes("недоступно, оно будет применено, когда появится в сети")) {
-          throw new Error("unavailable warning text mismatch: " + warning.textContent);
+        if (!offline.selectedMark || offline.selectedMark.hidden
+          || !textOf(panel.shadowRoot).includes("Выбран")) {
+          throw new Error("unavailable source did not become the explicit main source");
         }
             """,
         )
@@ -858,10 +862,10 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         options["devices"].append(
             {
                 "candidate_id": "candidate_roomless_elsewhere", "candidate_key": "candidate_roomless_elsewhere",
-                "name": "Датчик другой комнаты",
+                "name": "Кондиционер без комнаты",
                 "room_id": "",
-                "suggested_types": ["temperature_sensor"],
-                "recommended_type": "temperature_sensor",
+                "suggested_types": ["air_conditioner"],
+                "recommended_type": "air_conditioner",
                 "status": "available",
                 "suggested_room_id": "kids",
                 "suggested_room_name": "Детская",
@@ -889,7 +893,7 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         const otherRoom = panel._firstRunFields.room.devices.find((item) =>
           item.key === "candidate_trv:radiator_thermostat");
         const roomless = panel._firstRunFields.room.devices.find((item) =>
-          item.key === "candidate_roomless_elsewhere:temperature_sensor");
+          item.key === "candidate_roomless_elsewhere:air_conditioner");
         if (!otherRoom || !roomless || !otherRoom.checkbox.disabled || !roomless.checkbox.disabled) {
           throw new Error("show-all candidates outside this room became selectable");
         }
@@ -957,7 +961,7 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         toggle.checked = true;
         toggle.fire("change");
         const text = textOf(panel.shadowRoot);
-        ["Радиаторный термостат", "Кондиционер", "Датчик температуры", "Датчик влажности"]
+        ["Радиаторный термостат", "Кондиционер", "Температура комнаты", "Влажность комнаты"]
           .forEach((label) => {
             if (!text.includes(label)) throw new Error("нет русского названия типа: " + label);
           });
@@ -1106,14 +1110,9 @@ class PanelFirstRunWizardTest(unittest.TestCase):
           throw new Error("room step must show one roomless warning");
         }
         const warning = warnings[0].textContent;
-        const expectedNames = "Komanchi Living SmartIR, Устройство без комнаты 2, "
-          + "Устройство без комнаты 3, Устройство без комнаты 4, "
-          + "Устройство без комнаты 5 и ещё 1";
-        if (!warning.includes("Без комнаты: " + expectedNames)) {
-          throw new Error("roomless warning names or truncation mismatch: " + warning);
-        }
-        if (warning.includes("Устройство без комнаты 6")) {
-          throw new Error("roomless warning rendered more than five device names");
+        if (!warning.includes("Устройств без комнаты: 6")
+          || !warning.includes("не участвуют в климате")) {
+          throw new Error("roomless warning count or explanation mismatch: " + warning);
         }
             """,
         )
@@ -1444,7 +1443,7 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         if (text.includes("climate-обёртку SmartIR с готовым кодом")) {
           throw new Error("hint shown although a climate facade exists");
         }
-        if (!text.includes("Канал определяет способ управления")) {
+        if (!text.includes("Канал управления определяет")) {
           throw new Error("channel copy does not describe the honest transport");
         }
         if (text.includes("остаются в наблюдении")) {
@@ -1688,7 +1687,8 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         }
         let sections = findAll(panel.shadowRoot, (node) =>
           String(node.className).split(" ").includes("wizard-section"));
-        if (sections.length !== 1 || !textOf(sections[0]).includes("Сначала назначьте главные источники")) {
+        if (sections.length !== 1 || !textOf(sections[0]).includes("Главные показания комнаты")
+          || !textOf(sections[0]).includes("Устройства управления")) {
           throw new Error("device page is not the focused default");
         }
         const livingState = panel._firstRun.rooms.living;

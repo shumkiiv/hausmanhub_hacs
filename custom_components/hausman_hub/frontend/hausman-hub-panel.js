@@ -1,11 +1,12 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.10";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.10";
-import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.10";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.10";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.10";
-import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.10";
-import { openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.10";
-import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.10";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.11";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.11";
+import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.11";
+import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.11";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.11";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.11";
+import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.11";
+import { openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.11";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.11";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css";
@@ -1888,8 +1889,14 @@ class HausmanHubPanel extends HTMLElement {
 
   _firstRunDeviceGroups(choiceList, room, fields, allChoices, searchable) {
     return renderFirstRunDeviceGroups(this, choiceList, room, fields, allChoices, searchable, {
-      ACTIVE_DEVICE_TYPES, CONTROL_CHANNEL_LABELS, SENSOR_DEVICE_TYPES, ZIGBEE2MQTT_IMAGE_PATTERN,
+      ACTIVE_DEVICE_TYPES, CONTROL_CHANNEL_LABELS, ZIGBEE2MQTT_IMAGE_PATTERN,
       el, normalizedText, selectField, setAttr, svgIcon,
+    });
+  }
+
+  _firstRunClimateSources(room, fields, choices) {
+    return renderFirstRunClimateSources(this, room, fields, choices, {
+      ZIGBEE2MQTT_IMAGE_PATTERN, el, setAttr, svgIcon,
     });
   }
 

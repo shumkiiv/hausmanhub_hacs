@@ -152,20 +152,14 @@ const { el, setAttr, numberField, selectField, normalizedText, STRATEGY_ORDER, R
   if (this._activeRoomSetupPane === "limits") card.appendChild(limitsSection);
 
   const devicesSection = el("section", "wizard-section");
-  devicesSection.appendChild(el("h3", null, "Устройства и датчики"));
-  devicesSection.appendChild(el("div", "settings-explainer", "Сначала назначьте главные источники температуры и влажности, затем выберите исполнительные устройства комнаты. Контур принимает решения именно по двум главным показаниям. Одно физическое устройство показывается одной карточкой, его возможности выбираются внутри."));
-  devicesSection.appendChild(el("div", "muted", "Канал определяет способ управления и показывает, как HausmanHub отправит команду: напрямую, через ИК-пульт или через Яндекс."));
+  devicesSection.appendChild(el("h3", null, "Настройка климата комнаты"));
+  devicesSection.appendChild(el("div", "settings-explainer", "Этот этап разделён на две независимые задачи: сначала выберите показания, которым доверяет контур, затем — устройства, которыми он может управлять."));
   const roomlessCandidates = this._firstRunRoomlessCandidates();
   if (roomlessCandidates.length) {
-    const visibleNames = roomlessCandidates.slice(0, 5).map((candidate) => (
-      candidate.name || candidate.device_name || candidate.candidate_id
-    ));
-    const remaining = roomlessCandidates.length - visibleNames.length;
-    const names = `${visibleNames.join(", ")}${remaining ? ` и ещё ${remaining}` : ""}`;
     devicesSection.appendChild(el(
       "div",
       "wizard-warning",
-      `Без комнаты: ${names}. Выберите нужные ниже для локальной привязки HausmanHub или назначьте им зону в Home Assistant и обновите список.`
+      `Устройств без комнаты: ${roomlessCandidates.length}. Они не участвуют в климате, пока им не назначена комната в Home Assistant.`
     ));
   }
   const deviceActions = el("div", "actions");
@@ -181,7 +175,6 @@ const { el, setAttr, numberField, selectField, normalizedText, STRATEGY_ORDER, R
   const showAllLabel = el("label", "checkbox-field");
   showAllLabel.appendChild(showAll);
   showAllLabel.appendChild(el("span", null, "Показать устройства из других комнат"));
-  devicesSection.appendChild(showAllLabel);
   const roomChoices = this._firstRunRoomChoices(state, this._firstRunRoomCandidates(room.id));
   const roomlessChoices = this._firstRunRoomChoices(state, roomlessCandidates);
   const nearbyChoices = this._firstRunRoomChoices(state, this._firstRunPossibleRoomCandidates(room));
@@ -190,6 +183,14 @@ const { el, setAttr, numberField, selectField, normalizedText, STRATEGY_ORDER, R
     (this._firstRun.options && this._firstRun.options.devices) || []
   );
   const choices = roomChoices.concat(roomlessChoices, nearbyChoices);
+  const isClimateSource = (choice) => (
+    choice.type === "temperature_sensor" || choice.type === "humidity_sensor"
+  );
+  const roomControlChoices = roomChoices.filter((choice) => !isClimateSource(choice));
+  const roomlessControlChoices = roomlessChoices.filter((choice) => !isClimateSource(choice));
+  const nearbyControlChoices = nearbyChoices.filter((choice) => !isClimateSource(choice));
+  const catalogControlChoices = catalogChoices.filter((choice) => !isClimateSource(choice));
+  const controlChoices = choices.filter((choice) => !isClimateSource(choice));
   const irRemotes = (this._firstRun.options.ir_remotes || []).filter((remote) => remote.room_id === room.id);
   const hasClimateFacade = choices.some((choice) => (
     choice.type === "air_conditioner" || choice.type === "humidifier"
@@ -198,65 +199,25 @@ const { el, setAttr, numberField, selectField, normalizedText, STRATEGY_ORDER, R
     const names = irRemotes.map((remote) => `«${remote.name}»`).join(", ");
     devicesSection.appendChild(el("div", "wizard-hint", `Для ${names} нет обёртки. Создайте SmartIR climate, назначьте зоне и обновите список.`));
   }
-  const climateSourceChoices = state.showAllDevices ? catalogChoices : choices;
-  const climateSourceSummary = el("section", "climate-source-summary");
-  const climateSourceHeading = el("div", "climate-source-summary-heading");
-  climateSourceHeading.appendChild(el("strong", null, "Главные данные комнаты"));
-  climateSourceHeading.appendChild(el("span", null, "Оба источника обязательны: без них проверка комнаты не пройдёт."));
-  climateSourceSummary.appendChild(climateSourceHeading);
-  const climateSourceGrid = el("div", "climate-source-summary-grid");
-  [
-    ["temperature_sensor", "Температура", "По этому датчику контур включает охлаждение и обогрев."],
-    ["humidity_sensor", "Влажность", "По этому датчику контур управляет увлажнением."],
-  ].forEach(([type, title, helper]) => {
-    const item = el("div", "climate-source-summary-item");
-    item.appendChild(el("span", "climate-source-summary-label", title));
-    const value = el("strong");
-    const detail = el("small");
-    item.appendChild(value);
-    item.appendChild(detail);
-    item.appendChild(el("small", "climate-source-summary-help", helper));
-    fields.climateSources[type] = { detail, item, value };
-    climateSourceGrid.appendChild(item);
-  });
-  climateSourceSummary.appendChild(climateSourceGrid);
-  fields.refreshClimateSources = () => {
-    const sourceNames = {
-      humidity_sensor: "главный датчик влажности",
-      temperature_sensor: "главный датчик температуры",
-    };
-    Object.entries(sourceNames).forEach(([type, missingName]) => {
-      const selected = climateSourceChoices.filter((choice) => choice.type === type && choice.device.selected);
-      const summary = fields.climateSources[type];
-      summary.item.className = `climate-source-summary-item${selected.length === 1 ? " is-ready" : " is-missing"}`;
-      if (selected.length === 1) {
-        const candidate = selected[0].candidate;
-        summary.value.textContent = candidate.device_name || candidate.name;
-        summary.detail.textContent = candidate.name === candidate.device_name
-          ? "Выбран для управления климатом" : candidate.name;
-      } else {
-        summary.value.textContent = selected.length ? "Выбрано несколько источников" : "Не выбран";
-        summary.detail.textContent = selected.length
-          ? "Оставьте только один главный датчик." : `Выберите ${missingName} ниже.`;
-      }
-    });
-    fields.devices.forEach((field) => {
-      if (field.type !== "temperature_sensor" && field.type !== "humidity_sensor") return;
-      field.label.className = `device-option${field.checkbox.disabled ? " is-disabled" : ""}${field.choice.device.selected ? " is-climate-source" : ""}`;
-      if (field.sourceBadge) field.sourceBadge.hidden = !field.choice.device.selected;
-    });
-  };
-  fields.refreshClimateSources();
-  devicesSection.appendChild(climateSourceSummary);
+  devicesSection.appendChild(this._firstRunClimateSources(room, fields, roomChoices));
+  const controlHeading = el("div", "control-device-stage-heading");
+  const controlHeadingTitle = el("div");
+  controlHeadingTitle.appendChild(el("span", "setup-stage-number", "2"));
+  controlHeadingTitle.appendChild(el("strong", null, "Устройства управления"));
+  controlHeading.appendChild(controlHeadingTitle);
+  controlHeading.appendChild(el("p", null, "Выберите, чем контур может охлаждать, обогревать или увлажнять комнату. Датчики здесь больше не показываются."));
+  devicesSection.appendChild(controlHeading);
+  devicesSection.appendChild(el("div", "muted control-channel-explainer", "Канал управления определяет, как отправляется команда: напрямую, через ИК-пульт или через Яндекс."));
+  devicesSection.appendChild(showAllLabel);
   const search = el("input", "entity-search");
   search.type = "search";
-  search.placeholder = "Найти устройство или датчик";
-  setAttr(search, "aria-label", "Поиск устройств комнаты");
+  search.placeholder = "Найти управляющее устройство";
+  setAttr(search, "aria-label", "Поиск управляющих устройств комнаты");
   devicesSection.appendChild(search);
   const searchable = [];
   if (state.showAllDevices) {
     const byRoom = new Map();
-    catalogChoices.forEach((choice) => {
+    catalogControlChoices.forEach((choice) => {
       const roomId = choice.candidate.room_id || "";
       if (!byRoom.has(roomId)) byRoom.set(roomId, []);
       byRoom.get(roomId).push(choice);
@@ -273,29 +234,29 @@ const { el, setAttr, numberField, selectField, normalizedText, STRATEGY_ORDER, R
         devicesSection.appendChild(el("h4", null, roomId
           ? this._firstRunCandidateRoomName({ room_id: roomId }) : "Без комнаты"));
         devicesSection.appendChild(this._firstRunDeviceGroups(
-          groupedChoices, room, fields, catalogChoices, searchable
+          groupedChoices, room, fields, catalogControlChoices, searchable
         ));
       });
-    if (!catalogChoices.length) {
-      devicesSection.appendChild(el("div", "muted", "Home Assistant пока не передал ни одного устройства."));
+    if (!catalogControlChoices.length) {
+      devicesSection.appendChild(el("div", "muted", "Home Assistant пока не передал ни одного управляющего устройства."));
     }
   } else {
-    const groups = this._firstRunDeviceGroups(roomChoices, room, fields, choices, searchable);
-    if (!roomChoices.length) groups.appendChild(el("div", "muted", "Подходящих устройств в этой области пока нет."));
+    const groups = this._firstRunDeviceGroups(roomControlChoices, room, fields, controlChoices, searchable);
+    if (!roomControlChoices.length) groups.appendChild(el("div", "muted", "В этой комнате пока нет устройств управления климатом."));
     devicesSection.appendChild(groups);
-    if (roomlessChoices.length) {
+    if (roomlessControlChoices.length) {
       devicesSection.appendChild(this._collapsibleDeviceSection(
         "Устройства без комнаты",
         "Сначала вернитесь к привязке комнат и сохраните область устройства в Home Assistant. После обновления его можно будет добавить в климатический контур.",
-        this._firstRunDeviceGroups(roomlessChoices, room, fields, choices, searchable),
+        this._firstRunDeviceGroups(roomlessControlChoices, room, fields, controlChoices, searchable),
         false
       ));
     }
-    if (nearbyChoices.length) {
+    if (nearbyControlChoices.length) {
       devicesSection.appendChild(this._collapsibleDeviceSection(
         "Возможно, относится к этой комнате",
         "Эти климатические устройства уже привязаны к другой области Home Assistant и показаны только для проверки.",
-        this._firstRunDeviceGroups(nearbyChoices, room, fields, choices, searchable),
+        this._firstRunDeviceGroups(nearbyControlChoices, room, fields, controlChoices, searchable),
         true
       ));
     }
