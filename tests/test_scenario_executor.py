@@ -7,7 +7,12 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
-from custom_components.hausman_hub.application.scenario_executor import ScenarioExecutor
+from custom_components.hausman_hub.application.scenario_executor import (
+    ScenarioExecutor,
+    _device_action_confirmed,
+    _normalize_action_value,
+    _value_parameter_name,
+)
 from custom_components.hausman_hub.application.scenarios import (
     ScenarioDeviceAction,
     ScenarioDeviceEntry,
@@ -301,6 +306,34 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(receipt["readBack"]["attempted"])
         self.assertFalse(receipt["readBack"]["matched"])
         self.assertEqual("state_not_confirmed", receipt["reason"])
+
+    def test_extended_value_actions_use_typed_ha_parameters(self) -> None:
+        self.assertEqual(
+            "humidity",
+            _value_parameter_name("set_humidity", "humidifier", "set_humidity"),
+        )
+        self.assertEqual(
+            "position",
+            _value_parameter_name("set_position", "valve", "set_valve_position"),
+        )
+        self.assertEqual(45, _normalize_action_value("humidity", "45%"))
+
+    def test_extended_actions_have_explicit_read_back_rules(self) -> None:
+        self.assertTrue(
+            _device_action_confirmed(
+                SimpleNamespace(state="locked", attributes={}), "lock", None
+            )
+        )
+        self.assertTrue(
+            _device_action_confirmed(
+                SimpleNamespace(state="cleaning", attributes={}), "start", None
+            )
+        )
+        self.assertTrue(
+            _device_action_confirmed(
+                SimpleNamespace(state="open", attributes={}), "open_valve", None
+            )
+        )
 
 
 if __name__ == "__main__":

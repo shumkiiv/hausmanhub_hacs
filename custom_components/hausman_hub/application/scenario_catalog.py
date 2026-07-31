@@ -12,7 +12,20 @@ if TYPE_CHECKING:
 
 
 SCENARIO_CATALOG_DOMAINS = frozenset(
-    {"light", "switch", "fan", "cover", "media_player", "climate"}
+    {
+        "button",
+        "climate",
+        "cover",
+        "fan",
+        "humidifier",
+        "light",
+        "lock",
+        "media_player",
+        "switch",
+        "vacuum",
+        "valve",
+        "water_heater",
+    }
 )
 
 
@@ -188,6 +201,143 @@ def _domain_actions(domain: str) -> tuple[ScenarioDeviceAction, ...]:
                 title="Скорость вентилятора",
                 domain="climate",
                 service="set_fan_mode",
+                allowed_fields=frozenset({"value"}),
+            ),
+        )
+    if domain == "humidifier":
+        return (
+            ScenarioDeviceAction(
+                action_id="turn_on",
+                title="Включить",
+                domain="humidifier",
+                service="turn_on",
+                allowed_fields=frozenset(),
+            ),
+            ScenarioDeviceAction(
+                action_id="turn_off",
+                title="Выключить",
+                domain="humidifier",
+                service="turn_off",
+                allowed_fields=frozenset(),
+            ),
+            ScenarioDeviceAction(
+                action_id="set_humidity",
+                title="Целевая влажность",
+                domain="humidifier",
+                service="set_humidity",
+                allowed_fields=frozenset({"value"}),
+            ),
+        )
+    if domain == "water_heater":
+        return (
+            ScenarioDeviceAction(
+                action_id="turn_on",
+                title="Включить",
+                domain="water_heater",
+                service="turn_on",
+                allowed_fields=frozenset(),
+            ),
+            ScenarioDeviceAction(
+                action_id="turn_off",
+                title="Выключить",
+                domain="water_heater",
+                service="turn_off",
+                allowed_fields=frozenset(),
+            ),
+            ScenarioDeviceAction(
+                action_id="set_temperature",
+                title="Температура",
+                domain="water_heater",
+                service="set_temperature",
+                allowed_fields=frozenset({"value"}),
+            ),
+            ScenarioDeviceAction(
+                action_id="set_operation_mode",
+                title="Режим работы",
+                domain="water_heater",
+                service="set_operation_mode",
+                allowed_fields=frozenset({"value"}),
+            ),
+        )
+    if domain == "lock":
+        return (
+            ScenarioDeviceAction(
+                action_id="lock",
+                title="Закрыть",
+                domain="lock",
+                service="lock",
+                allowed_fields=frozenset(),
+            ),
+            ScenarioDeviceAction(
+                action_id="unlock",
+                title="Открыть",
+                domain="lock",
+                service="unlock",
+                allowed_fields=frozenset(),
+            ),
+        )
+    if domain == "vacuum":
+        return (
+            ScenarioDeviceAction(
+                action_id="start",
+                title="Начать уборку",
+                domain="vacuum",
+                service="start",
+                allowed_fields=frozenset(),
+            ),
+            ScenarioDeviceAction(
+                action_id="pause",
+                title="Пауза",
+                domain="vacuum",
+                service="pause",
+                allowed_fields=frozenset(),
+            ),
+            ScenarioDeviceAction(
+                action_id="stop",
+                title="Остановить",
+                domain="vacuum",
+                service="stop",
+                allowed_fields=frozenset(),
+            ),
+            ScenarioDeviceAction(
+                action_id="return_home",
+                title="Вернуться на базу",
+                domain="vacuum",
+                service="return_to_base",
+                allowed_fields=frozenset(),
+            ),
+        )
+    if domain == "button":
+        return (
+            ScenarioDeviceAction(
+                action_id="press",
+                title="Нажать",
+                domain="button",
+                service="press",
+                allowed_fields=frozenset(),
+            ),
+        )
+    if domain == "valve":
+        return (
+            ScenarioDeviceAction(
+                action_id="open_valve",
+                title="Открыть",
+                domain="valve",
+                service="open_valve",
+                allowed_fields=frozenset(),
+            ),
+            ScenarioDeviceAction(
+                action_id="close_valve",
+                title="Закрыть",
+                domain="valve",
+                service="close_valve",
+                allowed_fields=frozenset(),
+            ),
+            ScenarioDeviceAction(
+                action_id="set_position",
+                title="Позиция",
+                domain="valve",
+                service="set_valve_position",
                 allowed_fields=frozenset({"value"}),
             ),
         )

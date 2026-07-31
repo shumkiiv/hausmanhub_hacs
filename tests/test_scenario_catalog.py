@@ -15,9 +15,23 @@ class ScenarioCatalogPureTest(unittest.TestCase):
     """Test catalog helpers that do not need Home Assistant."""
 
     def test_allowed_domains(self) -> None:
-        self.assertIn("light", SCENARIO_CATALOG_DOMAINS)
-        self.assertIn("switch", SCENARIO_CATALOG_DOMAINS)
-        self.assertIn("climate", SCENARIO_CATALOG_DOMAINS)
+        self.assertEqual(
+            SCENARIO_CATALOG_DOMAINS,
+            {
+                "button",
+                "climate",
+                "cover",
+                "fan",
+                "humidifier",
+                "light",
+                "lock",
+                "media_player",
+                "switch",
+                "vacuum",
+                "valve",
+                "water_heater",
+            },
+        )
 
     def test_light_actions_include_brightness(self) -> None:
         actions = _domain_actions("light")
@@ -37,6 +51,27 @@ class ScenarioCatalogPureTest(unittest.TestCase):
         actions = _domain_actions("cover")
         position = next(action for action in actions if action.action_id == "set_position")
         self.assertIn("value", position.allowed_fields)
+
+    def test_extended_tablet_domains_have_semantic_actions(self) -> None:
+        expected = {
+            "button": {"press"},
+            "humidifier": {"turn_on", "turn_off", "set_humidity"},
+            "lock": {"lock", "unlock"},
+            "vacuum": {"start", "pause", "stop", "return_home"},
+            "valve": {"open_valve", "close_valve", "set_position"},
+            "water_heater": {
+                "turn_on",
+                "turn_off",
+                "set_temperature",
+                "set_operation_mode",
+            },
+        }
+        for domain, action_ids in expected.items():
+            with self.subTest(domain=domain):
+                self.assertEqual(
+                    {action.action_id for action in _domain_actions(domain)},
+                    action_ids,
+                )
 
     def test_unknown_domain_has_no_actions(self) -> None:
         self.assertEqual(_domain_actions("sensor"), ())

@@ -36,6 +36,8 @@ def _value_parameter_name(action_id: str, domain: str, service: str) -> str | No
         return "brightness"
     if domain == "cover" and service == "set_cover_position" and action_id == "set_position":
         return "position"
+    if domain == "valve" and service == "set_valve_position" and action_id == "set_position":
+        return "position"
     if domain == "climate":
         if service == "set_temperature" and action_id == "set_temperature":
             return "temperature"
@@ -43,6 +45,13 @@ def _value_parameter_name(action_id: str, domain: str, service: str) -> str | No
             return "hvac_mode"
         if service == "set_fan_mode" and action_id == "set_fan_mode":
             return "fan_mode"
+    if domain == "humidifier" and service == "set_humidity" and action_id == "set_humidity":
+        return "humidity"
+    if domain == "water_heater":
+        if service == "set_temperature" and action_id == "set_temperature":
+            return "temperature"
+        if service == "set_operation_mode" and action_id == "set_operation_mode":
+            return "operation_mode"
     return None
 
 
@@ -51,7 +60,7 @@ def _normalize_action_value(param: str, value: object) -> object:
 
     if value is None:
         return None
-    if param in ("brightness", "position"):
+    if param in ("brightness", "position", "humidity"):
         if isinstance(value, str):
             value = value.strip()
             if value.endswith("%"):
@@ -80,7 +89,7 @@ def _normalize_action_value(param: str, value: object) -> object:
         if isinstance(value, (int, float)) and not isinstance(value, bool):
             return float(value)
         raise ValueError("temperature must be a number")
-    if param in ("hvac_mode", "fan_mode"):
+    if param in ("hvac_mode", "fan_mode", "operation_mode"):
         if not isinstance(value, str):
             raise ValueError(f"{param} must be a string")
         return value.strip()
@@ -584,12 +593,26 @@ def _device_action_confirmed(state: object, action_id: str, value: object | None
         return state_value == "locked"
     if action_id == "unlock":
         return state_value == "unlocked"
+    if action_id == "start":
+        return state_value in {"cleaning", "on"}
+    if action_id == "pause":
+        return state_value in {"paused", "idle"}
+    if action_id == "stop":
+        return state_value in {"idle", "off", "docked"}
+    if action_id == "return_home":
+        return state_value in {"returning", "docked"}
+    if action_id == "open_valve":
+        return state_value in {"open", "opening"}
+    if action_id == "close_valve":
+        return state_value in {"closed", "closing"}
     expected_attribute = {
         "set_brightness": "brightness",
         "set_position": "current_position",
         "set_temperature": "temperature",
         "set_hvac_mode": "hvac_mode",
         "set_fan_mode": "fan_mode",
+        "set_humidity": "humidity",
+        "set_operation_mode": "operation_mode",
     }.get(action_id)
     if expected_attribute is None:
         return False
