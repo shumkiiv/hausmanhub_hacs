@@ -1,14 +1,14 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.14";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.14";
-import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.14";
-import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.51.14";
-import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.14";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.14";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.14";
-import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.14";
-import { openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.14";
-import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.14";
-import { createPriorityChoicePicker, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.51.14";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.15";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.15";
+import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.15";
+import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.51.15";
+import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.15";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.15";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.15";
+import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.15";
+import { openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.15";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.15";
+import { AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createPriorityChoicePicker, isAwayModeCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.51.15";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css";
@@ -53,9 +53,9 @@ const HOME_SIGNAL_BINDINGS = [
   },
   {
     key: "presence_entity_id", kind: "presence", title: "Общее присутствие дома",
-    helper: "Один общий статус всего дома, а не датчик отдельной комнаты.",
+    helper: "Общий режим дома, не датчик отдельной комнаты.",
     purpose: "Переключает общую политику между режимами «кто-то дома» и «никого нет».",
-    recommendation: "Выберите профиль человека или телефон со стабильным статусом «дома / не дома». Датчики комнат настраиваются отдельно.",
+    recommendation: "Выберите режим «дома / не дома», профиль или телефон. Комнатные датчики настраиваются отдельно.",
   },
   {
     key: "central_heating_entity_id", kind: "central_heating",
@@ -1943,8 +1943,6 @@ class HausmanHubPanel extends HTMLElement {
           value: plan.value,
         });
       } catch {
-        // The visible result remains failed; the user is told to verify the
-        // current setpoint before retrying.
       }
       return {
         status: "failed",
@@ -4486,6 +4484,7 @@ class HausmanHubPanel extends HTMLElement {
       running: "Датчик работы",
       power: "Датчик питания",
     };
+    if (signalKind === "presence" && isAwayModeCandidate(candidate)) return AWAY_MODE_TYPE;
     if (candidate.missing && signalKind === "outdoor_temperature") {
       return "Ранее выбранное — Ранее выбранный источник";
     }
@@ -4562,9 +4561,7 @@ class HausmanHubPanel extends HTMLElement {
       - Math.min(entityId.length, 255) / 1000;
   }
 
-  _signalCandidateDisplayName(candidate, peers = []) {
-    return signalCandidateDisplayName(candidate, peers, normalizedText);
-  }
+  _signalCandidateDisplayName(candidate, peers = []) { return signalCandidateDisplayName(candidate, peers, normalizedText); }
 
   _signalCandidateExplanation(candidate, signalKind) {
     if (!candidate) {
@@ -4581,6 +4578,7 @@ class HausmanHubPanel extends HTMLElement {
         ? "Выбранное ранее значение не подходит для наружной температуры или сейчас недоступно. Выберите другой источник."
         : "Ранее выбранный источник сейчас недоступен.";
     }
+    if (signalKind === "presence" && isAwayModeCandidate(candidate)) return AWAY_MODE_EXPLANATION;
     if (candidate.available === false) return "Источник сейчас недоступен и может не обновлять состояние.";
     if (candidate.domain === "weather") return "Текущая температура из погодной интеграции Home Assistant.";
     if (candidate.domain === "person") return "профиль пользователя: дома / не дома. Это общий статус всего дома.";
@@ -4727,9 +4725,7 @@ class HausmanHubPanel extends HTMLElement {
     return { root: fieldset, value: () => selectedValue, radios };
   }
 
-  _priorityChoicePicker(config) {
-    return createPriorityChoicePicker(this, config, { el, setAttr });
-  }
+  _priorityChoicePicker(config) { return createPriorityChoicePicker(this, config, { el, setAttr }); }
 
   _renderHome(container, home) {
     container.innerHTML = "";

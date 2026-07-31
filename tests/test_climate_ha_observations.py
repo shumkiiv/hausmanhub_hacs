@@ -571,6 +571,31 @@ class NativeHaObservationTest(unittest.TestCase):
             ClimateOccupancyMode.AWAY_SETBACK,
         )
 
+    def test_away_mode_binary_sensor_uses_inverted_home_semantics(self) -> None:
+        registry = full_registry()
+        registry = replace(
+            registry,
+            home=replace(
+                registry.home,
+                presence_entity_id="binary_sensor.a100_away",
+            ),
+        )
+        states = full_states()
+        states["binary_sensor.a100_away"] = ha_state(
+            "binary_sensor.a100_away", "on", {"friendly_name": "A100 Away"}
+        )
+        self.assertIs(
+            self.build(registry=registry, states=states).home.occupancy,
+            ClimateOccupancyMode.AWAY_SETBACK,
+        )
+        states["binary_sensor.a100_away"] = ha_state(
+            "binary_sensor.a100_away", "off", {"friendly_name": "A100 Away"}
+        )
+        self.assertIs(
+            self.build(registry=registry, states=states).home.occupancy,
+            ClimateOccupancyMode.HOME,
+        )
+
         states["person.ivan"] = ha_state("person.ivan", "unavailable")
         unknown = self.build(states=states)
         self.assertIs(unknown.home.occupancy, ClimateOccupancyMode.UNKNOWN)

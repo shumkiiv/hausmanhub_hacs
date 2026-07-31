@@ -16,6 +16,17 @@ export function weatherSourceDisplayName(entityId) {
   )).join(" ") || "Home Assistant";
 }
 
+const AWAY_MODE_PATTERN = /away|not[ _-]?home|никого.{0,8}(?:нет|дома)|не.{0,4}дома/i;
+export const AWAY_MODE_TYPE = "Режим «Дома / Не дома»";
+export const AWAY_MODE_EXPLANATION =
+  "Логический режим дома: включено — никого нет, выключено — дома. Это не физический датчик присутствия.";
+
+export function isAwayModeCandidate(candidate) {
+  return AWAY_MODE_PATTERN.test([
+    candidate?.name, candidate?.entity_id, candidate?.device_name,
+  ].filter(Boolean).join(" "));
+}
+
 export function signalCandidateDisplayName(candidate, peers, normalize) {
   if (!candidate) return "Источник не выбран";
   if (candidate.domain === "person") {

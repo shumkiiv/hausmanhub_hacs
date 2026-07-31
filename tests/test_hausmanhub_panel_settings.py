@@ -1979,6 +1979,29 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
+    def test_away_mode_is_not_described_as_a_physical_presence_sensor(self) -> None:
+        script = panel_script(
+            GET_PATHS,
+            {},
+            """
+        const candidate = {
+          entity_id: "binary_sensor.a100_away", name: "A100 Away",
+          device_name: "A100 Away", domain: "binary_sensor",
+          device_class: "occupancy", available: true,
+        };
+        const type = panel._signalCandidateType(candidate, "presence");
+        const explanation = panel._signalCandidateExplanation(candidate, "presence");
+        if (type !== "Режим «Дома / Не дома»") {
+          throw new Error("away mode has the wrong type: " + type);
+        }
+        for (const label of ["включено — никого нет", "выключено — дома", "не физический датчик"]) {
+          if (!explanation.includes(label)) throw new Error("away explanation missing: " + label);
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_previously_selected_indoor_sensor_is_explained_as_unsuitable_outdoors(self) -> None:
         payloads = dict(GET_PATHS)
         home = json.loads(json.dumps(HOME_PAYLOAD))

@@ -10,6 +10,8 @@ service names, transports, or commands.
 
 from __future__ import annotations
 
+import re
+
 from collections.abc import Mapping
 from dataclasses import dataclass
 import math
@@ -514,6 +516,23 @@ def _occupancy(
         # A configured but unobserved presence forbids auto-humidifying
         # without inventing an away setback.
         return ClimateOccupancyMode.UNKNOWN
+    identity = " ".join(
+        value
+        for value in (
+            state.entity_id,
+            state.attributes.get("friendly_name"),
+        )
+        if isinstance(value, str)
+    )
+    away_mode = re.search(
+        r"away|not[ _-]?home|никого.{0,8}(?:нет|дома)|не.{0,4}дома",
+        identity,
+        re.IGNORECASE,
+    )
+    if away_mode and state.state == "on":
+        return ClimateOccupancyMode.AWAY_SETBACK
+    if away_mode and state.state == "off":
+        return ClimateOccupancyMode.HOME
     if state.state in {"off", "not_home"}:
         return ClimateOccupancyMode.AWAY_SETBACK
     if state.state in {"on", "home"}:
