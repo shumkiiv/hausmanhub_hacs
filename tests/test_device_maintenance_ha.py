@@ -14,6 +14,9 @@ from custom_components.hausman_hub.device_maintenance_ha import (
     inventory_device_id,
     inventory_entity_id,
 )
+from custom_components.hausman_hub.application.dashboard_snapshot import (
+    stable_public_id,
+)
 
 
 class _Registry:
@@ -249,6 +252,38 @@ class HomeAssistantDeviceMaintenanceServiceTests(unittest.TestCase):
             )
         self.assertEqual("deleted", result["status"])
         self.assertEqual(["switch.standalone_relay"], hass.entity_registry.removed)
+
+    def test_entity_only_energy_source_is_visible_and_cannot_be_deleted(self) -> None:
+        hass = self._hass()
+        energy_id = stable_public_id(
+            "device", "entity:switch.standalone_relay"
+        )
+        hass.data["hausman_hub"]["tablet_preferences_service"] = SimpleNamespace(
+            energy={"settings": {"selectedDeviceIds": [energy_id]}}
+        )
+        service = HomeAssistantDeviceMaintenanceService(hass)
+
+        with patch.dict(sys.modules, _registry_modules(hass)):
+            snapshot = asyncio.run(service.async_snapshot())
+            with self.assertRaises(DeviceMaintenanceViolation) as used:
+                asyncio.run(
+                    service.async_delete(
+                        {
+                            "deviceId": inventory_entity_id(
+                                "switch.standalone_relay"
+                            ),
+                            "confirmed": True,
+                        }
+                    )
+                )
+
+        standalone = snapshot["devices"][
+            inventory_entity_id("switch.standalone_relay")
+        ]
+        self.assertTrue(standalone["deleteBlocked"])
+        self.assertIn("Карточка энергии", standalone["deleteBlockers"])
+        self.assertEqual("device_in_use", used.exception.code)
+        self.assertEqual([], hass.entity_registry.removed)
 
 
 if __name__ == "__main__":

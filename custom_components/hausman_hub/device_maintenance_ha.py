@@ -151,7 +151,10 @@ async def _hausmanhub_uses(
             }
         )
 
-    public_device_id = stable_public_id("device", f"device:{device_id}")
+    energy_source_key = f"device:{device_id}"
+    if not device_id and len(entity_ids) == 1:
+        energy_source_key = f"entity:{next(iter(entity_ids))}"
+    public_device_id = stable_public_id("device", energy_source_key)
     if public_device_id in context["energy_selected"]:  # type: ignore[operator]
         uses.append(
             {

@@ -1,6 +1,6 @@
 /* Scenario library and editor shared with the HausmanHub tablet contract. */
 
-import { SCENARIO_ICON_GROUPS, scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.51.43";
+import { SCENARIO_ICON_GROUPS, scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.51.44";
 
 const TRIGGER_TYPES = [
   ["manual", "Ручной запуск"], ["time", "По времени"],
@@ -341,7 +341,6 @@ async function saveScenarioQuick(panel, deps, source, successText) {
   panel._notice = "";
   try {
     await panel._hass.callApi("POST", deps.scenariosApi, scenarioPayload(normalizedScenario(source)));
-    panel._scenarios.list = null;
     panel._notice = successText;
     panel._error = false;
     await panel._loadScenarios();
@@ -353,7 +352,7 @@ async function saveScenarioQuick(panel, deps, source, successText) {
     return false;
   } finally {
     panel._busy = false;
-    if (panel._activeSection === "scenarios") updateScenarioEditor(panel);
+    if (panel._activeSection === "scenarios") panel._render();
   }
 }
 
@@ -362,7 +361,6 @@ async function deleteScenarioQuick(panel, deps, scenario) {
   panel._busy = true;
   try {
     await panel._hass.callApi("POST", deps.deleteApi, { scenario_id: scenario.id });
-    panel._scenarios.list = null;
     panel._notice = `Сценарий «${scenario.title}» удалён.`;
     panel._error = false;
     await panel._loadScenarios();
@@ -372,7 +370,7 @@ async function deleteScenarioQuick(panel, deps, scenario) {
     updateScenarioEditor(panel);
   } finally {
     panel._busy = false;
-    if (panel._activeSection === "scenarios") updateScenarioEditor(panel);
+    if (panel._activeSection === "scenarios") panel._render();
   }
 }
 
