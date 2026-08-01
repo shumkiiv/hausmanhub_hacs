@@ -1,0 +1,109 @@
+{
+  "contract": {
+    "name": "hausman-hub-ui-source-of-truth-audit",
+    "version": 1
+  },
+  "audited_at": "2026-08-01",
+  "rules": {
+    "product_design_file": "4vaAkBsKwtSyqJrr2X5RRs",
+    "hacs_design_file": "UK1PgZUQQrvYJ7tRZzWyvo",
+    "runtime_reference": "private Android application",
+    "implementation_order": [
+      "reconcile current Android behavior into the product CANON frame",
+      "reuse the same shared CANON frame in the HACS design file",
+      "implement HACS from the approved CANON frame"
+    ],
+    "archive_prefix": "ARCHIVE /",
+    "archive_is_implementable": false
+  },
+  "surfaces": [
+    {
+      "id": "overview",
+      "label": "Главная",
+      "android": "implemented",
+      "android_figma": ["716:943", "784:1109"],
+      "hacs": "implemented_needs_visual_reconciliation",
+      "hacs_figma": ["154:508"]
+    },
+    {
+      "id": "lighting",
+      "label": "Освещение",
+      "android": "implemented",
+      "android_figma": ["612:669"],
+      "hacs": "functional_needs_shared_canon",
+      "hacs_figma": []
+    },
+    {
+      "id": "climate",
+      "label": "Климат",
+      "android": "implemented",
+      "android_figma": ["619:397"],
+      "hacs": "functional_needs_visual_reconciliation",
+      "hacs_figma": ["257:582"]
+    },
+    {
+      "id": "rooms",
+      "label": "Комнаты",
+      "android": "implemented",
+      "android_figma": ["627:306"],
+      "hacs": "functional_needs_shared_canon",
+      "hacs_figma": []
+    },
+    {
+      "id": "media",
+      "label": "Медиа",
+      "android": "implemented",
+      "android_figma": ["634:494"],
+      "hacs": "functional_partial_canon",
+      "hacs_figma": ["237:582"]
+    },
+    {
+      "id": "security",
+      "label": "Безопасность",
+      "android": "implemented",
+      "android_figma": ["638:475"],
+      "hacs": "functional_needs_shared_canon",
+      "hacs_figma": []
+    },
+    {
+      "id": "devices",
+      "label": "Устройства",
+      "android": "implemented",
+      "android_figma": ["649:502"],
+      "hacs": "functional_needs_shared_canon",
+      "hacs_figma": []
+    },
+    {
+      "id": "energy",
+      "label": "Энергия",
+      "android": "implemented",
+      "android_figma": ["987:1368", "991:1368"],
+      "hacs": "shared_canon_available",
+      "hacs_figma": ["247:582", "251:582"]
+    },
+    {
+      "id": "scenarios",
+      "label": "Сценарии",
+      "android": "implemented",
+      "android_figma": ["661:645", "689:380"],
+      "hacs": "shared_canon_available",
+      "hacs_figma": ["255:582"]
+    },
+    {
+      "id": "settings",
+      "label": "Настройки",
+      "android": "implemented",
+      "android_figma": ["667:586"],
+      "hacs": "functional_needs_visual_reconciliation",
+      "hacs_figma": ["164:535"]
+    },
+    {
+      "id": "kiosk",
+      "label": "Режим киоска",
+      "android": "implemented",
+      "android_figma": ["752:1020", "785:1200"],
+      "hacs": "shared_canon_available",
+      "hacs_figma": ["261:618"]
+    }
+  ]
+}
