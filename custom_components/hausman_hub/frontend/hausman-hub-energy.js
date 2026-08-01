@@ -184,7 +184,8 @@ function renderEnergyHistory(panel, energy, selected, deps) {
   };
   copy.appendChild(el("h3", null, periodTitles[activePeriod]));
   copy.appendChild(el("small", null, selected.length
-    ? selected.map((item) => item.name).join(" + ") : "Источники не выбраны"));
+    ? `${selected.length} ${deviceWord(selected.length)} · выбранные источники`
+    : "Источники не выбраны"));
   head.appendChild(copy);
   const periods = el("div", "energy-periods");
   [["day", "День"], ["week", "Неделя"], ["month", "Месяц"], ["year", "Год"]]
@@ -281,13 +282,13 @@ function renderEnergyDevices(panel, container, sources, deps) {
     identity.appendChild(el("strong", null, source.name));
     identity.appendChild(el("small", null, [source.roomName || "Без комнаты", device && device.manufacturer, device && device.model].filter(Boolean).join(" · ")));
     row.appendChild(identity);
-    const live = el("span", "energy-device-value is-accent");
+    const live = el("span", "energy-device-value energy-device-live is-accent");
     live.appendChild(el("b", null, source.available ? sourceMetric(source, "currentPowerW", "Вт") : "—"));
     live.appendChild(el("small", null, source.available
       ? `${sourceMetric(source, "currentA", "А", 2)} · ${sourceMetric(source, "voltageV", "В")}`
       : "актуальных данных нет"));
     row.appendChild(live);
-    const accumulated = el("span", "energy-device-value");
+    const accumulated = el("span", "energy-device-value energy-device-accumulated");
     accumulated.appendChild(el("b", null, sourceMetric(source, source.todayKwh !== null && source.todayKwh !== undefined ? "todayKwh" : "totalKwh", "кВт·ч", 2)));
     accumulated.appendChild(el("small", null, source.todayKwh !== null && source.todayKwh !== undefined ? "за сегодня" : "накоплено"));
     row.appendChild(accumulated);
