@@ -958,7 +958,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           || !text.includes("Мощность") || !text.includes("12 Вт")) {
           throw new Error("device or its function missing from lighting section");
         }
-        const valueInput = findAll(lighting, (node) => node.tagName === "INPUT")[0];
+        const valueInput = findAll(lighting, (node) => node.tagName === "INPUT" && node.type !== "search")[0];
         if (!valueInput || valueInput.value !== "178") {
           throw new Error("device action did not use current brightness");
         }
@@ -981,7 +981,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         if (!refreshedCard || refreshedCard.open !== true) {
           throw new Error("expanded device card collapsed after confirmed action");
         }
-        const refreshedInput = findAll(refreshedLighting, (node) => node.tagName === "INPUT")[0];
+        const refreshedInput = findAll(refreshedLighting, (node) => node.tagName === "INPUT" && node.type !== "search")[0];
         const apply = findAll(refreshedLighting, (node) =>
           node.tagName === "BUTTON" && node.textContent === "Применить")[0];
         if (!refreshedInput || !apply || apply.disabled) {
@@ -1040,13 +1040,13 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const climateMainTab = panel._shell.tabs.climate;
         climateMainTab.fire("click");
         const subtabs = Object.values(panel._shell.climateTabs);
-        const expected = ["Контур", "Профили", "Расписание", "Сигналы дома", "Сигналы комнат", "AI-помощник"];
+        const expected = ["Обзор", "Контур", "Профили", "Расписание", "Сигналы дома", "Сигналы комнат", "AI-помощник"];
         if (JSON.stringify(subtabs.map((node) => node.textContent)) !== JSON.stringify(expected)) {
           throw new Error("climate subtab labels mismatch");
         }
         const visible = () => Object.entries(panel._shell.climateViews)
           .filter(([, node]) => !node.hidden).map(([name]) => name);
-        if (JSON.stringify(visible()) !== JSON.stringify(["contour"])) {
+        if (JSON.stringify(visible()) !== JSON.stringify(["overview"])) {
           throw new Error("climate default view is not isolated");
         }
         panel._shell.climateTabs.profiles.fire("click");

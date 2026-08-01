@@ -81,6 +81,41 @@ export function writeNavigationRoute(panel) {
   }
 }
 
+export function createKioskButton(panel, className, deps) {
+  const { el, svgIcon } = deps;
+  const button = el("button", `kiosk-toggle ${className}`);
+  button.type = "button";
+  button.appendChild(svgIcon("dashboard"));
+  button.appendChild(el("span", "kiosk-label", "Режим киоска"));
+  button.addEventListener("click", () => toggleKioskMode(panel));
+  return button;
+}
+
+export function setKioskState(panel, active) {
+  panel._kioskMode = Boolean(active);
+  panel.classList?.toggle?.("kiosk-mode", panel._kioskMode);
+  [panel._shell?.kioskButton, panel._shell?.sidebarKiosk].filter(Boolean).forEach((button) => {
+    button.setAttribute?.("aria-pressed", panel._kioskMode ? "true" : "false");
+    button.setAttribute?.("aria-label", panel._kioskMode ? "Выйти из режима киоска" : "Открыть режим киоска");
+    const label = button.querySelector?.(".kiosk-label");
+    if (label) label.textContent = panel._kioskMode ? "Выйти из киоска" : "Режим киоска";
+  });
+}
+
+export async function toggleKioskMode(panel) {
+  if (panel._kioskMode) {
+    if (document.fullscreenElement && typeof document.exitFullscreen === "function") {
+      await document.exitFullscreen().catch(() => {});
+    }
+    setKioskState(panel, false);
+    return;
+  }
+  setKioskState(panel, true);
+  if (typeof panel.requestFullscreen === "function") {
+    await panel.requestFullscreen().catch(() => setKioskState(panel, true));
+  }
+}
+
 export function renderOverviewNavigationSummary(panel, container, metrics, deps) {
   const { el, setAttr, svgIcon, sections } = deps;
   const heading = el("div", "overview-section-heading");
@@ -118,6 +153,7 @@ export function openRoomFromOverview(panel, room) {
   ));
   const roomId = (matched && matched.id) || room.id;
   if (roomId) panel._openHomeCards.add(`room:${roomId}`);
+  if (panel._sectionRenderKeys) panel._sectionRenderKeys.rooms = null;
   panel._activateSection("rooms");
 }
 

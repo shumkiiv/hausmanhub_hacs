@@ -1,14 +1,14 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.19";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.19";
-import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.19";
-import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.51.19";
-import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.19";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.19";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.19";
-import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.19";
-import { openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.19";
-import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.19";
-import { AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.51.19";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.20";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.20";
+import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.20";
+import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.51.20";
+import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.20";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.20";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.20";
+import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.20";
+import { createKioskButton, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.20";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.20";
+import { AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.51.20";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css";
@@ -67,6 +67,7 @@ const ZIGBEE2MQTT_IMAGE_PATTERN =
 const OUTDOOR_IDENTITY_PATTERN =
   /outdoor|outside|external|exterior|street|yard|улич|улиц|наруж|внешн|двор|погод/;
 const CLIMATE_VIEWS = [
+  { id: "overview", label: "Обзор", subtitle: "Климат по комнатам и отдельным устройствам" },
   { id: "contour", label: "Контур", subtitle: "Контур и управление климатом" },
   { id: "profiles", label: "Профили", subtitle: "Профили и расписание комфорта" },
   { id: "schedule", label: "Расписание", subtitle: "Границы профилей и автоматизация" },
@@ -274,12 +275,15 @@ class HausmanHubPanel extends HTMLElement {
     this._timer = null;
     this._shell = null;
     this._activeSection = null;
-    this._activeClimateView = "contour";
+    this._activeClimateView = "overview";
     this._activeSettingsView = "overview";
     this._activeRoomSetupPane = "devices";
     this._expandedWizardRooms = new Set();
     this._openSignalPickers = new Set();
     this._openHomeCards = new Set();
+    this._sectionRenderKeys = {};
+    this._loadingPanel = false;
+    this._kioskMode = false;
     this._dirty = {
       wizard: false, home: false, windows: false, profiles: false, schedule: false, mode: false,
       assistant: false,
@@ -340,6 +344,10 @@ class HausmanHubPanel extends HTMLElement {
       this._render();
       this._loadActiveNavigationView();
     };
+    this._onFullscreenChange = () => {
+      const active = typeof document !== "undefined" && document.fullscreenElement === this;
+      setKioskState(this, active);
+    };
   }
 
   set hass(value) {
@@ -357,6 +365,9 @@ class HausmanHubPanel extends HTMLElement {
     restoreNavigationFromLocation(this, false, PANEL_SECTIONS, CLIMATE_VIEWS, SETTINGS_VIEWS);
     this._timer = setInterval(() => this._load(), REFRESH_MS);
     document.addEventListener("visibilitychange", this._onVisible);
+    if (typeof document.addEventListener === "function") {
+      document.addEventListener("fullscreenchange", this._onFullscreenChange);
+    }
     if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
       window.addEventListener("popstate", this._onNavigationPop);
     }
@@ -370,6 +381,9 @@ class HausmanHubPanel extends HTMLElement {
     document.removeEventListener("visibilitychange", this._onVisible);
     if (typeof window !== "undefined" && typeof window.removeEventListener === "function") {
       window.removeEventListener("popstate", this._onNavigationPop);
+    }
+    if (typeof document !== "undefined" && typeof document.removeEventListener === "function") {
+      document.removeEventListener("fullscreenchange", this._onFullscreenChange);
     }
   }
 
@@ -493,7 +507,8 @@ class HausmanHubPanel extends HTMLElement {
   }
 
   async _load() {
-    if (!this._hass) return;
+    if (!this._hass || this._loadingPanel) return;
+    this._loadingPanel = true;
     try {
       const results = await Promise.all([
         this._hass.callApi("GET", PANEL_API),
@@ -503,6 +518,7 @@ class HausmanHubPanel extends HTMLElement {
         this._hass.callApi("GET", SETUP_API).catch(() => null),
         this._hass.callApi("GET", IR_CODE_BINDINGS_API).catch(() => ({ bindings: [] })),
         this._hass.callApi("GET", DASHBOARD_API).catch(() => null),
+        this._hass.callApi("GET", SCENARIOS_CATALOG_API).catch(() => null),
       ]);
       this._data = results[0];
       this._settings = {
@@ -513,22 +529,24 @@ class HausmanHubPanel extends HTMLElement {
         irBindings: results[5],
       };
       this._homeDashboard = results[6];
-      this._loadScenarios();
-      this._loadSettings();
+      this._scenarios.catalog = results[7];
       this._error = false;
     } catch (error) {
       this._error = true;
     }
+    this._loadingPanel = false;
     this._render();
   }
 
   async _loadScenarios() {
-    if (!this._hass) return;
+    if (!this._hass || this._scenarios.loading) return;
     this._scenarios.loading = true;
     try {
       const [list, catalog] = await Promise.all([
         this._hass.callApi("GET", SCENARIOS_API).catch(() => null),
-        this._hass.callApi("GET", SCENARIOS_CATALOG_API).catch(() => null),
+        this._scenarios.catalog
+          ? Promise.resolve(this._scenarios.catalog)
+          : this._hass.callApi("GET", SCENARIOS_CATALOG_API).catch(() => null),
       ]);
       this._scenarios.list = list;
       this._scenarios.catalog = catalog;
@@ -537,7 +555,7 @@ class HausmanHubPanel extends HTMLElement {
       this._scenarios.error = true;
     } finally {
       this._scenarios.loading = false;
-      this._render();
+      if (this._activeSection === "scenarios") this._renderScenarios(this._shell.scenarios);
     }
   }
 
@@ -557,7 +575,7 @@ class HausmanHubPanel extends HTMLElement {
       }
     } catch (error) {
     }
-    if (applied) this._render();
+    if (applied && this._activeSection === "settings") this._renderSettings(this._shell.settings);
   }
 
   async _post(path, payload, confirmText) {
@@ -689,6 +707,9 @@ class HausmanHubPanel extends HTMLElement {
     if (!this._dirty.wizard) {
       this._renderContour(shell.contour, snapshot, this._settings.setup);
     }
+    if (this._activeSection === "climate" && this._activeClimateView === "overview") {
+      this._renderHomeSection("climate", shell.climateOverview);
+    }
     this._renderRooms(shell.rooms, snapshot);
     if (!this._dirty.profiles) this._renderProfiles(shell.profiles, this._settings.setup);
     if (!this._dirty.schedule) this._renderSchedule(shell.schedule, this._settings);
@@ -736,6 +757,8 @@ class HausmanHubPanel extends HTMLElement {
     themeButton.type = "button";
     themeButton.addEventListener("click", () => this._cycleThemeMode());
     headerActions.appendChild(themeButton);
+    const kioskButton = createKioskButton(this, "header-kiosk", { el, svgIcon });
+    headerActions.appendChild(kioskButton);
     header.appendChild(headerActions);
     container.appendChild(header);
     const banner = el("div", "banner", "Данные HausmanHub недоступны. Проверьте интеграцию и повторите.");
@@ -788,6 +811,8 @@ class HausmanHubPanel extends HTMLElement {
     intercom.appendChild(el("span", "sidebar-intercom-label", "Домофон"));
     intercom.addEventListener("click", () => openIntercomFromRail(this));
     sidebar.appendChild(intercom);
+    const sidebarKiosk = createKioskButton(this, "sidebar-kiosk", { el, svgIcon });
+    sidebar.appendChild(sidebarKiosk);
     const sidebarFooter = el("div", "sidebar-footer");
     const sidebarVersion = el("span", "sidebar-version", "Версия —");
     sidebarFooter.appendChild(sidebarVersion);
@@ -833,7 +858,7 @@ class HausmanHubPanel extends HTMLElement {
     });
     climate.appendChild(climateNav);
     CLIMATE_VIEWS.forEach((view) => climate.appendChild(climateViews[view.id]));
-    const { contour, profiles, schedule, home, windows, assistant } = climateViews;
+    const { overview: climateOverview, contour, profiles, schedule, home, windows, assistant } = climateViews;
     const scenarios = el("div");
     sectionNodes.scenarios.appendChild(scenarios);
     const settings = el("div");
@@ -848,9 +873,10 @@ class HausmanHubPanel extends HTMLElement {
       container,
       banner, notice, loading, brandSubtitle, statusPill, versionBadge, themeButton, tabs, nav, sidebar, sidebarVersion, sectionNodes, wizard,
       readiness, summary, rooms,
-      climateNav, climateTabs, climateViews, contour, profiles, schedule, home, windows, assistant,
+      climateNav, climateTabs, climateViews, climateOverview, contour, profiles, schedule, home, windows, assistant,
       scenarios, settings,
       homeSections,
+      kioskButton, sidebarKiosk,
     };
     this._updateThemeSwitcher();
   }
@@ -885,11 +911,11 @@ class HausmanHubPanel extends HTMLElement {
     }
     if (section === "scenarios") {
       this._renderScenarios(this._shell.scenarios);
-      this._loadScenarios();
+      if (!this._scenarios.list && !this._scenarios.loading) this._loadScenarios();
     }
     if (section === "settings") {
       this._renderSettings(this._shell.settings);
-      this._loadSettings();
+      if (!this._settingsDirty && !this._settingsBaseline.home_assistant_url) this._loadSettings();
     }
     if (section === "energy") loadEnergyHistory(this);
     if (this._shell.homeSections && this._shell.homeSections[section]) {
@@ -904,6 +930,9 @@ class HausmanHubPanel extends HTMLElement {
     const changed = this._activeClimateView !== viewId;
     this._activeClimateView = viewId;
     this._syncClimateVisibility();
+    if (viewId === "overview") {
+      this._renderHomeSection("climate", this._shell.climateOverview);
+    }
     if (viewId === "assistant") {
       this._renderAssistant(this._shell.assistant);
       if (!this._assistant.loaded) this._loadAssistant();
@@ -5202,23 +5231,7 @@ class HausmanHubPanel extends HTMLElement {
   }
 
   _homeDevices(sectionId) {
-    const devices = this._homeDashboard && Array.isArray(this._homeDashboard.devices)
-      ? this._homeDashboard.devices : [];
-    if (sectionId === "devices" || sectionId === "rooms") return devices;
-    return devices.filter((device) => {
-      const domain = String(device.domain || "");
-      const category = String(device.category || "");
-      const identity = normalizedText(`${device.name} ${device.stateLabel}`);
-      if (sectionId === "lighting") {
-        return domain === "light" || category === "lighting"
-          || (domain === "switch" && /(свет|ламп|люстр|подсвет)/.test(identity));
-      }
-      if (sectionId === "media") return domain === "media_player" || category === "media";
-      if (sectionId === "security") {
-        return category === "security" || ["lock", "camera", "alarm_control_panel"].includes(domain);
-      }
-      return false;
-    });
+    return renderHomeSection.homeDevices(this, sectionId, normalizedText);
   }
 
   _catalogTargets(device) {
@@ -5231,8 +5244,18 @@ class HausmanHubPanel extends HTMLElement {
   }
 
   _renderHomeSection(sectionId, container) {
+    const dashboard = this._homeDashboard || null;
+    const key = JSON.stringify({
+      dashboard,
+      sectionId,
+      energy: sectionId === "energy" ? this._energyHistory : null,
+      energyUi: sectionId === "energy" ? [this._energySettingsOpen, this._energySelectedDeviceId, this._energyDraft] : null,
+    });
+    if (container.childNodes && container.childNodes.length && this._sectionRenderKeys[sectionId] === key) return;
+    this._sectionRenderKeys[sectionId] = key;
     renderHomeSection(this, sectionId, container, {
       el, svgIcon, normalizedText,
+      setAttr,
       sections: PANEL_SECTIONS,
       subtitles: SECTION_SUBTITLES,
     });
@@ -5263,11 +5286,7 @@ class HausmanHubPanel extends HTMLElement {
   }
 
   _deviceCountWord(count) {
-    const tail = count % 100;
-    if (tail >= 11 && tail <= 14) return "устройств";
-    if (count % 10 === 1) return "устройство";
-    if (count % 10 >= 2 && count % 10 <= 4) return "устройства";
-    return "устройств";
+    return renderHomeSection.deviceCountWord(count);
   }
 
   _renderRoomInventory(container) {

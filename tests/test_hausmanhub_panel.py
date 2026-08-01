@@ -34,7 +34,7 @@ WEATHER_SOURCES_JS = PANEL_JS.with_name("hausman-hub-weather-sources.js")
 WEATHER_SOURCES_CSS = PANEL_JS.with_name("hausman-hub-weather-sources.css")
 SETTINGS_CSS = PANEL_JS.with_name("hausman-hub-settings.css")
 WIZARD_VALIDATION_CSS = PANEL_JS.with_name("hausman-hub-wizard-validation.css")
-MAX_PANEL_JS_BYTES = 275 * 1024
+MAX_PANEL_JS_BYTES = 277 * 1024
 MAX_HOME_SECTIONS_JS_BYTES = 16 * 1024
 MAX_ROOM_SETUP_JS_BYTES = 24 * 1024
 MAX_ROOM_DEVICE_GROUPS_JS_BYTES = 12 * 1024
@@ -184,10 +184,11 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         )
         self.assertLessEqual(len(wizard_validation_styles.encode("utf-8")), 8 * 1024)
         self.assertIn('"/api/hausman_hub/panel/hausman-hub-panel.css"', content)
-        self.assertIn('hausman-hub-settings.css?v=1.51.19', styles)
-        self.assertIn('hausman-hub-control-channel.css?v=1.51.19', styles)
-        self.assertIn('hausman-hub-weather-sources.css?v=1.51.19', styles)
-        self.assertIn('hausman-hub-wizard-validation.css?v=1.51.19', styles)
+        self.assertIn('hausman-hub-settings.css?v=1.51.20', styles)
+        self.assertIn('hausman-hub-control-channel.css?v=1.51.20', styles)
+        self.assertIn('hausman-hub-weather-sources.css?v=1.51.20', styles)
+        self.assertIn('hausman-hub-wizard-validation.css?v=1.51.20', styles)
+        self.assertIn('hausman-hub-catalog.css?v=1.51.20', styles)
         self.assertIn("validation-issue-row", content)
         self.assertIn(
             "grid-template-columns:30px minmax(0,1fr) auto",
@@ -201,6 +202,20 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn("main.setup-shell { grid-template-columns:minmax(0,1fr); }", styles)
         self.assertIn("main.setup-shell > :not(.app-sidebar) { grid-column:1; }", styles)
         self.assertIn("&& !this._deviceBindings.error", content)
+
+    def test_catalog_refresh_is_stable_and_kiosk_is_available(self) -> None:
+        content = PANEL_JS.read_text(encoding="utf-8")
+        navigation = NAVIGATION_JS.read_text(encoding="utf-8")
+        home_sections = HOME_SECTIONS_JS.read_text(encoding="utf-8")
+        load_body = content.split("async _load()", 1)[1].split("async _loadScenarios()", 1)[0]
+
+        self.assertNotIn("this._loadScenarios();", load_body)
+        self.assertNotIn("this._loadSettings();", load_body)
+        self.assertIn("this._sectionRenderKeys[sectionId] === key", content)
+        self.assertIn("export function createKioskButton", navigation)
+        self.assertIn("export async function toggleKioskMode", navigation)
+        self.assertIn('el("section", "catalog-hero")', home_sections)
+        self.assertIn('el("div", "catalog-toolbar")', home_sections)
 
     def test_disabled_buttons_use_semantic_surface_border_and_text_tokens(self) -> None:
         styles = PANEL_CSS.read_text(encoding="utf-8")
@@ -435,7 +450,8 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             && !String(node.className).split(" ").includes("tab")
             && !String(node.className).split(" ").includes("theme-switch")
             && !String(node.className).split(" ").includes("sidebar-intercom")
-          ))) {{
+            && !String(node.className).split(" ").includes("kiosk-toggle")
+        ))) {{
             throw new Error("climate action rendered without settings");
           }}
         """
@@ -753,7 +769,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.51.19",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.51.20",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },
