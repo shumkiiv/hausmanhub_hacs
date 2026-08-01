@@ -687,6 +687,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
                     "roomName": "Кухня",
                     "domain": "switch",
                     "category": "switch",
+                    "imageUrl": "https://www.zigbee2mqtt.io/images/devices/TS011F_plug_1.png",
                     "state": "on",
                     "stateLabel": "включено",
                     "tone": "good",
@@ -739,17 +740,19 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         panel._shell.tabs.energy.fire("click");
         await tick();
         let text = textOf(panel._shell.homeSections.energy);
-        if (!text.includes("Энергия") || !text.includes("850") || !text.includes("230,1") || !text.includes("Торшер") || !text.includes("2 доступно · 1 на главной") || !text.includes("Единый источник истины")) {
+        if (!text.includes("Энергия сейчас") || !text.includes("850") || !text.includes("230,1") || !text.includes("Торшер") || !text.includes("Устройства энергии") || !text.includes("Карточка на главной") || text.includes("Единый источник истины")) {
           throw new Error("energy summary is incomplete: " + text);
         }
-        const configure = findAll(panel._shell.homeSections.energy, (node) =>
-          node.tagName === "BUTTON" && node.textContent === "Настроить карточку")[0];
-        configure.fire("click");
+        const rows = findAll(panel._shell.homeSections.energy, (node) =>
+          node.tagName === "BUTTON" && String(node.className).includes("energy-device-card"));
+        if (rows.length !== 2 || !findAll(rows[0], (node) => node.tagName === "IMG").length) {
+          throw new Error("energy sources must use one tablet row and product image per physical device");
+        }
         const both = findAll(panel._shell.homeSections.energy, (node) =>
-          node.tagName === "BUTTON" && node.textContent === "Оба")[0];
+          node.tagName === "BUTTON" && node.textContent === "Вт + А")[0];
         both.fire("click");
         const save = findAll(panel._shell.homeSections.energy, (node) =>
-          node.tagName === "BUTTON" && node.textContent === "Сохранить настройку")[0];
+          node.tagName === "BUTTON" && node.textContent === "Сохранить настройки")[0];
         save.fire("click");
         await tick(10);
         const post = calls.find((call) => call.method === "PUT" && call.path === "hausman_hub/v1/energy-settings");

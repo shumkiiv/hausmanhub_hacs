@@ -27,12 +27,50 @@ function primaryEnergyValue(energy) {
   return watts;
 }
 
-function energyMetric(deps, label, value, tone = "") {
+function energyMetric(deps, label, value, tone = "", caption = "") {
   const { el } = deps;
   const item = el("div", `energy-metric${tone ? ` ${tone}` : ""}`);
   item.appendChild(el("span", null, label));
   item.appendChild(el("strong", null, value));
+  if (caption) item.appendChild(el("small", null, caption));
   return item;
+}
+
+function deviceWord(count) {
+  const value = Math.abs(Number(count)) % 100;
+  const tail = value % 10;
+  if (value > 10 && value < 20) return "устройств";
+  if (tail === 1) return "устройство";
+  if (tail > 1 && tail < 5) return "устройства";
+  return "устройств";
+}
+
+function sourceDevice(panel, source) {
+  const devices = panel._homeDashboard && Array.isArray(panel._homeDashboard.devices)
+    ? panel._homeDashboard.devices : [];
+  return devices.find((item) => item.id === source.deviceId || item.physicalId === source.deviceId);
+}
+
+function energyDeviceVisual(panel, source, deps) {
+  const { el, svgIcon, setAttr } = deps;
+  const device = sourceDevice(panel, source);
+  const visual = el("span", "energy-device-visual");
+  const imageUrl = String(source.imageUrl || device && device.imageUrl || "");
+  const fallback = el("span", "energy-device-visual-fallback");
+  fallback.appendChild(svgIcon("energy"));
+  if (/^https?:\/\//i.test(imageUrl)) {
+    const image = el("img");
+    image.src = imageUrl;
+    image.alt = "";
+    setAttr(image, "loading", "lazy");
+    setAttr(image, "decoding", "async");
+    setAttr(image, "referrerpolicy", "no-referrer");
+    fallback.hidden = true;
+    image.addEventListener("error", () => { image.hidden = true; fallback.hidden = false; });
+    visual.appendChild(image);
+  }
+  visual.appendChild(fallback);
+  return visual;
 }
 
 export function renderEnergyOverviewCard(panel, container, deps) {
@@ -119,7 +157,122 @@ function renderDeviceDetail(panel, container, source, deps) {
   }
 }
 
-function settingsPanel(panel, energy, deps) {
+function renderEnergyHistory(panel, energy, selected, deps) {
+  const { el, setAttr } = deps;
+  const card = el("section", "card energy-history-card");
+  const head = el("div", "energy-card-head energy-history-head");
+  const copy = el("div", "energy-card-title");
+  copy.appendChild(el("h3", null, "Потребление за 24 часа"));
+  copy.appendChild(el("small", null, selected.length
+    ? selected.map((item) => item.name).join(" + ") : "Источники не выбраны"));
+  head.appendChild(copy);
+  const periods = el("div", "energy-periods");
+  ["День", "Неделя", "Месяц", "Год"].forEach((label, index) => {
+    const period = el("button", index === 0 ? "is-selected" : "", label);
+    period.type = "button";
+    period.disabled = index !== 0;
+    setAttr(period, "aria-pressed", index === 0 ? "true" : "false");
+    periods.appendChild(period);
+  });
+  head.appendChild(periods);
+  card.appendChild(head);
+  const layout = el("div", "energy-history-layout");
+  layout.appendChild(historyBars(panel, { id: "selection", name: "выбранных источников" }, deps));
+  const sources = el("div", "energy-current-sources");
+  sources.appendChild(el("h4", null, "Источники"));
+  selected.slice(0, 2).forEach((source) => {
+    const row = el("button", "energy-current-source");
+    row.type = "button";
+    row.addEventListener("click", () => {
+      panel._energySelectedDeviceId = source.id;
+      panel._renderEnergySection(panel._shell.homeSections.energy);
+    });
+    const identity = el("span");
+    identity.appendChild(el("strong", null, source.name));
+    identity.appendChild(el("small", null, `${sourceMetric(source, "currentA", "А", 2)} · ${sourceMetric(source, "voltageV", "В")}`));
+    row.appendChild(identity);
+    row.appendChild(el("b", null, sourceMetric(source, "currentPowerW", "Вт")));
+    sources.appendChild(row);
+  });
+  if (!selected.length) sources.appendChild(el("div", "energy-sources-empty", "Выберите источники"));
+  layout.appendChild(sources);
+  card.appendChild(layout);
+  return card;
+}
+
+function renderEnergyDevices(panel, container, sources, deps) {
+  const { el, setAttr } = deps;
+  const card = el("section", "card energy-devices-panel");
+  const head = el("div", "energy-card-head energy-devices-toolbar");
+  const title = el("div", "energy-card-title");
+  title.appendChild(el("h3", null, "Устройства энергии"));
+  title.appendChild(el("small", null, `${sources.length} ${deviceWord(sources.length)} · одна строка на физическое устройство`));
+  head.appendChild(title);
+  const controls = el("div", "energy-device-controls");
+  const activeFilter = panel._energyFilter || "all";
+  [["all", "Все"], ["online", "На связи"], ["power", "По мощности"]].forEach(([value, label]) => {
+    const button = el("button", activeFilter === value ? "is-selected" : "", label);
+    button.type = "button";
+    button.addEventListener("click", () => {
+      panel._energyFilter = value;
+      panel._renderEnergySection(container);
+    });
+    controls.appendChild(button);
+  });
+  const search = el("input", "energy-device-search");
+  search.type = "search";
+  search.placeholder = "Поиск";
+  search.value = panel._energyQuery || "";
+  setAttr(search, "aria-label", "Найти энергетическое устройство");
+  search.addEventListener("input", () => {
+    panel._energyQuery = search.value;
+    panel._renderEnergySection(container);
+  });
+  controls.appendChild(search);
+  head.appendChild(controls);
+  card.appendChild(head);
+
+  const query = String(panel._energyQuery || "").trim().toLocaleLowerCase("ru");
+  let shown = sources.filter((source) => activeFilter !== "online" || source.available);
+  if (query) shown = shown.filter((source) => `${source.name} ${source.roomName || ""}`.toLocaleLowerCase("ru").includes(query));
+  if (activeFilter === "power") shown = [...shown].sort((left, right) => (Number(right.currentPowerW) || 0) - (Number(left.currentPowerW) || 0));
+  const list = el("div", "energy-device-list");
+  shown.forEach((source) => {
+    const device = sourceDevice(panel, source);
+    const row = el("button", `energy-device-card${source.available ? "" : " is-unavailable"}`);
+    row.type = "button";
+    setAttr(row, "aria-label", `Открыть устройство ${source.name}`);
+    row.addEventListener("click", () => {
+      panel._energySelectedDeviceId = source.id;
+      panel._renderEnergySection(container);
+    });
+    row.appendChild(energyDeviceVisual(panel, source, deps));
+    const identity = el("span", "energy-device-card-copy");
+    identity.appendChild(el("strong", null, source.name));
+    identity.appendChild(el("small", null, [source.roomName || "Без комнаты", device && device.manufacturer, device && device.model].filter(Boolean).join(" · ")));
+    row.appendChild(identity);
+    const live = el("span", "energy-device-value is-accent");
+    live.appendChild(el("b", null, sourceMetric(source, "currentPowerW", "Вт")));
+    live.appendChild(el("small", null, `${sourceMetric(source, "currentA", "А", 2)} · ${sourceMetric(source, "voltageV", "В")}`));
+    row.appendChild(live);
+    const accumulated = el("span", "energy-device-value");
+    accumulated.appendChild(el("b", null, sourceMetric(source, source.todayKwh !== null && source.todayKwh !== undefined ? "todayKwh" : "totalKwh", "кВт·ч", 2)));
+    accumulated.appendChild(el("small", null, source.todayKwh !== null && source.todayKwh !== undefined ? "за сегодня" : "накоплено"));
+    row.appendChild(accumulated);
+    const status = el("span", `energy-device-status ${source.available ? "is-online" : "is-offline"}`);
+    status.appendChild(el("strong", null, source.available ? "В сети" : "Нет связи"));
+    status.appendChild(el("small", null, source.available ? "обновляется" : "проверьте устройство"));
+    row.appendChild(status);
+    row.appendChild(el("span", "energy-device-open", "Подробнее"));
+    row.appendChild(el("span", "energy-overview-chevron", "›"));
+    list.appendChild(row);
+  });
+  if (!shown.length) list.appendChild(el("div", "energy-devices-empty", "Устройства не найдены"));
+  card.appendChild(list);
+  return card;
+}
+
+function compactEnergySettings(panel, container, energy, deps) {
   const { el, setAttr } = deps;
   const draft = panel._energyDraft || {
     displayUnits: energy.settings.displayUnits || "watts",
@@ -129,95 +282,96 @@ function settingsPanel(panel, energy, deps) {
     selectedDeviceIds: [...(energy.selectedSourceIds || [])],
   };
   panel._energyDraft = draft;
-  const card = el("section", "card energy-settings-card");
-  const heading = el("div", "energy-settings-head");
-  const copy = el("div");
-  copy.appendChild(el("h3", null, "Настройка карточки"));
-  copy.appendChild(el("p", "section-intro", "Выберите единицы, способ показа и физические устройства. Настройка хранится в Home Assistant для всех клиентов."));
-  heading.appendChild(copy);
-  const close = el("button", "secondary", "Закрыть");
-  close.type = "button";
-  close.addEventListener("click", () => { panel._energySettingsOpen = false; panel._render(); });
-  heading.appendChild(close);
-  card.appendChild(heading);
-  const fieldGrid = el("div", "energy-settings-grid");
-  const unitField = el("fieldset", "energy-choice-field");
-  unitField.appendChild(el("legend", null, "Основное значение"));
+  const card = el("section", "card energy-compact-settings");
+  card.appendChild(el("h3", null, "Карточка на главной"));
+  card.appendChild(el("p", null, "Единицы, источники и способ группировки"));
+  card.appendChild(el("span", "energy-settings-label", "Единицы"));
   const units = el("div", "energy-segments");
-  [["watts", "Вт"], ["amps", "Амперы"], ["both", "Оба"]].forEach(([value, label]) => {
+  [["watts", "Вт"], ["amps", "А"], ["both", "Вт + А"]].forEach(([value, label]) => {
     const button = el("button", draft.displayUnits === value ? "is-selected" : "", label);
     button.type = "button";
     setAttr(button, "aria-pressed", draft.displayUnits === value ? "true" : "false");
-    button.addEventListener("click", () => { draft.displayUnits = value; panel._render(); });
+    button.addEventListener("click", () => { draft.displayUnits = value; panel._renderEnergySection(container); });
     units.appendChild(button);
   });
-  unitField.appendChild(units);
-  fieldGrid.appendChild(unitField);
-  const aggregationField = el("fieldset", "energy-choice-field");
-  aggregationField.appendChild(el("legend", null, "Отображение источников"));
-  const aggregation = el("div", "energy-segments");
-  [["combined", "Вместе"], ["separate", "Раздельно"]].forEach(([value, label]) => {
-    const button = el("button", draft.aggregation === value ? "is-selected" : "", label);
-    button.type = "button";
-    setAttr(button, "aria-pressed", draft.aggregation === value ? "true" : "false");
-    button.addEventListener("click", () => { draft.aggregation = value; panel._render(); });
-    aggregation.appendChild(button);
+  card.appendChild(units);
+  [["Напряжение", draft.showVoltage ? "Показывать" : "Скрывать", () => { draft.showVoltage = !draft.showVoltage; }],
+    ["Источники", draft.aggregation === "combined" ? "Вместе" : "Раздельно", () => { draft.aggregation = draft.aggregation === "combined" ? "separate" : "combined"; }],
+    ["Все устройства", draft.useAllDevices ? "Выбраны" : "Выборочно", () => { draft.useAllDevices = !draft.useAllDevices; }],
+  ].forEach(([label, value, update]) => {
+    const row = el("button", "energy-setting-line");
+    row.type = "button";
+    row.appendChild(el("span", null, label));
+    row.appendChild(el("strong", null, value));
+    row.addEventListener("click", () => { update(); panel._renderEnergySection(container); });
+    card.appendChild(row);
   });
-  aggregationField.appendChild(aggregation);
-  aggregationField.appendChild(el("small", "energy-choice-help", "«Вместе» показывает сумму мощности и тока. Складывать ток корректно только для источников одной линии; общий счётчик и его дочерние розетки одновременно выбирать не следует."));
-  fieldGrid.appendChild(aggregationField);
-  const voltage = el("label", "energy-toggle-row");
-  const voltageInput = el("input");
-  voltageInput.type = "checkbox";
-  voltageInput.checked = draft.showVoltage;
-  voltageInput.addEventListener("change", () => { draft.showVoltage = voltageInput.checked; });
-  voltage.appendChild(voltageInput);
-  const voltageCopy = el("span");
-  voltageCopy.appendChild(el("strong", null, "Показывать напряжение"));
-  voltageCopy.appendChild(el("small", null, "Напряжение не суммируется; для нескольких источников показывается среднее доступное значение."));
-  voltage.appendChild(voltageCopy);
-  fieldGrid.appendChild(voltage);
-  card.appendChild(fieldGrid);
-  const all = el("label", "energy-toggle-row energy-all-toggle");
-  const allInput = el("input");
-  allInput.type = "checkbox";
-  allInput.checked = draft.useAllDevices;
-  allInput.addEventListener("change", () => { draft.useAllDevices = allInput.checked; panel._render(); });
-  all.appendChild(allInput);
-  const allCopy = el("span");
-  allCopy.appendChild(el("strong", null, "Все подходящие устройства"));
-  allCopy.appendChild(el("small", null, "Новые физические устройства с измерениями энергии будут добавляться автоматически."));
-  all.appendChild(allCopy);
-  card.appendChild(all);
-  const list = el("div", `energy-source-picker${draft.useAllDevices ? " is-disabled" : ""}`);
-  energy.sources.forEach((source) => {
-    const option = el("label", "energy-source-option");
-    const input = el("input");
-    input.type = "checkbox";
-    input.disabled = draft.useAllDevices;
-    input.checked = draft.useAllDevices || draft.selectedDeviceIds.includes(source.id);
-    input.addEventListener("change", () => {
+  card.appendChild(el("span", "energy-settings-label", "Источники на карточке"));
+  const sources = el("div", "energy-compact-sources");
+  energy.sources.slice(0, 5).forEach((source) => {
+    const checked = draft.useAllDevices || draft.selectedDeviceIds.includes(source.id);
+    const label = el("label", "energy-compact-source");
+    const checkbox = el("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = checked;
+    checkbox.disabled = draft.useAllDevices;
+    checkbox.addEventListener("change", () => {
       const selected = new Set(draft.selectedDeviceIds);
-      if (input.checked) selected.add(source.id); else selected.delete(source.id);
+      if (checkbox.checked) selected.add(source.id); else selected.delete(source.id);
       draft.selectedDeviceIds = [...selected];
     });
-    option.appendChild(input);
-    const optionCopy = el("span");
-    optionCopy.appendChild(el("strong", null, source.name));
-    optionCopy.appendChild(el("small", null, `${source.roomName || "Без комнаты"} · ${sourceMetric(source, "currentPowerW", "Вт")}`));
-    option.appendChild(optionCopy);
-    list.appendChild(option);
+    label.appendChild(checkbox);
+    const copy = el("span");
+    copy.appendChild(el("strong", null, source.name));
+    copy.appendChild(el("small", null, sourceMetric(source, "currentPowerW", "Вт")));
+    label.appendChild(copy);
+    sources.appendChild(label);
   });
-  card.appendChild(list);
-  const actions = el("div", "energy-settings-actions");
-  const save = el("button", null, "Сохранить настройку");
+  card.appendChild(sources);
+  const save = el("button", "energy-settings-save", "Сохранить настройки");
   save.type = "button";
   save.disabled = panel._busy || (!draft.useAllDevices && !draft.selectedDeviceIds.length);
   save.addEventListener("click", () => panel._saveEnergySettings());
-  actions.appendChild(save);
-  actions.appendChild(el("span", "muted", save.disabled && !panel._busy ? "Выберите хотя бы одно устройство." : "Изменения применятся к карточке и разделу энергии."));
-  card.appendChild(actions);
+  card.appendChild(save);
   return card;
+}
+
+function renderEnergySidebar(panel, container, energy, sources, deps) {
+  const { el, svgIcon } = deps;
+  const sidebar = el("aside", "energy-sidebar");
+  const summary = el("section", "card energy-sidebar-summary");
+  summary.appendChild(el("h3", null, "Сводка"));
+  summary.appendChild(el("strong", "energy-sidebar-primary", sourceMetric(energy, "currentPowerW", "Вт")));
+  summary.appendChild(el("small", "energy-sidebar-caption", "Текущая нагрузка"));
+  const history = panel._energyHistory && panel._energyHistory.selection;
+  const peak = Array.isArray(history) && history.length
+    ? `${number(Math.max(...history.map((point) => Number(point.mean) || 0)))} Вт` : "—";
+  [["Сегодня", sourceMetric(energy, "todayKwh", "кВт·ч", 2), ""],
+    ["Пик", peak, ""],
+    ["Напряжение", sourceMetric(energy, "voltageV", "В"), ""],
+  ].forEach(([label, value, tone]) => {
+    const row = el("div", `energy-sidebar-row${tone ? ` ${tone}` : ""}`);
+    row.appendChild(el("span", null, label));
+    row.appendChild(el("strong", null, value));
+    summary.appendChild(row);
+  });
+  sidebar.appendChild(summary);
+  const unavailable = sources.filter((source) => !source.available);
+  const attention = el("section", `card energy-attention${unavailable.length ? " has-warning" : ""}`);
+  const attentionHead = el("div", "energy-attention-head");
+  attentionHead.appendChild(svgIcon(unavailable.length ? "warning" : "shield"));
+  attentionHead.appendChild(el("strong", null, unavailable.length ? "Требует внимания" : "Всё на связи"));
+  attention.appendChild(attentionHead);
+  if (unavailable.length) unavailable.slice(0, 2).forEach((source) => {
+    const row = el("div", "energy-attention-row");
+    row.appendChild(el("span", null, source.name));
+    row.appendChild(el("strong", null, "Нет связи"));
+    attention.appendChild(row);
+  });
+  else attention.appendChild(el("p", null, "Показания обновляются штатно"));
+  sidebar.appendChild(attention);
+  sidebar.appendChild(compactEnergySettings(panel, container, energy, deps));
+  return sidebar;
 }
 
 export function renderEnergySection(panel, container, deps) {
@@ -234,123 +388,37 @@ export function renderEnergySection(panel, container, deps) {
     return;
   }
   const heading = el("div", "home-section-heading energy-section-heading");
-  const icon = el("span", "home-section-icon");
-  icon.appendChild(svgIcon("energy"));
-  heading.appendChild(icon);
   const copy = el("div");
   copy.appendChild(el("h2", null, "Энергия"));
-  copy.appendChild(el("p", "section-intro", "Текущая нагрузка, напряжение, статистика и управление устройствами"));
+  copy.appendChild(el("p", "section-intro", "Потребление, нагрузка и управление источниками"));
   heading.appendChild(copy);
   container.appendChild(heading);
-  if (panel._energySettingsOpen) container.appendChild(settingsPanel(panel, energy, deps));
   const pageLayout = el("div", "energy-page-layout");
   const mainColumn = el("div", "energy-main-column");
-  const hero = el("section", "card energy-hero");
-  const main = el("div", "energy-hero-primary");
-  main.appendChild(el("span", "assistant-field-label", "Потребление сейчас"));
-  main.appendChild(el("strong", null, energy.available ? primaryEnergyValue(energy) : "Нет данных"));
-  main.appendChild(el("small", null, energy.settings.aggregation === "separate"
-    ? "Устройства показаны раздельно" : "Сумма выбранных источников"));
-  hero.appendChild(main);
-  const metrics = el("div", "energy-metric-grid");
-  if (energy.settings.displayUnits !== "amps") metrics.appendChild(energyMetric(deps, "Мощность", sourceMetric(energy, "currentPowerW", "Вт"), "is-accent"));
-  if (energy.settings.displayUnits !== "watts") metrics.appendChild(energyMetric(deps, "Ток", sourceMetric(energy, "currentA", "А", 2), "is-accent"));
-  if (energy.settings.showVoltage) metrics.appendChild(energyMetric(deps, "Напряжение", sourceMetric(energy, "voltageV", "В")));
-  hero.appendChild(metrics);
-  mainColumn.appendChild(hero);
   const selected = selectedSources(energy);
   const allSources = energy.sources;
-  const historyCard = el("section", "card energy-load-card energy-selection-history");
-  const historyHead = el("div", "energy-card-head");
-  historyHead.appendChild(el("h3", null, "Потребление за 24 часа"));
-  historyHead.appendChild(el("span", "status-badge", "Home Assistant"));
-  historyCard.appendChild(historyHead);
-  historyCard.appendChild(historyBars(panel, { id: "selection", name: "выбранных источников" }, deps));
-  mainColumn.appendChild(historyCard);
-  const chartCard = el("section", "card energy-load-card");
-  const chartHead = el("div", "energy-card-head");
-  chartHead.appendChild(el("h3", null, "Распределение нагрузки"));
-  chartHead.appendChild(el("span", "status-badge", "Сейчас"));
-  chartCard.appendChild(chartHead);
-  const maxPower = Math.max(...selected.map((item) => Number(item.currentPowerW) || 0), 1);
-  const bars = el("div", "energy-load-bars");
-  selected.forEach((item) => {
-    const row = el("button", "energy-load-row");
-    row.type = "button";
-    setAttr(row, "aria-label", `Открыть устройство ${item.name}`);
-    row.addEventListener("click", () => { panel._energySelectedDeviceId = item.id; panel._render(); });
-    row.appendChild(el("span", "energy-load-name", item.name));
-    const track = el("span", "energy-load-track");
-    const fill = el("span", "energy-load-fill");
-    fill.style.width = `${Math.max(2, ((Number(item.currentPowerW) || 0) / maxPower) * 100)}%`;
-    track.appendChild(fill);
-    row.appendChild(track);
-    row.appendChild(el("strong", null, sourceMetric(item, "currentPowerW", "Вт")));
-    bars.appendChild(row);
+  const hero = el("section", "card energy-live-card");
+  const liveHead = el("div", "energy-card-head energy-live-head");
+  liveHead.appendChild(el("h3", null, "Энергия сейчас"));
+  const sourcesButton = el("button", "energy-sources-button", `Источники: ${selected.length} ${deviceWord(selected.length)}`);
+  sourcesButton.type = "button";
+  sourcesButton.addEventListener("click", () => {
+    const settings = container.querySelector && container.querySelector(".energy-compact-settings");
+    if (settings && typeof settings.scrollIntoView === "function") settings.scrollIntoView({ behavior: "smooth", block: "nearest" });
   });
-  chartCard.appendChild(bars);
-  mainColumn.appendChild(chartCard);
-  const devicesHead = el("div", "energy-card-head energy-devices-head");
-  devicesHead.appendChild(el("h3", null, "Устройства"));
-  devicesHead.appendChild(el("span", "muted", `${allSources.length} доступно · ${selected.length} на главной`));
-  mainColumn.appendChild(devicesHead);
-  const grid = el("div", "energy-device-grid");
-  allSources.forEach((item) => {
-    const card = el("button", `energy-device-card${item.available ? "" : " is-unavailable"}`);
-    card.type = "button";
-    card.addEventListener("click", () => { panel._energySelectedDeviceId = item.id; panel._render(); });
-    const cardIcon = el("span", "energy-device-card-icon");
-    cardIcon.appendChild(svgIcon("energy"));
-    card.appendChild(cardIcon);
-    const cardCopy = el("span", "energy-device-card-copy");
-    cardCopy.appendChild(el("strong", null, item.name));
-    cardCopy.appendChild(el("small", null, item.roomName || "Без комнаты"));
-    const values = el("span", "energy-device-values");
-    values.appendChild(el("b", null, sourceMetric(item, "currentPowerW", "Вт")));
-    values.appendChild(el("span", null, `${sourceMetric(item, "currentA", "А", 2)} · ${sourceMetric(item, "voltageV", "В")}`));
-    cardCopy.appendChild(values);
-    card.appendChild(cardCopy);
-    card.appendChild(el("span", "energy-overview-chevron", "›"));
-    grid.appendChild(card);
-  });
-  mainColumn.appendChild(grid);
+  liveHead.appendChild(sourcesButton);
+  hero.appendChild(liveHead);
+  const metrics = el("div", "energy-metric-grid");
+  metrics.appendChild(energyMetric(deps, "Мощность", sourceMetric(energy, "currentPowerW", "Вт"), "is-accent", "Сейчас · выбранные источники"));
+  metrics.appendChild(energyMetric(deps, "Ток", sourceMetric(energy, "currentA", "А", 2), "", "Суммарно по источникам"));
+  metrics.appendChild(energyMetric(deps, "Напряжение", sourceMetric(energy, "voltageV", "В"), "", Number(energy.voltageV) >= 207 && Number(energy.voltageV) <= 253 ? "Нормальный диапазон" : "Проверьте напряжение"));
+  metrics.appendChild(energyMetric(deps, "Сегодня", sourceMetric(energy, "todayKwh", "кВт·ч", 2), "is-success", energy.todayKwh === null || energy.todayKwh === undefined ? "История не передана" : "За текущие сутки"));
+  hero.appendChild(metrics);
+  mainColumn.appendChild(hero);
+  mainColumn.appendChild(renderEnergyHistory(panel, energy, selected, deps));
+  mainColumn.appendChild(renderEnergyDevices(panel, container, allSources, deps));
   pageLayout.appendChild(mainColumn);
-
-  const sidebar = el("aside", "energy-sidebar");
-  const summary = el("section", "card energy-sidebar-summary");
-  summary.appendChild(el("h3", null, "Сводка"));
-  const availableCount = allSources.filter((item) => item.available).length;
-  [
-    ["Источники", String(allSources.length), ""],
-    ["Доступны", String(availableCount), "is-success"],
-    ["Накоплено", sourceMetric(energy, "totalKwh", "кВт·ч", 3), ""],
-  ].forEach(([label, value, tone]) => {
-    const row = el("div", `energy-sidebar-row${tone ? ` ${tone}` : ""}`);
-    row.appendChild(el("span", null, label));
-    row.appendChild(el("strong", null, value));
-    summary.appendChild(row);
-  });
-  sidebar.appendChild(summary);
-
-  const truth = el("section", "card energy-truth-card");
-  const truthIcon = el("span", "energy-truth-icon");
-  truthIcon.appendChild(svgIcon("energy"));
-  truth.appendChild(truthIcon);
-  truth.appendChild(el("h3", null, "Единый источник истины"));
-  truth.appendChild(el("p", null, "Выбор устройств и единиц хранится в Home Assistant и одинаков для планшета и панели HausmanHub."));
-  sidebar.appendChild(truth);
-
-  const configure = el("button", "secondary energy-sidebar-configure", "Настроить карточку");
-  configure.type = "button";
-  configure.addEventListener("click", () => {
-    panel._energySettingsOpen = !panel._energySettingsOpen;
-    panel._render();
-  });
-  const configureIcon = el("span", "energy-sidebar-configure-icon");
-  configureIcon.appendChild(svgIcon("settings"));
-  configure.appendChild(configureIcon);
-  sidebar.appendChild(configure);
-  pageLayout.appendChild(sidebar);
+  pageLayout.appendChild(renderEnergySidebar(panel, container, energy, allSources, deps));
   container.appendChild(pageLayout);
 }
 
