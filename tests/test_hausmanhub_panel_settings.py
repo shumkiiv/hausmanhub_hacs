@@ -30,6 +30,7 @@ SCENARIOS_JS = PANEL_JS.with_name("hausman-hub-scenarios.js")
 SCENARIO_ICONS_JS = PANEL_JS.with_name("hausman-hub-scenario-icons.js")
 SETTINGS_CSS = PANEL_JS.with_name("hausman-hub-settings.css")
 DIAGNOSTICS_JS = PANEL_JS.with_name("hausman-hub-diagnostics.js")
+ROLLOUT_JS = PANEL_JS.with_name("hausman-hub-rollout.js")
 DIAGNOSTICS_CSS = PANEL_JS.with_name("hausman-hub-diagnostics.css")
 SWITCH_CSS = PANEL_JS.with_name("hausman-hub-switch.css")
 DEVICE_BINDINGS_CSS = PANEL_JS.with_name("hausman-hub-device-bindings.css")
@@ -497,6 +498,10 @@ def panel_script(
       vm.runInThisContext(
         fs.readFileSync({str(DIAGNOSTICS_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(DIAGNOSTICS_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(ROLLOUT_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(ROLLOUT_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(PANEL_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, ""),
@@ -3038,7 +3043,14 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         payloads["hausman_hub/v1/admin/climate-mode"] = {
             "mode": "disabled",
             "contour_configured": True,
-            "rollout": {"enable_allowed": True},
+            "rollout": {
+                "phase": "ready_for_canary",
+                "enable_allowed": True,
+                "shadow_sample_count": 24,
+                "shadow_ready_room_count": 1,
+                "canary_room_id": "living",
+                "reasons": [],
+            },
         }
         script = panel_script(
             payloads,
@@ -3047,6 +3059,19 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const buttons = findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON");
         const enable = buttons.find((node) => node.textContent === "Запустить пилотную комнату");
         if (!enable || enable.disabled) throw new Error("enabled switch missing");
+        const rolloutCard = findAll(panel.shadowRoot, (node) =>
+          String(node.className).split(" ").includes("rollout-readiness"))[0];
+        if (!rolloutCard) throw new Error("rollout card missing");
+        const rollout = textOf(rolloutCard);
+        for (const expected of ["Пилот готов к запуску", "24", "Комнат проверено", "Гостиная"]) {
+          if (!rollout.includes(expected)) throw new Error("rollout summary missing: " + expected);
+        }
+        const readyBadge = findAll(panel.shadowRoot, (node) =>
+          String(node.className).split(" ").includes("status-badge")
+          && node.textContent === "Готово")[0];
+        if (!readyBadge || !String(readyBadge.className).split(" ").includes("is-ready")) {
+          throw new Error("ready rollout does not use the shared status style");
+        }
         enable.fire("click");
         await tick();
         const post = calls.find((call) => call.method === "POST" && call.path === "hausman_hub/v1/admin/climate-mode");
@@ -3055,6 +3080,39 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         if (JSON.stringify(post.payload) !== JSON.stringify(expected)) {
           throw new Error("mode payload mismatch: " + JSON.stringify(post.payload));
         }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_rollout_explains_why_pilot_is_still_blocked(self) -> None:
+        payloads = dict(GET_PATHS)
+        payloads["hausman_hub/v1/admin/climate-mode"] = {
+            "mode": "disabled",
+            "contour_configured": True,
+            "rollout": {
+                "phase": "shadow",
+                "enable_allowed": False,
+                "shadow_sample_count": 7,
+                "shadow_ready_room_count": 0,
+                "canary_room_id": "living",
+                "reasons": ["shadow_evidence_not_ready"],
+            },
+        }
+        script = panel_script(
+            payloads,
+            {},
+            """
+        const text = textOf(panel.shadowRoot);
+        for (const expected of [
+          "Идёт безопасная проверка без команд", "Без команд", "7",
+          "Для выбранной комнаты пока недостаточно подтверждённых наблюдений",
+        ]) {
+          if (!text.includes(expected)) throw new Error("blocked rollout explanation missing: " + expected);
+        }
+        const enable = findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON")
+          .find((node) => node.textContent === "Запустить пилотную комнату");
+        if (!enable || !enable.disabled) throw new Error("unsafe pilot start remained enabled");
             """,
         )
         completed = run_panel_script(script)
