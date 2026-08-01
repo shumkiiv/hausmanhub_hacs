@@ -64,7 +64,10 @@ function metrics(panel, devices, rooms) {
     ? panel._homeDashboard.alarms.filter((alarm) => alarm.active !== false) : [];
   const offline = devices.filter((device) => device.unavailable || device.state === "unavailable").length;
   const active = devices.filter((device) => !device.unavailable && (
-    device.active === true || !["off", "idle", "standby", "unknown", "unavailable"].includes(device.state)
+    device.active === true || (
+      typeof device.active !== "boolean"
+      && !["off", "idle", "standby", "unknown", "unavailable"].includes(device.state)
+    )
   )).length;
   return {
     total: devices.length,
@@ -105,7 +108,7 @@ function renderToolbar(container, count, deps) {
   const toolbar = el("div", "catalog-toolbar");
   const title = el("div", "catalog-toolbar-title");
   title.appendChild(el("h3", null, "Каталог"));
-  title.appendChild(el("span", "status-badge catalog-count", `${count} устройств`));
+  title.appendChild(el("span", "status-badge catalog-count", `${count} ${deviceCountWord(count)}`));
   toolbar.appendChild(title);
   const controls = el("div", "catalog-controls");
   const filters = el("div", "catalog-filters");
@@ -127,7 +130,7 @@ function renderToolbar(container, count, deps) {
       if (!card.hidden) visible += 1;
     });
     const badge = toolbar.querySelector(".catalog-count");
-    if (badge) badge.textContent = `${visible} устройств`;
+    if (badge) badge.textContent = `${visible} ${deviceCountWord(visible)}`;
     container.querySelectorAll(".inventory-room").forEach((room) => {
       room.hidden = !Array.from(room.querySelectorAll(".inventory-device-card")).some((card) => !card.hidden);
     });

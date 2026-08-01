@@ -194,12 +194,13 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertLessEqual(len(wizard_validation_styles.encode("utf-8")), 8 * 1024)
         self.assertLessEqual(len(catalog_styles.encode("utf-8")), 8 * 1024)
         self.assertIn('"/api/hausman_hub/panel/hausman-hub-panel.css"', content)
-        self.assertIn('hausman-hub-settings.css?v=1.51.22', styles)
-        self.assertIn('hausman-hub-control-channel.css?v=1.51.22', styles)
-        self.assertIn('hausman-hub-weather-sources.css?v=1.51.22', styles)
-        self.assertIn('hausman-hub-wizard-validation.css?v=1.51.22', styles)
-        self.assertIn('hausman-hub-catalog.css?v=1.51.22', styles)
-        self.assertIn('hausman-hub-media-device.css?v=1.51.22', styles)
+        self.assertIn('hausman-hub-settings.css?v=1.51.24', styles)
+        self.assertIn('hausman-hub-control-channel.css?v=1.51.24', styles)
+        self.assertIn('hausman-hub-weather-sources.css?v=1.51.24', styles)
+        self.assertIn('hausman-hub-wizard-validation.css?v=1.51.24', styles)
+        self.assertIn('hausman-hub-catalog.css?v=1.51.24', styles)
+        self.assertIn('hausman-hub-media-device.css?v=1.51.24', styles)
+        self.assertIn(".inventory-device-icon .icon { display:block;", styles)
         self.assertIn("validation-issue-row", content)
         self.assertIn(
             "grid-template-columns:30px minmax(0,1fr) auto",
@@ -793,7 +794,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.51.22",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.51.24",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },

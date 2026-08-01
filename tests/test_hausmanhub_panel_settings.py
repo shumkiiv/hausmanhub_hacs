@@ -1095,6 +1095,65 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
+    def test_security_cards_use_russian_states_and_distinct_centered_icons(self) -> None:
+        payloads = dict(GET_PATHS)
+        payloads["hausman_hub/v1/dashboard"] = {
+            "rooms": [{"id": "entry", "name": "Тамбур", "temp": 24.0, "humidity": 45}],
+            "devices": [
+                {
+                    "id": "device-lock", "physicalId": "device-lock",
+                    "entityId": "lock.front_door", "name": "Aqara Smart Lock A100",
+                    "roomId": "entry", "roomName": "Тамбур", "domain": "lock",
+                    "category": "security", "state": "locked", "stateLabel": "закрыт",
+                    "active": False, "tone": "neutral", "unavailable": False,
+                    "details": [{"entityId": "lock.front_door", "label": "Замок", "value": "закрыт"}],
+                },
+                {
+                    "id": "device-alarm", "physicalId": "device-alarm",
+                    "entityId": "alarm_control_panel.entry", "name": "EZVIZ Alarm",
+                    "roomId": "entry", "roomName": "Тамбур", "domain": "alarm_control_panel",
+                    "category": "security", "state": "disarmed", "stateLabel": "охрана выключена",
+                    "active": False, "tone": "neutral", "unavailable": False,
+                    "details": [{"entityId": "alarm_control_panel.entry", "label": "Охрана", "value": "охрана выключена"}],
+                },
+            ],
+            "alarms": [],
+        }
+        payloads["hausman_hub/v1/admin/scenarios/catalog"] = {"devices": []}
+        script = panel_script(
+            payloads,
+            {},
+            """
+        await tick();
+        panel._shell.tabs.security.fire("click");
+        const security = panel._shell.homeSections.security;
+        const text = textOf(security);
+        if (!text.includes("Безопасность · закрыт")
+          || !text.includes("Безопасность · охрана выключена")) {
+          throw new Error("security state is not semantic Russian copy: " + text);
+        }
+        if (text.includes("locked") || text.includes("disarmed") || text.includes("Устройство ·")) {
+          throw new Error("raw Home Assistant state leaked into security card: " + text);
+        }
+        const facts = findAll(security, (node) =>
+          String(node.className).split(" ").includes("catalog-hero-fact"));
+        if (facts.length !== 4 || !textOf(facts[2]).includes("0")
+          || !textOf(facts[2]).includes("Активно")) {
+          throw new Error("inactive security devices were counted as active");
+        }
+        const cards = findAll(security, (node) =>
+          String(node.className).split(" ").includes("inventory-device-card"));
+        if (cards.length !== 2) throw new Error("security cards missing");
+        const lockPath = findAll(cards[0], (node) => node.tagName === "PATH")[0];
+        const alarmPath = findAll(cards[1], (node) => node.tagName === "PATH")[0];
+        if (!lockPath || !alarmPath || !lockPath.d || !alarmPath.d || lockPath.d === alarmPath.d) {
+          throw new Error("lock and alarm must have distinct associative icons");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_overview_translates_readiness_reasons_without_snapshot(self) -> None:
         script = panel_script(
             GET_PATHS,

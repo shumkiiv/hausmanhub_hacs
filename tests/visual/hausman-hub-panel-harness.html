@@ -12,7 +12,7 @@
   <body>
     <hausman-hub-panel id="panel"></hausman-hub-panel>
     <script type="module">
-      import "../../custom_components/hausman_hub/frontend/hausman-hub-panel.js";
+      import "../../custom_components/hausman_hub/frontend/hausman-hub-panel.js?v=1.51.24";
       const params = new URLSearchParams(window.location.search);
       const panel = document.getElementById("panel");
       const theme = params.get("theme") === "dark" ? "dark" : "light";
@@ -21,7 +21,7 @@
       document.documentElement.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       document.body.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       panel._data = {
-        integration_version: "1.51.22",
+        integration_version: "1.51.24",
         readiness: { status: "ready", bridge_mode: "native", reasons: [] },
         snapshot: {
           rooms: [
@@ -173,7 +173,8 @@
         devices: [
           { id: "light-living", physicalId: "light-living", entityId: "light.living", name: "Основной свет", roomId: "living", roomName: "Гостиная", domain: "light", category: "lighting", stateLabel: "Включён", tone: "good", details: [{ entityId: "light.living", label: "Основной свет", value: "Включён" }] },
           { id: "media-living", physicalId: "media-living", entityId: "media_player.living", name: "Телевизор", roomId: "living", roomName: "Гостиная", domain: "media_player", category: "media", stateLabel: "Выключен", tone: "neutral", details: [{ entityId: "media_player.living", label: "Питание", value: "Выключено" }] },
-          { id: "lock-entry", physicalId: "lock-entry", entityId: "lock.entry", name: "Входная дверь", roomId: null, roomName: null, domain: "lock", category: "security", stateLabel: "Закрыта", tone: "good", details: [{ entityId: "lock.entry", label: "Замок", value: "Закрыт" }] },
+          { id: "lock-entry", physicalId: "lock-entry", entityId: "lock.entry", name: "Aqara Smart Lock A100", roomId: "entry", roomName: "Тамбур", domain: "lock", category: "security", state: "locked", stateLabel: "закрыт", active: false, tone: "neutral", details: [{ entityId: "lock.entry", label: "Замок", value: "закрыт" }, { entityId: "sensor.lock_battery", label: "Заряд", value: "88 %" }] },
+          { id: "alarm-entry", physicalId: "alarm-entry", entityId: "alarm_control_panel.entry", name: "EZVIZ Alarm", roomId: "entry", roomName: "Тамбур", domain: "alarm_control_panel", category: "security", state: "disarmed", stateLabel: "охрана выключена", active: false, tone: "neutral", details: [{ entityId: "alarm_control_panel.entry", label: "Охрана", value: "охрана выключена" }] },
         ],
         energy: {
           available: true,

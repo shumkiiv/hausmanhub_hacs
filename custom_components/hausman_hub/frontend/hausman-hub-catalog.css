@@ -17,11 +17,12 @@
 .catalog-toolbar-title { display:flex; align-items:center; gap:12px; min-width:0; }
 .catalog-toolbar-title h3 { font-size:21px; }
 .catalog-controls, .catalog-filters { display:flex; align-items:center; gap:8px; min-width:0; }
+.catalog-filters { flex:0 0 auto; }
 .catalog-filter { min-height:38px; margin:0; padding:8px 13px; border:1px solid var(--hmh-border,#2F3845);
   background:transparent; color:var(--hmh-text-dim,#9AA7B4); box-shadow:none; }
 .catalog-filter.is-active { border-color:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 42%,var(--hmh-border,#2F3845));
   background:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 12%,var(--hmh-raised,#181E26)); color:var(--hmh-text,#E7ECF3); }
-.catalog-search { width:270px; min-height:42px; }
+.catalog-search { flex:0 0 270px; width:270px; min-height:42px; }
 .inventory-device-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
 .inventory-device-card { container-type:inline-size; min-height:88px; }
 .inventory-device-summary { width:100%; }
@@ -53,6 +54,10 @@
 @media (min-width:1050px) {
   .sidebar-kiosk { display:flex; width:auto; margin:0 12px 10px; justify-content:flex-start; }
   .header-kiosk { display:none; }
+}
+@media (max-width:1280px) {
+  .catalog-toolbar { align-items:stretch; flex-direction:column; }
+  .catalog-controls { justify-content:space-between; }
 }
 @media (max-width:900px) {
   .catalog-hero-facts { grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px 0; }

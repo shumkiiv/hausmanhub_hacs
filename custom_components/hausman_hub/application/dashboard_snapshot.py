@@ -16,6 +16,7 @@ DASHBOARD_CONTRACT_VERSION = 1
 
 _PHYSICAL_DOMAINS = frozenset(
     {
+        "alarm_control_panel",
         "camera",
         "climate",
         "cover",
@@ -38,6 +39,7 @@ _PRIMARY_DOMAIN_ORDER = {
             "switch",
             "fan",
             "cover",
+            "alarm_control_panel",
             "lock",
             "vacuum",
             "media_player",
@@ -81,7 +83,22 @@ _ALARM_DEVICE_CLASSES = frozenset(
     {"moisture", "smoke", "gas", "carbon_monoxide", "safety", "problem"}
 )
 _ACTIVE_STATES = frozenset(
-    {"on", "open", "opening", "playing", "cleaning", "heat", "cool", "dry", "fan_only"}
+    {
+        "on",
+        "open",
+        "opening",
+        "playing",
+        "cleaning",
+        "heat",
+        "cool",
+        "dry",
+        "fan_only",
+        "armed_home",
+        "armed_away",
+        "armed_night",
+        "armed_vacation",
+        "armed_custom_bypass",
+    }
 )
 _UNAVAILABLE_STATES = frozenset({"unknown", "unavailable"})
 _VIRTUAL_DEVICE_INTEGRATIONS = frozenset(
@@ -240,6 +257,20 @@ def _state_label(entity: DashboardEntity) -> str:
         "dry": "осушение",
         "fan_only": "вентиляция",
         "idle": "ожидание",
+        "locked": "закрыт",
+        "unlocked": "открыт",
+        "locking": "закрывается",
+        "unlocking": "открывается",
+        "jammed": "заклинило",
+        "disarmed": "охрана выключена",
+        "armed_home": "охрана включена: дома",
+        "armed_away": "охрана включена: вне дома",
+        "armed_night": "охрана включена: ночь",
+        "armed_vacation": "охрана включена: отпуск",
+        "armed_custom_bypass": "охрана включена: особый режим",
+        "arming": "охрана включается",
+        "pending": "задержка перед включением",
+        "triggered": "тревога",
         "unavailable": "нет связи",
         "unknown": "состояние неизвестно",
     }
@@ -274,6 +305,7 @@ def _detail_label(entity: DashboardEntity) -> str:
         "lock": "Замок",
         "vacuum": "Уборка",
         "camera": "Камера",
+        "alarm_control_panel": "Охрана",
     }
     return domains.get(entity.domain, entity.name)
 
@@ -287,7 +319,7 @@ def _detail_value(entity: DashboardEntity) -> str:
 def _category(domain: str, entity: DashboardEntity) -> str:
     if domain in {"climate", "fan", "humidifier"}:
         return "climate"
-    if domain in {"camera", "lock"}:
+    if domain in {"camera", "lock", "alarm_control_panel"}:
         return "security"
     if domain == "media_player":
         return "media"

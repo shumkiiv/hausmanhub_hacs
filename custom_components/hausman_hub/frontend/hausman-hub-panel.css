@@ -1,11 +1,11 @@
-@import url("./hausman-hub-settings.css?v=1.51.22");
-@import url("./hausman-hub-device-bindings.css?v=1.51.22");
-@import url("./hausman-hub-energy.css?v=1.51.22");
-@import url("./hausman-hub-control-channel.css?v=1.51.22");
-@import url("./hausman-hub-weather-sources.css?v=1.51.22");
-@import url("./hausman-hub-wizard-validation.css?v=1.51.22");
-@import url("./hausman-hub-catalog.css?v=1.51.22");
-@import url("./hausman-hub-media-device.css?v=1.51.22");
+@import url("./hausman-hub-settings.css?v=1.51.24");
+@import url("./hausman-hub-device-bindings.css?v=1.51.24");
+@import url("./hausman-hub-energy.css?v=1.51.24");
+@import url("./hausman-hub-control-channel.css?v=1.51.24");
+@import url("./hausman-hub-weather-sources.css?v=1.51.24");
+@import url("./hausman-hub-wizard-validation.css?v=1.51.24");
+@import url("./hausman-hub-catalog.css?v=1.51.24");
+@import url("./hausman-hub-media-device.css?v=1.51.24");
 
 :host { display:block; box-sizing:border-box; width:100%; min-height:100%; overflow-x:hidden;
   --hmh-bg:#0B0F14; --hmh-surface:#12171D; --hmh-raised:#181E26; --hmh-field:#181E26; --hmh-hover:#1F2630;
@@ -167,7 +167,7 @@ section { min-width:0; }
 .inventory-device-summary::after { content:"›"; margin-left:2px; color:var(--hmh-text-dim,#9AA7B4); font-size:24px; transition:transform .18s ease; }
 .inventory-device-card[open] > .inventory-device-summary::after { transform:rotate(90deg); }
 .inventory-device-icon { width:54px; height:54px; border-radius:14px; }
-.inventory-device-icon .icon { width:27px; height:27px; }
+.inventory-device-icon .icon { display:block; width:27px; height:27px; margin:0; vertical-align:unset; }
 .inventory-device-copy { display:flex; flex:1 1 auto; flex-direction:column; gap:5px; min-width:0; }
 .inventory-device-copy strong { overflow:hidden; color:var(--hmh-text,#E7ECF3); font-size:16px; text-overflow:ellipsis; white-space:nowrap; }
 .inventory-device-copy small { overflow:hidden; color:var(--hmh-text-dim,#9AA7B4); font-size:13px; text-overflow:ellipsis; white-space:nowrap; }

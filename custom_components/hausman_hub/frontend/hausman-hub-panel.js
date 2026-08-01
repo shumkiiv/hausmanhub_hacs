@@ -1,15 +1,15 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.22";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.22";
-import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.22";
-import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.51.22";
-import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.22";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.22";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.22";
-import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.22";
-import { createKioskButton, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.22";
-import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.22";
-import { AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.51.22";
-import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.51.22";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.24";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.24";
+import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.24";
+import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.51.24";
+import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.24";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.24";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.24";
+import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.24";
+import { createKioskButton, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.24";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.24";
+import { AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.51.24";
+import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.51.24";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css";
@@ -167,6 +167,9 @@ const ICON_PATHS = {
   rooms: "M3 21V3h10v4h8v14h-2v-2h-4v2h-2v-8H5v8zm2-10h6V5H5zm10 6h4v-2h-4zm0-4h4v-2h-4z",
   media: "M4 6h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2m0 2v10h16V8zm6 2 5 3-5 3z",
   shield: "M12 2 4 5v6c0 5.05 3.41 9.74 8 11 4.59-1.26 8-5.95 8-11V5zm0 2.18L18 6.43V11c0 3.93-2.55 7.76-6 8.92C8.55 18.76 6 14.93 6 11V6.43z",
+  lock: "M17 8h-1V6a4 4 0 0 0-8 0v2H7a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2m-7-2a2 2 0 1 1 4 0v2h-4zm7 13H7v-9h10z",
+  alarm: "M6 18h12v2H6zm2-2V9a4 4 0 0 1 8 0v7zm2-2h4V9a2 2 0 0 0-4 0zM3 8l3-3 1.4 1.4-3 3zm18 0-1.4 1.4-3-3L18 5z",
+  camera: "M9 4 7.17 6H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-3.17L15 4zm3 13a4 4 0 1 1 0-8 4 4 0 0 1 0 8m0-2a2 2 0 1 0 0-4 2 2 0 0 0 0 4",
   settings: "M19.43 12.98c.04-.32.07-.65.07-.98s-.03-.66-.08-.98l2.11-1.65-2-3.46-2.49 1a7.2 7.2 0 0 0-1.69-.98L15 3.27h-4l-.35 2.66c-.61.25-1.17.59-1.69.98l-2.49-1-2 3.46 2.11 1.65c-.05.32-.08.66-.08.98s.03.66.08.98l-2.11 1.65 2 3.46 2.49-1c.52.4 1.08.73 1.69.98L11 20.73h4l.35-2.66c.61-.25 1.17-.58 1.69-.98l2.49 1 2-3.46zM13 17a5 5 0 1 1 0-10 5 5 0 0 1 0 10m0-3a2 2 0 1 0 0-4 2 2 0 0 0 0 4",
   chevron: "M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z",
   device: "M4 6h18V4H4c-1.1 0-2 .9-2 2v11H0v3h14v-3H4zm19 2h-6c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h6c.55 0 1-.45 1-1V9c0-.55-.45-1-1-1m-1 9h-4v-7h4z",
@@ -5218,7 +5221,10 @@ class HausmanHubPanel extends HTMLElement {
     const category = String(device && device.category || "");
     if (domain === "light" || category === "lighting") return "lightbulb";
     if (domain === "media_player" || category === "media") return "media";
-    if (["lock", "camera", "alarm_control_panel"].includes(domain) || category === "security") return "shield";
+    if (domain === "lock") return "lock";
+    if (domain === "alarm_control_panel") return "alarm";
+    if (domain === "camera") return "camera";
+    if (category === "security") return "shield";
     if (domain === "climate" || ["climate", "air"].includes(category)) return "thermometer";
     return "device";
   }
@@ -5341,7 +5347,7 @@ class HausmanHubPanel extends HTMLElement {
     card.appendChild(icon);
     const copy = el("div");
     copy.appendChild(el("strong", null, active.length ? `Активных тревог: ${active.length}` : "Активных тревог нет"));
-    copy.appendChild(el("span", "muted", `${alarms.length} датчиков безопасности под наблюдением`));
+    copy.appendChild(el("span", "muted", `Под наблюдением: ${alarms.length}`));
     card.appendChild(copy);
     container.appendChild(card);
   }

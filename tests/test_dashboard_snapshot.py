@@ -692,6 +692,54 @@ class DashboardSnapshotTest(unittest.TestCase):
         self.assertTrue(all(not device["possibleDuplicate"] for device in speaker_records))
         self.assertEqual(2, len({device["canonicalId"] for device in speaker_records}))
 
+    def test_security_devices_use_russian_semantic_states_and_category(self) -> None:
+        snapshot = build_dashboard_snapshot(
+            areas=(DashboardArea("entry", "Тамбур"),),
+            devices=(
+                DashboardDevice("front-lock", "Aqara Smart Lock A100", "entry"),
+                DashboardDevice("entry-alarm", "EZVIZ Alarm", "entry"),
+                DashboardDevice("leak-sensor", "Датчик протечки", "entry"),
+            ),
+            entities=(
+                DashboardEntity(
+                    "lock.front_door", "lock", "locked", "Замок",
+                    {}, "front-lock", "entry",
+                ),
+                DashboardEntity(
+                    "sensor.front_lock_battery", "sensor", "88", "Заряд",
+                    {"device_class": "battery", "unit_of_measurement": "%"},
+                    "front-lock", "entry",
+                ),
+                DashboardEntity(
+                    "alarm_control_panel.entry", "alarm_control_panel", "disarmed", "Охрана",
+                    {}, "entry-alarm", "entry",
+                ),
+                DashboardEntity(
+                    "binary_sensor.entry_leak", "binary_sensor", "off", "Протечка",
+                    {"device_class": "moisture"}, "leak-sensor", "entry",
+                ),
+            ),
+            generated_at_ms=1,
+            local_iso="2026-08-01T12:00:00+06:00",
+        )
+
+        cards = {device["name"]: device for device in snapshot["devices"]}
+        lock = cards["Aqara Smart Lock A100"]
+        alarm = cards["EZVIZ Alarm"]
+        leak = cards["Датчик протечки"]
+
+        self.assertEqual(("security", "закрыт"), (lock["category"], lock["stateLabel"]))
+        self.assertEqual("закрыт", lock["details"][0]["value"])
+        self.assertEqual(
+            ("security", "охрана выключена"),
+            (alarm["category"], alarm["stateLabel"]),
+        )
+        self.assertEqual("Охрана", alarm["details"][0]["label"])
+        self.assertEqual("охрана выключена", alarm["details"][0]["value"])
+        self.assertEqual("moisture", leak["category"])
+        self.assertNotEqual(lock["state"], lock["stateLabel"])
+        self.assertNotEqual(alarm["state"], alarm["stateLabel"])
+
 
 if __name__ == "__main__":
     unittest.main()
