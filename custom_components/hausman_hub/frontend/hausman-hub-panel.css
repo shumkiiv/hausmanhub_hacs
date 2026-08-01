@@ -1,8 +1,9 @@
-@import url("./hausman-hub-settings.css?v=1.51.18");
-@import url("./hausman-hub-device-bindings.css?v=1.51.18");
-@import url("./hausman-hub-energy.css?v=1.51.18");
-@import url("./hausman-hub-control-channel.css?v=1.51.18");
-@import url("./hausman-hub-weather-sources.css?v=1.51.18");
+@import url("./hausman-hub-settings.css?v=1.51.19");
+@import url("./hausman-hub-device-bindings.css?v=1.51.19");
+@import url("./hausman-hub-energy.css?v=1.51.19");
+@import url("./hausman-hub-control-channel.css?v=1.51.19");
+@import url("./hausman-hub-weather-sources.css?v=1.51.19");
+@import url("./hausman-hub-wizard-validation.css?v=1.51.19");
 
 :host { display:block; box-sizing:border-box; width:100%; min-height:100%; overflow-x:hidden;
   --hmh-bg:#0B0F14; --hmh-surface:#12171D; --hmh-raised:#181E26; --hmh-field:#181E26; --hmh-hover:#1F2630;
@@ -464,11 +465,8 @@ label.signal-option > input[type="radio"] { grid-column:1; width:18px; min-heigh
 .status-badge.is-attention { color:var(--warning-color,#ef6c00); }
 .wizard-section { margin:20px 0; padding-top:4px; border-top:1px solid var(--divider-color,#ddd); }
 .wizard-section > h3 { margin-bottom:8px; }
-.wizard-report { margin:12px 0 0; padding:12px; border:1px solid var(--divider-color,#ddd);
-  border-radius:12px; background:var(--secondary-background-color,#f2f4f5); }
 .wizard-hint { margin:12px 0 0; padding:12px; border:1px dashed var(--divider-color,#ddd);
   border-radius:12px; color:var(--secondary-text-color,#5b5b5b); }
- .wizard-report ul { margin:8px 0 0; padding-left:20px; }
  .ir-source-card { margin:14px 0; padding:15px; border:1px solid var(--divider-color,#ddd);
    border-radius:14px; background:var(--secondary-background-color,#f2f4f5); }
  .ir-source-card.is-recommended { border-color:color-mix(in srgb,var(--primary-color,#03a9f4) 48%,var(--divider-color,#ddd)); }

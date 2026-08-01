@@ -1,14 +1,14 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.18";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.18";
-import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.18";
-import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.51.18";
-import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.18";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.18";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.18";
-import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.18";
-import { openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.18";
-import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.18";
-import { AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.51.18";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.19";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.19";
+import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.19";
+import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.51.19";
+import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.19";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.19";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.19";
+import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.19";
+import { openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.19";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.19";
+import { AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.51.19";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css";
@@ -2873,20 +2873,46 @@ class HausmanHubPanel extends HTMLElement {
     const validation = this._firstRun.validation;
     if (validation) {
       const ready = validation.status === "ready" && validation.save_allowed === true;
-      const report = el("div", "wizard-report");
-      report.appendChild(el("strong", null, ready ? "Настройка прошла проверку" : "Найдены замечания"));
       const issues = this._firstRun.issues || [];
+      const report = el("section", `wizard-report validation-report ${ready ? "is-ready" : "is-blocked"}`);
+      const reportHead = el("div", "validation-report-head");
+      reportHead.appendChild(el("span", "validation-report-icon", ready ? "✓" : "!"));
+      const reportCopy = el("div", "validation-report-copy");
+      reportCopy.appendChild(el(
+        "strong",
+        null,
+        ready
+          ? (issues.length ? "Готово с замечаниями" : "Настройка готова")
+          : "Нужно исправить настройки"
+      ));
+      reportCopy.appendChild(el(
+        "span",
+        null,
+        ready
+          ? "Блокирующих ошибок нет — можно перейти к сохранению."
+          : "Исправьте отмеченные комнаты и повторите проверку."
+      ));
+      reportHead.appendChild(reportCopy);
+      report.appendChild(reportHead);
       if (issues.length) {
-        const list = el("ul");
+        const list = el("div", "validation-issue-list");
         issues.forEach((issue) => {
-          const line = el("li");
-          line.appendChild(el(
+          const line = el("div", `validation-issue-row ${issue.level === "warning" ? "is-warning" : "is-error"}`);
+          line.appendChild(el("span", "validation-issue-marker", issue.level === "warning" ? "!" : "×"));
+          const issueCopy = el("div", "validation-issue-copy");
+          issueCopy.appendChild(el(
+            "strong",
+            null,
+            issue.level === "warning" ? "Требует внимания" : "Нужно исправить"
+          ));
+          issueCopy.appendChild(el(
             "span",
             issue.level === "warning" ? "issue-warning" : null,
             issue.message || "Проверьте настройку."
           ));
+          line.appendChild(issueCopy);
           if (issue.room_id) {
-            const fix = el("button", "secondary", "Исправить комнату");
+            const fix = el("button", "secondary validation-issue-action", "Открыть комнату");
             fix.addEventListener("click", () => this._openFirstRunRoom(issue.room_id));
             line.appendChild(fix);
           }
@@ -2894,22 +2920,23 @@ class HausmanHubPanel extends HTMLElement {
         });
         report.appendChild(list);
       } else if (ready) {
-        report.appendChild(el("div", "muted", "Все выбранные комнаты готовы к сохранению."));
+        report.appendChild(el("div", "validation-ready-note", "Все выбранные комнаты и устройства проверены."));
       }
       card.appendChild(report);
     }
-    const actions = el("div", "actions");
+    const actions = el("div", "actions validation-actions");
     const back = el("button", "secondary", "Назад к параметрам дома");
     back.disabled = this._busy;
     back.addEventListener("click", () => {
       this._firstRun.step = "home";
       this._render();
     });
-    const check = el("button", null, "Проверить настройку");
+    const mainActions = el("div", "validation-actions-main");
+    const check = el("button", validation ? "secondary" : null, validation ? "Проверить повторно" : "Проверить настройку");
     check.disabled = this._busy;
     check.addEventListener("click", () => this._validateFirstRun());
     actions.appendChild(back);
-    actions.appendChild(check);
+    mainActions.appendChild(check);
     if (validation && validation.status === "ready" && validation.save_allowed === true) {
       const next = el("button", null, "Перейти к сохранению");
       next.disabled = this._busy;
@@ -2917,8 +2944,9 @@ class HausmanHubPanel extends HTMLElement {
         this._firstRun.step = "save";
         this._render();
       });
-      actions.appendChild(next);
+      mainActions.appendChild(next);
     }
+    actions.appendChild(mainActions);
     card.appendChild(actions);
   }
 
