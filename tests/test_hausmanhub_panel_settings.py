@@ -2786,8 +2786,10 @@ class PanelSettingsSectionsTest(unittest.TestCase):
             """
         const candidates = [
           { entity_id: "weather.forecast_omsk", name: "Forecast",
-            available: true, domain: "weather", room_id: "" },
+            available: false, domain: "weather", room_id: "" },
           { entity_id: "sensor.outdoor_temperature", name: "Внешний датчик температуры",
+            available: true, domain: "sensor", device_class: "temperature", room_id: "" },
+          { entity_id: "sensor.outdoor_reserve", name: "Резервный уличный датчик",
             available: true, domain: "sensor", device_class: "temperature", room_id: "" },
         ];
         const changes = [];
@@ -2808,7 +2810,10 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         }
         if (changes.length !== 1) throw new Error("priority change was not reported");
         const text = textOf(picker.root);
-        for (const label of ["Основной источник", "Резерв 1", "Добавить резервный источник"]) {
+        for (const label of [
+          "Основной источник", "Резерв 1", "Добавить резервный источник",
+          "Недоступен — будет пропущен", "Используется сейчас",
+        ]) {
           if (!text.includes(label)) throw new Error("priority UI missing: " + label);
         }
             """,

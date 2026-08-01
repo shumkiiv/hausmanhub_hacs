@@ -180,6 +180,10 @@ export function createPriorityChoicePicker(owner, config, deps) {
   };
   const render = () => {
     selected.innerHTML = "";
+    const activeEntityId = selectedValues.find((entityId) => {
+      const candidate = candidateById.get(entityId);
+      return candidate && candidate.available !== false && !candidate.missing;
+    });
     if (!selectedValues.length) {
       selected.appendChild(el(
         "div", "priority-source-empty",
@@ -201,6 +205,20 @@ export function createPriorityChoicePicker(owner, config, deps) {
         index === 0
           ? "Основной источник"
           : `Резерв ${index} · включится, если источники выше недоступны`
+      ));
+      const unavailable = !candidate || candidate.missing || candidate.available === false;
+      const sourceStatus = unavailable
+        ? "Недоступен — будет пропущен"
+        : entityId === activeEntityId
+          ? "Используется сейчас"
+          : "Резерв готов";
+      copy.appendChild(el(
+        "span",
+        `priority-source-status ${
+          entityId === activeEntityId ? "is-active" :
+            unavailable ? "is-unavailable" : "is-ready"
+        }`,
+        sourceStatus
       ));
       copy.appendChild(el(
         "small", null,

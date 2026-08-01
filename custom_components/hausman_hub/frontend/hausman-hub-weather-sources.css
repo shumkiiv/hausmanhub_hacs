@@ -7,6 +7,10 @@
 .priority-source-row.is-primary .priority-source-number{color:#fff;background:var(--hmh-success,#248759)}
 .priority-source-copy{display:flex;flex-direction:column;gap:4px;min-width:0}.priority-source-copy strong,.priority-source-copy small{overflow-wrap:anywhere}
 .priority-source-copy small{color:var(--hmh-muted,#aeb7c4);line-height:1.35}.priority-source-actions{display:flex;align-items:center;gap:8px}
+.priority-source-status{align-self:flex-start;padding:4px 8px;border-radius:999px;font-size:12px;font-weight:700;line-height:1.2;background:var(--hmh-raised,#202731);color:var(--hmh-muted,#aeb7c4)}
+.priority-source-status.is-active{background:color-mix(in srgb,var(--hmh-success,#3ddc84) 18%,transparent);color:var(--hmh-success,#248759)}
+.priority-source-status.is-ready{background:color-mix(in srgb,var(--primary-color,#4f8cff) 12%,transparent);color:var(--primary-color,#4f8cff)}
+.priority-source-status.is-unavailable{background:color-mix(in srgb,var(--hmh-warning,#d89b2b) 14%,transparent);color:var(--hmh-warning,#a66a00)}
 .priority-source-actions button,.priority-source-candidate button{min-height:38px}.priority-source-actions .icon-button{width:38px;min-width:38px;padding:0;font-size:18px}
 .priority-source-empty{padding:16px;border:1px dashed var(--divider-color,#d6deea);border-radius:14px;color:var(--hmh-muted,#aeb7c4)}
 .priority-source-chooser{margin-top:12px}.priority-source-available{padding:0 14px 14px}.priority-source-candidate{grid-template-columns:minmax(0,1fr) auto}
