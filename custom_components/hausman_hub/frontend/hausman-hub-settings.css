@@ -77,8 +77,7 @@
   background:var(--hmh-raised,#181E26); }
 .device-inventory-search { flex:0 0 245px; width:245px; min-height:42px; }
 .device-inventory-list { display:grid; gap:8px; margin-top:14px; }
-.device-inventory-row { display:grid; grid-template-columns:minmax(210px,1.4fr) minmax(130px,.7fr) minmax(150px,.75fr) minmax(240px,1.25fr);
-  align-items:center; gap:14px; min-height:78px; padding:12px 14px; border:1px solid color-mix(in srgb,var(--hmh-border,#2F3845) 76%,transparent);
+.device-inventory-row { display:block; min-height:78px; overflow:hidden; border:1px solid color-mix(in srgb,var(--hmh-border,#2F3845) 76%,transparent);
   border-radius:14px; background:color-mix(in srgb,var(--hmh-raised,#181E26) 70%,transparent); }
 .device-inventory-row.needs-attention { border-color:color-mix(in srgb,var(--warning-color,#E4A11B) 30%,var(--hmh-border,#2F3845)); }
 .device-inventory-identity strong, .device-inventory-identity small,
@@ -254,7 +253,7 @@ button.danger-button { color:#fff; border-color:color-mix(in srgb,var(--error-co
 @media (max-width:1050px) {
   .settings-status-panel { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .settings-status-panel > strong { grid-column:1 / -1; }
-  .device-inventory-row { grid-template-columns:minmax(210px,1.4fr) minmax(140px,.8fr) minmax(220px,1.2fr); }
+  .device-inventory-summary { grid-template-columns:minmax(210px,1.4fr) minmax(140px,.8fr) minmax(220px,1.2fr) 24px; }
   .device-inventory-composition { display:none; }
 }
 @media (max-width:760px) {
@@ -268,5 +267,7 @@ button.danger-button { color:#fff; border-color:color-mix(in srgb,var(--error-co
   .device-inventory-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .device-inventory-toolbar { align-items:stretch; flex-direction:column; }
   .device-inventory-search { flex:auto; width:100%; }
-  .device-inventory-row { grid-template-columns:1fr; gap:9px; }
+  .device-inventory-summary { grid-template-columns:1fr 24px; gap:9px; }
+  .device-inventory-room, .device-inventory-status { grid-column:1; }
+  .device-inventory-chevron { grid-column:2; grid-row:1; }
 }

@@ -38,13 +38,14 @@ SCENARIOS_CSS = PANEL_JS.with_name("hausman-hub-scenarios.css")
 SETTINGS_CSS = PANEL_JS.with_name("hausman-hub-settings.css")
 WIZARD_VALIDATION_CSS = PANEL_JS.with_name("hausman-hub-wizard-validation.css")
 CATALOG_CSS = PANEL_JS.with_name("hausman-hub-catalog.css")
+DEVICE_MAINTENANCE_CSS = PANEL_JS.with_name("hausman-hub-device-maintenance.css")
 MAX_PANEL_JS_BYTES = 277 * 1024
 MAX_HOME_SECTIONS_JS_BYTES = 16 * 1024
 MAX_ROOM_SETUP_JS_BYTES = 24 * 1024
 MAX_ROOM_DEVICE_GROUPS_JS_BYTES = 12 * 1024
 MAX_CONTROL_CHANNEL_JS_BYTES = 16 * 1024
 MAX_ROOM_CLIMATE_SOURCES_JS_BYTES = 16 * 1024
-MAX_DEVICE_INVENTORY_JS_BYTES = 16 * 1024
+MAX_DEVICE_INVENTORY_JS_BYTES = 20 * 1024
 MAX_DEVICE_BINDINGS_JS_BYTES = 20 * 1024
 MAX_AREA_BINDING_JS_BYTES = 24 * 1024
 MAX_NAVIGATION_JS_BYTES = 16 * 1024
@@ -73,6 +74,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         weather_sources = WEATHER_SOURCES_JS.read_text(encoding="utf-8")
         media_device = MEDIA_DEVICE_JS.read_text(encoding="utf-8")
         scenarios = SCENARIOS_JS.read_text(encoding="utf-8")
+        device_maintenance_css = DEVICE_MAINTENANCE_CSS.read_text(encoding="utf-8")
 
         self.assertLessEqual(len(content.encode("utf-8")), MAX_PANEL_JS_BYTES)
         self.assertLessEqual(len(weather_sources.encode("utf-8")), 24 * 1024)
@@ -106,12 +108,14 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             len(media_device.encode("utf-8")), MAX_MEDIA_DEVICE_JS_BYTES
         )
         self.assertLessEqual(len(scenarios.encode("utf-8")), MAX_SCENARIOS_JS_BYTES)
+        self.assertLessEqual(len(device_maintenance_css.encode("utf-8")), 8 * 1024)
         self.assertIn("renderHomeSection", home_sections)
         self.assertIn("renderFirstRunRoom", room_setup)
         self.assertIn("renderFirstRunDeviceGroups", room_device_groups)
         self.assertIn("resolveControlChannelTest", control_channel)
         self.assertIn("renderFirstRunClimateSources", room_climate_sources)
         self.assertIn("renderDeviceInventory", device_inventory)
+        self.assertIn("DEVICE_MAINTENANCE_API", device_inventory)
         self.assertIn("renderDeviceBindings", device_bindings)
         self.assertIn(
             "if (error && error.status === 409) state.preview = null;",
@@ -203,13 +207,14 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertLessEqual(len(wizard_validation_styles.encode("utf-8")), 8 * 1024)
         self.assertLessEqual(len(catalog_styles.encode("utf-8")), 8 * 1024)
         self.assertIn('"/api/hausman_hub/panel/hausman-hub-panel.css"', content)
-        self.assertIn('hausman-hub-settings.css?v=1.51.26', styles)
-        self.assertIn('hausman-hub-control-channel.css?v=1.51.26', styles)
-        self.assertIn('hausman-hub-weather-sources.css?v=1.51.26', styles)
-        self.assertIn('hausman-hub-wizard-validation.css?v=1.51.26', styles)
-        self.assertIn('hausman-hub-catalog.css?v=1.51.26', styles)
-        self.assertIn('hausman-hub-media-device.css?v=1.51.26', styles)
-        self.assertIn('hausman-hub-scenarios.css?v=1.51.26', styles)
+        self.assertIn('hausman-hub-settings.css?v=1.51.27', styles)
+        self.assertIn('hausman-hub-device-maintenance.css?v=1.51.27', styles)
+        self.assertIn('hausman-hub-control-channel.css?v=1.51.27', styles)
+        self.assertIn('hausman-hub-weather-sources.css?v=1.51.27', styles)
+        self.assertIn('hausman-hub-wizard-validation.css?v=1.51.27', styles)
+        self.assertIn('hausman-hub-catalog.css?v=1.51.27', styles)
+        self.assertIn('hausman-hub-media-device.css?v=1.51.27', styles)
+        self.assertIn('hausman-hub-scenarios.css?v=1.51.27', styles)
         self.assertIn(".inventory-device-icon .icon { display:block;", styles)
         self.assertIn("validation-issue-row", content)
         self.assertIn(
@@ -299,6 +304,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
 
     def test_panel_script_posts_only_to_approved_admin_routes(self) -> None:
         content = PANEL_JS.read_text(encoding="utf-8")
+        inventory = DEVICE_INVENTORY_JS.read_text(encoding="utf-8")
 
         for approved in (
             '"hausman_hub/v1/admin/panel"',
@@ -320,6 +326,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         ):
             with self.subTest(approved=approved):
                 self.assertIn(approved, content)
+        self.assertIn('"hausman_hub/v1/admin/device-maintenance"', inventory)
         self.assertIn('`${PANEL_API}/apply`', content)
         self.assertIn('`${PANEL_API}/temporary-temperature`', content)
         self.assertIn('`${AI_ASSISTANT_API}/settings`', content)
@@ -813,7 +820,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.51.26",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.51.27",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },

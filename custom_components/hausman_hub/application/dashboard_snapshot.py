@@ -182,6 +182,12 @@ def _opaque_id(prefix: str, source_id: str) -> str:
     return f"{prefix}_{digest}"
 
 
+def stable_public_id(prefix: str, source_id: str) -> str:
+    """Expose the canonical private-id-free identifier to admin adapters."""
+
+    return _opaque_id(prefix, source_id)
+
+
 def _number(value: object) -> float | None:
     if isinstance(value, bool):
         return None

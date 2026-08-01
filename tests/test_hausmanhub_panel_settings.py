@@ -1865,6 +1865,28 @@ class PanelSettingsSectionsTest(unittest.TestCase):
                 ],
             },
         }
+        payloads["hausman_hub/v1/admin/device-maintenance"] = {
+            "areas": [
+                {"id": "kids", "name": "Детская"},
+                {"id": "living", "name": "Гостиная"},
+            ],
+            "devices": {
+                "inventory-1": {
+                    "roomAreaId": "kids",
+                    "name": "Кондиционер",
+                    "haUrl": "/config/devices/device/native-one",
+                    "entityCount": 1,
+                    "entities": [{"id": "climate.kids", "name": "Климат детской", "disabled": False}],
+                    "integrationCount": 1,
+                    "uses": [{"kind": "climate", "title": "Климатический контур", "detail": "Устройство управляет климатом."}],
+                    "used": True,
+                    "identifySupported": True,
+                    "identifyLabel": "Identify",
+                    "deleteBlocked": True,
+                    "deleteBlockers": ["Климатический контур"],
+                },
+            },
+        }
         script = panel_script(
             payloads,
             {},
@@ -1897,6 +1919,61 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           String(node.className).split(" ").includes("device-inventory-row"));
         if (rows.length !== 1 || !textOf(rows[0]).includes("Датчик температуры")) {
           throw new Error("device inventory search mismatch");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_inventory_card_edits_native_device_and_explains_safe_actions(self) -> None:
+        payloads = dict(GET_PATHS)
+        payloads["hausman_hub/v1/dashboard"] = {
+            "rooms": [], "devices": [], "alarms": [],
+            "inventory": {
+                "summary": {"canonicalDeviceCount": 1, "attentionCount": 0},
+                "devices": [{
+                    "id": "inventory-native", "canonicalId": "device-native",
+                    "name": "Датчик", "roomId": "living", "roomName": "Гостиная",
+                    "kind": "physical", "status": "available", "canonical": True,
+                    "possibleDuplicate": False, "entityCount": 2, "domains": ["sensor", "button"],
+                }],
+            },
+        }
+        payloads["hausman_hub/v1/admin/device-maintenance"] = {
+            "areas": [{"id": "living", "name": "Гостиная"}, {"id": "kids", "name": "Детская"}],
+            "devices": {"inventory-native": {
+                "roomAreaId": "living", "name": "Датчик", "haUrl": "/config/devices/device/native",
+                "entityCount": 2, "integrationCount": 1,
+                "entities": [{"id": "sensor.value", "name": "Температура", "disabled": False}],
+                "uses": [], "used": False, "identifySupported": True,
+                "identifyLabel": "Identify", "deleteBlocked": False, "deleteBlockers": [],
+            }},
+        }
+        script = panel_script(
+            payloads,
+            {"hausman_hub/v1/admin/device-maintenance": {"status": "saved"}},
+            """
+        panel._shell.tabs.settings.fire("click");
+        await tick();
+        let screen = panel._shell.settings;
+        findAll(screen, (node) => node.tagName === "BUTTON" && node.textContent === "Комнаты")[0].fire("click");
+        screen = panel._shell.settings;
+        const card = findAll(screen, (node) => String(node.className).includes("device-inventory-summary"))[0];
+        card.fire("click");
+        await tick();
+        const text = textOf(screen);
+        for (const label of ["Где используется", "Не используется настройками HausmanHub", "Открыть в Home Assistant", "Найти устройство", "Удалить из реестра"]) {
+          if (!text.includes(label)) throw new Error("maintenance action missing: " + label);
+        }
+        const name = findAll(screen, (node) => node.tagName === "INPUT" && node.maxLength === 128)[0];
+        const room = findAll(screen, (node) => node.tagName === "SELECT")[0];
+        name.value = "Главный датчик";
+        room.value = "kids";
+        findAll(screen, (node) => node.tagName === "BUTTON" && node.textContent === "Сохранить в Home Assistant")[0].fire("click");
+        await tick(10);
+        const save = calls.find((call) => call.method === "POST" && call.path === "hausman_hub/v1/admin/device-maintenance" && call.payload.action === "update");
+        if (!save || save.payload.name !== "Главный датчик" || save.payload.areaId !== "kids") {
+          throw new Error("native registry update payload mismatch: " + JSON.stringify(save));
         }
             """,
         )

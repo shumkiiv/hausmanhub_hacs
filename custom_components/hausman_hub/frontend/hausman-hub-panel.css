@@ -1,12 +1,13 @@
-@import url("./hausman-hub-settings.css?v=1.51.26");
-@import url("./hausman-hub-device-bindings.css?v=1.51.26");
-@import url("./hausman-hub-energy.css?v=1.51.26");
-@import url("./hausman-hub-control-channel.css?v=1.51.26");
-@import url("./hausman-hub-weather-sources.css?v=1.51.26");
-@import url("./hausman-hub-wizard-validation.css?v=1.51.26");
-@import url("./hausman-hub-catalog.css?v=1.51.26");
-@import url("./hausman-hub-media-device.css?v=1.51.26");
-@import url("./hausman-hub-scenarios.css?v=1.51.26");
+@import url("./hausman-hub-settings.css?v=1.51.27");
+@import url("./hausman-hub-device-maintenance.css?v=1.51.27");
+@import url("./hausman-hub-device-bindings.css?v=1.51.27");
+@import url("./hausman-hub-energy.css?v=1.51.27");
+@import url("./hausman-hub-control-channel.css?v=1.51.27");
+@import url("./hausman-hub-weather-sources.css?v=1.51.27");
+@import url("./hausman-hub-wizard-validation.css?v=1.51.27");
+@import url("./hausman-hub-catalog.css?v=1.51.27");
+@import url("./hausman-hub-media-device.css?v=1.51.27");
+@import url("./hausman-hub-scenarios.css?v=1.51.27");
 
 :host { display:block; box-sizing:border-box; width:100%; min-height:100%; overflow-x:hidden;
   --hmh-bg:#0B0F14; --hmh-surface:#12171D; --hmh-raised:#181E26; --hmh-field:#181E26; --hmh-hover:#1F2630;

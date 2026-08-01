@@ -85,6 +85,10 @@ from .domain.ai_assistant import AiAdvisoryStatus, AiAssistantViolation
 from .domain.hub_settings import HausmanHubSettings
 from .dashboard_ha_snapshot import async_dashboard_snapshot
 from .energy_history_ha import async_energy_history
+from .device_maintenance_ha import (
+    DeviceMaintenanceViolation,
+    HomeAssistantDeviceMaintenanceService,
+)
 from .realtime_api import publish_command_receipt
 
 if TYPE_CHECKING:
@@ -127,6 +131,7 @@ ADMIN_DRAFT_SAVE_PATH = "/api/hausman_hub/v1/admin/climate-drafts/save"
 ADMIN_DEVICE_AREA_ASSIGNMENTS_PATH = (
     "/api/hausman_hub/v1/admin/device-area-assignments"
 )
+ADMIN_DEVICE_MAINTENANCE_PATH = "/api/hausman_hub/v1/admin/device-maintenance"
 ADMIN_DEVICE_BINDINGS_PATH = "/api/hausman_hub/v1/admin/climate-device-bindings"
 ADMIN_DEVICE_BINDINGS_PREVIEW_PATH = f"{ADMIN_DEVICE_BINDINGS_PATH}/preview"
 ADMIN_PROFILE_UPDATE_PATH = "/api/hausman_hub/v1/admin/climate-profiles"
@@ -207,6 +212,7 @@ def register_climate_api(
             ClimateAdminDraftValidationView(hass),
             ClimateAdminDraftSaveView(hass),
             ClimateAdminDeviceAreaAssignmentsView(hass),
+            ClimateAdminDeviceMaintenanceView(hass),
             ClimateAdminDeviceBindingsView(hass),
             ClimateAdminDeviceBindingsPreviewView(hass),
             ClimateAdminProfileUpdateView(hass),
@@ -925,6 +931,74 @@ class ClimateAdminDeviceAreaAssignmentsView(_ClimateView):
             )
         except ClimateRuntimeUnavailable:
             return self._unavailable()
+        except Exception:
+            return self._unavailable()
+        return self.json(result, headers=NO_STORE_HEADERS)
+
+
+class ClimateAdminDeviceMaintenanceView(_ClimateView):
+    """Inspect and safely maintain native Home Assistant device records."""
+
+    url = ADMIN_DEVICE_MAINTENANCE_PATH
+    name = "api:hausman_hub:climate_admin_device_maintenance"
+
+    async def get(self, request: Any) -> Any:
+        if not _is_exact_request(request, ADMIN_DEVICE_MAINTENANCE_PATH):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        try:
+            result = await HomeAssistantDeviceMaintenanceService(
+                self._hass
+            ).async_snapshot()
+        except DeviceMaintenanceViolation:
+            return self.json_message(
+                "Не удалось прочитать реестр устройств Home Assistant.",
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                headers=NO_STORE_HEADERS,
+            )
+        except Exception:
+            return self._unavailable()
+        return self.json(result, headers=NO_STORE_HEADERS)
+
+    async def post(self, request: Any) -> Any:
+        if not _is_exact_request(request, ADMIN_DEVICE_MAINTENANCE_PATH):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        try:
+            payload = await _request_json(request, maximum_bytes=MAX_ACTION_BODY_BYTES)
+            if not isinstance(payload, dict):
+                raise DeviceMaintenanceViolation("request body is invalid")
+            action = payload.get("action")
+            service = HomeAssistantDeviceMaintenanceService(self._hass)
+            if action == "update":
+                result = await service.async_update(payload)
+            elif action == "identify":
+                result = await service.async_identify(payload)
+            elif action == "delete":
+                result = await service.async_delete(payload)
+            else:
+                raise DeviceMaintenanceViolation("unknown maintenance action")
+        except DeviceMaintenanceViolation as error:
+            status = {
+                "not_found": HTTPStatus.NOT_FOUND,
+                "device_in_use": HTTPStatus.CONFLICT,
+                "confirmation_required": HTTPStatus.CONFLICT,
+                "not_supported": HTTPStatus.UNPROCESSABLE_ENTITY,
+                "registry_unavailable": HTTPStatus.SERVICE_UNAVAILABLE,
+            }.get(error.code, HTTPStatus.BAD_REQUEST)
+            return self.json(
+                {"error": error.code, "message": str(error)},
+                status=status,
+                headers=NO_STORE_HEADERS,
+            )
+        except ValueError:
+            return self.json_message(
+                "Запрос обслуживания устройства заполнен неверно.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
         except Exception:
             return self._unavailable()
         return self.json(result, headers=NO_STORE_HEADERS)
