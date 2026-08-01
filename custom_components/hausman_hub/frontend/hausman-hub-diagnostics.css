@@ -1,0 +1,35 @@
+.system-health-head .status-badge.is-error { color:var(--error-color,#E5534B);
+  background:color-mix(in srgb,var(--error-color,#E5534B) 10%,var(--hmh-raised,#181E26)); }
+.system-diagnostic-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+.system-diagnostic-item { display:grid; grid-template-columns:48px minmax(0,1fr); align-items:start; gap:13px;
+  min-height:136px; padding:17px; border:1px solid color-mix(in srgb,var(--hmh-border,#2F3845) 78%,transparent);
+  border-radius:15px; background:color-mix(in srgb,var(--hmh-raised,#181E26) 76%,transparent); }
+.system-diagnostic-item:last-child:nth-child(odd) { grid-column:1 / -1; }
+.system-diagnostic-item.is-warning { border-color:color-mix(in srgb,var(--warning-color,#E4A11B) 32%,var(--hmh-border,#2F3845)); }
+.system-diagnostic-item.is-error { border-color:color-mix(in srgb,var(--error-color,#E5534B) 42%,var(--hmh-border,#2F3845)); }
+.system-diagnostic-icon { display:grid; place-items:center; width:48px; height:48px; border-radius:14px;
+  color:var(--hmh-text-dim,#9AA7B4); background:var(--hmh-surface,#12171D); }
+.system-diagnostic-icon .icon { width:23px; height:23px; }
+.system-diagnostic-item.is-ready .system-diagnostic-icon { color:var(--success-color,#4CAF6E);
+  background:color-mix(in srgb,var(--success-color,#4CAF6E) 9%,var(--hmh-surface,#12171D)); }
+.system-diagnostic-item.is-warning .system-diagnostic-icon { color:var(--warning-color,#E4A11B);
+  background:color-mix(in srgb,var(--warning-color,#E4A11B) 9%,var(--hmh-surface,#12171D)); }
+.system-diagnostic-item.is-error .system-diagnostic-icon { color:var(--error-color,#E5534B);
+  background:color-mix(in srgb,var(--error-color,#E5534B) 9%,var(--hmh-surface,#12171D)); }
+.system-diagnostic-copy :is(strong,b) { display:block; }
+.system-diagnostic-copy strong { font-size:16px; line-height:1.35; }
+.system-diagnostic-copy b { margin-top:7px; font-size:18px; line-height:1.35; }
+.system-diagnostic-copy p { margin:7px 0 0; font-size:13px; line-height:1.5; }
+.system-diagnostic-attention { padding:16px 18px; border-radius:14px; color:var(--hmh-text,#E7ECF3);
+  background:color-mix(in srgb,var(--warning-color,#E4A11B) 8%,var(--hmh-raised,#181E26)); }
+.system-diagnostic-attention ul { display:grid; gap:6px; margin:9px 0 0; padding-left:20px; }
+.system-diagnostic-attention li { color:var(--hmh-text-dim,#9AA7B4); font-size:14px; line-height:1.45; }
+.system-technical-report { border:1px solid color-mix(in srgb,var(--hmh-border,#2F3845) 76%,transparent);
+  border-radius:14px; background:color-mix(in srgb,var(--hmh-raised,#181E26) 66%,transparent); }
+.system-technical-report summary { padding:15px 17px; cursor:pointer; font-size:14px; font-weight:650; }
+.system-technical-report pre { margin:0; padding:0 17px 17px; overflow:auto; color:var(--hmh-text-dim,#9AA7B4);
+  font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace; white-space:pre-wrap; }
+@media (max-width:760px) {
+  .system-diagnostic-grid { grid-template-columns:1fr; }
+  .system-diagnostic-item:last-child:nth-child(odd) { grid-column:auto; }
+}

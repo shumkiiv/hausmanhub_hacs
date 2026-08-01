@@ -29,6 +29,8 @@ MEDIA_DEVICE_JS = PANEL_JS.with_name("hausman-hub-media-device.js")
 SCENARIOS_JS = PANEL_JS.with_name("hausman-hub-scenarios.js")
 SCENARIO_ICONS_JS = PANEL_JS.with_name("hausman-hub-scenario-icons.js")
 SETTINGS_CSS = PANEL_JS.with_name("hausman-hub-settings.css")
+DIAGNOSTICS_JS = PANEL_JS.with_name("hausman-hub-diagnostics.js")
+DIAGNOSTICS_CSS = PANEL_JS.with_name("hausman-hub-diagnostics.css")
 SWITCH_CSS = PANEL_JS.with_name("hausman-hub-switch.css")
 DEVICE_BINDINGS_CSS = PANEL_JS.with_name("hausman-hub-device-bindings.css")
 
@@ -493,6 +495,10 @@ def panel_script(
         {{ filename: {str(SCENARIOS_JS)!r} }}
       );
       vm.runInThisContext(
+        fs.readFileSync({str(DIAGNOSTICS_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(DIAGNOSTICS_JS)!r} }}
+      );
+      vm.runInThisContext(
         fs.readFileSync({str(PANEL_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, ""),
         {{ filename: {str(PANEL_JS)!r} }}
       );
@@ -723,7 +729,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         }
         panel._shell.tabs.settings.fire("click");
         const systemButton = findAll(panel._shell.settings, (node) =>
-          node.tagName === "BUTTON" && node.textContent === "Система")[0];
+          node.tagName === "BUTTON" && node.textContent === "Диагностика")[0];
         systemButton.fire("click");
         const settingsRoute = historyCalls[historyCalls.length - 1].value;
         if (!settingsRoute.includes("hh_section=settings") || !settingsRoute.includes("hh_view=system")) {
@@ -1790,6 +1796,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         css = (
             PANEL_CSS.read_text(encoding="utf-8")
             + SETTINGS_CSS.read_text(encoding="utf-8")
+            + DIAGNOSTICS_CSS.read_text(encoding="utf-8")
             + SWITCH_CSS.read_text(encoding="utf-8")
         )
         for tablet_rule in (
@@ -1802,6 +1809,8 @@ class PanelSettingsSectionsTest(unittest.TestCase):
             "backdrop-filter:blur(18px)",
             ".settings-switch-track",
             ".settings-switch.is-on .settings-switch-knob",
+            ".system-diagnostic-grid",
+            ".system-technical-report",
         ):
             self.assertIn(tablet_rule, css)
         self.assertNotIn("input.settings-toggle", css)
@@ -1823,7 +1832,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         let screen = panel._shell.settings;
         let text = textOf(screen);
         for (const label of [
-          "Настройки HausmanHub", "Обзор", "Комнаты", "Подключение", "Интерфейс", "Система",
+          "Настройки HausmanHub", "Обзор", "Комнаты", "Подключение", "Интерфейс", "Диагностика",
           "Комнаты и устройства", "Home Assistant остаётся единым источником устройств", "Версия",
         ]) {
           if (!text.includes(label)) throw new Error("settings text missing: " + label);
@@ -1917,10 +1926,14 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         }
         screen = panel._shell.settings;
         findAll(screen, (node) => node.tagName === "BUTTON"
-          && node.textContent === "Система")[0].fire("click");
+          && node.textContent === "Диагностика")[0].fire("click");
         screen = panel._shell.settings;
         const systemText = textOf(screen);
-        for (const label of ["Состояние системы", "Устройства климата", "Копировать техническую сводку"]) {
+        for (const label of [
+          "Состояние системы", "Устройства климата", "Копировать техническую сводку",
+          "Связь с Home Assistant", "Сохранённая конфигурация", "Климатический контур",
+          "Сценарии", "Энергия", "Проверки", "Показать обезличенную техническую сводку",
+        ]) {
           if (!systemText.includes(label)) throw new Error("system status missing: " + label);
         }
         if (systemText.includes("native")) throw new Error("raw bridge mode exposed");
@@ -1929,8 +1942,12 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         await tick();
         if (clipboardWrites.length !== 1
           || !clipboardWrites[0].includes("HausmanHub — техническая сводка")
+          || !clipboardWrites[0].includes("Связь с Home Assistant: Соединение работает")
+          || !clipboardWrites[0].includes("Сохранённая конфигурация: 1 комната · 0 устройств")
+          || !clipboardWrites[0].includes("Климатический контур: Выключен в настройках")
           || clipboardWrites[0].includes("ready")
-          || clipboardWrites[0].includes("homeassistant.local")) {
+          || clipboardWrites[0].includes("homeassistant.local")
+          || clipboardWrites[0].includes("entity_id")) {
           throw new Error("redacted technical summary copy mismatch: " + JSON.stringify(clipboardWrites));
         }
         screen = panel._shell.settings;
@@ -1948,6 +1965,67 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           && call.path === "hausman_hub/v1/admin/reset");
         if (!resetPost || resetPost.payload.confirmation !== "RESET_HAUSMANHUB") {
           throw new Error("full reset confirmation contract mismatch");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_system_diagnostics_explain_component_health_without_private_ids(self) -> None:
+        payloads = dict(GET_PATHS)
+        payloads["hausman_hub/v1/dashboard"] = {
+            "devices": [], "rooms": [], "alarms": [],
+            "energy": {
+                "available": True,
+                "sources": [
+                    {"id": "source_private_a", "available": True},
+                    {"id": "source_private_b", "available": False},
+                ],
+            },
+        }
+        payloads["hausman_hub/v1/admin/scenarios"] = {
+            "scenarios": [
+                {"id": "private_morning", "enabled": True},
+                {"id": "private_night", "enabled": False},
+            ]
+        }
+        payloads["hausman_hub/v1/admin/scenarios/catalog"] = {"devices": []}
+        script = panel_script(
+            payloads,
+            {},
+            """
+        panel._shell.tabs.settings.fire("click");
+        findAll(panel._shell.settings, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Диагностика")[0].fire("click");
+        await tick();
+        let screen = panel._shell.settings;
+        let text = textOf(screen);
+        for (const label of [
+          "Все проверки пройдены", "Соединение работает", "1 комната · 0 устройств",
+          "Выключен в настройках", "2 сохранено · 1 включено",
+          "1 из 2 источников доступны",
+        ]) {
+          if (!text.includes(label)) throw new Error("healthy diagnostic missing: " + label);
+        }
+        if (text.includes("Что проверить") || text.includes("source_private")
+          || text.includes("private_morning")) {
+          throw new Error("healthy diagnostics exposed a false warning or private id: " + text);
+        }
+        findAll(screen, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Копировать техническую сводку")[0].fire("click");
+        await tick();
+        if (clipboardWrites.length !== 1
+          || clipboardWrites[0].includes("source_private")
+          || clipboardWrites[0].includes("private_morning")) {
+          throw new Error("copied diagnostics exposed private identifiers");
+        }
+        panel._error = true;
+        panel._renderSettings(panel._shell.settings);
+        screen = panel._shell.settings;
+        text = textOf(screen);
+        if (!text.includes("Связь потеряна") || !text.includes("Нет ответа")
+          || !text.includes("Проверьте Home Assistant и повторите обновление.")) {
+          throw new Error("connection loss is not explained by diagnostics: " + text);
         }
             """,
         )

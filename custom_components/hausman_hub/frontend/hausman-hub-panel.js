@@ -1,17 +1,18 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.45";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.45";
-import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.45";
-import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.51.45";
-import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.45";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.45";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.45";
-import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.45";
-import { createKioskButton, createKioskDock, handleKioskPointerUp, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.45";
-import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.45";
-import { AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.51.45";
-import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.51.45";
-import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.51.45";
-import { renderClimateOverview } from "./hausman-hub-climate-overview.js?v=1.51.45";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.46";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.46";
+import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.46";
+import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.51.46";
+import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.46";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.46";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.46";
+import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.46";
+import { createKioskButton, createKioskDock, handleKioskPointerUp, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.46";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.46";
+import { AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.51.46";
+import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.51.46";
+import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.51.46";
+import { renderClimateOverview } from "./hausman-hub-climate-overview.js?v=1.51.46";
+import { buildDiagnosticChecks, diagnosticSummaryText, renderDiagnosticDetails } from "./hausman-hub-diagnostics.js?v=1.51.46";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css";
@@ -84,7 +85,7 @@ const SETTINGS_VIEWS = [
   { id: "bindings", label: "Привязки", description: "Сущности Home Assistant" },
   { id: "connection", label: "Подключение", description: "Связь с Home Assistant" },
   { id: "appearance", label: "Интерфейс", description: "Тема, анимация и подсказки" },
-  { id: "system", label: "Система", description: "Версия и безопасный сброс" },
+  { id: "system", label: "Диагностика", description: "Связь, компоненты и безопасное обслуживание" },
 ];
 const ROOM_SETUP_PANES = [
   { id: "devices", label: "Устройства", description: "Чем измерять и управлять" },
@@ -437,6 +438,14 @@ class HausmanHubPanel extends HTMLElement {
     ) {
       loadDeviceBindings(this);
     }
+    if (
+      this._activeSection === "settings"
+      && this._activeSettingsView === "system"
+      && !this._scenarios.list
+      && !this._scenarios.loading
+    ) {
+      this._loadScenarios();
+    }
   }
 
   _applyThemeMode() {
@@ -589,6 +598,9 @@ class HausmanHubPanel extends HTMLElement {
     } finally {
       this._scenarios.loading = false;
       if (this._activeSection === "scenarios") this._renderScenarios(this._shell.scenarios);
+      if (this._activeSection === "settings" && this._activeSettingsView === "system") {
+        this._renderSettings(this._shell.settings);
+      }
     }
   }
 
@@ -5665,8 +5677,8 @@ class HausmanHubPanel extends HTMLElement {
       value: THEME_MODE_META[this._themeMode]?.hint || "авто",
     }));
     grid.appendChild(this._settingsOverviewLink({
-      viewId: "system", icon: "settings", title: "Система",
-      description: "Версия интеграции, состав данных и безопасный сброс",
+      viewId: "system", icon: "settings", title: "Диагностика",
+      description: "Связь, сохранённая конфигурация и доступность компонентов",
       value: `Версия ${this._data.integration_version || "—"}`,
     }));
     container.appendChild(grid);
@@ -5956,19 +5968,7 @@ class HausmanHubPanel extends HTMLElement {
   }
 
   _systemSummaryText() {
-    const setup = this._settings.setup || {};
-    const summary = setup.summary || {};
-    const readiness = this._data.readiness || {};
-    return [
-      "HausmanHub — техническая сводка",
-      `Версия: ${this._data.integration_version || "не определена"}`,
-      `Состояние: ${READINESS_LABELS[readiness.status] || "не определено"}`,
-      `Режим контура: ${BRIDGE_MODE_LABELS[readiness.bridge_mode] || "не определён"}`,
-      `Настройка климата: ${SETUP_STATUS_LABELS[setup.status] || "не определена"}`,
-      `Комнат: ${Number(summary.room_count) || 0}`,
-      `Устройств климата: ${Number(summary.device_count) || 0}`,
-      `Подключение: ${this._settingsData.connection_mode === "center" ? "HausmanHub" : "Home Assistant"}`,
-    ].join("\n");
+    return diagnosticSummaryText(this, buildDiagnosticChecks(this, READINESS_LABELS));
   }
 
   async _copySystemSummary() {
@@ -5996,7 +5996,14 @@ class HausmanHubPanel extends HTMLElement {
   _renderSystemSettings(container) {
     const setup = this._settings.setup || {};
     const summary = setup.summary || {};
-    const readiness = this._data.readiness || {};
+    const readiness = this._data && this._data.readiness || {};
+    const checks = buildDiagnosticChecks(this, READINESS_LABELS);
+    const errors = checks.filter((check) => check.tone === "is-error");
+    const warnings = checks.filter((check) => check.tone === "is-warning");
+    const overallTone = errors.length ? "is-error" : (warnings.length ? "is-warning" : "is-ready");
+    const overallLabel = errors.length
+      ? "Связь потеряна"
+      : (warnings.length ? `Нужно проверить: ${warnings.length}` : "Все проверки пройдены");
     const health = el("section", "card settings-card system-health-card");
     const healthHead = el("div", "system-health-head");
     const healthCopy = el("div");
@@ -6005,13 +6012,13 @@ class HausmanHubPanel extends HTMLElement {
     healthHead.appendChild(healthCopy);
     healthHead.appendChild(el(
       "span",
-      `status-badge ${readiness.status === "ready" ? "is-ready" : "is-warning"}`,
-      READINESS_LABELS[readiness.status] || "Состояние не определено"
+      `status-badge ${overallTone}`,
+      overallLabel
     ));
     health.appendChild(healthHead);
     const metrics = el("div", "system-health-metrics");
     [
-      ["Версия", this._data.integration_version || "—"],
+      ["Версия", this._data && this._data.integration_version || "—"],
       ["Комнаты", Number(summary.room_count) || 0],
       ["Устройства климата", Number(summary.device_count) || 0],
       ["Режим", BRIDGE_MODE_LABELS[readiness.bridge_mode] || "Не настроен"],
@@ -6022,6 +6029,7 @@ class HausmanHubPanel extends HTMLElement {
       metrics.appendChild(metric);
     });
     health.appendChild(metrics);
+    renderDiagnosticDetails(this, health, checks, { el, svgIcon });
     const healthActions = el("div", "system-health-actions");
     const refresh = el("button", "secondary", "Обновить состояние");
     refresh.disabled = this._busy;
@@ -6042,7 +6050,7 @@ class HausmanHubPanel extends HTMLElement {
     aboutCopy.appendChild(el("p", "muted", "Панель управления домом для Home Assistant"));
     aboutCopy.appendChild(el("small", null, "Единый интерфейс с планшетом HausmanHub"));
     about.appendChild(aboutCopy);
-    about.appendChild(el("span", "status-badge settings-version", `Версия ${this._data.integration_version || "—"}`));
+    about.appendChild(el("span", "status-badge settings-version", `Версия ${this._data && this._data.integration_version || "—"}`));
     container.appendChild(about);
 
     const danger = el("section", "card settings-card danger-settings-card");
