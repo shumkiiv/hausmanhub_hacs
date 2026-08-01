@@ -1,0 +1,96 @@
+.climate-dashboard { display:grid; gap:22px; min-width:0; }
+.climate-dashboard-hero { display:grid; grid-template-columns:minmax(280px,1.15fr) minmax(520px,1fr); gap:30px; align-items:center;
+  min-height:178px; padding:28px 30px; overflow:hidden; border:1px solid color-mix(in srgb,var(--hmh-accent,#4F8CFF) 38%,var(--hmh-border,#2F3845));
+  border-radius:22px; background:linear-gradient(135deg,color-mix(in srgb,var(--hmh-accent,#4F8CFF) 12%,var(--hmh-raised,#181E26)),var(--hmh-surface,#12171D));
+  box-shadow:0 14px 34px rgba(0,0,0,.18); }
+.climate-dashboard-hero-copy { display:flex; align-items:center; gap:18px; min-width:0; }
+.climate-dashboard-hero-icon { display:grid; flex:0 0 64px; place-items:center; width:64px; height:64px; border-radius:18px;
+  color:var(--hmh-accent,#4F8CFF); background:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 16%,var(--hmh-raised,#181E26)); }
+.climate-dashboard-hero-icon .icon { width:32px; height:32px; }
+.climate-dashboard-hero h2 { margin:0; font-size:31px; line-height:1.08; letter-spacing:-.025em; }
+.climate-dashboard-hero p { margin:8px 0 0; color:var(--hmh-text-dim,#9AA7B4); font-size:15px; line-height:1.45; }
+.climate-dashboard-facts { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); min-width:0; }
+.climate-dashboard-fact { min-width:0; padding:8px 18px; border-left:1px solid var(--hmh-border,#2F3845); text-align:center; }
+.climate-dashboard-fact:first-child { border-left:0; }
+.climate-dashboard-fact strong,.climate-dashboard-fact span { display:block; }
+.climate-dashboard-fact strong { overflow:hidden; color:var(--hmh-text,#E7ECF3); font-size:23px; line-height:1.15; text-overflow:ellipsis; white-space:nowrap; }
+.climate-dashboard-fact span { margin-top:7px; color:var(--hmh-text-dim,#9AA7B4); font-size:13px; line-height:1.3; }
+.climate-dashboard-fact.has-warning strong { color:var(--hmh-warning,#E5A84B); }
+.climate-category-section,.climate-rooms-section { min-width:0; padding:22px; border:1px solid var(--hmh-border,#2F3845); border-radius:20px;
+  background:var(--hmh-surface,#12171D); box-shadow:0 10px 26px rgba(0,0,0,.14); }
+.climate-section-heading { display:flex; align-items:center; justify-content:space-between; gap:18px; margin-bottom:16px; }
+.climate-section-heading h3 { margin:0; font-size:23px; line-height:1.2; }
+.climate-section-heading p { margin:5px 0 0; color:var(--hmh-text-dim,#9AA7B4); font-size:14px; }
+.climate-category-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+button.climate-category-card { display:grid; grid-template-columns:52px minmax(0,1fr) auto; align-items:center; gap:13px; min-height:82px; margin:0; padding:14px;
+  border:1px solid var(--hmh-border,#2F3845); border-radius:15px; color:var(--hmh-text,#E7ECF3); text-align:left;
+  background:var(--hmh-raised,#181E26); box-shadow:none; transition:border-color .18s ease,transform .18s ease,background .18s ease; }
+button.climate-category-card:hover { transform:translateY(-1px); border-color:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 55%,var(--hmh-border,#2F3845));
+  background:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 7%,var(--hmh-raised,#181E26)); }
+.climate-category-icon { display:grid; place-items:center; width:52px; height:52px; border-radius:14px; color:var(--hmh-accent,#4F8CFF);
+  background:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 14%,var(--hmh-raised,#181E26)); }
+.climate-category-icon .icon { width:27px; height:27px; }
+.climate-category-copy { min-width:0; }
+.climate-category-copy strong,.climate-category-copy small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.climate-category-copy strong { font-size:16px; line-height:1.3; }
+.climate-category-copy small { margin-top:5px; color:var(--hmh-text-dim,#9AA7B4); font-size:13px; }
+.climate-category-chevron { color:var(--hmh-text-dim,#9AA7B4); font-size:25px; }
+.climate-room-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+button.climate-room-card { display:flex; flex-direction:column; min-height:178px; margin:0; padding:17px; overflow:hidden; border:1px solid var(--hmh-border,#2F3845);
+  border-radius:16px; color:var(--hmh-text,#E7ECF3); text-align:left; background:var(--hmh-raised,#181E26); box-shadow:none; }
+button.climate-room-card:hover { border-color:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 48%,var(--hmh-border,#2F3845)); }
+.climate-room-title { display:grid; grid-template-columns:44px minmax(0,1fr) auto; align-items:center; gap:12px; width:100%; min-width:0; }
+.climate-room-icon { display:grid; place-items:center; width:44px; height:44px; border-radius:12px; color:var(--hmh-accent,#4F8CFF);
+  background:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 13%,var(--hmh-raised,#181E26)); }
+.climate-room-icon .icon { width:23px; height:23px; }
+.climate-room-title > span:nth-child(2),.climate-room-title strong,.climate-room-title small { display:block; min-width:0; }
+.climate-room-title strong { overflow:hidden; font-size:18px; text-overflow:ellipsis; white-space:nowrap; }
+.climate-room-title small { margin-top:4px; color:var(--hmh-text-dim,#9AA7B4); font-size:13px; }
+.climate-room-title b { font-size:22px; line-height:1; white-space:nowrap; }
+.climate-room-facts { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; width:100%; margin-top:14px; }
+.climate-room-facts > span { min-width:0; padding:9px 10px; border-radius:11px; background:var(--hmh-surface,#12171D); }
+.climate-room-facts small,.climate-room-facts strong { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.climate-room-facts small { color:var(--hmh-text-dim,#9AA7B4); font-size:11px; text-transform:uppercase; letter-spacing:.045em; }
+.climate-room-facts strong { margin-top:5px; font-size:14px; }
+.climate-room-open { margin-top:auto; padding-top:13px; color:var(--hmh-accent,#4F8CFF); font-size:13px; font-weight:650; }
+.climate-device-sheet-backdrop { position:fixed; z-index:1005; inset:0; display:grid; place-items:center; padding:28px; background:rgba(4,8,13,.68); backdrop-filter:blur(12px); }
+.climate-device-sheet { position:relative; width:min(940px,calc(100vw - 56px)); max-height:min(780px,calc(100vh - 56px)); overflow:auto; border:1px solid var(--hmh-border,#2F3845);
+  border-radius:24px; color:var(--hmh-text,#E7ECF3); background:var(--hmh-surface,#12171D); box-shadow:0 32px 90px rgba(0,0,0,.48); }
+.climate-sheet-close { position:sticky; z-index:2; top:16px; float:right; width:44px; height:44px; min-height:44px; margin:16px 16px 0 0; padding:0;
+  border:1px solid var(--hmh-border,#2F3845); border-radius:50%; color:var(--hmh-text,#E7ECF3); font-size:27px; font-weight:400; background:var(--hmh-raised,#181E26); }
+.climate-sheet-body { clear:both; padding:4px 24px 26px; }
+.climate-sheet-heading { display:flex; align-items:center; gap:13px; min-height:74px; margin-bottom:14px; }
+.climate-sheet-heading h3 { margin:0; font-size:27px; line-height:1.15; }
+.climate-sheet-heading p { margin:5px 0 0; color:var(--hmh-text-dim,#9AA7B4); font-size:14px; }
+.climate-sheet-back { flex:0 0 auto; min-height:40px; margin:0; border:1px solid var(--hmh-border,#2F3845); color:var(--hmh-text,#E7ECF3); background:var(--hmh-raised,#181E26); }
+.climate-sheet-device-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:13px; }
+button.climate-product-card { display:grid; grid-template-columns:76px minmax(0,1fr) 10px; align-items:center; gap:14px; min-height:106px; margin:0; padding:14px;
+  border:1px solid var(--hmh-border,#2F3845); border-radius:16px; color:var(--hmh-text,#E7ECF3); text-align:left; background:var(--hmh-raised,#181E26); box-shadow:none; }
+button.climate-product-card:hover { border-color:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 52%,var(--hmh-border,#2F3845)); }
+.climate-product-card.is-unavailable { opacity:.72; }
+.climate-product-image { display:grid; place-items:center; width:76px; height:76px; overflow:hidden; border-radius:13px; background:radial-gradient(circle at 50% 40%,rgba(255,255,255,.1),transparent 68%); }
+.climate-product-image img { display:block; width:100%; height:100%; object-fit:contain; }
+.climate-product-image.is-fallback { color:var(--hmh-text-dim,#9AA7B4); background:var(--hmh-surface,#12171D); }
+.climate-product-image .icon { width:34px; height:34px; }
+.climate-product-copy { min-width:0; }
+.climate-product-copy strong,.climate-product-copy small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.climate-product-copy strong { font-size:16px; }
+.climate-product-copy small { margin-top:7px; color:var(--hmh-text-dim,#9AA7B4); font-size:13px; }
+.climate-product-state { width:9px; height:9px; border-radius:50%; background:var(--hmh-text-dim,#9AA7B4); }
+.climate-product-state.good { background:var(--success-color,#4CAF6E); }
+.climate-product-state.bad { background:var(--error-color,#E5534B); }
+.climate-sheet-empty { padding:28px; border:1px dashed var(--hmh-border,#2F3845); border-radius:15px; color:var(--hmh-text-dim,#9AA7B4); text-align:center; }
+.climate-sheet-device-grid > .inventory-device-card { grid-column:1/-1; }
+@media (max-width:1100px) {
+  .climate-dashboard-hero { grid-template-columns:1fr; gap:20px; }
+  .climate-category-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media (max-width:760px) {
+  .climate-dashboard-hero { padding:22px; }
+  .climate-dashboard-facts { grid-template-columns:repeat(2,minmax(0,1fr)); gap:15px 0; }
+  .climate-dashboard-fact:nth-child(3) { border-left:0; }
+  .climate-category-grid,.climate-room-grid,.climate-sheet-device-grid { grid-template-columns:1fr; }
+  .climate-device-sheet-backdrop { padding:12px; }
+  .climate-device-sheet { width:calc(100vw - 24px); max-height:calc(100vh - 24px); border-radius:19px; }
+  .climate-sheet-body { padding:2px 16px 20px; }
+}

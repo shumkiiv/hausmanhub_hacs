@@ -12,7 +12,7 @@
   <body>
     <hausman-hub-panel id="panel"></hausman-hub-panel>
     <script type="module">
-      import "../../custom_components/hausman_hub/frontend/hausman-hub-panel.js?v=1.51.40";
+      import "../../custom_components/hausman_hub/frontend/hausman-hub-panel.js?v=1.51.41";
       const params = new URLSearchParams(window.location.search);
       const panel = document.getElementById("panel");
       const theme = params.get("theme") === "dark" ? "dark" : "light";
@@ -21,7 +21,7 @@
       document.documentElement.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       document.body.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       panel._data = {
-        integration_version: "1.51.40",
+        integration_version: "1.51.41",
         readiness: { status: "ready", bridge_mode: "native", reasons: [] },
         snapshot: {
           rooms: [
@@ -155,7 +155,12 @@
         ],
       };
       panel._scenarios = {
-        loading: false, error: false, catalog: { devices: [] },
+        loading: false, error: false, catalog: {
+          devices: [
+            { target_id: "ac-living", entity_id: "climate.living_ac", name: "Кондиционер гостиная", actions: [{ action_id: "turn_off", title: "Выключить", allowed_fields: [] }, { action_id: "set_temperature", title: "Температура", allowed_fields: ["value"] }] },
+            { target_id: "humidifier-bedroom", entity_id: "humidifier.bedroom", name: "Увлажнитель спальня", actions: [{ action_id: "turn_on", title: "Включить", allowed_fields: [] }, { action_id: "set_humidity", title: "Влажность", allowed_fields: ["value"] }] },
+          ],
+        },
         list: {
           scenarios: [
             { id: "scenario.good_morning", title: "Доброе утро", icon: "mdi:weather-sunset-up", enabled: true, requiresConfirmation: false },
@@ -166,15 +171,21 @@
       };
       panel._homeDashboard = {
         rooms: [
-          { id: "living", name: "Гостиная", temp: 24.8, humidity: 46 },
-          { id: "bedroom", name: "Спальня", temp: 24.2, humidity: 49 },
-          { id: "kitchen", name: "Кухня", temp: 25.1, humidity: 43 },
+          { id: "living", name: "Гостиная", temp: 24.8, humidity: 46, targetTemp: 25 },
+          { id: "bedroom", name: "Спальня", temp: 24.2, humidity: 49, targetTemp: 24, targetHumidity: 48 },
+          { id: "kitchen", name: "Кухня", temp: 25.1, humidity: 43, targetTemp: 24.5 },
         ],
         devices: [
           { id: "light-living", physicalId: "light-living", entityId: "light.living", name: "Основной свет", roomId: "living", roomName: "Гостиная", domain: "light", category: "lighting", stateLabel: "Включён", tone: "good", details: [{ entityId: "light.living", label: "Основной свет", value: "Включён" }] },
           { id: "media-living", physicalId: "media-living", entityId: "media_player.living", name: "Телевизор", roomId: "living", roomName: "Гостиная", domain: "media_player", category: "media", stateLabel: "Выключен", tone: "neutral", details: [{ entityId: "media_player.living", label: "Питание", value: "Выключено" }] },
           { id: "lock-entry", physicalId: "lock-entry", entityId: "lock.entry", name: "Aqara Smart Lock A100", roomId: "entry", roomName: "Тамбур", domain: "lock", category: "security", state: "locked", stateLabel: "закрыт", active: false, tone: "neutral", details: [{ entityId: "lock.entry", label: "Замок", value: "закрыт" }, { entityId: "sensor.lock_battery", label: "Заряд", value: "88 %" }] },
           { id: "alarm-entry", physicalId: "alarm-entry", entityId: "alarm_control_panel.entry", name: "EZVIZ Alarm", roomId: "entry", roomName: "Тамбур", domain: "alarm_control_panel", category: "security", state: "disarmed", stateLabel: "охрана выключена", active: false, tone: "neutral", details: [{ entityId: "alarm_control_panel.entry", label: "Охрана", value: "охрана выключена" }] },
+          { id: "ac-living", physicalId: "ac-living", entityId: "climate.living_ac", name: "Кондиционер гостиная", roomId: "living", roomName: "Гостиная", domain: "climate", category: "climate", state: "cool", stateLabel: "Охлаждение", active: true, tone: "good", imageUrl: "https://www.zigbee2mqtt.io/images/devices/AC211.png", details: [{ entityId: "climate.living_ac", label: "Режим", value: "Охлаждение" }, { entityId: "sensor.living_ac_temperature", label: "Температура", value: "24.8 °C" }] },
+          { id: "trv-living", physicalId: "trv-living", entityId: "climate.living_trv", name: "Термоголовка Sonoff гостиная", roomId: "living", roomName: "Гостиная", domain: "climate", category: "climate", state: "off", stateLabel: "Выключено", active: false, tone: "neutral", imageUrl: "https://www.zigbee2mqtt.io/images/devices/TRVZB.png", details: [{ entityId: "climate.living_trv", label: "Цель", value: "25 °C" }] },
+          { id: "humidifier-bedroom", physicalId: "humidifier-bedroom", entityId: "humidifier.bedroom", name: "Увлажнитель спальня", roomId: "bedroom", roomName: "Спальня", domain: "humidifier", category: "climate", state: "on", stateLabel: "Включено", active: true, tone: "good", details: [{ entityId: "humidifier.bedroom", label: "Целевая влажность", value: "48 %" }] },
+          { id: "floor-kitchen", physicalId: "floor-kitchen", entityId: "climate.kitchen_floor", name: "Тёплый пол кухня", roomId: "kitchen", roomName: "Кухня", domain: "climate", category: "climate", state: "heat", stateLabel: "Обогрев", active: true, tone: "good", details: [{ entityId: "climate.kitchen_floor", label: "Температура пола", value: "27 °C" }] },
+          { id: "purifier-living", physicalId: "purifier-living", entityId: "fan.living_purifier", name: "Очиститель воздуха гостиная", roomId: "living", roomName: "Гостиная", domain: "fan", category: "air_quality", state: "on", stateLabel: "Включено", active: true, tone: "good", details: [{ entityId: "sensor.living_pm25", label: "PM2.5", value: "8 мкг/м³" }] },
+          { id: "vent-kitchen", physicalId: "vent-kitchen", entityId: "fan.kitchen_exhaust", name: "Вытяжка кухня", roomId: "kitchen", roomName: "Кухня", domain: "fan", category: "climate", state: "off", stateLabel: "Выключено", active: false, tone: "neutral", details: [{ entityId: "fan.kitchen_exhaust", label: "Скорость", value: "0 %" }] },
         ],
         energy: {
           available: true,

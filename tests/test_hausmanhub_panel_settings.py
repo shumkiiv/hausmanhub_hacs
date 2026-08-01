@@ -17,6 +17,7 @@ PANEL_JS = (
 )
 PANEL_CSS = PANEL_JS.with_name("hausman-hub-panel.css")
 HOME_SECTIONS_JS = PANEL_JS.with_name("hausman-hub-home-sections.js")
+CLIMATE_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-climate-overview.js")
 ROOM_SETUP_JS = PANEL_JS.with_name("hausman-hub-room-setup.js")
 DEVICE_INVENTORY_JS = PANEL_JS.with_name("hausman-hub-device-inventory.js")
 DEVICE_BINDINGS_JS = PANEL_JS.with_name("hausman-hub-device-bindings.js")
@@ -337,8 +338,26 @@ def panel_script(
           this.value = "";
           this.checked = false;
           this._listeners = {{}};
+          this.parentElement = null;
+          this.classList = {{
+            add: (...names) => {{
+              const values = new Set(String(this.className).split(" ").filter(Boolean));
+              names.forEach((name) => values.add(name));
+              this.className = [...values].join(" ");
+            }},
+            remove: (...names) => {{
+              const removed = new Set(names);
+              this.className = String(this.className).split(" ")
+                .filter((name) => name && !removed.has(name)).join(" ");
+            }},
+            contains: (name) => String(this.className).split(" ").includes(name),
+            toggle: (name, enabled) => {{
+              if (enabled) this.classList.add(name); else this.classList.remove(name);
+            }},
+          }};
         }}
         appendChild(child) {{
+          child.parentElement = this;
           this.children.push(child);
           return child;
         }}
@@ -350,6 +369,22 @@ def panel_script(
         }}
         focus() {{
           this.focused = true;
+        }}
+        querySelector(selector) {{
+          const className = String(selector).startsWith(".") ? String(selector).slice(1) : null;
+          let result = null;
+          const visitNode = (node) => {{
+            if (result) return;
+            if (className && String(node.className).split(" ").includes(className)) result = node;
+            node.children.forEach(visitNode);
+          }};
+          this.children.forEach(visitNode);
+          return result;
+        }}
+        remove() {{
+          if (!this.parentElement) return;
+          this.parentElement.children = this.parentElement.children.filter((child) => child !== this);
+          this.parentElement = null;
         }}
         set innerHTML(value) {{
           if (value === "") this.children = [];
@@ -412,6 +447,10 @@ def panel_script(
       vm.runInThisContext(
         fs.readFileSync({str(HOME_SECTIONS_JS)!r}, "utf8").replace("export function renderHomeSection", "function renderHomeSection"),
         {{ filename: {str(HOME_SECTIONS_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(CLIMATE_OVERVIEW_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(CLIMATE_OVERVIEW_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(ROOM_SETUP_JS)!r}, "utf8").replace("export function renderFirstRunRoom", "function renderFirstRunRoom"),
@@ -1072,6 +1111,127 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const roomText = textOf(panel._shell.homeSections.rooms);
         if (!roomText.includes("Гостиная") || !roomText.includes("1 устройство")) {
           throw new Error("room inventory does not match tablet navigation");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_climate_overview_matches_tablet_categories_rooms_and_drill_down(self) -> None:
+        payloads = dict(GET_PATHS)
+        payloads["hausman_hub/v1/dashboard"] = {
+            "rooms": [
+                {
+                    "id": "living", "name": "Гостиная", "temp": 24.5,
+                    "humidity": 46, "targetTemp": 25.0,
+                },
+                {
+                    "id": "kids", "name": "Детская", "temp": 23.0,
+                    "humidity": 51, "targetTemp": 24.0,
+                },
+                {
+                    "id": "office", "name": "Кабинет", "temp": None,
+                    "humidity": None, "targetTemp": None,
+                },
+            ],
+            "devices": [
+                {
+                    "id": "device-ac", "physicalId": "device-ac",
+                    "entityId": "climate.living", "name": "Кондиционер гостиная",
+                    "roomId": "living", "roomName": "Гостиная", "domain": "climate",
+                    "category": "climate", "state": "cool", "stateLabel": "cool",
+                    "active": True, "tone": "good", "unavailable": False,
+                    "imageUrl": "https://www.zigbee2mqtt.io/images/devices/ac.png",
+                    "details": [{"entityId": "climate.living", "label": "Режим", "value": "Охлаждение"}],
+                },
+                {
+                    "id": "device-trv", "physicalId": "device-trv",
+                    "entityId": "climate.living_trv", "name": "Термоголовка Sonoff гостиная",
+                    "roomId": "living", "roomName": "Гостиная", "domain": "climate",
+                    "category": "climate", "state": "off", "stateLabel": "off",
+                    "active": False, "tone": "neutral", "unavailable": False,
+                    "details": [],
+                },
+                {
+                    "id": "device-humidifier", "physicalId": "device-humidifier",
+                    "entityId": "humidifier.kids", "name": "Увлажнитель детская",
+                    "roomId": "kids", "roomName": "Детская", "domain": "humidifier",
+                    "category": "climate", "state": "unavailable", "stateLabel": "unavailable",
+                    "active": False, "tone": "bad", "unavailable": True,
+                    "details": [],
+                },
+            ],
+            "alarms": [],
+        }
+        payloads["hausman_hub/v1/admin/scenarios/catalog"] = {
+            "devices": [
+                {
+                    "target_id": "target-ac", "entity_id": "climate.living",
+                    "name": "Кондиционер гостиная", "actions": [
+                        {"action_id": "turn_off", "title": "Выключить", "allowed_fields": []},
+                        {"action_id": "set_temperature", "title": "Температура", "allowed_fields": ["value"]},
+                    ],
+                }
+            ]
+        }
+        script = panel_script(
+            payloads,
+            {},
+            """
+        await tick();
+        panel._shell.tabs.climate.fire("click");
+        const climate = panel._shell.climateOverview;
+        const text = textOf(climate);
+        if (!text) throw new Error("climate overview empty state: active=" + panel._activeSection
+          + ", dashboard=" + JSON.stringify(panel._homeDashboard)
+          + ", key=" + panel._sectionRenderKeys.climate);
+        for (const label of [
+          "Климат по комнатам", "Обзор климата", "Комнаты и цели",
+          "Кондиционеры", "Термоголовки", "Тёплый пол", "Увлажнители",
+          "Очистители", "Вытяжки", "Гостиная", "Детская", "24.5 °C", "46 %",
+          "Кабинет", "Нет данных", "Цель не задана",
+        ]) {
+          if (!text.includes(label)) throw new Error("climate tablet text missing: " + label + " :: " + text);
+        }
+        if (text.includes("0 °C") || text.includes("0 %")) {
+          throw new Error("null climate reading was coerced to zero: " + text);
+        }
+        if (text.includes("cool") || text.includes("off") || text.includes("unavailable")) {
+          throw new Error("raw climate state leaked into the overview: " + text);
+        }
+        const categories = findAll(climate, (node) =>
+          String(node.className).split(" ").includes("climate-category-card"));
+        if (categories.length !== 6) throw new Error("climate category count mismatch");
+        const conditioner = categories.find((node) => textOf(node).includes("Кондиционеры"));
+        conditioner.fire("click");
+        let sheet = findAll(climate, (node) =>
+          String(node.className).split(" ").includes("climate-device-sheet"))[0];
+        if (!sheet || !textOf(sheet).includes("Кондиционер гостиная")
+          || !textOf(sheet).includes("Охлаждение")) {
+          throw new Error("category did not open all conditioner devices");
+        }
+        let products = findAll(sheet, (node) =>
+          String(node.className).split(" ").includes("climate-product-card"));
+        if (products.length !== 1) throw new Error("one physical AC rendered more than once");
+        products[0].fire("click");
+        sheet = findAll(climate, (node) =>
+          String(node.className).split(" ").includes("climate-device-sheet"))[0];
+        if (!findAll(sheet, (node) =>
+          String(node.className).split(" ").includes("inventory-device-card") && node.open === true).length) {
+          throw new Error("specific climate device did not open its detailed card");
+        }
+        const close = findAll(sheet, (node) =>
+          String(node.className).split(" ").includes("climate-sheet-close"))[0];
+        close.fire("click");
+        const room = findAll(climate, (node) =>
+          String(node.className).split(" ").includes("climate-room-card")
+          && textOf(node).includes("Гостиная"))[0];
+        room.fire("click");
+        const roomSheet = findAll(climate, (node) =>
+          String(node.className).split(" ").includes("climate-device-sheet"))[0];
+        if (!roomSheet || findAll(roomSheet, (node) =>
+          String(node.className).split(" ").includes("climate-product-card")).length !== 2) {
+          throw new Error("room climate drill-down did not show its physical devices");
         }
             """,
         )
