@@ -1510,6 +1510,30 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
+    def test_scenario_deep_link_loads_library_without_sidebar_click(self) -> None:
+        payloads = dict(GET_PATHS)
+        payloads["hausman_hub/v1/admin/scenarios"] = {"scenarios": []}
+        payloads["hausman_hub/v1/admin/scenarios/catalog"] = {"devices": []}
+        script = panel_script(
+            payloads,
+            {},
+            """
+        setWindowLocation("?hh_section=scenarios");
+        panel._onNavigationPop();
+        await tick();
+        const scenarioGets = calls.filter((call) => call.method === "GET"
+          && call.path === "hausman_hub/v1/admin/scenarios");
+        if (scenarioGets.length !== 1) {
+          throw new Error("scenario deep link did not load the library");
+        }
+        if (!textOf(panel._shell.scenarios).includes("Создайте первый сценарий")) {
+          throw new Error("scenario deep link did not render the empty state");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_empty_scenario_library_opens_editor_and_saves_device_action(self) -> None:
         payloads = dict(GET_PATHS)
         payloads["hausman_hub/v1/admin/scenarios"] = {"scenarios": []}
