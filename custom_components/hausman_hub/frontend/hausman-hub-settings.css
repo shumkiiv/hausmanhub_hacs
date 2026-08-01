@@ -232,7 +232,7 @@ button.danger-button { color:#fff; border-color:color-mix(in srgb,var(--error-co
   border:1px solid color-mix(in srgb,var(--hmh-border,#2F3845) 82%,transparent); border-radius:18px;
   background:var(--hmh-surface,#12171D); }
 .first-run-wizard .room-setup-heading + .room-setup-nav + .wizard-section > h3 { font-size:22px; }
-.room-review-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin:18px 0; }
+.room-review-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; margin:18px 0; }
 .room-review-item { min-height:86px; padding:14px; border-radius:13px; background:var(--hmh-raised,#181E26); }
 .room-review-item span, .room-review-item strong { display:block; }
 .room-review-item span { color:var(--hmh-text-dim,#9AA7B4); font-size:13px; }

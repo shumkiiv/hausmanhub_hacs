@@ -277,11 +277,35 @@ const { el, setAttr, numberField, selectField, normalizedText, STRATEGY_ORDER, R
   reviewSection.appendChild(el("h3", null, "Проверка комнаты"));
   reviewSection.appendChild(el("div", "settings-explainer", "Проверка не включает устройства. Она убеждается, что выбранные датчики, способы управления и границы не противоречат друг другу."));
   const reviewGrid = el("div", "room-review-grid");
-  const selectedDevices = Object.values(state.devices || {}).filter((device) => device && device.selected === true).length;
+  const selectedSources = roomChoices.filter((choice) => isClimateSource(choice) && choice.device.selected === true);
+  const selectedControls = controlChoices.filter((choice) => choice.device.selected === true);
+  const physicalControlIds = new Set(selectedControls.map((choice) => (
+    choice.candidate.device_group_id || choice.candidate.candidate_id
+  )));
+  const manualChannels = selectedControls.filter((choice) => (
+    ACTIVE_DEVICE_TYPES.has(choice.type) && choice.device.channel === "universal_ir"
+  ));
+  const testableChannels = selectedControls.filter((choice) => (
+    ACTIVE_DEVICE_TYPES.has(choice.type) && choice.device.channel !== "universal_ir"
+  ));
+  const confirmedChannels = testableChannels.filter((choice) => (
+    choice.device.channelTest && choice.device.channelTest.status === "confirmed"
+  ));
+  const failedChannels = testableChannels.filter((choice) => (
+    choice.device.channelTest && choice.device.channelTest.status === "failed"
+  ));
+  const sourceSummary = ["temperature_sensor", "humidity_sensor"].every((type) => (
+    selectedSources.filter((choice) => choice.type === type).length === 1
+  )) ? "Температура и влажность выбраны" : "Нужно выбрать оба показания";
+  const channelSummary = testableChannels.length
+    ? `${confirmedChannels.length} из ${testableChannels.length} подтверждено`
+    : (manualChannels.length ? "ИК-канал · ручная проверка" : "Нет проверяемых каналов");
   [
     ["Дневная цель", `${state.day.temperature || "—"} °C · ${state.day.humidity || "—"} %`],
     ["Ночная цель", `${state.night.temperature || "—"} °C · ${state.night.humidity || "—"} %`],
-    ["Устройства", selectedDevices ? `${selectedDevices} выбрано` : "Не выбраны"],
+    ["Главные показания", sourceSummary],
+    ["Устройства управления", physicalControlIds.size ? `${physicalControlIds.size} выбрано` : "Не выбраны"],
+    ["Проверка каналов", channelSummary],
     ["Режим дня", this._firstRun.schedule.enabled ? "Автоматический" : "Ручной"],
   ].forEach(([label, value]) => {
     const item = el("div", "room-review-item");
@@ -290,6 +314,26 @@ const { el, setAttr, numberField, selectField, normalizedText, STRATEGY_ORDER, R
     reviewGrid.appendChild(item);
   });
   reviewSection.appendChild(reviewGrid);
+  if (failedChannels.length) {
+    reviewSection.appendChild(el(
+      "div",
+      "wizard-warning room-review-channel-warning",
+      `Не прошли проверку: ${failedChannels.length}. Вернитесь к устройствам, проверьте выбранный канал и повторите тест.`
+    ));
+  } else if (manualChannels.length || confirmedChannels.length < testableChannels.length) {
+    const guidance = [];
+    if (confirmedChannels.length < testableChannels.length) {
+      guidance.push("Каналы можно сохранить без теста, но перед включением автоматического управления лучше подтвердить связь в карточке каждого устройства.");
+    }
+    if (manualChannels.length) {
+      guidance.push("Для ИК-канала отправьте пробный код и подтвердите физическую реакцию устройства вручную.");
+    }
+    reviewSection.appendChild(el(
+      "div",
+      "wizard-hint room-review-channel-hint",
+      guidance.join(" ")
+    ));
+  }
   if (report) {
     const reportBox = el("div", "wizard-report");
     reportBox.appendChild(el("strong", null, roomReady ? "Комната проверена" : "Проверка требует внимания"));

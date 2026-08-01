@@ -537,16 +537,30 @@ class PanelContourWizardTest(unittest.TestCase):
         panel._firstRunFields.rooms.living.include.fire("change");
         panel._firstRunFields.rooms.living.configure.fire("click");
         await tick();
-        const field = panel._firstRunFields.room.devices.find((item) => item.key === "candidate_ac:air_conditioner");
+        let field = panel._firstRunFields.room.devices.find((item) => item.key === "candidate_ac:air_conditioner");
         field.checkbox.checked = true;
         field.checkbox.fire("change");
-        const assistant = field.channelAssistant.node;
+        let assistant = field.channelAssistant.node;
         if (!textOf(assistant).includes("Рекомендуем: Напрямую через Home Assistant")
           || !textOf(assistant).includes("Как выбрать способ управления")) {
           throw new Error("channel recommendation or comparison help is missing");
         }
         field.controlChannel.value = "direct_wifi";
         field.controlChannel.fire("change");
+        panel._activeRoomSetupPane = "review";
+        panel._render();
+        let reviewText = textOf(panel.shadowRoot);
+        if (!reviewText.includes("Устройства управления")
+          || !reviewText.includes("1 выбрано")
+          || !reviewText.includes("Проверка каналов")
+          || !reviewText.includes("0 из 1 подтверждено")
+          || !reviewText.includes("Каналы можно сохранить без теста")) {
+          throw new Error("room review did not explain the untested control channel");
+        }
+        panel._activeRoomSetupPane = "devices";
+        panel._render();
+        field = panel._firstRunFields.room.devices.find((item) => item.key === "candidate_ac:air_conditioner");
+        assistant = field.channelAssistant.node;
         const testButton = findAll(assistant, (node) => node.tagName === "BUTTON"
           && node.textContent === "Проверить канал")[0];
         if (!testButton || !textOf(assistant).includes("без изменения режима")) {
@@ -566,12 +580,32 @@ class PanelContourWizardTest(unittest.TestCase):
           || !textOf(assistant).includes("возврат исходной")) {
           throw new Error("confirmed read-back was not shown honestly");
         }
+        panel._activeRoomSetupPane = "review";
+        panel._render();
+        reviewText = textOf(panel.shadowRoot);
+        if (!reviewText.includes("Проверка каналов")
+          || !reviewText.includes("1 из 1 подтверждено")
+          || reviewText.includes("Каналы можно сохранить без теста")) {
+          throw new Error("confirmed channel status did not reach the room review");
+        }
+        panel._activeRoomSetupPane = "devices";
+        panel._render();
+        field = panel._firstRunFields.room.devices.find((item) => item.key === "candidate_ac:air_conditioner");
+        assistant = field.channelAssistant.node;
         field.controlChannel.value = "universal_ir";
         field.controlChannel.fire("change");
         if (findAll(assistant, (node) => node.tagName === "BUTTON"
           && node.textContent === "Проверить канал").length
           || !textOf(assistant).includes("физическую реакцию")) {
           throw new Error("one-way IR channel was presented as automatically confirmable");
+        }
+        panel._activeRoomSetupPane = "review";
+        panel._render();
+        reviewText = textOf(panel.shadowRoot);
+        if (!reviewText.includes("ИК-канал · ручная проверка")
+          || !reviewText.includes("подтвердите физическую реакцию")
+          || reviewText.includes("0 из 1 подтверждено")) {
+          throw new Error("room review presented a one-way IR channel as automatically testable");
         }
             """,
         )
