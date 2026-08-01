@@ -365,6 +365,47 @@ class DashboardSnapshotTest(unittest.TestCase):
         self.assertEqual("Чайник", energy["sources"][0]["name"])
         self.assertEqual("watts", energy["settings"]["displayUnits"])
 
+    def test_energy_source_is_offline_when_switch_is_unavailable(self) -> None:
+        snapshot = build_dashboard_snapshot(
+            areas=(),
+            devices=(DashboardDevice("breaker", "Автомат", None),),
+            entities=(
+                DashboardEntity(
+                    "switch.breaker",
+                    "switch",
+                    "unavailable",
+                    "Автомат",
+                    {},
+                    "breaker",
+                ),
+                DashboardEntity(
+                    "sensor.breaker_power",
+                    "sensor",
+                    "0",
+                    "Мощность",
+                    {"device_class": "power", "unit_of_measurement": "W"},
+                    "breaker",
+                ),
+                DashboardEntity(
+                    "sensor.breaker_voltage",
+                    "sensor",
+                    "224",
+                    "Напряжение",
+                    {"device_class": "voltage", "unit_of_measurement": "V"},
+                    "breaker",
+                ),
+            ),
+            generated_at_ms=1,
+            local_iso="2026-08-01T12:00:00+06:00",
+            energy_settings=HausmanHubSettings(energy_use_all_devices=True),
+        )
+
+        source = snapshot["energy"]["sources"][0]
+        self.assertFalse(source["available"])
+        self.assertFalse(snapshot["energy"]["available"])
+        self.assertIsNone(snapshot["energy"]["currentPowerW"])
+        self.assertIsNone(snapshot["energy"]["voltageV"])
+
     def test_default_energy_selection_avoids_implicit_double_counting(self) -> None:
         snapshot = build_dashboard_snapshot(
             areas=(),

@@ -252,8 +252,10 @@ function renderEnergyDevices(panel, container, sources, deps) {
     identity.appendChild(el("small", null, [source.roomName || "Без комнаты", device && device.manufacturer, device && device.model].filter(Boolean).join(" · ")));
     row.appendChild(identity);
     const live = el("span", "energy-device-value is-accent");
-    live.appendChild(el("b", null, sourceMetric(source, "currentPowerW", "Вт")));
-    live.appendChild(el("small", null, `${sourceMetric(source, "currentA", "А", 2)} · ${sourceMetric(source, "voltageV", "В")}`));
+    live.appendChild(el("b", null, source.available ? sourceMetric(source, "currentPowerW", "Вт") : "—"));
+    live.appendChild(el("small", null, source.available
+      ? `${sourceMetric(source, "currentA", "А", 2)} · ${sourceMetric(source, "voltageV", "В")}`
+      : "актуальных данных нет"));
     row.appendChild(live);
     const accumulated = el("span", "energy-device-value");
     accumulated.appendChild(el("b", null, sourceMetric(source, source.todayKwh !== null && source.todayKwh !== undefined ? "todayKwh" : "totalKwh", "кВт·ч", 2)));

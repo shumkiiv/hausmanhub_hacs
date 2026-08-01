@@ -123,6 +123,7 @@ _ALLOWLISTED_ATTRIBUTES = (
     "temperature",
 )
 _ENERGY_USAGE_DEVICE_CLASSES = frozenset({"power", "current", "energy"})
+_ENERGY_CONTROL_DOMAINS = frozenset({"switch"})
 _MINIMUM_MAINS_VOLTAGE = 80.0
 
 
@@ -432,6 +433,34 @@ def _is_energy_source(
         return True
     voltage = measurements.get("voltageV")
     return voltage is not None and voltage >= _MINIMUM_MAINS_VOLTAGE
+
+
+def _energy_source_available(
+    entities: Iterable[DashboardEntity],
+    measurements: Mapping[str, float | None],
+) -> bool:
+    """Require a live meter and, when present, a live physical control entity."""
+
+    collected = tuple(entities)
+    measurement_entities = tuple(
+        entity
+        for entity in collected
+        if _device_class(entity) in _ENERGY_USAGE_DEVICE_CLASSES
+        or (
+            _device_class(entity) == "voltage"
+            and (measurements.get("voltageV") or 0) >= _MINIMUM_MAINS_VOLTAGE
+        )
+    )
+    if not measurement_entities or not any(
+        entity.state not in _UNAVAILABLE_STATES for entity in measurement_entities
+    ):
+        return False
+    control_entities = tuple(
+        entity for entity in collected if entity.domain in _ENERGY_CONTROL_DOMAINS
+    )
+    return not control_entities or any(
+        entity.state not in _UNAVAILABLE_STATES for entity in control_entities
+    )
 
 
 def _room_climate(entities: Iterable[DashboardEntity]) -> DashboardEntity | None:
@@ -796,6 +825,7 @@ def build_dashboard_snapshot(
         details = _device_details(name, members)
         electrical = _energy_measurements(members)
         has_energy = _is_energy_source(members, electrical)
+        energy_available = _energy_source_available(members, electrical)
         device_payloads.append(
             {
                 "id": public_id,
@@ -837,7 +867,7 @@ def build_dashboard_snapshot(
                     "name": name,
                     "roomId": area.area_id if area is not None else None,
                     "roomName": area.name if area is not None else None,
-                    "available": not unavailable,
+                    "available": energy_available,
                     **electrical,
                 }
             )
@@ -991,19 +1021,20 @@ def build_dashboard_snapshot(
         for source in energy_sources
         if saved_energy.energy_use_all_devices or source["id"] in selected_ids
     ]
+    live_selected_sources = [source for source in selected_sources if source["available"]]
     power_values = [
         float(source["currentPowerW"])
-        for source in selected_sources
+        for source in live_selected_sources
         if source["currentPowerW"] is not None
     ]
     current_values = [
         float(source["currentA"])
-        for source in selected_sources
+        for source in live_selected_sources
         if source["currentA"] is not None
     ]
     voltage_values = [
         float(source["voltageV"])
-        for source in selected_sources
+        for source in live_selected_sources
         if source["voltageV"] is not None
     ]
     energy_values = [
