@@ -51,6 +51,25 @@ function sourceDevice(panel, source) {
   return devices.find((item) => item.id === source.deviceId || item.physicalId === source.deviceId);
 }
 
+function energyPowerAction(panel, source, actionId) {
+  const device = sourceDevice(panel, source);
+  const targets = device ? panel._catalogTargets(device) : [];
+  return targets.flatMap((target) => (target.actions || [])
+    .map((action) => ({ target, action })))
+    .find((entry) => entry.action.action_id === actionId
+      && !(entry.action.allowed_fields || []).includes("value"));
+}
+
+function runEnergyPowerAction(panel, source, actionId) {
+  const item = energyPowerAction(panel, source, actionId);
+  if (!item || !source.available || panel._busy) return;
+  const device = sourceDevice(panel, source);
+  const breaker = /автомат|breaker|rcbo|mcb|din/i.test(`${source.name} ${device && device.model || ""}`);
+  if (actionId === "turn_off" && breaker
+      && !window.confirm(`Отключить «${source.name}»? Питание подключённой линии будет снято.`)) return;
+  panel._executeDeviceAction(item.target.target_id, actionId, null);
+}
+
 function showEnergyDevice(panel, container, sourceId) {
   panel._energySelectedDeviceId = sourceId;
   panel._renderEnergySection(container);
@@ -100,42 +119,68 @@ export function renderEnergyOverviewCard(panel, container, deps) {
   container.appendChild(card);
 }
 
-function historyBars(panel, source, deps) {
+function renderEnergyHistoryChart(panel, source, deps, retry) {
   const { el, setAttr } = deps;
   const wrap = el("div", "energy-history");
   const history = panel._energyHistory && panel._energyHistory[source.id];
   const period = panel._energyHistoryPeriod || "day";
-  const periodLabels = {
+  const labels = {
     day: ["за последние 24 часа", "Почасовая средняя мощность · последние 24 часа"],
     week: ["за последние 7 дней", "Почасовая средняя мощность · последние 7 дней"],
     month: ["за последний месяц", "Средняя мощность по дням · последний месяц"],
     year: ["за последний год", "Средняя мощность по дням · последний год"],
   };
-  const values = Array.isArray(history) ? history
-    .map((point) => Number(point.mean))
-    .filter(Number.isFinite) : [];
+  const values = Array.isArray(history) ? history.map((point) => Number(point.mean)).filter(Number.isFinite) : [];
   if (!values.length) {
-    wrap.appendChild(el("div", "energy-history-empty", "История мощности пока недоступна. Текущие показания продолжают обновляться."));
-    return wrap;
+    const empty = el("div", "energy-history-empty");
+    empty.appendChild(el("strong", null, panel._energyHistoryError ? "Не удалось получить историю" : "История мощности пока недоступна"));
+    empty.appendChild(el("span", null, panel._energyHistoryError
+      ? "Проверьте Recorder Home Assistant и повторите загрузку."
+      : "Текущие показания продолжают обновляться."));
+    const button = el("button", "secondary", "Обновить");
+    button.type = "button"; button.disabled = panel._energyHistoryLoading; button.addEventListener("click", retry);
+    empty.appendChild(button); wrap.appendChild(empty); return wrap;
   }
-  const max = Math.max(...values, 1);
-  const chart = el("div", "energy-history-bars");
-  setAttr(chart, "role", "img");
-  setAttr(chart, "aria-label", `График мощности ${source.name} ${periodLabels[period][0]}`);
-  const bucketSize = Math.max(1, Math.ceil(values.length / 48));
-  const visibleValues = [];
+  const max = Math.max(...values);
+  const min = Math.min(...values);
+  const span = Math.max(max - min, max * .12, 1);
+  const bucketSize = Math.max(1, Math.ceil(values.length / 36));
+  const visible = [];
   for (let index = 0; index < values.length; index += bucketSize) {
     const bucket = values.slice(index, index + bucketSize);
-    visibleValues.push(bucket.reduce((sum, value) => sum + value, 0) / bucket.length);
+    visible.push(bucket.reduce((sum, value) => sum + value, 0) / bucket.length);
   }
-  visibleValues.forEach((value) => {
-    const bar = el("span", "energy-history-bar");
-    bar.style.height = `${Math.max(4, (value / max) * 100)}%`;
-    setAttr(bar, "title", `${number(value)} Вт`);
-    chart.appendChild(bar);
-  });
-  wrap.appendChild(chart);
-  wrap.appendChild(el("div", "energy-chart-caption", periodLabels[period][1]));
+  const chart = el("canvas", "energy-history-canvas");
+  chart.width = 960; chart.height = 220;
+  setAttr(chart, "role", "img");
+  setAttr(chart, "aria-label", `График мощности ${source.name} ${labels[period][0]}`);
+  setAttr(chart, "title", `${number(values[values.length - 1])} Вт · ${labels[period][1]}`);
+  if (typeof chart.getContext === "function") {
+    const context = chart.getContext("2d");
+    if (context) {
+      const width = chart.width;
+      const height = chart.height;
+      const pad = { left: 20, right: 20, top: 20, bottom: 28 };
+      context.strokeStyle = "rgba(132, 151, 177, .18)"; context.lineWidth = 1;
+      for (let row = 0; row < 4; row += 1) {
+        const y = pad.top + ((height - pad.top - pad.bottom) / 3) * row;
+        context.beginPath(); context.moveTo(pad.left, y); context.lineTo(width - pad.right, y); context.stroke();
+      }
+      const points = visible.map((value, index) => ({
+        x: pad.left + (index / Math.max(visible.length - 1, 1)) * (width - pad.left - pad.right),
+        y: pad.top + (1 - ((value - min) / span)) * (height - pad.top - pad.bottom),
+      }));
+      const fill = context.createLinearGradient(0, pad.top, 0, height - pad.bottom);
+      fill.addColorStop(0, "rgba(79, 140, 255, .28)"); fill.addColorStop(1, "rgba(79, 140, 255, 0)");
+      context.beginPath();
+      points.forEach((point, index) => index ? context.lineTo(point.x, point.y) : context.moveTo(point.x, point.y));
+      context.lineTo(points[points.length - 1].x, height - pad.bottom); context.lineTo(points[0].x, height - pad.bottom);
+      context.closePath(); context.fillStyle = fill; context.fill(); context.beginPath();
+      points.forEach((point, index) => index ? context.lineTo(point.x, point.y) : context.moveTo(point.x, point.y));
+      context.strokeStyle = "#4F8CFF"; context.lineWidth = 5; context.lineJoin = "round"; context.lineCap = "round"; context.stroke();
+    }
+  }
+  wrap.appendChild(chart); wrap.appendChild(el("div", "energy-chart-caption", labels[period][1]));
   return wrap;
 }
 
@@ -197,7 +242,10 @@ function renderDeviceDetail(panel, container, source, deps) {
   chartHead.appendChild(chartCopy);
   chartHead.appendChild(energyPeriodButtons(panel, container, deps));
   chartCard.appendChild(chartHead);
-  chartCard.appendChild(historyBars(panel, source, deps));
+  chartCard.appendChild(renderEnergyHistoryChart(panel, source, deps, () => {
+    panel._energyHistoryError = null;
+    loadEnergyHistory(panel);
+  }));
   main.appendChild(chartCard);
   layout.appendChild(main);
 
@@ -207,21 +255,15 @@ function renderDeviceDetail(panel, container, source, deps) {
   control.appendChild(el("p", null, source.available
     ? "Команда будет подтверждена по фактическому состоянию устройства."
     : "Управление недоступно, пока устройство не вернётся в сеть."));
-  const targets = device ? panel._catalogTargets(device) : [];
-  const actions = targets.flatMap((target) => (target.actions || []).map((action) => ({ target, action })));
   const controls = el("div", "energy-power-actions");
   let controlCount = 0;
   [["turn_on", "Включить"], ["turn_off", "Отключить"]].forEach(([actionId, label]) => {
-    const item = actions.find((entry) => entry.action.action_id === actionId && !(entry.action.allowed_fields || []).includes("value"));
+    const item = energyPowerAction(panel, source, actionId);
     if (!item) return;
     const button = el("button", actionId === "turn_off" ? "secondary is-danger" : "secondary", label);
     button.type = "button";
     button.disabled = panel._busy || !source.available;
-    button.addEventListener("click", () => {
-      const breaker = /автомат|breaker|rcbo|mcb|din/i.test(`${source.name} ${device && device.model || ""}`);
-      if (actionId === "turn_off" && breaker && !window.confirm(`Отключить «${source.name}»? Питание подключённой линии будет снято.`)) return;
-      panel._executeDeviceAction(item.target.target_id, actionId, null);
-    });
+    button.addEventListener("click", () => runEnergyPowerAction(panel, source, actionId));
     controls.appendChild(button);
     controlCount += 1;
   });
@@ -264,7 +306,10 @@ function renderEnergyHistory(panel, energy, selected, deps) {
   head.appendChild(energyPeriodButtons(panel, panel._shell.homeSections.energy, deps));
   card.appendChild(head);
   const layout = el("div", "energy-history-layout");
-  layout.appendChild(historyBars(panel, { id: "selection", name: "выбранных источников" }, deps));
+  layout.appendChild(renderEnergyHistoryChart(panel, { id: "selection", name: "выбранных источников" }, deps, () => {
+    panel._energyHistoryError = null;
+    loadEnergyHistory(panel);
+  }));
   const sources = el("div", "energy-current-sources");
   sources.appendChild(el("h4", null, "Источники"));
   selected.slice(0, 2).forEach((source) => {
@@ -323,33 +368,45 @@ function renderEnergyDevices(panel, container, sources, deps) {
   const list = el("div", "energy-device-list");
   shown.forEach((source) => {
     const device = sourceDevice(panel, source);
-    const row = el("button", `energy-device-card${source.available ? "" : " is-unavailable"}`);
-    row.type = "button";
-    setAttr(row, "aria-label", `Открыть устройство ${source.name}`);
-    row.addEventListener("click", () => showEnergyDevice(panel, container, source.id));
-    row.appendChild(energyDeviceVisual(panel, source, deps));
+    const row = el("div", `energy-device-card${source.available ? "" : " is-unavailable"}`);
+    const open = el("button", "energy-device-card-open");
+    open.type = "button";
+    setAttr(open, "aria-label", `Открыть устройство ${source.name}`);
+    open.addEventListener("click", () => showEnergyDevice(panel, container, source.id));
+    open.appendChild(energyDeviceVisual(panel, source, deps));
     const identity = el("span", "energy-device-card-copy");
     identity.appendChild(el("strong", null, source.name));
     identity.appendChild(el("small", null, [source.roomName || "Без комнаты", device && device.manufacturer, device && device.model].filter(Boolean).join(" · ")));
-    row.appendChild(identity);
+    open.appendChild(identity);
     const live = el("span", "energy-device-value energy-device-live is-accent");
     live.appendChild(el("b", null, source.available ? sourceMetric(source, "currentPowerW", "Вт") : "—"));
     live.appendChild(el("small", null, source.available
       ? `${sourceMetric(source, "currentA", "А", 2)} · ${sourceMetric(source, "voltageV", "В")}`
       : "актуальных данных нет"));
-    row.appendChild(live);
+    open.appendChild(live);
     const accumulated = el("span", "energy-device-value energy-device-accumulated");
     accumulated.appendChild(el("b", null, sourceMetric(source, source.todayKwh !== null && source.todayKwh !== undefined ? "todayKwh" : "totalKwh", "кВт·ч", 2)));
     accumulated.appendChild(el("small", null, source.todayKwh !== null && source.todayKwh !== undefined ? "за сегодня" : "накоплено"));
-    row.appendChild(accumulated);
+    open.appendChild(accumulated);
     const isPoweredOff = source.available && source.powered === false;
     const statusTone = !source.available ? "is-offline" : (isPoweredOff ? "is-powered-off" : "is-online");
     const status = el("span", `energy-device-status ${statusTone}`);
     status.appendChild(el("strong", null, !source.available ? "Нет связи" : (isPoweredOff ? "Выключен" : "В сети")));
     status.appendChild(el("small", null, !source.available ? "проверьте устройство" : (isPoweredOff ? "питание отключено" : "обновляется")));
-    row.appendChild(status);
-    row.appendChild(el("span", "energy-device-open", "Подробнее"));
-    row.appendChild(el("span", "energy-overview-chevron", "›"));
+    open.appendChild(status);
+    open.appendChild(el("span", "energy-overview-chevron", "›"));
+    row.appendChild(open);
+    const actionId = source.powered === false ? "turn_on" : "turn_off";
+    const action = energyPowerAction(panel, source, actionId);
+    if (action) {
+      const quick = el("button", `secondary energy-device-quick${actionId === "turn_off" ? " is-danger" : ""}`,
+        actionId === "turn_off" ? "Отключить" : "Включить");
+      quick.type = "button";
+      quick.disabled = panel._busy || !source.available;
+      setAttr(quick, "aria-label", `${actionId === "turn_off" ? "Отключить" : "Включить"} ${source.name}`);
+      quick.addEventListener("click", () => runEnergyPowerAction(panel, source, actionId));
+      row.appendChild(quick);
+    }
     list.appendChild(row);
   });
   if (!shown.length) list.appendChild(el("div", "energy-devices-empty", "Устройства не найдены"));
@@ -537,14 +594,30 @@ export async function loadEnergyHistory(panel) {
     (response && Array.isArray(response.series) ? response.series : [])
       .filter((series) => series.unit === "W" && series.metric === "power")
       .forEach((series) => {
-        const source = energy.sources.find((item) => item.deviceId === series.deviceId);
-        const key = series.scope === "selection" ? "selection" : (source && source.id || series.deviceId);
+        const source = energy.sources.find((item) => item.id === series.sourceId
+          || item.deviceId === series.deviceId);
+        const key = series.scope === "selection" ? "selection" : (source && source.id || series.deviceId || series.sourceId);
         history[key] = (series.points || []).map((point) => ({
           start: point.at,
           mean: point.value,
         }));
       });
+    if (!history.selection) {
+      const selectedIds = new Set(selectedSources(energy).map((source) => source.id));
+      const values = new Map();
+      Object.entries(history).forEach(([sourceId, points]) => {
+        if (!selectedIds.has(sourceId)) return;
+        (points || []).forEach((point) => {
+          const value = Number(point.mean);
+          if (!point.start || !Number.isFinite(value)) return;
+          values.set(point.start, (values.get(point.start) || 0) + value);
+        });
+      });
+      history.selection = [...values.entries()].sort(([left], [right]) => left.localeCompare(right))
+        .map(([start, mean]) => ({ start, mean }));
+    }
     panel._energyHistory = history;
+    panel._energyHistoryError = null;
   } catch (error) {
     panel._energyHistory = panel._energyHistory || {};
     panel._energyHistoryError = error && error.message || "history_unavailable";

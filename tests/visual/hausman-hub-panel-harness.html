@@ -12,7 +12,7 @@
   <body>
     <hausman-hub-panel id="panel"></hausman-hub-panel>
     <script type="module">
-      import "../../custom_components/hausman_hub/frontend/hausman-hub-panel.js?v=1.51.59";
+      import "../../custom_components/hausman_hub/frontend/hausman-hub-panel.js?v=1.51.60";
       const params = new URLSearchParams(window.location.search);
       const panel = document.getElementById("panel");
       const theme = params.get("theme") === "dark" ? "dark" : "light";
@@ -21,7 +21,7 @@
       document.documentElement.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       document.body.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       panel._data = {
-        integration_version: "1.51.59",
+        integration_version: "1.51.60",
         readiness: { status: "ready", bridge_mode: "native", reasons: [] },
         snapshot: {
           rooms: [
@@ -159,6 +159,8 @@
           devices: [
             { target_id: "ac-living", entity_id: "climate.living_ac", name: "Кондиционер гостиная", actions: [{ action_id: "turn_off", title: "Выключить", allowed_fields: [] }, { action_id: "set_temperature", title: "Температура", allowed_fields: ["value"] }] },
             { target_id: "humidifier-bedroom", entity_id: "humidifier.bedroom", name: "Увлажнитель спальня", actions: [{ action_id: "turn_on", title: "Включить", allowed_fields: [] }, { action_id: "set_humidity", title: "Влажность", allowed_fields: ["value"] }] },
+            { target_id: "breaker-232", entity_id: "switch.breaker_232", name: "Автомат 232", actions: [{ action_id: "turn_on", title: "Включить", allowed_fields: [] }, { action_id: "turn_off", title: "Отключить", allowed_fields: [] }] },
+            { target_id: "breaker-233", entity_id: "switch.breaker_233", name: "Автомат 233", actions: [{ action_id: "turn_on", title: "Включить", allowed_fields: [] }, { action_id: "turn_off", title: "Отключить", allowed_fields: [] }] },
           ],
         },
         list: {
@@ -187,19 +189,21 @@
           { id: "floor-kitchen", physicalId: "floor-kitchen", entityId: "climate.kitchen_floor", name: "Тёплый пол кухня", roomId: "kitchen", roomName: "Кухня", domain: "climate", category: "climate", state: "heat", stateLabel: "Обогрев", active: true, tone: "good", details: [{ entityId: "climate.kitchen_floor", label: "Температура пола", value: "27 °C" }] },
           { id: "purifier-living", physicalId: "purifier-living", entityId: "fan.living_purifier", name: "Очиститель воздуха гостиная", roomId: "living", roomName: "Гостиная", domain: "fan", category: "air_quality", state: "on", stateLabel: "Включено", active: true, tone: "good", details: [{ entityId: "sensor.living_pm25", label: "PM2.5", value: "8 мкг/м³" }] },
           { id: "vent-kitchen", physicalId: "vent-kitchen", entityId: "fan.kitchen_exhaust", name: "Вытяжка кухня", roomId: "kitchen", roomName: "Кухня", domain: "fan", category: "climate", state: "off", stateLabel: "Выключено", active: false, tone: "neutral", details: [{ entityId: "fan.kitchen_exhaust", label: "Скорость", value: "0 %" }] },
+          { id: "breaker-232", physicalId: "breaker-232", entityId: "switch.breaker_232", name: "Автомат 232", roomName: "Дом", manufacturer: "Tongou", model: "Smart circuit breaker", domain: "switch", category: "energy", state: "on", stateLabel: "Включён", tone: "good", imageUrl: "https://www.zigbee2mqtt.io/images/devices/TO-Q-SY1-JZT.png", details: [{ entityId: "switch.breaker_232", label: "Питание", value: "Включено" }] },
+          { id: "breaker-233", physicalId: "breaker-233", entityId: "switch.breaker_233", name: "Автомат 233", roomName: "Дом", manufacturer: "Tongou", model: "Smart circuit breaker", domain: "switch", category: "energy", state: "on", stateLabel: "Включён", tone: "good", imageUrl: "https://www.zigbee2mqtt.io/images/devices/TO-Q-SY1-JZT.png", details: [{ entityId: "switch.breaker_233", label: "Питание", value: "Включено" }] },
         ],
         energy: {
           available: true,
-          currentPowerW: 1855,
-          currentA: null,
-          voltageV: null,
+          currentPowerW: 226,
+          currentA: 1.6,
+          voltageV: 225.5,
           totalKwh: 13.51,
-          selectedSourceIds: ["breaker-233", "unknown-meter", "breaker-232", "smart-plug"],
-          settings: { displayUnits: "watts", showVoltage: true, aggregation: "combined", useAllDevices: true },
+          selectedSourceIds: ["breaker-233", "breaker-232"],
+          settings: { displayUnits: "both", showVoltage: true, aggregation: "combined", useAllDevices: false },
           sources: [
             { id: "unknown-meter", deviceId: "unknown-meter", name: "0xa4c1385af46163eb", roomName: "Дом", available: true, currentPowerW: 0, currentA: null, voltageV: null, totalKwh: null },
-            { id: "breaker-232", deviceId: "breaker-232", name: "Автомат 232", roomName: "Дом", available: true, currentPowerW: 0, currentA: null, voltageV: null, totalKwh: null },
-            { id: "breaker-233", deviceId: "breaker-233", name: "Автомат 233", roomName: "Дом", available: true, currentPowerW: 1855, currentA: null, voltageV: null, totalKwh: 13.51 },
+            { id: "breaker-232", deviceId: "breaker-232", name: "Автомат 232", roomName: "Дом", available: true, powered: true, currentPowerW: 6, currentA: 0.06, voltageV: 226, totalKwh: 8.59, imageUrl: "https://www.zigbee2mqtt.io/images/devices/TO-Q-SY1-JZT.png" },
+            { id: "breaker-233", deviceId: "breaker-233", name: "Автомат 233", roomName: "Дом", available: true, powered: true, currentPowerW: 220, currentA: 1.54, voltageV: 225, totalKwh: 62.27, imageUrl: "https://www.zigbee2mqtt.io/images/devices/TO-Q-SY1-JZT.png" },
             { id: "smart-plug", deviceId: "smart-plug", name: "Умная розетка Потребляемая", roomName: "Дом", available: true, currentPowerW: null, currentA: null, voltageV: null, totalKwh: null },
           ],
         },
@@ -216,6 +220,14 @@
           { id: "event-1", title: "Климат гостиной", message: "Цель изменена до 25 °C", ts: Date.now() - 180000 },
           { id: "event-2", title: "Свет на кухне", message: "Выключен", ts: Date.now() - 720000 },
         ],
+      };
+      panel._energyHistory = {
+        selection: Array.from({ length: 24 }, (_, index) => ({
+          start: new Date(Date.now() - (23 - index) * 3600000).toISOString(),
+          mean: 70 + index * 6 + Math.sin(index * .85) * 18,
+        })),
+        "breaker-232": Array.from({ length: 24 }, (_, index) => ({ start: String(index), mean: 4 + Math.sin(index) * 2 })),
+        "breaker-233": Array.from({ length: 24 }, (_, index) => ({ start: String(index), mean: 66 + index * 6 })),
       };
       panel._settingsData = {
         connection_mode: "center",
@@ -234,7 +246,7 @@
       }
       panel._render();
       panel.shadowRoot.querySelector("link").href =
-        "../../custom_components/hausman_hub/frontend/hausman-hub-panel.css?v=1.51.59";
+        "../../custom_components/hausman_hub/frontend/hausman-hub-panel.css?v=1.51.60";
       if (screen === "assistant") {
         panel._assistant = {
           loaded: true,

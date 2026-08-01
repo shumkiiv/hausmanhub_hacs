@@ -893,7 +893,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("energy summary is incomplete: " + text);
         }
         const rows = findAll(panel._shell.homeSections.energy, (node) =>
-          node.tagName === "BUTTON" && String(node.className).includes("energy-device-card"));
+          String(node.className).split(" ").includes("energy-device-card"));
         if (rows.length !== 2 || !findAll(rows[0], (node) => node.tagName === "IMG").length) {
           throw new Error("energy sources must use one tablet row and product image per physical device");
         }
@@ -922,8 +922,14 @@ class PanelSettingsSectionsTest(unittest.TestCase):
             { action_id: "turn_off", title: "Выключить", allowed_fields: [] },
           ],
         }] };
+        panel._renderEnergySection(panel._shell.homeSections.energy);
+        const quickPower = findAll(panel._shell.homeSections.energy, (node) =>
+          node.tagName === "BUTTON" && String(node.className).includes("energy-device-quick"))[0];
+        if (!quickPower || quickPower.textContent !== "Отключить") {
+          throw new Error("energy row quick power action is missing");
+        }
         const device = findAll(panel._shell.homeSections.energy, (node) =>
-          node.tagName === "BUTTON" && String(node.className).includes("energy-device-card"))[0];
+          node.tagName === "BUTTON" && String(node.className).includes("energy-device-card-open"))[0];
         device.fire("click");
         text = textOf(panel._shell.homeSections.energy);
         if (!text.includes("История мощности") || !text.includes("Питание") || !text.includes("Об устройстве") || !text.includes("Автомат кухни") || !text.includes("DIN RCBO")) {
@@ -2643,7 +2649,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.51.59")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.51.60")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;
