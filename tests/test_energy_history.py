@@ -12,6 +12,41 @@ from custom_components.hausman_hub.application.energy_history import (
 
 
 class EnergyHistoryTest(unittest.TestCase):
+    def test_recorder_unix_timestamps_are_kept_as_utc_points(self) -> None:
+        start = datetime(2026, 8, 1, 6, 0, tzinfo=timezone.utc)
+        descriptor = EnergySeriesDescriptor(
+            entity_id="sensor.recorder_power",
+            source_id="device_public:power",
+            device_id="device_public",
+            name="Автомат · Мощность",
+            room_id=None,
+            unit="W",
+            value_key="mean",
+            metric="power",
+        )
+
+        payload = build_energy_history(
+            start=start,
+            end=start + timedelta(hours=2),
+            interval="1h",
+            descriptors=(descriptor,),
+            rows_by_entity={
+                descriptor.entity_id: [
+                    {"start": start.timestamp(), "mean": 1289.0},
+                    {"start": (start + timedelta(hours=1)).timestamp(), "mean": 640.0},
+                ]
+            },
+        )
+
+        self.assertEqual(
+            [start.isoformat(), (start + timedelta(hours=1)).isoformat()],
+            [point["at"] for point in payload["series"][0]["points"]],
+        )
+        self.assertEqual(
+            [1289.0, 640.0],
+            [point["value"] for point in payload["series"][0]["points"]],
+        )
+
     def test_fifteen_minute_series_is_bounded_aggregated_and_private(self) -> None:
         start = datetime(2026, 7, 31, 6, 0, tzinfo=timezone.utc)
         descriptor = EnergySeriesDescriptor(

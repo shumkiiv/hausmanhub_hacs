@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +23,11 @@ class EnergySeriesDescriptor:
 def _timestamp(value: object) -> datetime | None:
     if isinstance(value, datetime):
         return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        try:
+            return datetime.fromtimestamp(value, tz=timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            return None
     if isinstance(value, str):
         try:
             return datetime.fromisoformat(value.replace("Z", "+00:00"))
