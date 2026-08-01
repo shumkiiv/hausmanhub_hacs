@@ -1,4 +1,7 @@
 .device-inventory-row.is-expanded { border-color:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 56%,var(--hmh-border,#2F3845)); }
+.device-inventory-heading-row { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; }
+.device-inventory-heading-row .device-inventory-heading { min-width:0; }
+.device-inventory-refresh { flex:0 0 auto; min-height:42px; margin:0; }
 .device-inventory-summary { display:grid; grid-template-columns:minmax(210px,1.4fr) minmax(130px,.7fr) minmax(150px,.75fr) minmax(240px,1.25fr) 24px;
   align-items:center; gap:14px; width:100%; min-height:76px; margin:0; padding:12px 14px; text-align:left; color:var(--hmh-text,#E7ECF3);
   border:0; border-radius:0; background:transparent; box-shadow:none; }
@@ -16,6 +19,13 @@
 .device-maintenance-overview section { min-width:0; padding:14px; border-radius:12px; background:var(--hmh-raised,#181E26); }
 .device-maintenance-overview h4 { margin:0 0 9px; font-size:14px; }
 .device-maintenance-overview p { margin:5px 0 0; font-size:13px; line-height:1.45; }
+.device-maintenance-entity-list { margin-top:8px; }
+.device-maintenance-entity-list > summary { color:var(--hmh-accent,#4F8CFF); font-size:13px; font-weight:650; cursor:pointer; }
+.device-maintenance-entity-rows { display:grid; gap:7px; margin-top:10px; }
+.device-maintenance-entity-row { display:grid; gap:2px; padding:8px 10px; border-radius:9px;
+  background:color-mix(in srgb,var(--hmh-surface,#12171D) 74%,transparent); }
+.device-maintenance-entity-row strong { font-size:13px; }
+.device-maintenance-entity-row small { font-size:12px; }
 .device-maintenance-use { display:grid; gap:3px; padding:8px 0; border-top:1px solid var(--hmh-border,#2F3845); }
 .device-maintenance-use:first-of-type { padding-top:0; border-top:0; }
 .device-maintenance-use strong { font-size:14px; }
@@ -34,13 +44,27 @@
 .device-maintenance-actions a.button { display:inline-flex; align-items:center; padding:8px 14px; text-decoration:none; }
 .device-maintenance-actions .danger { margin-left:auto; color:var(--error-color,#E5534B); border-color:color-mix(in srgb,var(--error-color,#E5534B) 45%,var(--hmh-border,#2F3845)); }
 .device-maintenance-message { margin-top:12px; padding:10px 12px; color:var(--hmh-text,#E7ECF3); border-radius:10px; background:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 12%,var(--hmh-raised,#181E26)); }
+.device-maintenance-message.is-success { background:color-mix(in srgb,var(--success-color,#4CAF6E) 14%,var(--hmh-raised,#181E26)); }
+.device-maintenance-message.is-error { color:var(--error-color,#E5534B); background:color-mix(in srgb,var(--error-color,#E5534B) 10%,var(--hmh-raised,#181E26)); }
+.device-maintenance-confirm { display:flex; align-items:center; justify-content:space-between; gap:18px; margin-top:14px; padding:14px;
+  border:1px solid color-mix(in srgb,var(--error-color,#E5534B) 40%,var(--hmh-border,#2F3845)); border-radius:12px;
+  background:color-mix(in srgb,var(--error-color,#E5534B) 8%,var(--hmh-raised,#181E26)); }
+.device-maintenance-confirm strong { font-size:14px; }
+.device-maintenance-confirm p { margin:4px 0 0; font-size:13px; }
+.device-maintenance-confirm-actions { display:flex; flex:0 0 auto; gap:8px; }
+.device-maintenance-confirm-actions button { min-height:40px; margin:0; }
+.device-inventory-more { display:block; min-width:220px; min-height:42px; margin:14px auto 2px; }
 .device-maintenance-error { display:block; margin-bottom:10px; color:var(--error-color,#E5534B); }
 @media (max-width:1050px) {
   .device-maintenance-form { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .device-maintenance-form button { grid-column:1 / -1; }
 }
 @media (max-width:760px) {
+  .device-inventory-heading-row, .device-maintenance-confirm { align-items:stretch; flex-direction:column; }
+  .device-inventory-refresh { align-self:flex-start; }
   .device-maintenance-overview, .device-maintenance-form { grid-template-columns:1fr; }
   .device-maintenance-form button { grid-column:auto; }
   .device-maintenance-actions .danger { margin-left:0; }
+  .device-maintenance-confirm-actions { width:100%; }
+  .device-maintenance-confirm-actions button { flex:1 1 0; }
 }

@@ -2292,7 +2292,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         screen = panel._shell.settings;
         let text = textOf(screen);
         for (const label of [
-          "Что Home Assistant считает устройствами", "основных устройств",
+          "Устройства Home Assistant", "основных устройств", "Обновить список",
           "Возможный дубль", "Не привязано",
         ]) {
           if (!text.includes(label)) throw new Error("inventory text missing: " + label);
@@ -2360,7 +2360,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         card.fire("click");
         await tick();
         const text = textOf(screen);
-        for (const label of ["Где используется", "Не используется настройками HausmanHub", "Открыть в Home Assistant", "Найти устройство", "Удалить из реестра"]) {
+        for (const label of ["Где используется", "Не используется настройками HausmanHub", "Возможности устройства", "Показать состав", "Открыть в Home Assistant", "Найти устройство", "Удалить из реестра"]) {
           if (!text.includes(label)) throw new Error("maintenance action missing: " + label);
         }
         const name = findAll(screen, (node) => node.tagName === "INPUT" && node.maxLength === 128)[0];
@@ -2372,6 +2372,81 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const save = calls.find((call) => call.method === "POST" && call.path === "hausman_hub/v1/admin/device-maintenance" && call.payload.action === "update");
         if (!save || save.payload.name !== "Главный датчик" || save.payload.areaId !== "kids") {
           throw new Error("native registry update payload mismatch: " + JSON.stringify(save));
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_inventory_paginates_and_uses_inline_delete_confirmation(self) -> None:
+        payloads = dict(GET_PATHS)
+        devices = [
+            {
+                "id": f"inventory-{index}",
+                "canonicalId": f"device-{index}",
+                "name": f"Устройство {index:02d}",
+                "roomId": "living",
+                "roomName": "Гостиная",
+                "kind": "physical",
+                "status": "available",
+                "canonical": True,
+                "possibleDuplicate": False,
+                "entityCount": 1,
+                "domains": ["sensor"],
+            }
+            for index in range(18)
+        ]
+        payloads["hausman_hub/v1/dashboard"] = {
+            "rooms": [], "devices": [], "alarms": [],
+            "inventory": {
+                "summary": {"canonicalDeviceCount": 18, "attentionCount": 0},
+                "devices": devices,
+            },
+        }
+        payloads["hausman_hub/v1/admin/device-maintenance"] = {
+            "areas": [{"id": "living", "name": "Гостиная"}],
+            "devices": {
+                "inventory-0": {
+                    "roomAreaId": "living", "name": "Устройство 00",
+                    "haUrl": "/config/devices/device/native", "entityCount": 1,
+                    "integrationCount": 1,
+                    "entities": [{"id": "sensor.value", "name": "Значение", "disabled": False}],
+                    "uses": [], "used": False, "identifySupported": False,
+                    "identifyLabel": None, "deleteBlocked": False, "deleteBlockers": [],
+                }
+            },
+        }
+        script = panel_script(
+            payloads,
+            {"hausman_hub/v1/admin/device-maintenance": {"status": "deleted"}},
+            """
+        panel._shell.tabs.settings.fire("click");
+        await tick();
+        let screen = panel._shell.settings;
+        findAll(screen, (node) => node.tagName === "BUTTON" && node.textContent === "Комнаты")[0].fire("click");
+        screen = panel._shell.settings;
+        let rows = findAll(screen, (node) => String(node.className).split(" ").includes("device-inventory-row"));
+        if (rows.length !== 16) throw new Error("inventory first page must contain 16 rows");
+        const more = findAll(screen, (node) => node.tagName === "BUTTON" && node.textContent === "Показать ещё 2")[0];
+        if (!more) throw new Error("inventory pagination control is missing");
+        more.fire("click");
+        rows = findAll(screen, (node) => String(node.className).split(" ").includes("device-inventory-row"));
+        if (rows.length !== 18) throw new Error("inventory pagination did not reveal remaining rows");
+        findAll(rows[0], (node) => String(node.className).includes("device-inventory-summary"))[0].fire("click");
+        await tick();
+        findAll(screen, (node) => node.tagName === "BUTTON" && node.textContent === "Удалить из реестра")[0].fire("click");
+        if (calls.some((call) => call.method === "POST" && call.payload.action === "delete")) {
+          throw new Error("delete ran before the inline confirmation");
+        }
+        const confirmationText = textOf(screen);
+        if (!confirmationText.includes("Это не отключает физическое устройство")) {
+          throw new Error("safe inline delete explanation is missing");
+        }
+        findAll(screen, (node) => node.tagName === "BUTTON" && node.textContent === "Удалить запись")[0].fire("click");
+        await tick(10);
+        const removal = calls.find((call) => call.method === "POST" && call.payload.action === "delete");
+        if (!removal || removal.payload.confirmed !== true || removal.payload.deviceId !== "inventory-0") {
+          throw new Error("confirmed registry removal payload mismatch: " + JSON.stringify(removal));
         }
             """,
         )

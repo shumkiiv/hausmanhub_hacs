@@ -1,6 +1,7 @@
 const DEVICE_MAINTENANCE_API = "hausman_hub/v1/admin/device-maintenance";
 const Z2M_DEVICE_IMAGE =
   /^https:\/\/www\.zigbee2mqtt\.io\/images\/devices\/(?:[A-Za-z0-9._~-]|%[0-9A-F]{2})+\.png$/;
+const INVENTORY_PAGE_SIZE = 16;
 
 const INVENTORY_FILTERS = [
   { id: "attention", label: "Требуют внимания" },
@@ -47,7 +48,9 @@ function metric(el, value, label, tone = "") {
 
 function stateFor(panel) {
   if (!panel._deviceMaintenance) {
-    panel._deviceMaintenance = { data: null, loading: false, error: "", action: "", message: "" };
+    panel._deviceMaintenance = {
+      data: null, loading: false, error: "", action: "", message: "", messageTone: "", confirmDelete: null,
+    };
   }
   return panel._deviceMaintenance;
 }
@@ -73,6 +76,7 @@ async function runAction(panel, device, action, payload, repaint) {
   if (!panel._hass || state.action) return;
   state.action = action;
   state.message = "";
+  state.messageTone = "";
   repaint();
   try {
     await panel._hass.callApi("POST", DEVICE_MAINTENANCE_API, {
@@ -83,6 +87,8 @@ async function runAction(panel, device, action, payload, repaint) {
       : action === "identify"
         ? "Команда поиска отправлена устройству."
         : "Запись удалена из реестра Home Assistant.";
+    state.messageTone = "is-success";
+    state.confirmDelete = null;
     state.data = null;
     if (action === "delete") panel._inventoryDeviceId = null;
     await loadMaintenance(panel, repaint, true);
@@ -91,6 +97,7 @@ async function runAction(panel, device, action, payload, repaint) {
     state.message = error && error.status === 409
       ? "Удаление заблокировано: устройство ещё используется HausmanHub."
       : "Операция не выполнена. Реестр Home Assistant не изменён.";
+    state.messageTone = "is-error";
   } finally {
     state.action = "";
     if (typeof panel._render === "function") panel._render();
@@ -136,12 +143,20 @@ function detailPanel(panel, el, device, maintenance, repaint) {
   overview.appendChild(usage);
 
   const composition = el("section", "device-maintenance-entities");
-  composition.appendChild(el("h4", null, `Состав · ${maintenance.entityCount || 0}`));
+  composition.appendChild(el("h4", null, `Возможности устройства · ${maintenance.entityCount || 0}`));
   const entities = Array.isArray(maintenance.entities) ? maintenance.entities : [];
   if (entities.length) {
-    const names = entities.slice(0, 6).map((item) => item.name || item.id).join(" · ");
-    composition.appendChild(el("p", "muted", names));
-    if (entities.length > 6) composition.appendChild(el("small", "muted", `Ещё ${entities.length - 6}`));
+    const entityList = el("details", "device-maintenance-entity-list");
+    entityList.appendChild(el("summary", null, "Показать состав"));
+    const rows = el("div", "device-maintenance-entity-rows");
+    entities.forEach((item) => {
+      const entity = el("div", "device-maintenance-entity-row");
+      entity.appendChild(el("strong", null, item.name || "Сущность"));
+      entity.appendChild(el("small", "muted", item.disabled ? "Отключена в Home Assistant" : "Доступна в Home Assistant"));
+      rows.appendChild(entity);
+    });
+    entityList.appendChild(rows);
+    composition.appendChild(entityList);
   } else {
     composition.appendChild(el("p", "muted", "Сущностей нет. Это может быть устаревшая запись реестра."));
   }
@@ -207,13 +222,41 @@ function detailPanel(panel, el, device, maintenance, repaint) {
     ? `Сначала уберите использование: ${(maintenance.deleteBlockers || []).join(", ")}.`
     : "Подключённая интеграция может создать устройство снова.";
   remove.addEventListener("click", () => {
-    const subject = device.kind === "entity_only" ? "сущность" : "устройство";
-    const warning = `Удалить ${subject} «${device.name}» из реестра Home Assistant? Подключённая интеграция может создать запись снова.`;
-    if (window.confirm(warning)) runAction(panel, device, "delete", { confirmed: true }, repaint);
+    state.confirmDelete = device.id;
+    state.message = "";
+    repaint();
   });
   actions.appendChild(remove);
   detail.appendChild(actions);
-  if (state.message) detail.appendChild(el("div", "device-maintenance-message", state.message));
+  if (state.confirmDelete === device.id) {
+    const confirmation = el("div", "device-maintenance-confirm");
+    confirmation.role = "alertdialog";
+    confirmation["aria-label"] = "Подтверждение удаления записи Home Assistant";
+    const confirmationCopy = el("div");
+    confirmationCopy.appendChild(el("strong", null, "Удалить запись из Home Assistant?"));
+    confirmationCopy.appendChild(el("p", "muted", "Это не отключает физическое устройство. Интеграция может создать запись снова."));
+    confirmation.appendChild(confirmationCopy);
+    const confirmationActions = el("div", "device-maintenance-confirm-actions");
+    const cancel = el("button", "secondary", "Отмена");
+    cancel.type = "button";
+    cancel.addEventListener("click", () => {
+      state.confirmDelete = null;
+      repaint();
+    });
+    confirmationActions.appendChild(cancel);
+    const confirm = el("button", "danger", "Удалить запись");
+    confirm.type = "button";
+    confirm.addEventListener("click", () => runAction(panel, device, "delete", { confirmed: true }, repaint));
+    confirmationActions.appendChild(confirm);
+    confirmation.appendChild(confirmationActions);
+    detail.appendChild(confirmation);
+  }
+  if (state.message) {
+    const message = el("div", `device-maintenance-message ${state.messageTone || ""}`, state.message);
+    message.role = state.messageTone === "is-error" ? "alert" : "status";
+    message["aria-live"] = state.messageTone === "is-error" ? "assertive" : "polite";
+    detail.appendChild(message);
+  }
   return detail;
 }
 
@@ -279,11 +322,26 @@ export function renderDeviceInventory(panel, container, helpers) {
   if (!devices.length) return;
   const summary = inventory.summary || {};
   const section = el("section", "card device-inventory");
+  const heading = el("div", "device-inventory-heading-row");
   const copy = el("div", "device-inventory-heading");
   copy.appendChild(el("div", "settings-heading-eyebrow", "Инвентаризация и обслуживание"));
-  copy.appendChild(el("h3", null, "Что Home Assistant считает устройствами"));
-  copy.appendChild(el("p", "muted", "Откройте карточку, чтобы проверить использование, переименовать устройство, назначить комнату, найти его физически или безопасно удалить запись."));
-  section.appendChild(copy);
+  copy.appendChild(el("h3", null, "Устройства Home Assistant"));
+  copy.appendChild(el("p", "muted", "Одна строка соответствует одной физической записи. Откройте её, чтобы увидеть использование, изменить имя или комнату, найти устройство и безопасно удалить устаревшую запись."));
+  heading.appendChild(copy);
+  const refresh = el("button", "secondary device-inventory-refresh", "Обновить список");
+  refresh.type = "button";
+  refresh.disabled = stateFor(panel).loading;
+  refresh.addEventListener("click", async () => {
+    const state = stateFor(panel);
+    state.data = null;
+    state.message = "";
+    await loadMaintenance(panel, () => {
+      if (typeof panel._render === "function") panel._render();
+    }, true);
+    if (typeof panel._load === "function") await panel._load();
+  });
+  heading.appendChild(refresh);
+  section.appendChild(heading);
   const metrics = el("div", "device-inventory-metrics");
   metrics.appendChild(metric(el, summary.canonicalDeviceCount, "основных устройств"));
   metrics.appendChild(metric(el, summary.unassignedCount, "без комнаты", summary.unassignedCount ? "is-warning" : ""));
@@ -300,9 +358,11 @@ export function renderDeviceInventory(panel, container, helpers) {
     list.innerHTML = "";
     const query = normalizedText(search.value || "");
     panel._inventoryQuery = search.value || "";
-    const visible = devices.filter((device) => matchesFilter(device, activeFilter) && (!query || normalizedText([
+    const matching = devices.filter((device) => matchesFilter(device, activeFilter) && (!query || normalizedText([
       device.name, device.roomName, device.manufacturer, device.model, ...(device.domains || []),
     ].filter(Boolean).join(" ")).includes(query)));
+    const limit = Number(panel._inventoryLimit) || INVENTORY_PAGE_SIZE;
+    const visible = matching.slice(0, limit);
     visible.forEach((device) => list.appendChild(inventoryRow(panel, el, device, renderRows)));
     if (!visible.length) {
       const empty = el("div", "device-inventory-empty");
@@ -310,12 +370,22 @@ export function renderDeviceInventory(panel, container, helpers) {
       empty.appendChild(el("p", "muted", "Измените фильтр или поисковый запрос."));
       list.appendChild(empty);
     }
+    if (matching.length > visible.length) {
+      const more = el("button", "secondary device-inventory-more", `Показать ещё ${Math.min(INVENTORY_PAGE_SIZE, matching.length - visible.length)}`);
+      more.type = "button";
+      more.addEventListener("click", () => {
+        panel._inventoryLimit = limit + INVENTORY_PAGE_SIZE;
+        renderRows();
+      });
+      list.appendChild(more);
+    }
   };
   INVENTORY_FILTERS.forEach((filter) => {
     const button = el("button", filter.id === activeFilter ? "is-current" : "", filter.label);
     button.type = "button";
     button.addEventListener("click", () => {
       panel._inventoryFilter = filter.id;
+      panel._inventoryLimit = INVENTORY_PAGE_SIZE;
       activeFilter = filter.id;
       Array.from(filters.children).forEach((child, index) => {
         child.className = INVENTORY_FILTERS[index].id === activeFilter ? "is-current" : "";
@@ -328,7 +398,10 @@ export function renderDeviceInventory(panel, container, helpers) {
   search.type = "search";
   search.placeholder = "Найти устройство, комнату или тип";
   search.value = panel._inventoryQuery || "";
-  search.addEventListener("input", renderRows);
+  search.addEventListener("input", () => {
+    panel._inventoryLimit = INVENTORY_PAGE_SIZE;
+    renderRows();
+  });
   toolbar.appendChild(search);
   section.appendChild(toolbar);
   section.appendChild(list);
