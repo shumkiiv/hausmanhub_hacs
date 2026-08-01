@@ -98,6 +98,13 @@ function historyBars(panel, source, deps) {
   const { el, setAttr } = deps;
   const wrap = el("div", "energy-history");
   const history = panel._energyHistory && panel._energyHistory[source.id];
+  const period = panel._energyHistoryPeriod || "day";
+  const periodLabels = {
+    day: ["за последние 24 часа", "Почасовая средняя мощность · последние 24 часа"],
+    week: ["за последние 7 дней", "Почасовая средняя мощность · последние 7 дней"],
+    month: ["за последний месяц", "Средняя мощность по дням · последний месяц"],
+    year: ["за последний год", "Средняя мощность по дням · последний год"],
+  };
   const values = Array.isArray(history) ? history
     .map((point) => Number(point.mean))
     .filter(Number.isFinite) : [];
@@ -108,15 +115,21 @@ function historyBars(panel, source, deps) {
   const max = Math.max(...values, 1);
   const chart = el("div", "energy-history-bars");
   setAttr(chart, "role", "img");
-  setAttr(chart, "aria-label", `График мощности ${source.name} за последние 24 часа`);
-  values.slice(-24).forEach((value) => {
+  setAttr(chart, "aria-label", `График мощности ${source.name} ${periodLabels[period][0]}`);
+  const bucketSize = Math.max(1, Math.ceil(values.length / 48));
+  const visibleValues = [];
+  for (let index = 0; index < values.length; index += bucketSize) {
+    const bucket = values.slice(index, index + bucketSize);
+    visibleValues.push(bucket.reduce((sum, value) => sum + value, 0) / bucket.length);
+  }
+  visibleValues.forEach((value) => {
     const bar = el("span", "energy-history-bar");
     bar.style.height = `${Math.max(4, (value / max) * 100)}%`;
     setAttr(bar, "title", `${number(value)} Вт`);
     chart.appendChild(bar);
   });
   wrap.appendChild(chart);
-  wrap.appendChild(el("div", "energy-chart-caption", "Почасовая средняя мощность · последние 24 часа"));
+  wrap.appendChild(el("div", "energy-chart-caption", periodLabels[period][1]));
   return wrap;
 }
 
@@ -162,16 +175,33 @@ function renderEnergyHistory(panel, energy, selected, deps) {
   const card = el("section", "card energy-history-card");
   const head = el("div", "energy-card-head energy-history-head");
   const copy = el("div", "energy-card-title");
-  copy.appendChild(el("h3", null, "Потребление за 24 часа"));
+  const activePeriod = panel._energyHistoryPeriod || "day";
+  const periodTitles = {
+    day: "Потребление за 24 часа",
+    week: "Потребление за 7 дней",
+    month: "Потребление за месяц",
+    year: "Потребление за год",
+  };
+  copy.appendChild(el("h3", null, periodTitles[activePeriod]));
   copy.appendChild(el("small", null, selected.length
     ? selected.map((item) => item.name).join(" + ") : "Источники не выбраны"));
   head.appendChild(copy);
   const periods = el("div", "energy-periods");
-  ["День", "Неделя", "Месяц", "Год"].forEach((label, index) => {
-    const period = el("button", index === 0 ? "is-selected" : "", label);
+  [["day", "День"], ["week", "Неделя"], ["month", "Месяц"], ["year", "Год"]]
+    .forEach(([value, label]) => {
+    const selectedPeriod = activePeriod === value;
+    const period = el("button", selectedPeriod ? "is-selected" : "", label);
     period.type = "button";
-    period.disabled = index !== 0;
-    setAttr(period, "aria-pressed", index === 0 ? "true" : "false");
+    period.disabled = panel._energyHistoryLoading;
+    setAttr(period, "aria-pressed", selectedPeriod ? "true" : "false");
+    period.addEventListener("click", () => {
+      if (value === panel._energyHistoryPeriod) return;
+      panel._energyHistoryPeriod = value;
+      panel._energyHistory = {};
+      if (panel._energyHistoryLoading) panel._energyHistoryReloadRequested = true;
+      panel._renderEnergySection(panel._shell.homeSections.energy);
+      loadEnergyHistory(panel);
+    });
     periods.appendChild(period);
   });
   head.appendChild(periods);
@@ -433,12 +463,20 @@ export async function loadEnergyHistory(panel) {
   if (typeof panel._hass.callApi !== "function") return;
   panel._energyHistoryLoading = true;
   try {
+    const period = panel._energyHistoryPeriod || "day";
+    const ranges = {
+      day: { days: 1, interval: "1h" },
+      week: { days: 7, interval: "1h" },
+      month: { days: 31, interval: "1d" },
+      year: { days: 365, interval: "1d" },
+    };
+    const range = ranges[period] || ranges.day;
     const end = new Date();
-    const start = new Date(end.getTime() - 24 * 60 * 60 * 1000);
+    const start = new Date(end.getTime() - range.days * 24 * 60 * 60 * 1000);
     const params = new URLSearchParams({
       from: start.toISOString(),
       to: end.toISOString(),
-      interval: "1h",
+      interval: range.interval,
     });
     energy.sources.forEach((source) => params.append("deviceId", source.deviceId));
     const response = await panel._hass.callApi(
@@ -458,8 +496,14 @@ export async function loadEnergyHistory(panel) {
     panel._energyHistory = history;
   } catch (error) {
     panel._energyHistory = panel._energyHistory || {};
+    panel._energyHistoryError = error && error.message || "history_unavailable";
   } finally {
     panel._energyHistoryLoading = false;
+    if (panel._energyHistoryReloadRequested) {
+      panel._energyHistoryReloadRequested = false;
+      loadEnergyHistory(panel);
+      return;
+    }
     if (panel._activeSection === "energy") panel._render();
   }
 }

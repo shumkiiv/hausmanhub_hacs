@@ -160,6 +160,11 @@ class PanelJavaScriptContractTest(unittest.TestCase):
     def test_energy_history_uses_hausmanhub_api_not_raw_recorder_socket(self) -> None:
         content = ENERGY_JS.read_text(encoding="utf-8")
         self.assertIn("hausman_hub/v1/energy/history", content)
+        self.assertIn('["year", "Год"]', content)
+        self.assertIn('year: { days: 365, interval: "1d" }', content)
+        self.assertIn('panel._energyHistoryPeriod = value', content)
+        self.assertIn('panel._energyHistoryReloadRequested = true', content)
+        self.assertIn('if (panel._energyHistoryReloadRequested)', content)
         self.assertIn('series.metric === "power"', content)
         self.assertIn('series.scope === "selection" ? "selection"', content)
         self.assertIn('id: "selection", name: "выбранных источников"', content)
@@ -213,18 +218,18 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertLessEqual(len(wizard_validation_styles.encode("utf-8")), 8 * 1024)
         self.assertLessEqual(len(catalog_styles.encode("utf-8")), 8 * 1024)
         self.assertIn('"/api/hausman_hub/panel/hausman-hub-panel.css"', content)
-        self.assertIn('hausman-hub-settings.css?v=1.51.33', styles)
-        self.assertIn('hausman-hub-switch.css?v=1.51.33', styles)
-        self.assertIn('hausman-hub-notice.css?v=1.51.33', styles)
+        self.assertIn('hausman-hub-settings.css?v=1.51.34', styles)
+        self.assertIn('hausman-hub-switch.css?v=1.51.34', styles)
+        self.assertIn('hausman-hub-notice.css?v=1.51.34', styles)
         self.assertIn(".notice { position:fixed", notice_styles)
         self.assertIn(".notice.is-error", notice_styles)
-        self.assertIn('hausman-hub-device-maintenance.css?v=1.51.33', styles)
-        self.assertIn('hausman-hub-control-channel.css?v=1.51.33', styles)
-        self.assertIn('hausman-hub-weather-sources.css?v=1.51.33', styles)
-        self.assertIn('hausman-hub-wizard-validation.css?v=1.51.33', styles)
-        self.assertIn('hausman-hub-catalog.css?v=1.51.33', styles)
-        self.assertIn('hausman-hub-media-device.css?v=1.51.33', styles)
-        self.assertIn('hausman-hub-scenarios.css?v=1.51.33', styles)
+        self.assertIn('hausman-hub-device-maintenance.css?v=1.51.34', styles)
+        self.assertIn('hausman-hub-control-channel.css?v=1.51.34', styles)
+        self.assertIn('hausman-hub-weather-sources.css?v=1.51.34', styles)
+        self.assertIn('hausman-hub-wizard-validation.css?v=1.51.34', styles)
+        self.assertIn('hausman-hub-catalog.css?v=1.51.34', styles)
+        self.assertIn('hausman-hub-media-device.css?v=1.51.34', styles)
+        self.assertIn('hausman-hub-scenarios.css?v=1.51.34', styles)
         self.assertIn(".inventory-device-icon .icon { display:block;", styles)
         self.assertIn("validation-issue-row", content)
         self.assertIn(
@@ -830,7 +835,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.51.33",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.51.34",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },

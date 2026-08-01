@@ -868,12 +868,27 @@ class LocalSummaryAccessTest(unittest.TestCase):
             )
             invalid.query = Query(
                 {
-                    "from": "2026-06-01T00:00:00+00:00",
+                    "from": "2025-07-29T00:00:00+00:00",
                     "to": "2026-07-31T00:00:00+00:00",
                     "interval": "15m",
                 }
             )
             self.assertEqual(400, asyncio.run(view.get(invalid)).status)
+
+            yearly = FakeRequest(
+                "127.0.0.1",
+                reader_user("system-users"),
+                path=path,
+                query_string="from=...",
+            )
+            yearly.query = Query(
+                {
+                    "from": "2025-08-01T00:00:00+00:00",
+                    "to": "2026-07-31T00:00:00+00:00",
+                    "interval": "1d",
+                }
+            )
+            self.assertEqual(200, asyncio.run(view.get(yearly)).status)
         finally:
             method_globals["async_dashboard_snapshot"] = original_dashboard
             method_globals["async_energy_history"] = original_history
@@ -2223,7 +2238,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.51.33", panel.payload["integration_version"])
+        self.assertEqual("1.51.34", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",

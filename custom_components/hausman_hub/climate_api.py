@@ -419,11 +419,11 @@ class EnergyHistoryView(_ClimateView):
             or start.tzinfo is None
             or end.tzinfo is None
             or end <= start
-            or end - start > timedelta(days=31)
+            or end - start > timedelta(days=366)
             or interval not in {"5m", "15m", "1h", "1d"}
         ):
             return self.json_message(
-                "Диапазон истории энергии должен быть корректным и не длиннее 31 дня.",
+                "Диапазон истории энергии должен быть корректным и не длиннее 366 дней.",
                 HTTPStatus.BAD_REQUEST,
                 headers=NO_STORE_HEADERS,
             )

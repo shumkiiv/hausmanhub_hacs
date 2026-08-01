@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from datetime import datetime
+import logging
 from typing import TYPE_CHECKING
 
 from .application.energy_history import EnergySeriesDescriptor, build_energy_history
@@ -11,6 +12,8 @@ from .application.energy_history import EnergySeriesDescriptor, build_energy_his
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
+
+_LOGGER = logging.getLogger(__name__)
 
 _MEASUREMENTS: dict[str, tuple[str, str, str, float]] = {
     "power": ("Мощность", "W", "mean", 1.0),
@@ -137,6 +140,10 @@ async def async_energy_history(
                 {"mean", "state", "sum"},
             )
         except Exception:
+            _LOGGER.exception(
+                "Не удалось прочитать статистику энергии Recorder для %s рядов",
+                len(descriptors),
+            )
             rows = {}
     return build_energy_history(
         start=start,

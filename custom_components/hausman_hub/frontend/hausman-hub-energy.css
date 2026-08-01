@@ -44,7 +44,7 @@
 .energy-periods button { width:74px; min-height:30px; margin:0; padding:5px 8px; color:var(--hmh-text-dim); font-size:13px;
   border:0; border-radius:10px; background:transparent; box-shadow:none; }
 .energy-periods button.is-selected { color:var(--hmh-text); border:1px solid var(--hmh-accent); background:var(--hmh-raised); }
-.energy-periods button:disabled { opacity:.52; }
+.energy-periods button:disabled { cursor:wait; opacity:.68; }
 .energy-history-layout { display:grid; grid-template-columns:minmax(0,1fr) 275px; gap:10px; height:172px; margin-top:8px; }
 .energy-history { position:relative; min-width:0; min-height:0; margin:0; padding:18px 24px 28px; overflow:hidden;
   border:1px solid var(--hmh-border); border-radius:14px; background:repeating-linear-gradient(to bottom,transparent 0,transparent 32px,color-mix(in srgb,var(--hmh-border) 55%,transparent) 33px); }
