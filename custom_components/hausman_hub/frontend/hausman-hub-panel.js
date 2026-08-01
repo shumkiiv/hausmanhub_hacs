@@ -1,20 +1,21 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.57";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.57";
-import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.57";
-import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.51.57";
-import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.57";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.57";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.57";
-import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.57";
-import { createKioskButton, createKioskDock, handleKioskPointerUp, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.57";
-import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.57";
-import { AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.51.57";
-import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.51.57";
-import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.51.57";
-import { renderClimateOverview } from "./hausman-hub-climate-overview.js?v=1.51.57";
-import { buildDiagnosticChecks, diagnosticSummaryText, renderDiagnosticDetails } from "./hausman-hub-diagnostics.js?v=1.51.57";
-import { renderRolloutReadiness } from "./hausman-hub-rollout.js?v=1.51.57";
-import { renderOverviewContent, renderOverviewHero } from "./hausman-hub-overview.js?v=1.51.57";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.58";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.58";
+import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.58";
+import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.51.58";
+import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.58";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.58";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.58";
+import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.58";
+import { createKioskButton, createKioskDock, handleKioskPointerUp, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.58";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.58";
+import { AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.51.58";
+import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.51.58";
+import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.51.58";
+import { renderClimateOverview } from "./hausman-hub-climate-overview.js?v=1.51.58";
+import { buildDiagnosticChecks, diagnosticSummaryText, renderDiagnosticDetails } from "./hausman-hub-diagnostics.js?v=1.51.58";
+import { renderRolloutReadiness } from "./hausman-hub-rollout.js?v=1.51.58";
+import { renderOverviewContent, renderOverviewHero } from "./hausman-hub-overview.js?v=1.51.58";
+import { renderPhysicalDeviceCard } from "./hausman-hub-device-card.js?v=1.51.58";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css";
@@ -5469,47 +5470,9 @@ class HausmanHubPanel extends HTMLElement {
   }
 
   _deviceInventoryCard(device) {
-    const mediaCard = renderMediaDeviceCard(this, device, { el, svgIcon });
+    const mediaCard = renderMediaDeviceCard(this, device, { el, svgIcon, setAttr });
     if (mediaCard) return mediaCard;
-    const card = el("details", `inventory-device-card${device.unavailable ? " is-unavailable" : ""}`);
-    const openKey = `device:${device.id || device.physicalId || device.entityId}`;
-    card.open = this._openHomeCards.has(openKey);
-    card.addEventListener("toggle", () => {
-      if (card.open) this._openHomeCards.add(openKey);
-      else this._openHomeCards.delete(openKey);
-    });
-    const summary = el("summary", "inventory-device-summary");
-    const icon = el("span", "inventory-device-icon");
-    icon.appendChild(svgIcon(this._deviceIcon(device)));
-    summary.appendChild(icon);
-    const copy = el("span", "inventory-device-copy");
-    copy.appendChild(el("strong", null, device.name || "Устройство"));
-    copy.appendChild(el("small", null, `${this._deviceCategoryName(device)} · ${device.stateLabel || "Состояние неизвестно"}`));
-    summary.appendChild(copy);
-    summary.appendChild(el("span", `device-state-dot ${device.tone || "neutral"}`));
-    card.appendChild(summary);
-    const body = el("div", "inventory-device-body");
-    const details = Array.isArray(device.details) ? device.details : [];
-    if (details.length) {
-      const detailGrid = el("dl", "device-detail-grid");
-      details.forEach((detail) => {
-        const row = el("div", "device-detail-row");
-        row.appendChild(el("dt", null, detail.label || "Показатель"));
-        row.appendChild(el("dd", null, detail.value || "Нет данных"));
-        detailGrid.appendChild(row);
-      });
-      body.appendChild(detailGrid);
-    }
-    const targets = this._catalogTargets(device);
-    if (!targets.length) {
-      body.appendChild(el("p", "muted", device.unavailable
-        ? "Устройство сейчас недоступно. Управление появится после восстановления связи."
-        : "Для устройства доступны только просмотр состояния и диагностические показатели."));
-    } else {
-      targets.forEach((target) => body.appendChild(this._deviceTargetControls(target, device)));
-    }
-    card.appendChild(body);
-    return card;
+    return renderPhysicalDeviceCard(this, device, { el, svgIcon, setAttr });
   }
 
   _deviceActionInitialValue(device, target, action) {

@@ -17,7 +17,7 @@
     "archive_is_implementable": false
   },
   "hacs_figma_structure": {
-    "total_top_level_nodes": 49,
+    "total_top_level_nodes": 50,
     "nodes_deleted": 0,
     "pages": [
       {
@@ -47,7 +47,8 @@
           "228:549",
           "232:549",
           "237:582",
-          "276:11"
+          "276:11",
+          "280:582"
         ]
       },
       {
@@ -72,8 +73,8 @@
       "label": "Освещение",
       "android": "implemented",
       "android_figma": ["612:669"],
-      "hacs": "functional_needs_shared_canon",
-      "hacs_figma": []
+      "hacs": "implemented_with_shared_device_drilldown",
+      "hacs_figma": ["281:676"]
     },
     {
       "id": "climate",
@@ -88,32 +89,32 @@
       "label": "Комнаты",
       "android": "implemented",
       "android_figma": ["627:306"],
-      "hacs": "functional_needs_shared_canon",
-      "hacs_figma": []
+      "hacs": "implemented_with_shared_device_drilldown",
+      "hacs_figma": ["281:676"]
     },
     {
       "id": "media",
       "label": "Медиа",
       "android": "implemented",
       "android_figma": ["634:494"],
-      "hacs": "functional_partial_canon",
-      "hacs_figma": ["237:582"]
+      "hacs": "implemented_with_shared_device_drilldown",
+      "hacs_figma": ["237:582", "281:676"]
     },
     {
       "id": "security",
       "label": "Безопасность",
       "android": "implemented",
       "android_figma": ["638:475"],
-      "hacs": "functional_needs_shared_canon",
-      "hacs_figma": []
+      "hacs": "implemented_with_shared_device_drilldown",
+      "hacs_figma": ["281:676"]
     },
     {
       "id": "devices",
       "label": "Устройства",
       "android": "implemented",
       "android_figma": ["649:502"],
-      "hacs": "functional_needs_shared_canon",
-      "hacs_figma": []
+      "hacs": "implemented_with_shared_device_drilldown",
+      "hacs_figma": ["281:676"]
     },
     {
       "id": "energy",

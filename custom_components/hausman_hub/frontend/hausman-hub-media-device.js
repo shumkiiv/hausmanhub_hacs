@@ -1,5 +1,27 @@
 const TV_IDENTITY = /(?:\btv\b|телевиз|television|smart[ _-]?tv|pus\d|oled|qled)/i;
 
+function appendDeviceVisual(container, device, iconName, { el, svgIcon }, className) {
+  const visual = el("span", className);
+  const imageUrl = String(device && device.imageUrl || "").trim();
+  if (imageUrl && !/^(?:javascript|data:text\/html)/i.test(imageUrl)) {
+    const image = el("img");
+    image.src = imageUrl;
+    image.alt = "";
+    image.loading = "lazy";
+    image.addEventListener("error", () => {
+      visual.innerHTML = "";
+      visual.classList.add("is-fallback");
+      visual.appendChild(svgIcon(iconName));
+    });
+    visual.appendChild(image);
+  } else {
+    visual.classList.add("is-fallback");
+    visual.appendChild(svgIcon(iconName));
+  }
+  container.appendChild(visual);
+  return visual;
+}
+
 function isMediaDevice(device) {
   return String(device && device.domain || "") === "media_player"
     || String(device && device.category || "") === "media";
@@ -50,20 +72,6 @@ function actionButton(owner, target, actionId, label, className, el) {
   return button;
 }
 
-function appendProductVisual(container, device, iconName, { el, svgIcon }) {
-  const imageUrl = String(device && device.imageUrl || "");
-  if (/^https?:\/\//i.test(imageUrl)) {
-    const image = el("img", "media-device-product-image");
-    image.src = imageUrl;
-    image.alt = "";
-    container.appendChild(image);
-    return;
-  }
-  const fallback = el("span", "media-device-product-fallback");
-  fallback.appendChild(svgIcon(iconName));
-  container.appendChild(fallback);
-}
-
 export function renderMediaDeviceCard(owner, device, deps) {
   if (!isMediaDevice(device)) return null;
   const { el, svgIcon } = deps;
@@ -79,9 +87,7 @@ export function renderMediaDeviceCard(owner, device, deps) {
   });
 
   const summary = el("summary", "inventory-device-summary media-device-summary");
-  const icon = el("span", "inventory-device-icon media-device-icon");
-  icon.appendChild(svgIcon("media"));
-  summary.appendChild(icon);
+  appendDeviceVisual(summary, device, "media", deps, "inventory-device-visual media-device-icon");
   const copy = el("span", "inventory-device-copy");
   copy.appendChild(el("strong", null, television ? "Телевизор" : (device.name || "Медиоустройство")));
   const identity = [device.roomName, television ? device.name : device.model]
@@ -92,11 +98,30 @@ export function renderMediaDeviceCard(owner, device, deps) {
   summaryState.appendChild(el("strong", null, state.title));
   summaryState.appendChild(el("small", null, state.detail));
   summary.appendChild(summaryState);
+  summary.appendChild(el("span", "inventory-device-chevron", "›"));
   card.appendChild(summary);
 
-  const body = el("div", "inventory-device-body media-device-body");
+  const backdrop = el("div", "device-sheet-backdrop inventory-device-body media-device-body");
+  const body = el("section", "device-sheet media-device-sheet");
+  deps.setAttr(body, "role", "dialog");
+  deps.setAttr(body, "aria-modal", "true");
+  deps.setAttr(body, "aria-label", television ? "Телевизор" : (device.name || "Медиоустройство"));
+  const close = el("button", "device-sheet-close", "×");
+  close.type = "button";
+  deps.setAttr(close, "aria-label", "Закрыть");
+  const dismiss = (event) => {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation && event.stopPropagation();
+    }
+    card.open = false;
+    owner._openHomeCards.delete(openKey);
+  };
+  close.addEventListener("click", dismiss);
+  body.appendChild(close);
+
   const visual = el("div", "media-device-visual");
-  appendProductVisual(visual, device, "media", deps);
+  appendDeviceVisual(visual, device, "media", deps, "media-device-product");
   visual.appendChild(el("span", "media-device-kind", television ? "TV" : "МЕДИА"));
   body.appendChild(visual);
 
@@ -131,6 +156,8 @@ export function renderMediaDeviceCard(owner, device, deps) {
     control.appendChild(power);
   }
   body.appendChild(control);
-  card.appendChild(body);
+  backdrop.appendChild(body);
+  backdrop.addEventListener("click", (event) => { if (event.target === backdrop) dismiss(event); });
+  card.appendChild(backdrop);
   return card;
 }

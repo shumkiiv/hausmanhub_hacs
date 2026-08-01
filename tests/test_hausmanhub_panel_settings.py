@@ -26,6 +26,7 @@ NAVIGATION_JS = PANEL_JS.with_name("hausman-hub-navigation.js")
 ENERGY_JS = PANEL_JS.with_name("hausman-hub-energy.js")
 WEATHER_SOURCES_JS = PANEL_JS.with_name("hausman-hub-weather-sources.js")
 MEDIA_DEVICE_JS = PANEL_JS.with_name("hausman-hub-media-device.js")
+DEVICE_CARD_JS = PANEL_JS.with_name("hausman-hub-device-card.js")
 SCENARIOS_JS = PANEL_JS.with_name("hausman-hub-scenarios.js")
 SCENARIO_ICONS_JS = PANEL_JS.with_name("hausman-hub-scenario-icons.js")
 SETTINGS_CSS = PANEL_JS.with_name("hausman-hub-settings.css")
@@ -485,6 +486,10 @@ def panel_script(
         {{ filename: {str(WEATHER_SOURCES_JS)!r} }}
       );
       vm.runInThisContext(
+        fs.readFileSync({str(DEVICE_CARD_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(DEVICE_CARD_JS)!r} }}
+      );
+      vm.runInThisContext(
         fs.readFileSync({str(MEDIA_DEVICE_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(MEDIA_DEVICE_JS)!r} }}
       );
@@ -763,6 +768,50 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         panel._onNavigationPop();
         if (panel._activeSection !== "overview" || panel._shell.sectionNodes.overview.hidden) {
           throw new Error("route without HausmanHub params did not restore overview");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_physical_device_card_prefers_zigbee_image_and_opens_fixed_dialog(self) -> None:
+        script = panel_script(
+            GET_PATHS,
+            {},
+            """
+        const device = {
+          id: "living_trv",
+          physicalId: "living_trv",
+          name: "Термоголовка Sonoff",
+          roomName: "Гостиная",
+          state: "heat",
+          imageUrl: "https://www.zigbee2mqtt.io/images/devices/TRVZB.png",
+          manufacturer: "SONOFF",
+          model: "TRVZB",
+          details: [
+            { label: "temperature", value: "25,0 °C" },
+            { label: "temperature", value: "25,0 °C" },
+            { label: "battery", value: "88 %" },
+          ],
+          controls: [],
+        };
+        const card = panel._deviceInventoryCard(device);
+        const images = findAll(card, (node) => node.tagName === "IMG");
+        if (images.length !== 2 || !images.every((node) => node.src.includes("TRVZB.png"))) {
+          throw new Error("Zigbee2MQTT image was not preferred in summary and detail");
+        }
+        const dialogs = findAll(card, (node) => node.role === "dialog");
+        if (dialogs.length !== 1 || dialogs[0]["aria-label"] !== "Термоголовка Sonoff") {
+          throw new Error("one fixed device dialog was not created");
+        }
+        const text = textOf(card);
+        if (!text.includes("Обогрев") || text.includes("heat")) {
+          throw new Error("device state was not localized: " + text);
+        }
+        const factLabels = findAll(card, (node) => node.tagName === "DT")
+          .map((node) => node.textContent);
+        if (JSON.stringify(factLabels) !== JSON.stringify(["Температура", "Заряд"])) {
+          throw new Error("device facts were not deduplicated: " + JSON.stringify(factLabels));
         }
             """,
         )
@@ -1313,7 +1362,8 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           || text.includes("Android TV") || text.includes("Philips TV")) {
           throw new Error("technical HA entities leaked into TV card: " + text);
         }
-        const buttons = findAll(cards[0], (node) => node.tagName === "BUTTON");
+        const buttons = findAll(cards[0], (node) => node.tagName === "BUTTON"
+          && !String(node.className).split(" ").includes("device-sheet-close"));
         if (buttons.length !== 3 || !buttons.some((node) => node.textContent === "Играть")
           || !buttons.some((node) => node.textContent === "Пауза")
           || !buttons.some((node) => node.textContent === "Выключить")) {
@@ -1366,8 +1416,8 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         panel._shell.tabs.security.fire("click");
         const security = panel._shell.homeSections.security;
         const text = textOf(security);
-        if (!text.includes("Безопасность · закрыт")
-          || !text.includes("Безопасность · охрана выключена")) {
+        if (!text.includes("Тамбур · Закрыт")
+          || !text.includes("Тамбур · Охрана выключена")) {
           throw new Error("security state is not semantic Russian copy: " + text);
         }
         if (text.includes("locked") || text.includes("disarmed") || text.includes("Устройство ·")) {

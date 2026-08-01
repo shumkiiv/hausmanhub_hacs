@@ -1,21 +1,22 @@
-@import url("./hausman-hub-tokens.css?v=1.51.57");
-@import url("./hausman-hub-overview.css?v=1.51.57");
-@import url("./hausman-hub-settings.css?v=1.51.57");
-@import url("./hausman-hub-diagnostics.css?v=1.51.57");
-@import url("./hausman-hub-switch.css?v=1.51.57");
-@import url("./hausman-hub-notice.css?v=1.51.57");
-@import url("./hausman-hub-device-maintenance.css?v=1.51.57");
-@import url("./hausman-hub-device-bindings.css?v=1.51.57");
-@import url("./hausman-hub-energy.css?v=1.51.57");
-@import url("./hausman-hub-control-channel.css?v=1.51.57");
-@import url("./hausman-hub-weather-sources.css?v=1.51.57");
-@import url("./hausman-hub-wizard-validation.css?v=1.51.57");
-@import url("./hausman-hub-catalog.css?v=1.51.57");
-@import url("./hausman-hub-media-device.css?v=1.51.57");
-@import url("./hausman-hub-scenarios.css?v=1.51.57");
-@import url("./hausman-hub-climate-overview.css?v=1.51.57");
-@import url("./hausman-hub-navigation.css?v=1.51.57");
-@import url("./hausman-hub-rollout.css?v=1.51.57");
+@import url("./hausman-hub-tokens.css?v=1.51.58");
+@import url("./hausman-hub-overview.css?v=1.51.58");
+@import url("./hausman-hub-settings.css?v=1.51.58");
+@import url("./hausman-hub-diagnostics.css?v=1.51.58");
+@import url("./hausman-hub-switch.css?v=1.51.58");
+@import url("./hausman-hub-notice.css?v=1.51.58");
+@import url("./hausman-hub-device-maintenance.css?v=1.51.58");
+@import url("./hausman-hub-device-bindings.css?v=1.51.58");
+@import url("./hausman-hub-energy.css?v=1.51.58");
+@import url("./hausman-hub-control-channel.css?v=1.51.58");
+@import url("./hausman-hub-weather-sources.css?v=1.51.58");
+@import url("./hausman-hub-wizard-validation.css?v=1.51.58");
+@import url("./hausman-hub-catalog.css?v=1.51.58");
+@import url("./hausman-hub-media-device.css?v=1.51.58");
+@import url("./hausman-hub-device-card.css?v=1.51.58");
+@import url("./hausman-hub-scenarios.css?v=1.51.58");
+@import url("./hausman-hub-climate-overview.css?v=1.51.58");
+@import url("./hausman-hub-navigation.css?v=1.51.58");
+@import url("./hausman-hub-rollout.css?v=1.51.58");
 
 :host { display:block; box-sizing:border-box; width:100%; min-height:100%; overflow-x:hidden;
   font-family:var(--primary-font-family,sans-serif);
@@ -154,8 +155,7 @@ section { min-width:0; }
 .inventory-device-card.is-unavailable { opacity:.78; }
 .inventory-device-summary { display:flex; align-items:center; gap:14px; min-height:88px; padding:14px 16px; cursor:pointer; list-style:none; }
 .inventory-device-summary::-webkit-details-marker, .room-inventory-summary::-webkit-details-marker { display:none; }
-.inventory-device-summary::after { content:"›"; margin-left:2px; color:var(--hmh-text-dim,#9AA7B4); font-size:24px; transition:transform .18s ease; }
-.inventory-device-card[open] > .inventory-device-summary::after { transform:rotate(90deg); }
+.inventory-device-summary::after { content:none; }
 .inventory-device-icon { width:54px; height:54px; border-radius:14px; }
 .inventory-device-icon .icon { display:block; width:27px; height:27px; margin:0; vertical-align:unset; }
 .inventory-device-copy { display:flex; flex:1 1 auto; flex-direction:column; gap:5px; min-width:0; }
@@ -164,7 +164,7 @@ section { min-width:0; }
 .device-state-dot { flex:0 0 9px; width:9px; height:9px; border-radius:50%; background:var(--hmh-text-dim,#9AA7B4); }
 .device-state-dot.good { background:var(--success-color,#4CAF6E); }
 .device-state-dot.bad { background:var(--error-color,#E5534B); }
-.inventory-device-body { padding:0 16px 16px; border-top:1px solid color-mix(in srgb,var(--hmh-border,#2F3845) 70%,transparent); }
+.inventory-device-card > .inventory-device-body:not(.device-sheet-backdrop) { padding:0 16px 16px; border-top:1px solid color-mix(in srgb,var(--hmh-border,#2F3845) 70%,transparent); }
 .device-detail-grid { display:grid; gap:7px; margin:0; padding:14px 0 2px; }
 .device-detail-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:14px; align-items:baseline; }
 .device-detail-row dt { min-width:0; color:var(--hmh-text-dim,#9AA7B4); font-size:13px; overflow-wrap:anywhere; }
