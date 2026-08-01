@@ -1813,6 +1813,29 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
+    def test_failed_device_action_uses_error_toast_without_hiding_panel(self) -> None:
+        script = panel_script(
+            dict(GET_PATHS),
+            {"hausman_hub/v1/device-actions": {"__fail": 503}},
+            """
+        await panel._executeDeviceAction("target-living-main", "turn_on", null);
+        await tick();
+        const notice = panel._shell.notice;
+        if (!String(notice.className).split(" ").includes("is-error")) {
+          throw new Error("failed device action was not rendered as an error toast");
+        }
+        if (notice.role !== "alert" || notice["aria-live"] !== "assertive") {
+          throw new Error("error toast accessibility contract mismatch");
+        }
+        if (panel._error) throw new Error("device failure hid the otherwise available panel");
+        if (panel._notice !== "Команда устройству не выполнена. Откройте карточку и проверьте доступность.") {
+          throw new Error("device failure explanation missing");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_settings_show_canonical_device_inventory_with_working_filters(self) -> None:
         payloads = dict(GET_PATHS)
         payloads["hausman_hub/v1/dashboard"] = {
