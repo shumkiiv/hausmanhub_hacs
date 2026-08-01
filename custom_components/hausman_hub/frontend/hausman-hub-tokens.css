@@ -1,0 +1,29 @@
+:host {
+  --hmh-surface-canvas:#0B0F14; --hmh-surface-navigation:#12171D; --hmh-surface-card:#12171D;
+  --hmh-surface-raised:#181E26; --hmh-surface-field:#181E26; --hmh-surface-hover:#1F2630;
+  --hmh-border-default:#2F3845; --hmh-border-active:#4F8CFF;
+  --hmh-text-primary:#E6EAF2; --hmh-text-secondary:#A3AAB7; --hmh-text-disabled:#6E7785;
+  --hmh-accent-primary:#4F8CFF; --hmh-status-success:#3DD17A; --hmh-status-warning:#FFB020; --hmh-status-danger:#FF5C5C;
+  --hmh-control-disabled-background:#12171D; --hmh-control-disabled-border:#28323D; --hmh-control-disabled-text:#748191;
+  --hmh-bg:var(--hmh-surface-canvas); --hmh-surface:var(--hmh-surface-card); --hmh-raised:var(--hmh-surface-raised);
+  --hmh-field:var(--hmh-surface-field); --hmh-hover:var(--hmh-surface-hover); --hmh-border:var(--hmh-border-default);
+  --hmh-accent:var(--hmh-accent-primary); --hmh-text:var(--hmh-text-primary); --hmh-text-dim:var(--hmh-text-secondary);
+  --hmh-radius-control:12px; --hmh-radius-card:16px; --hmh-radius-section:20px;
+  --primary-font-family:Inter,"Segoe UI",Roboto,sans-serif;
+  --primary-text-color:var(--hmh-text); --secondary-text-color:var(--hmh-text-dim);
+  --primary-background-color:var(--hmh-bg); --card-background-color:var(--hmh-raised);
+  --secondary-background-color:var(--hmh-raised); --divider-color:var(--hmh-border);
+  --primary-color:var(--hmh-accent); --text-primary-color:#FFFFFF;
+  --error-color:var(--hmh-status-danger); --success-color:var(--hmh-status-success); --warning-color:var(--hmh-status-warning);
+  --hmh-disabled-bg:var(--hmh-control-disabled-background); --hmh-disabled-border:var(--hmh-control-disabled-border); --hmh-disabled-text:var(--hmh-control-disabled-text);
+}
+
+:host(.theme-light) {
+  --hmh-surface-canvas:#EEF1F6; --hmh-surface-navigation:#FFFFFF; --hmh-surface-card:#FFFFFF;
+  --hmh-surface-raised:#F6F8FB; --hmh-surface-field:#FFFFFF; --hmh-surface-hover:#E5EAF1;
+  --hmh-border-default:#D8DFE9; --hmh-border-active:#2F6FE4;
+  --hmh-text-primary:#161C26; --hmh-text-secondary:#5C6878; --hmh-text-disabled:#7B8796;
+  --hmh-accent-primary:#2F6FE4; --hmh-status-success:#2E7D4C; --hmh-status-warning:#9A5F0B; --hmh-status-danger:#C93A32;
+  --hmh-control-disabled-background:#F6F8FB; --hmh-control-disabled-border:#D5DCE5; --hmh-control-disabled-text:#7B8796;
+  --text-primary-color:#FFFFFF;
+}

@@ -1,40 +1,24 @@
-@import url("./hausman-hub-settings.css?v=1.51.55");
-@import url("./hausman-hub-diagnostics.css?v=1.51.55");
-@import url("./hausman-hub-switch.css?v=1.51.55");
-@import url("./hausman-hub-notice.css?v=1.51.55");
-@import url("./hausman-hub-device-maintenance.css?v=1.51.55");
-@import url("./hausman-hub-device-bindings.css?v=1.51.55");
-@import url("./hausman-hub-energy.css?v=1.51.55");
-@import url("./hausman-hub-control-channel.css?v=1.51.55");
-@import url("./hausman-hub-weather-sources.css?v=1.51.55");
-@import url("./hausman-hub-wizard-validation.css?v=1.51.55");
-@import url("./hausman-hub-catalog.css?v=1.51.55");
-@import url("./hausman-hub-media-device.css?v=1.51.55");
-@import url("./hausman-hub-scenarios.css?v=1.51.55");
-@import url("./hausman-hub-climate-overview.css?v=1.51.55");
-@import url("./hausman-hub-navigation.css?v=1.51.55");
-@import url("./hausman-hub-rollout.css?v=1.51.55");
+@import url("./hausman-hub-tokens.css?v=1.51.56");
+@import url("./hausman-hub-settings.css?v=1.51.56");
+@import url("./hausman-hub-diagnostics.css?v=1.51.56");
+@import url("./hausman-hub-switch.css?v=1.51.56");
+@import url("./hausman-hub-notice.css?v=1.51.56");
+@import url("./hausman-hub-device-maintenance.css?v=1.51.56");
+@import url("./hausman-hub-device-bindings.css?v=1.51.56");
+@import url("./hausman-hub-energy.css?v=1.51.56");
+@import url("./hausman-hub-control-channel.css?v=1.51.56");
+@import url("./hausman-hub-weather-sources.css?v=1.51.56");
+@import url("./hausman-hub-wizard-validation.css?v=1.51.56");
+@import url("./hausman-hub-catalog.css?v=1.51.56");
+@import url("./hausman-hub-media-device.css?v=1.51.56");
+@import url("./hausman-hub-scenarios.css?v=1.51.56");
+@import url("./hausman-hub-climate-overview.css?v=1.51.56");
+@import url("./hausman-hub-navigation.css?v=1.51.56");
+@import url("./hausman-hub-rollout.css?v=1.51.56");
 
 :host { display:block; box-sizing:border-box; width:100%; min-height:100%; overflow-x:hidden;
-  --hmh-bg:#0B0F14; --hmh-surface:#12171D; --hmh-raised:#181E26; --hmh-field:#181E26; --hmh-hover:#1F2630;
-  --hmh-border:#2F3845; --hmh-accent:#4F8CFF; --hmh-text:#E7ECF3; --hmh-text-dim:#9AA7B4;
-  --hmh-radius-control:12px; --hmh-radius-card:16px; --hmh-radius-section:20px;
-  --primary-font-family:Inter,"Segoe UI",Roboto,sans-serif;
-  --primary-text-color:var(--hmh-text); --secondary-text-color:var(--hmh-text-dim);
-  --primary-background-color:var(--hmh-bg); --card-background-color:var(--hmh-raised);
-  --secondary-background-color:var(--hmh-raised); --divider-color:var(--hmh-border);
-  --primary-color:var(--hmh-accent); --text-primary-color:#FFFFFF;
-  --error-color:#E5534B; --success-color:#4CAF6E; --warning-color:#F0A23C;
-  --hmh-disabled-bg:#151B22; --hmh-disabled-border:#28323D; --hmh-disabled-text:#748191;
   font-family:var(--primary-font-family,sans-serif);
   color:var(--primary-text-color,#E7ECF3); background:var(--primary-background-color,#0B0F14); }
-:host(.theme-light) {
-  --hmh-bg:#EEF1F6; --hmh-surface:#FFFFFF; --hmh-raised:#F6F8FB; --hmh-field:#FFFFFF; --hmh-hover:#E5EAF1;
-  --hmh-border:#D8DFE9; --hmh-accent:#2F6FE4; --hmh-text:#161C26; --hmh-text-dim:#5C6878;
-  --hmh-radius-control:12px; --hmh-radius-card:16px; --hmh-radius-section:20px;
-  --text-primary-color:#FFFFFF;
-  --error-color:#C93A32; --success-color:#2E7D4C; --warning-color:#9A5F0B;
-  --hmh-disabled-bg:#F3F5F8; --hmh-disabled-border:#D5DCE5; --hmh-disabled-text:#7B8796; }
 :host(.theme-light) .card { box-shadow:0 5px 9px rgba(22,28,38,.09); }
 :host(.theme-light) .hero { box-shadow:0 8px 28px rgba(22,28,38,.13); }
 :host(.reduced-motion) *, :host(.reduced-motion) *::before, :host(.reduced-motion) *::after {

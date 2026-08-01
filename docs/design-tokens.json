@@ -1,0 +1,69 @@
+{
+  "contract": {
+    "name": "hausmanhub-design-tokens",
+    "version": 1,
+    "figma_file_key": "UK1PgZUQQrvYJ7tRZzWyvo",
+    "figma_foundations_node_id": "270:643"
+  },
+  "collections": {
+    "primitives": {
+      "figma_name": "HMH · Primitives",
+      "modes": ["Value"],
+      "variable_count": 27
+    },
+    "semantic": {
+      "figma_name": "HMH · Semantic",
+      "modes": ["Light", "Dark"],
+      "variable_count": 18
+    },
+    "metrics": {
+      "figma_name": "HMH · Metrics",
+      "modes": ["Value"],
+      "variable_count": 17
+    }
+  },
+  "semantic_colors": {
+    "surface/canvas": {"light": "#EEF1F6", "dark": "#0B0F14", "css": "--hmh-surface-canvas", "android": "surfaceCanvas"},
+    "surface/navigation": {"light": "#FFFFFF", "dark": "#12171D", "css": "--hmh-surface-navigation", "android": "surfaceNavigation"},
+    "surface/card": {"light": "#FFFFFF", "dark": "#12171D", "css": "--hmh-surface-card", "android": "surfaceCard"},
+    "surface/raised": {"light": "#F6F8FB", "dark": "#181E26", "css": "--hmh-surface-raised", "android": "surfaceRaised"},
+    "surface/field": {"light": "#FFFFFF", "dark": "#181E26", "css": "--hmh-surface-field", "android": "surfaceField"},
+    "surface/hover": {"light": "#E5EAF1", "dark": "#1F2630", "css": "--hmh-surface-hover", "android": "surfaceHover"},
+    "border/default": {"light": "#D8DFE9", "dark": "#2F3845", "css": "--hmh-border-default", "android": "borderDefault"},
+    "border/active": {"light": "#2F6FE4", "dark": "#4F8CFF", "css": "--hmh-border-active", "android": "borderActive"},
+    "text/primary": {"light": "#161C26", "dark": "#E6EAF2", "css": "--hmh-text-primary", "android": "textPrimary"},
+    "text/secondary": {"light": "#5C6878", "dark": "#A3AAB7", "css": "--hmh-text-secondary", "android": "textSecondary"},
+    "text/disabled": {"light": "#7B8796", "dark": "#6E7785", "css": "--hmh-text-disabled", "android": "textDisabled"},
+    "accent/primary": {"light": "#2F6FE4", "dark": "#4F8CFF", "css": "--hmh-accent-primary", "android": "accentPrimary"},
+    "status/success": {"light": "#2E7D4C", "dark": "#3DD17A", "css": "--hmh-status-success", "android": "accentSuccess"},
+    "status/warning": {"light": "#9A5F0B", "dark": "#FFB020", "css": "--hmh-status-warning", "android": "accentWarning"},
+    "status/danger": {"light": "#C93A32", "dark": "#FF5C5C", "css": "--hmh-status-danger", "android": "accentDanger"},
+    "control/disabled-background": {"light": "#F6F8FB", "dark": "#12171D", "css": "--hmh-control-disabled-background", "android": "controlDisabledBackground"},
+    "control/disabled-border": {"light": "#D5DCE5", "dark": "#28323D", "css": "--hmh-control-disabled-border", "android": "controlDisabledBorder"},
+    "control/disabled-text": {"light": "#7B8796", "dark": "#748191", "css": "--hmh-control-disabled-text", "android": "controlDisabledText"}
+  },
+  "metrics": {
+    "spacing": [2, 4, 6, 8, 12, 16, 24, 32],
+    "radius": [4, 5, 6, 8, 10, 12, 16, 20, 999]
+  },
+  "typography": {
+    "font_family": "Inter",
+    "styles": {
+      "Display": [44, 52, "Bold"],
+      "Hero title": [40, 48, "Bold"],
+      "Title": [24, 32, "Semi Bold"],
+      "Headline": [20, 28, "Semi Bold"],
+      "Body": [16, 24, "Regular"],
+      "Secondary": [14, 20, "Regular"],
+      "Caption": [12, 16, "Regular"],
+      "Overline": [12, 16, "Medium"]
+    }
+  },
+  "rules": {
+    "figma_is_visual_source": true,
+    "android_production_v2_is_behavioral_baseline": true,
+    "hacs_uses_semantic_css_variables": true,
+    "community_libraries_do_not_override_product_tokens": true,
+    "figma_reference_pixels_per_android_dp": 2
+  }
+}
