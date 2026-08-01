@@ -1,16 +1,16 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.30";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.30";
-import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.30";
-import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.51.30";
-import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.30";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.30";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.30";
-import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.30";
-import { createKioskButton, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.30";
-import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.30";
-import { AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.51.30";
-import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.51.30";
-import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.51.30";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.31";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.31";
+import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.31";
+import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.51.31";
+import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.31";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.31";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.31";
+import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.31";
+import { createKioskButton, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.31";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.31";
+import { AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.51.31";
+import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.51.31";
+import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.51.31";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css";
@@ -212,6 +212,8 @@ function brandMark() {
   setAttr(mark, "aria-hidden", "true");
   const shell = document.createElementNS(SVG_NAMESPACE, "svg");
   setAttr(shell, "viewBox", "0 0 31.7778 37.0833");
+  setAttr(shell, "width", "32");
+  setAttr(shell, "height", "38");
   setAttr(shell, "class", "brand-mark-shell");
   const shellPath = document.createElementNS(SVG_NAMESPACE, "path");
   setAttr(shellPath, "d", "M1.66667 35.4167V12.75L15.8889 2.08333L30.1111 12.75V35.4167H1.66667Z");
@@ -222,6 +224,8 @@ function brandMark() {
   shell.appendChild(shellPath);
   const letter = document.createElementNS(SVG_NAMESPACE, "svg");
   setAttr(letter, "viewBox", "0 0 17.1111 15.3333");
+  setAttr(letter, "width", "18");
+  setAttr(letter, "height", "16");
   setAttr(letter, "class", "brand-mark-letter");
   const letterPath = document.createElementNS(SVG_NAMESPACE, "path");
   setAttr(letterPath, "d", "M1.88889 1.88889V13.4444M15.2222 1.88889V13.4444M1.88889 7.66667H15.2222");
@@ -279,6 +283,7 @@ class HausmanHubPanel extends HTMLElement {
     this._preferencesDirty = false;
     this._preferencesWriting = false;
     this._timer = null;
+    this._styleRevealTimer = null;
     this._shell = null;
     this._activeSection = null;
     this._activeClimateView = "overview";
@@ -384,6 +389,10 @@ class HausmanHubPanel extends HTMLElement {
   disconnectedCallback() {
     if (this._timer) clearInterval(this._timer);
     this._timer = null;
+    if (this._styleRevealTimer && typeof window !== "undefined" && typeof window.clearTimeout === "function") {
+      window.clearTimeout(this._styleRevealTimer);
+    }
+    this._styleRevealTimer = null;
     document.removeEventListener("visibilitychange", this._onVisible);
     if (typeof window !== "undefined" && typeof window.removeEventListener === "function") {
       window.removeEventListener("popstate", this._onNavigationPop);
@@ -756,10 +765,23 @@ class HausmanHubPanel extends HTMLElement {
     const root = this.shadowRoot;
     const stylesheet = el("link");
     stylesheet.rel = "stylesheet";
+    const container = el("main");
+    container.style.visibility = "hidden";
+    const revealPanel = () => {
+      container.style.visibility = "";
+      if (this._styleRevealTimer && typeof window !== "undefined" && typeof window.clearTimeout === "function") {
+        window.clearTimeout(this._styleRevealTimer);
+      }
+      this._styleRevealTimer = null;
+    };
+    stylesheet.addEventListener("load", revealPanel);
+    stylesheet.addEventListener("error", revealPanel);
     stylesheet.href = PANEL_CSS_URL;
     root.appendChild(stylesheet);
-    const container = el("main");
     root.appendChild(container);
+    if (typeof window !== "undefined" && typeof window.setTimeout === "function") {
+      this._styleRevealTimer = window.setTimeout(revealPanel, 2000);
+    }
     const header = el("header", "page-header");
     const brand = el("div", "page-brand");
     brand.appendChild(brandMark());

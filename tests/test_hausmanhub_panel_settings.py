@@ -544,6 +544,33 @@ def run_panel_script(script: str) -> subprocess.CompletedProcess[str]:
 class PanelSettingsSectionsTest(unittest.TestCase):
     """The settings sections render and post the strict admin contracts."""
 
+    def test_panel_stays_hidden_until_styles_load_and_logo_has_safe_size(self) -> None:
+        script = panel_script(
+            dict(GET_PATHS),
+            {},
+            """
+        const stylesheet = panel.shadowRoot.children.find((node) => node.tagName === "LINK");
+        const main = panel.shadowRoot.children.find((node) => node.tagName === "MAIN");
+        if (!stylesheet || !main || main.style.visibility !== "hidden") {
+          throw new Error("panel content became visible before its stylesheet loaded");
+        }
+        const logoShells = findAll(panel.shadowRoot, (node) =>
+          String(node.className || node.class).split(" ").includes("brand-mark-shell"));
+        const logoLetters = findAll(panel.shadowRoot, (node) =>
+          String(node.className || node.class).split(" ").includes("brand-mark-letter"));
+        if (!logoShells.length || logoShells.some((node) => node.width !== "32" || node.height !== "38")) {
+          throw new Error("logo shell has no safe intrinsic size");
+        }
+        if (!logoLetters.length || logoLetters.some((node) => node.width !== "18" || node.height !== "16")) {
+          throw new Error("logo letter has no safe intrinsic size");
+        }
+        stylesheet.fire("load");
+        if (main.style.visibility !== "") throw new Error("panel stayed hidden after stylesheet load");
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_disabled_not_configured_state_stays_honest(self) -> None:
         payloads = dict(GET_PATHS)
         payloads["hausman_hub/v1/admin/climate-drafts/current"] = NOT_CONFIGURED_SETUP
