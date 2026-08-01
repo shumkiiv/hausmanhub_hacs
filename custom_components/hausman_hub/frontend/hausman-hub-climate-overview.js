@@ -149,6 +149,20 @@ function climateDeviceKey(device) {
   ) || "");
 }
 
+function refreshClimateOverlay(panel) {
+  if (panel._sectionRenderKeys) panel._sectionRenderKeys.climate = null;
+  if (typeof panel._render === "function") panel._render();
+}
+
+function requestClimateSheet(panel, title, devices) {
+  panel._climateOverlay = {
+    title,
+    deviceKeys: devices.map(climateDeviceKey).filter(Boolean),
+    selectedKey: null,
+  };
+  refreshClimateOverlay(panel);
+}
+
 function renderClimateDeviceList(panel, body, title, devices, deps, onBack) {
   const { el, setAttr, svgIcon } = deps;
   body.innerHTML = "";
@@ -184,32 +198,15 @@ function renderClimateDeviceList(panel, body, title, devices, deps, onBack) {
       if (panel._climateOverlay) {
         panel._climateOverlay.selectedKey = climateDeviceKey(device);
       }
-      const selected = panel._deviceInventoryCard(device);
-      selected.open = true;
-      renderClimateDeviceList(panel, body, device.name || "Устройство", [device], deps, () => {
-        if (panel._climateOverlay) panel._climateOverlay.selectedKey = null;
-        renderClimateDeviceList(panel, body, title, devices, deps, onBack);
-      });
-      const selectedGrid = body.querySelector ? body.querySelector(".climate-sheet-device-grid") : null;
-      if (selectedGrid) {
-        selectedGrid.innerHTML = "";
-        selectedGrid.appendChild(selected);
-      }
+      refreshClimateOverlay(panel);
     });
     grid.appendChild(card);
   });
   body.appendChild(grid);
 }
 
-function openClimateSheet(panel, container, title, devices, deps, restoring = false) {
+function openClimateSheet(panel, container, title, devices, deps) {
   const { el, setAttr } = deps;
-  if (!restoring) {
-    panel._climateOverlay = {
-      title,
-      deviceKeys: devices.map(climateDeviceKey).filter(Boolean),
-      selectedKey: null,
-    };
-  }
   const existing = container.querySelector && container.querySelector(".climate-device-sheet-backdrop");
   if (existing && existing.remove) existing.remove();
   const backdrop = el("div", "climate-device-sheet-backdrop");
@@ -239,7 +236,7 @@ function openClimateSheet(panel, container, title, devices, deps, restoring = fa
   }
   renderClimateDeviceList(panel, body, selected.name || "Устройство", [selected], deps, () => {
     if (panel._climateOverlay) panel._climateOverlay.selectedKey = null;
-    renderClimateDeviceList(panel, body, title, devices, deps, null);
+    refreshClimateOverlay(panel);
   });
   const selectedGrid = body.querySelector ? body.querySelector(".climate-sheet-device-grid") : null;
   if (selectedGrid) {
@@ -275,7 +272,7 @@ function renderCategories(panel, container, devices, deps) {
       : "Нет устройств"));
     card.appendChild(cardCopy);
     card.appendChild(el("span", "climate-category-chevron", "›"));
-    card.addEventListener("click", () => openClimateSheet(panel, container, category.title, matches, deps));
+    card.addEventListener("click", () => requestClimateSheet(panel, category.title, matches));
     grid.appendChild(card);
   });
   section.appendChild(grid);
@@ -336,7 +333,7 @@ function renderRooms(panel, container, rooms, devices, deps) {
     });
     card.appendChild(facts);
     card.appendChild(el("span", "climate-room-open", "Открыть устройства ›"));
-    card.addEventListener("click", () => openClimateSheet(panel, container, room.name || "Комната", matches, deps));
+    card.addEventListener("click", () => requestClimateSheet(panel, room.name || "Комната", matches));
     grid.appendChild(card);
   });
   section.appendChild(grid);
@@ -363,7 +360,7 @@ export function renderClimateOverview(panel, container, deps) {
   if (panel._climateOverlay) {
     const keys = new Set(panel._climateOverlay.deviceKeys || []);
     const matches = devices.filter((device) => keys.has(climateDeviceKey(device)));
-    openClimateSheet(panel, page, panel._climateOverlay.title, matches, deps, true);
+    openClimateSheet(panel, page, panel._climateOverlay.title, matches, deps);
   }
   container.appendChild(page);
 }
