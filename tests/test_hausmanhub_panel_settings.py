@@ -24,6 +24,7 @@ AREA_BINDING_JS = PANEL_JS.with_name("hausman-hub-area-binding.js")
 NAVIGATION_JS = PANEL_JS.with_name("hausman-hub-navigation.js")
 ENERGY_JS = PANEL_JS.with_name("hausman-hub-energy.js")
 WEATHER_SOURCES_JS = PANEL_JS.with_name("hausman-hub-weather-sources.js")
+MEDIA_DEVICE_JS = PANEL_JS.with_name("hausman-hub-media-device.js")
 SETTINGS_CSS = PANEL_JS.with_name("hausman-hub-settings.css")
 DEVICE_BINDINGS_CSS = PANEL_JS.with_name("hausman-hub-device-bindings.css")
 
@@ -436,6 +437,10 @@ def panel_script(
       vm.runInThisContext(
         fs.readFileSync({str(WEATHER_SOURCES_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(WEATHER_SOURCES_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(MEDIA_DEVICE_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(MEDIA_DEVICE_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(PANEL_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, ""),
@@ -999,6 +1004,91 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const roomText = textOf(panel._shell.homeSections.rooms);
         if (!roomText.includes("Гостиная") || !roomText.includes("1 устройство")) {
           throw new Error("room inventory does not match tablet navigation");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_television_card_uses_tablet_presentation_not_entity_dump(self) -> None:
+        payloads = dict(GET_PATHS)
+        payloads["hausman_hub/v1/dashboard"] = {
+            "rooms": [{"id": "living", "name": "Гостиная", "temp": 24.5, "humidity": 46}],
+            "devices": [
+                {
+                    "id": "device-tv",
+                    "physicalId": "device-tv",
+                    "entityId": "media_player.tv_cast",
+                    "name": "58PUS8506/60",
+                    "roomId": "living",
+                    "roomName": "Гостиная",
+                    "domain": "media_player",
+                    "category": "media",
+                    "state": "playing",
+                    "stateLabel": "Воспроизводится",
+                    "tone": "good",
+                    "unavailable": False,
+                    "manufacturer": "Philips",
+                    "model": "58PUS8506/60",
+                    "attributes": {"media_title": "Кинопоиск"},
+                    "details": [
+                        {"entityId": "media_player.tv_cast", "label": "Медиа", "value": "Воспроизводится"},
+                        {"entityId": "media_player.tv_android", "label": "Медиа", "value": "Нет связи"},
+                        {"entityId": "media_player.tv_philips", "label": "Медиа", "value": "Включено"},
+                        {"entityId": "light.tv_ambilight", "label": "Освещение", "value": "Выключено"},
+                        {"entityId": "switch.tv_screen", "label": "Состояние экрана", "value": "Включено"},
+                    ],
+                }
+            ],
+            "alarms": [],
+        }
+        actions = [
+            {"action_id": "turn_on", "title": "Включить", "allowed_fields": []},
+            {"action_id": "turn_off", "title": "Выключить", "allowed_fields": []},
+            {"action_id": "media_play", "title": "Играть", "allowed_fields": []},
+            {"action_id": "media_pause", "title": "Пауза", "allowed_fields": []},
+        ]
+        payloads["hausman_hub/v1/admin/scenarios/catalog"] = {
+            "devices": [
+                {"target_id": "tv-cast", "entity_id": "media_player.tv_cast", "name": "58PUS8506/60", "actions": actions},
+                {"target_id": "tv-android", "entity_id": "media_player.tv_android", "name": "Android TV", "actions": actions},
+                {"target_id": "tv-philips", "entity_id": "media_player.tv_philips", "name": "Philips TV", "actions": actions},
+                {"target_id": "tv-ambilight", "entity_id": "light.tv_ambilight", "name": "Ambilight", "actions": actions},
+            ]
+        }
+        script = panel_script(
+            payloads,
+            {"hausman_hub/v1/device-actions": {"status": "confirmed"}},
+            """
+        await tick();
+        panel._shell.tabs.media.fire("click");
+        const media = panel._shell.homeSections.media;
+        const cards = findAll(media, (node) =>
+          String(node.className).split(" ").includes("media-device-card"));
+        if (cards.length !== 1) throw new Error("TV did not render as one physical card");
+        const text = textOf(cards[0]);
+        if (!text.includes("Телевизор") || !text.includes("Гостиная · 58PUS8506/60")
+          || !text.includes("Кинопоиск") || !text.includes("Сейчас воспроизводится")) {
+          throw new Error("tablet TV identity or state is missing: " + text);
+        }
+        if (text.includes("Ambilight") || text.includes("Состояние экрана")
+          || text.includes("Android TV") || text.includes("Philips TV")) {
+          throw new Error("technical HA entities leaked into TV card: " + text);
+        }
+        const buttons = findAll(cards[0], (node) => node.tagName === "BUTTON");
+        if (buttons.length !== 3 || !buttons.some((node) => node.textContent === "Играть")
+          || !buttons.some((node) => node.textContent === "Пауза")
+          || !buttons.some((node) => node.textContent === "Выключить")) {
+          throw new Error("semantic tablet controls mismatch: " + buttons.map((node) => node.textContent));
+        }
+        buttons.find((node) => node.textContent === "Пауза").fire("click", {
+          preventDefault() {}, stopPropagation() {},
+        });
+        await tick(10);
+        const post = calls.find((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/device-actions");
+        if (!post || post.payload.targetId !== "tv-cast" || post.payload.actionId !== "media_pause") {
+          throw new Error("TV command used a secondary entity: " + JSON.stringify(post));
         }
             """,
         )
