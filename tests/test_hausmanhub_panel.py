@@ -38,6 +38,9 @@ MEDIA_DEVICE_JS = PANEL_JS.with_name("hausman-hub-media-device.js")
 SCENARIOS_JS = PANEL_JS.with_name("hausman-hub-scenarios.js")
 SCENARIO_ICONS_JS = PANEL_JS.with_name("hausman-hub-scenario-icons.js")
 ROLLOUT_JS = PANEL_JS.with_name("hausman-hub-rollout.js")
+OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-overview.js")
+OVERVIEW_CSS = PANEL_JS.with_name("hausman-hub-overview.css")
+OVERVIEW_HERO = PANEL_JS.parent / "assets" / "dashboard-hero-living-room-day.png"
 WEATHER_SOURCES_CSS = PANEL_JS.with_name("hausman-hub-weather-sources.css")
 SCENARIOS_CSS = PANEL_JS.with_name("hausman-hub-scenarios.css")
 ROLLOUT_CSS = PANEL_JS.with_name("hausman-hub-rollout.css")
@@ -47,7 +50,7 @@ NOTICE_CSS = PANEL_JS.with_name("hausman-hub-notice.css")
 WIZARD_VALIDATION_CSS = PANEL_JS.with_name("hausman-hub-wizard-validation.css")
 CATALOG_CSS = PANEL_JS.with_name("hausman-hub-catalog.css")
 DEVICE_MAINTENANCE_CSS = PANEL_JS.with_name("hausman-hub-device-maintenance.css")
-MAX_PANEL_JS_BYTES = 279 * 1024
+MAX_PANEL_JS_BYTES = 280 * 1024
 MAX_HOME_SECTIONS_JS_BYTES = 16 * 1024
 MAX_ROOM_SETUP_JS_BYTES = 24 * 1024
 MAX_ROOM_DEVICE_GROUPS_JS_BYTES = 12 * 1024
@@ -84,11 +87,13 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         scenarios = SCENARIOS_JS.read_text(encoding="utf-8")
         scenario_icons = SCENARIO_ICONS_JS.read_text(encoding="utf-8")
         rollout = ROLLOUT_JS.read_text(encoding="utf-8")
+        overview = OVERVIEW_JS.read_text(encoding="utf-8")
         device_maintenance_css = DEVICE_MAINTENANCE_CSS.read_text(encoding="utf-8")
 
         self.assertLessEqual(len(content.encode("utf-8")), MAX_PANEL_JS_BYTES)
         self.assertLessEqual(len(rollout.encode("utf-8")), 8 * 1024)
-        self.assertIn('hausman-hub-rollout.js?v=1.51.56', content)
+        self.assertLessEqual(len(overview.encode("utf-8")), 16 * 1024)
+        self.assertIn('hausman-hub-rollout.js?v=1.51.57', content)
         self.assertLessEqual(len(weather_sources.encode("utf-8")), 24 * 1024)
         self.assertLessEqual(
             len(home_sections.encode("utf-8")), MAX_HOME_SECTIONS_JS_BYTES
@@ -139,6 +144,10 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn("renderMediaDeviceCard", media_device)
         self.assertIn("renderEnergySection", energy)
         self.assertIn("renderScenarioSection", scenarios)
+        self.assertIn("renderOverviewHero", overview)
+        self.assertIn("physicalDeviceCount(devices)", overview)
+        self.assertTrue(OVERVIEW_CSS.is_file())
+        self.assertEqual(b"\x89PNG\r\n\x1a\n", OVERVIEW_HERO.read_bytes()[:8])
         self.assertIn("SCENARIO_ICON_GROUPS", scenario_icons)
         self.assertIn("renderHomeSection.overviewMetrics", home_sections)
         self.assertIn("renderHomeSection.roomCountWord", home_sections)
@@ -169,6 +178,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             "hausman-hub-navigation.js",
             "hausman-hub-energy.js",
             "hausman-hub-scenarios.js",
+            "hausman-hub-overview.js",
         ):
             self.assertIn(f'./{module}?v={manifest["version"]}', content)
         self.assertIn(
@@ -267,22 +277,22 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertLessEqual(len(energy_styles.encode("utf-8")), 18 * 1024)
         self.assertLessEqual(len(rollout_styles.encode("utf-8")), 4 * 1024)
         self.assertIn('"/api/hausman_hub/panel/hausman-hub-panel.css"', content)
-        self.assertIn('hausman-hub-settings.css?v=1.51.56', styles)
-        self.assertIn('hausman-hub-diagnostics.css?v=1.51.56', styles)
-        self.assertIn('hausman-hub-switch.css?v=1.51.56', styles)
-        self.assertIn('hausman-hub-notice.css?v=1.51.56', styles)
+        self.assertIn('hausman-hub-settings.css?v=1.51.57', styles)
+        self.assertIn('hausman-hub-diagnostics.css?v=1.51.57', styles)
+        self.assertIn('hausman-hub-switch.css?v=1.51.57', styles)
+        self.assertIn('hausman-hub-notice.css?v=1.51.57', styles)
         self.assertIn(".notice { position:fixed", notice_styles)
         self.assertIn(".notice.is-error", notice_styles)
-        self.assertIn('hausman-hub-device-maintenance.css?v=1.51.56', styles)
-        self.assertIn('hausman-hub-control-channel.css?v=1.51.56', styles)
-        self.assertIn('hausman-hub-weather-sources.css?v=1.51.56', styles)
-        self.assertIn('hausman-hub-wizard-validation.css?v=1.51.56', styles)
-        self.assertIn('hausman-hub-catalog.css?v=1.51.56', styles)
-        self.assertIn('hausman-hub-media-device.css?v=1.51.56', styles)
-        self.assertIn('hausman-hub-scenarios.css?v=1.51.56', styles)
-        self.assertIn('hausman-hub-climate-overview.css?v=1.51.56', styles)
-        self.assertIn('hausman-hub-navigation.css?v=1.51.56', styles)
-        self.assertIn('hausman-hub-rollout.css?v=1.51.56', styles)
+        self.assertIn('hausman-hub-device-maintenance.css?v=1.51.57', styles)
+        self.assertIn('hausman-hub-control-channel.css?v=1.51.57', styles)
+        self.assertIn('hausman-hub-weather-sources.css?v=1.51.57', styles)
+        self.assertIn('hausman-hub-wizard-validation.css?v=1.51.57', styles)
+        self.assertIn('hausman-hub-catalog.css?v=1.51.57', styles)
+        self.assertIn('hausman-hub-media-device.css?v=1.51.57', styles)
+        self.assertIn('hausman-hub-scenarios.css?v=1.51.57', styles)
+        self.assertIn('hausman-hub-climate-overview.css?v=1.51.57', styles)
+        self.assertIn('hausman-hub-navigation.css?v=1.51.57', styles)
+        self.assertIn('hausman-hub-rollout.css?v=1.51.57', styles)
         self.assertIn(":host(.kiosk-mode) .kiosk-dock", navigation_styles)
         self.assertIn(".banner { position:fixed", navigation_styles)
         self.assertIn(".inventory-device-icon .icon { display:block;", styles)
@@ -997,7 +1007,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.51.56",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.51.57",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },

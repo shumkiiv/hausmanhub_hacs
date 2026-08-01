@@ -31,6 +31,7 @@ SCENARIO_ICONS_JS = PANEL_JS.with_name("hausman-hub-scenario-icons.js")
 SETTINGS_CSS = PANEL_JS.with_name("hausman-hub-settings.css")
 DIAGNOSTICS_JS = PANEL_JS.with_name("hausman-hub-diagnostics.js")
 ROLLOUT_JS = PANEL_JS.with_name("hausman-hub-rollout.js")
+OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-overview.js")
 DIAGNOSTICS_CSS = PANEL_JS.with_name("hausman-hub-diagnostics.css")
 SWITCH_CSS = PANEL_JS.with_name("hausman-hub-switch.css")
 DEVICE_BINDINGS_CSS = PANEL_JS.with_name("hausman-hub-device-bindings.css")
@@ -504,6 +505,10 @@ def panel_script(
         {{ filename: {str(ROLLOUT_JS)!r} }}
       );
       vm.runInThisContext(
+        fs.readFileSync({str(OVERVIEW_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(OVERVIEW_JS)!r} }}
+      );
+      vm.runInThisContext(
         fs.readFileSync({str(PANEL_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, ""),
         {{ filename: {str(PANEL_JS)!r} }}
       );
@@ -933,12 +938,19 @@ class PanelSettingsSectionsTest(unittest.TestCase):
             },
         }
         payloads["hausman_hub/v1/dashboard"] = {
+            "summary": {"homeName": "Дом"},
             "rooms": [
-                {"id": "living", "name": "Гостиная", "temp": 24.5, "humidity": 46},
-                {"id": "bedroom", "name": "Спальня", "temp": 23.5, "humidity": 50},
+                {"id": "living", "name": "Гостиная", "temp": 24.5, "humidity": 46, "targetTemp": 25, "targetHumidity": 45},
+                {"id": "bedroom", "name": "Спальня", "temp": 23.5, "humidity": 50, "targetTemp": 24, "targetHumidity": 50},
             ],
-            "devices": [],
+            "devices": [
+                {"id": "light.main", "physicalId": "light-fixture", "domain": "light", "state": "on"},
+                {"id": "light.level", "physicalId": "light-fixture", "domain": "light", "state": "on"},
+                {"id": "climate.living", "physicalId": "ac-living", "domain": "climate", "state": "cool"},
+            ],
             "alarms": [],
+            "scenarios": [{"id": "morning", "title": "Доброе утро", "favorite": True}],
+            "weather": {"temperatureC": 20, "condition": "sunny", "windSpeedMps": 2.1},
         }
         script = panel_script(
             payloads,
@@ -947,46 +959,32 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const overview = panel._shell.sectionNodes.overview;
         const text = textOf(overview);
         for (const label of [
-          "Дом в комфортном режиме", "Сводка", "Комнаты", "Гостиная", "Спальня",
-          "24.0 °C", "48 %", "1 из 2", "Дневной профиль", "Ночной профиль",
+          "Дом", "Гостиная", "Спальня", "Климат", "Цель климата",
+          "Комфорт в доме", "Избранные сценарии", "Доброе утро", "Погода",
         ]) {
           if (!text.includes(label)) throw new Error("overview text missing: " + label);
         }
-        if (text.includes("day профиль") || text.includes("night профиль")) {
-          throw new Error("raw profile code exposed");
-        }
         const byClass = (name) => findAll(overview, (node) =>
           String(node.className).split(" ").includes(name));
-        if (byClass("overview-hero-metric").length !== 4) {
-          throw new Error("overview hero must contain four metrics");
+        if (byClass("overview-canon-hero-fact").length !== 4) {
+          throw new Error("canonical hero must contain four facts");
         }
-        if (byClass("summary-item").length !== 3 || byClass("overview-room-card").length !== 2) {
-          throw new Error("overview summary or room hierarchy mismatch");
+        if (byClass("overview-canon-primary-card").length !== 3) {
+          throw new Error("canonical first row must contain three cards");
         }
-        if (byClass("summary-icon").some((node) => node.children.length !== 1)) {
-          throw new Error("overview summary icon missing");
+        const homeButton = findAll(overview, (node) => node.tagName === "BUTTON"
+          && node["aria-current"] === "page")[0];
+        if (!homeButton || !homeButton.disabled) {
+          throw new Error("current home control must be explicit and non-interactive");
         }
-        const summaryLinks = byClass("summary-link");
-        if (summaryLinks.some((node) => node.tagName !== "BUTTON")) {
-          throw new Error("overview summary is not keyboard-clickable");
-        }
-        summaryLinks[0].fire("click");
+        const climateCard = byClass("overview-canon-primary-card")[0];
+        climateCard.fire("click");
         if (panel._activeSection !== "climate") {
-          throw new Error("temperature summary did not open climate");
-        }
-        panel._shell.tabs.overview.fire("click");
-        const overviewAfterReturn = panel._shell.sectionNodes.overview;
-        const deviceLink = findAll(overviewAfterReturn, (node) =>
-          String(node.className).split(" ").includes("summary-link")
-          && String(node["aria-label"]).includes("Активные устройства"))[0];
-        deviceLink.fire("click");
-        if (panel._activeSection !== "devices") {
-          throw new Error("device summary did not open devices");
+          throw new Error("climate card did not open climate");
         }
         panel._shell.tabs.overview.fire("click");
         const roomCard = findAll(panel._shell.sectionNodes.overview, (node) =>
-          String(node.className).split(" ").includes("overview-room-card")
-          && String(node["aria-label"]).includes("Гостиная"))[0];
+          node.tagName === "BUTTON" && String(node["aria-label"]).includes("Гостиная"))[0];
         roomCard.fire("click");
         if (panel._activeSection !== "rooms") {
           throw new Error("overview room did not open rooms");

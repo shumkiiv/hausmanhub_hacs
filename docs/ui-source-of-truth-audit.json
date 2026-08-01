@@ -17,7 +17,7 @@
     "archive_is_implementable": false
   },
   "hacs_figma_structure": {
-    "total_top_level_nodes": 48,
+    "total_top_level_nodes": 49,
     "nodes_deleted": 0,
     "pages": [
       {
@@ -46,7 +46,8 @@
           "226:549",
           "228:549",
           "232:549",
-          "237:582"
+          "237:582",
+          "276:11"
         ]
       },
       {
@@ -63,8 +64,8 @@
       "label": "Главная",
       "android": "implemented",
       "android_figma": ["716:943", "784:1109"],
-      "hacs": "implemented_needs_visual_reconciliation",
-      "hacs_figma": ["154:508"]
+      "hacs": "implemented_from_shared_canon",
+      "hacs_figma": ["276:11"]
     },
     {
       "id": "lighting",

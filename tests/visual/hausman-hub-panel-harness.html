@@ -12,7 +12,7 @@
   <body>
     <hausman-hub-panel id="panel"></hausman-hub-panel>
     <script type="module">
-      import "../../custom_components/hausman_hub/frontend/hausman-hub-panel.js?v=1.51.56";
+      import "../../custom_components/hausman_hub/frontend/hausman-hub-panel.js?v=1.51.57";
       const params = new URLSearchParams(window.location.search);
       const panel = document.getElementById("panel");
       const theme = params.get("theme") === "dark" ? "dark" : "light";
@@ -21,7 +21,7 @@
       document.documentElement.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       document.body.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       panel._data = {
-        integration_version: "1.51.56",
+        integration_version: "1.51.57",
         readiness: { status: "ready", bridge_mode: "native", reasons: [] },
         snapshot: {
           rooms: [
@@ -170,10 +170,11 @@
         },
       };
       panel._homeDashboard = {
+        summary: { homeName: "Дом" },
         rooms: [
-          { id: "living", name: "Гостиная", temp: 24.8, humidity: 46, targetTemp: 25 },
+          { id: "living", name: "Гостиная", temp: 24.8, humidity: 46, targetTemp: 25, targetHumidity: 45 },
           { id: "bedroom", name: "Спальня", temp: 24.2, humidity: 49, targetTemp: 24, targetHumidity: 48 },
-          { id: "kitchen", name: "Кухня", temp: 25.1, humidity: 43, targetTemp: 24.5 },
+          { id: "kitchen", name: "Кухня", temp: 25.1, humidity: 43, targetTemp: 24.5, targetHumidity: 45 },
         ],
         devices: [
           { id: "light-living", physicalId: "light-living", entityId: "light.living", name: "Основной свет", roomId: "living", roomName: "Гостиная", domain: "light", category: "lighting", stateLabel: "Включён", tone: "good", details: [{ entityId: "light.living", label: "Основной свет", value: "Включён" }] },
@@ -204,6 +205,16 @@
         },
         alarms: [
           { id: "leak-bathroom", title: "Датчик протечки", active: false, roomId: "bathroom" },
+        ],
+        scenarios: [
+          { id: "scenario.good_morning", title: "Доброе утро", description: "Свет и комфорт", favorite: true, enabled: true },
+          { id: "scenario.leaving_home", title: "Уходим из дома", description: "Свет и безопасность", favorite: true, enabled: true, requiresConfirmation: true },
+          { id: "scenario.night_mode", title: "Ночной режим", description: "Тихо и прохладно", favorite: true, enabled: true },
+        ],
+        weather: { temperatureC: 21.4, condition: "partlycloudy", windSpeedMps: 2.4 },
+        events: [
+          { id: "event-1", title: "Климат гостиной", message: "Цель изменена до 25 °C", ts: Date.now() - 180000 },
+          { id: "event-2", title: "Свет на кухне", message: "Выключен", ts: Date.now() - 720000 },
         ],
       };
       panel._settingsData = {

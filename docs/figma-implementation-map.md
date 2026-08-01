@@ -37,6 +37,7 @@ payload, хранение или исполнение команд.
 
 | Область | Тёмный node-id | Светлый node-id | Реализация в panel.js |
 |---|---:|---:|---|
+| Главная, общий канон HACS | `276:11` | та же структура через semantic Light | `renderOverviewHero`, `renderOverviewContent` |
 | Обзор | `4:84` | `58:325` | `_ensureShell`, `_renderOverviewSummary`, `_renderRooms` |
 | Мастер, список комнат | `4:2` | `58:209` | `_renderFirstRunProgress`, `_renderFirstRunRooms` |
 | Мастер, комната и устройства | `2:2` | `56:175` | `_renderFirstRunRoom`, `_firstRunDeviceGroups` |
