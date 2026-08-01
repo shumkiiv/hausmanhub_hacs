@@ -138,15 +138,34 @@
 .energy-compact-source small { color:var(--hmh-text-dim); font-size:11px; }
 .energy-settings-save { width:100%; min-height:42px; margin:10px 0 0; border-radius:12px; }
 
-.energy-back { margin:0 0 18px; }
-.energy-device-hero { margin-bottom:24px; }
-.energy-device-head { display:flex; align-items:center; gap:16px; margin-bottom:22px; }
-.energy-device-icon { width:58px; height:58px; border-radius:17px; }
-.energy-device-head h2 { margin:0; font-size:30px; }
-.energy-device-head .section-intro { margin:5px 0 0; }
-.energy-device-hero > .energy-metric-grid { margin-bottom:12px; }
-.energy-device-management > h3 { margin-bottom:7px; font-size:21px; }
-.energy-device-management > .section-intro { margin:0 0 16px; }
+.energy-back { min-height:38px; margin:0 0 12px; padding:7px 13px; }
+.energy-detail-layout { display:grid; grid-template-columns:minmax(0,1fr) 310px; align-items:start; gap:14px; }
+.energy-detail-main, .energy-detail-sidebar { display:flex; flex-direction:column; gap:14px; min-width:0; }
+.energy-device-hero { padding:18px; }
+.energy-device-head { display:flex; align-items:center; gap:16px; margin-bottom:18px; }
+.energy-device-head > .energy-device-visual { flex:0 0 auto; width:72px; height:72px; }
+.energy-device-identity { flex:1 1 auto; min-width:0; }
+.energy-device-head h2 { margin:0; font-size:30px; line-height:1.1; overflow-wrap:anywhere; }
+.energy-device-head .section-intro { margin:6px 0 0; line-height:1.4; overflow-wrap:anywhere; }
+.energy-detail-status { flex:0 0 auto; padding:7px 11px; font-size:12px; font-weight:700; border-radius:999px;
+  background:var(--hmh-raised); }
+.energy-detail-status.is-online { color:#41D17D; }
+.energy-detail-status.is-off { color:var(--hmh-text-dim); }
+.energy-detail-status.is-offline { color:#F1B84B; }
+.energy-device-chart-card { min-height:292px; padding:16px; }
+.energy-device-chart-card > .energy-history { min-height:210px; margin-top:12px; }
+.energy-detail-sidebar .card { padding:16px; }
+.energy-detail-sidebar h3 { margin:0; font-size:20px; }
+.energy-device-control-card > p { margin:7px 0 14px; color:var(--hmh-text-dim); font-size:13px; line-height:1.45; }
+.energy-power-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+.energy-power-actions button { width:100%; min-height:44px; margin:0; }
+.energy-power-actions button.is-danger { color:#FF8078; border-color:color-mix(in srgb,#FF5C57 42%,var(--hmh-border)); }
+.energy-control-unavailable { grid-column:1 / -1; color:var(--hmh-text-dim); font-size:13px; line-height:1.45; }
+.energy-info-row { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.3fr); gap:12px; padding:11px 0;
+  border-bottom:1px solid var(--hmh-border); }
+.energy-info-row:last-child { border-bottom:0; }
+.energy-info-row span { color:var(--hmh-text-dim); font-size:13px; }
+.energy-info-row strong { min-width:0; font-size:13px; text-align:right; overflow-wrap:anywhere; }
 
 @media (max-width:1280px) {
   .energy-page-layout { grid-template-columns:1fr; }
@@ -155,6 +174,8 @@
   .energy-device-card { grid-template-columns:58px minmax(170px,1fr) 150px 112px 92px 18px; }
   .energy-device-visual { width:58px; height:58px; }
   .energy-device-open { display:none; }
+  .energy-detail-layout { grid-template-columns:1fr; }
+  .energy-detail-sidebar { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
 }
 @media (max-width:900px) {
   .energy-metric-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
@@ -182,4 +203,9 @@
     grid-template-areas:"visual identity chevron" "visual live chevron"; gap:7px 10px; }
   .energy-device-visual { width:52px; height:52px; }
   .energy-device-live { min-width:0; text-align:left; }
+  .energy-device-head { align-items:flex-start; flex-wrap:wrap; }
+  .energy-device-head > .energy-device-visual { width:60px; height:60px; }
+  .energy-device-head h2 { font-size:25px; }
+  .energy-detail-status { margin-left:76px; }
+  .energy-detail-sidebar { display:flex; }
 }

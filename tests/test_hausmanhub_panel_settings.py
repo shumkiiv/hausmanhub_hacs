@@ -715,18 +715,20 @@ class PanelSettingsSectionsTest(unittest.TestCase):
                 {
                     "id": "device_0123456789abcdef",
                     "physicalId": "device_0123456789abcdef",
-                    "entityId": "switch.kettle",
-                    "name": "Чайник",
+                    "entityId": "switch.kitchen_breaker",
+                    "name": "Автомат кухни",
                     "roomName": "Кухня",
                     "domain": "switch",
                     "category": "switch",
+                    "manufacturer": "Tuya",
+                    "model": "DIN RCBO",
                     "imageUrl": "https://www.zigbee2mqtt.io/images/devices/TS011F_plug_1.png",
                     "state": "on",
                     "stateLabel": "включено",
                     "tone": "good",
                     "details": [
-                        {"label": "Мощность", "value": "1850 W", "entityId": "sensor.kettle_power", "domain": "sensor", "state": "1850"},
-                        {"label": "Ток", "value": "8.04 A", "entityId": "sensor.kettle_current", "domain": "sensor", "state": "8.04"},
+                        {"label": "Мощность", "value": "1850 W", "entityId": "sensor.kitchen_breaker_power", "domain": "sensor", "state": "1850"},
+                        {"label": "Ток", "value": "8.04 A", "entityId": "sensor.kitchen_breaker_current", "domain": "sensor", "state": "8.04"},
                     ],
                     "actions": [],
                 },
@@ -754,7 +756,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
                 "selectedSourceIds": ["device_0123456789abcdef"],
                 "settings": {"displayUnits": "watts", "showVoltage": True, "aggregation": "combined", "useAllDevices": True},
                 "sources": [
-                    {"id": "device_0123456789abcdef", "deviceId": "device_0123456789abcdef", "name": "Чайник", "roomName": "Кухня", "available": True, "powered": True, "currentPowerW": 1850, "currentA": 8.04, "voltageV": 230.1, "totalKwh": 12.4},
+                    {"id": "device_0123456789abcdef", "deviceId": "device_0123456789abcdef", "name": "Автомат кухни", "roomName": "Кухня", "available": True, "powered": True, "currentPowerW": 1850, "currentA": 8.04, "voltageV": 230.1, "totalKwh": 12.4},
                     {"id": "device_fedcba9876543210", "deviceId": "device_fedcba9876543210", "name": "Торшер", "roomName": "Гостиная", "available": True, "powered": False, "currentPowerW": 0, "currentA": 0, "voltageV": 230.0, "totalKwh": 2.1}
                 ],
             },
@@ -798,12 +800,32 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("energy settings post mismatch: " + JSON.stringify(post));
         }
         panel._shell.tabs.energy.fire("click");
+        panel._scenarios.catalog = { devices: [{
+          entity_id: "switch.kitchen_breaker",
+          target_id: "target-kitchen-breaker",
+          actions: [
+            { action_id: "turn_on", title: "Включить", allowed_fields: [] },
+            { action_id: "turn_off", title: "Выключить", allowed_fields: [] },
+          ],
+        }] };
         const device = findAll(panel._shell.homeSections.energy, (node) =>
           node.tagName === "BUTTON" && String(node.className).includes("energy-device-card"))[0];
         device.fire("click");
         text = textOf(panel._shell.homeSections.energy);
-        if (!text.includes("Устройство и управление") || !text.includes("Чайник")) {
+        if (!text.includes("История мощности") || !text.includes("Питание") || !text.includes("Об устройстве") || !text.includes("Автомат кухни") || !text.includes("DIN RCBO")) {
           throw new Error("energy device detail did not open: " + text);
+        }
+        let confirmation = "";
+        window.confirm = (message) => { confirmation = message; return false; };
+        const powerOff = findAll(panel._shell.homeSections.energy, (node) =>
+          node.tagName === "BUTTON" && node.textContent === "Отключить")[0];
+        if (!powerOff) throw new Error("breaker power control is missing");
+        powerOff.fire("click");
+        if (!confirmation.includes("Питание подключённой линии будет снято")) {
+          throw new Error("breaker did not request an explicit confirmation");
+        }
+        if (calls.some((call) => call.path === "hausman_hub/v1/device-actions")) {
+          throw new Error("cancelled breaker command reached the API");
         }
             """,
         )

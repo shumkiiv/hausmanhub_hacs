@@ -221,18 +221,18 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertLessEqual(len(catalog_styles.encode("utf-8")), 8 * 1024)
         self.assertLessEqual(len(energy_styles.encode("utf-8")), 18 * 1024)
         self.assertIn('"/api/hausman_hub/panel/hausman-hub-panel.css"', content)
-        self.assertIn('hausman-hub-settings.css?v=1.51.36', styles)
-        self.assertIn('hausman-hub-switch.css?v=1.51.36', styles)
-        self.assertIn('hausman-hub-notice.css?v=1.51.36', styles)
+        self.assertIn('hausman-hub-settings.css?v=1.51.37', styles)
+        self.assertIn('hausman-hub-switch.css?v=1.51.37', styles)
+        self.assertIn('hausman-hub-notice.css?v=1.51.37', styles)
         self.assertIn(".notice { position:fixed", notice_styles)
         self.assertIn(".notice.is-error", notice_styles)
-        self.assertIn('hausman-hub-device-maintenance.css?v=1.51.36', styles)
-        self.assertIn('hausman-hub-control-channel.css?v=1.51.36', styles)
-        self.assertIn('hausman-hub-weather-sources.css?v=1.51.36', styles)
-        self.assertIn('hausman-hub-wizard-validation.css?v=1.51.36', styles)
-        self.assertIn('hausman-hub-catalog.css?v=1.51.36', styles)
-        self.assertIn('hausman-hub-media-device.css?v=1.51.36', styles)
-        self.assertIn('hausman-hub-scenarios.css?v=1.51.36', styles)
+        self.assertIn('hausman-hub-device-maintenance.css?v=1.51.37', styles)
+        self.assertIn('hausman-hub-control-channel.css?v=1.51.37', styles)
+        self.assertIn('hausman-hub-weather-sources.css?v=1.51.37', styles)
+        self.assertIn('hausman-hub-wizard-validation.css?v=1.51.37', styles)
+        self.assertIn('hausman-hub-catalog.css?v=1.51.37', styles)
+        self.assertIn('hausman-hub-media-device.css?v=1.51.37', styles)
+        self.assertIn('hausman-hub-scenarios.css?v=1.51.37', styles)
         self.assertIn(".inventory-device-icon .icon { display:block;", styles)
         self.assertIn("validation-issue-row", content)
         self.assertIn(
@@ -254,7 +254,11 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn("energy-device-accumulated", energy_styles)
         self.assertIn(".energy-device-visual { width:58px; height:58px; }", energy_styles)
         self.assertIn('grid-template-areas:"visual identity live chevron"', energy_styles)
+        self.assertIn(".energy-detail-layout", energy_styles)
+        self.assertIn(".energy-device-chart-card", energy_styles)
         self.assertIn("выбранные источники", ENERGY_JS.read_text(encoding="utf-8"))
+        self.assertIn("Питание подключённой линии будет снято", ENERGY_JS.read_text(encoding="utf-8"))
+        self.assertIn("Фактические данные Recorder Home Assistant", ENERGY_JS.read_text(encoding="utf-8"))
         self.assertIn("подтверждение|ожида", content)
         self.assertIn("&& !this._deviceBindings.error", content)
 
@@ -844,7 +848,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.51.36",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.51.37",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },

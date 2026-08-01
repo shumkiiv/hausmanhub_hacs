@@ -51,6 +51,12 @@ function sourceDevice(panel, source) {
   return devices.find((item) => item.id === source.deviceId || item.physicalId === source.deviceId);
 }
 
+function showEnergyDevice(panel, container, sourceId) {
+  panel._energySelectedDeviceId = sourceId;
+  panel._renderEnergySection(container);
+  if (typeof container.scrollIntoView === "function") container.scrollIntoView({ block: "start" });
+}
+
 function energyDeviceVisual(panel, source, deps) {
   const { el, svgIcon, setAttr } = deps;
   const device = sourceDevice(panel, source);
@@ -133,41 +139,109 @@ function historyBars(panel, source, deps) {
   return wrap;
 }
 
+function energyPeriodButtons(panel, container, deps) {
+  const { el, setAttr } = deps;
+  const periods = el("div", "energy-periods");
+  [["day", "День"], ["week", "Неделя"], ["month", "Месяц"], ["year", "Год"]]
+    .forEach(([value, label]) => {
+      const selected = (panel._energyHistoryPeriod || "day") === value;
+      const button = el("button", selected ? "is-selected" : "", label);
+      button.type = "button";
+      button.disabled = panel._energyHistoryLoading;
+      setAttr(button, "aria-pressed", selected ? "true" : "false");
+      button.addEventListener("click", () => {
+        if (selected) return;
+        panel._energyHistoryPeriod = value;
+        panel._energyHistory = {};
+        if (panel._energyHistoryLoading) panel._energyHistoryReloadRequested = true;
+        panel._renderEnergySection(container);
+        loadEnergyHistory(panel);
+      });
+      periods.appendChild(button);
+    });
+  return periods;
+}
+
 function renderDeviceDetail(panel, container, source, deps) {
-  const { el, svgIcon } = deps;
+  const { el } = deps;
+  const device = sourceDevice(panel, source);
   const back = el("button", "secondary energy-back", "← Все устройства");
   back.type = "button";
-  back.addEventListener("click", () => {
-    panel._energySelectedDeviceId = null;
-    panel._renderEnergySection(container);
-  });
+  back.addEventListener("click", () => showEnergyDevice(panel, container, null));
   container.appendChild(back);
+  const layout = el("div", "energy-detail-layout");
+  const main = el("div", "energy-detail-main");
   const hero = el("section", "card energy-device-hero");
   const head = el("div", "energy-device-head");
-  const icon = el("span", "energy-device-icon");
-  icon.appendChild(svgIcon("energy"));
-  head.appendChild(icon);
-  const copy = el("div");
+  head.appendChild(energyDeviceVisual(panel, source, deps));
+  const copy = el("div", "energy-device-identity");
   copy.appendChild(el("h2", null, source.name));
-  copy.appendChild(el("p", "section-intro", source.roomName || "Без комнаты"));
+  copy.appendChild(el("p", "section-intro", [source.roomName || "Без комнаты", device && device.manufacturer, device && device.model].filter(Boolean).join(" · ")));
   head.appendChild(copy);
+  const status = el("span", `energy-detail-status ${!source.available ? "is-offline" : (source.powered === false ? "is-off" : "is-online")}`,
+    !source.available ? "Нет связи" : (source.powered === false ? "Питание выключено" : "Работает"));
+  head.appendChild(status);
   hero.appendChild(head);
   const metrics = el("div", "energy-metric-grid");
-  metrics.appendChild(energyMetric(deps, "Мощность", sourceMetric(source, "currentPowerW", "Вт"), "is-accent"));
-  metrics.appendChild(energyMetric(deps, "Ток", sourceMetric(source, "currentA", "А", 2)));
-  metrics.appendChild(energyMetric(deps, "Напряжение", sourceMetric(source, "voltageV", "В")));
-  metrics.appendChild(energyMetric(deps, "Счётчик", sourceMetric(source, "totalKwh", "кВт·ч", 3)));
+  metrics.appendChild(energyMetric(deps, "Мощность", sourceMetric(source, "currentPowerW", "Вт"), "is-accent", "Текущая нагрузка"));
+  metrics.appendChild(energyMetric(deps, "Ток", sourceMetric(source, "currentA", "А", 2), "", "Сейчас"));
+  metrics.appendChild(energyMetric(deps, "Напряжение", sourceMetric(source, "voltageV", "В"), "", Number(source.voltageV) >= 207 && Number(source.voltageV) <= 253 ? "В норме" : "Проверьте сеть"));
+  metrics.appendChild(energyMetric(deps, "Счётчик", sourceMetric(source, "totalKwh", "кВт·ч", 3), "", "Накоплено"));
   hero.appendChild(metrics);
-  hero.appendChild(historyBars(panel, source, deps));
-  container.appendChild(hero);
-  const device = panel._homeDashboard.devices.find((item) => item.id === source.deviceId);
-  if (device) {
-    const management = el("section", "energy-device-management");
-    management.appendChild(el("h3", null, "Устройство и управление"));
-    management.appendChild(el("p", "section-intro", "Все доступные функции одного физического устройства. Команда считается выполненной только после подтверждения состояния."));
-    management.appendChild(panel._deviceInventoryCard(device));
-    container.appendChild(management);
-  }
+  main.appendChild(hero);
+  const chartCard = el("section", "card energy-device-chart-card");
+  const chartHead = el("div", "energy-card-head energy-history-head");
+  const chartCopy = el("div", "energy-card-title");
+  chartCopy.appendChild(el("h3", null, "История мощности"));
+  chartCopy.appendChild(el("small", null, "Фактические данные Recorder Home Assistant"));
+  chartHead.appendChild(chartCopy);
+  chartHead.appendChild(energyPeriodButtons(panel, container, deps));
+  chartCard.appendChild(chartHead);
+  chartCard.appendChild(historyBars(panel, source, deps));
+  main.appendChild(chartCard);
+  layout.appendChild(main);
+
+  const sidebar = el("aside", "energy-detail-sidebar");
+  const control = el("section", "card energy-device-control-card");
+  control.appendChild(el("h3", null, "Питание"));
+  control.appendChild(el("p", null, source.available
+    ? "Команда будет подтверждена по фактическому состоянию устройства."
+    : "Управление недоступно, пока устройство не вернётся в сеть."));
+  const targets = device ? panel._catalogTargets(device) : [];
+  const actions = targets.flatMap((target) => (target.actions || []).map((action) => ({ target, action })));
+  const controls = el("div", "energy-power-actions");
+  let controlCount = 0;
+  [["turn_on", "Включить"], ["turn_off", "Отключить"]].forEach(([actionId, label]) => {
+    const item = actions.find((entry) => entry.action.action_id === actionId && !(entry.action.allowed_fields || []).includes("value"));
+    if (!item) return;
+    const button = el("button", actionId === "turn_off" ? "secondary is-danger" : "secondary", label);
+    button.type = "button";
+    button.disabled = panel._busy || !source.available;
+    button.addEventListener("click", () => {
+      const breaker = /автомат|breaker|rcbo|mcb|din/i.test(`${source.name} ${device && device.model || ""}`);
+      if (actionId === "turn_off" && breaker && !window.confirm(`Отключить «${source.name}»? Питание подключённой линии будет снято.`)) return;
+      panel._executeDeviceAction(item.target.target_id, actionId, null);
+    });
+    controls.appendChild(button);
+    controlCount += 1;
+  });
+  if (!controlCount) controls.appendChild(el("span", "energy-control-unavailable", "Для устройства доступен только просмотр показаний."));
+  control.appendChild(controls);
+  sidebar.appendChild(control);
+  const info = el("section", "card energy-device-info-card");
+  info.appendChild(el("h3", null, "Об устройстве"));
+  [["Состояние", !source.available ? "Нет связи" : (source.powered === false ? "Выключено" : "В сети")],
+    ["Комната", source.roomName || "Не назначена"],
+    ["Производитель", device && device.manufacturer || "Не указан"],
+    ["Модель", device && device.model || "Не указана"]].forEach(([label, value]) => {
+    const row = el("div", "energy-info-row");
+    row.appendChild(el("span", null, label));
+    row.appendChild(el("strong", null, value));
+    info.appendChild(row);
+  });
+  sidebar.appendChild(info);
+  layout.appendChild(sidebar);
+  container.appendChild(layout);
 }
 
 function renderEnergyHistory(panel, energy, selected, deps) {
@@ -187,25 +261,7 @@ function renderEnergyHistory(panel, energy, selected, deps) {
     ? `${selected.length} ${deviceWord(selected.length)} · выбранные источники`
     : "Источники не выбраны"));
   head.appendChild(copy);
-  const periods = el("div", "energy-periods");
-  [["day", "День"], ["week", "Неделя"], ["month", "Месяц"], ["year", "Год"]]
-    .forEach(([value, label]) => {
-    const selectedPeriod = activePeriod === value;
-    const period = el("button", selectedPeriod ? "is-selected" : "", label);
-    period.type = "button";
-    period.disabled = panel._energyHistoryLoading;
-    setAttr(period, "aria-pressed", selectedPeriod ? "true" : "false");
-    period.addEventListener("click", () => {
-      if (value === panel._energyHistoryPeriod) return;
-      panel._energyHistoryPeriod = value;
-      panel._energyHistory = {};
-      if (panel._energyHistoryLoading) panel._energyHistoryReloadRequested = true;
-      panel._renderEnergySection(panel._shell.homeSections.energy);
-      loadEnergyHistory(panel);
-    });
-    periods.appendChild(period);
-  });
-  head.appendChild(periods);
+  head.appendChild(energyPeriodButtons(panel, panel._shell.homeSections.energy, deps));
   card.appendChild(head);
   const layout = el("div", "energy-history-layout");
   layout.appendChild(historyBars(panel, { id: "selection", name: "выбранных источников" }, deps));
@@ -214,10 +270,7 @@ function renderEnergyHistory(panel, energy, selected, deps) {
   selected.slice(0, 2).forEach((source) => {
     const row = el("button", "energy-current-source");
     row.type = "button";
-    row.addEventListener("click", () => {
-      panel._energySelectedDeviceId = source.id;
-      panel._renderEnergySection(panel._shell.homeSections.energy);
-    });
+    row.addEventListener("click", () => showEnergyDevice(panel, panel._shell.homeSections.energy, source.id));
     const identity = el("span");
     identity.appendChild(el("strong", null, source.name));
     identity.appendChild(el("small", null, `${sourceMetric(source, "currentA", "А", 2)} · ${sourceMetric(source, "voltageV", "В")}`));
@@ -273,10 +326,7 @@ function renderEnergyDevices(panel, container, sources, deps) {
     const row = el("button", `energy-device-card${source.available ? "" : " is-unavailable"}`);
     row.type = "button";
     setAttr(row, "aria-label", `Открыть устройство ${source.name}`);
-    row.addEventListener("click", () => {
-      panel._energySelectedDeviceId = source.id;
-      panel._renderEnergySection(container);
-    });
+    row.addEventListener("click", () => showEnergyDevice(panel, container, source.id));
     row.appendChild(energyDeviceVisual(panel, source, deps));
     const identity = el("span", "energy-device-card-copy");
     identity.appendChild(el("strong", null, source.name));
