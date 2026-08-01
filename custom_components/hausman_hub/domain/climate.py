@@ -23,7 +23,7 @@ _OUTDOOR_TEMPERATURE_ENTITY_DOMAINS = frozenset({"sensor", "weather"})
 _PRESENCE_ENTITY_DOMAINS = frozenset({"binary_sensor", "person", "device_tracker"})
 _ROOM_PRESENCE_ENTITY_DOMAINS = frozenset({"binary_sensor"})
 _CENTRAL_HEATING_ENTITY_DOMAINS = frozenset(
-    {"binary_sensor", "switch", "input_boolean"}
+    {"binary_sensor", "switch", "input_boolean", "sensor"}
 )
 _PASSIVE_OBSERVATION_ENTITY_DOMAINS = frozenset({"sensor"})
 MAX_ROOM_PRESENCE_ENTITIES = 32
@@ -171,6 +171,8 @@ class ClimateHomeEnvironment:
     central_heating_entity_id: str | None = None
     heating_lockout_high: float = 18.0
     heating_lockout_low: float = 16.0
+    central_heating_temperature_on: float = 35.0
+    central_heating_temperature_off: float = 30.0
 
     def __post_init__(self) -> None:
         _optional_entity_domain(
@@ -223,6 +225,18 @@ class ClimateHomeEnvironment:
         if self.heating_lockout_low >= self.heating_lockout_high:
             raise ClimateModelViolation(
                 "heating lockout low threshold must stay below the high threshold"
+            )
+        _temperature_threshold(
+            self.central_heating_temperature_on,
+            "central heating on temperature threshold",
+        )
+        _temperature_threshold(
+            self.central_heating_temperature_off,
+            "central heating off temperature threshold",
+        )
+        if self.central_heating_temperature_off >= self.central_heating_temperature_on:
+            raise ClimateModelViolation(
+                "central heating off temperature must stay below the on temperature"
             )
 
     @property
@@ -426,6 +440,18 @@ def _lockout_threshold(value: object, label: str) -> float:
         raise ClimateModelViolation(f"{label} must be numeric") from error
     if not -40.0 <= number <= 60.0:
         raise ClimateModelViolation(f"{label} must stay within -40..60")
+    return number
+
+
+def _temperature_threshold(value: object, label: str) -> float:
+    if isinstance(value, bool):
+        raise ClimateModelViolation(f"{label} must be numeric")
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError) as error:
+        raise ClimateModelViolation(f"{label} must be numeric") from error
+    if not -40.0 <= number <= 120.0:
+        raise ClimateModelViolation(f"{label} must stay within -40..120")
     return number
 
 

@@ -15,9 +15,9 @@ export const HOME_SIGNAL_BINDINGS = [
   {
     key: "central_heating_entity_id", kind: "central_heating",
     title: "Центральное отопление",
-    helper: "Нужен сигнал «работает», а не температура батареи.",
+    helper: "Прямой сигнал работы или температура батареи / трубы отопления.",
     purpose: "Позволяет контуру понимать, работает ли котёл, насос или общая подача тепла.",
-    recommendation: "Нужен сигнал «работает / не работает». Температура батареи и обычные клавиши выключателей не подходят.",
+    recommendation: "Лучший вариант — прямой сигнал «работает / не работает». Если его нет, выберите датчик температуры батареи или трубы; обычные комнатные термометры и клавиши выключателей не подходят.",
   },
 ];
 
@@ -40,6 +40,10 @@ export function weatherSourceDisplayName(entityId) {
 }
 
 const AWAY_MODE_PATTERN = /away|not[ _-]?home|никого.{0,8}(?:нет|дома)|не.{0,4}дома/i;
+const CENTRAL_HEATING_IDENTITY_PATTERN =
+  /central.{0,12}heat|heating|boiler|heat.{0,12}(pump|supply)|circulat.{0,12}pump|radiator|heating.{0,12}(pipe|flow|return)|(pipe|flow|return).{0,12}heat|централ.{0,12}отоп|отоплен|кот[её]л|теплоснаб|(насос|подач).{0,12}(отоп|тепл)|(отоп|тепл).{0,12}(насос|подач)|батаре|радиатор|труб.{0,12}(отоп|подач|обрат)|(отоп|подач|обрат).{0,12}труб|теплонос/;
+const CENTRAL_HEATING_ACCESSORY_PATTERN =
+  /(^|[^a-z0-9])trv([^a-z0-9]|$)|thermostatic.{0,12}radiator|radiator.{0,12}valve|термоголов|увлажн|humidifier/;
 export const AWAY_MODE_TYPE = "Режим «Дома / Не дома»";
 export const AWAY_MODE_EXPLANATION =
   "Логический режим дома: включено — никого нет, выключено — дома. Это не физический датчик присутствия.";
@@ -48,6 +52,15 @@ export function isAwayModeCandidate(candidate) {
   return AWAY_MODE_PATTERN.test([
     candidate?.name, candidate?.entity_id, candidate?.device_name,
   ].filter(Boolean).join(" "));
+}
+
+export function isCentralHeatingCandidate(candidate, identity) {
+  return ["binary_sensor", "switch", "input_boolean", "sensor"].includes(candidate.domain)
+    && (candidate.domain !== "binary_sensor"
+      || ["heat", "running", "power"].includes(candidate.device_class))
+    && (candidate.domain !== "sensor" || candidate.device_class === "temperature")
+    && CENTRAL_HEATING_IDENTITY_PATTERN.test(identity)
+    && !CENTRAL_HEATING_ACCESSORY_PATTERN.test(identity);
 }
 
 export function signalCandidateDisplayName(candidate, peers, normalize) {
@@ -69,6 +82,35 @@ export function signalCandidateDisplayName(candidate, peers, normalize) {
   const localized = /^(?:forecast|weather)$/i.test(String(name).trim())
     ? "Погода" : name;
   return `${localized} · ${weatherSourceDisplayName(candidate.entity_id)}`;
+}
+
+export function createHeatingTemperatureFields(config, deps) {
+  const { el, numberField } = deps;
+  const root = el("div", "heating-temperature-thresholds");
+  root.appendChild(el("h3", "threshold-heading", "Температура батареи или трубы"));
+  root.appendChild(el(
+    "div", "muted threshold-intro",
+    "Только для датчика батареи или трубы. Между порогами сохраняется предыдущее состояние."
+  ));
+  const on = numberField(config.onValue ?? 35, -40, 120, 0.5, config.onChange);
+  const onRow = el("label", "form-field", "Считать отопление включённым от, °C");
+  onRow.appendChild(on);
+  const off = numberField(config.offValue ?? 30, -40, 120, 0.5, config.onChange);
+  const offRow = el("label", "form-field", "Считать отопление выключенным ниже, °C");
+  offRow.appendChild(off);
+  const grid = el("div", "home-threshold-grid");
+  grid.appendChild(onRow);
+  grid.appendChild(offRow);
+  root.appendChild(grid);
+  return {
+    root,
+    values: () => ({ on: Number(on.value), off: Number(off.value) }),
+    valid: () => on.value !== "" && off.value !== ""
+      && Number.isFinite(Number(on.value)) && Number.isFinite(Number(off.value))
+      && Number(on.value) >= -40 && Number(on.value) <= 120
+      && Number(off.value) >= -40 && Number(off.value) <= 120
+      && Number(off.value) < Number(on.value),
+  };
 }
 
 export function createPriorityChoicePicker(owner, config, deps) {

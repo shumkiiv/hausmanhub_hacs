@@ -23,7 +23,9 @@
           }
         },
         "presence_entity_id": {"$ref": "#/$defs/optional_entity_id"},
-        "central_heating_entity_id": {"$ref": "#/$defs/optional_entity_id"}
+        "central_heating_entity_id": {"$ref": "#/$defs/optional_entity_id"},
+        "central_heating_temperature_on": {"type": "number", "minimum": -40, "maximum": 120},
+        "central_heating_temperature_off": {"type": "number", "minimum": -40, "maximum": 120}
       }
     },
     "rooms": {

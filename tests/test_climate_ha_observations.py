@@ -286,6 +286,38 @@ class NativeHaObservationTest(unittest.TestCase):
         self.assertIs(temperature.availability, ClimateDeviceAvailability.AVAILABLE)
         self.assertIs(temperature.activity, ClimateDeviceActivity.IDLE)
 
+    def test_radiator_temperature_infers_central_heating_with_hysteresis(self) -> None:
+        registry = replace(
+            full_registry(),
+            home=ClimateHomeEnvironment(
+                central_heating_entity_id="sensor.battery_temperature",
+                central_heating_temperature_on=35.0,
+                central_heating_temperature_off=30.0,
+            ),
+        )
+        hot = self.build(
+            registry=registry,
+            states={"sensor.battery_temperature": ha_state("sensor.battery_temperature", "42.5")},
+        )
+        self.assertIs(hot.home.central_heating_on, True)
+        holding = self.build(
+            registry=registry,
+            states={"sensor.battery_temperature": ha_state("sensor.battery_temperature", "33")},
+            previous_central_heating_on=hot.home.central_heating_on,
+        )
+        self.assertIs(holding.home.central_heating_on, True)
+        cold = self.build(
+            registry=registry,
+            states={"sensor.battery_temperature": ha_state("sensor.battery_temperature", "27")},
+            previous_central_heating_on=holding.home.central_heating_on,
+        )
+        self.assertIs(cold.home.central_heating_on, False)
+        unknown = self.build(
+            registry=registry,
+            states={"sensor.battery_temperature": ha_state("sensor.battery_temperature", "33")},
+        )
+        self.assertIsNone(unknown.home.central_heating_on)
+
     def test_weather_entity_temperature_attribute_is_a_real_outdoor_source(self) -> None:
         registry = full_registry()
         registry = replace(

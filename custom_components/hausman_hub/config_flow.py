@@ -420,7 +420,7 @@ PRESENCE_ENTITY_SELECTOR = EntitySelector(
 )
 CENTRAL_HEATING_ENTITY_SELECTOR = EntitySelector(
     EntitySelectorConfig(
-        domain=["binary_sensor", "switch", "input_boolean"],
+        domain=["binary_sensor", "switch", "input_boolean", "sensor"],
         multiple=False,
     )
 )
@@ -3051,6 +3051,12 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
                     "central_heating_entity_id": current_entities[
                         CENTRAL_HEATING_ENTITY_FIELD
                     ],
+                    "central_heating_temperature_on": _threshold_default(
+                        home.get("central_heating_temperature_on"), 35.0
+                    ),
+                    "central_heating_temperature_off": _threshold_default(
+                        home.get("central_heating_temperature_off"), 30.0
+                    ),
                     "heating_lockout_high": float(high),
                     "heating_lockout_low": float(low),
                 }

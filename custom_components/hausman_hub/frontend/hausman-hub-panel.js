@@ -1,14 +1,14 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.16";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.16";
-import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.16";
-import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.51.16";
-import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.16";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.16";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.16";
-import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.16";
-import { openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.16";
-import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.16";
-import { AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createPriorityChoicePicker, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.51.16";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.17";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.17";
+import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.17";
+import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.51.17";
+import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.17";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.17";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.17";
+import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.17";
+import { openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.17";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.17";
+import { AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.51.17";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css";
@@ -66,10 +66,6 @@ const ZIGBEE2MQTT_IMAGE_PATTERN =
   /^https:\/\/www\.zigbee2mqtt\.io\/images\/devices\/(?:[A-Za-z0-9._~-]|%[0-9A-F]{2})+\.png$/;
 const OUTDOOR_IDENTITY_PATTERN =
   /outdoor|outside|external|exterior|street|yard|улич|улиц|наруж|внешн|двор|погод/;
-const CENTRAL_HEATING_IDENTITY_PATTERN =
-  /central.{0,12}heat|heating|boiler|heat.{0,12}(pump|supply)|circulat.{0,12}pump|централ.{0,12}отоп|отоплен|кот[её]л|теплоснаб|(насос|подач).{0,12}(отоп|тепл)|(отоп|тепл).{0,12}(насос|подач)/;
-const CENTRAL_HEATING_ACCESSORY_PATTERN =
-  /(^|[^a-z0-9])trv([^a-z0-9]|$)|thermostatic.{0,12}radiator|radiator.{0,12}valve|термоголов|увлажн|humidifier/;
 const CLIMATE_VIEWS = [
   { id: "contour", label: "Контур", subtitle: "Контур и управление климатом" },
   { id: "profiles", label: "Профили", subtitle: "Профили и расписание комфорта" },
@@ -2488,12 +2484,19 @@ class HausmanHubPanel extends HTMLElement {
     const home = this._firstRun.home;
     const high = Number(home.heating_lockout_high);
     const low = Number(home.heating_lockout_low);
+    const heatingOn = Number(home.central_heating_temperature_on ?? 35);
+    const heatingOff = Number(home.central_heating_temperature_off ?? 30);
     if (
       home.heating_lockout_high === "" || home.heating_lockout_low === ""
       || !Number.isFinite(high) || !Number.isFinite(low) || high < -40 || high > 60
       || low < -40 || low > 60 || low >= high
+      || home.central_heating_temperature_on === ""
+      || home.central_heating_temperature_off === ""
+      || !Number.isFinite(heatingOn) || !Number.isFinite(heatingOff)
+      || heatingOn < -40 || heatingOn > 120 || heatingOff < -40 || heatingOff > 120
+      || heatingOff >= heatingOn
     ) {
-      this._firstRun.homeError = "Проверьте пороги: от -40 до 60 °C, нижний строго меньше верхнего.";
+      this._firstRun.homeError = "Проверьте пороги: нижний должен быть строго меньше верхнего.";
       this._render();
       return;
     }
@@ -2505,6 +2508,8 @@ class HausmanHubPanel extends HTMLElement {
         central_heating_entity_id: home.central_heating_entity_id || null,
         heating_lockout_high: high,
         heating_lockout_low: low,
+        central_heating_temperature_on: heatingOn,
+        central_heating_temperature_off: heatingOff,
         outdoor_temperature_entity_id: home.outdoor_temperature_entity_id || null,
         outdoor_temperature_entity_ids: home.outdoor_temperature_entity_ids || [],
         presence_entity_id: home.presence_entity_id || null,
@@ -2735,6 +2740,8 @@ class HausmanHubPanel extends HTMLElement {
         central_heating_entity_id: saved.central_heating_entity_id || null,
         heating_lockout_high: saved.heating_lockout_high === undefined ? 18 : saved.heating_lockout_high,
         heating_lockout_low: saved.heating_lockout_low === undefined ? 16 : saved.heating_lockout_low,
+        central_heating_temperature_on: saved.central_heating_temperature_on === undefined ? 35 : saved.central_heating_temperature_on,
+        central_heating_temperature_off: saved.central_heating_temperature_off === undefined ? 30 : saved.central_heating_temperature_off,
         outdoor_temperature_entity_id: saved.outdoor_temperature_entity_id || null,
         outdoor_temperature_entity_ids: Array.isArray(saved.outdoor_temperature_entity_ids)
           && saved.outdoor_temperature_entity_ids.length
@@ -2776,6 +2783,17 @@ class HausmanHubPanel extends HTMLElement {
       card.appendChild(picker.root);
       pickers[key] = picker;
     });
+    const heatingThresholds = createHeatingTemperatureFields({
+      onValue: home.central_heating_temperature_on,
+      offValue: home.central_heating_temperature_off,
+      onChange: () => {
+        const values = heatingThresholds.values();
+        home.central_heating_temperature_on = values.on;
+        home.central_heating_temperature_off = values.off;
+        clearError();
+      },
+    }, { el, numberField });
+    card.appendChild(heatingThresholds.root);
     card.appendChild(el("h3", "threshold-heading", "Погодная блокировка отопления"));
     card.appendChild(el(
       "div",
@@ -4471,6 +4489,9 @@ class HausmanHubPanel extends HTMLElement {
     if (candidate.domain === "device_tracker") return "Телефоны и трекеры (геолокация)";
     if (candidate.domain === "switch") return "Выключатель";
     if (candidate.domain === "input_boolean") return "Логический переключатель";
+    if (signalKind === "central_heating" && candidate.domain === "sensor") {
+      return "Температура батареи / трубы";
+    }
     if (deviceClassLabels[candidate.device_class]) {
       return deviceClassLabels[candidate.device_class];
     }
@@ -4510,11 +4531,7 @@ class HausmanHubPanel extends HTMLElement {
           || (candidate.domain === "binary_sensor" && isAwayModeCandidate(candidate));
       }
       if (signalKind !== "central_heating") return true;
-      return ["binary_sensor", "switch", "input_boolean"].includes(candidate.domain)
-        && (candidate.domain !== "binary_sensor"
-          || ["heat", "running", "power"].includes(candidate.device_class))
-        && CENTRAL_HEATING_IDENTITY_PATTERN.test(identity)
-        && !CENTRAL_HEATING_ACCESSORY_PATTERN.test(identity);
+      return isCentralHeatingCandidate(candidate, identity);
     }).forEach((candidate) => {
       const key = candidate.device_group_id
         ? `${candidate.device_group_id}:${signalKind}` : candidate.entity_id;
@@ -4566,7 +4583,10 @@ class HausmanHubPanel extends HTMLElement {
     if (candidate.domain === "person") return "профиль пользователя: дома / не дома. Это общий статус всего дома.";
     if (candidate.domain === "device_tracker") return "Телефон или трекер передаёт геолокационный статус «дома / не дома».";
     if (signalKind === "outdoor_temperature") return "Используется только показание температуры наружного воздуха.";
-    if (signalKind === "central_heating") return "Используется состояние «работает / не работает», а не температура устройства.";
+    if (signalKind === "central_heating" && candidate.domain === "sensor") {
+      return "По температуре батареи или трубы HausmanHub определяет, идёт ли сейчас подача тепла.";
+    }
+    if (signalKind === "central_heating") return "Используется прямое состояние «работает / не работает».";
     if (signalKind === "window") return "Используется состояние «открыто / закрыто» этой комнаты.";
     return "Физический датчик сообщает о движении или присутствии.";
   }
@@ -4756,6 +4776,15 @@ class HausmanHubPanel extends HTMLElement {
       card.appendChild(picker.root);
       pickers[binding.key] = picker;
     });
+    const heatingThresholds = createHeatingTemperatureFields({
+      onValue: values.central_heating_temperature_on,
+      offValue: values.central_heating_temperature_off,
+      onChange: () => {
+        validationError.textContent = "";
+        this._markDirty("home", dirtyNotice);
+      },
+    }, { el, numberField });
+    card.appendChild(heatingThresholds.root);
     card.appendChild(el("h3", "threshold-heading", "Погодная блокировка отопления"));
     card.appendChild(el(
       "div",
@@ -4794,14 +4823,15 @@ class HausmanHubPanel extends HTMLElement {
       const rawLow = low.value;
       const highValue = Number(rawHigh);
       const lowValue = Number(rawLow);
+      const heatingValues = heatingThresholds.values();
       if (
         rawHigh === "" || rawLow === ""
         || !Number.isFinite(highValue) || !Number.isFinite(lowValue)
         || highValue < -40 || highValue > 60 || lowValue < -40 || lowValue > 60
         || lowValue >= highValue
+        || !heatingThresholds.valid()
       ) {
-        validationError.textContent =
-          "Проверьте пороги: от -40 до 60 °C, нижний строго меньше верхнего.";
+        validationError.textContent = "Проверьте пороги: нижний должен быть строго меньше верхнего.";
         this._activateSection("climate");
         focusNode(
           rawHigh === "" || !Number.isFinite(highValue) || highValue < -40 || highValue > 60
@@ -4820,6 +4850,8 @@ class HausmanHubPanel extends HTMLElement {
           presence_entity_id: pickers.presence_entity_id.value() || null,
           central_heating_entity_id:
             pickers.central_heating_entity_id.value() || null,
+          central_heating_temperature_on: heatingValues.on,
+          central_heating_temperature_off: heatingValues.off,
           heating_lockout_high: highValue,
           heating_lockout_low: lowValue,
         },

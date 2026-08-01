@@ -110,6 +110,7 @@ def build_native_ha_climate_observation(
     protection: ClimateProtectionMemory,
     local_time: tuple[int, int] | None = None,
     previous_weather_lockout: bool | None = None,
+    previous_central_heating_on: bool | None = None,
 ) -> ClimateObservationSnapshot:
     """Build one complete observation from registry bindings and HA states."""
 
@@ -147,6 +148,7 @@ def build_native_ha_climate_observation(
             observed_at,
             local_time,
             previous_weather_lockout,
+            previous_central_heating_on,
         ),
         control=ClimateControlObservation(),
         rooms=rooms,
@@ -363,6 +365,7 @@ def _home_observation(
     observed_at: int,
     local_time: tuple[int, int] | None,
     previous_weather_lockout: bool | None,
+    previous_central_heating_on: bool | None,
 ) -> ClimateHomeObservation:
     home = registry.home
     outdoor_sources = home.prioritized_outdoor_temperature_entity_ids
@@ -379,7 +382,13 @@ def _home_observation(
         heat_load_temperature=heat_load,
         heating_lockout_high=home.heating_lockout_high,
         heating_lockout_low=home.heating_lockout_low,
-        central_heating_on=_home_switch(home.central_heating_entity_id, states),
+        central_heating_on=_central_heating_state(
+            home.central_heating_entity_id,
+            states,
+            home.central_heating_temperature_on,
+            home.central_heating_temperature_off,
+            previous_central_heating_on,
+        ),
         central_heating_configured=home.central_heating_entity_id is not None,
         weather_heating_lockout=_weather_heating_lockout(
             heat_load,
@@ -489,9 +498,12 @@ def _outdoor_temperature_value(state: ClimateHaEntityState) -> float | None:
     return _number(state.state)
 
 
-def _home_switch(
+def _central_heating_state(
     entity_id: str | None,
     states: ClimateHaStateView,
+    temperature_on: float,
+    temperature_off: float,
+    previous: bool | None,
 ) -> bool | None:
     if entity_id is None:
         return None
@@ -502,6 +514,15 @@ def _home_switch(
         return True
     if state.state == "off":
         return False
+    if entity_id.startswith("sensor."):
+        temperature = _number(state.state)
+        if temperature is None or not -40.0 <= temperature <= 120.0:
+            return None
+        if temperature >= temperature_on:
+            return True
+        if temperature <= temperature_off:
+            return False
+        return previous
     return None
 
 

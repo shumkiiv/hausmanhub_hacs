@@ -1753,8 +1753,8 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         if (!text.includes("Расписание")) throw new Error("schedule heading missing");
         if (!text.includes("Сигналы дома")) throw new Error("home heading missing");
         if (!text.includes("Сигналы комнат")) throw new Error("room signals heading missing");
-        if (!text.includes("Нужен сигнал «работает», а не температура батареи.")) {
-          throw new Error("central heating helper does not explain the binary signal");
+        if (!text.includes("Прямой сигнал работы или температура батареи / трубы отопления.")) {
+          throw new Error("central heating helper does not explain both supported source types");
         }
         if (!text.includes("Общее присутствие дома")) throw new Error("general presence label missing");
         if (!text.includes("Датчики присутствия")) throw new Error("room presence label missing");
@@ -2121,10 +2121,12 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           { entity_id: "switch.trv_heating", name: "TRV heating", domain: "switch" },
           { entity_id: "input_boolean.central_heating", name: "Центральное отопление", domain: "input_boolean" },
           { entity_id: "binary_sensor.boiler_heat", name: "Нагрев", domain: "binary_sensor", device_class: "heat" },
+          { entity_id: "sensor.battery_temperature", name: "Температура батарей", domain: "sensor", device_class: "temperature", room_name: "Гостиная" },
+          { entity_id: "sensor.living_temperature", name: "Температура гостиной", domain: "sensor", device_class: "temperature", room_name: "Гостиная" },
         ];
         const filtered = panel._signalCandidatesForPicker(candidates, null, "central_heating")
           .map((candidate) => candidate.entity_id).sort();
-        const expected = ["binary_sensor.boiler_heat", "input_boolean.central_heating"].sort();
+        const expected = ["binary_sensor.boiler_heat", "input_boolean.central_heating", "sensor.battery_temperature"].sort();
         if (JSON.stringify(filtered) !== JSON.stringify(expected)) {
           throw new Error("central heating picker exposed unrelated devices: " + JSON.stringify(filtered));
         }
@@ -2302,6 +2304,8 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           outdoor_temperature_entity_ids: [],
           presence_entity_id: null,
           central_heating_entity_id: null,
+          central_heating_temperature_on: 35,
+          central_heating_temperature_off: 30,
           heating_lockout_high: 18,
           heating_lockout_low: 16,
         };

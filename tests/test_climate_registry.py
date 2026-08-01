@@ -315,6 +315,21 @@ class ClimateRegistryTest(unittest.TestCase):
         with self.assertRaisesRegex(ClimateModelViolation, "presence entity"):
             ClimateHomeEnvironment(presence_entity_id="not an entity")
 
+        temperature_source = ClimateHomeEnvironment(
+            central_heating_entity_id="sensor.battery_temperature",
+            central_heating_temperature_on=38.0,
+            central_heating_temperature_off=31.0,
+        )
+        restored = registry_from_payload(
+            registry_to_payload(ClimateRegistry(home=temperature_source))
+        )
+        self.assertEqual(temperature_source, restored.home)
+        with self.assertRaisesRegex(ClimateModelViolation, "below the on temperature"):
+            ClimateHomeEnvironment(
+                central_heating_temperature_on=30.0,
+                central_heating_temperature_off=30.0,
+            )
+
     def test_passive_sensor_observation_endpoint_matches_its_kind(self) -> None:
         sensor = air_conditioner(
             device_id="living_temperature",

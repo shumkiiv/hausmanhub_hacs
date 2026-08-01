@@ -20,7 +20,9 @@ from ..domain.climate import (
 
 OUTDOOR_TEMPERATURE_DOMAINS = frozenset({"sensor", "weather"})
 PRESENCE_DOMAINS = frozenset({"binary_sensor", "person", "device_tracker"})
-CENTRAL_HEATING_DOMAINS = frozenset({"binary_sensor", "switch", "input_boolean"})
+CENTRAL_HEATING_DOMAINS = frozenset(
+    {"binary_sensor", "switch", "input_boolean", "sensor"}
+)
 WINDOW_DOMAINS = frozenset({"binary_sensor"})
 ROOM_PRESENCE_DOMAINS = frozenset({"binary_sensor"})
 OUTDOOR_TEMPERATURE_SIGNAL = "outdoor_temperature"
@@ -49,6 +51,8 @@ WINDOW_DEVICE_CLASSES = frozenset({"window", "door", "opening", "garage_door"})
 CENTRAL_HEATING_DEVICE_CLASSES = frozenset({"heat", "running", "power"})
 HEATING_LOCKOUT_MINIMUM = -40.0
 HEATING_LOCKOUT_MAXIMUM = 60.0
+CENTRAL_HEATING_TEMPERATURE_MINIMUM = -40.0
+CENTRAL_HEATING_TEMPERATURE_MAXIMUM = 120.0
 CLIMATE_MODES = frozenset({"disabled", "managed"})
 MAX_ENTITY_ID_LENGTH = 255
 _OUTDOOR_IDENTITY = re.compile(
@@ -65,7 +69,11 @@ _CENTRAL_HEATING_IDENTITY = re.compile(
     r"circulat.{0,12}pump|"
     r"централ.{0,12}отоп|отоплен|кот[её]л|теплоснаб|"
     r"(?:насос|подач).{0,12}(?:отоп|тепл)|"
-    r"(?:отоп|тепл).{0,12}(?:насос|подач))",
+    r"(?:отоп|тепл).{0,12}(?:насос|подач)|"
+    r"radiator|heating.{0,12}(?:pipe|flow|return)|"
+    r"(?:pipe|flow|return).{0,12}heat|"
+    r"батаре|радиатор|труб.{0,12}(?:отоп|подач|обрат)|"
+    r"(?:отоп|подач|обрат).{0,12}труб|теплонос)",
     re.IGNORECASE,
 )
 _CENTRAL_HEATING_ACCESSORY_IDENTITY = re.compile(
@@ -83,7 +91,13 @@ HOME_ENVIRONMENT_FIELDS = frozenset(
         "heating_lockout_low",
     }
 )
-OPTIONAL_HOME_ENVIRONMENT_FIELDS = frozenset({"outdoor_temperature_entity_ids"})
+OPTIONAL_HOME_ENVIRONMENT_FIELDS = frozenset(
+    {
+        "outdoor_temperature_entity_ids",
+        "central_heating_temperature_on",
+        "central_heating_temperature_off",
+    }
+)
 ROOM_WINDOW_FIELDS = frozenset({"room_id", "window_entity_id"})
 ROOM_SIGNAL_FIELDS = frozenset(
     {"room_id", "window_entity_id", "presence_entity_ids"}
@@ -148,10 +162,15 @@ def signal_candidate_is_suitable(
             for value in (entity_id, friendly_name, room_name)
             if isinstance(value, str)
         )
+        associative = (
+            bool(_CENTRAL_HEATING_IDENTITY.search(identity))
+            and not _CENTRAL_HEATING_ACCESSORY_IDENTITY.search(identity)
+        )
+        if domain == "sensor":
+            return associative and device_class == "temperature"
         return (
             domain in CENTRAL_HEATING_DOMAINS
-            and bool(_CENTRAL_HEATING_IDENTITY.search(identity))
-            and not _CENTRAL_HEATING_ACCESSORY_IDENTITY.search(identity)
+            and associative
             and (
                 domain in {"switch", "input_boolean"}
                 or device_class in CENTRAL_HEATING_DEVICE_CLASSES
@@ -248,13 +267,25 @@ def validate_home_environment_update(
     low = _lockout_threshold(payload["heating_lockout_low"])
     if low >= high:
         raise ClimateSignalSettingsViolation("invalid_lockout_order")
-    result = {
+    heating_temperature_on = _heating_temperature_threshold(
+        payload.get("central_heating_temperature_on", 35.0)
+    )
+    heating_temperature_off = _heating_temperature_threshold(
+        payload.get("central_heating_temperature_off", 30.0)
+    )
+    if heating_temperature_off >= heating_temperature_on:
+        raise ClimateSignalSettingsViolation("invalid_heating_temperature_order")
+    result: dict[str, object] = {
         "outdoor_temperature_entity_id": outdoor,
         "presence_entity_id": presence,
         "central_heating_entity_id": central_heating,
         "heating_lockout_high": high,
         "heating_lockout_low": low,
     }
+    if "central_heating_temperature_on" in payload:
+        result["central_heating_temperature_on"] = heating_temperature_on
+    if "central_heating_temperature_off" in payload:
+        result["central_heating_temperature_off"] = heating_temperature_off
     if outdoor_sources_value is not None:
         result["outdoor_temperature_entity_ids"] = list(outdoor_sources)
     return result
@@ -408,6 +439,27 @@ def _lockout_threshold(value: object) -> float:
         raise ClimateSignalSettingsViolation("invalid_lockout_threshold")
     if not HEATING_LOCKOUT_MINIMUM <= result <= HEATING_LOCKOUT_MAXIMUM:
         raise ClimateSignalSettingsViolation("invalid_lockout_threshold")
+    return result
+
+
+def _heating_temperature_threshold(value: object) -> float:
+    """Accept one battery/pipe temperature threshold for heating inference."""
+
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ClimateSignalSettingsViolation("invalid_heating_temperature_threshold")
+    try:
+        result = float(value)
+    except OverflowError:
+        raise ClimateSignalSettingsViolation(
+            "invalid_heating_temperature_threshold"
+        ) from None
+    if (
+        not isfinite(result)
+        or not CENTRAL_HEATING_TEMPERATURE_MINIMUM
+        <= result
+        <= CENTRAL_HEATING_TEMPERATURE_MAXIMUM
+    ):
+        raise ClimateSignalSettingsViolation("invalid_heating_temperature_threshold")
     return result
 
 

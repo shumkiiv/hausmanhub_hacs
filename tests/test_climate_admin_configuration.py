@@ -252,6 +252,8 @@ class ClimateSignalSettingsValidationTest(unittest.TestCase):
             ("switch", None, "switch.trv_heating", "TRV heating"),
             ("binary_sensor", "power", "binary_sensor.tv_power", "Телевизор питание"),
             ("input_boolean", None, "input_boolean.manual", "Ручной режим"),
+            ("sensor", "temperature", "sensor.living_temperature", "Температура гостиной"),
+            ("sensor", "temperature", "sensor.trv_local_temperature", "Термоголовка гостиная"),
         ):
             with self.subTest(entity_id=entity_id):
                 self.assertFalse(
@@ -283,6 +285,12 @@ class ClimateSignalSettingsValidationTest(unittest.TestCase):
                 None,
                 "switch.boiler",
                 "Котёл",
+            ),
+            (
+                "sensor",
+                "temperature",
+                "sensor.battery_temperature",
+                "Температура батарей",
             ),
         ):
             with self.subTest(entity_id=entity_id):
@@ -900,6 +908,33 @@ class ClimateAdminRuntimeSupportTest(unittest.TestCase):
             ],
             catalog,
         )
+        heating_view = SignalStateView(
+            {
+                "sensor.battery_temperature": (
+                    "41.0",
+                    "Температура батарей",
+                    "temperature",
+                    "living",
+                ),
+                "sensor.living_temperature": (
+                    "24.0",
+                    "Температура гостиной",
+                    "temperature",
+                    "living",
+                ),
+            }
+        )
+        heating_runtime, _, _ = build_runtime(
+            registry_with_rooms(), state_view=heating_view
+        )
+        heating_catalog = asyncio.run(
+            heating_runtime.async_signal_catalog(CENTRAL_HEATING_SIGNAL)
+        )
+        self.assertEqual(
+            ["sensor.battery_temperature"],
+            [item["entity_id"] for item in heating_catalog],
+        )
+        self.assertEqual("Гостиная", heating_catalog[0]["room_name"])
 
     def test_signal_catalog_fails_closed_without_the_extension(self) -> None:
         runtime, _, _ = build_runtime(registry_with_rooms(), state_view=object())

@@ -249,6 +249,7 @@ class ClimateRuntime:
         self._protection_memory = empty_climate_protection_memory(updated_at=0)
         self._protection_restart_after: int | None = None
         self._weather_heating_lockout: bool | None = None
+        self._central_heating_on: bool | None = None
         self._lock = asyncio.Lock()
         self._contour_applications = _ContourApplyLedger(
             operation_id_factory=operation_id_factory,
@@ -419,6 +420,7 @@ class ClimateRuntime:
             validate_contour_bindings(self._contours, registry)
             await self._registry_store.async_save(registry)
             self._registry = registry
+            self._central_heating_on = None
             self.last_error = None
             return receipt
 
@@ -617,6 +619,7 @@ class ClimateRuntime:
             self._protection_memory = protection
             self._protection_restart_after = None
             self._weather_heating_lockout = None
+            self._central_heating_on = None
             return {
                 "status": "reset",
                 "room_count": 0,
@@ -1528,8 +1531,10 @@ class ClimateRuntime:
                 protection=self._protection_memory,
                 local_time=(local.hour, local.minute),
                 previous_weather_lockout=self._weather_heating_lockout,
+                previous_central_heating_on=self._central_heating_on,
             )
             self._weather_heating_lockout = observation.home.weather_heating_lockout
+            self._central_heating_on = observation.home.central_heating_on
             return observation
         except (ClimateHaObservationViolation, ClimateObservationViolation) as error:
             self.last_error = type(error).__name__
@@ -1623,6 +1628,7 @@ class ClimateRuntime:
             validate_contour_bindings(self._contours, registry)
             await self._registry_store.async_save(registry)
             self._registry = registry
+            self._central_heating_on = None
             self.last_error = None
             return registry_to_payload(registry)
 
@@ -1639,6 +1645,7 @@ class ClimateRuntime:
             validate_contour_bindings(self._contours, registry)
             await self._registry_store.async_save(registry)
             self._registry = registry
+            self._central_heating_on = None
             self.last_error = None
             result = registry_to_payload(registry)
             result["setup_revision"] = climate_setup_revision(registry, self._contours)

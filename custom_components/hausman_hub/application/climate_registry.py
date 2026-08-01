@@ -70,6 +70,14 @@ def registry_to_payload(registry: ClimateRegistry) -> dict[str, object]:
         home["heating_lockout_high"] = registry.home.heating_lockout_high
     if registry.home.heating_lockout_low != 16.0:
         home["heating_lockout_low"] = registry.home.heating_lockout_low
+    if registry.home.central_heating_temperature_on != 35.0:
+        home["central_heating_temperature_on"] = (
+            registry.home.central_heating_temperature_on
+        )
+    if registry.home.central_heating_temperature_off != 30.0:
+        home["central_heating_temperature_off"] = (
+            registry.home.central_heating_temperature_off
+        )
     return {
         "version": registry.version,
         "home": home,
@@ -121,12 +129,16 @@ def registry_from_payload(payload: object) -> ClimateRegistry:
             "central_heating_entity_id",
             "heating_lockout_high",
             "heating_lockout_low",
+            "central_heating_temperature_on",
+            "central_heating_temperature_off",
         },
         "registry home",
         optional={
             "outdoor_temperature_entity_ids",
             "heating_lockout_high",
             "heating_lockout_low",
+            "central_heating_temperature_on",
+            "central_heating_temperature_off",
         },
     )
     rooms = _bounded_list(root["rooms"], "registry rooms", 128)
@@ -164,6 +176,16 @@ def registry_from_payload(payload: object) -> ClimateRegistry:
                     home.get("heating_lockout_low"),
                     16.0,
                     "heating lockout low threshold",
+                ),
+                central_heating_temperature_on=_optional_threshold(
+                    home.get("central_heating_temperature_on"),
+                    35.0,
+                    "central heating on temperature threshold",
+                ),
+                central_heating_temperature_off=_optional_threshold(
+                    home.get("central_heating_temperature_off"),
+                    30.0,
+                    "central heating off temperature threshold",
                 ),
             ),
             rooms=tuple(_room(value, index) for index, value in enumerate(rooms)),
