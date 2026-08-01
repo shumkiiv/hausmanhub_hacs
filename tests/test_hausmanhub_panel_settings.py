@@ -25,6 +25,7 @@ NAVIGATION_JS = PANEL_JS.with_name("hausman-hub-navigation.js")
 ENERGY_JS = PANEL_JS.with_name("hausman-hub-energy.js")
 WEATHER_SOURCES_JS = PANEL_JS.with_name("hausman-hub-weather-sources.js")
 MEDIA_DEVICE_JS = PANEL_JS.with_name("hausman-hub-media-device.js")
+SCENARIOS_JS = PANEL_JS.with_name("hausman-hub-scenarios.js")
 SETTINGS_CSS = PANEL_JS.with_name("hausman-hub-settings.css")
 DEVICE_BINDINGS_CSS = PANEL_JS.with_name("hausman-hub-device-bindings.css")
 
@@ -441,6 +442,10 @@ def panel_script(
       vm.runInThisContext(
         fs.readFileSync({str(MEDIA_DEVICE_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(MEDIA_DEVICE_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(SCENARIOS_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(SCENARIOS_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(PANEL_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, ""),
@@ -1418,6 +1423,83 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           && call.path === "hausman_hub/v1/admin/scenarios/delete")) {
           throw new Error("scenario delete API missing");
         }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_empty_scenario_library_opens_editor_and_saves_device_action(self) -> None:
+        payloads = dict(GET_PATHS)
+        payloads["hausman_hub/v1/admin/scenarios"] = {"scenarios": []}
+        payloads["hausman_hub/v1/admin/scenarios/catalog"] = {
+            "devices": [
+                {
+                    "target_id": "light.living",
+                    "name": "Основной свет · Гостиная",
+                    "entity_id": "light.living",
+                    "actions": [
+                        {
+                            "action_id": "turn_on",
+                            "title": "Включить",
+                            "domain": "light",
+                            "service": "turn_on",
+                            "allowed_fields": [],
+                        }
+                    ],
+                }
+            ]
+        }
+        script = panel_script(
+            payloads,
+            {"hausman_hub/v1/admin/scenarios": {"ok": True, "status": "success"}},
+            """
+        panel._shell.tabs.scenarios.fire("click");
+        await tick();
+        const screen = panel._shell.scenarios;
+        const create = findAll(screen, (node) => node.tagName === "BUTTON")
+          .find((node) => node.textContent === "+ Создать сценарий");
+        if (!create) throw new Error("scenario create action missing from empty state");
+        create.fire("click");
+        if (!panel._scenarioEditor || !textOf(screen).includes("РЕДАКТОР СЦЕНАРИЯ")) {
+          throw new Error("full scenario editor did not open");
+        }
+
+        const labelledControl = (label) => {
+          const wrapper = findAll(screen, (node) => String(node.className).split(" ").includes("scenario-editor-field"))
+            .find((node) => node.children[0] && node.children[0].textContent === label);
+          if (!wrapper) throw new Error("scenario field missing: " + label);
+          return wrapper.children.find((node) => ["INPUT", "TEXTAREA", "SELECT"].includes(node.tagName));
+        };
+        const title = labelledControl("Название");
+        title.value = "Вечерний свет";
+        title.fire("input");
+        const addAction = findAll(screen, (node) => node.tagName === "BUTTON")
+          .find((node) => node.textContent === "+ Добавить действие");
+        addAction.fire("click");
+
+        let device = labelledControl("Устройство");
+        device.value = "light.living";
+        device.fire("change");
+        const command = labelledControl("Команда устройства");
+        command.value = "turn_on";
+        command.fire("change");
+        const save = findAll(screen, (node) => node.tagName === "BUTTON")
+          .find((node) => node.textContent === "Сохранить");
+        save.fire("click");
+        await tick();
+        await tick();
+
+        const request = calls.find((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/admin/scenarios");
+        if (!request) throw new Error("scenario save API was not called");
+        if (request.payload.title !== "Вечерний свет"
+            || request.payload.definition.triggers[0].type !== "manual"
+            || request.payload.definition.actions[0].targetId !== "light.living"
+            || request.payload.definition.actions[0].actionId !== "turn_on") {
+          throw new Error("scenario save contract mismatch: " + JSON.stringify(request.payload));
+        }
+        if (panel._scenarioEditor !== null) throw new Error("editor stayed open after successful save");
+        if (!textOf(panel.shadowRoot).includes("сохранён")) throw new Error("scenario success feedback missing");
             """,
         )
         completed = run_panel_script(script)

@@ -25,6 +25,7 @@ AREA_BINDING_JS = PANEL_JS.with_name("hausman-hub-area-binding.js")
 NAVIGATION_JS = PANEL_JS.with_name("hausman-hub-navigation.js")
 ENERGY_JS = PANEL_JS.with_name("hausman-hub-energy.js")
 WEATHER_SOURCES_JS = PANEL_JS.with_name("hausman-hub-weather-sources.js")
+SCENARIOS_JS = PANEL_JS.with_name("hausman-hub-scenarios.js")
 
 PANEL_PAYLOAD = {
     "contract": {"name": "hausman-hub-admin-panel", "version": 2},
@@ -334,6 +335,10 @@ def panel_script(get_table: dict, post_table: dict, assertions: str) -> str:
       vm.runInThisContext(
         fs.readFileSync({str(WEATHER_SOURCES_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(WEATHER_SOURCES_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(SCENARIOS_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(SCENARIOS_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(PANEL_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, ""),

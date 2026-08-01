@@ -1,15 +1,16 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.25";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.25";
-import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.25";
-import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.51.25";
-import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.25";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.25";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.25";
-import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.25";
-import { createKioskButton, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.25";
-import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.25";
-import { AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.51.25";
-import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.51.25";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.26";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.26";
+import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.26";
+import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.51.26";
+import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.26";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.26";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.26";
+import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.26";
+import { createKioskButton, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.26";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.26";
+import { AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.51.26";
+import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.51.26";
+import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.51.26";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css";
@@ -254,6 +255,7 @@ class HausmanHubPanel extends HTMLElement {
       data: null, error: false, fields: null, loaded: false, loading: false,
     };
     this._scenarios = { list: null, catalog: null, loading: false, error: false };
+    this._scenarioEditor = null;
     this._settingsData = { connection_mode: "center", smart_home_center_url: "", home_assistant_url: "" };
     this._settingsBaseline = { ...this._settingsData };
     this._settingsPrefs = { large_text: false, reduced_motion: false, show_hints: true };
@@ -904,6 +906,10 @@ class HausmanHubPanel extends HTMLElement {
   _activateSection(section, focus = false) {
     if (!PANEL_SECTIONS.some((item) => item.id === section)) return;
     const changed = this._activeSection !== section;
+    if (changed) {
+      this._notice = "";
+      this._error = false;
+    }
     this._activeSection = section;
     this._syncSectionVisibility();
     if (section === "climate") {
@@ -5496,6 +5502,7 @@ class HausmanHubPanel extends HTMLElement {
       this._error = false;
     } catch (error) {
       this._notice = "Команда устройству не выполнена. Откройте карточку и проверьте доступность.";
+      this._error = true;
     } finally {
       this._busy = false;
       await this._load();
@@ -5511,65 +5518,10 @@ class HausmanHubPanel extends HTMLElement {
   }
 
   _renderScenarios(container) {
-    container.innerHTML = "";
-    const card = el("div", "card scenarios-card");
-    const heading = el("div", "scenarios-heading");
-    const headingCopy = el("div");
-    headingCopy.appendChild(el("h2", null, "Сценарии"));
-    headingCopy.appendChild(el("p", "section-intro", "Запускайте, проверяйте и обслуживайте сценарии дома"));
-    heading.appendChild(headingCopy);
-    card.appendChild(heading);
-    if (this._scenarios.loading && !this._scenarios.list) {
-      card.appendChild(el("div", "muted", "Загрузка сценариев…"));
-      container.appendChild(card);
-      return;
-    }
-    if (!this._scenarios.list || !this._scenarios.list.scenarios) {
-      card.appendChild(el("div", "muted", "Список сценариев недоступен."));
-      container.appendChild(card);
-      return;
-    }
-    const items = this._scenarios.list.scenarios;
-    if (!items.length) {
-      card.appendChild(el("div", "muted", "Нет сохранённых сценариев."));
-    }
-    const list = el("div", "scenario-list");
-    items.forEach((scenario) => {
-      const requiresConfirmation = scenario.requiresConfirmation === true
-        || scenario.requires_confirmation === true;
-      const row = el("article", `scenario-row${scenario.enabled ? "" : " is-disabled"}`);
-      const icon = el("span", "scenario-icon");
-      icon.appendChild(svgIcon(this._scenarioIconName(scenario)));
-      row.appendChild(icon);
-      const copy = el("div", "scenario-copy");
-      copy.appendChild(el("h3", null, scenario.title || scenario.id));
-      const meta = [
-        scenario.id,
-        requiresConfirmation ? "требуется подтверждение" : "",
-        scenario.enabled ? "" : "выключен",
-      ].filter(Boolean).join(" · ");
-      copy.appendChild(el("p", "muted", meta));
-      row.appendChild(copy);
-      const actions = el("div", "scenario-actions");
-      if (scenario.enabled) {
-        const runBtn = el("button", null, "Запустить");
-        runBtn.disabled = this._busy;
-        runBtn.addEventListener("click", () => this._post(SCENARIOS_RUN_API, { scenario_id: scenario.id }, requiresConfirmation ? `Запустить сценарий "${scenario.title}"?` : null));
-        actions.appendChild(runBtn);
-      }
-      const testBtn = el("button", "secondary", "Проверить");
-      testBtn.disabled = this._busy;
-      testBtn.addEventListener("click", () => this._scenarioTest(scenario));
-      actions.appendChild(testBtn);
-      const delBtn = el("button", "secondary", "Удалить");
-      delBtn.disabled = this._busy;
-      delBtn.addEventListener("click", () => this._post(SCENARIOS_DELETE_API, { scenario_id: scenario.id }, `Удалить сценарий "${scenario.title}"?`));
-      actions.appendChild(delBtn);
-      row.appendChild(actions);
-      list.appendChild(row);
+    renderScenarioSection(this, container, {
+      el, svgIcon, setAttr, scenariosApi: SCENARIOS_API, testApi: SCENARIOS_TEST_API,
+      deleteApi: SCENARIOS_DELETE_API, runApi: SCENARIOS_RUN_API,
     });
-    card.appendChild(list);
-    container.appendChild(card);
   }
 
   async _scenarioTest(scenario) {
