@@ -207,14 +207,14 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertLessEqual(len(wizard_validation_styles.encode("utf-8")), 8 * 1024)
         self.assertLessEqual(len(catalog_styles.encode("utf-8")), 8 * 1024)
         self.assertIn('"/api/hausman_hub/panel/hausman-hub-panel.css"', content)
-        self.assertIn('hausman-hub-settings.css?v=1.51.27', styles)
-        self.assertIn('hausman-hub-device-maintenance.css?v=1.51.27', styles)
-        self.assertIn('hausman-hub-control-channel.css?v=1.51.27', styles)
-        self.assertIn('hausman-hub-weather-sources.css?v=1.51.27', styles)
-        self.assertIn('hausman-hub-wizard-validation.css?v=1.51.27', styles)
-        self.assertIn('hausman-hub-catalog.css?v=1.51.27', styles)
-        self.assertIn('hausman-hub-media-device.css?v=1.51.27', styles)
-        self.assertIn('hausman-hub-scenarios.css?v=1.51.27', styles)
+        self.assertIn('hausman-hub-settings.css?v=1.51.28', styles)
+        self.assertIn('hausman-hub-device-maintenance.css?v=1.51.28', styles)
+        self.assertIn('hausman-hub-control-channel.css?v=1.51.28', styles)
+        self.assertIn('hausman-hub-weather-sources.css?v=1.51.28', styles)
+        self.assertIn('hausman-hub-wizard-validation.css?v=1.51.28', styles)
+        self.assertIn('hausman-hub-catalog.css?v=1.51.28', styles)
+        self.assertIn('hausman-hub-media-device.css?v=1.51.28', styles)
+        self.assertIn('hausman-hub-scenarios.css?v=1.51.28', styles)
         self.assertIn(".inventory-device-icon .icon { display:block;", styles)
         self.assertIn("validation-issue-row", content)
         self.assertIn(
@@ -820,7 +820,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.51.27",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.51.28",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },

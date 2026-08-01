@@ -1699,8 +1699,9 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         screen = panel._shell.settings;
         const text = textOf(screen);
         for (const label of [
-          "Привязка к сущностям Home Assistant", "HausmanHub не выбирает дубли автоматически",
-          "Кондиционер гостиная", "Не привязано", "Проверить", "Сохранить привязки",
+          "Связи с устройствами Home Assistant", "Служебное восстановление",
+          "Кондиционер гостиная", "Нужно выбрать", "Проверить", "Сохранить привязки",
+          "В этой комнате", "Во всём доме", "Проверка безопасна", "Единственное доступное совпадение",
         ]) {
           if (!text.includes(label)) throw new Error("binding wizard text missing: " + label);
         }
@@ -1708,16 +1709,19 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         if (!select || select.value !== "" || select.children.length !== 2) {
           throw new Error("wizard auto-selected or exposed another-room entity");
         }
-        const otherToggle = findAll(screen, (node) => node.type === "checkbox")[0];
-        otherToggle.checked = true;
-        otherToggle.fire("change");
+        const otherRooms = findAll(screen, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Во всём доме")[0];
+        if (!otherRooms) throw new Error("clear all-home diagnostic choice is missing");
+        otherRooms.fire("click");
         screen = panel._shell.settings;
         select = findAll(screen, (node) => node.tagName === "SELECT")[0];
         if (select.children.length !== 3 || select.children[2].disabled !== true) {
           throw new Error("other-room diagnostic option is not visibly fail-closed");
         }
-        select.value = "climate.living_ac";
-        select.fire("change");
+        const recommended = findAll(screen, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Выбрать")[0];
+        if (!recommended) throw new Error("safe same-room recommendation is missing");
+        recommended.fire("click");
         await new Promise((resolve) => setTimeout(resolve, 400));
         screen = panel._shell.settings;
         const check = findAll(screen, (node) => node.tagName === "BUTTON"

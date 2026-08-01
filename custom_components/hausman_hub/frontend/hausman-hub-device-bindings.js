@@ -7,10 +7,10 @@ export function renderDeviceBindingCallout(panel, container, helpers) {
   const bindings = el("section", "card native-binding-callout");
   bindings.appendChild(svgIcon("device", "native-binding-callout-icon"));
   const copy = el("div", "native-binding-callout-copy");
-  copy.appendChild(el("strong", null, "Нативные сущности устройств"));
-  copy.appendChild(el("p", "muted", "После миграции некоторым устройствам нужно один раз указать точную сущность Home Assistant. Выбор сначала проверяется и не отправляет команды."));
+  copy.appendChild(el("strong", null, "Восстановление связей устройств"));
+  copy.appendChild(el("p", "muted", "Служебный раздел нужен только после переноса или переименования сущностей. В обычной работе открывать его не требуется."));
   bindings.appendChild(copy);
-  const open = el("button", "secondary", "Открыть привязки");
+  const open = el("button", "secondary", "Проверить связи");
   open.addEventListener("click", () => panel._activateSettingsView("bindings"));
   bindings.appendChild(open);
   container.appendChild(bindings);
@@ -149,8 +149,9 @@ function renderSummary(panel, container, helpers) {
   const intro = el("section", "card settings-card native-binding-summary");
   const head = el("div", "native-binding-summary-head");
   const copy = el("div");
-  copy.appendChild(el("h3", null, "Привязка к сущностям Home Assistant"));
-  copy.appendChild(el("p", "muted settings-card-intro", "Для каждого логического устройства выберите одну настоящую сущность того же типа и той же комнаты. HausmanHub не выбирает дубли автоматически."));
+  copy.appendChild(el("div", "settings-heading-eyebrow", "Служебное восстановление"));
+  copy.appendChild(el("h3", null, "Связи с устройствами Home Assistant"));
+  copy.appendChild(el("p", "muted settings-card-intro", "HausmanHub помнит назначение устройства, но после переноса или переименования может потерять ссылку на его сущность. Здесь ссылка восстанавливается — сами устройства и их настройки не меняются."));
   head.appendChild(copy);
   const refresh = el("button", "secondary", "Обновить список");
   refresh.disabled = panel._busy || state.loading || isDirty(panel);
@@ -159,26 +160,68 @@ function renderSummary(panel, container, helpers) {
   head.appendChild(refresh);
   intro.appendChild(head);
   const metrics = el("div", "native-binding-metrics");
-  metrics.appendChild(metric(el, "Устройства", Number(summary.device_count) || 0, ""));
-  metrics.appendChild(metric(el, "Привязано", Number(summary.bound_count) || 0, "is-ready"));
-  metrics.appendChild(metric(el, "Нужно привязать", Number(summary.missing_count) || 0, Number(summary.missing_count) ? "is-warning" : "is-ready"));
+  metrics.appendChild(metric(el, "Связей всего", Number(summary.device_count) || 0, ""));
+  metrics.appendChild(metric(el, "Работают", Number(summary.bound_count) || 0, "is-ready"));
+  metrics.appendChild(metric(el, "Нужно восстановить", Number(summary.missing_count) || 0, Number(summary.missing_count) ? "is-warning" : "is-ready"));
   intro.appendChild(metrics);
-  intro.appendChild(el("div", "settings-explainer", "Сначала нажмите «Проверить». Сохранение станет доступно только для однозначных доступных сущностей в той же комнате. Проверка и сохранение не включают устройства и не меняют их режимы."));
-  const otherRooms = el("label", "native-binding-other-rooms");
-  const otherCopy = el("span");
-  otherCopy.appendChild(el("strong", null, "Показывать сущности из других комнат"));
-  otherCopy.appendChild(el("small", null, "Только для поиска ошибок. Сохранить такую привязку нельзя, пока комната не исправлена в Home Assistant."));
-  const toggle = el("input", "settings-toggle");
-  toggle.type = "checkbox";
-  toggle.checked = state.showOtherRooms;
-  toggle.addEventListener("change", () => {
-    state.showOtherRooms = toggle.checked;
-    panel._render();
+  const steps = el("div", "native-binding-explanation");
+  [
+    ["1", "Найдите назначение", "Например: кондиционер гостиной или главный датчик температуры."],
+    ["2", "Выберите сущность", "HausmanHub покажет только подходящий тип и сначала — ту же комнату."],
+    ["3", "Проверьте и сохраните", "Проверка безопасна: команды устройствам не отправляются."],
+  ].forEach(([number, title, text]) => {
+    const item = el("div", "native-binding-explanation-item");
+    item.appendChild(el("span", null, number));
+    const itemCopy = el("div");
+    itemCopy.appendChild(el("strong", null, title));
+    itemCopy.appendChild(el("small", null, text));
+    item.appendChild(itemCopy);
+    steps.appendChild(item);
   });
-  otherRooms.appendChild(otherCopy);
-  otherRooms.appendChild(toggle);
-  intro.appendChild(otherRooms);
+  intro.appendChild(steps);
+  const scope = el("div", "native-binding-scope");
+  const scopeCopy = el("div");
+  scopeCopy.appendChild(el("strong", null, "Где искать подходящее устройство"));
+  scopeCopy.appendChild(el("small", null, state.showOtherRooms
+    ? "Диагностический режим показывает весь дом. Связь из другой комнаты сохранить нельзя, пока комната не исправлена в Home Assistant."
+    : "Обычный режим показывает только доступные сущности из той же комнаты."));
+  scope.appendChild(scopeCopy);
+  const scopeChoice = el("div", "native-binding-scope-choice");
+  [
+    [false, "В этой комнате"],
+    [true, "Во всём доме"],
+  ].forEach(([value, label]) => {
+    const button = el("button", state.showOtherRooms === value ? "is-current" : "", label);
+    button.type = "button";
+    button.addEventListener("click", () => {
+      state.showOtherRooms = value;
+      panel._render();
+    });
+    scopeChoice.appendChild(button);
+  });
+  scope.appendChild(scopeChoice);
+  intro.appendChild(scope);
+  if (Number(summary.bound_count) > 0) {
+    const configured = el("button", "secondary native-binding-configured-toggle",
+      state.showConfigured ? "Скрыть работающие связи" : `Показать работающие связи · ${Number(summary.bound_count)}`);
+    configured.type = "button";
+    configured.addEventListener("click", () => {
+      state.showConfigured = !state.showConfigured;
+      panel._render();
+    });
+    intro.appendChild(configured);
+  }
   container.appendChild(intro);
+}
+
+function purposeFor(device) {
+  const kind = String(device.kind_name || "").toLowerCase();
+  if (kind.includes("температур")) return "По этой сущности HausmanHub получает температуру комнаты.";
+  if (kind.includes("влажност")) return "По этой сущности HausmanHub получает влажность комнаты.";
+  if (kind.includes("кондиционер")) return "Через эту сущность HausmanHub управляет режимом и температурой кондиционера.";
+  if (kind.includes("термоголов")) return "Через эту сущность HausmanHub управляет отоплением радиатора.";
+  if (kind.includes("увлажн")) return "Через эту сущность HausmanHub управляет увлажнителем.";
+  return "Эта связь нужна HausmanHub для наблюдения или управления устройством.";
 }
 
 function renderBindingDeviceRow(panel, list, device, helpers, usedSelections) {
@@ -186,21 +229,48 @@ function renderBindingDeviceRow(panel, list, device, helpers, usedSelections) {
   const state = panel._deviceBindings;
   const row = el("article", "native-binding-row");
   const identity = el("div", "native-binding-identity");
+  identity.appendChild(el("span", "native-binding-label", "Что должно работать"));
   identity.appendChild(el("strong", null, device.name));
   identity.appendChild(el("small", null, device.kind_name));
-  identity.appendChild(el("code", null, device.device_id));
+  identity.appendChild(el("p", "muted", purposeFor(device)));
   row.appendChild(identity);
   const field = el("label", "native-binding-field");
-  field.appendChild(el("span", null, "Сущность Home Assistant"));
+  field.appendChild(el("span", null, "Подходящее устройство в Home Assistant"));
+  const currentValue = String(state.selections[device.device_id] || "");
+  const suitable = (device.candidates || []).filter((candidate) => (
+    candidate.same_room && candidate.available
+    && (!usedSelections.has(candidate.entity_id) || candidate.entity_id === currentValue)
+  ));
+  if (!currentValue && suitable.length === 1) {
+    const recommendation = el("div", "native-binding-recommendation");
+    const recommendationCopy = el("div");
+    recommendationCopy.appendChild(el("strong", null, suitable[0].name));
+    recommendationCopy.appendChild(el("small", null, "Единственное доступное совпадение по назначению и комнате."));
+    recommendation.appendChild(recommendationCopy);
+    const choose = el("button", "secondary", "Выбрать");
+    choose.type = "button";
+    choose.disabled = panel._busy;
+    choose.addEventListener("click", (event) => {
+      event?.preventDefault?.();
+      state.selections[device.device_id] = suitable[0].entity_id;
+      state.preview = null;
+      state.status = "";
+      panel._render();
+      schedulePreview(panel);
+    });
+    recommendation.appendChild(choose);
+    field.appendChild(recommendation);
+  } else if (!currentValue && suitable.length > 1) {
+    field.appendChild(el("small", "native-binding-choice-note", `Найдено несколько совпадений: ${suitable.length}. Сверьте название устройства.`));
+  }
   const select = el("select");
-  const empty = el("option", null, "Выберите сущность");
+  const empty = el("option", null, "Выберите устройство");
   empty.value = "";
   select.appendChild(empty);
-  const currentValue = String(state.selections[device.device_id] || "");
   (device.candidates || []).forEach((candidate) => {
     if (!candidate.same_room && !state.showOtherRooms && candidate.entity_id !== currentValue) return;
     const option = el("option", null, [candidate.name, candidate.room_name,
-      candidate.available ? "доступно" : "недоступно", candidate.entity_id].join(" · "));
+      candidate.available ? "доступно" : "нет связи"].filter(Boolean).join(" · "));
     option.value = candidate.entity_id;
     option.disabled = !candidate.available || !candidate.same_room
       || (usedSelections.has(candidate.entity_id) && candidate.entity_id !== currentValue);
@@ -219,13 +289,13 @@ function renderBindingDeviceRow(panel, list, device, helpers, usedSelections) {
   const selectedCandidate = (device.candidates || []).find((candidate) => candidate.entity_id === currentValue);
   field.appendChild(el("small", "native-binding-help", currentValue
     ? (selectedCandidate?.same_room
-      ? "Тип и комната совпадают. Выполните проверку перед сохранением."
-      : "Текущая сущность отсутствует или относится к другой комнате.")
-    : "Привязка отсутствует: устройство пока нельзя наблюдать нативно."));
+      ? "Комната и назначение совпадают. Осталось проверить связь перед сохранением."
+      : "Выбранная сущность относится к другой комнате. Сначала исправьте комнату в Home Assistant.")
+    : "Связь не выбрана — эта функция HausmanHub сейчас не работает."));
   row.appendChild(field);
   row.appendChild(currentValue
-    ? el("span", `native-binding-state ${selectedCandidate?.available ? "is-ready" : "is-warning"}`, selectedCandidate?.available ? "Выбрано" : "Недоступно")
-    : el("span", "native-binding-state is-warning", "Не привязано"));
+    ? el("span", `native-binding-state ${selectedCandidate?.available ? "is-ready" : "is-warning"}`, selectedCandidate?.available ? "Связь выбрана" : "Нет связи")
+    : el("span", "native-binding-state is-warning", "Нужно выбрать"));
   list.appendChild(row);
 }
 
@@ -235,13 +305,22 @@ function renderBindingRoom(panel, container, room, helpers, usedSelections) {
   const head = el("div", "native-binding-room-head");
   const copy = el("div");
   copy.appendChild(el("h3", null, room.name || room.id));
-  const missing = (room.devices || []).filter((device) => !device.current_entity_id).length;
-  copy.appendChild(el("p", "muted", missing ? `Без нативной сущности: ${missing}` : "Все устройства этой комнаты привязаны"));
+  const allDevices = room.devices || [];
+  const missing = allDevices.filter((device) => !device.current_entity_id).length;
+  copy.appendChild(el("p", "muted", missing ? `Нужно восстановить связей: ${missing}` : "Все связи этой комнаты работают"));
   head.appendChild(copy);
   head.appendChild(el("span", `status-badge ${missing ? "is-warning" : "is-ready"}`, missing ? "Нужна настройка" : "Готово"));
   section.appendChild(head);
   const list = el("div", "native-binding-list");
-  (room.devices || []).forEach((device) => renderBindingDeviceRow(panel, list, device, helpers, usedSelections));
+  const visible = panel._deviceBindings.showConfigured
+    ? allDevices : allDevices.filter((device) => !device.current_entity_id);
+  visible.forEach((device) => renderBindingDeviceRow(panel, list, device, helpers, usedSelections));
+  if (!visible.length) {
+    const ready = el("div", "native-binding-room-ready");
+    ready.appendChild(el("strong", null, "Настройка не требуется"));
+    ready.appendChild(el("small", "muted", "Все связи работают. Их можно показать кнопкой выше."));
+    list.appendChild(ready);
+  }
   section.appendChild(list);
   container.appendChild(section);
 }
