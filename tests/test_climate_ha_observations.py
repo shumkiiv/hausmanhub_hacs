@@ -568,6 +568,25 @@ class NativeHaObservationTest(unittest.TestCase):
         self.assertTrue(blocked.home.air_conditioner_outdoor_lockout)
         self.assertFalse(allowed.home.air_conditioner_outdoor_lockout)
 
+    def test_air_conditioner_guard_fails_closed_when_configured_source_is_lost(self) -> None:
+        observation = self.build(
+            registry=self._weather_registry(),
+            states=self._weather_states("unavailable"),
+        )
+
+        self.assertTrue(observation.home.air_conditioner_outdoor_guard_configured)
+        self.assertIsNone(observation.home.outdoor_temperature)
+        self.assertTrue(observation.home.air_conditioner_outdoor_lockout)
+
+    def test_air_conditioner_guard_stays_inactive_when_no_source_is_configured(self) -> None:
+        observation = self.build(
+            registry=registry((), home=ClimateHomeEnvironment()),
+            states={},
+        )
+
+        self.assertFalse(observation.home.air_conditioner_outdoor_guard_configured)
+        self.assertFalse(observation.home.air_conditioner_outdoor_lockout)
+
     def test_weather_lockout_ignores_hydraulic_activity(self) -> None:
         observation = self.build(
             registry=self._weather_registry(),

@@ -385,6 +385,29 @@ class ClimatePolicyTest(unittest.TestCase):
             tuple(device.action for device in result.devices),
         )
 
+    def test_outdoor_guard_blocks_ac_when_configured_temperature_is_unknown(self) -> None:
+        automatic = climate_reference_policy("stopped_ac_starts_at_default_gap")
+        result = resolve_climate_room_policy(
+            automatic.room,
+            replace(
+                automatic.home,
+                outdoor_temperature=None,
+                air_conditioner_outdoor_guard_configured=True,
+            ),
+            automatic.control,
+            automatic.resolution,
+            automatic.equipment,
+            automatic.stability,
+            automatic.selected_devices,
+            observed_at=automatic.observed_at,
+        )
+
+        self.assertIs(result.policy, ClimateRoomPolicy.SAFETY_LOCKOUT)
+        self.assertIn(
+            ClimatePolicyBlocker.AIR_CONDITIONER_OUTDOOR_LOCKOUT,
+            result.blockers,
+        )
+
     def test_outdoor_cold_guard_allows_ac_above_configured_minimum(self) -> None:
         automatic = climate_reference_policy("stopped_ac_starts_at_default_gap")
         home = replace(

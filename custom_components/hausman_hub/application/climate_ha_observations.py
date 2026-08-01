@@ -385,6 +385,7 @@ def _home_observation(
         air_conditioner_minimum_outdoor_temperature=(
             home.air_conditioner_minimum_outdoor_temperature
         ),
+        air_conditioner_outdoor_guard_configured=bool(outdoor_sources),
         central_heating_on=_central_heating_state(
             home.central_heating_entity_id,
             states,

@@ -157,6 +157,7 @@ class ClimateHomeObservation:
     heating_lockout_high: float = 18.0
     heating_lockout_low: float = 16.0
     air_conditioner_minimum_outdoor_temperature: float = -5.0
+    air_conditioner_outdoor_guard_configured: bool = False
     central_heating_on: bool | None = None
     central_heating_configured: bool = True
     weather_heating_lockout: bool = False
@@ -193,6 +194,10 @@ class ClimateHomeObservation:
             self.air_conditioner_minimum_outdoor_temperature,
             "air conditioner minimum outdoor temperature",
         )
+        if type(self.air_conditioner_outdoor_guard_configured) is not bool:
+            raise ClimateObservationViolation(
+                "air conditioner outdoor guard configured flag must be boolean"
+            )
         _optional_bool(self.central_heating_on, "central heating state")
         if type(self.central_heating_configured) is not bool:
             raise ClimateObservationViolation(
@@ -219,6 +224,9 @@ class ClimateHomeObservation:
             self.outdoor_temperature is not None
             and self.outdoor_temperature
             <= self.air_conditioner_minimum_outdoor_temperature
+        ) or (
+            self.air_conditioner_outdoor_guard_configured
+            and self.outdoor_temperature is None
         )
 
 
