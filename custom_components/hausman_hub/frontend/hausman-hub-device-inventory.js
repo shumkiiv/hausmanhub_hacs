@@ -1,4 +1,6 @@
 const DEVICE_MAINTENANCE_API = "hausman_hub/v1/admin/device-maintenance";
+const Z2M_DEVICE_IMAGE =
+  /^https:\/\/www\.zigbee2mqtt\.io\/images\/devices\/(?:[A-Za-z0-9._~-]|%[0-9A-F]{2})+\.png$/;
 
 const INVENTORY_FILTERS = [
   { id: "attention", label: "Требуют внимания" },
@@ -111,11 +113,6 @@ function detailPanel(panel, el, device, maintenance, repaint) {
     detail.appendChild(retry);
     return detail;
   }
-  if (device.kind === "entity_only") {
-    detail.appendChild(el("strong", null, "Это отдельная сущность, а не устройство"));
-    detail.appendChild(el("p", "muted", "Переименование и комната такой сущности изменяются в её карточке Home Assistant. HausmanHub не создаёт фиктивную запись устройства."));
-    return detail;
-  }
   if (!maintenance) {
     detail.appendChild(el("p", "muted", "Запись уже удалена или изменилась. Обновите инвентаризацию."));
     return detail;
@@ -150,6 +147,13 @@ function detailPanel(panel, el, device, maintenance, repaint) {
   }
   overview.appendChild(composition);
   detail.appendChild(overview);
+
+  if (device.kind === "entity_only") {
+    const note = el("div", "device-maintenance-entity-note");
+    note.appendChild(el("strong", null, "Отдельная сущность Home Assistant"));
+    note.appendChild(el("span", null, "У неё нет физической карточки устройства. Название и комната сохраняются прямо в реестре сущностей Home Assistant."));
+    detail.appendChild(note);
+  }
 
   const form = el("div", "device-maintenance-form");
   const nameLabel = el("label", null);
@@ -203,7 +207,8 @@ function detailPanel(panel, el, device, maintenance, repaint) {
     ? `Сначала уберите использование: ${(maintenance.deleteBlockers || []).join(", ")}.`
     : "Подключённая интеграция может создать устройство снова.";
   remove.addEventListener("click", () => {
-    const warning = `Удалить «${device.name}» из реестра Home Assistant? Подключённая интеграция может создать его снова.`;
+    const subject = device.kind === "entity_only" ? "сущность" : "устройство";
+    const warning = `Удалить ${subject} «${device.name}» из реестра Home Assistant? Подключённая интеграция может создать запись снова.`;
     if (window.confirm(warning)) runAction(panel, device, "delete", { confirmed: true }, repaint);
   });
   actions.appendChild(remove);
@@ -223,8 +228,21 @@ function inventoryRow(panel, el, device, repaint) {
     summary.ariaExpanded = expanded ? "true" : "false";
   }
   const identity = el("div", "device-inventory-identity");
-  identity.appendChild(el("strong", null, device.name || "Устройство без названия"));
-  identity.appendChild(el("small", "muted", [device.manufacturer, device.model].filter(Boolean).join(" · ") || KIND_LABELS[device.kind] || "Устройство Home Assistant"));
+  const visual = el("span", "device-inventory-visual");
+  if (Z2M_DEVICE_IMAGE.test(String(device.imageUrl || ""))) {
+    const image = el("img");
+    image.src = device.imageUrl;
+    image.alt = "";
+    image.loading = "lazy";
+    visual.appendChild(image);
+  } else {
+    visual.appendChild(el("span", "device-inventory-neutral", "◇"));
+  }
+  identity.appendChild(visual);
+  const identityCopy = el("span", "device-inventory-identity-copy");
+  identityCopy.appendChild(el("strong", null, device.name || "Устройство без названия"));
+  identityCopy.appendChild(el("small", "muted", [device.manufacturer, device.model].filter(Boolean).join(" · ") || KIND_LABELS[device.kind] || "Устройство Home Assistant"));
+  identity.appendChild(identityCopy);
   summary.appendChild(identity);
   const room = el("div", "device-inventory-room");
   room.appendChild(el("span", "device-inventory-label", "Комната"));
@@ -243,7 +261,7 @@ function inventoryRow(panel, el, device, repaint) {
   summary.addEventListener("click", () => {
     panel._inventoryDeviceId = expanded ? null : device.id;
     repaint();
-    if (!expanded && device.kind !== "entity_only") loadMaintenance(panel, repaint);
+    if (!expanded) loadMaintenance(panel, repaint);
   });
   row.appendChild(summary);
   if (expanded) {

@@ -323,6 +323,7 @@
         },
         "model": { "type": ["string", "null"] },
         "manufacturer": { "type": ["string", "null"] },
+        "imageUrl": { "type": ["string", "null"] },
         "integrations": {
           "type": "array",
           "items": { "type": "string" }

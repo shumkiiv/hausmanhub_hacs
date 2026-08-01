@@ -14,6 +14,21 @@ if TYPE_CHECKING:
 
 
 _IDENTIFY_WORDS = ("identify", "locate", "find", "идентифиц", "найти устройство")
+_ENTITY_ONLY_DOMAINS = frozenset(
+    {
+        "alarm_control_panel",
+        "camera",
+        "climate",
+        "cover",
+        "fan",
+        "humidifier",
+        "light",
+        "lock",
+        "media_player",
+        "switch",
+        "vacuum",
+    }
+)
 
 
 class DeviceMaintenanceViolation(ValueError):
@@ -28,6 +43,12 @@ def inventory_device_id(device_id: str) -> str:
     """Return the private-id-free identifier already used by inventory cards."""
 
     return stable_public_id("inventory", f"device:{device_id}")
+
+
+def inventory_entity_id(entity_id: str) -> str:
+    """Return the inventory identifier used for a standalone HA entity."""
+
+    return stable_public_id("inventory", f"entity:{entity_id}")
 
 
 def _values(registry: object, collection: str) -> tuple[object, ...]:
@@ -226,6 +247,40 @@ class HomeAssistantDeviceMaintenanceService:
             )
         return device
 
+    def _entity_only(self, registry: object, public_id: object) -> object:
+        if not isinstance(public_id, str) or not public_id:
+            raise DeviceMaintenanceViolation("entity id is required")
+        entity = next(
+            (
+                item
+                for item in _values(registry, "entities")
+                if getattr(item, "device_id", None) is None
+                and str(getattr(item, "entity_id", "")).partition(".")[0]
+                in _ENTITY_ONLY_DOMAINS
+                and inventory_entity_id(str(getattr(item, "entity_id", ""))) == public_id
+            ),
+            None,
+        )
+        if entity is None:
+            raise DeviceMaintenanceViolation(
+                "Home Assistant entity no longer exists",
+                code="not_found",
+            )
+        return entity
+
+    def _record(
+        self,
+        device_registry: object,
+        entity_registry: object,
+        public_id: object,
+    ) -> tuple[str, object]:
+        try:
+            return "device", self._device(device_registry, public_id)
+        except DeviceMaintenanceViolation as error:
+            if error.code != "not_found":
+                raise
+        return "entity_only", self._entity_only(entity_registry, public_id)
+
     async def async_snapshot(self) -> dict[str, object]:
         area_registry, device_registry, entity_registry = self._registries()
         usage_context = await _usage_context(self._hass)
@@ -279,11 +334,42 @@ class HomeAssistantDeviceMaintenanceService:
                 "deleteBlocked": bool(uses),
                 "deleteBlockers": [use["title"] for use in uses],
             }
+        for entity in _values(entity_registry, "entities"):
+            entity_id = getattr(entity, "entity_id", None)
+            if (
+                not isinstance(entity_id, str)
+                or getattr(entity, "device_id", None) is not None
+                or getattr(entity, "disabled_by", None) is not None
+                or entity_id.partition(".")[0] not in _ENTITY_ONLY_DOMAINS
+            ):
+                continue
+            uses = await _hausmanhub_uses(
+                self._hass, {entity_id}, "", usage_context
+            )
+            devices[inventory_entity_id(entity_id)] = {
+                "kind": "entity_only",
+                "roomAreaId": getattr(entity, "area_id", None),
+                "name": _entry_name(entity),
+                "haUrl": f"/config/entities/entity/{entity_id}",
+                "entityCount": 1,
+                "entities": [
+                    {"id": entity_id, "name": _entry_name(entity), "disabled": False}
+                ],
+                "integrationCount": 1,
+                "uses": uses,
+                "used": bool(uses),
+                "identifySupported": False,
+                "identifyLabel": None,
+                "deleteBlocked": bool(uses),
+                "deleteBlockers": [use["title"] for use in uses],
+            }
         return {"areas": areas, "devices": devices}
 
     async def async_update(self, payload: dict[str, object]) -> dict[str, object]:
         _area_registry, device_registry, entity_registry = self._registries()
-        device = self._device(device_registry, payload.get("deviceId"))
+        kind, record = self._record(
+            device_registry, entity_registry, payload.get("deviceId")
+        )
         name = payload.get("name")
         area_id = payload.get("areaId")
         if not isinstance(name, str) or not name.strip() or len(name.strip()) > 128:
@@ -295,15 +381,24 @@ class HomeAssistantDeviceMaintenanceService:
         }
         if area_id is not None and area_id not in valid_areas:
             raise DeviceMaintenanceViolation("Home Assistant area no longer exists", code="not_found")
-        update = getattr(device_registry, "async_update_device", None)
         update_entity = getattr(entity_registry, "async_update_entity", None)
-        if not callable(update):
-            raise DeviceMaintenanceViolation("device update is unavailable", code="registry_unavailable")
-        update(device.id, name_by_user=name.strip(), area_id=area_id)
-        if callable(update_entity):
-            for entity in _entity_entries(entity_registry, device.id):
-                if getattr(entity, "area_id", None) is not None:
-                    update_entity(entity.entity_id, area_id=None)
+        if kind == "entity_only":
+            if not callable(update_entity):
+                raise DeviceMaintenanceViolation(
+                    "entity update is unavailable", code="registry_unavailable"
+                )
+            update_entity(record.entity_id, name=name.strip(), area_id=area_id)
+        else:
+            update = getattr(device_registry, "async_update_device", None)
+            if not callable(update):
+                raise DeviceMaintenanceViolation(
+                    "device update is unavailable", code="registry_unavailable"
+                )
+            update(record.id, name_by_user=name.strip(), area_id=area_id)
+            if callable(update_entity):
+                for entity in _entity_entries(entity_registry, record.id):
+                    if getattr(entity, "area_id", None) is not None:
+                        update_entity(entity.entity_id, area_id=None)
         return {"status": "saved", "deviceId": payload["deviceId"]}
 
     async def async_identify(self, payload: dict[str, object]) -> dict[str, object]:
@@ -322,25 +417,37 @@ class HomeAssistantDeviceMaintenanceService:
 
     async def async_delete(self, payload: dict[str, object]) -> dict[str, object]:
         _area_registry, device_registry, entity_registry = self._registries()
-        device = self._device(device_registry, payload.get("deviceId"))
+        kind, record = self._record(
+            device_registry, entity_registry, payload.get("deviceId")
+        )
         if payload.get("confirmed") is not True:
             raise DeviceMaintenanceViolation("explicit confirmation is required", code="confirmation_required")
-        entries = _entity_entries(entity_registry, device.id)
+        entries = (
+            (record,)
+            if kind == "entity_only"
+            else _entity_entries(entity_registry, record.id)
+        )
         entity_ids = {
             str(entry.entity_id)
             for entry in entries
             if isinstance(getattr(entry, "entity_id", None), str)
         }
-        uses = await _hausmanhub_uses(self._hass, entity_ids, device.id)
+        uses = await _hausmanhub_uses(
+            self._hass, entity_ids, "" if kind == "entity_only" else record.id
+        )
         if uses:
             raise DeviceMaintenanceViolation(
                 "device is still used by HausmanHub",
                 code="device_in_use",
             )
-        remove = getattr(device_registry, "async_remove_device", None)
+        remove = (
+            getattr(entity_registry, "async_remove", None)
+            if kind == "entity_only"
+            else getattr(device_registry, "async_remove_device", None)
+        )
         if not callable(remove):
             raise DeviceMaintenanceViolation("device removal is unavailable", code="registry_unavailable")
-        result = remove(device.id)
+        result = remove(record.entity_id if kind == "entity_only" else record.id)
         if inspect.isawaitable(result):
             await result
         return {"status": "deleted", "deviceId": payload["deviceId"]}

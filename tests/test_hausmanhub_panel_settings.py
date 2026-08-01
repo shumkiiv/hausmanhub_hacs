@@ -2025,6 +2025,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
                     "name": "Датчик", "roomId": "living", "roomName": "Гостиная",
                     "kind": "physical", "status": "available", "canonical": True,
                     "possibleDuplicate": False, "entityCount": 2, "domains": ["sensor", "button"],
+                    "imageUrl": "https://www.zigbee2mqtt.io/images/devices/TS011F_plug_1.png",
                 }],
             },
         }
@@ -2048,6 +2049,10 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         findAll(screen, (node) => node.tagName === "BUTTON" && node.textContent === "Комнаты")[0].fire("click");
         screen = panel._shell.settings;
         const card = findAll(screen, (node) => String(node.className).includes("device-inventory-summary"))[0];
+        const image = findAll(card, (node) => node.tagName === "IMG")[0];
+        if (!image || image.src !== "https://www.zigbee2mqtt.io/images/devices/TS011F_plug_1.png") {
+          throw new Error("official Zigbee2MQTT maintenance image is missing");
+        }
         card.fire("click");
         await tick();
         const text = textOf(screen);
@@ -2064,6 +2069,57 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         if (!save || save.payload.name !== "Главный датчик" || save.payload.areaId !== "kids") {
           throw new Error("native registry update payload mismatch: " + JSON.stringify(save));
         }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_entity_only_inventory_card_is_manageable_without_fake_device(self) -> None:
+        payloads = dict(GET_PATHS)
+        payloads["hausman_hub/v1/dashboard"] = {
+            "rooms": [], "devices": [], "alarms": [],
+            "inventory": {
+                "summary": {"canonicalDeviceCount": 1, "attentionCount": 0},
+                "devices": [{
+                    "id": "inventory-entity", "canonicalId": "device-entity",
+                    "name": "Отдельное реле", "roomId": None, "roomName": None,
+                    "kind": "entity_only", "status": "available", "canonical": True,
+                    "possibleDuplicate": False, "entityCount": 1, "domains": ["switch"],
+                    "imageUrl": None,
+                }],
+            },
+        }
+        payloads["hausman_hub/v1/admin/device-maintenance"] = {
+            "areas": [{"id": "living", "name": "Гостиная"}],
+            "devices": {"inventory-entity": {
+                "kind": "entity_only", "roomAreaId": None, "name": "Отдельное реле",
+                "haUrl": "/config/entities/entity/switch.standalone_relay",
+                "entityCount": 1, "integrationCount": 1,
+                "entities": [{"id": "switch.standalone_relay", "name": "Отдельное реле", "disabled": False}],
+                "uses": [], "used": False, "identifySupported": False,
+                "identifyLabel": None, "deleteBlocked": False, "deleteBlockers": [],
+            }},
+        }
+        script = panel_script(
+            payloads,
+            {"hausman_hub/v1/admin/device-maintenance": {"status": "saved"}},
+            """
+        panel._shell.tabs.settings.fire("click");
+        await tick();
+        let screen = panel._shell.settings;
+        findAll(screen, (node) => node.tagName === "BUTTON" && node.textContent === "Комнаты")[0].fire("click");
+        screen = panel._shell.settings;
+        findAll(screen, (node) => String(node.className).includes("device-inventory-summary"))[0].fire("click");
+        await tick();
+        const text = textOf(screen);
+        for (const label of [
+          "Отдельная сущность Home Assistant", "Сохранить в Home Assistant",
+          "Открыть в Home Assistant", "Удалить из реестра",
+        ]) {
+          if (!text.includes(label)) throw new Error("entity-only maintenance action missing: " + label);
+        }
+        const neutral = findAll(screen, (node) => String(node.className).includes("device-inventory-neutral"))[0];
+        if (!neutral || textOf(neutral) !== "◇") throw new Error("neutral unknown-device visual is missing");
             """,
         )
         completed = run_panel_script(script)

@@ -749,6 +749,7 @@ def build_dashboard_snapshot(
                 "domains": sorted({member.domain for member in members}),
                 "model": device.model,
                 "manufacturer": device.manufacturer,
+                "imageUrl": device.image_url,
                 "integrations": list(device.integrations),
                 "disabled": device.disabled,
                 "reason": _inventory_reason(
@@ -785,6 +786,7 @@ def build_dashboard_snapshot(
                 "domains": sorted({member.domain for member in members}),
                 "model": None,
                 "manufacturer": None,
+                "imageUrl": None,
                 "integrations": [],
                 "disabled": False,
                 "reason": _inventory_reason(

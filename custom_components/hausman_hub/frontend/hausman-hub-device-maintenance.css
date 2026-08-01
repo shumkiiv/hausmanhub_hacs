@@ -3,6 +3,13 @@
   align-items:center; gap:14px; width:100%; min-height:76px; margin:0; padding:12px 14px; text-align:left; color:var(--hmh-text,#E7ECF3);
   border:0; border-radius:0; background:transparent; box-shadow:none; }
 .device-inventory-summary:hover { background:color-mix(in srgb,var(--hmh-hover,#1F2630) 70%,transparent); }
+.device-inventory-identity { display:flex; align-items:center; gap:12px; min-width:0; }
+.device-inventory-identity-copy { min-width:0; }
+.device-inventory-visual { display:grid; flex:0 0 52px; place-items:center; width:52px; height:52px; overflow:hidden;
+  border:1px solid color-mix(in srgb,var(--hmh-border,#2F3845) 82%,transparent); border-radius:13px;
+  background:color-mix(in srgb,var(--hmh-surface,#12171D) 78%,transparent); }
+.device-inventory-visual img { display:block; width:44px; height:44px; object-fit:contain; }
+.device-inventory-neutral { color:var(--hmh-text-dim,#9AA7B4); font-size:27px; line-height:1; }
 .device-inventory-chevron { justify-self:end; color:var(--hmh-text-dim,#9AA7B4); font-size:20px; }
 .device-maintenance-detail { padding:18px; border-top:1px solid var(--hmh-border,#2F3845); background:color-mix(in srgb,var(--hmh-surface,#12171D) 74%,transparent); }
 .device-maintenance-overview { display:grid; grid-template-columns:minmax(0,1.25fr) minmax(240px,.75fr); gap:12px; }
@@ -18,6 +25,10 @@
 .device-maintenance-form label { display:grid; gap:6px; min-width:0; color:var(--hmh-text-dim,#9AA7B4); font-size:12px; }
 .device-maintenance-form input, .device-maintenance-form select { width:100%; min-height:42px; }
 .device-maintenance-form button { min-height:42px; margin:0; }
+.device-maintenance-entity-note { display:grid; gap:4px; margin-top:12px; padding:12px 14px; border-radius:12px;
+  color:var(--hmh-text-dim,#9AA7B4); background:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 9%,var(--hmh-raised,#181E26)); }
+.device-maintenance-entity-note strong { color:var(--hmh-text,#E7ECF3); font-size:14px; }
+.device-maintenance-entity-note span { font-size:13px; line-height:1.45; }
 .device-maintenance-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
 .device-maintenance-actions > * { min-height:40px; margin:0; }
 .device-maintenance-actions a.button { display:inline-flex; align-items:center; padding:8px 14px; text-decoration:none; }

@@ -12,6 +12,7 @@ from custom_components.hausman_hub.device_maintenance_ha import (
     DeviceMaintenanceViolation,
     HomeAssistantDeviceMaintenanceService,
     inventory_device_id,
+    inventory_entity_id,
 )
 
 
@@ -42,6 +43,10 @@ class _Registry:
             setattr(item, key, value)
 
     def async_remove_device(self, item_id: str) -> None:
+        self.removed.append(item_id)
+        getattr(self, self.collection).pop(item_id)
+
+    def async_remove(self, item_id: str) -> None:
         self.removed.append(item_id)
         getattr(self, self.collection).pop(item_id)
 
@@ -107,6 +112,15 @@ class HomeAssistantDeviceMaintenanceServiceTests(unittest.TestCase):
                     disabled_by=None,
                     area_id=None,
                 ),
+                SimpleNamespace(
+                    entity_id="switch.standalone_relay",
+                    device_id=None,
+                    name="Отдельное реле",
+                    original_name=None,
+                    translation_key=None,
+                    disabled_by=None,
+                    area_id=None,
+                ),
             ],
         )
         return SimpleNamespace(
@@ -130,6 +144,10 @@ class HomeAssistantDeviceMaintenanceServiceTests(unittest.TestCase):
         self.assertFalse(item["deleteBlocked"])
         self.assertEqual("/config/devices/device/device-one", item["haUrl"])
         self.assertEqual(["Гостиная", "Детская"], [area["name"] for area in payload["areas"]])
+        standalone = payload["devices"][inventory_entity_id("switch.standalone_relay")]
+        self.assertEqual("entity_only", standalone["kind"])
+        self.assertEqual("/config/entities/entity/switch.standalone_relay", standalone["haUrl"])
+        self.assertFalse(standalone["identifySupported"])
 
     def test_update_persists_name_and_area_and_clears_entity_override(self) -> None:
         hass = self._hass()
@@ -159,6 +177,20 @@ class HomeAssistantDeviceMaintenanceServiceTests(unittest.TestCase):
             [("button", "press", {"entity_id": "button.device_identify"}, True)],
             hass.services.calls,
         )
+
+    def test_entity_only_update_persists_name_and_area_in_entity_registry(self) -> None:
+        hass = self._hass()
+        public_id = inventory_entity_id("switch.standalone_relay")
+        with patch.dict(sys.modules, _registry_modules(hass)):
+            result = asyncio.run(
+                HomeAssistantDeviceMaintenanceService(hass).async_update(
+                    {"deviceId": public_id, "name": "Реле подсветки", "areaId": "living"}
+                )
+            )
+        self.assertEqual("saved", result["status"])
+        entity = hass.entity_registry.entities["switch.standalone_relay"]
+        self.assertEqual("Реле подсветки", entity.name)
+        self.assertEqual("living", entity.area_id)
 
     def test_delete_requires_confirmation_and_is_blocked_by_scenario_usage(self) -> None:
         hass = self._hass()
@@ -203,6 +235,20 @@ class HomeAssistantDeviceMaintenanceServiceTests(unittest.TestCase):
             )
         self.assertEqual("deleted", result["status"])
         self.assertEqual(["device-one"], hass.device_registry.removed)
+
+    def test_delete_removes_an_unreferenced_entity_only_record(self) -> None:
+        hass = self._hass()
+        with patch.dict(sys.modules, _registry_modules(hass)):
+            result = asyncio.run(
+                HomeAssistantDeviceMaintenanceService(hass).async_delete(
+                    {
+                        "deviceId": inventory_entity_id("switch.standalone_relay"),
+                        "confirmed": True,
+                    }
+                )
+            )
+        self.assertEqual("deleted", result["status"])
+        self.assertEqual(["switch.standalone_relay"], hass.entity_registry.removed)
 
 
 if __name__ == "__main__":

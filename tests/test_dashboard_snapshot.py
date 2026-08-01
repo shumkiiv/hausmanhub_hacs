@@ -557,6 +557,7 @@ class DashboardSnapshotTest(unittest.TestCase):
                     "TS0012",
                     "Tuya",
                     integrations=("mqtt",),
+                    image_url="https://www.zigbee2mqtt.io/images/devices/TS0012.png",
                 ),
                 DashboardDevice(
                     "switch-right",
@@ -631,6 +632,11 @@ class DashboardSnapshotTest(unittest.TestCase):
         shadow = next(item for item in air_conditioners if not item["canonical"])
         self.assertTrue(shadow["possibleDuplicate"])
         self.assertIsNotNone(shadow["duplicateOf"])
+        switch = next(item for item in inventory["devices"] if item["name"] == "Выключатель гостиная")
+        self.assertEqual(
+            "https://www.zigbee2mqtt.io/images/devices/TS0012.png",
+            switch["imageUrl"],
+        )
 
         living = next(room for room in snapshot["rooms"] if room["id"] == "living")
         self.assertEqual(2, len(living["deviceIds"]))
