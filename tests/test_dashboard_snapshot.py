@@ -624,6 +624,8 @@ class DashboardSnapshotTest(unittest.TestCase):
         self.assertEqual(5, inventory["summary"]["registeredCount"])
         self.assertEqual(1, inventory["summary"]["duplicateGroupCount"])
         self.assertEqual(1, inventory["summary"]["emptyCount"])
+        self.assertEqual(2, inventory["summary"]["physicalDeviceCount"])
+        self.assertEqual(0, inventory["summary"]["logicalEntityCount"])
         air_conditioners = [
             item for item in inventory["devices"] if item["name"] == "Кондиционер"
         ]
@@ -653,6 +655,37 @@ class DashboardSnapshotTest(unittest.TestCase):
         ):
             self.assertNotIn(source_id, serialized)
 
+    def test_inventory_counts_physical_devices_not_their_functions(self) -> None:
+        snapshot = build_dashboard_snapshot(
+            areas=(DashboardArea("living", "Гостиная"),),
+            devices=(
+                DashboardDevice(
+                    "wall-switch", "Двухклавишный выключатель", "living",
+                    "TS0012", "Tuya", integrations=("mqtt",),
+                ),
+            ),
+            entities=(
+                DashboardEntity("switch.wall_left", "switch", "off", "Левая клавиша", {}, "wall-switch", "living"),
+                DashboardEntity("switch.wall_right", "switch", "on", "Правая клавиша", {}, "wall-switch", "living"),
+                DashboardEntity("sensor.wall_power", "sensor", "2.1", "Мощность", {"device_class": "power"}, "wall-switch", "living"),
+                DashboardEntity("switch.helper_one", "switch", "off", "Виртуальное реле 1", {}, None, "living"),
+                DashboardEntity("switch.helper_two", "switch", "off", "Виртуальное реле 2", {}, None, "living"),
+            ),
+            generated_at_ms=1,
+            local_iso="2026-08-01T14:00:00+06:00",
+        )
+
+        summary = snapshot["inventory"]["summary"]
+        self.assertEqual(1, summary["physicalDeviceCount"])
+        self.assertEqual(2, summary["logicalEntityCount"])
+        self.assertEqual(3, summary["canonicalDeviceCount"])
+        physical = next(
+            item
+            for item in snapshot["inventory"]["devices"]
+            if item["kind"] == "physical"
+        )
+        self.assertEqual(3, physical["entityCount"])
+
     def test_media_appliance_merges_distinct_integration_facades(self) -> None:
         snapshot = build_dashboard_snapshot(
             areas=(DashboardArea("living", "Гостиная"),),
@@ -671,6 +704,7 @@ class DashboardSnapshotTest(unittest.TestCase):
                     "tv-philips", "58PUS8506/60", "living",
                     "58PUS8506/60", "Philips",
                     integrations=("philips_js",),
+                    image_url="https://www.zigbee2mqtt.io/images/devices/58PUS8506.png",
                 ),
                 DashboardDevice(
                     "speaker-one", "Колонка", "living", "Audio 100", "Acme",
@@ -726,6 +760,10 @@ class DashboardSnapshotTest(unittest.TestCase):
         television = television_cards[0]
         self.assertEqual("media_player", television["domain"])
         self.assertEqual(6, len(television["details"]))
+        self.assertEqual(
+            "https://www.zigbee2mqtt.io/images/devices/58PUS8506.png",
+            television["imageUrl"],
+        )
         self.assertEqual(
             {
                 "media_player.tv_cast",

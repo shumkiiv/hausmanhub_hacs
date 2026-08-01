@@ -707,6 +707,7 @@ def build_dashboard_snapshot(
                     device_by_id[device_id].disabled,
                     _device_status(device_by_id[device_id], registry_members[device_id])
                     != "available",
+                    device_by_id[device_id].image_url is None,
                     -len(registry_members[device_id]),
                     device_id,
                 ),
@@ -830,6 +831,16 @@ def build_dashboard_snapshot(
                 )
             )
             primary = members[0]
+        image_url = registry_device.image_url if registry_device is not None else None
+        if source_device_id in merged_media_sources and image_url is None:
+            image_url = next(
+                (
+                    device_by_id[merged_source].image_url
+                    for merged_source in merged_media_sources[source_device_id]
+                    if device_by_id[merged_source].image_url is not None
+                ),
+                None,
+            )
         public_id = _opaque_id("device", group_key)
         area_id = primary.area_id or (
             registry_device.area_id if registry_device is not None else None
@@ -867,9 +878,7 @@ def build_dashboard_snapshot(
                 "manufacturer": registry_device.manufacturer
                 if registry_device is not None
                 else None,
-                "imageUrl": registry_device.image_url
-                if registry_device is not None
-                else None,
+                "imageUrl": image_url,
                 "attributes": _safe_attributes(primary),
                 "actions": [],
                 "details": details,
@@ -1009,8 +1018,18 @@ def build_dashboard_snapshot(
         key=lambda item: (
             str(item.get("roomName") or "Я"),
             str(item.get("name") or ""),
+            bool(item.get("possibleDuplicate")),
             str(item.get("id") or ""),
         )
+    )
+    physical_device_count = sum(
+        bool(item["canonical"])
+        and item["kind"] == "physical"
+        and int(item["entityCount"]) > 0
+        for item in inventory_payloads
+    )
+    logical_entity_count = sum(
+        item["kind"] == "entity_only" for item in inventory_payloads
     )
     inventory_summary = {
         "registeredCount": len(inventory_payloads),
@@ -1018,6 +1037,8 @@ def build_dashboard_snapshot(
             bool(item["canonical"]) and int(item["entityCount"]) > 0
             for item in inventory_payloads
         ),
+        "physicalDeviceCount": physical_device_count,
+        "logicalEntityCount": logical_entity_count,
         "virtualCount": sum(item["kind"] == "virtual" for item in inventory_payloads),
         "unassignedCount": sum(item["roomId"] is None for item in inventory_payloads),
         "unavailableCount": sum(

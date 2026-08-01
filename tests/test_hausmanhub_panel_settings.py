@@ -2204,6 +2204,8 @@ class PanelSettingsSectionsTest(unittest.TestCase):
                 "summary": {
                     "registeredCount": 3,
                     "canonicalDeviceCount": 2,
+                    "physicalDeviceCount": 1,
+                    "logicalEntityCount": 1,
                     "virtualCount": 2,
                     "unassignedCount": 1,
                     "unavailableCount": 1,
@@ -2292,7 +2294,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         screen = panel._shell.settings;
         let text = textOf(screen);
         for (const label of [
-          "Устройства Home Assistant", "основных устройств", "Обновить список",
+          "Устройства Home Assistant", "физических устройств", "отдельных сущностей", "Обновить список",
           "Возможный дубль", "Не привязано",
         ]) {
           if (!text.includes(label)) throw new Error("inventory text missing: " + label);

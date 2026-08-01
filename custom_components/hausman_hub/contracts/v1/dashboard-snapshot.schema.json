@@ -213,6 +213,8 @@
           "required": [
             "registeredCount",
             "canonicalDeviceCount",
+            "physicalDeviceCount",
+            "logicalEntityCount",
             "virtualCount",
             "unassignedCount",
             "unavailableCount",

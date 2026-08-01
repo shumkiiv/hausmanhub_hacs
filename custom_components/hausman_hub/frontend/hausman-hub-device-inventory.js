@@ -9,6 +9,7 @@ const INVENTORY_FILTERS = [
   { id: "unassigned", label: "Без комнаты" },
   { id: "unavailable", label: "Нет связи" },
   { id: "virtual", label: "Виртуальные" },
+  { id: "entity_only", label: "Отдельные сущности" },
   { id: "duplicates", label: "Возможные дубли" },
 ];
 
@@ -35,6 +36,7 @@ function matchesFilter(device, filter) {
   if (filter === "unassigned") return !device.roomId;
   if (filter === "unavailable") return device.status === "unavailable";
   if (filter === "virtual") return device.kind === "virtual";
+  if (filter === "entity_only") return device.kind === "entity_only";
   if (filter === "duplicates") return device.possibleDuplicate === true;
   return true;
 }
@@ -294,7 +296,8 @@ function inventoryRow(panel, el, device, repaint) {
   const composition = el("div", "device-inventory-composition");
   composition.appendChild(el("span", "device-inventory-label", KIND_LABELS[device.kind] || "Устройство"));
   const count = Number(device.entityCount) || 0;
-  composition.appendChild(el("strong", null, `${count} ${count === 1 ? "сущность" : "сущности"}`));
+  const capabilityLabel = count === 1 ? "возможность" : count > 1 && count < 5 ? "возможности" : "возможностей";
+  composition.appendChild(el("strong", null, `${count} ${capabilityLabel}`));
   summary.appendChild(composition);
   const status = el("div", `device-inventory-status is-${device.status || "available"}`);
   status.appendChild(el("strong", null, device.possibleDuplicate ? "Возможный дубль" : STATUS_LABELS[device.status] || "Состояние неизвестно"));
@@ -343,7 +346,8 @@ export function renderDeviceInventory(panel, container, helpers) {
   heading.appendChild(refresh);
   section.appendChild(heading);
   const metrics = el("div", "device-inventory-metrics");
-  metrics.appendChild(metric(el, summary.canonicalDeviceCount, "основных устройств"));
+  metrics.appendChild(metric(el, summary.physicalDeviceCount ?? summary.canonicalDeviceCount, "физических устройств"));
+  metrics.appendChild(metric(el, summary.logicalEntityCount, "отдельных сущностей"));
   metrics.appendChild(metric(el, summary.unassignedCount, "без комнаты", summary.unassignedCount ? "is-warning" : ""));
   metrics.appendChild(metric(el, summary.unavailableCount, "нет связи", summary.unavailableCount ? "is-warning" : ""));
   metrics.appendChild(metric(el, summary.duplicateGroupCount, "групп дублей", summary.duplicateGroupCount ? "is-warning" : ""));
