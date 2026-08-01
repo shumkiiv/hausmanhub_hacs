@@ -735,12 +735,59 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           "overview", "lighting", "climate", "rooms", "media",
           "security", "devices", "energy", "scenarios", "settings",
         ];
-        ordered.forEach((section) => {
+        const expectedCopy = {
+          overview: ["Управление климатом"],
+          lighting: ["Освещение"],
+          climate: ["Климат"],
+          rooms: ["Комнаты"],
+          media: ["Медиа"],
+          security: ["Безопасность"],
+          devices: ["Устройства"],
+          energy: ["Энергия", "Данные энергии"],
+          scenarios: ["Сценарии", "сценарий"],
+          settings: ["Настройки"],
+        };
+        const persistentControls = {
+          intercom: findAll(panel.shadowRoot, (node) =>
+            node.tagName === "BUTTON" && node["aria-label"] === "Открыть домофон")[0],
+          headerKiosk: panel._shell.kioskButton,
+          sidebarKiosk: panel._shell.sidebarKiosk,
+          kioskDock: panel._shell.kioskDock,
+        };
+        if (Object.values(persistentControls).some((control) => !control)) {
+          throw new Error("persistent tablet controls are incomplete");
+        }
+        for (const section of ordered) {
           panel._shell.tabs[section].fire("click");
+          await tick();
           if (panel._activeSection !== section || panel._shell.sectionNodes[section].hidden) {
             throw new Error("top-level section is not functional: " + section);
           }
-        });
+          const visibleSections = ordered.filter((candidate) =>
+            panel._shell.sectionNodes[candidate].hidden === false);
+          if (visibleSections.length !== 1 || visibleSections[0] !== section) {
+            throw new Error("section visibility contract failed: " + visibleSections.join(","));
+          }
+          const selectedTabs = ordered.filter((candidate) =>
+            panel._shell.tabs[candidate]["aria-selected"] === "true"
+            && panel._shell.tabs[candidate]["aria-current"] === "page");
+          if (selectedTabs.length !== 1 || selectedTabs[0] !== section) {
+            throw new Error("navigation accessibility state failed: " + selectedTabs.join(","));
+          }
+          const sectionCopy = textOf(panel._shell.sectionNodes[section]).replace(/\\s+/g, " ").trim();
+          if (sectionCopy.length < 20 || !expectedCopy[section].some((copy) => sectionCopy.includes(copy))) {
+            throw new Error("section has no useful content: " + section + " / " + sectionCopy);
+          }
+          if (persistentControls.intercom.hidden
+              || persistentControls.headerKiosk.hidden
+              || persistentControls.sidebarKiosk.hidden) {
+            throw new Error("persistent control disappeared in section: " + section);
+          }
+        }
+        if (persistentControls.intercom !== findAll(panel.shadowRoot, (node) =>
+          node.tagName === "BUTTON" && node["aria-label"] === "Открыть домофон")[0]) {
+          throw new Error("navigation rerendered the persistent intercom control");
+        }
         panel._shell.tabs.climate.fire("click");
         panel._shell.climateTabs.profiles.fire("click");
         const climateRoute = historyCalls[historyCalls.length - 1].value;
