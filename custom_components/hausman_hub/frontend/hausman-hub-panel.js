@@ -1,16 +1,16 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.38";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.38";
-import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.38";
-import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.51.38";
-import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.38";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.38";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.38";
-import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.38";
-import { createKioskButton, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.38";
-import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.38";
-import { AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.51.38";
-import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.51.38";
-import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.51.38";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.39";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.39";
+import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.39";
+import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.51.39";
+import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.39";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.39";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.39";
+import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.39";
+import { createKioskButton, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.39";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.39";
+import { AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.51.39";
+import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.51.39";
+import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.51.39";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css";
@@ -184,6 +184,7 @@ const ICON_PATHS = {
   water: "M12 2.69 6.35 8.34A8 8 0 0 0 4 14a8 8 0 0 0 16 0c0-2.21-.9-4.21-2.35-5.66L12 2.69zM12 20a6 6 0 0 1-4.24-10.24L12 5.52l4.24 4.24A6 6 0 0 1 12 20z",
   bolt: "M11 21h-1l1-7H7.5c-.88 0-.33-.75-.31-.78C8.46 10.97 10.37 7.63 13 3h1l-1 7h3.5c.4 0 .62.19.4.66C12.97 17.53 11 21 11 21z",
   energy: "M13 2 4.5 13H11l-1 9 8.5-12H12z",
+  play: "M8 5v14l11-7z",
   intercom: "M7 2h10a3 3 0 0 1 3 3v14a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3m0 2a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1zm5 2a3 3 0 1 1 0 6 3 3 0 0 1 0-6m-3 8h6v2H9zm0 4h4v2H9z",
 };
 
@@ -5549,14 +5550,6 @@ class HausmanHubPanel extends HTMLElement {
       this._busy = false;
       await this._load();
     }
-  }
-
-  _scenarioIconName(scenario) {
-    const source = normalizedText(`${scenario && scenario.icon} ${scenario && scenario.title}`);
-    if (source.includes("morning") || source.includes("утр") || source.includes("sun")) return "sun";
-    if (source.includes("night") || source.includes("ноч") || source.includes("moon")) return "moon";
-    if (source.includes("home") || source.includes("дом")) return "home";
-    return "bolt";
   }
 
   _renderScenarios(container) {

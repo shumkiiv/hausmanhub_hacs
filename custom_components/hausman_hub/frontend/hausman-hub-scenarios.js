@@ -1,5 +1,7 @@
 /* Scenario library and editor shared with the HausmanHub tablet contract. */
 
+import { SCENARIO_ICON_GROUPS, scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.51.39";
+
 const TRIGGER_TYPES = [
   ["manual", "Ручной запуск"], ["time", "По времени"],
   ["sunrise", "Восход солнца"], ["sunset", "Закат солнца"],
@@ -17,13 +19,6 @@ const COMPARISONS = [
   ["equals", "равно"], ["not_equals", "не равно"], ["above", "выше"],
   ["below", "ниже"], ["changed", "изменилось"],
 ];
-const ICONS = [
-  ["mdi:script", "Сценарий"], ["mdi:weather-sunset-up", "Утро"],
-  ["mdi:weather-night", "Ночь"], ["mdi:home", "Дом"],
-  ["mdi:lightbulb-group", "Освещение"], ["mdi:thermometer", "Климат"],
-  ["mdi:shield-home", "Безопасность"], ["mdi:movie-open", "Кино"],
-];
-
 function scenarioClone(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -34,7 +29,7 @@ function scenarioId() {
 
 function defaultScenarioDraft() {
   return {
-    id: scenarioId(), title: "", group: "Сценарии", description: "", icon: "mdi:script",
+    id: scenarioId(), title: "", group: "Мои сценарии", description: "", icon: "mdi:home-heart",
     enabled: true, favorite: false, danger: false, requiresConfirmation: false,
     definition: {
       version: 1, executionMode: "single",
@@ -62,6 +57,15 @@ function normalizedScenario(source) {
     ? scenario.definition.conditions : [];
   scenario.definition.actions = Array.isArray(scenario.definition.actions)
     ? scenario.definition.actions : [];
+  return scenario;
+}
+
+function duplicateScenarioDraft(source) {
+  const scenario = normalizedScenario(source);
+  scenario.id = scenarioId();
+  scenario.title = `${scenario.title || "Сценарий"} — копия`;
+  scenario.favorite = false;
+  delete scenario.updatedAt;
   return scenario;
 }
 
@@ -95,6 +99,48 @@ function scenarioSelectField(deps, label, value, options, onChange, help = "") {
   wrapper.appendChild(select);
   if (help) wrapper.appendChild(el("small", null, help));
   return wrapper;
+}
+
+function scenarioIconField(deps, value, onChange) {
+  const { el, setAttr } = deps;
+  const field = el("div", "scenario-editor-field scenario-icon-field");
+  field.appendChild(el("span", null, "Иконка"));
+  const picker = el("details", "scenario-icon-picker");
+  const current = scenarioIconMeta(value);
+  const summary = el("summary", "scenario-icon-current");
+  const currentIcon = el("ha-icon", "icon scenario-material-icon");
+  setAttr(currentIcon, "icon", `mdi:${current.mdi}`);
+  summary.appendChild(currentIcon);
+  const currentLabel = el("strong", null, current.label);
+  summary.appendChild(currentLabel);
+  summary.appendChild(el("small", null, "Выбрать из коллекции"));
+  picker.appendChild(summary);
+  const catalog = el("div", "scenario-icon-catalog");
+  SCENARIO_ICON_GROUPS.forEach((group) => {
+    catalog.appendChild(el("h4", null, group.title));
+    const grid = el("div", "scenario-icon-grid");
+    group.items.forEach((item) => {
+      const button = el("button", item.key === current.key ? "is-selected" : "");
+      button.type = "button";
+      setAttr(button, "aria-label", `Выбрать иконку «${item.label}»`);
+      const itemIcon = el("ha-icon", "icon scenario-material-icon");
+      setAttr(itemIcon, "icon", `mdi:${item.mdi}`);
+      button.appendChild(itemIcon);
+      button.appendChild(el("span", null, item.label));
+      button.addEventListener("click", () => {
+        onChange(`mdi:${item.key}`);
+        setAttr(currentIcon, "icon", `mdi:${item.mdi}`);
+        currentLabel.textContent = item.label;
+        picker.open = false;
+      });
+      grid.appendChild(button);
+    });
+    catalog.appendChild(grid);
+  });
+  picker.appendChild(catalog);
+  field.appendChild(picker);
+  field.appendChild(el("small", null, "Ассоциативные иконки сгруппированы по назначению."));
+  return field;
 }
 
 function scenarioToggle(deps, label, description, checked, onChange) {
@@ -289,6 +335,47 @@ async function submitScenario(panel, deps, testOnly) {
   else updateScenarioEditor(panel);
 }
 
+async function saveScenarioQuick(panel, deps, source, successText) {
+  if (panel._busy) return false;
+  panel._busy = true;
+  panel._notice = "";
+  try {
+    await panel._hass.callApi("POST", deps.scenariosApi, scenarioPayload(normalizedScenario(source)));
+    panel._scenarios.list = null;
+    panel._notice = successText;
+    panel._error = false;
+    await panel._loadScenarios();
+    return true;
+  } catch (error) {
+    panel._notice = "Изменение не сохранено. Проверьте доступность Home Assistant.";
+    panel._error = true;
+    updateScenarioEditor(panel);
+    return false;
+  } finally {
+    panel._busy = false;
+    if (panel._activeSection === "scenarios") updateScenarioEditor(panel);
+  }
+}
+
+async function deleteScenarioQuick(panel, deps, scenario) {
+  if (panel._busy || !window.confirm(`Удалить сценарий «${scenario.title}»?`)) return;
+  panel._busy = true;
+  try {
+    await panel._hass.callApi("POST", deps.deleteApi, { scenario_id: scenario.id });
+    panel._scenarios.list = null;
+    panel._notice = `Сценарий «${scenario.title}» удалён.`;
+    panel._error = false;
+    await panel._loadScenarios();
+  } catch (error) {
+    panel._notice = "Сценарий не удалён. Проверьте доступность Home Assistant.";
+    panel._error = true;
+    updateScenarioEditor(panel);
+  } finally {
+    panel._busy = false;
+    if (panel._activeSection === "scenarios") updateScenarioEditor(panel);
+  }
+}
+
 function renderScenarioEditor(panel, container, deps) {
   const { el, svgIcon, setAttr } = deps;
   const scenario = panel._scenarioEditor;
@@ -314,7 +401,9 @@ function renderScenarioEditor(panel, container, deps) {
   const about = scenarioEditorSection(deps, "О сценарии", "Название и визуальное обозначение на панели и планшете.");
   const aboutGrid = el("div", "scenario-editor-grid");
   aboutGrid.appendChild(scenarioField(deps, "Название", scenario.title, (value) => { scenario.title = value; }, { placeholder: "Например: Доброе утро", maxlength: 120 }));
-  aboutGrid.appendChild(scenarioSelectField(deps, "Иконка", scenario.icon, ICONS, (value) => { scenario.icon = value; }));
+  aboutGrid.appendChild(scenarioIconField(deps, scenario.icon, (value) => {
+    scenario.icon = value;
+  }));
   aboutGrid.appendChild(scenarioField(deps, "Группа", scenario.group, (value) => { scenario.group = value; }, { placeholder: "Сценарии" }));
   aboutGrid.appendChild(scenarioField(deps, "Описание", scenario.description, (value) => { scenario.description = value; }, { multiline: true, wide: true, maxlength: 500 }));
   about.appendChild(aboutGrid);
@@ -376,25 +465,69 @@ function renderScenarioEditor(panel, container, deps) {
 }
 
 export function renderScenarioSection(panel, container, deps) {
-  const { el, svgIcon } = deps;
+  const { el, svgIcon, setAttr } = deps;
   container.innerHTML = "";
-  const card = el("div", "card scenarios-card");
-  const heading = el("div", "scenarios-heading");
+  panel._scenarioLibrary = panel._scenarioLibrary || { filter: "all", query: "" };
+  const items = panel._scenarios.list && Array.isArray(panel._scenarios.list.scenarios)
+    ? panel._scenarios.list.scenarios : [];
+  const enabledCount = items.filter((item) => item.enabled !== false).length;
+  const favoriteCount = items.filter((item) => item.favorite === true).length;
+
+  const hero = el("section", "scenario-library-hero");
+  const heroCopy = el("div", "scenario-library-hero-copy");
+  heroCopy.appendChild(el("span", "scenario-library-kicker", "СЦЕНАРИИ ДОМА"));
+  heroCopy.appendChild(el("h2", null, "Дом работает по вашим правилам"));
+  heroCopy.appendChild(el("p", null, "Собирайте устройства, условия и расписание в понятные действия. Каждый запуск подтверждается Home Assistant."));
+  hero.appendChild(heroCopy);
+  const heroStats = el("div", "scenario-library-stats");
+  [[String(items.length), "всего"], [String(enabledCount), "включено"], [String(favoriteCount), "на главной"]].forEach(([value, label]) => {
+    const stat = el("div"); stat.appendChild(el("strong", null, value)); stat.appendChild(el("span", null, label)); heroStats.appendChild(stat);
+  });
+  hero.appendChild(heroStats);
+  container.appendChild(hero);
+
+  const card = el("section", "card scenarios-card scenario-library");
+  const heading = el("div", "scenarios-heading scenario-library-toolbar");
   const headingCopy = el("div");
-  headingCopy.appendChild(el("h2", null, "Сценарии"));
-  headingCopy.appendChild(el("p", "section-intro", "Создавайте, запускайте и изменяйте сценарии дома"));
+  headingCopy.appendChild(el("h2", null, "Мои сценарии"));
+  headingCopy.appendChild(el("p", "section-intro", "Быстрый запуск и полное редактирование без технических сущностей"));
   heading.appendChild(headingCopy);
-  const create = el("button", "scenario-create", "+ Создать сценарий");
+  const create = el("button", "scenario-create", "+ Новый сценарий");
   create.type = "button";
   create.addEventListener("click", () => { panel._scenarioEditor = defaultScenarioDraft(); updateScenarioEditor(panel); });
   heading.appendChild(create);
   card.appendChild(heading);
+  const controls = el("div", "scenario-library-controls");
+  const search = el("input", "scenario-library-search");
+  search.type = "search";
+  search.value = panel._scenarioLibrary.query;
+  setAttr(search, "placeholder", "Найти сценарий");
+  setAttr(search, "aria-label", "Найти сценарий");
+  controls.appendChild(search);
+  const filters = el("div", "scenario-library-filters");
+  const filterOptions = [["all", "Все"], ["favorite", "На главной"], ["enabled", "Включены"], ["disabled", "Выключены"]];
+  filterOptions.forEach(([value, label]) => {
+    const button = el("button", panel._scenarioLibrary.filter === value ? "is-active" : "", label);
+    button.type = "button";
+    button.addEventListener("click", () => { panel._scenarioLibrary.filter = value; updateScenarioEditor(panel); });
+    filters.appendChild(button);
+  });
+  controls.appendChild(filters);
+  card.appendChild(controls);
   if (panel._scenarios.loading && !panel._scenarios.list) {
     card.appendChild(el("div", "muted", "Загрузка сценариев…"));
   } else if (!panel._scenarios.list || !Array.isArray(panel._scenarios.list.scenarios)) {
     card.appendChild(el("div", "muted", "Список сценариев недоступен."));
   } else {
-    const items = panel._scenarios.list.scenarios;
+    const query = panel._scenarioLibrary.query.trim().toLocaleLowerCase("ru");
+    const filtered = items.filter((scenario) => {
+      const matchesQuery = !query || `${scenario.title || ""} ${scenario.group || ""} ${scenario.description || ""}`.toLocaleLowerCase("ru").includes(query);
+      const matchesFilter = panel._scenarioLibrary.filter === "all"
+        || (panel._scenarioLibrary.filter === "favorite" && scenario.favorite === true)
+        || (panel._scenarioLibrary.filter === "enabled" && scenario.enabled !== false)
+        || (panel._scenarioLibrary.filter === "disabled" && scenario.enabled === false);
+      return matchesQuery && matchesFilter;
+    });
     if (!items.length) {
       const empty = el("div", "scenario-empty");
       const icon = el("span", "scenario-empty-icon");
@@ -406,18 +539,46 @@ export function renderScenarioSection(panel, container, deps) {
       emptyCreate.addEventListener("click", () => { panel._scenarioEditor = defaultScenarioDraft(); updateScenarioEditor(panel); });
       empty.appendChild(emptyCreate);
       card.appendChild(empty);
+    } else {
+      const empty = el("div", "scenario-empty scenario-empty-compact");
+      empty.appendChild(el("h3", null, "Ничего не найдено"));
+      empty.appendChild(el("p", null, "Измените запрос или выберите другой фильтр."));
+      empty.hidden = filtered.length > 0;
+      card.appendChild(empty);
+      panel._scenarioEmptySearch = empty;
     }
-    const list = el("div", "scenario-list");
-    items.forEach((scenario) => {
+    const list = el("div", "scenario-list scenario-library-grid");
+    const visibleIds = new Set(filtered.map((item) => item.id));
+    items.forEach((source) => {
+      const scenario = normalizedScenario(source);
       const requiresConfirmation = scenario.requiresConfirmation === true || scenario.requires_confirmation === true;
-      const row = el("article", `scenario-row${scenario.enabled ? "" : " is-disabled"}`);
-      const icon = el("span", "scenario-icon");
-      icon.appendChild(svgIcon(panel._scenarioIconName(scenario)));
-      row.appendChild(icon);
-      const copy = el("div", "scenario-copy");
+      const meta = scenarioIconMeta(scenario.icon, scenario.title);
+      const row = el("article", `scenario-row scenario-library-card${scenario.enabled ? "" : " is-disabled"}`);
+      row.hidden = !visibleIds.has(source.id);
+      row._scenarioSearchText = `${scenario.title} ${scenario.group} ${scenario.description}`.toLocaleLowerCase("ru");
+      row._scenarioState = scenario;
+      const top = el("div", "scenario-library-card-top");
+      const icon = el("span", "scenario-icon scenario-library-icon");
+      const materialIcon = el("ha-icon", "icon scenario-material-icon");
+      setAttr(materialIcon, "icon", `mdi:${meta.mdi}`);
+      icon.appendChild(materialIcon);
+      top.appendChild(icon);
+      const favorite = el("button", `scenario-favorite${scenario.favorite ? " is-active" : ""}`);
+      favorite.type = "button";
+      favorite.textContent = scenario.favorite ? "★" : "☆";
+      setAttr(favorite, "aria-label", scenario.favorite ? "Убрать с главного экрана" : "Добавить на главный экран");
+      favorite.addEventListener("click", () => {
+        scenario.favorite = !scenario.favorite;
+        saveScenarioQuick(panel, deps, scenario, scenario.favorite ? `Сценарий «${scenario.title}» добавлен на главный экран.` : `Сценарий «${scenario.title}» убран с главного экрана.`);
+      });
+      top.appendChild(favorite);
+      row.appendChild(top);
+      const copy = el("div", "scenario-copy scenario-library-copy");
       copy.tabIndex = 0;
+      copy.appendChild(el("span", "scenario-library-group", scenario.group));
       copy.appendChild(el("h3", null, scenario.title || scenario.id));
-      copy.appendChild(el("p", "muted", [scenarioSummary(normalizedScenario(scenario)), requiresConfirmation ? "требуется подтверждение" : "", scenario.enabled ? "" : "выключен"].filter(Boolean).join(" · ")));
+      copy.appendChild(el("p", null, scenario.description || "Сценарий готов к ручному или автоматическому запуску."));
+      copy.appendChild(el("small", "scenario-library-summary", [scenarioSummary(scenario), requiresConfirmation ? "с подтверждением" : ""].filter(Boolean).join(" · ")));
       copy.addEventListener("click", () => { panel._scenarioEditor = normalizedScenario(scenario); updateScenarioEditor(panel); });
       copy.addEventListener("keydown", (event) => {
         if (event.key === "Enter" || event.key === " ") {
@@ -427,25 +588,60 @@ export function renderScenarioSection(panel, container, deps) {
         }
       });
       row.appendChild(copy);
-      const actions = el("div", "scenario-actions");
-      if (scenario.enabled) {
-        const run = el("button", null, "Запустить");
-        run.disabled = panel._busy;
-        run.addEventListener("click", () => panel._post(deps.runApi, { scenario_id: scenario.id }, requiresConfirmation ? `Запустить сценарий "${scenario.title}"?` : null));
-        actions.appendChild(run);
-      }
-      const test = el("button", "secondary", "Проверить");
-      test.disabled = panel._busy;
-      test.addEventListener("click", () => panel._scenarioTest(scenario));
-      actions.appendChild(test);
-      const remove = el("button", "secondary", "Удалить");
-      remove.disabled = panel._busy;
-      remove.addEventListener("click", () => panel._post(deps.deleteApi, { scenario_id: scenario.id }, `Удалить сценарий "${scenario.title}"?`));
-      actions.appendChild(remove);
+      const actions = el("div", "scenario-actions scenario-library-actions");
+      const enabled = el("button", `scenario-enabled${scenario.enabled ? " is-active" : ""}`, scenario.enabled ? "Включён" : "Выключен");
+      enabled.type = "button";
+      enabled.addEventListener("click", () => {
+        scenario.enabled = !scenario.enabled;
+        saveScenarioQuick(panel, deps, scenario, `Сценарий «${scenario.title}» ${scenario.enabled ? "включён" : "выключен"}.`);
+      });
+      actions.appendChild(enabled);
+      const edit = el("button", "secondary scenario-edit", "Изменить");
+      edit.type = "button";
+      edit.addEventListener("click", () => { panel._scenarioEditor = normalizedScenario(scenario); updateScenarioEditor(panel); });
+      actions.appendChild(edit);
+      const menu = el("details", "scenario-more");
+      const menuButton = el("summary", null, "•••");
+      setAttr(menuButton, "aria-label", `Дополнительные действия для «${scenario.title}»`);
+      menu.appendChild(menuButton);
+      const menuItems = el("div", "scenario-more-menu");
+      const test = el("button", null, "Проверить");
+      test.type = "button"; test.addEventListener("click", () => panel._scenarioTest(scenario));
+      const duplicate = el("button", null, "Создать копию");
+      duplicate.type = "button"; duplicate.addEventListener("click", () => {
+        panel._scenarioEditor = duplicateScenarioDraft(scenario); updateScenarioEditor(panel);
+      });
+      const remove = el("button", "is-danger", "Удалить");
+      remove.type = "button"; remove.addEventListener("click", () => deleteScenarioQuick(panel, deps, scenario));
+      menuItems.appendChild(test); menuItems.appendChild(duplicate); menuItems.appendChild(remove);
+      menu.appendChild(menuItems); actions.appendChild(menu);
+      const run = el("button", "scenario-run");
+      run.type = "button";
+      run.disabled = panel._busy || !scenario.enabled;
+      run.appendChild(svgIcon("play"));
+      setAttr(run, "aria-label", scenario.enabled ? `Запустить сценарий «${scenario.title}»` : `Сценарий «${scenario.title}» выключен`);
+      run.addEventListener("click", () => panel._post(deps.runApi, { scenario_id: scenario.id }, requiresConfirmation ? `Запустить сценарий «${scenario.title}»?` : null));
+      actions.appendChild(run);
       row.appendChild(actions);
       list.appendChild(row);
     });
     card.appendChild(list);
+    search.addEventListener("input", () => {
+      panel._scenarioLibrary.query = search.value;
+      const nextQuery = search.value.trim().toLocaleLowerCase("ru");
+      let visibleCount = 0;
+      Array.from(list.children).forEach((row) => {
+        const scenario = row._scenarioState;
+        const matchesQuery = !nextQuery || row._scenarioSearchText.includes(nextQuery);
+        const matchesFilter = panel._scenarioLibrary.filter === "all"
+          || (panel._scenarioLibrary.filter === "favorite" && scenario.favorite === true)
+          || (panel._scenarioLibrary.filter === "enabled" && scenario.enabled !== false)
+          || (panel._scenarioLibrary.filter === "disabled" && scenario.enabled === false);
+        row.hidden = !(matchesQuery && matchesFilter);
+        if (!row.hidden) visibleCount += 1;
+      });
+      if (panel._scenarioEmptySearch) panel._scenarioEmptySearch.hidden = visibleCount > 0;
+    });
   }
   container.appendChild(card);
   if (panel._scenarioEditor) renderScenarioEditor(panel, container, deps);

@@ -34,6 +34,7 @@ ENERGY_CSS = PANEL_JS.with_name("hausman-hub-energy.css")
 WEATHER_SOURCES_JS = PANEL_JS.with_name("hausman-hub-weather-sources.js")
 MEDIA_DEVICE_JS = PANEL_JS.with_name("hausman-hub-media-device.js")
 SCENARIOS_JS = PANEL_JS.with_name("hausman-hub-scenarios.js")
+SCENARIO_ICONS_JS = PANEL_JS.with_name("hausman-hub-scenario-icons.js")
 WEATHER_SOURCES_CSS = PANEL_JS.with_name("hausman-hub-weather-sources.css")
 SCENARIOS_CSS = PANEL_JS.with_name("hausman-hub-scenarios.css")
 SETTINGS_CSS = PANEL_JS.with_name("hausman-hub-settings.css")
@@ -54,7 +55,7 @@ MAX_AREA_BINDING_JS_BYTES = 24 * 1024
 MAX_NAVIGATION_JS_BYTES = 16 * 1024
 MAX_ENERGY_JS_BYTES = 32 * 1024
 MAX_MEDIA_DEVICE_JS_BYTES = 12 * 1024
-MAX_SCENARIOS_JS_BYTES = 32 * 1024
+MAX_SCENARIOS_JS_BYTES = 40 * 1024
 MAX_PANEL_CSS_BYTES = 56 * 1024
 MAX_SETTINGS_CSS_BYTES = 24 * 1024
 
@@ -77,6 +78,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         weather_sources = WEATHER_SOURCES_JS.read_text(encoding="utf-8")
         media_device = MEDIA_DEVICE_JS.read_text(encoding="utf-8")
         scenarios = SCENARIOS_JS.read_text(encoding="utf-8")
+        scenario_icons = SCENARIO_ICONS_JS.read_text(encoding="utf-8")
         device_maintenance_css = DEVICE_MAINTENANCE_CSS.read_text(encoding="utf-8")
 
         self.assertLessEqual(len(content.encode("utf-8")), MAX_PANEL_JS_BYTES)
@@ -111,6 +113,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             len(media_device.encode("utf-8")), MAX_MEDIA_DEVICE_JS_BYTES
         )
         self.assertLessEqual(len(scenarios.encode("utf-8")), MAX_SCENARIOS_JS_BYTES)
+        self.assertLessEqual(len(scenario_icons.encode("utf-8")), 12 * 1024)
         self.assertLessEqual(len(device_maintenance_css.encode("utf-8")), 8 * 1024)
         self.assertIn("renderHomeSection", home_sections)
         self.assertIn("renderFirstRunRoom", room_setup)
@@ -129,6 +132,8 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn("renderMediaDeviceCard", media_device)
         self.assertIn("renderEnergySection", energy)
         self.assertIn("renderScenarioSection", scenarios)
+        self.assertIn("SCENARIO_ICON_GROUPS", scenario_icons)
+        self.assertGreaterEqual(scenario_icons.count('["'), 80)
         self.assertIn('el("button", "sidebar-intercom")', content)
         self.assertIn("openIntercomFromRail(this)", content)
         self.assertIn("export function openIntercomFromRail(panel)", navigation)
@@ -157,6 +162,10 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             "hausman-hub-scenarios.js",
         ):
             self.assertIn(f'./{module}?v={manifest["version"]}', content)
+        self.assertIn(
+            f'./hausman-hub-scenario-icons.js?v={manifest["version"]}',
+            SCENARIOS_JS.read_text(encoding="utf-8"),
+        )
 
     def test_energy_history_uses_hausmanhub_api_not_raw_recorder_socket(self) -> None:
         content = ENERGY_JS.read_text(encoding="utf-8")
@@ -211,7 +220,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
 
         self.assertLessEqual(len(styles.encode("utf-8")), MAX_PANEL_CSS_BYTES)
         self.assertLessEqual(len(weather_source_styles.encode("utf-8")), 8 * 1024)
-        self.assertLessEqual(len(scenario_styles.encode("utf-8")), 12 * 1024)
+        self.assertLessEqual(len(scenario_styles.encode("utf-8")), 16 * 1024)
         self.assertLessEqual(
             len(settings_styles.encode("utf-8")), MAX_SETTINGS_CSS_BYTES
         )
@@ -221,18 +230,18 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertLessEqual(len(catalog_styles.encode("utf-8")), 8 * 1024)
         self.assertLessEqual(len(energy_styles.encode("utf-8")), 18 * 1024)
         self.assertIn('"/api/hausman_hub/panel/hausman-hub-panel.css"', content)
-        self.assertIn('hausman-hub-settings.css?v=1.51.38', styles)
-        self.assertIn('hausman-hub-switch.css?v=1.51.38', styles)
-        self.assertIn('hausman-hub-notice.css?v=1.51.38', styles)
+        self.assertIn('hausman-hub-settings.css?v=1.51.39', styles)
+        self.assertIn('hausman-hub-switch.css?v=1.51.39', styles)
+        self.assertIn('hausman-hub-notice.css?v=1.51.39', styles)
         self.assertIn(".notice { position:fixed", notice_styles)
         self.assertIn(".notice.is-error", notice_styles)
-        self.assertIn('hausman-hub-device-maintenance.css?v=1.51.38', styles)
-        self.assertIn('hausman-hub-control-channel.css?v=1.51.38', styles)
-        self.assertIn('hausman-hub-weather-sources.css?v=1.51.38', styles)
-        self.assertIn('hausman-hub-wizard-validation.css?v=1.51.38', styles)
-        self.assertIn('hausman-hub-catalog.css?v=1.51.38', styles)
-        self.assertIn('hausman-hub-media-device.css?v=1.51.38', styles)
-        self.assertIn('hausman-hub-scenarios.css?v=1.51.38', styles)
+        self.assertIn('hausman-hub-device-maintenance.css?v=1.51.39', styles)
+        self.assertIn('hausman-hub-control-channel.css?v=1.51.39', styles)
+        self.assertIn('hausman-hub-weather-sources.css?v=1.51.39', styles)
+        self.assertIn('hausman-hub-wizard-validation.css?v=1.51.39', styles)
+        self.assertIn('hausman-hub-catalog.css?v=1.51.39', styles)
+        self.assertIn('hausman-hub-media-device.css?v=1.51.39', styles)
+        self.assertIn('hausman-hub-scenarios.css?v=1.51.39', styles)
         self.assertIn(".inventory-device-icon .icon { display:block;", styles)
         self.assertIn("validation-issue-row", content)
         self.assertIn(
@@ -460,7 +469,11 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             {{ filename: {str(MEDIA_DEVICE_JS)!r} }}
           );
           vm.runInThisContext(
-            fs.readFileSync({str(SCENARIOS_JS)!r}, "utf8").replace(/export /g, ""),
+            fs.readFileSync({str(SCENARIO_ICONS_JS)!r}, "utf8").replace(/export /g, ""),
+            {{ filename: {str(SCENARIO_ICONS_JS)!r} }}
+          );
+          vm.runInThisContext(
+            fs.readFileSync({str(SCENARIOS_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, "").replace(/export /g, ""),
             {{ filename: {str(SCENARIOS_JS)!r} }}
           );
           vm.runInThisContext(
@@ -624,7 +637,11 @@ THEME_TEST_HARNESS = """
     { filename: __MEDIA_DEVICE_JS__ }
   );
   vm.runInThisContext(
-    fs.readFileSync(__SCENARIOS_JS__, "utf8").replace(/export /g, ""),
+    fs.readFileSync(__SCENARIO_ICONS_JS__, "utf8").replace(/export /g, ""),
+    { filename: __SCENARIO_ICONS_JS__ }
+  );
+  vm.runInThisContext(
+    fs.readFileSync(__SCENARIOS_JS__, "utf8").replace(/^import .*;\\s*/gm, "").replace(/export /g, ""),
     { filename: __SCENARIOS_JS__ }
   );
   vm.runInThisContext(
@@ -654,6 +671,7 @@ class PanelThemeSwitcherTest(unittest.TestCase):
         script = script.replace("__NAVIGATION_JS__", repr(str(NAVIGATION_JS)))
         script = script.replace("__ENERGY_JS__", repr(str(ENERGY_JS)))
         script = script.replace("__MEDIA_DEVICE_JS__", repr(str(MEDIA_DEVICE_JS)))
+        script = script.replace("__SCENARIO_ICONS_JS__", repr(str(SCENARIO_ICONS_JS)))
         script = script.replace("__SCENARIOS_JS__", repr(str(SCENARIOS_JS)))
         return subprocess.run(
             ("node", "--input-type=commonjs", "--eval", script),
@@ -848,7 +866,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.51.38",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.51.39",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },

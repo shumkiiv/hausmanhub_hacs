@@ -26,6 +26,7 @@ ENERGY_JS = PANEL_JS.with_name("hausman-hub-energy.js")
 WEATHER_SOURCES_JS = PANEL_JS.with_name("hausman-hub-weather-sources.js")
 MEDIA_DEVICE_JS = PANEL_JS.with_name("hausman-hub-media-device.js")
 SCENARIOS_JS = PANEL_JS.with_name("hausman-hub-scenarios.js")
+SCENARIO_ICONS_JS = PANEL_JS.with_name("hausman-hub-scenario-icons.js")
 SETTINGS_CSS = PANEL_JS.with_name("hausman-hub-settings.css")
 SWITCH_CSS = PANEL_JS.with_name("hausman-hub-switch.css")
 DEVICE_BINDINGS_CSS = PANEL_JS.with_name("hausman-hub-device-bindings.css")
@@ -445,7 +446,11 @@ def panel_script(
         {{ filename: {str(MEDIA_DEVICE_JS)!r} }}
       );
       vm.runInThisContext(
-        fs.readFileSync({str(SCENARIOS_JS)!r}, "utf8").replace(/export /g, ""),
+        fs.readFileSync({str(SCENARIO_ICONS_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(SCENARIO_ICONS_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(SCENARIOS_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(SCENARIOS_JS)!r} }}
       );
       vm.runInThisContext(
@@ -1430,6 +1435,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         script = panel_script(
             payloads,
             {
+                "hausman_hub/v1/admin/scenarios": {"ok": True},
                 "hausman_hub/v1/admin/scenarios/run": {"status": "confirmed"},
                 "hausman_hub/v1/admin/scenarios/test": {"ok": True},
                 "hausman_hub/v1/admin/scenarios/delete": {"status": "confirmed"},
@@ -1439,9 +1445,20 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         await tick();
         const screen = panel._shell.scenarios;
         const text = textOf(screen);
-        for (const label of ["Доброе утро", "Уходим из дома", "Ночной режим", "требуется подтверждение", "выключен"]) {
+        for (const label of ["Дом работает по вашим правилам", "На главной", "Доброе утро", "Уходим из дома", "Ночной режим", "с подтверждением", "Выключен"]) {
           if (!text.includes(label)) throw new Error("scenario text missing: " + label);
         }
+        const search = findAll(screen, (node) => node.tagName === "INPUT" && node["placeholder"] === "Найти сценарий")[0];
+        if (!search) throw new Error("scenario search field missing");
+        search.value = "ноч";
+        search.fire("input");
+        const searchRows = findAll(screen, (node) => String(node.className).split(" ").includes("scenario-row"));
+        if (searchRows.filter((node) => !node.hidden).length !== 1
+            || findAll(screen, (node) => node === search).length !== 1) {
+          throw new Error("scenario search rerendered the field or filtered incorrectly");
+        }
+        search.value = "";
+        search.fire("input");
         if (text.includes("mdi:")) throw new Error("raw MDI icon name exposed");
         const rows = findAll(screen, (node) => String(node.className).split(" ").includes("scenario-row"));
         const icons = findAll(screen, (node) => String(node.className).split(" ").includes("scenario-icon"));
@@ -1449,12 +1466,12 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("scenario Figma row hierarchy mismatch");
         }
         const rowButtons = (row) => findAll(row, (node) => node.tagName === "BUTTON");
-        if (rowButtons(rows[0]).length !== 3 || rowButtons(rows[2]).length !== 2) {
-          throw new Error("enabled/disabled scenario actions mismatch");
+        if (rowButtons(rows[0]).length < 6 || rowButtons(rows[2]).length < 6) {
+          throw new Error("scenario maintenance actions mismatch");
         }
         let confirmation = "";
         window.confirm = (message) => { confirmation = message; return true; };
-        rowButtons(rows[1]).find((node) => node.textContent === "Запустить").fire("click");
+        rowButtons(rows[1]).find((node) => String(node["aria-label"] || "").startsWith("Запустить сценарий")).fire("click");
         await tick();
         if (!confirmation.includes("Уходим из дома")) throw new Error("camelCase confirmation flag ignored");
         const run = calls.find((call) => call.method === "POST"
@@ -1462,6 +1479,16 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         if (!run || run.payload.scenario_id !== "scenario.leaving_home") {
           throw new Error("scenario run payload mismatch");
         }
+        panel._shell.tabs.scenarios.fire("click");
+        await tick();
+        const favoriteButton = findAll(panel._shell.scenarios, (node) => node.tagName === "BUTTON")
+          .find((node) => node["aria-label"] === "Добавить на главный экран");
+        favoriteButton.fire("click");
+        await tick();
+        await tick();
+        const favoriteSave = calls.find((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/admin/scenarios" && call.payload.favorite === true);
+        if (!favoriteSave) throw new Error("favorite quick-save contract missing");
         panel._shell.tabs.scenarios.fire("click");
         await tick();
         const refreshedRows = findAll(panel._shell.scenarios, (node) =>
@@ -1512,12 +1539,26 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         await tick();
         const screen = panel._shell.scenarios;
         const create = findAll(screen, (node) => node.tagName === "BUTTON")
-          .find((node) => node.textContent === "+ Создать сценарий");
+          .find((node) => node.textContent === "+ Новый сценарий" || node.textContent === "Создать сценарий");
         if (!create) throw new Error("scenario create action missing from empty state");
         create.fire("click");
         if (!panel._scenarioEditor || !textOf(screen).includes("РЕДАКТОР СЦЕНАРИЯ")) {
           throw new Error("full scenario editor did not open");
         }
+        const iconButtons = findAll(screen, (node) => node.tagName === "BUTTON"
+          && String(node["aria-label"] || "").startsWith("Выбрать иконку"));
+        const materialIcons = iconButtons.map((button) => findAll(button, (node) => node.tagName === "HA-ICON")[0])
+          .filter(Boolean).map((node) => node.icon);
+        if (iconButtons.length < 80 || new Set(materialIcons).size < 80
+            || !textOf(screen).includes("Безопасность") || !textOf(screen).includes("Энергия")) {
+          throw new Error("semantic scenario icon catalog is incomplete");
+        }
+        const currentIconLabel = findAll(screen, (node) => String(node.className).split(" ").includes("scenario-icon-current"))[0]
+          .children.find((node) => node.tagName === "STRONG");
+        const differentIcon = iconButtons.find((button) => !button.className.includes("is-selected"));
+        const expectedIconLabel = differentIcon.children.find((node) => node.tagName === "SPAN").textContent;
+        differentIcon.fire("click");
+        if (currentIconLabel.textContent !== expectedIconLabel) throw new Error("selected icon summary stayed stale");
 
         const labelledControl = (label) => {
           const wrapper = findAll(screen, (node) => String(node.className).split(" ").includes("scenario-editor-field"))
