@@ -1,4 +1,4 @@
-.notice { position:fixed; z-index:100; top:16px; left:50%; display:flex; align-items:center; width:min(880px,calc(100vw - 32px));
+.notice { position:fixed; z-index:1040; top:16px; left:50%; display:flex; align-items:center; width:min(880px,calc(100vw - 32px));
   min-height:48px; margin:0; padding:12px 18px 12px 44px; color:var(--hmh-text,#E7ECF3);
   border:1px solid color-mix(in srgb,var(--hmh-accent,#4F8CFF) 38%,var(--hmh-border,#2F3845)); border-radius:14px;
   background:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 10%,var(--hmh-surface,#12171D));

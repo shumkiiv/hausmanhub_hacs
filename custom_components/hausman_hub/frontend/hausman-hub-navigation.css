@@ -1,4 +1,4 @@
-.banner { position:fixed; z-index:101; top:16px; left:50%; width:min(880px,calc(100vw - 32px));
+.banner { position:fixed; z-index:1041; top:16px; left:50%; width:min(880px,calc(100vw - 32px));
   min-height:48px; margin:0; padding:12px 18px 12px 44px; border:1px solid color-mix(in srgb,var(--error-color,#E5534B) 58%,var(--hmh-border,#2F3845));
   border-radius:14px; background:color-mix(in srgb,var(--error-color,#E5534B) 14%,var(--hmh-surface,#12171D));
   color:var(--hmh-text,#E7ECF3); box-shadow:0 16px 42px rgba(0,0,0,.24); backdrop-filter:blur(18px);

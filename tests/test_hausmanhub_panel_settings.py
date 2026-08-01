@@ -29,6 +29,7 @@ MEDIA_DEVICE_JS = PANEL_JS.with_name("hausman-hub-media-device.js")
 DEVICE_CARD_JS = PANEL_JS.with_name("hausman-hub-device-card.js")
 SCENARIOS_JS = PANEL_JS.with_name("hausman-hub-scenarios.js")
 SCENARIO_ICONS_JS = PANEL_JS.with_name("hausman-hub-scenario-icons.js")
+SCENARIO_FIELDS_JS = PANEL_JS.with_name("hausman-hub-scenario-fields.js")
 SETTINGS_CSS = PANEL_JS.with_name("hausman-hub-settings.css")
 DIAGNOSTICS_JS = PANEL_JS.with_name("hausman-hub-diagnostics.js")
 ROLLOUT_JS = PANEL_JS.with_name("hausman-hub-rollout.js")
@@ -496,6 +497,10 @@ def panel_script(
       vm.runInThisContext(
         fs.readFileSync({str(SCENARIO_ICONS_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(SCENARIO_ICONS_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(SCENARIO_FIELDS_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
+        {{ filename: {str(SCENARIO_FIELDS_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(SCENARIOS_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, "").replace(/export /g, ""),
@@ -1813,6 +1818,10 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const title = labelledControl("Название");
         title.value = "Вечерний свет";
         title.fire("input");
+        const actionStep = findAll(screen, (node) => String(node.className).split(" ").includes("scenario-editor-step"))
+          .find((node) => textOf(node).includes("Тогда"));
+        if (!actionStep) throw new Error("scenario action step is missing");
+        actionStep.fire("click");
         const addAction = findAll(screen, (node) => node.tagName === "BUTTON")
           .find((node) => node.textContent === "+ Добавить действие");
         addAction.fire("click");
@@ -1840,6 +1849,58 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         }
         if (panel._scenarioEditor !== null) throw new Error("editor stayed open after successful save");
         if (!textOf(panel.shadowRoot).includes("сохранён")) throw new Error("scenario success feedback missing");
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_scenario_editor_has_five_clear_steps_switches_and_safe_escape(self) -> None:
+        payloads = dict(GET_PATHS)
+        payloads["hausman_hub/v1/admin/scenarios"] = {"scenarios": []}
+        payloads["hausman_hub/v1/admin/scenarios/catalog"] = {"devices": []}
+        script = panel_script(
+            payloads,
+            {},
+            """
+        panel._shell.tabs.scenarios.fire("click");
+        await tick();
+        const screen = panel._shell.scenarios;
+        findAll(screen, (node) => node.tagName === "BUTTON")
+          .find((node) => node.textContent === "+ Новый сценарий" || node.textContent === "Создать сценарий")
+          .fire("click");
+        await tick();
+        const steps = findAll(screen, (node) => String(node.className).split(" ").includes("scenario-editor-step"));
+        const labels = steps.map((node) => findAll(node, (child) => child.tagName === "B")[0].textContent);
+        if (JSON.stringify(labels) !== JSON.stringify(["Основное", "Когда", "Если", "Тогда", "Доступ"])) {
+          throw new Error("scenario editor step contract mismatch: " + JSON.stringify(labels));
+        }
+        steps[4].fire("click");
+        const switches = findAll(screen, (node) => node.role === "switch");
+        if (switches.length !== 3 || switches.some((node) => !["true", "false"].includes(node["aria-checked"]))) {
+          throw new Error("scenario publication switches are not accessible");
+        }
+        const favorite = switches.find((node) => textOf(node).includes("Показывать на главной"));
+        favorite.fire("click");
+        if (favorite["aria-checked"] !== "true" || panel._scenarioEditor.favorite !== true) {
+          throw new Error("scenario favorite switch did not update the draft");
+        }
+        favorite.fire("click");
+        if (favorite["aria-checked"] !== "false" || panel._scenarioEditor.favorite !== false) {
+          throw new Error("scenario favorite switch did not toggle off");
+        }
+        const enabled = switches.find((node) => textOf(node).includes("Сценарий включён"));
+        enabled.fire("click");
+        if (enabled["aria-checked"] !== "false" || panel._scenarioEditor.enabled !== false) {
+          throw new Error("initially enabled scenario switch did not toggle off");
+        }
+        let confirmations = 0;
+        window.confirm = () => { confirmations += 1; return true; };
+        const overlay = findAll(screen, (node) => String(node.className).split(" ").includes("scenario-editor-overlay"))[0];
+        let prevented = false;
+        overlay.fire("keydown", { key: "Escape", preventDefault: () => { prevented = true; } });
+        if (!prevented || confirmations !== 1 || panel._scenarioEditor !== null) {
+          throw new Error("Escape did not safely close a dirty scenario editor");
+        }
             """,
         )
         completed = run_panel_script(script)
@@ -2582,7 +2643,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).endsWith("hausman-hub-panel.css")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.51.59")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

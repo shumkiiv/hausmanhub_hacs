@@ -61,7 +61,7 @@ class UiSourceOfTruthAuditTest(unittest.TestCase):
     def test_figma_pages_separate_canon_from_archive_without_deletion(self) -> None:
         payload = json.loads(AUDIT.read_text(encoding="utf-8"))
         structure = payload["hacs_figma_structure"]
-        self.assertEqual(50, structure["total_top_level_nodes"])
+        self.assertEqual(51, structure["total_top_level_nodes"])
         self.assertEqual(0, structure["nodes_deleted"])
         pages = {page["purpose"]: page for page in structure["pages"]}
         self.assertEqual(
