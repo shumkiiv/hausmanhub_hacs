@@ -466,6 +466,20 @@ class ClimateSignalSettingsValidationTest(unittest.TestCase):
             ({**base, "heating_lockout_high": 61}, "invalid_lockout_threshold"),
             ({**base, "heating_lockout_low": -41}, "invalid_lockout_threshold"),
             (
+                {
+                    **base,
+                    "air_conditioner_minimum_outdoor_temperature": -41,
+                },
+                "invalid_lockout_threshold",
+            ),
+            (
+                {
+                    **base,
+                    "air_conditioner_minimum_outdoor_temperature": True,
+                },
+                "invalid_lockout_threshold",
+            ),
+            (
                 {**base, "heating_lockout_high": 10**400},
                 "invalid_lockout_threshold",
             ),
@@ -1484,6 +1498,7 @@ class ClimateAdminConfigurationRoutesTest(unittest.TestCase):
                 "central_heating_entity_id": "switch.synthetic_central",
                 "heating_lockout_high": 19,
                 "heating_lockout_low": 15,
+                "air_conditioner_minimum_outdoor_temperature": -7.5,
             },
         )
         self.assertEqual(200, saved.status)
@@ -1492,6 +1507,12 @@ class ClimateAdminConfigurationRoutesTest(unittest.TestCase):
             saved.payload["home"]["outdoor_temperature_entity_id"],
         )
         self.assertEqual(19.0, saved.payload["home"]["heating_lockout_high"])
+        self.assertEqual(
+            -7.5,
+            saved.payload["home"][
+                "air_conditioner_minimum_outdoor_temperature"
+            ],
+        )
         self.assertIsInstance(saved.payload["setup_revision"], int)
 
         weather_saved = self._post(

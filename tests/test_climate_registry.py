@@ -317,6 +317,7 @@ class ClimateRegistryTest(unittest.TestCase):
 
         temperature_source = ClimateHomeEnvironment(
             central_heating_entity_id="sensor.battery_temperature",
+            air_conditioner_minimum_outdoor_temperature=-7.5,
             central_heating_temperature_on=38.0,
             central_heating_temperature_off=31.0,
         )

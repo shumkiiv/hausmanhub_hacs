@@ -122,6 +122,7 @@ class ClimatePolicyBlocker(StrEnum):
     MINIMUM_RUN_HOLD = "minimum_run_hold"
     DEVICE_UNAVAILABLE = "device_unavailable"
     WEATHER_LOCKOUT = "weather_lockout"
+    AIR_CONDITIONER_OUTDOOR_LOCKOUT = "air_conditioner_outdoor_lockout"
 
 
 class ClimateFinalDeviceAction(StrEnum):
@@ -503,6 +504,18 @@ def _expected_policy_output(
             _safe_off_devices(selected_devices),
         )
 
+    if home.air_conditioner_outdoor_lockout and any(
+        device.kind is ClimateObservationDeviceKind.AIR_CONDITIONER
+        for device in selected_devices
+    ):
+        return (
+            ClimateRoomPolicy.SAFETY_LOCKOUT,
+            ClimatePolicyAction.SAFE_OFF,
+            ClimatePolicyReason.SAFETY_LOCKOUT,
+            (ClimatePolicyBlocker.AIR_CONDITIONER_OUTDOOR_LOCKOUT,),
+            _safe_off_air_conditioners(selected_devices),
+        )
+
     safety = _safety_blockers(room)
     if safety:
         return (
@@ -799,6 +812,40 @@ def _safe_off_devices(
         elif device.kind is ClimateObservationDeviceKind.RADIATOR_THERMOSTAT:
             action = ClimateFinalDeviceAction.OBSERVE
             reason = ClimateFinalDeviceReason.POLICY_OBSERVE
+        elif device.activity in stopped:
+            action = ClimateFinalDeviceAction.OFF
+            reason = ClimateFinalDeviceReason.ALREADY_OFF
+        else:
+            action = ClimateFinalDeviceAction.SAFE_OFF
+            reason = ClimateFinalDeviceReason.POLICY_SAFE_OFF
+        result.append(
+            ClimateFinalDevicePlan(
+                device_id=device.device_id,
+                room_id=device.room_id,
+                kind=device.kind,
+                action=action,
+                target_temperature=None,
+                fan_mode=None,
+                quiet=None,
+                reason=reason,
+            )
+        )
+    return tuple(result)
+
+
+def _safe_off_air_conditioners(
+    selected: tuple[ClimateDeviceObservation, ...],
+) -> tuple[ClimateFinalDevicePlan, ...]:
+    """Stop only air conditioners for the low outdoor-temperature guard."""
+
+    stopped = {ClimateDeviceActivity.STOPPED, ClimateDeviceActivity.IDLE}
+    result: list[ClimateFinalDevicePlan] = []
+    for device in selected:
+        if device.kind is not ClimateObservationDeviceKind.AIR_CONDITIONER:
+            continue
+        if device.availability is not ClimateDeviceAvailability.AVAILABLE:
+            action = ClimateFinalDeviceAction.UNAVAILABLE
+            reason = ClimateFinalDeviceReason.DEVICE_UNAVAILABLE
         elif device.activity in stopped:
             action = ClimateFinalDeviceAction.OFF
             reason = ClimateFinalDeviceReason.ALREADY_OFF

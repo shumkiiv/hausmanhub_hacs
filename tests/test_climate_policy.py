@@ -364,6 +364,51 @@ class ClimatePolicyTest(unittest.TestCase):
 
         self.assertNotIn(ClimatePolicyBlocker.WEATHER_LOCKOUT, result.blockers)
 
+    def test_outdoor_cold_guard_overrides_manual_request_and_stops_ac(self) -> None:
+        result = resolve_climate_room_policy(
+            *_force_safe_off_inputs(
+                outdoor_temperature=-5.0,
+                window=ClimateWindowState.CLOSED,
+                manual_request=True,
+            ),
+            observed_at=NOW,
+        )
+
+        self.assertIs(result.policy, ClimateRoomPolicy.SAFETY_LOCKOUT)
+        self.assertIs(result.action, ClimatePolicyAction.SAFE_OFF)
+        self.assertEqual(
+            (ClimatePolicyBlocker.AIR_CONDITIONER_OUTDOOR_LOCKOUT,),
+            result.blockers,
+        )
+        self.assertEqual(
+            (ClimateFinalDeviceAction.SAFE_OFF,),
+            tuple(device.action for device in result.devices),
+        )
+
+    def test_outdoor_cold_guard_allows_ac_above_configured_minimum(self) -> None:
+        automatic = climate_reference_policy("stopped_ac_starts_at_default_gap")
+        home = replace(
+            automatic.home,
+            outdoor_temperature=-4.9,
+            air_conditioner_minimum_outdoor_temperature=-5.0,
+        )
+        result = resolve_climate_room_policy(
+            automatic.room,
+            home,
+            automatic.control,
+            automatic.resolution,
+            automatic.equipment,
+            automatic.stability,
+            automatic.selected_devices,
+            observed_at=automatic.observed_at,
+        )
+
+        self.assertIs(result.policy, ClimateRoomPolicy.AUTO)
+        self.assertNotIn(
+            ClimatePolicyBlocker.AIR_CONDITIONER_OUTDOOR_LOCKOUT,
+            result.blockers,
+        )
+
     def test_weather_lockout_hysteresis_holds_lockout_without_activity(self) -> None:
         result = resolve_climate_room_policy(
             *_weather_inputs(weather_heating_lockout=True),
@@ -570,6 +615,9 @@ def _weather_inputs(
 def _force_safe_off_inputs(
     *,
     ac_activity: ClimateDeviceActivity = ClimateDeviceActivity.RUNNING,
+    outdoor_temperature: float | None = None,
+    window: ClimateWindowState = ClimateWindowState.OPEN,
+    manual_request: bool = False,
 ):
     room = ClimateRoomObservation(
         room_id="living",
@@ -577,14 +625,18 @@ def _force_safe_off_inputs(
         data_status=ClimateDataStatus.FRESH,
         temperature=30.0,
         temperature_quality=ClimateTemperatureQuality.NORMAL,
-        window=ClimateWindowState.OPEN,
+        window=window,
         mode=ClimateRoomMode.AUTO,
     )
     home = ClimateHomeObservation(
         season=ClimateSeason.SUMMER,
+        outdoor_temperature=outdoor_temperature,
         central_heating_on=False,
     )
-    control = ClimateControlObservation()
+    control = ClimateControlObservation(
+        manual_request=manual_request,
+        manual_request_room_id="living" if manual_request else None,
+    )
     resolution = ClimateRoomThermalResolution(
         room_id="living",
         season=ClimateSeason.SUMMER,

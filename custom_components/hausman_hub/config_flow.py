@@ -136,12 +136,16 @@ PRESENCE_ENTITY_FIELD = "presence_entity_id"
 CENTRAL_HEATING_ENTITY_FIELD = "central_heating_entity_id"
 HEATING_LOCKOUT_HIGH_FIELD = "heating_lockout_high"
 HEATING_LOCKOUT_LOW_FIELD = "heating_lockout_low"
+AIR_CONDITIONER_MINIMUM_OUTDOOR_TEMPERATURE_FIELD = (
+    "air_conditioner_minimum_outdoor_temperature"
+)
 HEATING_LOCKOUT_HIGH_DEFAULT = 18.0
 HEATING_LOCKOUT_LOW_DEFAULT = 16.0
 HEATING_LOCKOUT_HIGH_MIN = -40.0
 HEATING_LOCKOUT_HIGH_MAX = 60.0
 HEATING_LOCKOUT_LOW_MIN = -40.0
 HEATING_LOCKOUT_LOW_MAX = 60.0
+AIR_CONDITIONER_MINIMUM_OUTDOOR_TEMPERATURE_DEFAULT = -5.0
 CONTOUR_ACTION_FIELD = "contour_action"
 CONTOUR_NAME_FIELD = "contour_name"
 CONTOUR_MODE_FIELD = "contour_mode"
@@ -554,6 +558,9 @@ def _home_environment_schema(
     *,
     high_default: float,
     low_default: float,
+    air_conditioner_minimum_default: float = (
+        AIR_CONDITIONER_MINIMUM_OUTDOOR_TEMPERATURE_DEFAULT
+    ),
 ) -> vol.Schema:
     return vol.Schema(
         {
@@ -581,6 +588,18 @@ def _home_environment_schema(
             vol.Required(
                 HEATING_LOCKOUT_LOW_FIELD,
                 default=low_default,
+            ): NumberSelector(
+                NumberSelectorConfig(
+                    min=HEATING_LOCKOUT_LOW_MIN,
+                    max=HEATING_LOCKOUT_LOW_MAX,
+                    step=0.5,
+                    unit_of_measurement="°C",
+                    mode=NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Required(
+                AIR_CONDITIONER_MINIMUM_OUTDOOR_TEMPERATURE_FIELD,
+                default=air_conditioner_minimum_default,
             ): NumberSelector(
                 NumberSelectorConfig(
                     min=HEATING_LOCKOUT_LOW_MIN,
@@ -3013,6 +3032,10 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
             home.get("heating_lockout_low"),
             HEATING_LOCKOUT_LOW_DEFAULT,
         )
+        air_conditioner_minimum_default = _threshold_default(
+            home.get(AIR_CONDITIONER_MINIMUM_OUTDOOR_TEMPERATURE_FIELD),
+            AIR_CONDITIONER_MINIMUM_OUTDOOR_TEMPERATURE_DEFAULT,
+        )
         errors: dict[str, str] = {}
         if user_input is not None:
             current_entities = {
@@ -3028,6 +3051,10 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
             }
             high = user_input.get(HEATING_LOCKOUT_HIGH_FIELD)
             low = user_input.get(HEATING_LOCKOUT_LOW_FIELD)
+            air_conditioner_minimum = user_input.get(
+                AIR_CONDITIONER_MINIMUM_OUTDOOR_TEMPERATURE_FIELD,
+                air_conditioner_minimum_default,
+            )
             if not _valid_threshold(
                 high,
                 minimum=HEATING_LOCKOUT_HIGH_MIN,
@@ -3040,6 +3067,14 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
                 maximum=HEATING_LOCKOUT_LOW_MAX,
             ):
                 errors[HEATING_LOCKOUT_LOW_FIELD] = "invalid_heating_lockout_low"
+            if not _valid_threshold(
+                air_conditioner_minimum,
+                minimum=HEATING_LOCKOUT_LOW_MIN,
+                maximum=HEATING_LOCKOUT_LOW_MAX,
+            ):
+                errors[AIR_CONDITIONER_MINIMUM_OUTDOOR_TEMPERATURE_FIELD] = (
+                    "invalid_air_conditioner_minimum_outdoor_temperature"
+                )
             if not errors and float(low) >= float(high):
                 errors[HEATING_LOCKOUT_LOW_FIELD] = "invalid_heating_lockout_order"
             if not errors:
@@ -3059,6 +3094,9 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
                     ),
                     "heating_lockout_high": float(high),
                     "heating_lockout_low": float(low),
+                    "air_conditioner_minimum_outdoor_temperature": float(
+                        air_conditioner_minimum
+                    ),
                 }
                 try:
                     await runtime.async_update_home_environment(home_update)
@@ -3081,10 +3119,17 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
                 maximum=HEATING_LOCKOUT_LOW_MAX,
             ):
                 low_default = float(low)
+            if _valid_threshold(
+                air_conditioner_minimum,
+                minimum=HEATING_LOCKOUT_LOW_MIN,
+                maximum=HEATING_LOCKOUT_LOW_MAX,
+            ):
+                air_conditioner_minimum_default = float(air_conditioner_minimum)
 
         schema = _home_environment_schema(
             high_default=high_default,
             low_default=low_default,
+            air_conditioner_minimum_default=air_conditioner_minimum_default,
         )
         suggested = {
             key: value

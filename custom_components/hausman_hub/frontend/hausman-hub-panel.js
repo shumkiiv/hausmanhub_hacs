@@ -1,14 +1,14 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.17";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.17";
-import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.17";
-import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.51.17";
-import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.17";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.17";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.17";
-import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.17";
-import { openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.17";
-import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.17";
-import { AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.51.17";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.18";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.18";
+import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.18";
+import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.51.18";
+import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.18";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.18";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.18";
+import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.18";
+import { openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.18";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.18";
+import { AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.51.18";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css";
@@ -2486,6 +2486,9 @@ class HausmanHubPanel extends HTMLElement {
     const low = Number(home.heating_lockout_low);
     const heatingOn = Number(home.central_heating_temperature_on ?? 35);
     const heatingOff = Number(home.central_heating_temperature_off ?? 30);
+    const airConditionerMinimum = Number(
+      home.air_conditioner_minimum_outdoor_temperature ?? -5
+    );
     if (
       home.heating_lockout_high === "" || home.heating_lockout_low === ""
       || !Number.isFinite(high) || !Number.isFinite(low) || high < -40 || high > 60
@@ -2495,6 +2498,9 @@ class HausmanHubPanel extends HTMLElement {
       || !Number.isFinite(heatingOn) || !Number.isFinite(heatingOff)
       || heatingOn < -40 || heatingOn > 120 || heatingOff < -40 || heatingOff > 120
       || heatingOff >= heatingOn
+      || home.air_conditioner_minimum_outdoor_temperature === ""
+      || !Number.isFinite(airConditionerMinimum)
+      || airConditionerMinimum < -40 || airConditionerMinimum > 60
     ) {
       this._firstRun.homeError = "Проверьте пороги: нижний должен быть строго меньше верхнего.";
       this._render();
@@ -2510,6 +2516,7 @@ class HausmanHubPanel extends HTMLElement {
         heating_lockout_low: low,
         central_heating_temperature_on: heatingOn,
         central_heating_temperature_off: heatingOff,
+        air_conditioner_minimum_outdoor_temperature: airConditionerMinimum,
         outdoor_temperature_entity_id: home.outdoor_temperature_entity_id || null,
         outdoor_temperature_entity_ids: home.outdoor_temperature_entity_ids || [],
         presence_entity_id: home.presence_entity_id || null,
@@ -2742,6 +2749,9 @@ class HausmanHubPanel extends HTMLElement {
         heating_lockout_low: saved.heating_lockout_low === undefined ? 16 : saved.heating_lockout_low,
         central_heating_temperature_on: saved.central_heating_temperature_on === undefined ? 35 : saved.central_heating_temperature_on,
         central_heating_temperature_off: saved.central_heating_temperature_off === undefined ? 30 : saved.central_heating_temperature_off,
+        air_conditioner_minimum_outdoor_temperature:
+          saved.air_conditioner_minimum_outdoor_temperature === undefined
+            ? -5 : saved.air_conditioner_minimum_outdoor_temperature,
         outdoor_temperature_entity_id: saved.outdoor_temperature_entity_id || null,
         outdoor_temperature_entity_ids: Array.isArray(saved.outdoor_temperature_entity_ids)
           && saved.outdoor_temperature_entity_ids.length
@@ -2816,6 +2826,28 @@ class HausmanHubPanel extends HTMLElement {
     lowRow.appendChild(low);
     card.appendChild(lowRow);
     card.appendChild(el("div", "muted field-help", LOCKOUT_HELP));
+    card.appendChild(el("h3", "threshold-heading", "Защита кондиционеров от холода"));
+    card.appendChild(el(
+      "div",
+      "muted threshold-intro",
+      "При достижении критической наружной температуры HausmanHub не запускает кондиционеры автоматически и выключает уже работающие — даже включённые вручную."
+    ));
+    const airConditionerMinimum = numberField(
+      home.air_conditioner_minimum_outdoor_temperature, -40, 60, 0.5,
+      () => {
+        home.air_conditioner_minimum_outdoor_temperature = airConditionerMinimum.value;
+        clearError();
+      }
+    );
+    const airConditionerMinimumRow = el(
+      "label", "form-field", "Критический минимум на улице, °C"
+    );
+    airConditionerMinimumRow.appendChild(airConditionerMinimum);
+    card.appendChild(airConditionerMinimumRow);
+    card.appendChild(el(
+      "div", "muted field-help",
+      "Защита срабатывает при указанной температуре и ниже. Рекомендуемое значение для большинства бытовых кондиционеров — −5 °C; точный предел сверяйте с паспортом модели."
+    ));
     if (this._firstRun.homeError) card.appendChild(el("div", "field-error", this._firstRun.homeError));
     const actions = el("div", "actions");
     const back = el("button", "secondary", "Назад к комнатам");
@@ -4810,6 +4842,26 @@ class HausmanHubPanel extends HTMLElement {
     card.appendChild(
       el("div", "muted", LOCKOUT_HELP)
     );
+    card.appendChild(el("h3", "threshold-heading", "Защита кондиционеров от холода"));
+    card.appendChild(el(
+      "div", "muted threshold-intro",
+      "При указанной наружной температуре и ниже HausmanHub блокирует автоматический запуск и немедленно выключает работающий кондиционер, в том числе включённый вручную."
+    ));
+    const airConditionerMinimum = numberField(
+      values.air_conditioner_minimum_outdoor_temperature === undefined
+        ? -5 : values.air_conditioner_minimum_outdoor_temperature,
+      -40, 60, 0.5,
+      () => { validationError.textContent = ""; this._markDirty("home", dirtyNotice); }
+    );
+    const airConditionerMinimumRow = el(
+      "label", "form-field", "Критический минимум на улице, °C"
+    );
+    airConditionerMinimumRow.appendChild(airConditionerMinimum);
+    card.appendChild(airConditionerMinimumRow);
+    card.appendChild(el(
+      "div", "muted",
+      "По умолчанию −5 °C. Уточните допустимую температуру работы в паспорте конкретной модели."
+    ));
     const validationError = el("div", "field-error");
     setAttr(validationError, "role", "alert");
     card.appendChild(validationError);
@@ -4824,12 +4876,17 @@ class HausmanHubPanel extends HTMLElement {
       const highValue = Number(rawHigh);
       const lowValue = Number(rawLow);
       const heatingValues = heatingThresholds.values();
+      const rawAirConditionerMinimum = airConditionerMinimum.value;
+      const airConditionerMinimumValue = Number(rawAirConditionerMinimum);
       if (
         rawHigh === "" || rawLow === ""
         || !Number.isFinite(highValue) || !Number.isFinite(lowValue)
         || highValue < -40 || highValue > 60 || lowValue < -40 || lowValue > 60
         || lowValue >= highValue
         || !heatingThresholds.valid()
+        || rawAirConditionerMinimum === ""
+        || !Number.isFinite(airConditionerMinimumValue)
+        || airConditionerMinimumValue < -40 || airConditionerMinimumValue > 60
       ) {
         validationError.textContent = "Проверьте пороги: нижний должен быть строго меньше верхнего.";
         this._activateSection("climate");
@@ -4854,6 +4911,8 @@ class HausmanHubPanel extends HTMLElement {
           central_heating_temperature_off: heatingValues.off,
           heating_lockout_high: highValue,
           heating_lockout_low: lowValue,
+          air_conditioner_minimum_outdoor_temperature:
+            airConditionerMinimumValue,
         },
         "Сохранить привязки сигналов дома и пороги блокировки отопления?",
         "Сигналы дома сохранены.",

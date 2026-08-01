@@ -24,6 +24,9 @@
         },
         "presence_entity_id": {"$ref": "#/$defs/optional_entity_id"},
         "central_heating_entity_id": {"$ref": "#/$defs/optional_entity_id"},
+        "heating_lockout_high": {"type": "number", "minimum": -40, "maximum": 60},
+        "heating_lockout_low": {"type": "number", "minimum": -40, "maximum": 60},
+        "air_conditioner_minimum_outdoor_temperature": {"type": "number", "minimum": -40, "maximum": 60},
         "central_heating_temperature_on": {"type": "number", "minimum": -40, "maximum": 120},
         "central_heating_temperature_off": {"type": "number", "minimum": -40, "maximum": 120}
       }

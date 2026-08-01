@@ -33,7 +33,7 @@ ENERGY_JS = PANEL_JS.with_name("hausman-hub-energy.js")
 WEATHER_SOURCES_JS = PANEL_JS.with_name("hausman-hub-weather-sources.js")
 WEATHER_SOURCES_CSS = PANEL_JS.with_name("hausman-hub-weather-sources.css")
 SETTINGS_CSS = PANEL_JS.with_name("hausman-hub-settings.css")
-MAX_PANEL_JS_BYTES = 270 * 1024
+MAX_PANEL_JS_BYTES = 275 * 1024
 MAX_HOME_SECTIONS_JS_BYTES = 16 * 1024
 MAX_ROOM_SETUP_JS_BYTES = 24 * 1024
 MAX_ROOM_DEVICE_GROUPS_JS_BYTES = 12 * 1024
@@ -181,9 +181,9 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             len(settings_styles.encode("utf-8")), MAX_SETTINGS_CSS_BYTES
         )
         self.assertIn('"/api/hausman_hub/panel/hausman-hub-panel.css"', content)
-        self.assertIn('hausman-hub-settings.css?v=1.51.17', styles)
-        self.assertIn('hausman-hub-control-channel.css?v=1.51.17', styles)
-        self.assertIn('hausman-hub-weather-sources.css?v=1.51.17', styles)
+        self.assertIn('hausman-hub-settings.css?v=1.51.18', styles)
+        self.assertIn('hausman-hub-control-channel.css?v=1.51.18', styles)
+        self.assertIn('hausman-hub-weather-sources.css?v=1.51.18', styles)
         self.assertIn("--hmh-bg:#0B0F14", styles)
         self.assertIn("--hmh-bg:#EEF1F6", styles)
         self.assertIn(".page-header", styles)
@@ -743,7 +743,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.51.17",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.51.18",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },

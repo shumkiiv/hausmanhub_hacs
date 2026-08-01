@@ -382,6 +382,9 @@ def _home_observation(
         heat_load_temperature=heat_load,
         heating_lockout_high=home.heating_lockout_high,
         heating_lockout_low=home.heating_lockout_low,
+        air_conditioner_minimum_outdoor_temperature=(
+            home.air_conditioner_minimum_outdoor_temperature
+        ),
         central_heating_on=_central_heating_state(
             home.central_heating_entity_id,
             states,

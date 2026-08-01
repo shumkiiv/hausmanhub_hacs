@@ -70,6 +70,10 @@ def registry_to_payload(registry: ClimateRegistry) -> dict[str, object]:
         home["heating_lockout_high"] = registry.home.heating_lockout_high
     if registry.home.heating_lockout_low != 16.0:
         home["heating_lockout_low"] = registry.home.heating_lockout_low
+    if registry.home.air_conditioner_minimum_outdoor_temperature != -5.0:
+        home["air_conditioner_minimum_outdoor_temperature"] = (
+            registry.home.air_conditioner_minimum_outdoor_temperature
+        )
     if registry.home.central_heating_temperature_on != 35.0:
         home["central_heating_temperature_on"] = (
             registry.home.central_heating_temperature_on
@@ -129,6 +133,7 @@ def registry_from_payload(payload: object) -> ClimateRegistry:
             "central_heating_entity_id",
             "heating_lockout_high",
             "heating_lockout_low",
+            "air_conditioner_minimum_outdoor_temperature",
             "central_heating_temperature_on",
             "central_heating_temperature_off",
         },
@@ -137,6 +142,7 @@ def registry_from_payload(payload: object) -> ClimateRegistry:
             "outdoor_temperature_entity_ids",
             "heating_lockout_high",
             "heating_lockout_low",
+            "air_conditioner_minimum_outdoor_temperature",
             "central_heating_temperature_on",
             "central_heating_temperature_off",
         },
@@ -176,6 +182,11 @@ def registry_from_payload(payload: object) -> ClimateRegistry:
                     home.get("heating_lockout_low"),
                     16.0,
                     "heating lockout low threshold",
+                ),
+                air_conditioner_minimum_outdoor_temperature=_optional_threshold(
+                    home.get("air_conditioner_minimum_outdoor_temperature"),
+                    -5.0,
+                    "air conditioner minimum outdoor temperature",
                 ),
                 central_heating_temperature_on=_optional_threshold(
                     home.get("central_heating_temperature_on"),

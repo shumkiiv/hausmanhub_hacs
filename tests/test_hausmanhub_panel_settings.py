@@ -2308,6 +2308,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           central_heating_temperature_off: 30,
           heating_lockout_high: 18,
           heating_lockout_low: 16,
+          air_conditioner_minimum_outdoor_temperature: -5,
         };
         if (JSON.stringify(post.payload) !== JSON.stringify(expected)) {
           throw new Error("home payload mismatch: " + JSON.stringify(post.payload));

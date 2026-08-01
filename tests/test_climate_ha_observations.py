@@ -555,6 +555,19 @@ class NativeHaObservationTest(unittest.TestCase):
         self.assertFalse(relaxed.home.weather_heating_lockout)
         self.assertTrue(strict.home.weather_heating_lockout)
 
+    def test_air_conditioner_outdoor_guard_uses_configured_exact_boundary(self) -> None:
+        blocked = self.build(
+            registry=self._weather_registry(air_conditioner_minimum=-7.0),
+            states=self._weather_states("-7.0"),
+        )
+        allowed = self.build(
+            registry=self._weather_registry(air_conditioner_minimum=-7.0),
+            states=self._weather_states("-6.9"),
+        )
+
+        self.assertTrue(blocked.home.air_conditioner_outdoor_lockout)
+        self.assertFalse(allowed.home.air_conditioner_outdoor_lockout)
+
     def test_weather_lockout_ignores_hydraulic_activity(self) -> None:
         observation = self.build(
             registry=self._weather_registry(),
@@ -564,13 +577,22 @@ class NativeHaObservationTest(unittest.TestCase):
 
         self.assertFalse(observation.home.weather_heating_lockout)
 
-    def _weather_registry(self, *, high: float = 18.0, low: float = 16.0) -> ClimateRegistry:
+    def _weather_registry(
+        self,
+        *,
+        high: float = 18.0,
+        low: float = 16.0,
+        air_conditioner_minimum: float = -5.0,
+    ) -> ClimateRegistry:
         return registry(
             (),
             home=ClimateHomeEnvironment(
                 outdoor_temperature_entity_id="sensor.outdoor_temperature",
                 heating_lockout_high=high,
                 heating_lockout_low=low,
+                air_conditioner_minimum_outdoor_temperature=(
+                    air_conditioner_minimum
+                ),
             ),
         )
 

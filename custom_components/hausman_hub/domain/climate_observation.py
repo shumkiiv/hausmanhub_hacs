@@ -156,6 +156,7 @@ class ClimateHomeObservation:
     heat_load_temperature: float | None = None
     heating_lockout_high: float = 18.0
     heating_lockout_low: float = 16.0
+    air_conditioner_minimum_outdoor_temperature: float = -5.0
     central_heating_on: bool | None = None
     central_heating_configured: bool = True
     weather_heating_lockout: bool = False
@@ -188,6 +189,10 @@ class ClimateHomeObservation:
             raise ClimateObservationViolation(
                 "heating lockout low threshold must stay below the high threshold"
             )
+        _lockout_threshold(
+            self.air_conditioner_minimum_outdoor_temperature,
+            "air conditioner minimum outdoor temperature",
+        )
         _optional_bool(self.central_heating_on, "central heating state")
         if type(self.central_heating_configured) is not bool:
             raise ClimateObservationViolation(
@@ -205,6 +210,16 @@ class ClimateHomeObservation:
                 "weather heating lockout must be boolean"
             )
         _require_enum(self.occupancy, ClimateOccupancyMode, "occupancy")
+
+    @property
+    def air_conditioner_outdoor_lockout(self) -> bool:
+        """Return whether outdoor cold requires every air conditioner off."""
+
+        return (
+            self.outdoor_temperature is not None
+            and self.outdoor_temperature
+            <= self.air_conditioner_minimum_outdoor_temperature
+        )
 
 
 @dataclass(frozen=True, slots=True)

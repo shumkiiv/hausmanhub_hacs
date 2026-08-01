@@ -171,6 +171,7 @@ class ClimateHomeEnvironment:
     central_heating_entity_id: str | None = None
     heating_lockout_high: float = 18.0
     heating_lockout_low: float = 16.0
+    air_conditioner_minimum_outdoor_temperature: float = -5.0
     central_heating_temperature_on: float = 35.0
     central_heating_temperature_off: float = 30.0
 
@@ -226,6 +227,10 @@ class ClimateHomeEnvironment:
             raise ClimateModelViolation(
                 "heating lockout low threshold must stay below the high threshold"
             )
+        _lockout_threshold(
+            self.air_conditioner_minimum_outdoor_temperature,
+            "air conditioner minimum outdoor temperature",
+        )
         _temperature_threshold(
             self.central_heating_temperature_on,
             "central heating on temperature threshold",

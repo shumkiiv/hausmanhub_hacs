@@ -94,6 +94,7 @@ HOME_ENVIRONMENT_FIELDS = frozenset(
 OPTIONAL_HOME_ENVIRONMENT_FIELDS = frozenset(
     {
         "outdoor_temperature_entity_ids",
+        "air_conditioner_minimum_outdoor_temperature",
         "central_heating_temperature_on",
         "central_heating_temperature_off",
     }
@@ -265,6 +266,9 @@ def validate_home_environment_update(
     )
     high = _lockout_threshold(payload["heating_lockout_high"])
     low = _lockout_threshold(payload["heating_lockout_low"])
+    air_conditioner_minimum = _lockout_threshold(
+        payload.get("air_conditioner_minimum_outdoor_temperature", -5.0)
+    )
     if low >= high:
         raise ClimateSignalSettingsViolation("invalid_lockout_order")
     heating_temperature_on = _heating_temperature_threshold(
@@ -282,6 +286,10 @@ def validate_home_environment_update(
         "heating_lockout_high": high,
         "heating_lockout_low": low,
     }
+    if "air_conditioner_minimum_outdoor_temperature" in payload:
+        result["air_conditioner_minimum_outdoor_temperature"] = (
+            air_conditioner_minimum
+        )
     if "central_heating_temperature_on" in payload:
         result["central_heating_temperature_on"] = heating_temperature_on
     if "central_heating_temperature_off" in payload:
