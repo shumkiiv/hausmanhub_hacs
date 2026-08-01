@@ -16,6 +16,47 @@
     "archive_prefix": "ARCHIVE /",
     "archive_is_implementable": false
   },
+  "hacs_figma_structure": {
+    "total_top_level_nodes": 48,
+    "nodes_deleted": 0,
+    "pages": [
+      {
+        "id": "267:644",
+        "name": "00 • CANON — Shared",
+        "purpose": "shared_canon",
+        "node_ids": [
+          "247:582",
+          "251:582",
+          "255:582",
+          "257:582",
+          "261:618",
+          "262:644"
+        ]
+      },
+      {
+        "id": "267:645",
+        "name": "10 • CANON — HACS",
+        "purpose": "hacs_canon",
+        "node_ids": [
+          "192:543",
+          "215:547",
+          "220:549",
+          "222:549",
+          "224:549",
+          "226:549",
+          "228:549",
+          "232:549",
+          "237:582"
+        ]
+      },
+      {
+        "id": "0:1",
+        "name": "90 • ARCHIVE — HACS",
+        "purpose": "archive",
+        "top_level_node_count": 33
+      }
+    ]
+  },
   "surfaces": [
     {
       "id": "overview",

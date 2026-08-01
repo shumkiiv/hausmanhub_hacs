@@ -58,6 +58,26 @@ class UiSourceOfTruthAuditTest(unittest.TestCase):
         for item in payload["surfaces"]:
             self.assertNotIn("archive", item["hacs"])
 
+    def test_figma_pages_separate_canon_from_archive_without_deletion(self) -> None:
+        payload = json.loads(AUDIT.read_text(encoding="utf-8"))
+        structure = payload["hacs_figma_structure"]
+        self.assertEqual(48, structure["total_top_level_nodes"])
+        self.assertEqual(0, structure["nodes_deleted"])
+        pages = {page["purpose"]: page for page in structure["pages"]}
+        self.assertEqual(
+            {"shared_canon", "hacs_canon", "archive"},
+            set(pages),
+        )
+        shared = set(pages["shared_canon"]["node_ids"])
+        hacs = set(pages["hacs_canon"]["node_ids"])
+        self.assertTrue(shared)
+        self.assertTrue(hacs)
+        self.assertTrue(shared.isdisjoint(hacs))
+        self.assertEqual(
+            structure["total_top_level_nodes"],
+            len(shared) + len(hacs) + pages["archive"]["top_level_node_count"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,6 @@
 /* Scenario library and editor shared with the HausmanHub tablet contract. */
 
-import { SCENARIO_ICON_GROUPS, scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.51.54";
+import { SCENARIO_ICON_GROUPS, scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.51.55";
 
 const TRIGGER_TYPES = [
   ["manual", "Ручной запуск"], ["time", "По времени"],
