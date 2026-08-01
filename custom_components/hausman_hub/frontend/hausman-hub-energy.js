@@ -261,9 +261,11 @@ function renderEnergyDevices(panel, container, sources, deps) {
     accumulated.appendChild(el("b", null, sourceMetric(source, source.todayKwh !== null && source.todayKwh !== undefined ? "todayKwh" : "totalKwh", "кВт·ч", 2)));
     accumulated.appendChild(el("small", null, source.todayKwh !== null && source.todayKwh !== undefined ? "за сегодня" : "накоплено"));
     row.appendChild(accumulated);
-    const status = el("span", `energy-device-status ${source.available ? "is-online" : "is-offline"}`);
-    status.appendChild(el("strong", null, source.available ? "В сети" : "Нет связи"));
-    status.appendChild(el("small", null, source.available ? "обновляется" : "проверьте устройство"));
+    const isPoweredOff = source.available && source.powered === false;
+    const statusTone = !source.available ? "is-offline" : (isPoweredOff ? "is-powered-off" : "is-online");
+    const status = el("span", `energy-device-status ${statusTone}`);
+    status.appendChild(el("strong", null, !source.available ? "Нет связи" : (isPoweredOff ? "Выключен" : "В сети")));
+    status.appendChild(el("small", null, !source.available ? "проверьте устройство" : (isPoweredOff ? "питание отключено" : "обновляется")));
     row.appendChild(status);
     row.appendChild(el("span", "energy-device-open", "Подробнее"));
     row.appendChild(el("span", "energy-overview-chevron", "›"));

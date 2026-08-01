@@ -463,6 +463,20 @@ def _energy_source_available(
     )
 
 
+def _energy_source_powered(entities: Iterable[DashboardEntity]) -> bool | None:
+    """Return the observed physical switch state without confusing it with reachability."""
+
+    control_entities = tuple(
+        entity
+        for entity in entities
+        if entity.domain in _ENERGY_CONTROL_DOMAINS
+        and entity.state not in _UNAVAILABLE_STATES
+    )
+    if not control_entities:
+        return None
+    return any(entity.state == "on" for entity in control_entities)
+
+
 def _room_climate(entities: Iterable[DashboardEntity]) -> DashboardEntity | None:
     return next((entity for entity in entities if entity.domain == "climate"), None)
 
@@ -826,6 +840,7 @@ def build_dashboard_snapshot(
         electrical = _energy_measurements(members)
         has_energy = _is_energy_source(members, electrical)
         energy_available = _energy_source_available(members, electrical)
+        energy_powered = _energy_source_powered(members)
         device_payloads.append(
             {
                 "id": public_id,
@@ -868,6 +883,7 @@ def build_dashboard_snapshot(
                     "roomId": area.area_id if area is not None else None,
                     "roomName": area.name if area is not None else None,
                     "available": energy_available,
+                    "powered": energy_powered,
                     **electrical,
                 }
             )

@@ -93,6 +93,7 @@
 .energy-device-value > small { overflow:hidden; margin-top:3px; color:var(--hmh-text-dim); font-size:12px; text-overflow:ellipsis; white-space:nowrap; }
 .energy-device-status > strong { font-size:14px; }
 .energy-device-status.is-online > strong { color:#41D17D; }
+.energy-device-status.is-powered-off > strong { color:var(--hmh-text); }
 .energy-device-status.is-offline > strong { color:#F1B84B; }
 .energy-device-status > small { margin-top:3px; color:var(--hmh-text-dim); font-size:11px; }
 .energy-device-open { color:var(--hmh-text-dim); font-size:13px; text-align:center; }

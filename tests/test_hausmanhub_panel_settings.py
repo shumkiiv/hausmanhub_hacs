@@ -754,8 +754,8 @@ class PanelSettingsSectionsTest(unittest.TestCase):
                 "selectedSourceIds": ["device_0123456789abcdef"],
                 "settings": {"displayUnits": "watts", "showVoltage": True, "aggregation": "combined", "useAllDevices": True},
                 "sources": [
-                    {"id": "device_0123456789abcdef", "deviceId": "device_0123456789abcdef", "name": "Чайник", "roomName": "Кухня", "available": True, "currentPowerW": 1850, "currentA": 8.04, "voltageV": 230.1, "totalKwh": 12.4},
-                    {"id": "device_fedcba9876543210", "deviceId": "device_fedcba9876543210", "name": "Торшер", "roomName": "Гостиная", "available": True, "currentPowerW": 0, "currentA": 0, "voltageV": 230.0, "totalKwh": 2.1}
+                    {"id": "device_0123456789abcdef", "deviceId": "device_0123456789abcdef", "name": "Чайник", "roomName": "Кухня", "available": True, "powered": True, "currentPowerW": 1850, "currentA": 8.04, "voltageV": 230.1, "totalKwh": 12.4},
+                    {"id": "device_fedcba9876543210", "deviceId": "device_fedcba9876543210", "name": "Торшер", "roomName": "Гостиная", "available": True, "powered": False, "currentPowerW": 0, "currentA": 0, "voltageV": 230.0, "totalKwh": 2.1}
                 ],
             },
             "rooms": [], "alarms": [],
@@ -773,13 +773,18 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         panel._shell.tabs.energy.fire("click");
         await tick();
         let text = textOf(panel._shell.homeSections.energy);
-        if (!text.includes("Энергия сейчас") || !text.includes("850") || !text.includes("230,1") || !text.includes("Торшер") || !text.includes("Устройства энергии") || !text.includes("Карточка на главной") || text.includes("Единый источник истины")) {
+        if (!text.includes("Энергия сейчас") || !text.includes("850") || !text.includes("230,1") || !text.includes("Торшер") || !text.includes("Выключен") || !text.includes("питание отключено") || !text.includes("Устройства энергии") || !text.includes("Карточка на главной") || text.includes("Единый источник истины")) {
           throw new Error("energy summary is incomplete: " + text);
         }
         const rows = findAll(panel._shell.homeSections.energy, (node) =>
           node.tagName === "BUTTON" && String(node.className).includes("energy-device-card"));
         if (rows.length !== 2 || !findAll(rows[0], (node) => node.tagName === "IMG").length) {
           throw new Error("energy sources must use one tablet row and product image per physical device");
+        }
+        const poweredOffStatus = findAll(rows[1], (node) =>
+          String(node.className).includes("energy-device-status"))[0];
+        if (!poweredOffStatus || !String(poweredOffStatus.className).includes("is-powered-off")) {
+          throw new Error("powered-off energy source must use a neutral status tone");
         }
         const both = findAll(panel._shell.homeSections.energy, (node) =>
           node.tagName === "BUTTON" && node.textContent === "Вт + А")[0];
