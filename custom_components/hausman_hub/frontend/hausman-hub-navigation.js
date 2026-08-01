@@ -167,10 +167,14 @@ export function renderOverviewNavigationSummary(panel, container, metrics, deps)
   heading.appendChild(el("p", "section-intro", "Основные показатели дома"));
   container.appendChild(heading);
   const summary = el("div", "overview-summary");
+  const deviceLabel = metrics.activeDevices == null ? "Устройства настроены" : "Активные устройства";
+  const deviceValue = metrics.activeDevices == null
+    ? `${metrics.deviceCount}`
+    : `${metrics.activeDevices} из ${metrics.deviceCount}`;
   [
     ["thermometer", "Температура", metrics.temperature, "climate"],
     ["water", "Влажность", metrics.humidity, "climate"],
-    ["device", "Активные устройства", `${metrics.activeDevices} из ${metrics.deviceCount}`, "devices"],
+    ["device", deviceLabel, deviceValue, "devices"],
   ].forEach(([iconName, label, value, targetSection]) => {
     const item = el("button", "summary-item summary-link");
     item.type = "button";

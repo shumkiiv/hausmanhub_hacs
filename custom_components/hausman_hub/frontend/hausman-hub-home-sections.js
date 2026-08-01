@@ -54,6 +54,16 @@ function deviceCountWord(count) {
   return "устройств";
 }
 
+function roomCountWord(count) {
+  const value = Math.abs(Number(count) || 0);
+  const tail = value % 100;
+  const last = value % 10;
+  if (tail >= 11 && tail <= 14) return "комнат";
+  if (last === 1) return "комната";
+  if (last >= 2 && last <= 4) return "комнаты";
+  return "комнат";
+}
+
 function average(values) {
   const valid = values.filter((value) => Number.isFinite(Number(value))).map(Number);
   return valid.length ? valid.reduce((sum, value) => sum + value, 0) / valid.length : null;
@@ -221,3 +231,30 @@ export function renderHomeSection(panel, sectionId, container, deps) {
 
 renderHomeSection.homeDevices = homeDevices;
 renderHomeSection.deviceCountWord = deviceCountWord;
+renderHomeSection.roomCountWord = roomCountWord;
+renderHomeSection.overviewMetrics = function overviewMetrics(
+  snapshot, setup, formatTemperature, formatHumidity
+) {
+  const rooms = snapshot && Array.isArray(snapshot.rooms) ? snapshot.rooms : [];
+  const setupRooms = setup && Array.isArray(setup.rooms) ? setup.rooms : [];
+  const summary = setup && setup.summary && typeof setup.summary === "object" ? setup.summary : {};
+  const devices = rooms.flatMap((room) => Array.isArray(room.devices) ? room.devices : []);
+  const runtimeAvailable = rooms.length > 0;
+  const valuesAverage = (values) => {
+    const valid = values.filter((value) => typeof value === "number" && Number.isFinite(value));
+    return valid.length ? valid.reduce((sum, value) => sum + value, 0) / valid.length : null;
+  };
+  const activeDevices = devices.filter((device) => (
+    !["off", "idle", "unavailable", "unknown"].includes(device.state)
+  )).length;
+  const configuredRoomCount = Number(summary.room_count) || setupRooms.length;
+  const configuredDeviceCount = Number(summary.device_count) || 0;
+  return {
+    roomCount: runtimeAvailable ? rooms.length : configuredRoomCount,
+    deviceCount: runtimeAvailable ? devices.length : configuredDeviceCount,
+    activeDevices: runtimeAvailable ? activeDevices : null,
+    runtimeAvailable,
+    temperature: formatTemperature(valuesAverage(rooms.map((room) => room.temperature))),
+    humidity: formatHumidity(valuesAverage(rooms.map((room) => room.humidity))),
+  };
+};

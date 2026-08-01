@@ -1,17 +1,17 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.44";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.44";
-import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.44";
-import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.51.44";
-import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.44";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.44";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.44";
-import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.44";
-import { createKioskButton, createKioskDock, handleKioskPointerUp, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.44";
-import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.44";
-import { AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.51.44";
-import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.51.44";
-import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.51.44";
-import { renderClimateOverview } from "./hausman-hub-climate-overview.js?v=1.51.44";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.45";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.45";
+import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.45";
+import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.51.45";
+import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.45";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.45";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.45";
+import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.45";
+import { createKioskButton, createKioskDock, handleKioskPointerUp, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.45";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.45";
+import { AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.51.45";
+import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.51.45";
+import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.51.45";
+import { renderClimateOverview } from "./hausman-hub-climate-overview.js?v=1.51.45";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css";
@@ -743,9 +743,9 @@ class HausmanHubPanel extends HTMLElement {
       this._activeSection = "overview";
       shell.brandSubtitle.textContent = SECTION_SUBTITLES.overview;
       this._renderHeaderStatus(this._data.readiness);
-      this._renderReadiness(shell.readiness, this._data.readiness, this._data.snapshot);
+      this._renderReadiness(shell.readiness, this._data.readiness, this._data.snapshot, this._settings.setup);
       this._renderOverviewSummary(shell.summary, this._settings.setup, this._data.snapshot);
-      this._renderRooms(shell.rooms, this._data.snapshot);
+      this._renderRooms(shell.rooms, this._data.snapshot, this._settings.setup);
       PANEL_SECTIONS.forEach((section) => {
         shell.sectionNodes[section.id].hidden = section.id !== "overview";
       });
@@ -754,7 +754,7 @@ class HausmanHubPanel extends HTMLElement {
     shell.nav.hidden = false;
     shell.sidebar.hidden = false;
     this._chooseInitialSection();
-    this._renderReadiness(shell.readiness, this._data.readiness, this._data.snapshot);
+    this._renderReadiness(shell.readiness, this._data.readiness, this._data.snapshot, this._settings.setup);
     const snapshot = this._data.snapshot;
     this._renderOverviewSummary(shell.summary, this._settings.setup, snapshot);
     if (!this._dirty.wizard) {
@@ -763,7 +763,7 @@ class HausmanHubPanel extends HTMLElement {
     if (this._activeSection === "climate" && this._activeClimateView === "overview") {
       this._renderHomeSection("climate", shell.climateOverview);
     }
-    this._renderRooms(shell.rooms, snapshot);
+    this._renderRooms(shell.rooms, snapshot, this._settings.setup);
     if (!this._dirty.profiles) this._renderProfiles(shell.profiles, this._settings.setup);
     if (!this._dirty.schedule) this._renderSchedule(shell.schedule, this._settings);
     if (!this._dirty.home) this._renderHome(shell.home, this._settings.home);
@@ -1094,29 +1094,16 @@ class HausmanHubPanel extends HTMLElement {
   _renderOverviewSummary(container, setup, snapshot) {
     container.innerHTML = "";
     if (!setup && !snapshot) return;
-    renderOverviewNavigationSummary(this, container, this._overviewMetrics(snapshot), {
+    renderOverviewNavigationSummary(this, container, this._overviewMetrics(snapshot, setup), {
       el, setAttr, svgIcon, sections: PANEL_SECTIONS,
     });
     renderEnergyOverviewCard(this, container, { el, setAttr, svgIcon });
   }
 
-  _overviewMetrics(snapshot) {
-    const rooms = snapshot && Array.isArray(snapshot.rooms) ? snapshot.rooms : [];
-    const average = (values) => {
-      const valid = values.filter((value) => typeof value === "number" && Number.isFinite(value));
-      return valid.length ? valid.reduce((sum, value) => sum + value, 0) / valid.length : null;
-    };
-    const devices = rooms.flatMap((room) => Array.isArray(room.devices) ? room.devices : []);
-    const activeDevices = devices.filter((device) => (
-      !["off", "idle", "unavailable", "unknown"].includes(device.state)
-    )).length;
-    return {
-      roomCount: rooms.length,
-      deviceCount: devices.length,
-      activeDevices,
-      temperature: this._temp(average(rooms.map((room) => room.temperature))),
-      humidity: this._humidity(average(rooms.map((room) => room.humidity))),
-    };
+  _overviewMetrics(snapshot, setup = null) {
+    return renderHomeSection.overviewMetrics(
+      snapshot, setup, (value) => this._temp(value), (value) => this._humidity(value)
+    );
   }
 
   _markDirty(section, indicator = null) {
@@ -1578,9 +1565,9 @@ class HausmanHubPanel extends HTMLElement {
     return new Intl.NumberFormat("ru-RU").format(Number(value || 0));
   }
 
-  _renderReadiness(container, readiness, snapshot) {
+  _renderReadiness(container, readiness, snapshot, setup = null) {
     container.innerHTML = "";
-    const metrics = this._overviewMetrics(snapshot);
+    const metrics = this._overviewMetrics(snapshot, setup);
     const ready = readiness.status === "ready";
     const card = el("div", "card hero overview-hero");
     const head = el("div", "overview-hero-head");
@@ -1602,11 +1589,17 @@ class HausmanHubPanel extends HTMLElement {
     head.appendChild(el("span", "status-badge overview-mode-status", this._bridgeModeName(readiness.bridge_mode)));
     card.appendChild(head);
     const metricGrid = el("div", "overview-hero-metrics");
+    const deviceMetric = metrics.runtimeAvailable
+      ? [metrics.activeDevices, "Устройств активно"]
+      : [metrics.deviceCount, "Устройств настроено"];
+    const roomMetric = metrics.runtimeAvailable
+      ? [metrics.roomCount, "Комнаты"]
+      : [metrics.roomCount, "Комнат настроено"];
     [
       [metrics.temperature, "Температура"],
       [metrics.humidity, "Влажность"],
-      [metrics.activeDevices, "Устройств активно"],
-      [metrics.roomCount, "Комнаты"],
+      deviceMetric,
+      roomMetric,
     ].forEach(([value, label]) => {
       const metric = el("div", "overview-hero-metric");
       metric.appendChild(el("strong", null, value));
@@ -1614,6 +1607,15 @@ class HausmanHubPanel extends HTMLElement {
       metricGrid.appendChild(metric);
     });
     card.appendChild(metricGrid);
+    if (!metrics.runtimeAvailable && metrics.roomCount > 0) {
+      card.appendChild(el(
+        "div",
+        "empty-state muted",
+        `Конфигурация сохранена: ${metrics.roomCount} ${this._roomCountWord(metrics.roomCount)} · `
+          + `${metrics.deviceCount} ${this._deviceCountWord(metrics.deviceCount)}. `
+          + "Текущие показатели появятся после включения наблюдения или управления."
+      ));
+    }
     if (Array.isArray(readiness.reasons) && readiness.reasons.length) {
       const reasons = el("div", "reasons");
       readiness.reasons.forEach((reason) => {
@@ -1656,7 +1658,7 @@ class HausmanHubPanel extends HTMLElement {
     container.appendChild(card);
   }
 
-  _renderRooms(container, snapshot) {
+  _renderRooms(container, snapshot, setup = null) {
     container.innerHTML = "";
     if (!snapshot) {
       const card = el(
@@ -1714,7 +1716,14 @@ class HausmanHubPanel extends HTMLElement {
       grid.appendChild(card);
     });
     if (!(snapshot.rooms || []).length) {
-      grid.appendChild(el("div", "card empty-state muted", "Комнаты пока не добавлены."));
+      const setupSummary = setup && setup.summary || {};
+      const configuredRoomCount = Number(setupSummary.room_count)
+        || (setup && Array.isArray(setup.rooms) ? setup.rooms.length : 0);
+      const message = configuredRoomCount > 0
+        ? `${configuredRoomCount} ${this._roomCountWord(configuredRoomCount)} настроено. `
+          + "Текущие показатели появятся после включения наблюдения или управления."
+        : "Комнаты пока не добавлены.";
+      grid.appendChild(el("div", "card empty-state muted", message));
     }
     container.appendChild(grid);
   }
@@ -5366,6 +5375,10 @@ class HausmanHubPanel extends HTMLElement {
 
   _deviceCountWord(count) {
     return renderHomeSection.deviceCountWord(count);
+  }
+
+  _roomCountWord(count) {
+    return renderHomeSection.roomCountWord(count);
   }
 
   _renderRoomInventory(container) {

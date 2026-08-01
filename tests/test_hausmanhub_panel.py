@@ -134,6 +134,8 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn("renderEnergySection", energy)
         self.assertIn("renderScenarioSection", scenarios)
         self.assertIn("SCENARIO_ICON_GROUPS", scenario_icons)
+        self.assertIn("renderHomeSection.overviewMetrics", home_sections)
+        self.assertIn("renderHomeSection.roomCountWord", home_sections)
         self.assertGreaterEqual(scenario_icons.count('["'), 80)
         self.assertIn('el("button", "sidebar-intercom")', content)
         self.assertIn("openIntercomFromRail(this)", content)
@@ -257,20 +259,20 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertLessEqual(len(catalog_styles.encode("utf-8")), 8 * 1024)
         self.assertLessEqual(len(energy_styles.encode("utf-8")), 18 * 1024)
         self.assertIn('"/api/hausman_hub/panel/hausman-hub-panel.css"', content)
-        self.assertIn('hausman-hub-settings.css?v=1.51.44', styles)
-        self.assertIn('hausman-hub-switch.css?v=1.51.44', styles)
-        self.assertIn('hausman-hub-notice.css?v=1.51.44', styles)
+        self.assertIn('hausman-hub-settings.css?v=1.51.45', styles)
+        self.assertIn('hausman-hub-switch.css?v=1.51.45', styles)
+        self.assertIn('hausman-hub-notice.css?v=1.51.45', styles)
         self.assertIn(".notice { position:fixed", notice_styles)
         self.assertIn(".notice.is-error", notice_styles)
-        self.assertIn('hausman-hub-device-maintenance.css?v=1.51.44', styles)
-        self.assertIn('hausman-hub-control-channel.css?v=1.51.44', styles)
-        self.assertIn('hausman-hub-weather-sources.css?v=1.51.44', styles)
-        self.assertIn('hausman-hub-wizard-validation.css?v=1.51.44', styles)
-        self.assertIn('hausman-hub-catalog.css?v=1.51.44', styles)
-        self.assertIn('hausman-hub-media-device.css?v=1.51.44', styles)
-        self.assertIn('hausman-hub-scenarios.css?v=1.51.44', styles)
-        self.assertIn('hausman-hub-climate-overview.css?v=1.51.44', styles)
-        self.assertIn('hausman-hub-navigation.css?v=1.51.44', styles)
+        self.assertIn('hausman-hub-device-maintenance.css?v=1.51.45', styles)
+        self.assertIn('hausman-hub-control-channel.css?v=1.51.45', styles)
+        self.assertIn('hausman-hub-weather-sources.css?v=1.51.45', styles)
+        self.assertIn('hausman-hub-wizard-validation.css?v=1.51.45', styles)
+        self.assertIn('hausman-hub-catalog.css?v=1.51.45', styles)
+        self.assertIn('hausman-hub-media-device.css?v=1.51.45', styles)
+        self.assertIn('hausman-hub-scenarios.css?v=1.51.45', styles)
+        self.assertIn('hausman-hub-climate-overview.css?v=1.51.45', styles)
+        self.assertIn('hausman-hub-navigation.css?v=1.51.45', styles)
         self.assertIn(":host(.kiosk-mode) .kiosk-dock", navigation_styles)
         self.assertIn(".banner { position:fixed", navigation_styles)
         self.assertIn(".inventory-device-icon .icon { display:block;", styles)
@@ -370,6 +372,67 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         ):
             with self.subTest(rule=rule):
                 self.assertIn(rule, styles)
+
+    def test_disabled_climate_keeps_configured_counts_visible(self) -> None:
+        content = PANEL_JS.read_text(encoding="utf-8")
+        metrics = HOME_SECTIONS_JS.read_text(encoding="utf-8")
+        navigation = NAVIGATION_JS.read_text(encoding="utf-8")
+        readiness = content.split(
+            "_renderReadiness(container, readiness, snapshot, setup = null)", 1
+        )[1].split("_renderRooms", 1)[0]
+
+        self.assertIn("summary.room_count", metrics)
+        self.assertIn("summary.device_count", metrics)
+        self.assertIn("runtimeAvailable ? rooms.length : configuredRoomCount", metrics)
+        self.assertIn("activeDevices: runtimeAvailable ? activeDevices : null", metrics)
+        self.assertIn('"Устройств настроено"', readiness)
+        self.assertIn('"Комнат настроено"', readiness)
+        self.assertIn("Конфигурация сохранена:", readiness)
+        self.assertIn("после включения наблюдения или управления", readiness)
+        self.assertIn('metrics.activeDevices == null ? "Устройства настроены"', navigation)
+        self.assertIn('const deviceValue = metrics.activeDevices == null', navigation)
+
+        script = f"""
+          const vm = require("vm");
+          const fs = require("fs");
+          vm.runInThisContext(
+            fs.readFileSync({str(HOME_SECTIONS_JS)!r}, "utf8")
+              .replace("export function renderHomeSection", "function renderHomeSection")
+          );
+          const saved = renderHomeSection.overviewMetrics(
+            null,
+            {{ rooms: [], summary: {{ room_count: 4, device_count: 12 }} }},
+            (value) => value == null ? "Нет данных" : `${{value}} °C`,
+            (value) => value == null ? "Нет данных" : `${{value}} %`
+          );
+          if (saved.roomCount !== 4 || saved.deviceCount !== 12) {{
+            throw new Error("saved setup counts were not preserved");
+          }}
+          if (saved.runtimeAvailable || saved.activeDevices !== null) {{
+            throw new Error("missing runtime was presented as live data");
+          }}
+          if (renderHomeSection.roomCountWord(4) !== "комнаты"
+              || renderHomeSection.roomCountWord(12) !== "комнат") {{
+            throw new Error("room count wording is invalid");
+          }}
+          const live = renderHomeSection.overviewMetrics(
+            {{ rooms: [{{ temperature: 24, humidity: 45, devices: [{{ state: "on" }}] }}] }},
+            {{ summary: {{ room_count: 4, device_count: 12 }} }},
+            String,
+            String
+          );
+          if (live.roomCount !== 1 || live.deviceCount !== 1 || live.activeDevices !== 1) {{
+            throw new Error("live runtime did not take precedence");
+          }}
+        """
+        completed = subprocess.run(
+            ("node", "--input-type=commonjs", "--eval", script),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(0, completed.returncode, completed.stderr)
 
     def test_panel_script_uses_only_relative_local_api_paths(self) -> None:
         content = PANEL_JS.read_text(encoding="utf-8")
@@ -917,7 +980,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.51.44",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.51.45",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },
