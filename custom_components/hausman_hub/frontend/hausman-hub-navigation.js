@@ -91,6 +91,28 @@ export function createKioskButton(panel, className, deps) {
   return button;
 }
 
+export function createKioskDock(panel, deps) {
+  const { el, svgIcon, setAttr } = deps;
+  const dock = el("div", "kiosk-dock");
+  dock.hidden = true;
+  setAttr(dock, "aria-label", "Быстрые действия режима киоска");
+  const intercom = el("button", "kiosk-intercom");
+  intercom.type = "button";
+  setAttr(intercom, "aria-label", "Открыть домофон");
+  intercom.appendChild(svgIcon("intercom"));
+  intercom.appendChild(el("span", null, "Домофон"));
+  intercom.addEventListener("click", () => openIntercomFromRail(panel));
+  dock.appendChild(intercom);
+  const exit = el("button", "kiosk-exit");
+  exit.type = "button";
+  setAttr(exit, "aria-label", "Выйти из режима киоска");
+  exit.appendChild(svgIcon("close"));
+  exit.appendChild(el("span", null, "Выйти"));
+  exit.addEventListener("click", () => toggleKioskMode(panel));
+  dock.appendChild(exit);
+  return dock;
+}
+
 export function setKioskState(panel, active) {
   panel._kioskMode = Boolean(active);
   panel.classList?.toggle?.("kiosk-mode", panel._kioskMode);
@@ -100,6 +122,25 @@ export function setKioskState(panel, active) {
     const label = button.querySelector?.(".kiosk-label");
     if (label) label.textContent = panel._kioskMode ? "Выйти из киоска" : "Режим киоска";
   });
+  if (panel._shell?.kioskDock) panel._shell.kioskDock.hidden = !panel._kioskMode;
+}
+
+export function handleKioskPointerUp(panel, event) {
+  if (!panel._kioskMode) return;
+  const target = event && event.target;
+  const interactiveSelector = "button, input, select, textarea, a";
+  const path = event && typeof event.composedPath === "function" ? event.composedPath() : [];
+  const interactive = path.some((node) => (
+    node && typeof node.matches === "function" && node.matches(interactiveSelector)
+  )) || (target && typeof target.closest === "function" && target.closest(interactiveSelector));
+  if (interactive) return;
+  const now = Date.now();
+  if (now - panel._kioskTapAt <= 420) {
+    panel._kioskTapAt = 0;
+    toggleKioskMode(panel);
+    return;
+  }
+  panel._kioskTapAt = now;
 }
 
 export async function toggleKioskMode(panel) {
@@ -109,6 +150,9 @@ export async function toggleKioskMode(panel) {
     }
     setKioskState(panel, false);
     return;
+  }
+  if (panel._activeSection !== "overview" && typeof panel._activateSection === "function") {
+    panel._activateSection("overview");
   }
   setKioskState(panel, true);
   if (typeof panel.requestFullscreen === "function") {

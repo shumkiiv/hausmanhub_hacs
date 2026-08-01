@@ -1204,6 +1204,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         if (categories.length !== 6) throw new Error("climate category count mismatch");
         const conditioner = categories.find((node) => textOf(node).includes("Кондиционеры"));
         conditioner.fire("click");
+        panel._render();
         let sheet = findAll(climate, (node) =>
           String(node.className).split(" ").includes("climate-device-sheet"))[0];
         if (!sheet || !textOf(sheet).includes("Кондиционер гостиная")
@@ -1214,6 +1215,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           String(node.className).split(" ").includes("climate-product-card"));
         if (products.length !== 1) throw new Error("one physical AC rendered more than once");
         products[0].fire("click");
+        panel._render();
         sheet = findAll(climate, (node) =>
           String(node.className).split(" ").includes("climate-device-sheet"))[0];
         if (!findAll(sheet, (node) =>
@@ -1223,6 +1225,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const close = findAll(sheet, (node) =>
           String(node.className).split(" ").includes("climate-sheet-close"))[0];
         close.fire("click");
+        if (panel._climateOverlay !== null) throw new Error("climate overlay state was not cleared");
         const room = findAll(climate, (node) =>
           String(node.className).split(" ").includes("climate-room-card")
           && textOf(node).includes("Гостиная"))[0];

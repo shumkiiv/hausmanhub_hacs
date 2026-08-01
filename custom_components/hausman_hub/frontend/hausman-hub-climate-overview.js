@@ -143,6 +143,12 @@ function productImage(device, deps) {
   return media;
 }
 
+function climateDeviceKey(device) {
+  return String(device && (
+    device.physicalId || device.deviceId || device.id || device.entityId || device.name
+  ) || "");
+}
+
 function renderClimateDeviceList(panel, body, title, devices, deps, onBack) {
   const { el, setAttr, svgIcon } = deps;
   body.innerHTML = "";
@@ -175,9 +181,13 @@ function renderClimateDeviceList(panel, body, title, devices, deps, onBack) {
     const dot = el("span", `climate-product-state ${device.unavailable ? "bad" : (deviceIsActive(device) ? "good" : "neutral")}`);
     card.appendChild(dot);
     card.addEventListener("click", () => {
+      if (panel._climateOverlay) {
+        panel._climateOverlay.selectedKey = climateDeviceKey(device);
+      }
       const selected = panel._deviceInventoryCard(device);
       selected.open = true;
       renderClimateDeviceList(panel, body, device.name || "Устройство", [device], deps, () => {
+        if (panel._climateOverlay) panel._climateOverlay.selectedKey = null;
         renderClimateDeviceList(panel, body, title, devices, deps, onBack);
       });
       const selectedGrid = body.querySelector ? body.querySelector(".climate-sheet-device-grid") : null;
@@ -191,8 +201,15 @@ function renderClimateDeviceList(panel, body, title, devices, deps, onBack) {
   body.appendChild(grid);
 }
 
-function openClimateSheet(panel, container, title, devices, deps) {
+function openClimateSheet(panel, container, title, devices, deps, restoring = false) {
   const { el, setAttr } = deps;
+  if (!restoring) {
+    panel._climateOverlay = {
+      title,
+      deviceKeys: devices.map(climateDeviceKey).filter(Boolean),
+      selectedKey: null,
+    };
+  }
   const existing = container.querySelector && container.querySelector(".climate-device-sheet-backdrop");
   if (existing && existing.remove) existing.remove();
   const backdrop = el("div", "climate-device-sheet-backdrop");
@@ -203,7 +220,10 @@ function openClimateSheet(panel, container, title, devices, deps) {
   const close = el("button", "climate-sheet-close", "×");
   close.type = "button";
   setAttr(close, "aria-label", "Закрыть");
-  const dismiss = () => backdrop.remove && backdrop.remove();
+  const dismiss = () => {
+    panel._climateOverlay = null;
+    if (backdrop.remove) backdrop.remove();
+  };
   close.addEventListener("click", dismiss);
   backdrop.addEventListener("click", (event) => { if (event.target === backdrop) dismiss(); });
   sheet.appendChild(close);
@@ -211,7 +231,23 @@ function openClimateSheet(panel, container, title, devices, deps) {
   sheet.appendChild(body);
   backdrop.appendChild(sheet);
   container.appendChild(backdrop);
-  renderClimateDeviceList(panel, body, title, devices, deps, null);
+  const selectedKey = panel._climateOverlay && panel._climateOverlay.selectedKey;
+  const selected = selectedKey && devices.find((device) => climateDeviceKey(device) === selectedKey);
+  if (!selected) {
+    renderClimateDeviceList(panel, body, title, devices, deps, null);
+    return;
+  }
+  renderClimateDeviceList(panel, body, selected.name || "Устройство", [selected], deps, () => {
+    if (panel._climateOverlay) panel._climateOverlay.selectedKey = null;
+    renderClimateDeviceList(panel, body, title, devices, deps, null);
+  });
+  const selectedGrid = body.querySelector ? body.querySelector(".climate-sheet-device-grid") : null;
+  if (selectedGrid) {
+    selectedGrid.innerHTML = "";
+    const selectedCard = panel._deviceInventoryCard(selected);
+    selectedCard.open = true;
+    selectedGrid.appendChild(selectedCard);
+  }
 }
 
 function renderCategories(panel, container, devices, deps) {
@@ -324,6 +360,11 @@ export function renderClimateOverview(panel, container, deps) {
   page.appendChild(createHero(panel, rooms, devices, deps));
   renderCategories(panel, page, devices, deps);
   renderRooms(panel, page, rooms, devices, deps);
+  if (panel._climateOverlay) {
+    const keys = new Set(panel._climateOverlay.deviceKeys || []);
+    const matches = devices.filter((device) => keys.has(climateDeviceKey(device)));
+    openClimateSheet(panel, page, panel._climateOverlay.title, matches, deps, true);
+  }
   container.appendChild(page);
 }
 

@@ -1,16 +1,17 @@
-@import url("./hausman-hub-settings.css?v=1.51.41");
-@import url("./hausman-hub-switch.css?v=1.51.41");
-@import url("./hausman-hub-notice.css?v=1.51.41");
-@import url("./hausman-hub-device-maintenance.css?v=1.51.41");
-@import url("./hausman-hub-device-bindings.css?v=1.51.41");
-@import url("./hausman-hub-energy.css?v=1.51.41");
-@import url("./hausman-hub-control-channel.css?v=1.51.41");
-@import url("./hausman-hub-weather-sources.css?v=1.51.41");
-@import url("./hausman-hub-wizard-validation.css?v=1.51.41");
-@import url("./hausman-hub-catalog.css?v=1.51.41");
-@import url("./hausman-hub-media-device.css?v=1.51.41");
-@import url("./hausman-hub-scenarios.css?v=1.51.41");
-@import url("./hausman-hub-climate-overview.css?v=1.51.41");
+@import url("./hausman-hub-settings.css?v=1.51.42");
+@import url("./hausman-hub-switch.css?v=1.51.42");
+@import url("./hausman-hub-notice.css?v=1.51.42");
+@import url("./hausman-hub-device-maintenance.css?v=1.51.42");
+@import url("./hausman-hub-device-bindings.css?v=1.51.42");
+@import url("./hausman-hub-energy.css?v=1.51.42");
+@import url("./hausman-hub-control-channel.css?v=1.51.42");
+@import url("./hausman-hub-weather-sources.css?v=1.51.42");
+@import url("./hausman-hub-wizard-validation.css?v=1.51.42");
+@import url("./hausman-hub-catalog.css?v=1.51.42");
+@import url("./hausman-hub-media-device.css?v=1.51.42");
+@import url("./hausman-hub-scenarios.css?v=1.51.42");
+@import url("./hausman-hub-climate-overview.css?v=1.51.42");
+@import url("./hausman-hub-navigation.css?v=1.51.42");
 
 :host { display:block; box-sizing:border-box; width:100%; min-height:100%; overflow-x:hidden;
   --hmh-bg:#0B0F14; --hmh-surface:#12171D; --hmh-raised:#181E26; --hmh-field:#181E26; --hmh-hover:#1F2630;
@@ -99,7 +100,6 @@ section { min-width:0; }
 .section-intro { margin:-7px 0 18px; max-width:760px; color:var(--secondary-text-color,#727272);
   font-size:14px; line-height:1.5; }
 .muted { color:var(--secondary-text-color,#727272); font-size:13px; line-height:1.45; }
-.banner { padding:12px 15px; margin:0 0 16px; border-radius:12px; color:#fff; background:var(--error-color,#db4437); }
 .loading { min-height:72px; padding:20px; border-radius:16px; border:1px solid var(--divider-color,#ddd);
   background:var(--card-background-color,#fff); }
 .cards, .room-card-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:16px; }

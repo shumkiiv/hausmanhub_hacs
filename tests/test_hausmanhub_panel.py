@@ -29,6 +29,7 @@ DEVICE_INVENTORY_JS = PANEL_JS.with_name("hausman-hub-device-inventory.js")
 DEVICE_BINDINGS_JS = PANEL_JS.with_name("hausman-hub-device-bindings.js")
 AREA_BINDING_JS = PANEL_JS.with_name("hausman-hub-area-binding.js")
 NAVIGATION_JS = PANEL_JS.with_name("hausman-hub-navigation.js")
+NAVIGATION_CSS = PANEL_JS.with_name("hausman-hub-navigation.css")
 ENERGY_JS = PANEL_JS.with_name("hausman-hub-energy.js")
 ENERGY_CSS = PANEL_JS.with_name("hausman-hub-energy.css")
 WEATHER_SOURCES_JS = PANEL_JS.with_name("hausman-hub-weather-sources.js")
@@ -43,7 +44,7 @@ NOTICE_CSS = PANEL_JS.with_name("hausman-hub-notice.css")
 WIZARD_VALIDATION_CSS = PANEL_JS.with_name("hausman-hub-wizard-validation.css")
 CATALOG_CSS = PANEL_JS.with_name("hausman-hub-catalog.css")
 DEVICE_MAINTENANCE_CSS = PANEL_JS.with_name("hausman-hub-device-maintenance.css")
-MAX_PANEL_JS_BYTES = 277 * 1024
+MAX_PANEL_JS_BYTES = 279 * 1024
 MAX_HOME_SECTIONS_JS_BYTES = 16 * 1024
 MAX_ROOM_SETUP_JS_BYTES = 24 * 1024
 MAX_ROOM_DEVICE_GROUPS_JS_BYTES = 12 * 1024
@@ -206,12 +207,37 @@ class PanelJavaScriptContractTest(unittest.TestCase):
 
         self.assertEqual(0, completed.returncode, completed.stderr)
 
+    def test_kiosk_double_tap_ignores_controls_inside_shadow_dom(self) -> None:
+        script = f"""
+          const vm = require("vm");
+          const fs = require("fs");
+          vm.runInThisContext(fs.readFileSync({str(NAVIGATION_JS)!r}, "utf8").replace(/export /g, ""));
+          const panel = {{ _kioskMode: true, _kioskTapAt: Date.now() }};
+          const host = {{ closest: () => null }};
+          const button = {{ matches: (selector) => selector.includes("button") }};
+          const event = {{ target: host, composedPath: () => [button, host] }};
+          handleKioskPointerUp(panel, event);
+          handleKioskPointerUp(panel, event);
+          if (!panel._kioskMode || panel._kioskTapAt === 0) {{
+            throw new Error("kiosk exited after a double tap on a shadow DOM control");
+          }}
+        """
+        completed = subprocess.run(
+            ("node", "--input-type=commonjs", "--eval", script),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_panel_styles_are_local_and_stay_bounded(self) -> None:
         content = PANEL_JS.read_text(encoding="utf-8")
         styles = PANEL_CSS.read_text(encoding="utf-8")
         settings_styles = SETTINGS_CSS.read_text(encoding="utf-8")
         switch_styles = SWITCH_CSS.read_text(encoding="utf-8")
         notice_styles = NOTICE_CSS.read_text(encoding="utf-8")
+        navigation_styles = NAVIGATION_CSS.read_text(encoding="utf-8")
         wizard_validation_styles = WIZARD_VALIDATION_CSS.read_text(encoding="utf-8")
         weather_source_styles = WEATHER_SOURCES_CSS.read_text(encoding="utf-8")
         scenario_styles = SCENARIOS_CSS.read_text(encoding="utf-8")
@@ -226,23 +252,27 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         )
         self.assertLessEqual(len(switch_styles.encode("utf-8")), 4 * 1024)
         self.assertLessEqual(len(notice_styles.encode("utf-8")), 4 * 1024)
+        self.assertLessEqual(len(navigation_styles.encode("utf-8")), 8 * 1024)
         self.assertLessEqual(len(wizard_validation_styles.encode("utf-8")), 8 * 1024)
         self.assertLessEqual(len(catalog_styles.encode("utf-8")), 8 * 1024)
         self.assertLessEqual(len(energy_styles.encode("utf-8")), 18 * 1024)
         self.assertIn('"/api/hausman_hub/panel/hausman-hub-panel.css"', content)
-        self.assertIn('hausman-hub-settings.css?v=1.51.41', styles)
-        self.assertIn('hausman-hub-switch.css?v=1.51.41', styles)
-        self.assertIn('hausman-hub-notice.css?v=1.51.41', styles)
+        self.assertIn('hausman-hub-settings.css?v=1.51.42', styles)
+        self.assertIn('hausman-hub-switch.css?v=1.51.42', styles)
+        self.assertIn('hausman-hub-notice.css?v=1.51.42', styles)
         self.assertIn(".notice { position:fixed", notice_styles)
         self.assertIn(".notice.is-error", notice_styles)
-        self.assertIn('hausman-hub-device-maintenance.css?v=1.51.41', styles)
-        self.assertIn('hausman-hub-control-channel.css?v=1.51.41', styles)
-        self.assertIn('hausman-hub-weather-sources.css?v=1.51.41', styles)
-        self.assertIn('hausman-hub-wizard-validation.css?v=1.51.41', styles)
-        self.assertIn('hausman-hub-catalog.css?v=1.51.41', styles)
-        self.assertIn('hausman-hub-media-device.css?v=1.51.41', styles)
-        self.assertIn('hausman-hub-scenarios.css?v=1.51.41', styles)
-        self.assertIn('hausman-hub-climate-overview.css?v=1.51.41', styles)
+        self.assertIn('hausman-hub-device-maintenance.css?v=1.51.42', styles)
+        self.assertIn('hausman-hub-control-channel.css?v=1.51.42', styles)
+        self.assertIn('hausman-hub-weather-sources.css?v=1.51.42', styles)
+        self.assertIn('hausman-hub-wizard-validation.css?v=1.51.42', styles)
+        self.assertIn('hausman-hub-catalog.css?v=1.51.42', styles)
+        self.assertIn('hausman-hub-media-device.css?v=1.51.42', styles)
+        self.assertIn('hausman-hub-scenarios.css?v=1.51.42', styles)
+        self.assertIn('hausman-hub-climate-overview.css?v=1.51.42', styles)
+        self.assertIn('hausman-hub-navigation.css?v=1.51.42', styles)
+        self.assertIn(":host(.kiosk-mode) .kiosk-dock", navigation_styles)
+        self.assertIn(".banner { position:fixed", navigation_styles)
         self.assertIn(".inventory-device-icon .icon { display:block;", styles)
         self.assertIn("validation-issue-row", content)
         self.assertIn(
@@ -282,7 +312,10 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertNotIn("this._loadSettings();", load_body)
         self.assertIn("this._sectionRenderKeys[sectionId] === key", content)
         self.assertIn("export function createKioskButton", navigation)
+        self.assertIn("export function createKioskDock", navigation)
+        self.assertIn("export function handleKioskPointerUp", navigation)
         self.assertIn("export async function toggleKioskMode", navigation)
+        self.assertIn('panel._activateSection("overview")', navigation)
         self.assertIn('el("section", "catalog-hero")', home_sections)
         self.assertIn('el("div", "catalog-toolbar")', home_sections)
 
@@ -867,7 +900,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.51.41",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.51.42",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },

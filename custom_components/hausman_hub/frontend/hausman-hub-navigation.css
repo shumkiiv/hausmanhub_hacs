@@ -1,0 +1,23 @@
+.banner { position:fixed; z-index:101; top:16px; left:50%; width:min(880px,calc(100vw - 32px));
+  min-height:48px; margin:0; padding:12px 18px 12px 44px; border:1px solid color-mix(in srgb,var(--error-color,#E5534B) 58%,var(--hmh-border,#2F3845));
+  border-radius:14px; background:color-mix(in srgb,var(--error-color,#E5534B) 14%,var(--hmh-surface,#12171D));
+  color:var(--hmh-text,#E7ECF3); box-shadow:0 16px 42px rgba(0,0,0,.24); backdrop-filter:blur(18px);
+  transform:translateX(-50%); font-size:14px; font-weight:650; line-height:1.45; }
+.banner::before { content:"!"; position:absolute; left:17px; top:50%; display:grid; place-items:center; width:18px; height:18px;
+  border-radius:50%; background:var(--error-color,#E5534B); color:#fff; transform:translateY(-50%); font-size:12px; font-weight:800; }
+.kiosk-dock { display:none; }
+:host(.kiosk-mode) .kiosk-dock { position:fixed; z-index:90; right:32px; bottom:30px; display:flex; align-items:center; gap:10px;
+  padding:9px; border:1px solid color-mix(in srgb,var(--hmh-border,#2F3845) 78%,transparent); border-radius:20px;
+  background:color-mix(in srgb,var(--hmh-surface,#12171D) 88%,transparent); box-shadow:0 18px 48px rgba(0,0,0,.34); backdrop-filter:blur(22px); }
+.kiosk-dock button { display:inline-flex; align-items:center; justify-content:center; gap:10px; min-height:54px; margin:0; border-radius:14px; box-shadow:none; }
+.kiosk-dock .icon { width:23px; height:23px; }
+.kiosk-intercom { min-width:176px; padding:12px 20px; border:1px solid color-mix(in srgb,var(--hmh-accent,#4F8CFF) 34%,var(--hmh-border,#2F3845));
+  background:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 11%,var(--hmh-raised,#181E26)); color:var(--hmh-text,#E7ECF3); font-size:16px; font-weight:700; }
+.kiosk-exit { min-width:112px; padding:12px 16px; border:1px solid var(--hmh-border,#2F3845); background:transparent;
+  color:var(--hmh-text-dim,#9AA7B4); font-size:14px; font-weight:650; }
+:host(.kiosk-mode) main { padding-bottom:112px; }
+@media (max-width:640px) {
+  .banner { top:10px; width:calc(100vw - 20px); padding:11px 14px 11px 40px; font-size:13px; }
+  :host(.kiosk-mode) .kiosk-dock { right:12px; bottom:12px; left:12px; justify-content:stretch; }
+  .kiosk-dock button { flex:1 1 auto; min-width:0; }
+}
