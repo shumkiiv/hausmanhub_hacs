@@ -1575,6 +1575,7 @@ class ClimateAdminClimateModeView(_ClimateView):
                 generated_at=int(dt_util.now().timestamp() * 1000)
             )
         status["rollout"] = await runtime.async_climate_rollout_status(shadow_window)
+        status["cutover"] = await runtime.async_climate_cutover_status(shadow_window)
         return status
 
     async def get(self, request: Any) -> Any:

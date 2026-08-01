@@ -101,6 +101,7 @@ from .climate_ownership import (
     plan_room_promotion,
 )
 from .climate_rollout import climate_rollout_status
+from .climate_cutover import climate_cutover_status
 from .climate_registry import (
     ClimateRegistryViolation,
     reconcile_climate_registry,
@@ -1747,6 +1748,20 @@ class ClimateRuntime:
 
         async with self._lock:
             return climate_rollout_status(
+                self._registry,
+                self._contours,
+                bridge_mode=self.configuration.climate_bridge_mode,
+                shadow_window=shadow_window,
+            )
+
+    async def async_climate_cutover_status(
+        self,
+        shadow_window: object,
+    ) -> dict[str, object]:
+        """Evaluate whether the retired Node-RED contour can be switched off."""
+
+        async with self._lock:
+            return climate_cutover_status(
                 self._registry,
                 self._contours,
                 bridge_mode=self.configuration.climate_bridge_mode,

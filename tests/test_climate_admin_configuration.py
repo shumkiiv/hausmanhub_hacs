@@ -1333,6 +1333,12 @@ class ClimateAdminConfigurationRoutesTest(unittest.TestCase):
         self.assertFalse(response.payload["contour_configured"])
         self.assertEqual("not_configured", response.payload["rollout"]["phase"])
         self.assertFalse(response.payload["rollout"]["enable_allowed"])
+        self.assertEqual(
+            {"name": "hausman-hub-node-red-cutover", "version": 1},
+            response.payload["cutover"]["contract"],
+        )
+        self.assertFalse(response.payload["cutover"]["node_red_can_be_disabled"])
+        self.assertFalse(response.payload["cutover"]["physical_commands_sent"])
         repost = self._post(
             path,
             self._admin(),
