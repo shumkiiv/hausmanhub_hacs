@@ -36,6 +36,7 @@ SCENARIOS_JS = PANEL_JS.with_name("hausman-hub-scenarios.js")
 WEATHER_SOURCES_CSS = PANEL_JS.with_name("hausman-hub-weather-sources.css")
 SCENARIOS_CSS = PANEL_JS.with_name("hausman-hub-scenarios.css")
 SETTINGS_CSS = PANEL_JS.with_name("hausman-hub-settings.css")
+SWITCH_CSS = PANEL_JS.with_name("hausman-hub-switch.css")
 WIZARD_VALIDATION_CSS = PANEL_JS.with_name("hausman-hub-wizard-validation.css")
 CATALOG_CSS = PANEL_JS.with_name("hausman-hub-catalog.css")
 DEVICE_MAINTENANCE_CSS = PANEL_JS.with_name("hausman-hub-device-maintenance.css")
@@ -193,6 +194,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         content = PANEL_JS.read_text(encoding="utf-8")
         styles = PANEL_CSS.read_text(encoding="utf-8")
         settings_styles = SETTINGS_CSS.read_text(encoding="utf-8")
+        switch_styles = SWITCH_CSS.read_text(encoding="utf-8")
         wizard_validation_styles = WIZARD_VALIDATION_CSS.read_text(encoding="utf-8")
         weather_source_styles = WEATHER_SOURCES_CSS.read_text(encoding="utf-8")
         scenario_styles = SCENARIOS_CSS.read_text(encoding="utf-8")
@@ -204,17 +206,19 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertLessEqual(
             len(settings_styles.encode("utf-8")), MAX_SETTINGS_CSS_BYTES
         )
+        self.assertLessEqual(len(switch_styles.encode("utf-8")), 4 * 1024)
         self.assertLessEqual(len(wizard_validation_styles.encode("utf-8")), 8 * 1024)
         self.assertLessEqual(len(catalog_styles.encode("utf-8")), 8 * 1024)
         self.assertIn('"/api/hausman_hub/panel/hausman-hub-panel.css"', content)
-        self.assertIn('hausman-hub-settings.css?v=1.51.28', styles)
-        self.assertIn('hausman-hub-device-maintenance.css?v=1.51.28', styles)
-        self.assertIn('hausman-hub-control-channel.css?v=1.51.28', styles)
-        self.assertIn('hausman-hub-weather-sources.css?v=1.51.28', styles)
-        self.assertIn('hausman-hub-wizard-validation.css?v=1.51.28', styles)
-        self.assertIn('hausman-hub-catalog.css?v=1.51.28', styles)
-        self.assertIn('hausman-hub-media-device.css?v=1.51.28', styles)
-        self.assertIn('hausman-hub-scenarios.css?v=1.51.28', styles)
+        self.assertIn('hausman-hub-settings.css?v=1.51.29', styles)
+        self.assertIn('hausman-hub-switch.css?v=1.51.29', styles)
+        self.assertIn('hausman-hub-device-maintenance.css?v=1.51.29', styles)
+        self.assertIn('hausman-hub-control-channel.css?v=1.51.29', styles)
+        self.assertIn('hausman-hub-weather-sources.css?v=1.51.29', styles)
+        self.assertIn('hausman-hub-wizard-validation.css?v=1.51.29', styles)
+        self.assertIn('hausman-hub-catalog.css?v=1.51.29', styles)
+        self.assertIn('hausman-hub-media-device.css?v=1.51.29', styles)
+        self.assertIn('hausman-hub-scenarios.css?v=1.51.29', styles)
         self.assertIn(".inventory-device-icon .icon { display:block;", styles)
         self.assertIn("validation-issue-row", content)
         self.assertIn(
@@ -820,7 +824,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.51.28",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.51.29",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },

@@ -27,6 +27,7 @@ WEATHER_SOURCES_JS = PANEL_JS.with_name("hausman-hub-weather-sources.js")
 MEDIA_DEVICE_JS = PANEL_JS.with_name("hausman-hub-media-device.js")
 SCENARIOS_JS = PANEL_JS.with_name("hausman-hub-scenarios.js")
 SETTINGS_CSS = PANEL_JS.with_name("hausman-hub-settings.css")
+SWITCH_CSS = PANEL_JS.with_name("hausman-hub-switch.css")
 DEVICE_BINDINGS_CSS = PANEL_JS.with_name("hausman-hub-device-bindings.css")
 
 PANEL_PAYLOAD = {
@@ -1509,6 +1510,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         css = (
             PANEL_CSS.read_text(encoding="utf-8")
             + SETTINGS_CSS.read_text(encoding="utf-8")
+            + SWITCH_CSS.read_text(encoding="utf-8")
         )
         for tablet_rule in (
             ".settings-subnav",
@@ -1518,8 +1520,11 @@ class PanelSettingsSectionsTest(unittest.TestCase):
             ".settings-page-actions { position:sticky",
             ".room-setup-nav",
             "backdrop-filter:blur(18px)",
+            ".settings-switch-track",
+            ".settings-switch.is-on .settings-switch-knob",
         ):
             self.assertIn(tablet_rule, css)
+        self.assertNotIn("input.settings-toggle", css)
         payloads = dict(GET_PATHS)
         payloads["hausman_hub/v1/admin/connection-settings"] = {
             "connection_mode": "center",
@@ -1601,14 +1606,17 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         findAll(screen, (node) => node.tagName === "BUTTON"
           && node.textContent === "Интерфейс")[0].fire("click");
         screen = panel._shell.settings;
-        const toggles = findAll(screen, (node) => String(node.className).split(" ").includes("settings-toggle"));
+        const toggles = findAll(screen, (node) => String(node.className).split(" ").includes("settings-switch"));
         if (toggles.length !== 3 || !textOf(screen).includes("Тема панели")) {
           throw new Error("interface settings page mismatch");
         }
+        if (toggles.some((node) => node.tagName !== "BUTTON" || node.role !== "switch"
+          || !["true", "false"].includes(node["aria-checked"]))) {
+          throw new Error("interface preference is not an accessible custom switch");
+        }
         const motionToggle = findAll(screen, (node) =>
-          String(node.className).split(" ").includes("settings-toggle"))[1];
-        motionToggle.checked = true;
-        motionToggle.fire("change");
+          String(node.className).split(" ").includes("settings-switch"))[1];
+        motionToggle.fire("click");
         if (panel._settingsPrefs.reduced_motion !== true) {
           throw new Error("reduced motion preference did not apply");
         }

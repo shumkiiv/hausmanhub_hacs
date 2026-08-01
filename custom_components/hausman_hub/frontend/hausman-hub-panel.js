@@ -1,16 +1,16 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.28";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.28";
-import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.28";
-import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.51.28";
-import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.28";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.28";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.28";
-import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.28";
-import { createKioskButton, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.28";
-import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.28";
-import { AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.51.28";
-import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.51.28";
-import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.51.28";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.29";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.29";
+import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.29";
+import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.51.29";
+import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.29";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.29";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.29";
+import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.29";
+import { createKioskButton, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.29";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.29";
+import { AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.51.29";
+import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.51.29";
+import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.51.29";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css";
@@ -5850,16 +5850,23 @@ class HausmanHubPanel extends HTMLElement {
         description: "Оставить короткие подсказки рядом с настройками, которые влияют на автоматику.",
       },
     ].forEach((preference) => {
-      const row = el("label", "settings-toggle-row");
+      const row = el("div", "settings-toggle-row");
       const copy = el("span", "settings-toggle-copy");
       copy.appendChild(el("strong", null, preference.title));
       copy.appendChild(el("small", null, preference.description));
       row.appendChild(copy);
-      const toggle = el("input", "settings-toggle");
-      toggle.type = "checkbox";
-      toggle.checked = this._settingsPrefs[preference.key] === true;
-      toggle.addEventListener("change", () => {
-        this._settingsPrefs[preference.key] = toggle.checked;
+      const enabled = this._settingsPrefs[preference.key] === true;
+      const toggle = el("button", `settings-switch${enabled ? " is-on" : ""}`);
+      toggle.type = "button";
+      setAttr(toggle, "role", "switch");
+      setAttr(toggle, "aria-checked", enabled ? "true" : "false");
+      setAttr(toggle, "aria-label", preference.title);
+      toggle.appendChild(el("span", "settings-switch-status", enabled ? "Включено" : "Выключено"));
+      const track = el("span", "settings-switch-track");
+      track.appendChild(el("span", "settings-switch-knob"));
+      toggle.appendChild(track);
+      toggle.addEventListener("click", () => {
+        this._settingsPrefs[preference.key] = !enabled;
         this._persistUserPreferences();
         this._applyLocalPreferences();
         this._render();
