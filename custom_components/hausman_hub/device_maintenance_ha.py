@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import importlib
+import hashlib
 import inspect
+import json
+import time
 from typing import TYPE_CHECKING, Any
 
 from .application.dashboard_snapshot import stable_public_id
@@ -29,6 +32,22 @@ _ENTITY_ONLY_DOMAINS = frozenset(
         "vacuum",
     }
 )
+_USAGE_SOURCES = (
+    "hausmanhub_climate",
+    "hausmanhub_energy",
+    "hausmanhub_scenarios",
+    "ha_automations",
+    "ha_groups",
+    "ha_scenes",
+    "ha_scripts",
+)
+_RELATED_KIND = {
+    "automation": "ha_automation",
+    "group": "ha_group",
+    "person": "external_unknown",
+    "scene": "ha_scene",
+    "script": "ha_script",
+}
 
 
 class DeviceMaintenanceViolation(ValueError):
@@ -135,9 +154,8 @@ async def _hausmanhub_uses(
     for title in titles:
         uses.append(
             {
-                "kind": "scenario",
-                "title": title,
-                "detail": "Сценарий HausmanHub обращается к этому устройству.",
+                "kind": "hausmanhub_scenario",
+                "name": title,
             }
         )
 
@@ -145,9 +163,8 @@ async def _hausmanhub_uses(
     if any(entity_id in climate_text for entity_id in entity_ids):  # type: ignore[operator]
         uses.append(
             {
-                "kind": "climate",
-                "title": "Климатический контур",
-                "detail": "Одна или несколько сущностей выбраны в настройке климата.",
+                "kind": "hausmanhub_climate",
+                "name": "Климатический контур",
             }
         )
 
@@ -158,9 +175,8 @@ async def _hausmanhub_uses(
     if public_device_id in context["energy_selected"]:  # type: ignore[operator]
         uses.append(
             {
-                "kind": "energy",
-                "title": "Карточка энергии",
-                "detail": "Устройство выбрано источником данных энергопотребления.",
+                "kind": "hausmanhub_energy",
+                "name": "Карточка энергии",
             }
         )
     return uses
@@ -200,12 +216,104 @@ async def _usage_context(hass: HomeAssistant) -> dict[str, object]:
         selected = set(preferences.energy["settings"]["selectedDeviceIds"])
     except (AttributeError, KeyError, TypeError):
         selected = set()
+    related_factory: object | None = None
+    related_item_type: object | None = None
+    related_sources: object | None = None
+    related_warning: str | None = None
+    try:
+        search = importlib.import_module("homeassistant.components.search")
+        entity_helpers = importlib.import_module("homeassistant.helpers.entity")
+        related_factory = getattr(search, "Searcher")
+        related_item_type = getattr(search, "ItemType")
+        related_sources = getattr(entity_helpers, "entity_sources")(hass)
+    except (AttributeError, ModuleNotFoundError, RuntimeError):
+        related_warning = "Индекс зависимостей Home Assistant недоступен. Удаление заблокировано."
     return {
         "entity_targets": entity_targets,
         "scenario_titles": scenario_titles,
         "climate_text": climate_text,
         "energy_selected": selected,
+        "related_factory": related_factory,
+        "related_item_type": related_item_type,
+        "related_sources": related_sources,
+        "related_warning": related_warning,
     }
+
+
+def _related_name(hass: HomeAssistant, item_id: str) -> str:
+    state = getattr(getattr(hass, "states", None), "get", lambda _value: None)(
+        item_id
+    )
+    attributes = getattr(state, "attributes", {}) if state is not None else {}
+    return str(attributes.get("friendly_name") or item_id)
+
+
+def _home_assistant_uses(
+    hass: HomeAssistant,
+    context: dict[str, object],
+    item_type: str,
+    item_id: str,
+) -> tuple[list[dict[str, str]], str | None]:
+    factory = context.get("related_factory")
+    enum = context.get("related_item_type")
+    if not callable(factory) or enum is None:
+        return [], str(context.get("related_warning") or "Индекс зависимостей недоступен.")
+    try:
+        searcher = factory(hass, context.get("related_sources"))
+        selected_type = getattr(enum, item_type.upper())
+        related = searcher.async_search(selected_type, item_id)
+    except Exception:
+        return [], "Не удалось проверить все зависимости Home Assistant. Удаление заблокировано."
+    uses: list[dict[str, str]] = []
+    for raw_kind, values in related.items():
+        kind = _RELATED_KIND.get(str(raw_kind))
+        if kind is None:
+            continue
+        for value in sorted(values, key=str.casefold):
+            uses.append({"kind": kind, "name": _related_name(hass, str(value))})
+    return uses, None
+
+
+def _unique_uses(values: list[dict[str, str]]) -> list[dict[str, str]]:
+    unique = {(item["kind"], item["name"]): item for item in values}
+    return [unique[key] for key in sorted(unique, key=lambda item: (item[0], item[1].casefold()))]
+
+
+def _record_status(hass: HomeAssistant, entries: tuple[object, ...]) -> str:
+    states = []
+    state_get = getattr(getattr(hass, "states", None), "get", None)
+    if callable(state_get):
+        for entry in entries:
+            state = state_get(str(getattr(entry, "entity_id", "")))
+            if state is not None:
+                states.append(str(getattr(state, "state", "unknown")))
+    if not states:
+        return "unknown"
+    return "available" if any(state not in {"unknown", "unavailable"} for state in states) else "unavailable"
+
+
+def _snapshot_revision(payload: dict[str, object]) -> str:
+    safety = {
+        "usageIndex": payload["usageIndex"],
+        "areas": payload["areas"],
+        "devices": [
+            {
+                key: item.get(key)
+                for key in (
+                    "id",
+                    "name",
+                    "areaId",
+                    "entities",
+                    "uses",
+                    "identifySupported",
+                    "deleteEligible",
+                )
+            }
+            for item in payload["devices"]  # type: ignore[union-attr]
+        ],
+    }
+    encoded = json.dumps(safety, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 class HomeAssistantDeviceMaintenanceService:
@@ -296,7 +404,8 @@ class HomeAssistantDeviceMaintenanceService:
             ),
             key=lambda item: item["name"].casefold(),
         )
-        devices: dict[str, dict[str, object]] = {}
+        devices: list[dict[str, object]] = []
+        warnings: set[str] = set()
         for device in _values(device_registry, "devices"):
             raw_id = getattr(device, "id", None)
             if not isinstance(raw_id, str) or not raw_id:
@@ -311,14 +420,25 @@ class HomeAssistantDeviceMaintenanceService:
             uses = await _hausmanhub_uses(
                 self._hass, entity_ids, raw_id, usage_context
             )
+            related, warning = _home_assistant_uses(
+                self._hass, usage_context, "device", raw_id
+            )
+            uses = _unique_uses([*uses, *related])
+            if warning:
+                warnings.add(warning)
             config_entries = tuple(getattr(device, "config_entries", ()) or ())
-            devices[inventory_device_id(raw_id)] = {
-                "roomAreaId": getattr(device, "area_id", None),
+            blockers = [item["name"] for item in uses[:64]]
+            if warning:
+                blockers = [*blockers[:63], warning]
+            devices.append({
+                "id": inventory_device_id(raw_id),
+                "areaId": getattr(device, "area_id", None),
                 "name": str(
                     getattr(device, "name_by_user", None)
                     or getattr(device, "name", None)
                     or "Устройство"
                 ),
+                "status": _record_status(self._hass, entries),
                 "haUrl": f"/config/devices/device/{raw_id}",
                 "entityCount": len(entries),
                 "entities": [
@@ -334,9 +454,10 @@ class HomeAssistantDeviceMaintenanceService:
                 "used": bool(uses),
                 "identifySupported": identify is not None,
                 "identifyLabel": _entry_name(identify) if identify is not None else None,
-                "deleteBlocked": bool(uses),
-                "deleteBlockers": [use["title"] for use in uses],
-            }
+                "deleteBlocked": bool(uses) or bool(warning),
+                "deleteEligible": not uses and not warning,
+                "deleteBlockers": blockers,
+            })
         for entity in _values(entity_registry, "entities"):
             entity_id = getattr(entity, "entity_id", None)
             if (
@@ -349,10 +470,20 @@ class HomeAssistantDeviceMaintenanceService:
             uses = await _hausmanhub_uses(
                 self._hass, {entity_id}, "", usage_context
             )
-            devices[inventory_entity_id(entity_id)] = {
-                "kind": "entity_only",
-                "roomAreaId": getattr(entity, "area_id", None),
+            related, warning = _home_assistant_uses(
+                self._hass, usage_context, "entity", entity_id
+            )
+            uses = _unique_uses([*uses, *related])
+            if warning:
+                warnings.add(warning)
+            blockers = [item["name"] for item in uses[:64]]
+            if warning:
+                blockers = [*blockers[:63], warning]
+            devices.append({
+                "id": inventory_entity_id(entity_id),
+                "areaId": getattr(entity, "area_id", None),
                 "name": _entry_name(entity),
+                "status": _record_status(self._hass, (entity,)),
                 "haUrl": f"/config/entities/entity/{entity_id}",
                 "entityCount": 1,
                 "entities": [
@@ -363,19 +494,98 @@ class HomeAssistantDeviceMaintenanceService:
                 "used": bool(uses),
                 "identifySupported": False,
                 "identifyLabel": None,
-                "deleteBlocked": bool(uses),
-                "deleteBlockers": [use["title"] for use in uses],
-            }
-        return {"areas": areas, "devices": devices}
+                "deleteBlocked": bool(uses) or bool(warning),
+                "deleteEligible": not uses and not warning,
+                "deleteBlockers": blockers,
+            })
+        if warnings:
+            warning = sorted(warnings, key=str.casefold)[0]
+            for item in devices:
+                item["deleteBlocked"] = True
+                item["deleteEligible"] = False
+                blockers = item["deleteBlockers"]
+                if warning not in blockers:  # type: ignore[operator]
+                    if len(blockers) >= 64:  # type: ignore[arg-type]
+                        blockers[-1] = warning  # type: ignore[index]
+                    else:
+                        blockers.append(warning)  # type: ignore[union-attr]
+        devices.sort(key=lambda item: (str(item["name"]).casefold(), str(item["id"])))
+        payload: dict[str, object] = {
+            "contract": {
+                "name": "hausman-hub-device-maintenance-snapshot",
+                "version": 1,
+            },
+            "snapshotRevision": "0" * 64,
+            "usageIndex": {
+                "complete": not warnings,
+                "sources": list(_USAGE_SOURCES),
+                "warnings": sorted(warnings, key=str.casefold),
+            },
+            "areas": areas,
+            "devices": devices,
+            "physicalCommandsSent": False,
+        }
+        payload["snapshotRevision"] = _snapshot_revision(payload)
+        return payload
+
+    async def _require_revision(self, payload: dict[str, object]) -> dict[str, object]:
+        expected = payload.get("expectedRevision")
+        snapshot = await self.async_snapshot()
+        if not isinstance(expected, str) or expected != snapshot["snapshotRevision"]:
+            raise DeviceMaintenanceViolation(
+                "device inventory changed; refresh it and repeat the action",
+                code="snapshot_changed",
+            )
+        return snapshot
+
+    async def _receipt(
+        self,
+        *,
+        action: str,
+        device_id: str,
+        result: str,
+        physical_commands_sent: bool,
+        confirmed: bool,
+        read_back_attempted: bool,
+        read_back_matched: bool,
+        message: str,
+    ) -> dict[str, object]:
+        snapshot = await self.async_snapshot()
+        return {
+            "contract": {
+                "name": "hausman-hub-device-maintenance-receipt",
+                "version": 1,
+            },
+            "accepted": True,
+            "confirmed": confirmed,
+            "status": "confirmed" if confirmed else "accepted",
+            "result": result,
+            "action": action,
+            "deviceId": device_id,
+            "snapshotRevision": snapshot["snapshotRevision"],
+            "message": message,
+            "physicalCommandsSent": physical_commands_sent,
+            "readBack": {
+                "attempted": read_back_attempted,
+                "matched": read_back_matched,
+                "observedAt": int(time.time() * 1000) if read_back_attempted else None,
+            },
+        }
 
     async def async_update(self, payload: dict[str, object]) -> dict[str, object]:
+        await self._require_revision(payload)
         _area_registry, device_registry, entity_registry = self._registries()
         kind, record = self._record(
             device_registry, entity_registry, payload.get("deviceId")
         )
-        name = payload.get("name")
-        area_id = payload.get("areaId")
-        if not isinstance(name, str) or not name.strip() or len(name.strip()) > 128:
+        changes = payload.get("changes")
+        if not isinstance(changes, dict) or not changes:
+            raise DeviceMaintenanceViolation("device changes are required")
+        name = changes.get("name")
+        area_id = changes.get("areaId")
+        if name is not None and (
+            not isinstance(name, str) or not name.strip() or len(name.strip()) > 255
+        ):
             raise DeviceMaintenanceViolation("device name is invalid")
         if area_id is not None and (not isinstance(area_id, str) or len(area_id) > 128):
             raise DeviceMaintenanceViolation("area id is invalid")
@@ -390,21 +600,61 @@ class HomeAssistantDeviceMaintenanceService:
                 raise DeviceMaintenanceViolation(
                     "entity update is unavailable", code="registry_unavailable"
                 )
-            update_entity(record.entity_id, name=name.strip(), area_id=area_id)
+            update_entity(
+                record.entity_id,
+                **({"name": name.strip()} if isinstance(name, str) else {}),
+                **({"area_id": area_id} if "areaId" in changes else {}),
+            )
         else:
             update = getattr(device_registry, "async_update_device", None)
             if not callable(update):
                 raise DeviceMaintenanceViolation(
                     "device update is unavailable", code="registry_unavailable"
                 )
-            update(record.id, name_by_user=name.strip(), area_id=area_id)
-            if callable(update_entity):
+            update(
+                record.id,
+                **({"name_by_user": name.strip()} if isinstance(name, str) else {}),
+                **({"area_id": area_id} if "areaId" in changes else {}),
+            )
+            if callable(update_entity) and "areaId" in changes:
                 for entity in _entity_entries(entity_registry, record.id):
                     if getattr(entity, "area_id", None) is not None:
                         update_entity(entity.entity_id, area_id=None)
-        return {"status": "saved", "deviceId": payload["deviceId"]}
+        device_id = str(payload["deviceId"])
+        _read_kind, read_record = self._record(
+            device_registry, entity_registry, device_id
+        )
+        observed_name = (
+            getattr(read_record, "name", None)
+            if kind == "entity_only"
+            else getattr(read_record, "name_by_user", None)
+        )
+        if (
+            isinstance(name, str) and observed_name != name.strip()
+        ) or (
+            "areaId" in changes and getattr(read_record, "area_id", None) != area_id
+        ):
+            raise DeviceMaintenanceViolation(
+                "registry update was not confirmed by read-back",
+                code="registry_unavailable",
+            )
+        return await self._receipt(
+            action="update",
+            device_id=device_id,
+            result="updated",
+            physical_commands_sent=False,
+            confirmed=True,
+            read_back_attempted=True,
+            read_back_matched=True,
+            message="Название и комната устройства сохранены в Home Assistant.",
+        )
 
     async def async_identify(self, payload: dict[str, object]) -> dict[str, object]:
+        await self._require_revision(payload)
+        if payload.get("confirmed") is not True:
+            raise DeviceMaintenanceViolation(
+                "explicit confirmation is required", code="confirmation_required"
+            )
         _area_registry, device_registry, entity_registry = self._registries()
         device = self._device(device_registry, payload.get("deviceId"))
         identify = _identify_entity(_entity_entries(entity_registry, device.id))
@@ -416,31 +666,33 @@ class HomeAssistantDeviceMaintenanceService:
         await HomeAssistantDeviceIdentifier(self._hass).async_identify(
             identify.entity_id
         )
-        return {"status": "command_sent", "deviceId": payload["deviceId"]}
+        return await self._receipt(
+            action="identify",
+            device_id=str(payload["deviceId"]),
+            result="identify_requested",
+            physical_commands_sent=True,
+            confirmed=False,
+            read_back_attempted=False,
+            read_back_matched=False,
+            message="Команда идентификации отправлена; устройство не поддерживает read-back.",
+        )
 
     async def async_delete(self, payload: dict[str, object]) -> dict[str, object]:
+        snapshot = await self._require_revision(payload)
         _area_registry, device_registry, entity_registry = self._registries()
         kind, record = self._record(
             device_registry, entity_registry, payload.get("deviceId")
         )
         if payload.get("confirmed") is not True:
             raise DeviceMaintenanceViolation("explicit confirmation is required", code="confirmation_required")
-        entries = (
-            (record,)
-            if kind == "entity_only"
-            else _entity_entries(entity_registry, record.id)
+        device_id = str(payload["deviceId"])
+        item = next(
+            (value for value in snapshot["devices"] if value["id"] == device_id),  # type: ignore[union-attr]
+            None,
         )
-        entity_ids = {
-            str(entry.entity_id)
-            for entry in entries
-            if isinstance(getattr(entry, "entity_id", None), str)
-        }
-        uses = await _hausmanhub_uses(
-            self._hass, entity_ids, "" if kind == "entity_only" else record.id
-        )
-        if uses:
+        if not item or item.get("deleteEligible") is not True:
             raise DeviceMaintenanceViolation(
-                "device is still used by HausmanHub",
+                "device is referenced or the usage index is incomplete",
                 code="device_in_use",
             )
         remove = (
@@ -453,4 +705,23 @@ class HomeAssistantDeviceMaintenanceService:
         result = remove(record.entity_id if kind == "entity_only" else record.id)
         if inspect.isawaitable(result):
             await result
-        return {"status": "deleted", "deviceId": payload["deviceId"]}
+        try:
+            self._record(device_registry, entity_registry, device_id)
+        except DeviceMaintenanceViolation as error:
+            if error.code != "not_found":
+                raise
+        else:
+            raise DeviceMaintenanceViolation(
+                "device removal was not confirmed by the registry",
+                code="registry_unavailable",
+            )
+        return await self._receipt(
+            action="delete",
+            device_id=device_id,
+            result="deleted",
+            physical_commands_sent=False,
+            confirmed=True,
+            read_back_attempted=True,
+            read_back_matched=True,
+            message="Запись удалена из реестра Home Assistant.",
+        )

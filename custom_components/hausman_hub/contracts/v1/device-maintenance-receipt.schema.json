@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hausmanhub/contracts/v1/device-maintenance-receipt.schema.json",
+  "title": "HausmanHub local device maintenance receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "accepted",
+    "confirmed",
+    "status",
+    "result",
+    "action",
+    "deviceId",
+    "snapshotRevision",
+    "message",
+    "physicalCommandsSent",
+    "readBack"
+  ],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-device-maintenance-receipt"},
+        "version": {"const": 1}
+      }
+    },
+    "accepted": {"type": "boolean"},
+    "confirmed": {"type": "boolean"},
+    "status": {"enum": ["accepted", "confirmed"]},
+    "result": {"enum": ["updated", "identify_requested", "deleted"]},
+    "action": {"enum": ["update", "identify", "delete"]},
+    "deviceId": {"type": "string", "minLength": 1, "maxLength": 128},
+    "snapshotRevision": {"type": "string", "pattern": "^[a-f0-9]{16,64}$"},
+    "message": {"type": "string", "minLength": 1, "maxLength": 500},
+    "physicalCommandsSent": {"type": "boolean"},
+    "readBack": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attempted", "matched", "observedAt"],
+      "properties": {
+        "attempted": {"type": "boolean"},
+        "matched": {"type": "boolean"},
+        "observedAt": {"type": ["integer", "null"], "minimum": 0}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"action": {"const": "update"}}},
+      "then": {
+        "properties": {
+          "accepted": {"const": true},
+          "confirmed": {"const": true},
+          "status": {"const": "confirmed"},
+          "result": {"const": "updated"},
+          "physicalCommandsSent": {"const": false},
+          "readBack": {
+            "properties": {"attempted": {"const": true}, "matched": {"const": true}}
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"action": {"const": "identify"}}},
+      "then": {
+        "properties": {
+          "accepted": {"const": true},
+          "confirmed": {"const": false},
+          "status": {"const": "accepted"},
+          "result": {"const": "identify_requested"},
+          "physicalCommandsSent": {"const": true},
+          "readBack": {
+            "properties": {"attempted": {"const": false}, "matched": {"const": false}, "observedAt": {"const": null}}
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"action": {"const": "delete"}}},
+      "then": {
+        "properties": {
+          "accepted": {"const": true},
+          "confirmed": {"const": true},
+          "status": {"const": "confirmed"},
+          "result": {"const": "deleted"},
+          "physicalCommandsSent": {"const": false},
+          "readBack": {
+            "properties": {"attempted": {"const": true}, "matched": {"const": true}}
+          }
+        }
+      }
+    }
+  ]
+}

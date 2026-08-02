@@ -984,6 +984,7 @@ class ClimateAdminDeviceMaintenanceView(_ClimateView):
             status = {
                 "not_found": HTTPStatus.NOT_FOUND,
                 "device_in_use": HTTPStatus.CONFLICT,
+                "snapshot_changed": HTTPStatus.CONFLICT,
                 "confirmation_required": HTTPStatus.CONFLICT,
                 "not_supported": HTTPStatus.UNPROCESSABLE_ENTITY,
                 "registry_unavailable": HTTPStatus.SERVICE_UNAVAILABLE,

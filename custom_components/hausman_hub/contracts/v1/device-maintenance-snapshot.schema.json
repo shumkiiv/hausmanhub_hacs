@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hausmanhub/contracts/v1/device-maintenance-snapshot.schema.json",
+  "title": "HausmanHub local device maintenance snapshot v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "snapshotRevision", "usageIndex", "areas", "devices", "physicalCommandsSent"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-device-maintenance-snapshot"},
+        "version": {"const": 1}
+      }
+    },
+    "snapshotRevision": {"type": "string", "pattern": "^[a-f0-9]{16,64}$"},
+    "usageIndex": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["complete", "sources", "warnings"],
+      "properties": {
+        "complete": {"type": "boolean"},
+        "sources": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 16,
+          "items": {
+            "enum": [
+              "hausmanhub_climate",
+              "hausmanhub_energy",
+              "hausmanhub_scenarios",
+              "ha_automations",
+              "ha_dashboards",
+              "ha_groups",
+              "ha_scenes",
+              "ha_scripts"
+            ]
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {"type": "string", "minLength": 1, "maxLength": 240}
+        }
+      }
+    },
+    "areas": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1, "maxLength": 128},
+          "name": {"type": "string", "minLength": 1, "maxLength": 128}
+        }
+      }
+    },
+    "devices": {
+      "type": "array",
+      "maxItems": 512,
+      "items": {"$ref": "#/$defs/device"}
+    },
+    "physicalCommandsSent": {"const": false}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "usageIndex": {"properties": {"complete": {"const": false}}}
+        }
+      },
+      "then": {
+        "properties": {
+          "devices": {
+            "items": {
+              "properties": {
+                "deleteBlocked": {"const": true},
+                "deleteEligible": {"const": false}
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "entity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "disabled"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1, "maxLength": 255},
+        "name": {"type": "string", "minLength": 1, "maxLength": 255},
+        "disabled": {"type": "boolean"}
+      }
+    },
+    "use": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "name"],
+      "properties": {
+        "kind": {
+          "enum": [
+            "hausmanhub_climate",
+            "hausmanhub_energy",
+            "hausmanhub_scenario",
+            "ha_automation",
+            "ha_dashboard",
+            "ha_group",
+            "ha_scene",
+            "ha_script",
+            "external_unknown"
+          ]
+        },
+        "name": {"type": "string", "minLength": 1, "maxLength": 255}
+      }
+    },
+    "device": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "areaId",
+        "status",
+        "entityCount",
+        "entities",
+        "integrationCount",
+        "uses",
+        "used",
+        "identifySupported",
+        "identifyLabel",
+        "deleteBlocked",
+        "deleteEligible",
+        "deleteBlockers"
+      ],
+      "properties": {
+        "id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "name": {"type": "string", "minLength": 1, "maxLength": 255},
+        "areaId": {"type": ["string", "null"], "minLength": 1, "maxLength": 128},
+        "status": {"enum": ["available", "unavailable", "unknown"]},
+        "haUrl": {"type": ["string", "null"], "maxLength": 512},
+        "entityCount": {"type": "integer", "minimum": 0, "maximum": 1024},
+        "entities": {"type": "array", "maxItems": 1024, "items": {"$ref": "#/$defs/entity"}},
+        "integrationCount": {"type": "integer", "minimum": 0, "maximum": 128},
+        "uses": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/use"}},
+        "used": {"type": "boolean"},
+        "identifySupported": {"type": "boolean"},
+        "identifyLabel": {"type": ["string", "null"], "maxLength": 128},
+        "deleteBlocked": {"type": "boolean"},
+        "deleteEligible": {"type": "boolean"},
+        "deleteBlockers": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {"type": "string", "minLength": 1, "maxLength": 240}
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"deleteEligible": {"const": true}}},
+          "then": {
+            "properties": {
+              "used": {"const": false},
+              "uses": {"maxItems": 0},
+              "deleteBlocked": {"const": false},
+              "deleteBlockers": {"maxItems": 0}
+            }
+          }
+        }
+      ]
+    }
+  }
+}

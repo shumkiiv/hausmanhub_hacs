@@ -64,12 +64,45 @@ class _Services:
         self.calls.append((domain, service, data, blocking))
 
 
+class _States:
+    def __init__(self) -> None:
+        self.values = {
+            "sensor.room_temperature": SimpleNamespace(
+                state="22.5", attributes={"friendly_name": "Температура"}
+            ),
+            "button.device_identify": SimpleNamespace(state="unknown", attributes={}),
+            "switch.standalone_relay": SimpleNamespace(state="off", attributes={}),
+        }
+
+    def get(self, entity_id: str) -> object | None:
+        return self.values.get(entity_id)
+
+
 def _registry_modules(hass: object) -> dict[str, ModuleType]:
     modules: dict[str, ModuleType] = {}
     for kind in ("area", "device", "entity"):
         module = ModuleType(f"homeassistant.helpers.{kind}_registry")
         module.async_get = lambda value, key=kind: getattr(value, f"{key}_registry")  # type: ignore[attr-defined]
         modules[module.__name__] = module
+    search = ModuleType("homeassistant.components.search")
+
+    class _ItemType:
+        DEVICE = "device"
+        ENTITY = "entity"
+
+    class _Searcher:
+        def __init__(self, value: object, _sources: object) -> None:
+            self.hass = value
+
+        def async_search(self, item_type: str, item_id: str):
+            return getattr(self.hass, "related", {}).get((item_type, item_id), {})
+
+    search.ItemType = _ItemType  # type: ignore[attr-defined]
+    search.Searcher = _Searcher  # type: ignore[attr-defined]
+    modules[search.__name__] = search
+    entity_helpers = ModuleType("homeassistant.helpers.entity")
+    entity_helpers.entity_sources = lambda _value: {}  # type: ignore[attr-defined]
+    modules[entity_helpers.__name__] = entity_helpers
     return modules
 
 
@@ -131,8 +164,14 @@ class HomeAssistantDeviceMaintenanceServiceTests(unittest.TestCase):
             device_registry=device,
             entity_registry=entity,
             services=_Services(),
+            states=_States(),
+            related={},
             data={"hausman_hub": {}},
         )
+
+    @staticmethod
+    def _revision(service: HomeAssistantDeviceMaintenanceService) -> str:
+        return str(asyncio.run(service.async_snapshot())["snapshotRevision"])
 
     def test_snapshot_exposes_safe_actions_areas_entities_and_ha_link(self) -> None:
         hass = self._hass()
@@ -140,15 +179,16 @@ class HomeAssistantDeviceMaintenanceServiceTests(unittest.TestCase):
             payload = asyncio.run(
                 HomeAssistantDeviceMaintenanceService(hass).async_snapshot()
             )
-        item = payload["devices"][inventory_device_id("device-one")]
-        self.assertEqual("living", item["roomAreaId"])
+        items = {item["id"]: item for item in payload["devices"]}
+        item = items[inventory_device_id("device-one")]
+        self.assertEqual("living", item["areaId"])
         self.assertEqual(2, item["entityCount"])
         self.assertTrue(item["identifySupported"])
         self.assertFalse(item["deleteBlocked"])
+        self.assertTrue(item["deleteEligible"])
         self.assertEqual("/config/devices/device/device-one", item["haUrl"])
         self.assertEqual(["Гостиная", "Детская"], [area["name"] for area in payload["areas"]])
-        standalone = payload["devices"][inventory_entity_id("switch.standalone_relay")]
-        self.assertEqual("entity_only", standalone["kind"])
+        standalone = items[inventory_entity_id("switch.standalone_relay")]
         self.assertEqual("/config/entities/entity/switch.standalone_relay", standalone["haUrl"])
         self.assertFalse(standalone["identifySupported"])
 
@@ -156,12 +196,18 @@ class HomeAssistantDeviceMaintenanceServiceTests(unittest.TestCase):
         hass = self._hass()
         public_id = inventory_device_id("device-one")
         with patch.dict(sys.modules, _registry_modules(hass)):
+            service = HomeAssistantDeviceMaintenanceService(hass)
             result = asyncio.run(
-                HomeAssistantDeviceMaintenanceService(hass).async_update(
-                    {"deviceId": public_id, "name": "Климат гостиной", "areaId": "kids"}
+                service.async_update(
+                    {
+                        "expectedRevision": self._revision(service),
+                        "deviceId": public_id,
+                        "changes": {"name": "Климат гостиной", "areaId": "kids"},
+                    }
                 )
             )
-        self.assertEqual("saved", result["status"])
+        self.assertEqual("confirmed", result["status"])
+        self.assertTrue(result["readBack"]["matched"])
         device = hass.device_registry.devices["device-one"]
         self.assertEqual("Климат гостиной", device.name_by_user)
         self.assertEqual("kids", device.area_id)
@@ -170,12 +216,18 @@ class HomeAssistantDeviceMaintenanceServiceTests(unittest.TestCase):
     def test_identify_calls_only_the_real_identify_button(self) -> None:
         hass = self._hass()
         with patch.dict(sys.modules, _registry_modules(hass)):
+            service = HomeAssistantDeviceMaintenanceService(hass)
             result = asyncio.run(
-                HomeAssistantDeviceMaintenanceService(hass).async_identify(
-                    {"deviceId": inventory_device_id("device-one")}
+                service.async_identify(
+                    {
+                        "expectedRevision": self._revision(service),
+                        "deviceId": inventory_device_id("device-one"),
+                        "confirmed": True,
+                    }
                 )
             )
-        self.assertEqual("command_sent", result["status"])
+        self.assertEqual("accepted", result["status"])
+        self.assertFalse(result["confirmed"])
         self.assertEqual(
             [("button", "press", {"entity_id": "button.device_identify"}, True)],
             hass.services.calls,
@@ -185,12 +237,17 @@ class HomeAssistantDeviceMaintenanceServiceTests(unittest.TestCase):
         hass = self._hass()
         public_id = inventory_entity_id("switch.standalone_relay")
         with patch.dict(sys.modules, _registry_modules(hass)):
+            service = HomeAssistantDeviceMaintenanceService(hass)
             result = asyncio.run(
-                HomeAssistantDeviceMaintenanceService(hass).async_update(
-                    {"deviceId": public_id, "name": "Реле подсветки", "areaId": "living"}
+                service.async_update(
+                    {
+                        "expectedRevision": self._revision(service),
+                        "deviceId": public_id,
+                        "changes": {"name": "Реле подсветки", "areaId": "living"},
+                    }
                 )
             )
-        self.assertEqual("saved", result["status"])
+        self.assertEqual("confirmed", result["status"])
         entity = hass.entity_registry.entities["switch.standalone_relay"]
         self.assertEqual("Реле подсветки", entity.name)
         self.assertEqual("living", entity.area_id)
@@ -219,9 +276,13 @@ class HomeAssistantDeviceMaintenanceServiceTests(unittest.TestCase):
         service = HomeAssistantDeviceMaintenanceService(hass)
         with patch.dict(sys.modules, _registry_modules(hass)):
             with self.assertRaises(DeviceMaintenanceViolation) as unconfirmed:
-                asyncio.run(service.async_delete({"deviceId": inventory_device_id("device-one")}))
+                asyncio.run(service.async_delete({
+                    "expectedRevision": self._revision(service),
+                    "deviceId": inventory_device_id("device-one"),
+                }))
             with self.assertRaises(DeviceMaintenanceViolation) as used:
                 asyncio.run(service.async_delete({
+                    "expectedRevision": self._revision(service),
                     "deviceId": inventory_device_id("device-one"), "confirmed": True,
                 }))
         self.assertEqual("confirmation_required", unconfirmed.exception.code)
@@ -231,26 +292,33 @@ class HomeAssistantDeviceMaintenanceServiceTests(unittest.TestCase):
     def test_delete_removes_an_unreferenced_registry_record(self) -> None:
         hass = self._hass()
         with patch.dict(sys.modules, _registry_modules(hass)):
+            service = HomeAssistantDeviceMaintenanceService(hass)
             result = asyncio.run(
-                HomeAssistantDeviceMaintenanceService(hass).async_delete(
-                    {"deviceId": inventory_device_id("device-one"), "confirmed": True}
+                service.async_delete(
+                    {
+                        "expectedRevision": self._revision(service),
+                        "deviceId": inventory_device_id("device-one"),
+                        "confirmed": True,
+                    }
                 )
             )
-        self.assertEqual("deleted", result["status"])
+        self.assertEqual("deleted", result["result"])
         self.assertEqual(["device-one"], hass.device_registry.removed)
 
     def test_delete_removes_an_unreferenced_entity_only_record(self) -> None:
         hass = self._hass()
         with patch.dict(sys.modules, _registry_modules(hass)):
+            service = HomeAssistantDeviceMaintenanceService(hass)
             result = asyncio.run(
-                HomeAssistantDeviceMaintenanceService(hass).async_delete(
+                service.async_delete(
                     {
+                        "expectedRevision": self._revision(service),
                         "deviceId": inventory_entity_id("switch.standalone_relay"),
                         "confirmed": True,
                     }
                 )
             )
-        self.assertEqual("deleted", result["status"])
+        self.assertEqual("deleted", result["result"])
         self.assertEqual(["switch.standalone_relay"], hass.entity_registry.removed)
 
     def test_entity_only_energy_source_is_visible_and_cannot_be_deleted(self) -> None:
@@ -269,6 +337,7 @@ class HomeAssistantDeviceMaintenanceServiceTests(unittest.TestCase):
                 asyncio.run(
                     service.async_delete(
                         {
+                            "expectedRevision": snapshot["snapshotRevision"],
                             "deviceId": inventory_entity_id(
                                 "switch.standalone_relay"
                             ),
@@ -277,13 +346,67 @@ class HomeAssistantDeviceMaintenanceServiceTests(unittest.TestCase):
                     )
                 )
 
-        standalone = snapshot["devices"][
-            inventory_entity_id("switch.standalone_relay")
-        ]
+        standalone = next(
+            item for item in snapshot["devices"]
+            if item["id"] == inventory_entity_id("switch.standalone_relay")
+        )
         self.assertTrue(standalone["deleteBlocked"])
         self.assertIn("Карточка энергии", standalone["deleteBlockers"])
         self.assertEqual("device_in_use", used.exception.code)
         self.assertEqual([], hass.entity_registry.removed)
+
+    def test_home_assistant_automation_reference_blocks_deletion(self) -> None:
+        hass = self._hass()
+        hass.related[("device", "device-one")] = {
+            "automation": {"automation.keep_climate_safe"}
+        }
+        service = HomeAssistantDeviceMaintenanceService(hass)
+        with patch.dict(sys.modules, _registry_modules(hass)):
+            snapshot = asyncio.run(service.async_snapshot())
+            item = next(
+                value for value in snapshot["devices"]
+                if value["id"] == inventory_device_id("device-one")
+            )
+            with self.assertRaises(DeviceMaintenanceViolation) as used:
+                asyncio.run(service.async_delete({
+                    "expectedRevision": snapshot["snapshotRevision"],
+                    "deviceId": item["id"],
+                    "confirmed": True,
+                }))
+        self.assertFalse(item["deleteEligible"])
+        self.assertEqual("ha_automation", item["uses"][0]["kind"])
+        self.assertEqual("device_in_use", used.exception.code)
+
+    def test_stale_snapshot_blocks_update_before_registry_write(self) -> None:
+        hass = self._hass()
+        service = HomeAssistantDeviceMaintenanceService(hass)
+        with patch.dict(sys.modules, _registry_modules(hass)):
+            with self.assertRaises(DeviceMaintenanceViolation) as stale:
+                asyncio.run(service.async_update({
+                    "expectedRevision": "0" * 64,
+                    "deviceId": inventory_device_id("device-one"),
+                    "changes": {"name": "Новое имя"},
+                }))
+        self.assertEqual("snapshot_changed", stale.exception.code)
+        self.assertEqual([], hass.device_registry.updated)
+
+    def test_missing_home_assistant_index_fails_closed(self) -> None:
+        hass = self._hass()
+        modules = _registry_modules(hass)
+        modules.pop("homeassistant.components.search")
+        modules.pop("homeassistant.helpers.entity")
+        with patch.dict(sys.modules, modules):
+            with patch(
+                "custom_components.hausman_hub.device_maintenance_ha.importlib.import_module",
+                side_effect=lambda name: modules[name]
+                if name in modules
+                else (_ for _ in ()).throw(ModuleNotFoundError(name)),
+            ):
+                snapshot = asyncio.run(
+                    HomeAssistantDeviceMaintenanceService(hass).async_snapshot()
+                )
+        self.assertFalse(snapshot["usageIndex"]["complete"])
+        self.assertTrue(all(item["deleteBlocked"] for item in snapshot["devices"]))
 
 
 if __name__ == "__main__":

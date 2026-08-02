@@ -2428,6 +2428,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
             },
         }
         payloads["hausman_hub/v1/admin/device-maintenance"] = {
+            "snapshotRevision": "0123456789abcdef",
             "areas": [
                 {"id": "kids", "name": "Детская"},
                 {"id": "living", "name": "Гостиная"},
@@ -2503,6 +2504,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
             },
         }
         payloads["hausman_hub/v1/admin/device-maintenance"] = {
+            "snapshotRevision": "0123456789abcdef",
             "areas": [{"id": "living", "name": "Гостиная"}, {"id": "kids", "name": "Детская"}],
             "devices": {"inventory-native": {
                 "roomAreaId": "living", "name": "Датчик", "haUrl": "/config/devices/device/native",
@@ -2539,7 +2541,8 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         findAll(screen, (node) => node.tagName === "BUTTON" && node.textContent === "Сохранить в Home Assistant")[0].fire("click");
         await tick(10);
         const save = calls.find((call) => call.method === "POST" && call.path === "hausman_hub/v1/admin/device-maintenance" && call.payload.action === "update");
-        if (!save || save.payload.name !== "Главный датчик" || save.payload.areaId !== "kids") {
+        if (!save || save.payload.expectedRevision !== "0123456789abcdef"
+          || save.payload.changes.name !== "Главный датчик" || save.payload.changes.areaId !== "kids") {
           throw new Error("native registry update payload mismatch: " + JSON.stringify(save));
         }
             """,
@@ -2696,7 +2699,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.51.60")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.51.61")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

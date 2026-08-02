@@ -64,7 +64,17 @@ async function loadMaintenance(panel, repaint, force = false) {
   state.error = "";
   repaint();
   try {
-    state.data = await panel._hass.callApi("GET", DEVICE_MAINTENANCE_API);
+    const payload = await panel._hass.callApi("GET", DEVICE_MAINTENANCE_API);
+    const rawDevices = payload && payload.devices;
+    const devices = Array.isArray(rawDevices)
+      ? rawDevices
+      : Object.entries(rawDevices || {}).map(([id, item]) => ({
+        ...item, id, areaId: item.areaId ?? item.roomAreaId ?? null,
+      }));
+    state.data = {
+      ...payload,
+      devicesById: Object.fromEntries(devices.map((item) => [item.id, item])),
+    };
   } catch (error) {
     state.error = "Не удалось получить права обслуживания реестра Home Assistant.";
   } finally {
@@ -82,6 +92,8 @@ async function runAction(panel, device, action, payload, repaint) {
   repaint();
   try {
     await panel._hass.callApi("POST", DEVICE_MAINTENANCE_API, {
+      contract: { name: "hausman-hub-device-maintenance-request", version: 1 },
+      expectedRevision: state.data.snapshotRevision,
       action, deviceId: device.id, ...payload,
     });
     state.message = action === "update"
@@ -97,7 +109,9 @@ async function runAction(panel, device, action, payload, repaint) {
     if (typeof panel._load === "function") await panel._load();
   } catch (error) {
     state.message = error && error.status === 409
-      ? "Удаление заблокировано: устройство ещё используется HausmanHub."
+      ? action === "delete"
+        ? "Удаление заблокировано: найдена зависимость или проверка ссылок неполна."
+        : "Список устройств изменился. Обновите его и повторите действие."
       : "Операция не выполнена. Реестр Home Assistant не изменён.";
     state.messageTone = "is-error";
   } finally {
@@ -134,13 +148,17 @@ function detailPanel(panel, el, device, maintenance, repaint) {
   if (uses.length) {
     uses.forEach((item) => {
       const row = el("div", "device-maintenance-use");
-      row.appendChild(el("strong", null, item.title || "HausmanHub"));
-      row.appendChild(el("small", "muted", item.detail || "Устройство используется."));
+      row.appendChild(el("strong", null, item.name || "HausmanHub"));
+      row.appendChild(el("small", "muted", "Эта ссылка должна быть удалена до удаления устройства."));
       usage.appendChild(row);
     });
   } else {
-    usage.appendChild(el("strong", "device-maintenance-free", "Не используется настройками HausmanHub"));
-    usage.appendChild(el("p", "muted", "Автоматизации Home Assistant могут обращаться к отдельным сущностям — перед удалением проверьте их в исходной карточке."));
+    usage.appendChild(el("strong", "device-maintenance-free", maintenance.deleteEligible === false
+      ? "Удаление временно заблокировано"
+      : "Не используется настройками HausmanHub"));
+    const warnings = state.data && state.data.usageIndex && Array.isArray(state.data.usageIndex.warnings)
+      ? state.data.usageIndex.warnings : [];
+    usage.appendChild(el("p", "muted", warnings[0] || "HausmanHub проверил свои настройки, автоматизации, сценарии, группы и скрипты Home Assistant."));
   }
   overview.appendChild(usage);
 
@@ -190,7 +208,7 @@ function detailPanel(panel, el, device, maintenance, repaint) {
   areas.forEach((area) => {
     const option = el("option", null, area.name);
     option.value = area.id;
-    option.selected = area.id === maintenance.roomAreaId;
+    option.selected = area.id === maintenance.areaId;
     room.appendChild(option);
   });
   roomLabel.appendChild(room);
@@ -199,7 +217,7 @@ function detailPanel(panel, el, device, maintenance, repaint) {
   save.type = "button";
   save.disabled = Boolean(state.action);
   save.addEventListener("click", () => runAction(panel, device, "update", {
-    name: name.value, areaId: room.value || null,
+    changes: { name: name.value, areaId: room.value || null },
   }, repaint));
   form.appendChild(save);
   detail.appendChild(form);
@@ -215,7 +233,7 @@ function detailPanel(panel, el, device, maintenance, repaint) {
   identify.title = maintenance.identifySupported
     ? `Home Assistant вызовет ${maintenance.identifyLabel || "команду идентификации"}.`
     : "Устройство не предоставляет команду Identify/Locate, поэтому фиктивный поиск не показывается.";
-  identify.addEventListener("click", () => runAction(panel, device, "identify", {}, repaint));
+  identify.addEventListener("click", () => runAction(panel, device, "identify", { confirmed: true }, repaint));
   actions.appendChild(identify);
   const remove = el("button", "danger subtle", "Удалить из реестра");
   remove.type = "button";
@@ -311,8 +329,8 @@ function inventoryRow(panel, el, device, repaint) {
   });
   row.appendChild(summary);
   if (expanded) {
-    const maintenance = stateFor(panel).data && stateFor(panel).data.devices
-      ? stateFor(panel).data.devices[device.id] : null;
+    const maintenance = stateFor(panel).data && stateFor(panel).data.devicesById
+      ? stateFor(panel).data.devicesById[device.id] : null;
     row.appendChild(detailPanel(panel, el, device, maintenance, repaint));
   }
   return row;

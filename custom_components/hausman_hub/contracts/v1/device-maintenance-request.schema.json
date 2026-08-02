@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hausmanhub/contracts/v1/device-maintenance-request.schema.json",
+  "title": "HausmanHub local device maintenance request v1",
+  "oneOf": [
+    {"$ref": "#/$defs/update"},
+    {"$ref": "#/$defs/identify"},
+    {"$ref": "#/$defs/delete"}
+  ],
+  "$defs": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-device-maintenance-request"},
+        "version": {"const": 1}
+      }
+    },
+    "update": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["expectedRevision", "action", "deviceId", "changes"],
+      "properties": {
+        "contract": {"$ref": "#/$defs/contract"},
+        "expectedRevision": {"type": "string", "pattern": "^[a-f0-9]{16,64}$"},
+        "action": {"const": "update"},
+        "deviceId": {"type": "string", "minLength": 1, "maxLength": 128},
+        "changes": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "name": {"type": "string", "minLength": 1, "maxLength": 255},
+            "areaId": {"type": ["string", "null"], "minLength": 1, "maxLength": 128}
+          }
+        }
+      }
+    },
+    "identify": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["expectedRevision", "action", "deviceId", "confirmed"],
+      "properties": {
+        "contract": {"$ref": "#/$defs/contract"},
+        "expectedRevision": {"type": "string", "pattern": "^[a-f0-9]{16,64}$"},
+        "action": {"const": "identify"},
+        "deviceId": {"type": "string", "minLength": 1, "maxLength": 128},
+        "confirmed": {"const": true}
+      }
+    },
+    "delete": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["expectedRevision", "action", "deviceId", "confirmed"],
+      "properties": {
+        "contract": {"$ref": "#/$defs/contract"},
+        "expectedRevision": {"type": "string", "pattern": "^[a-f0-9]{16,64}$"},
+        "action": {"const": "delete"},
+        "deviceId": {"type": "string", "minLength": 1, "maxLength": 128},
+        "confirmed": {"const": true}
+      }
+    }
+  }
+}
