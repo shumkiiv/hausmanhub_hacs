@@ -718,11 +718,21 @@ class DashboardSnapshotTest(unittest.TestCase):
             entities=(
                 DashboardEntity(
                     "media_player.tv_cast", "media_player", "off", "Телевизор",
-                    {}, "tv-cast", "living",
+                    {
+                        "media_title": "Кинопоиск",
+                        "app_name": "Кинопоиск HD",
+                        "source": "HDMI 1",
+                        "access_token": "must-not-leak",
+                    }, "tv-cast", "living",
                 ),
                 DashboardEntity(
                     "media_player.tv_android", "media_player", "off", "Телевизор",
-                    {}, "tv-android", "living",
+                    {
+                        "media_title": "Кинопоиск",
+                        "app_name": "Кинопоиск HD",
+                        "source": "HDMI 1",
+                        "access_token": "must-not-leak",
+                    }, "tv-android", "living",
                 ),
                 DashboardEntity(
                     "remote.tv_android", "remote", "on", "Пульт",
@@ -730,7 +740,12 @@ class DashboardSnapshotTest(unittest.TestCase):
                 ),
                 DashboardEntity(
                     "media_player.tv_philips", "media_player", "off", "Телевизор",
-                    {}, "tv-philips", "living",
+                    {
+                        "media_title": "Кинопоиск",
+                        "app_name": "Кинопоиск HD",
+                        "source": "HDMI 1",
+                        "access_token": "must-not-leak",
+                    }, "tv-philips", "living",
                 ),
                 DashboardEntity(
                     "light.tv_ambilight", "light", "off", "Ambilight",
@@ -759,6 +774,14 @@ class DashboardSnapshotTest(unittest.TestCase):
         self.assertEqual(1, len(television_cards))
         television = television_cards[0]
         self.assertEqual("media_player", television["domain"])
+        self.assertEqual(
+            {
+                "media_title": "Кинопоиск",
+                "app_name": "Кинопоиск HD",
+                "source": "HDMI 1",
+            },
+            television["attributes"],
+        )
         self.assertEqual(6, len(television["details"]))
         self.assertEqual(
             "https://www.zigbee2mqtt.io/images/devices/58PUS8506.png",

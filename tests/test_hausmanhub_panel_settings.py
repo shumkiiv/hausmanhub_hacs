@@ -20,6 +20,7 @@ HOME_SECTIONS_JS = PANEL_JS.with_name("hausman-hub-home-sections.js")
 CLIMATE_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-climate-overview.js")
 LIGHTING_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-lighting.js")
 ROOMS_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-rooms.js")
+MEDIA_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-media-overview.js")
 ROOM_SETUP_JS = PANEL_JS.with_name("hausman-hub-room-setup.js")
 DEVICE_INVENTORY_JS = PANEL_JS.with_name("hausman-hub-device-inventory.js")
 DEVICE_BINDINGS_JS = PANEL_JS.with_name("hausman-hub-device-bindings.js")
@@ -467,6 +468,10 @@ def panel_script(
       vm.runInThisContext(
         fs.readFileSync({str(ROOMS_OVERVIEW_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(ROOMS_OVERVIEW_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(MEDIA_OVERVIEW_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(MEDIA_OVERVIEW_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(ROOM_SETUP_JS)!r}, "utf8").replace("export function renderFirstRunRoom", "function renderFirstRunRoom"),
@@ -1460,6 +1465,12 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         await tick();
         panel._shell.tabs.media.fire("click");
         const media = panel._shell.homeSections.media;
+        const mediaText = textOf(media);
+        if (!mediaText.includes("СЕЙЧАС ВОСПРОИЗВОДИТСЯ")
+          || !mediaText.includes("По комнатам") || !mediaText.includes("Медиаустройства")
+          || !mediaText.includes("Кинопоиск")) {
+          throw new Error("canonical media hierarchy is incomplete: " + mediaText);
+        }
         const cards = findAll(media, (node) =>
           String(node.className).split(" ").includes("media-device-card"));
         if (cards.length !== 1) throw new Error("TV did not render as one physical card");
@@ -2751,7 +2762,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.51.64")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.51.65")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

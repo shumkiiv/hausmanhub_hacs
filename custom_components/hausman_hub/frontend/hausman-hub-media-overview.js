@@ -1,0 +1,128 @@
+function mediaOverviewNormalized(value) { return String(value || "").trim().toLocaleLowerCase("ru"); }
+function mediaOverviewKey(device) { return device.physicalId || device.id || device.entityId; }
+function mediaOverviewUnavailable(device) { return Boolean(device.unavailable || device.state === "unavailable"); }
+function mediaOverviewPlaying(device) { return !mediaOverviewUnavailable(device) && String(device.state || "").toLowerCase() === "playing"; }
+function mediaOverviewIsDevice(device) {
+  return String(device && device.domain || "") === "media_player"
+    || String(device && device.category || "") === "media";
+}
+function mediaOverviewIsTv(device) {
+  return /(?:\btv\b|телевиз|television|smart[ _-]?tv|pus\d|oled|qled)/i.test([
+    device.name, device.model, device.entityId,
+  ].filter(Boolean).join(" "));
+}
+function mediaOverviewRoom(device, rooms) {
+  return rooms.find((room) => room.id && room.id === device.roomId)
+    || rooms.find((room) => mediaOverviewNormalized(room.name) === mediaOverviewNormalized(device.roomName))
+    || null;
+}
+function mediaOverviewDeviceWord(count) {
+  if (count % 100 >= 11 && count % 100 <= 14) return "устройств";
+  if (count % 10 === 1) return "устройство";
+  if (count % 10 >= 2 && count % 10 <= 4) return "устройства";
+  return "устройств";
+}
+
+function renderMediaOverviewHero(container, devices, deps) {
+  const { el, svgIcon } = deps;
+  const playing = devices.filter(mediaOverviewPlaying);
+  const available = devices.filter((device) => !mediaOverviewUnavailable(device));
+  const tv = devices.filter(mediaOverviewIsTv).length;
+  const focus = playing[0] || available[0] || devices[0];
+  const hero = el("section", "media-canon-hero");
+  const copy = el("div", "media-canon-hero-copy");
+  const icon = el("span", "media-canon-hero-icon");
+  icon.appendChild(svgIcon("media"));
+  copy.appendChild(icon);
+  const identity = el("div");
+  identity.appendChild(el("span", "media-canon-eyebrow", playing.length ? "СЕЙЧАС ВОСПРОИЗВОДИТСЯ" : "МЕДИА ДОМА"));
+  identity.appendChild(el("h2", null, focus ? (focus.name || "Медиоустройство") : "Медиа не настроено"));
+  const source = focus && focus.attributes && (focus.attributes.media_title || focus.attributes.app_name || focus.attributes.source);
+  identity.appendChild(el("p", null, source || (focus && focus.roomName) || "Телевизоры и аудиосистемы по комнатам"));
+  copy.appendChild(identity);
+  hero.appendChild(copy);
+  const facts = el("div", "media-canon-hero-facts");
+  [[String(devices.length), "Устройства"], [String(playing.length), "Воспроизводят"],
+    [String(available.length), "На связи"], [String(tv), "Телевизоры"]]
+    .forEach(([value, label]) => {
+      const fact = el("span"); fact.appendChild(el("strong", null, value)); fact.appendChild(el("small", null, label)); facts.appendChild(fact);
+    });
+  hero.appendChild(facts);
+  container.appendChild(hero);
+}
+
+function renderMediaZones(container, rooms, devices, deps) {
+  const { el, svgIcon } = deps;
+  const groups = new Map();
+  devices.forEach((device) => {
+    const room = mediaOverviewRoom(device, rooms);
+    const id = room ? room.id : "unassigned";
+    if (!groups.has(id)) groups.set(id, { name: room ? room.name : "Не распределено", devices: [] });
+    groups.get(id).devices.push(device);
+  });
+  const section = el("section", "media-canon-section");
+  const heading = el("div", "media-canon-heading");
+  heading.appendChild(el("h3", null, "По комнатам"));
+  const zoneMod100 = groups.size % 100;
+  const zoneMod10 = groups.size % 10;
+  const zoneNoun = zoneMod100 >= 11 && zoneMod100 <= 14
+    ? "зон"
+    : zoneMod10 === 1
+      ? "зона"
+      : zoneMod10 >= 2 && zoneMod10 <= 4
+        ? "зоны"
+        : "зон";
+  heading.appendChild(el("span", null, `${groups.size} ${zoneNoun}`));
+  section.appendChild(heading);
+  const grid = el("div", "media-zone-grid");
+  [...groups.values()].forEach((group) => {
+    const card = el("article", `media-zone-card${group.devices.some(mediaOverviewUnavailable) ? " has-warning" : ""}`);
+    const head = el("div", "media-zone-head");
+    const icon = el("span"); icon.appendChild(svgIcon("media")); head.appendChild(icon);
+    head.appendChild(el("strong", null, group.name));
+    head.appendChild(el("b", null, String(group.devices.length)));
+    card.appendChild(head);
+    card.appendChild(el("p", null, group.devices.slice(0, 3).map((device) => device.name).join(" · ") || "Устройств нет"));
+    const playing = group.devices.filter(mediaOverviewPlaying).length;
+    const unavailable = group.devices.filter(mediaOverviewUnavailable).length;
+    card.appendChild(el("small", unavailable ? `${unavailable} без связи` : (playing ? `${playing} воспроизводит` : "Все устройства на связи")));
+    grid.appendChild(card);
+  });
+  section.appendChild(grid);
+  container.appendChild(section);
+}
+
+function renderMediaDeviceGrid(panel, container, devices, deps) {
+  const { el } = deps;
+  const section = el("section", "media-canon-section");
+  const heading = el("div", "media-canon-heading");
+  heading.appendChild(el("h3", null, "Медиаустройства"));
+  heading.appendChild(el("span", null, `${devices.length} ${mediaOverviewDeviceWord(devices.length)}`));
+  section.appendChild(heading);
+  const grid = el("div", "inventory-device-grid media-canon-device-grid");
+  devices.forEach((device) => grid.appendChild(panel._deviceInventoryCard(device)));
+  if (!devices.length) grid.appendChild(el("div", "empty-state", "Физические медиоустройства пока не найдены."));
+  section.appendChild(grid);
+  container.appendChild(section);
+}
+
+export function renderMediaOverview(panel, container, deps) {
+  container.innerHTML = "";
+  const dashboard = panel._homeDashboard;
+  if (!dashboard) {
+    const empty = deps.el("section", "card empty-state");
+    empty.appendChild(deps.el("h2", null, "Медиа"));
+    empty.appendChild(deps.el("p", null, "Данные медиа пока недоступны. Проверьте подключение HausmanHub."));
+    container.appendChild(empty); return;
+  }
+  const rooms = Array.isArray(dashboard.rooms) ? dashboard.rooms : [];
+  const unique = new Map();
+  (Array.isArray(dashboard.devices) ? dashboard.devices : [])
+    .filter(mediaOverviewIsDevice).forEach((device) => unique.set(mediaOverviewKey(device), device));
+  const devices = [...unique.values()];
+  const page = deps.el("div", "media-canon-page");
+  renderMediaOverviewHero(page, devices, deps);
+  renderMediaZones(page, rooms, devices, deps);
+  renderMediaDeviceGrid(panel, page, devices, deps);
+  container.appendChild(page);
+}

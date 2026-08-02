@@ -113,13 +113,16 @@ _MEDIA_IDENTITY_NOISE = frozenset(
     {"android", "device", "display", "media", "smart", "television", "uhd"}
 )
 _ALLOWLISTED_ATTRIBUTES = (
+    "app_name",
     "brightness",
     "current_position",
     "current_temperature",
     "fan_mode",
     "humidity",
     "hvac_action",
+    "media_title",
     "percentage",
+    "source",
     "temperature",
 )
 _ENERGY_USAGE_DEVICE_CLASSES = frozenset({"power", "current", "energy"})
