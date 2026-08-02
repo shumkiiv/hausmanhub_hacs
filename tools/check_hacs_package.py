@@ -28,7 +28,10 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 INTEGRATION_DIRECTORY = PurePosixPath("custom_components/hausman_hub")
 HACS_METADATA_PATH = PurePosixPath("hacs.json")
 MANIFEST_PATH = INTEGRATION_DIRECTORY / "manifest.json"
-ICON_PATH = INTEGRATION_DIRECTORY / "brand/icon.png"
+BRAND_IMAGE_DIMENSIONS = {
+    INTEGRATION_DIRECTORY / "brand/icon.png": (256, 256),
+    INTEGRATION_DIRECTORY / "brand/icon@2x.png": (512, 512),
+}
 CHANGELOG_PATH = PurePosixPath("CHANGELOG.md")
 LICENSE_PATH = PurePosixPath("LICENSE")
 README_PATH = PurePosixPath("README.md")
@@ -146,7 +149,7 @@ REQUIRED_PACKAGE_PATHS = (
     INTEGRATION_DIRECTORY / "contour_storage.py",
     INTEGRATION_DIRECTORY / "reference/v1/climate-reference-suite.json",
     MANIFEST_PATH,
-    ICON_PATH,
+    *BRAND_IMAGE_DIMENSIONS,
     *TRANSLATION_PATHS,
     *CONTRACT_PATHS,
 )
@@ -238,9 +241,12 @@ def find_hacs_package_violations(
                 "translations: English and Russian files must have the same key shape"
             )
 
-    icon = indexed_files.get(ICON_PATH)
-    if icon is not None and not is_expected_icon(icon):
-        findings.append(f"{ICON_PATH}: must be a 512px transparent PNG")
+    for image_path, dimensions in BRAND_IMAGE_DIMENSIONS.items():
+        image = indexed_files.get(image_path)
+        if image is not None and not is_expected_brand_image(image, dimensions):
+            findings.append(
+                f"{image_path}: must be a {dimensions[0]}x{dimensions[1]} RGBA PNG"
+            )
 
     changelog = read_utf8_text(indexed_files, CHANGELOG_PATH, findings)
     if manifest is not None and changelog is not None:
@@ -356,8 +362,8 @@ def json_shape(value: object) -> object:
     return None
 
 
-def is_expected_icon(content: bytes) -> bool:
-    """Validate the indexed icon without decoding or reading any external file."""
+def is_expected_brand_image(content: bytes, dimensions: tuple[int, int]) -> bool:
+    """Validate an indexed brand image without reading any external file."""
 
     if len(content) > MAX_ICON_BYTES or not content.startswith(PNG_SIGNATURE):
         return False
@@ -382,7 +388,10 @@ def is_expected_icon(content: bytes) -> bool:
             if chunk_type != b"IHDR" or length != 13:
                 return False
             width, height = struct.unpack(">II", chunk_data[:8])
-            if (width, height) != (512, 512) or chunk_data[8:] != b"\x08\x06\x00\x00\x00":
+            if (
+                (width, height) != dimensions
+                or chunk_data[8:] != b"\x08\x06\x00\x00\x00"
+            ):
                 return False
             saw_ihdr = True
         elif chunk_type == b"IDAT":

@@ -33,24 +33,25 @@ class HacsPackageCheckTest(unittest.TestCase):
         )
 
     def test_missing_file_or_link_is_rejected(self) -> None:
-        missing_icon = without_file(self.files, package.ICON_PATH)
+        icon_path = next(iter(package.BRAND_IMAGE_DIMENSIONS))
+        missing_icon = without_file(self.files, icon_path)
         missing_findings = package.find_hacs_package_violations(
             missing_icon,
             self.file_modes,
         )
         self.assertIn(
-            f"{package.ICON_PATH}: missing required HACS package file",
+            f"{icon_path}: missing required HACS package file",
             missing_findings,
         )
 
         linked_modes = dict(self.file_modes)
-        linked_modes[package.ICON_PATH] = "120000"
+        linked_modes[icon_path] = "120000"
         linked_findings = package.find_hacs_package_violations(
             self.files,
             linked_modes,
         )
         self.assertIn(
-            f"{package.ICON_PATH}: must be a regular Git file",
+            f"{icon_path}: must be a regular Git file",
             linked_findings,
         )
 
@@ -103,13 +104,14 @@ class HacsPackageCheckTest(unittest.TestCase):
             translation_findings,
         )
 
-        invalid_icon = replace_file(self.files, package.ICON_PATH, b"not a PNG")
+        icon_path = next(iter(package.BRAND_IMAGE_DIMENSIONS))
+        invalid_icon = replace_file(self.files, icon_path, b"not a PNG")
         icon_findings = package.find_hacs_package_violations(
             invalid_icon,
             self.file_modes,
         )
         self.assertIn(
-            f"{package.ICON_PATH}: must be a 512px transparent PNG",
+            f"{icon_path}: must be a 256x256 RGBA PNG",
             icon_findings,
         )
 

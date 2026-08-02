@@ -61,7 +61,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         self.assertEqual("hausman_hub", manifest["domain"])
         self.assertTrue(manifest["config_flow"])
         self.assertTrue(manifest["single_config_entry"])
-        self.assertEqual("1.52.0", manifest["version"])
+        self.assertEqual("1.52.1", manifest["version"])
 
     def test_current_manifest_version_has_a_plain_change_note(self) -> None:
         manifest = json.loads((INTEGRATION / "manifest.json").read_text(encoding="utf-8"))
@@ -430,16 +430,20 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         )
         self.assertNotIn("следующий короткий шаг будет описан", plain_guide)
 
-    def test_brand_icon_is_a_square_transparent_png(self) -> None:
-        """Keep the local Home Assistant brand image present and usable."""
+    def test_brand_icons_cover_normal_and_hidpi_displays(self) -> None:
+        """Keep both local Home Assistant brand images present and usable."""
 
-        icon = INTEGRATION / "brand" / "icon.png"
-        icon_bytes = icon.read_bytes()
-
-        self.assertEqual(b"\x89PNG\r\n\x1a\n", icon_bytes[:8])
-        self.assertEqual(b"IHDR", icon_bytes[12:16])
-        self.assertEqual((512, 512), struct.unpack(">II", icon_bytes[16:24]))
-        self.assertEqual(6, icon_bytes[25], "icon must keep an alpha channel")
+        expected_sizes = {"icon.png": 256, "icon@2x.png": 512}
+        for filename, expected_size in expected_sizes.items():
+            with self.subTest(filename=filename):
+                icon_bytes = (INTEGRATION / "brand" / filename).read_bytes()
+                self.assertEqual(b"\x89PNG\r\n\x1a\n", icon_bytes[:8])
+                self.assertEqual(b"IHDR", icon_bytes[12:16])
+                self.assertEqual(
+                    (expected_size, expected_size),
+                    struct.unpack(">II", icon_bytes[16:24]),
+                )
+                self.assertEqual(6, icon_bytes[25], "icon must keep an alpha channel")
 
     def test_initial_entry_only_contains_an_approved_mode_and_direct_block(self) -> None:
         data = create_initial_entry("read-only")
