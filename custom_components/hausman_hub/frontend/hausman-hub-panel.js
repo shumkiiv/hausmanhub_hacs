@@ -1,29 +1,30 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.67";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.67";
-import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.67";
-import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.51.67";
-import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.67";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.67";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.67";
-import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.67";
-import { createKioskButton, createKioskDock, handleKioskPointerUp, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.67";
-import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.67";
-import { AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.51.67";
-import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.51.67";
-import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.51.67";
-import { renderClimateOverview } from "./hausman-hub-climate-overview.js?v=1.51.67";
-import { renderLightingOverview } from "./hausman-hub-lighting.js?v=1.51.67";
-import { renderRoomsOverview } from "./hausman-hub-rooms.js?v=1.51.67";
-import { renderMediaOverview } from "./hausman-hub-media-overview.js?v=1.51.67";
-import { renderSecurityOverview } from "./hausman-hub-security-overview.js?v=1.51.67";
-import { renderDevicesOverview } from "./hausman-hub-devices-overview.js?v=1.51.67";
-import { buildDiagnosticChecks, diagnosticSummaryText, renderDiagnosticDetails } from "./hausman-hub-diagnostics.js?v=1.51.67";
-import { renderRolloutReadiness } from "./hausman-hub-rollout.js?v=1.51.67";
-import { renderOverviewContent, renderOverviewHero } from "./hausman-hub-overview.js?v=1.51.67";
-import { renderPhysicalDeviceCard } from "./hausman-hub-device-card.js?v=1.51.67";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.51.68";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.51.68";
+import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.51.68";
+import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.51.68";
+import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.51.68";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.51.68";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.51.68";
+import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.51.68";
+import { createKioskButton, createKioskDock, handleKioskPointerUp, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.51.68";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.51.68";
+import { AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.51.68";
+import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.51.68";
+import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.51.68";
+import { renderClimateOverview } from "./hausman-hub-climate-overview.js?v=1.51.68";
+import { renderLightingOverview } from "./hausman-hub-lighting.js?v=1.51.68";
+import { renderRoomsOverview } from "./hausman-hub-rooms.js?v=1.51.68";
+import { renderMediaOverview } from "./hausman-hub-media-overview.js?v=1.51.68";
+import { renderSecurityOverview } from "./hausman-hub-security-overview.js?v=1.51.68";
+import { renderDevicesOverview } from "./hausman-hub-devices-overview.js?v=1.51.68";
+import { buildDiagnosticChecks, diagnosticSummaryText, renderDiagnosticDetails } from "./hausman-hub-diagnostics.js?v=1.51.68";
+import { renderRolloutReadiness } from "./hausman-hub-rollout.js?v=1.51.68";
+import { renderOverviewContent, renderOverviewHero } from "./hausman-hub-overview.js?v=1.51.68";
+import { renderPhysicalDeviceCard } from "./hausman-hub-device-card.js?v=1.51.68";
+import { copyTechnicalLog, recordTechnicalEvent, renderTechnicalLogCard } from "./hausman-hub-technical-log.js?v=1.51.68";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
-const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css?v=1.51.67";
+const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css?v=1.51.68";
 const DASHBOARD_API = "hausman_hub/v1/dashboard";
 const DEVICE_ACTIONS_API = "hausman_hub/v1/device-actions";
 const MODE_API = "hausman_hub/v1/admin/climate-mode";
@@ -292,6 +293,7 @@ class HausmanHubPanel extends HTMLElement {
     this._error = false;
     this._busy = false;
     this._notice = "";
+    this._technicalLog = [];
     this._themeMode = "auto";
     this._preferencesLoaded = false;
     this._preferencesLoading = false;
@@ -580,9 +582,14 @@ class HausmanHubPanel extends HTMLElement {
       };
       this._homeDashboard = results[6];
       this._scenarios.catalog = results[7];
+      const recovered = this._error;
       this._error = false;
+      if (recovered || !this._technicalLog.length) {
+        this._recordTechnicalEvent("success", "Связь с HausmanHub установлена");
+      }
     } catch (error) {
       this._error = true;
+      this._recordTechnicalEvent("error", "Не удалось получить данные панели");
     }
     this._loadingPanel = false;
     this._render();
@@ -5669,13 +5676,13 @@ class HausmanHubPanel extends HTMLElement {
     grid.appendChild(this._settingsOverviewLink({
       viewId: "connection", icon: "device", title: "Подключение",
       description: "Откуда панель получает данные и куда отправляет команды",
-      value: this._settingsData.connection_mode === "center" ? "HausmanHub" : "Home Assistant",
+      value: this._settingsData.connection_mode === "center" ? "Совместимый API" : "HausmanHub в Home Assistant",
       status: { className: "is-ready", label: "Активно" },
     }));
     grid.appendChild(this._settingsOverviewLink({
-      viewId: "appearance", icon: "sun", title: "Интерфейс",
-      description: "Тема, движение элементов и пояснения сложных параметров",
-      value: THEME_MODE_META[this._themeMode]?.hint || "авто",
+      viewId: "appearance", icon: "sun", title: "Интерфейс и профиль",
+      description: "Тема, размер, движение и подсказки для текущего пользователя",
+      value: `Профиль Home Assistant · ${THEME_MODE_META[this._themeMode]?.hint || "авто"}`,
     }));
     grid.appendChild(this._settingsOverviewLink({
       viewId: "system", icon: "settings", title: "Диагностика",
@@ -5782,16 +5789,16 @@ class HausmanHubPanel extends HTMLElement {
     const modes = el("div", "settings-mode-options");
     [
       {
-        value: "center",
-        title: "HausmanHub",
+        value: "home_assistant",
+        title: "HausmanHub в Home Assistant",
         label: "Рекомендуется",
-        description: "Климатический контур, сценарии и подтверждённые команды через единый API.",
+        description: "Самостоятельная интеграция использует локальные данные, сценарии и подтверждённые команды Home Assistant.",
       },
       {
-        value: "home_assistant",
-        title: "Только Home Assistant",
-        label: "Базовый режим",
-        description: "Панель использует локальные данные Home Assistant без внешнего центра.",
+        value: "center",
+        title: "Совместимый внешний API",
+        label: "Переходный режим",
+        description: "Нужен только для существующей установки с отдельным совместимым центром управления.",
       },
     ].forEach((mode) => {
       const selected = this._settingsData.connection_mode === mode.value;
@@ -5829,7 +5836,7 @@ class HausmanHubPanel extends HTMLElement {
     form.appendChild(haLabel);
     if (this._settingsData.connection_mode === "center") {
       const centerLabel = el("label", "settings-field");
-      centerLabel.appendChild(el("span", "assistant-field-label", "Адрес HausmanHub"));
+      centerLabel.appendChild(el("span", "assistant-field-label", "Адрес совместимого API"));
       const centerInput = el("input");
       centerInput.type = "url";
       centerInput.value = this._settingsData.smart_home_center_url;
@@ -5840,7 +5847,7 @@ class HausmanHubPanel extends HTMLElement {
         this._updateSettingsActionControls();
       });
       centerLabel.appendChild(centerInput);
-      centerLabel.appendChild(el("small", "settings-field-help", "Необязателен, пока самостоятельный центр не развёрнут."));
+      centerLabel.appendChild(el("small", "settings-field-help", "Используется только в переходном режиме; обычной установке Home Assistant не требуется."));
       form.appendChild(centerLabel);
     }
     card.appendChild(form);
@@ -5850,11 +5857,11 @@ class HausmanHubPanel extends HTMLElement {
     status.appendChild(this._settingsStatusRow("Панель Home Assistant", this._error ? "Недоступна" : "Доступна", this._error ? "is-warning" : "is-ready"));
     status.appendChild(this._settingsStatusRow(
       "Режим команд",
-      this._settingsData.connection_mode === "center" ? "Через HausmanHub" : "Локально в Home Assistant"
+      this._settingsData.connection_mode === "center" ? "Через совместимый API" : "HausmanHub в Home Assistant"
     ));
     if (this._settingsData.connection_mode === "center") {
       status.appendChild(this._settingsStatusRow(
-        "Адрес HausmanHub",
+        "Совместимый API",
         this._settingsData.smart_home_center_url ? "Указан, но ещё не проверен" : "Пока не указан",
         this._settingsData.smart_home_center_url ? "" : "is-warning"
       ));
@@ -5972,6 +5979,14 @@ class HausmanHubPanel extends HTMLElement {
     return diagnosticSummaryText(this, buildDiagnosticChecks(this, READINESS_LABELS));
   }
 
+  _recordTechnicalEvent(level, message) {
+    recordTechnicalEvent(this._technicalLog, level, message);
+  }
+
+  async _copyTechnicalLog() {
+    await copyTechnicalLog(this);
+  }
+
   async _copySystemSummary() {
     const text = this._systemSummaryText();
     try {
@@ -6041,6 +6056,8 @@ class HausmanHubPanel extends HTMLElement {
     healthActions.appendChild(copy);
     health.appendChild(healthActions);
     container.appendChild(health);
+
+    renderTechnicalLogCard(this, container, { el });
 
     const about = el("section", "card settings-about");
     const aboutIcon = el("span", "settings-about-icon");
@@ -6163,8 +6180,10 @@ class HausmanHubPanel extends HTMLElement {
     try {
       await this._hass.callApi("GET", PANEL_API);
       this._notice = "Панель доступна. Проверка не отправляла команды устройствам.";
+      this._recordTechnicalEvent("success", "Проверка подключения выполнена успешно");
     } catch (error) {
       this._notice = "Панель не ответила. Проверьте Home Assistant и повторите попытку.";
+      this._recordTechnicalEvent("error", "Проверка подключения завершилась ошибкой");
     } finally {
       this._busy = false;
       this._render();
@@ -6195,8 +6214,10 @@ class HausmanHubPanel extends HTMLElement {
       this._settingsDirty = false;
       this._notice = "Настройки подключения сохранены.";
       this._error = false;
+      this._recordTechnicalEvent("success", "Настройки подключения сохранены");
     } catch (error) {
       this._notice = "Не удалось сохранить настройки подключения.";
+      this._recordTechnicalEvent("error", "Не удалось сохранить настройки подключения");
     } finally {
       this._busy = false;
     }

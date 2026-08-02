@@ -23,6 +23,7 @@ ROOMS_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-rooms.js")
 MEDIA_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-media-overview.js")
 SECURITY_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-security-overview.js")
 DEVICES_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-devices-overview.js")
+TECHNICAL_LOG_JS = PANEL_JS.with_name("hausman-hub-technical-log.js")
 ROOM_SETUP_JS = PANEL_JS.with_name("hausman-hub-room-setup.js")
 DEVICE_INVENTORY_JS = PANEL_JS.with_name("hausman-hub-device-inventory.js")
 DEVICE_BINDINGS_JS = PANEL_JS.with_name("hausman-hub-device-bindings.js")
@@ -542,6 +543,10 @@ def panel_script(
       vm.runInThisContext(
         fs.readFileSync({str(OVERVIEW_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(OVERVIEW_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(TECHNICAL_LOG_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(TECHNICAL_LOG_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(PANEL_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, ""),
@@ -2184,12 +2189,12 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         }
         screen = panel._shell.settings;
         findAll(screen, (node) => node.tagName === "BUTTON"
-          && textOf(node).includes("Только Home Assistant"))[0].fire("click");
+          && textOf(node).includes("HausmanHub в Home Assistant"))[0].fire("click");
         screen = panel._shell.settings;
         const centerField = findAll(screen, (node) =>
           String(node.className).split(" ").includes("settings-field")
-          && textOf(node).includes("Адрес HausmanHub"))[0];
-        if (centerField) throw new Error("HausmanHub URL remains visible in HA-only mode");
+          && textOf(node).includes("Адрес совместимого API"))[0];
+        if (centerField) throw new Error("external API URL remains visible in HA-owned mode");
         const haUrl = findAll(screen, (node) => node.type === "url")[0];
         const stableUrlField = haUrl;
         haUrl.value = "https://ha.example.test";
@@ -2259,6 +2264,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const systemText = textOf(screen);
         for (const label of [
           "Состояние системы", "Устройства климата", "Копировать техническую сводку",
+          "Технический журнал", "Копировать журнал",
           "Связь с Home Assistant", "Сохранённая конфигурация", "Климатический контур",
           "Сценарии", "Энергия", "Проверки", "Показать обезличенную техническую сводку",
         ]) {
@@ -2277,6 +2283,17 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           || clipboardWrites[0].includes("homeassistant.local")
           || clipboardWrites[0].includes("entity_id")) {
           throw new Error("redacted technical summary copy mismatch: " + JSON.stringify(clipboardWrites));
+        }
+        screen = panel._shell.settings;
+        findAll(screen, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Копировать журнал")[0].fire("click");
+        await tick();
+        if (clipboardWrites.length !== 2
+          || !clipboardWrites[1].includes("Технический журнал текущего сеанса")
+          || !clipboardWrites[1].includes("Связь с HausmanHub установлена")
+          || clipboardWrites[1].includes("homeassistant.local")
+          || clipboardWrites[1].includes("entity_id")) {
+          throw new Error("redacted technical log copy mismatch: " + JSON.stringify(clipboardWrites));
         }
         screen = panel._shell.settings;
         findAll(screen, (node) => node.tagName === "BUTTON"
@@ -2860,7 +2877,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.51.67")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.51.68")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;
