@@ -24,6 +24,7 @@ MEDIA_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-media-overview.js")
 SECURITY_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-security-overview.js")
 DEVICES_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-devices-overview.js")
 TECHNICAL_LOG_JS = PANEL_JS.with_name("hausman-hub-technical-log.js")
+FEEDBACK_JS = PANEL_JS.with_name("hausman-hub-feedback.js")
 KIOSK_JS = PANEL_JS.with_name("hausman-hub-kiosk.js")
 ROOM_SETUP_JS = PANEL_JS.with_name("hausman-hub-room-setup.js")
 DEVICE_INVENTORY_JS = PANEL_JS.with_name("hausman-hub-device-inventory.js")
@@ -549,6 +550,10 @@ def panel_script(
       vm.runInThisContext(
         fs.readFileSync({str(TECHNICAL_LOG_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(TECHNICAL_LOG_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(FEEDBACK_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(FEEDBACK_JS)!r} }}
       );
       const log = recordTechnicalEvent;
       vm.runInThisContext(
@@ -2922,7 +2927,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.51.71")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.51.72")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;
