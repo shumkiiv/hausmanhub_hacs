@@ -1,0 +1,51 @@
+.lighting-dashboard { display:grid; gap:22px; min-width:0; }
+.lighting-dashboard-hero { position:relative; display:grid; grid-template-columns:minmax(320px,1.15fr) minmax(420px,.85fr); gap:28px; align-items:end;
+  min-height:238px; overflow:hidden; padding:28px 30px; border:1px solid color-mix(in srgb,var(--hmh-warning,#E5A84B) 36%,var(--hmh-border,#2F3845)); border-radius:22px;
+  background:linear-gradient(90deg,rgba(7,11,16,.9),rgba(7,11,16,.38)),url("./assets/dashboard-hero-living-room-day.png") center 53%/cover no-repeat; box-shadow:0 14px 36px rgba(0,0,0,.24); }
+.lighting-dashboard-hero-copy { display:flex; align-items:center; gap:18px; color:#F3F5F8; }
+.lighting-dashboard-hero-icon { display:grid; flex:0 0 64px; place-items:center; width:64px; height:64px; border-radius:18px; color:#FFB72E; background:rgba(15,19,24,.74); }
+.lighting-dashboard-hero-icon .icon { width:32px; height:32px; }
+.lighting-dashboard-hero h2 { margin:0; font-size:clamp(31px,3vw,43px); line-height:1.06; }
+.lighting-dashboard-hero p { max-width:620px; margin:8px 0 0; color:#D4DAE3; font-size:17px; line-height:1.4; }
+.lighting-dashboard-hero-facts { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; align-self:end; }
+.lighting-dashboard-hero-fact { display:grid; gap:5px; min-width:0; padding:15px 16px; border:1px solid rgba(255,255,255,.14); border-radius:14px; color:#F2F4F7; background:rgba(12,16,21,.72); backdrop-filter:blur(12px); }
+.lighting-dashboard-hero-fact strong { font-size:24px; line-height:1.1; }
+.lighting-dashboard-hero-fact small { color:#B9C1CC; font-size:13px; }
+.lighting-room-section,.lighting-device-section { min-width:0; padding:22px; border:1px solid var(--hmh-border,#2F3845); border-radius:20px; background:var(--hmh-surface,#12171D); box-shadow:0 10px 26px rgba(0,0,0,.14); }
+.lighting-section-heading { display:flex; align-items:center; justify-content:space-between; gap:18px; margin-bottom:16px; }
+.lighting-section-heading h3 { margin:0; font-size:23px; line-height:1.2; }
+.lighting-section-heading p { margin:5px 0 0; color:var(--hmh-text-dim,#9AA7B4); font-size:14px; }
+.lighting-room-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+.lighting-room-card { display:grid; grid-template-columns:48px minmax(0,1fr) auto; gap:13px; align-items:center; min-height:96px; margin:0; padding:15px; border:1px solid var(--hmh-border,#2F3845); border-radius:16px; color:var(--hmh-text,#E7ECF3); background:var(--hmh-raised,#181E26); box-shadow:none; text-align:left; }
+.lighting-room-card:hover,.lighting-room-card:focus-visible { border-color:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 55%,var(--hmh-border,#2F3845)); background:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 7%,var(--hmh-raised,#181E26)); }
+.lighting-room-card.is-active { border-color:color-mix(in srgb,#FFB72E 48%,var(--hmh-border,#2F3845)); }
+.lighting-room-icon { display:grid; place-items:center; width:48px; height:48px; border-radius:14px; color:var(--hmh-text-dim,#9AA7B4); background:var(--hmh-surface,#12171D); }
+.lighting-room-card.is-active .lighting-room-icon { color:#FFB72E; background:color-mix(in srgb,#FFB72E 13%,var(--hmh-surface,#12171D)); }
+.lighting-room-icon .icon { width:25px; height:25px; }
+.lighting-room-copy { display:grid; min-width:0; gap:5px; }
+.lighting-room-copy strong { overflow:hidden; font-size:18px; text-overflow:ellipsis; white-space:nowrap; }
+.lighting-room-copy small { overflow:hidden; color:var(--hmh-text-dim,#9AA7B4); font-size:13px; text-overflow:ellipsis; white-space:nowrap; }
+.lighting-room-state { color:var(--hmh-text-dim,#9AA7B4); font-size:13px; font-weight:700; white-space:nowrap; }
+.lighting-room-card.is-active .lighting-room-state { color:#FFB72E; }
+.lighting-device-room + .lighting-device-room { margin-top:19px; padding-top:18px; border-top:1px solid var(--hmh-border,#2F3845); }
+.lighting-device-room-title { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:12px; }
+.lighting-device-room-title h4 { margin:0; font-size:19px; }
+.lighting-device-room-title span { color:var(--hmh-text-dim,#9AA7B4); font-size:13px; }
+.lighting-room-sheet-backdrop { position:fixed; z-index:1010; inset:0; display:grid; place-items:center; padding:28px; background:rgba(4,8,13,.7); backdrop-filter:blur(14px); }
+.lighting-room-sheet { position:relative; width:min(980px,calc(100vw - 56px)); max-height:min(820px,calc(100vh - 56px)); overflow:auto; border:1px solid var(--hmh-border,#2F3845); border-radius:24px; color:var(--hmh-text,#E7ECF3); background:var(--hmh-surface,#12171D); box-shadow:0 32px 90px rgba(0,0,0,.5); }
+.lighting-room-sheet-close { position:sticky; z-index:2; top:16px; float:right; width:46px; height:46px; min-height:46px; margin:16px 16px 0 0; padding:0; border:1px solid var(--hmh-border,#2F3845); border-radius:50%; color:var(--hmh-text,#E7ECF3); font-size:28px; background:var(--hmh-raised,#181E26); }
+.lighting-room-sheet-body { clear:both; padding:2px 26px 28px; }
+.lighting-room-sheet-eyebrow { color:#FFB72E; font-size:12px; font-weight:750; letter-spacing:.1em; }
+.lighting-room-sheet h2 { margin:7px 0 5px; font-size:32px; }
+.lighting-room-sheet p { margin:0 0 18px; font-size:14px; }
+.lighting-room-sheet-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+@media (max-width:1100px) {
+  .lighting-dashboard-hero { grid-template-columns:1fr; }
+  .lighting-room-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media (max-width:760px) {
+  .lighting-dashboard-hero { min-height:0; padding:22px; }
+  .lighting-dashboard-hero-copy { align-items:flex-start; }
+  .lighting-dashboard-hero-facts,.lighting-room-grid,.lighting-room-sheet-grid { grid-template-columns:1fr; }
+  .lighting-room-section,.lighting-device-section { padding:16px; }
+}

@@ -18,6 +18,7 @@ PANEL_JS = (
 PANEL_CSS = PANEL_JS.with_name("hausman-hub-panel.css")
 HOME_SECTIONS_JS = PANEL_JS.with_name("hausman-hub-home-sections.js")
 CLIMATE_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-climate-overview.js")
+LIGHTING_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-lighting.js")
 ROOM_SETUP_JS = PANEL_JS.with_name("hausman-hub-room-setup.js")
 DEVICE_INVENTORY_JS = PANEL_JS.with_name("hausman-hub-device-inventory.js")
 DEVICE_BINDINGS_JS = PANEL_JS.with_name("hausman-hub-device-bindings.js")
@@ -457,6 +458,10 @@ def panel_script(
       vm.runInThisContext(
         fs.readFileSync({str(CLIMATE_OVERVIEW_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(CLIMATE_OVERVIEW_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(LIGHTING_OVERVIEW_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(LIGHTING_OVERVIEW_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(ROOM_SETUP_JS)!r}, "utf8").replace("export function renderFirstRunRoom", "function renderFirstRunRoom"),
@@ -1128,8 +1133,8 @@ class PanelSettingsSectionsTest(unittest.TestCase):
                     "physicalId": "device-light",
                     "entityId": "light.living_main",
                     "name": "Выключатель гостиная",
-                    "roomId": "living",
-                    "roomName": "Гостиная",
+                    "roomId": None,
+                    "roomName": "  Гостиная ",
                     "domain": "light",
                     "category": "lighting",
                     "stateLabel": "Включён",
@@ -1148,7 +1153,21 @@ class PanelSettingsSectionsTest(unittest.TestCase):
                             "value": "12 Вт",
                         },
                     ],
-                }
+                },
+                {
+                    "id": "device-socket",
+                    "physicalId": "device-socket",
+                    "entityId": "switch.living_socket",
+                    "name": "Умная розетка",
+                    "roomId": "living",
+                    "roomName": "Гостиная",
+                    "domain": "switch",
+                    "category": "lighting",
+                    "stateLabel": "Выключена",
+                    "tone": "neutral",
+                    "unavailable": False,
+                    "details": [],
+                },
             ],
             "alarms": [],
         }
@@ -1190,6 +1209,21 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           || !text.includes("Мощность") || !text.includes("12 Вт")) {
           throw new Error("device or its function missing from lighting section");
         }
+        if (text.includes("Умная розетка")) {
+          throw new Error("unrelated switch was promoted to lighting");
+        }
+        const roomCard = findAll(lighting, (node) => node.tagName === "BUTTON"
+          && String(node.className).split(" ").includes("lighting-room-card"))[0];
+        if (!roomCard) throw new Error("room-name fallback did not create a room card");
+        roomCard.fire("click");
+        const sheet = findAll(lighting, (node) =>
+          String(node.className).split(" ").includes("lighting-room-sheet"))[0];
+        if (!sheet || !textOf(sheet).includes("Выключатель гостиная")) {
+          throw new Error("room drill-down did not open the physical device");
+        }
+        const closeSheet = findAll(sheet, (node) =>
+          String(node.className).split(" ").includes("lighting-room-sheet-close"))[0];
+        closeSheet.fire("click");
         const valueInput = findAll(lighting, (node) => node.tagName === "INPUT" && node.type !== "search")[0];
         if (!valueInput || valueInput.value !== "178") {
           throw new Error("device action did not use current brightness");
@@ -2703,7 +2737,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.51.62")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.51.63")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;
