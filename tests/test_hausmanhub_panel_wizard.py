@@ -29,6 +29,7 @@ SCENARIOS_JS = PANEL_JS.with_name("hausman-hub-scenarios.js")
 SCENARIO_ICONS_JS = PANEL_JS.with_name("hausman-hub-scenario-icons.js")
 CLIMATE_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-climate-overview.js")
 LIGHTING_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-lighting.js")
+ROOMS_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-rooms.js")
 ROLLOUT_JS = PANEL_JS.with_name("hausman-hub-rollout.js")
 
 PANEL_PAYLOAD = {
@@ -355,6 +356,10 @@ def panel_script(get_table: dict, post_table: dict, assertions: str) -> str:
       vm.runInThisContext(
         fs.readFileSync({str(LIGHTING_OVERVIEW_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(LIGHTING_OVERVIEW_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(ROOMS_OVERVIEW_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(ROOMS_OVERVIEW_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(ROLLOUT_JS)!r}, "utf8").replace(/export /g, ""),

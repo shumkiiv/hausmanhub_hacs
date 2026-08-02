@@ -19,6 +19,7 @@ PANEL_CSS = PANEL_JS.with_name("hausman-hub-panel.css")
 HOME_SECTIONS_JS = PANEL_JS.with_name("hausman-hub-home-sections.js")
 CLIMATE_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-climate-overview.js")
 LIGHTING_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-lighting.js")
+ROOMS_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-rooms.js")
 ROOM_SETUP_JS = PANEL_JS.with_name("hausman-hub-room-setup.js")
 DEVICE_INVENTORY_JS = PANEL_JS.with_name("hausman-hub-device-inventory.js")
 DEVICE_BINDINGS_JS = PANEL_JS.with_name("hausman-hub-device-bindings.js")
@@ -462,6 +463,10 @@ def panel_script(
       vm.runInThisContext(
         fs.readFileSync({str(LIGHTING_OVERVIEW_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(LIGHTING_OVERVIEW_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(ROOMS_OVERVIEW_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(ROOMS_OVERVIEW_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(ROOM_SETUP_JS)!r}, "utf8").replace("export function renderFirstRunRoom", "function renderFirstRunRoom"),
@@ -1106,10 +1111,19 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("overview room did not open rooms");
         }
         const expandedRoom = findAll(panel._shell.homeSections.rooms, (node) =>
-          String(node.className).split(" ").includes("room-inventory-card")
-          && node.open === true)[0];
-        if (!expandedRoom || !textOf(expandedRoom).includes("Гостиная")) {
-          throw new Error("selected room was not expanded after navigation");
+          String(node.className).split(" ").includes("rooms-detail-sheet"))[0];
+        if (!expandedRoom || !textOf(expandedRoom).includes("Гостиная")
+          || !textOf(expandedRoom).includes("Устройства комнаты")) {
+          throw new Error("selected room detail was not opened after navigation");
+        }
+        const closeRoom = findAll(expandedRoom, (node) =>
+          String(node.className).split(" ").includes("rooms-detail-close"))[0];
+        closeRoom.fire("click");
+        panel._sectionRenderKeys.rooms = null;
+        panel._render();
+        if (findAll(panel._shell.homeSections.rooms, (node) =>
+          String(node.className).split(" ").includes("rooms-detail-sheet")).length) {
+          throw new Error("closed room detail reopened after render");
         }
             """,
         )
@@ -1263,7 +1277,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         }
         panel._shell.tabs.rooms.fire("click");
         const roomText = textOf(panel._shell.homeSections.rooms);
-        if (!roomText.includes("Гостиная") || !roomText.includes("1 устройство")) {
+        if (!roomText.includes("Гостиная") || !roomText.includes("2 устройства")) {
           throw new Error("room inventory does not match tablet navigation");
         }
             """,
@@ -2737,7 +2751,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.51.63")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.51.64")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

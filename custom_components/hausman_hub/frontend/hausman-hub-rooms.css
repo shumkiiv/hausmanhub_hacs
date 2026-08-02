@@ -1,0 +1,52 @@
+.rooms-canon-page { display:grid; gap:20px; }
+.rooms-canon-hero { position:relative; min-height:250px; overflow:hidden; border:1px solid var(--hmh-border); border-radius:var(--hmh-radius-section); background:linear-gradient(90deg,rgba(6,13,19,.94),rgba(6,13,19,.46)),url("./assets/dashboard-hero-living-room-day.png") center/cover; box-shadow:0 14px 36px rgba(0,0,0,.18); color:#f7f9fc; }
+.rooms-canon-hero-copy { display:flex; align-items:center; gap:18px; padding:32px; }
+.rooms-canon-hero-copy h2 { margin:0 0 8px; font-size:clamp(28px,3vw,44px); }
+.rooms-canon-hero-copy p { margin:0; max-width:700px; color:rgba(247,249,252,.78); font-size:17px; }
+.rooms-canon-hero-icon { display:grid; place-items:center; width:64px; height:64px; border:1px solid rgba(255,255,255,.18); border-radius:20px; background:rgba(9,16,23,.66); color:#8fb4ff; }
+.rooms-canon-hero-icon svg { width:31px; height:31px; }
+.rooms-canon-hero-facts { position:absolute; right:28px; bottom:26px; left:28px; display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); overflow:hidden; border:1px solid rgba(255,255,255,.14); border-radius:18px; background:rgba(7,14,20,.74); backdrop-filter:blur(14px); }
+.rooms-canon-hero-facts>span { display:flex; flex-direction:column; gap:3px; padding:16px 20px; border-right:1px solid rgba(255,255,255,.12); }
+.rooms-canon-hero-facts>span:last-child { border-right:0; }
+.rooms-canon-hero-facts strong { font-size:26px; }
+.rooms-canon-hero-facts small { color:rgba(247,249,252,.68); font-size:13px; }
+.rooms-canon-section { display:grid; gap:16px; padding:24px; border:1px solid var(--hmh-border); border-radius:var(--hmh-radius-section); background:var(--hmh-surface); box-shadow:0 14px 36px rgba(0,0,0,.18); }
+.rooms-canon-heading { display:flex; align-items:end; justify-content:space-between; gap:18px; }
+.rooms-canon-heading h3 { margin:0 0 5px; font-size:25px; }
+.rooms-canon-heading p { margin:0; color:var(--hmh-text-dim); font-size:14px; }
+.rooms-canon-controls { display:flex; align-items:center; gap:12px; }
+.rooms-canon-search { width:min(360px,100%); min-height:50px; }
+.rooms-canon-filters { display:flex; flex-wrap:wrap; gap:8px; }
+.rooms-canon-filters button { min-height:44px; border-color:var(--hmh-border); background:transparent; color:var(--hmh-text-dim); }
+.rooms-canon-filters button.is-active { border-color:color-mix(in srgb,var(--hmh-accent) 55%,transparent); background:color-mix(in srgb,var(--hmh-accent) 14%,transparent); color:var(--hmh-text); }
+.rooms-canon-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+.rooms-canon-card { display:grid; grid-template-columns:auto minmax(0,1fr) auto auto; align-items:center; gap:14px; min-height:112px; padding:18px; border:1px solid var(--hmh-border); border-radius:18px; background:var(--hmh-raised); color:var(--hmh-text); text-align:left; box-shadow:none; }
+.rooms-canon-card:hover,.rooms-canon-card:focus-visible { transform:translateY(-1px); border-color:color-mix(in srgb,var(--hmh-accent) 55%,var(--hmh-border)); background:color-mix(in srgb,var(--hmh-accent) 7%,var(--hmh-raised)); }
+.rooms-canon-card.has-warning { border-color:color-mix(in srgb,#d99a25 42%,var(--hmh-border)); }
+.rooms-canon-card-icon { display:grid; place-items:center; width:48px; height:48px; border-radius:15px; background:color-mix(in srgb,var(--hmh-accent) 13%,transparent); color:var(--hmh-accent); }
+.rooms-canon-card-icon svg { width:25px; height:25px; }
+.rooms-canon-card-copy,.rooms-canon-card-climate { display:flex; flex-direction:column; gap:5px; min-width:0; }
+.rooms-canon-card-copy strong { overflow:hidden; font-size:18px; text-overflow:ellipsis; white-space:nowrap; }
+.rooms-canon-card-copy small,.rooms-canon-card-climate small { color:var(--hmh-text-dim); font-size:13px; }
+.rooms-canon-card-climate { align-items:flex-end; }
+.rooms-canon-card-climate strong { font-size:18px; }
+.rooms-canon-card-chevron { color:var(--hmh-text-dim); font-size:26px; }
+.rooms-detail-backdrop { position:fixed; z-index:1010; inset:0; display:grid; place-items:center; padding:32px; background:rgba(3,8,12,.74); backdrop-filter:blur(12px); }
+.rooms-detail-sheet { position:relative; width:min(1180px,calc(100vw - 64px)); max-height:calc(100vh - 64px); overflow:auto; padding:30px; border:1px solid var(--hmh-border); border-radius:28px; background:var(--hmh-surface); box-shadow:0 32px 90px rgba(0,0,0,.44); color:var(--hmh-text); }
+.rooms-detail-close { position:sticky; z-index:2; top:0; float:right; width:48px; min-width:48px; height:48px; padding:0; border-radius:50%; background:var(--hmh-raised); color:var(--hmh-text); font-size:30px; }
+.rooms-detail-head { display:flex; align-items:center; gap:18px; padding-right:64px; }
+.rooms-detail-icon { display:grid; place-items:center; width:64px; height:64px; border-radius:20px; background:color-mix(in srgb,var(--hmh-accent) 14%,transparent); color:var(--hmh-accent); }
+.rooms-detail-icon svg { width:31px; height:31px; }
+.rooms-detail-eyebrow { color:var(--hmh-accent); font-size:12px; font-weight:750; letter-spacing:.12em; }
+.rooms-detail-head h2 { margin:4px 0 6px; font-size:32px; }
+.rooms-detail-head p { margin:0; color:var(--hmh-text-dim); font-size:15px; }
+.rooms-detail-facts { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); margin:24px 0; border:1px solid var(--hmh-border); border-radius:18px; background:var(--hmh-raised); }
+.rooms-detail-facts>span { display:flex; flex-direction:column; gap:5px; padding:18px 20px; border-right:1px solid var(--hmh-border); }
+.rooms-detail-facts>span:last-child { border-right:0; }
+.rooms-detail-facts strong { font-size:22px; }
+.rooms-detail-facts small { color:var(--hmh-text-dim); font-size:13px; }
+.rooms-detail-section-title { display:flex; align-items:center; justify-content:space-between; margin:0 0 14px; }
+.rooms-detail-section-title h3 { margin:0; font-size:22px; }
+.rooms-detail-section-title span { color:var(--hmh-text-dim); }
+@media (max-width:1100px) { .rooms-canon-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .rooms-canon-controls { align-items:stretch; flex-direction:column; } .rooms-canon-search { width:100%; } }
+@media (max-width:760px) { .rooms-canon-hero { min-height:330px; } .rooms-canon-hero-copy { align-items:flex-start; padding:24px; } .rooms-canon-hero-facts { grid-template-columns:repeat(2,1fr); right:20px; bottom:20px; left:20px; } .rooms-canon-hero-facts>span:nth-child(2) { border-right:0; } .rooms-canon-grid { grid-template-columns:1fr; } .rooms-canon-card { grid-template-columns:auto minmax(0,1fr) auto; } .rooms-canon-card-climate { display:none; } .rooms-detail-backdrop { padding:12px; } .rooms-detail-sheet { width:calc(100vw - 24px); max-height:calc(100vh - 24px); padding:22px; border-radius:22px; } .rooms-detail-facts { grid-template-columns:repeat(2,1fr); } .rooms-detail-facts>span:nth-child(2) { border-right:0; } }

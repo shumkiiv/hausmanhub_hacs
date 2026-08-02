@@ -193,16 +193,15 @@ export function renderHomeSection(panel, sectionId, container, deps) {
     deps.renderLightingOverview(panel, container, deps);
     return;
   }
+  if (sectionId === "rooms") {
+    deps.renderRoomsOverview(panel, container, deps);
+    return;
+  }
   const meta = SECTION_META[sectionId] || SECTION_META.devices;
   const rooms = panel._homeDashboard && Array.isArray(panel._homeDashboard.rooms)
     ? panel._homeDashboard.rooms : [];
   const devices = panel._homeDashboard ? panel._homeDevices(sectionId) : [];
   renderHero(panel, container, meta, metrics(panel, devices, rooms), deps);
-  if (sectionId === "rooms") {
-    if (panel._homeDashboard) panel._renderRoomInventory(container);
-    else container.appendChild(el("div", "card empty-state", "Данные комнат пока недоступны. Проверьте подключение HausmanHub."));
-    return;
-  }
   if (sectionId === "security" && panel._homeDashboard) panel._renderAlarmSummary(container);
   renderToolbar(container, devices.length, deps);
   if (!panel._homeDashboard) {
