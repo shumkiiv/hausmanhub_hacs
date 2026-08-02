@@ -1,7 +1,7 @@
 /* Scenario library and editor shared with the HausmanHub tablet contract. */
 
-import { scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.51.69";
-import { scenarioField, scenarioIconField, scenarioSelectField, scenarioToggle } from "./hausman-hub-scenario-fields.js?v=1.51.69";
+import { scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.51.70";
+import { scenarioEditorIssues, scenarioField, scenarioIconField, scenarioSelectField, scenarioToggle } from "./hausman-hub-scenario-fields.js?v=1.51.70";
 
 const TRIGGER_TYPES = [
   ["manual", "Ручной запуск"], ["time", "По времени"],
@@ -146,13 +146,30 @@ function scenarioRuleCard(panel, kind, rule, index, rules, deps) {
   const card = el("article", "scenario-rule-card");
   const head = el("div", "scenario-rule-head");
   head.appendChild(el("strong", null, `${index + 1}. ${kind === "action" ? "Шаг" : kind === "trigger" ? "Триггер" : "Условие"}`));
+  const controls = el("div", "scenario-rule-order");
+  const move = (direction, label) => {
+    const button = el("button", "secondary scenario-rule-move", label);
+    button.type = "button";
+    button.disabled = direction < 0 ? index === 0 : index === rules.length - 1;
+    deps.setAttr(button, "aria-label", `${direction < 0 ? "Поднять" : "Опустить"} ${kind === "action" ? "шаг" : kind === "trigger" ? "триггер" : "условие"} ${index + 1}`);
+    button.addEventListener("click", () => {
+      const target = index + direction;
+      if (target < 0 || target >= rules.length) return;
+      [rules[index], rules[target]] = [rules[target], rules[index]];
+      updateScenarioEditor(panel);
+    });
+    return button;
+  };
+  controls.appendChild(move(-1, "↑"));
+  controls.appendChild(move(1, "↓"));
   const remove = el("button", "secondary scenario-rule-remove", "Удалить");
   remove.type = "button";
   remove.addEventListener("click", () => {
     rules.splice(index, 1);
     updateScenarioEditor(panel);
   });
-  head.appendChild(remove);
+  controls.appendChild(remove);
+  head.appendChild(controls);
   card.appendChild(head);
   const change = (changed) => {
     rules[index] = changed;
@@ -210,21 +227,6 @@ function scenarioEditorSection(deps, title, description) {
   section.appendChild(deps.el("h3", null, title));
   if (description) section.appendChild(deps.el("p", "scenario-editor-panel-copy", description));
   return section;
-}
-
-function scenarioEditorIssues(scenario) {
-  const issues = [];
-  const add = (code, step, message) => issues.push({ code, step, message });
-  if (!String(scenario.title || "").trim()) add("title_required", "about", "Укажите название сценария.");
-  if (!scenario.definition.triggers.length) add("trigger_required", "triggers", "Добавьте хотя бы один триггер.");
-  if (!scenario.definition.actions.length) add("action_required", "actions", "Добавьте хотя бы одно действие.");
-  scenario.definition.actions.forEach((action) => {
-    if (action.type === "device_action" && (!action.targetId || !action.actionId)) add("device_action_incomplete", "actions", "Для каждого действия выберите устройство и команду.");
-    if (action.type === "run_scenario" && !action.scenarioId) add("scenario_action_incomplete", "actions", "Выберите запускаемый сценарий.");
-    if (action.type === "notification" && !String(action.message || "").trim()) add("notification_empty", "actions", "Введите текст уведомления.");
-    if (action.type === "delay" && Number(action.delaySeconds) < 1) add("delay_invalid", "actions", "Пауза должна быть не меньше одной секунды.");
-  });
-  return [...new Map(issues.map((issue) => [issue.code, issue])).values()];
 }
 
 function scenarioStepIssueCount(scenario, step) {

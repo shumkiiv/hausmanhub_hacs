@@ -111,6 +111,9 @@
 .scenario-rule-list { display:grid; gap:12px; }
 .scenario-rule-card { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; padding:16px; border:1px solid color-mix(in srgb,var(--hmh-border,#2F3845) 84%,transparent); border-radius:14px; background:var(--hmh-raised,#181E26); }
 .scenario-rule-head { grid-column:1 / -1; display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.scenario-rule-order { display:flex; align-items:center; gap:8px; }
+.scenario-rule-move { min-width:38px; padding:8px 10px; font-size:18px; line-height:1; }
+.scenario-rule-move:disabled { opacity:.28; cursor:default; }
 .scenario-rule-remove { min-height:34px; padding:6px 11px; color:var(--hmh-danger,#EF6A6A); }
 .scenario-rule-fields { display:contents; }
 .scenario-rule-hint { grid-column:1 / -1; margin:0; padding:12px 14px; border-radius:11px; color:var(--hmh-muted,#AAB4C2); background:color-mix(in srgb,var(--hmh-accent,#4D8DFF) 8%,transparent); }

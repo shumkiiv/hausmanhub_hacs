@@ -2115,7 +2115,22 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         if (JSON.stringify(labels) !== JSON.stringify(["Основное", "Когда", "Если", "Тогда", "Доступ"])) {
           throw new Error("scenario editor step contract mismatch: " + JSON.stringify(labels));
         }
-        steps[4].fire("click");
+        steps[3].fire("click");
+        const addAction = findAll(screen, (node) => node.tagName === "BUTTON" && node.textContent === "+ Добавить действие")[0];
+        addAction.fire("click");
+        findAll(screen, (node) => node.tagName === "BUTTON" && node.textContent === "+ Добавить действие")[0].fire("click");
+        const originalOrder = panel._scenarioEditor.definition.actions.map((item) => item.id);
+        const moveDown = findAll(screen, (node) => node.tagName === "BUTTON" && node["aria-label"] === "Опустить шаг 1")[0];
+        if (!moveDown || moveDown.disabled) throw new Error("scenario action ordering control missing");
+        moveDown.fire("click");
+        const movedOrder = panel._scenarioEditor.definition.actions.map((item) => item.id);
+        if (movedOrder[0] !== originalOrder[1] || movedOrder[1] !== originalOrder[0]) {
+          throw new Error("scenario action order did not change");
+        }
+        const actionIssue = findAll(screen, (node) => String(node.className).split(" ").includes("scenario-editor-step-issue"))[0];
+        if (!actionIssue) throw new Error("incomplete scenario action is not flagged before API validation");
+        const refreshedSteps = findAll(screen, (node) => String(node.className).split(" ").includes("scenario-editor-step"));
+        refreshedSteps[4].fire("click");
         const switches = findAll(screen, (node) => node.role === "switch");
         if (switches.length !== 3 || switches.some((node) => !["true", "false"].includes(node["aria-checked"]))) {
           throw new Error("scenario publication switches are not accessible");
@@ -2899,7 +2914,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.51.69")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.51.70")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

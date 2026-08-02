@@ -1,6 +1,6 @@
 /* Focused form controls for the guided scenario editor. */
 
-import { SCENARIO_ICON_GROUPS, scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.51.69";
+import { SCENARIO_ICON_GROUPS, scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.51.70";
 
 export function scenarioField(deps, label, value, onChange, options = {}) {
   const { el, setAttr } = deps;
@@ -97,4 +97,30 @@ export function scenarioToggle(deps, label, description, checked, onChange) {
     onChange(state);
   });
   return wrapper;
+}
+
+export function scenarioEditorIssues(scenario) {
+  const issues = [];
+  const add = (code, step, message) => issues.push({ code, step, message });
+  if (!String(scenario.title || "").trim()) add("title_required", "about", "Укажите название сценария.");
+  if (!scenario.definition.triggers.length) add("trigger_required", "triggers", "Добавьте хотя бы один триггер.");
+  if (!scenario.definition.actions.length) add("action_required", "actions", "Добавьте хотя бы одно действие.");
+  scenario.definition.triggers.forEach((trigger) => {
+    if (trigger.type === "time" && !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(trigger.value || ""))) add("trigger_time_invalid", "triggers", "Укажите корректное время запуска.");
+    if (trigger.type === "device_state" && (!trigger.targetId || !trigger.property || !trigger.comparison)) add("trigger_device_incomplete", "triggers", "Для триггера выберите устройство, показатель и сравнение.");
+    if (trigger.type === "device_state" && trigger.comparison !== "changed" && String(trigger.value ?? "").trim() === "") add("trigger_value_required", "triggers", "Укажите значение, которое запустит сценарий.");
+  });
+  scenario.definition.conditions.forEach((condition) => {
+    if (condition.type === "time_window" && !/^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/.test(String(condition.value || ""))) add("condition_window_invalid", "conditions", "Укажите временной промежуток в формате 22:00-07:00.");
+    if (condition.type === "weekday" && !String(condition.value || "").trim()) add("condition_weekday_required", "conditions", "Выберите хотя бы один день недели.");
+    if (condition.type === "device_state" && (!condition.targetId || !condition.property || !condition.comparison)) add("condition_device_incomplete", "conditions", "Для условия выберите устройство, показатель и сравнение.");
+    if (condition.type === "device_state" && condition.comparison !== "changed" && String(condition.value ?? "").trim() === "") add("condition_value_required", "conditions", "Укажите значение для проверки условия.");
+  });
+  scenario.definition.actions.forEach((action) => {
+    if (action.type === "device_action" && (!action.targetId || !action.actionId)) add("device_action_incomplete", "actions", "Для каждого действия выберите устройство и команду.");
+    if (action.type === "run_scenario" && !action.scenarioId) add("scenario_action_incomplete", "actions", "Выберите запускаемый сценарий.");
+    if (action.type === "notification" && !String(action.message || "").trim()) add("notification_empty", "actions", "Введите текст уведомления.");
+    if (action.type === "delay" && (!Number.isFinite(Number(action.delaySeconds)) || Number(action.delaySeconds) < 1)) add("delay_invalid", "actions", "Пауза должна быть не меньше одной секунды.");
+  });
+  return [...new Map(issues.map((issue) => [issue.code, issue])).values()];
 }
