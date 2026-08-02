@@ -1049,6 +1049,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
             "rooms": [
                 {"id": "living", "name": "Гостиная", "temp": 24.5, "humidity": 46, "targetTemp": 25, "targetHumidity": 45},
                 {"id": "bedroom", "name": "Спальня", "temp": 23.5, "humidity": 50, "targetTemp": 24, "targetHumidity": 50},
+                {"id": "office", "name": "Кабинет", "temp": None, "humidity": None, "targetTemp": None, "targetHumidity": None},
             ],
             "devices": [
                 {"id": "light.main", "physicalId": "light-fixture", "domain": "light", "state": "on"},
@@ -1066,10 +1067,13 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const overview = panel._shell.sectionNodes.overview;
         const text = textOf(overview);
         for (const label of [
-          "Дом", "Гостиная", "Спальня", "Климат", "Цель климата",
+          "Дом", "Гостиная", "Спальня", "Кабинет", "Климат", "Цель климата",
           "Комфорт в доме", "Избранные сценарии", "Доброе утро", "Погода",
         ]) {
           if (!text.includes(label)) throw new Error("overview text missing: " + label);
+        }
+        if (text.includes("0,0–25,0°") || text.includes("0–50%")) {
+          throw new Error("missing climate target was coerced to zero: " + text);
         }
         const byClass = (name) => findAll(overview, (node) =>
           String(node.className).split(" ").includes(name));
@@ -2699,7 +2703,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.51.61")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.51.62")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

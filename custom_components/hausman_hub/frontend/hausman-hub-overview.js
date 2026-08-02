@@ -1,7 +1,15 @@
 const CLIMATE_DOMAINS = new Set(["climate", "humidifier", "fan"]);
 
 function validNumbers(values) {
-  return values.map(Number).filter(Number.isFinite);
+  return values
+    .filter((value) => value !== null && value !== undefined && value !== "")
+    .map(Number)
+    .filter(Number.isFinite);
+}
+
+function validNumber(value) {
+  return value !== null && value !== undefined && value !== ""
+    && Number.isFinite(Number(value));
 }
 
 function average(values) {
@@ -127,7 +135,7 @@ function renderPrimaryCards(panel, container, dashboard, deps) {
     `${humidityTarget === "Нет данных" ? "Влажность — в деталях" : humidityTarget} · ${rooms.length} ${panel._roomCountWord(rooms.length)}`);
   row.appendChild(targetCard);
   const comfortCard = cardButton(deps, "overview-canon-primary-card is-comfort", "climate", panel);
-  const deviations = rooms.map((room) => Number.isFinite(Number(room.temp)) && Number.isFinite(Number(room.targetTemp))
+  const deviations = rooms.map((room) => validNumber(room.temp) && validNumber(room.targetTemp)
     ? Math.abs(Number(room.temp) - Number(room.targetTemp)) : null).filter(Number.isFinite);
   const stable = deviations.length && Math.max(...deviations) <= 1;
   appendMetric(deps, comfortCard, "Комфорт в доме", stable ? "В норме" : (deviations.length ? "Выравнивается" : "Нет данных"),
