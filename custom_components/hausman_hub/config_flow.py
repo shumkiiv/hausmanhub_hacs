@@ -860,19 +860,6 @@ def _general_settings_schema(
                 SUMMARY_UPDATE_INTERVAL_FIELD,
                 default=summary_update_interval_default,
             ): SUMMARY_UPDATE_INTERVAL_SELECTOR,
-            vol.Required(
-                CONNECTION_MODE_FIELD,
-                default=connection_mode_default,
-            ): SelectSelector(
-                SelectSelectorConfig(
-                    options=list(APPROVED_CONNECTION_MODES),
-                    translation_key="connection_mode",
-                )
-            ),
-            vol.Optional(
-                SMART_HOME_CENTER_URL_FIELD,
-                default=smart_home_center_url_default or "",
-            ): TextSelector(TextSelectorConfig(multiline=False, type=TextSelectorType.TEXT)),
             vol.Optional(
                 HOME_ASSISTANT_URL_FIELD,
                 default=home_assistant_url_default or "",
@@ -2937,8 +2924,7 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
             mode = user_input.get(MODE_FIELD, mode_default)
             local_page = user_input.get(LOCAL_SUMMARY_ENABLED_FIELD, local_page_default)
             interval = user_input.get(SUMMARY_UPDATE_INTERVAL_FIELD, interval_default)
-            connection_mode = user_input.get(CONNECTION_MODE_FIELD, connection_mode_default)
-            smart_home_center_url = user_input.get(SMART_HOME_CENTER_URL_FIELD, smart_home_center_url_default or "")
+            connection_mode = CONNECTION_MODE_DEFAULT
             home_assistant_url = user_input.get(HOME_ASSISTANT_URL_FIELD, home_assistant_url_default or "")
             if mode not in APPROVED_MODES:
                 errors[MODE_FIELD] = "unsafe_mode"
@@ -2946,8 +2932,6 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
                 errors[LOCAL_SUMMARY_ENABLED_FIELD] = "unsafe_local_summary_setting"
             elif interval not in APPROVED_SUMMARY_UPDATE_INTERVALS:
                 errors[SUMMARY_UPDATE_INTERVAL_FIELD] = "unsafe_summary_update_interval"
-            elif connection_mode not in APPROVED_CONNECTION_MODES:
-                errors[CONNECTION_MODE_FIELD] = "unsafe_connection_mode"
             else:
                 updates: dict[str, object] = {
                     MODE_FIELD: mode,
@@ -2955,10 +2939,7 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
                     SUMMARY_UPDATE_INTERVAL_FIELD: interval,
                     CONNECTION_MODE_FIELD: connection_mode,
                 }
-                if smart_home_center_url:
-                    updates[SMART_HOME_CENTER_URL_FIELD] = smart_home_center_url
-                else:
-                    updates[SMART_HOME_CENTER_URL_FIELD] = None
+                updates[SMART_HOME_CENTER_URL_FIELD] = None
                 if home_assistant_url:
                     updates[HOME_ASSISTANT_URL_FIELD] = home_assistant_url
                 else:

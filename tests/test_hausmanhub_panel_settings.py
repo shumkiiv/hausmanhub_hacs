@@ -2199,8 +2199,8 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         self.assertNotIn("input.settings-toggle", css)
         payloads = dict(GET_PATHS)
         payloads["hausman_hub/v1/admin/connection-settings"] = {
-            "connection_mode": "center",
-            "smart_home_center_url": "http://hausmanhub.local:8099",
+            "connection_mode": "home_assistant",
+            "smart_home_center_url": None,
             "home_assistant_url": "https://homeassistant.local",
         }
         script = panel_script(
@@ -2225,7 +2225,8 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           && node.textContent === "Подключение")[0].fire("click");
         screen = panel._shell.settings;
         const urls = findAll(screen, (node) => node.type === "url");
-        if (urls.length !== 2 || !textOf(screen).includes("Источник данных и команд")) {
+        if (urls.length !== 1 || !textOf(screen).includes("Источник данных и команд")
+          || !textOf(screen).includes("Внешний Center и Node-RED для работы не требуются")) {
           throw new Error("connection settings page mismatch");
         }
         const panelGets = calls.filter((call) => call.method === "GET"
@@ -2237,9 +2238,6 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           && call.path === "hausman_hub/v1/admin/panel").length !== panelGets + 1) {
           throw new Error("connection check did not call the live panel API");
         }
-        screen = panel._shell.settings;
-        findAll(screen, (node) => node.tagName === "BUTTON"
-          && textOf(node).includes("HausmanHub в Home Assistant"))[0].fire("click");
         screen = panel._shell.settings;
         const centerField = findAll(screen, (node) =>
           String(node.className).split(" ").includes("settings-field")
@@ -2268,7 +2266,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           && call.path === "hausman_hub/v1/admin/connection-settings");
         const expected = {
           connection_mode: "home_assistant",
-          smart_home_center_url: "http://hausmanhub.local:8099",
+          smart_home_center_url: "",
           home_assistant_url: "https://ha.example.test",
         };
         if (!post || JSON.stringify(post.payload) !== JSON.stringify(expected)) {
@@ -2927,7 +2925,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.51.72")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.51.73")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

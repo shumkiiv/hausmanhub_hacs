@@ -76,7 +76,7 @@ export function diagnosticSummaryText(panel, checks) {
   return [
     "HausmanHub — техническая сводка",
     `Версия: ${panel._data && panel._data.integration_version || "не определена"}`,
-    `Подключение: ${panel._settingsData.connection_mode === "center" ? "HausmanHub" : "Home Assistant"}`,
+    "Подключение: HausmanHub в Home Assistant",
     "",
     "Проверки:",
     ...checks.map((check) => `${check.title}: ${check.value}`),

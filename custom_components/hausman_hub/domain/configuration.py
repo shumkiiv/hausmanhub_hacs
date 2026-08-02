@@ -44,7 +44,7 @@ class SafeConfiguration:
     climate_bridge_target: ClimateBridgeTarget | None = None
     climate_canary_room_id: str | None = None
     native_climate_policy: NativeClimatePolicy = NativeClimatePolicy()
-    connection_mode: str = "center"
+    connection_mode: str = "home_assistant"
     smart_home_center_url: str | None = None
     home_assistant_url: str | None = None
 

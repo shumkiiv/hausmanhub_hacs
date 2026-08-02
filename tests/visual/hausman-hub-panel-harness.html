@@ -12,7 +12,7 @@
   <body>
     <hausman-hub-panel id="panel"></hausman-hub-panel>
     <script type="module">
-      import "../../custom_components/hausman_hub/frontend/hausman-hub-panel.js?v=1.51.72";
+      import "../../custom_components/hausman_hub/frontend/hausman-hub-panel.js?v=1.51.73";
       const params = new URLSearchParams(window.location.search);
       const panel = document.getElementById("panel");
       const theme = params.get("theme") === "dark" ? "dark" : "light";
@@ -21,7 +21,7 @@
       document.documentElement.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       document.body.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       panel._data = {
-        integration_version: "1.51.72",
+        integration_version: "1.51.73",
         readiness: { status: "ready", bridge_mode: "native", reasons: [] },
         snapshot: {
           rooms: [
@@ -230,8 +230,8 @@
         "breaker-233": Array.from({ length: 24 }, (_, index) => ({ start: String(index), mean: 66 + index * 6 })),
       };
       panel._settingsData = {
-        connection_mode: "center",
-        smart_home_center_url: "http://hausmanhub.local:8099",
+        connection_mode: "home_assistant",
+        smart_home_center_url: null,
         home_assistant_url: "https://homeassistant.local",
       };
       panel._settingsBaseline = { ...panel._settingsData };
@@ -246,7 +246,7 @@
       }
       panel._render();
       panel.shadowRoot.querySelector("link").href =
-        "../../custom_components/hausman_hub/frontend/hausman-hub-panel.css?v=1.51.72";
+        "../../custom_components/hausman_hub/frontend/hausman-hub-panel.css?v=1.51.73";
       if (screen === "assistant") {
         panel._assistant = {
           loaded: true,

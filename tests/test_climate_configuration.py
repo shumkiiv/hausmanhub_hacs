@@ -24,6 +24,23 @@ ENTRY = {
 
 
 class ClimateConfigurationTest(unittest.TestCase):
+    def test_new_writes_make_home_assistant_the_only_runtime_authority(self) -> None:
+        result = create_options(
+            "read-only",
+            connection_mode_value="center",
+            smart_home_center_url_value="http://192.168.1.10:8099",
+            home_assistant_url_value="http://homeassistant.local:8123",
+        )
+
+        configuration = effective_configuration(ENTRY, result)
+        self.assertEqual("home_assistant", configuration.connection_mode)
+        self.assertIsNone(configuration.smart_home_center_url)
+        self.assertEqual(
+            "http://homeassistant.local:8123", configuration.home_assistant_url
+        )
+        self.assertNotIn("connection_mode", result)
+        self.assertNotIn("smart_home_center_url", result)
+
     def test_target_accepts_only_normalized_private_literal_origins(self) -> None:
         self.assertEqual(
             "http://192.168.1.10:1880",

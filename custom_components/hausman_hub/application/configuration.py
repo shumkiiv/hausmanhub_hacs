@@ -60,7 +60,7 @@ NATIVE_TARGET_TEMPERATURE_FIELD = "native_target_temperature"
 NATIVE_TARGET_HUMIDITY_FIELD = "native_target_humidity"
 
 CONNECTION_MODE_FIELD = "connection_mode"
-CONNECTION_MODE_DEFAULT = "center"
+CONNECTION_MODE_DEFAULT = "home_assistant"
 SMART_HOME_CENTER_URL_FIELD = "smart_home_center_url"
 HOME_ASSISTANT_URL_FIELD = "home_assistant_url"
 
@@ -111,6 +111,10 @@ def create_options(
         native_climate_room_id_value = None
         native_target_temperature_value = None
         native_target_humidity_value = None
+    # External Center values are read only for migration compatibility. Every
+    # newly written configuration is native to Home Assistant.
+    connection_mode_value = CONNECTION_MODE_DEFAULT
+    smart_home_center_url_value = None
     configuration = _configuration_for(
         mode_value,
         local_summary_enabled_value,

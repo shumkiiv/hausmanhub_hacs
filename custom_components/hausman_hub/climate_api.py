@@ -2038,8 +2038,8 @@ class ClimateAdminConnectionSettingsView(_ClimateView):
             return self._unavailable()
         return self.json(
             {
-                "connection_mode": current.connection_mode,
-                "smart_home_center_url": current.smart_home_center_url,
+                "connection_mode": CONNECTION_MODE_DEFAULT,
+                "smart_home_center_url": None,
                 "home_assistant_url": current.home_assistant_url,
             },
             headers=NO_STORE_HEADERS,
@@ -2071,10 +2071,10 @@ class ClimateAdminConnectionSettingsView(_ClimateView):
             current = effective_configuration(entry.data, entry.options)
         except Exception:
             return self._unavailable()
-        connection_mode = payload.get(CONNECTION_MODE_FIELD, current.connection_mode)
-        smart_home_center_url = payload.get(
-            SMART_HOME_CENTER_URL_FIELD, current.smart_home_center_url
-        )
+        # The external Center is migration input only. Runtime authority and all new
+        # writes stay inside Home Assistant so the integration is self-contained.
+        connection_mode = CONNECTION_MODE_DEFAULT
+        smart_home_center_url = None
         home_assistant_url = payload.get(
             HOME_ASSISTANT_URL_FIELD, current.home_assistant_url
         )
