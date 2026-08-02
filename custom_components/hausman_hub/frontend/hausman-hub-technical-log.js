@@ -1,7 +1,8 @@
 const LEVELS = new Set(["success", "warning", "error"]);
 const EMPTY_ENTRY = { at: "—", level: "info", message: "Событий текущего сеанса пока нет" };
 
-export function recordTechnicalEvent(entries, level, message) {
+export function recordTechnicalEvent(host, level, message) {
+  const entries = host._technicalLog;
   const safeLevel = LEVELS.has(level) ? level : "info";
   const safeMessage = String(message || "Техническое событие")
     .replace(/https?:\/\/\S+/gi, "[адрес скрыт]")

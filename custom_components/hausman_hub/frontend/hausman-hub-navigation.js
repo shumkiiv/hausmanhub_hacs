@@ -123,6 +123,7 @@ export function setKioskState(panel, active) {
     if (label) label.textContent = panel._kioskMode ? "Выйти из киоска" : "Режим киоска";
   });
   if (panel._shell?.kioskDock) panel._shell.kioskDock.hidden = !panel._kioskMode;
+  panel._syncSectionVisibility?.();
 }
 
 export function handleKioskPointerUp(panel, event) {

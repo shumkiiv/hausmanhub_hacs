@@ -34,6 +34,7 @@ MEDIA_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-media-overview.js")
 SECURITY_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-security-overview.js")
 DEVICES_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-devices-overview.js")
 TECHNICAL_LOG_JS = PANEL_JS.with_name("hausman-hub-technical-log.js")
+KIOSK_JS = PANEL_JS.with_name("hausman-hub-kiosk.js")
 ROLLOUT_JS = PANEL_JS.with_name("hausman-hub-rollout.js")
 
 PANEL_PAYLOAD = {
@@ -384,6 +385,11 @@ def panel_script(get_table: dict, post_table: dict, assertions: str) -> str:
       vm.runInThisContext(
         fs.readFileSync({str(TECHNICAL_LOG_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(TECHNICAL_LOG_JS)!r} }}
+      );
+      const log = recordTechnicalEvent;
+      vm.runInThisContext(
+        fs.readFileSync({str(KIOSK_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(KIOSK_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(PANEL_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, ""),
