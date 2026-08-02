@@ -207,6 +207,10 @@ export function renderHomeSection(panel, sectionId, container, deps) {
     deps.renderSecurityOverview(panel, container, deps);
     return;
   }
+  if (sectionId === "devices") {
+    deps.renderDevicesOverview(panel, container, deps);
+    return;
+  }
   const meta = SECTION_META[sectionId] || SECTION_META.devices;
   const rooms = panel._homeDashboard && Array.isArray(panel._homeDashboard.rooms)
     ? panel._homeDashboard.rooms : [];

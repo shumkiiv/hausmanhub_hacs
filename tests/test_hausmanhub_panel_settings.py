@@ -22,6 +22,7 @@ LIGHTING_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-lighting.js")
 ROOMS_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-rooms.js")
 MEDIA_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-media-overview.js")
 SECURITY_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-security-overview.js")
+DEVICES_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-devices-overview.js")
 ROOM_SETUP_JS = PANEL_JS.with_name("hausman-hub-room-setup.js")
 DEVICE_INVENTORY_JS = PANEL_JS.with_name("hausman-hub-device-inventory.js")
 DEVICE_BINDINGS_JS = PANEL_JS.with_name("hausman-hub-device-bindings.js")
@@ -477,6 +478,10 @@ def panel_script(
       vm.runInThisContext(
         fs.readFileSync({str(SECURITY_OVERVIEW_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(SECURITY_OVERVIEW_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(DEVICES_OVERVIEW_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(DEVICES_OVERVIEW_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(ROOM_SETUP_JS)!r}, "utf8").replace("export function renderFirstRunRoom", "function renderFirstRunRoom"),
@@ -1578,6 +1583,78 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           String(node.className).split(" ").includes("inventory-device-card"));
         if (filteredCards.length !== 1 || !textOf(filteredCards[0]).includes("Датчик протечки")) {
           throw new Error("security contour did not drill down to its physical devices");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_devices_overview_counts_physical_devices_once_and_drills_into_category(self) -> None:
+        payloads = dict(GET_PATHS)
+        payloads["hausman_hub/v1/dashboard"] = {
+            "rooms": [
+                {"id": "living", "name": "Гостиная"},
+                {"id": "kitchen", "name": "Кухня"},
+            ],
+            "devices": [
+                {
+                    "id": "device-ac", "physicalId": "physical-ac",
+                    "entityId": "climate.living", "name": "Кондиционер гостиная",
+                    "roomId": "living", "roomName": "Гостиная", "domain": "climate",
+                    "category": "climate", "state": "cool", "stateLabel": "охлаждение",
+                    "active": True, "unavailable": False,
+                    "imageUrl": "https://www.zigbee2mqtt.io/images/devices/ac.png",
+                    "details": [{"entityId": "climate.living", "label": "Климат", "value": "охлаждение"}],
+                },
+                {
+                    "id": "device-ac-shadow", "physicalId": "physical-ac",
+                    "entityId": "switch.living_ac", "name": "Кондиционер гостиная",
+                    "roomId": "living", "roomName": "Гостиная", "domain": "switch",
+                    "category": "appliance", "state": "on", "stateLabel": "включено",
+                    "active": True, "unavailable": False, "details": [],
+                },
+                {
+                    "id": "device-kettle", "physicalId": "physical-kettle",
+                    "entityId": "switch.kettle", "name": "Чайник",
+                    "roomId": "kitchen", "roomName": "Кухня", "domain": "switch",
+                    "category": "appliance", "state": "unavailable", "stateLabel": "нет связи",
+                    "active": False, "unavailable": True, "details": [],
+                },
+            ],
+            "alarms": [],
+        }
+        payloads["hausman_hub/v1/admin/scenarios/catalog"] = {"devices": []}
+        script = panel_script(
+            payloads,
+            {},
+            """
+        await tick();
+        panel._shell.tabs.devices.fire("click");
+        const devices = panel._shell.homeSections.devices;
+        const text = textOf(devices);
+        if (!text.includes("ФИЗИЧЕСКИЕ УСТРОЙСТВА ДОМА")
+          || !text.includes("Категории устройств") || !text.includes("Источник данных")
+          || !text.includes("HausmanHub") || text.includes("Smart Home Center")) {
+          throw new Error("canonical devices hierarchy is incomplete: " + text);
+        }
+        let cards = findAll(devices, (node) =>
+          String(node.className).split(" ").includes("inventory-device-card"));
+        if (cards.length !== 2) throw new Error("one physical device rendered more than once");
+        const images = findAll(devices, (node) => node.tagName === "IMG");
+        if (!images.some((node) => String(node.src).includes("zigbee2mqtt.io"))) {
+          throw new Error("Zigbee2MQTT image did not have presentation priority");
+        }
+        const categories = findAll(devices, (node) =>
+          String(node.className).split(" ").includes("devices-canon-category"));
+        const climate = categories.find((node) => textOf(node).includes("Климат"));
+        if (!climate || !categories.some((node) => textOf(node).includes("Техника"))) {
+          throw new Error("device categories missing");
+        }
+        climate.fire("click");
+        cards = findAll(devices, (node) =>
+          String(node.className).split(" ").includes("inventory-device-card"));
+        if (cards.length !== 1 || !textOf(cards[0]).includes("Кондиционер гостиная")) {
+          throw new Error("device category did not drill down to its physical devices");
         }
             """,
         )
@@ -2783,7 +2860,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.51.66")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.51.67")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;
