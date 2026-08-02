@@ -40,8 +40,10 @@ function homeDevices(panel, sectionId, normalizedText) {
     if (sectionId === "media") return domain === "media_player" || category === "media";
     if (sectionId === "climate") return ["climate", "humidifier", "fan"].includes(domain)
       || ["climate", "air_quality"].includes(category);
-    if (sectionId === "security") return category === "security"
-      || ["lock", "camera", "alarm_control_panel"].includes(domain);
+    if (sectionId === "security") return [
+      "security", "moisture", "smoke", "gas", "carbon_monoxide", "safety", "problem",
+      "occupancy", "presence", "motion", "opening", "door", "window",
+    ].includes(category) || ["lock", "camera", "alarm_control_panel"].includes(domain);
     return false;
   });
 }
@@ -199,6 +201,10 @@ export function renderHomeSection(panel, sectionId, container, deps) {
   }
   if (sectionId === "media") {
     deps.renderMediaOverview(panel, container, deps);
+    return;
+  }
+  if (sectionId === "security") {
+    deps.renderSecurityOverview(panel, container, deps);
     return;
   }
   const meta = SECTION_META[sectionId] || SECTION_META.devices;

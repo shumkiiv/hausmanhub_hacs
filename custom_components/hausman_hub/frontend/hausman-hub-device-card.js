@@ -21,6 +21,11 @@ const STATE_LABELS = {
   auto: "Автоматически",
   unavailable: "Нет связи",
   unknown: "Состояние неизвестно",
+  "сухо": "Сухо",
+  "обнаружена вода": "Обнаружена вода",
+  "движения нет": "Движения нет",
+  "обнаружено движение": "Обнаружено движение",
+  "без охраны": "Без охраны",
 };
 
 const DETAIL_LABELS = {
@@ -44,7 +49,7 @@ export function localizedDeviceState(device) {
   if (device && device.unavailable) return "Нет связи";
   const rawState = normalized(device && device.state);
   const rawLabel = normalized(device && device.stateLabel);
-  return STATE_LABELS[rawState] || STATE_LABELS[rawLabel]
+  return STATE_LABELS[rawLabel] || STATE_LABELS[rawState]
     || (device && device.stateLabel) || "Состояние неизвестно";
 }
 

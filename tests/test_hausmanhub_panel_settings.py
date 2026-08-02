@@ -21,6 +21,7 @@ CLIMATE_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-climate-overview.js")
 LIGHTING_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-lighting.js")
 ROOMS_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-rooms.js")
 MEDIA_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-media-overview.js")
+SECURITY_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-security-overview.js")
 ROOM_SETUP_JS = PANEL_JS.with_name("hausman-hub-room-setup.js")
 DEVICE_INVENTORY_JS = PANEL_JS.with_name("hausman-hub-device-inventory.js")
 DEVICE_BINDINGS_JS = PANEL_JS.with_name("hausman-hub-device-bindings.js")
@@ -472,6 +473,10 @@ def panel_script(
       vm.runInThisContext(
         fs.readFileSync({str(MEDIA_OVERVIEW_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(MEDIA_OVERVIEW_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(SECURITY_OVERVIEW_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(SECURITY_OVERVIEW_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(ROOM_SETUP_JS)!r}, "utf8").replace("export function renderFirstRunRoom", "function renderFirstRunRoom"),
@@ -1525,6 +1530,14 @@ class PanelSettingsSectionsTest(unittest.TestCase):
                     "active": False, "tone": "neutral", "unavailable": False,
                     "details": [{"entityId": "alarm_control_panel.entry", "label": "Охрана", "value": "охрана выключена"}],
                 },
+                {
+                    "id": "device-leak", "physicalId": "device-leak",
+                    "entityId": "binary_sensor.entry_leak", "name": "Датчик протечки",
+                    "roomId": "entry", "roomName": "Тамбур", "domain": "binary_sensor",
+                    "category": "moisture", "state": "off", "stateLabel": "сухо",
+                    "active": False, "tone": "neutral", "unavailable": False,
+                    "details": [{"entityId": "binary_sensor.entry_leak", "label": "Протечка", "value": "сухо"}],
+                },
             ],
             "alarms": [],
         }
@@ -1537,26 +1550,34 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         panel._shell.tabs.security.fire("click");
         const security = panel._shell.homeSections.security;
         const text = textOf(security);
-        if (!text.includes("Тамбур · Закрыт")
-          || !text.includes("Тамбур · Охрана выключена")) {
+        if (!text.includes("Дом под наблюдением") || !text.includes("Контуры безопасности")
+          || !text.includes("Датчики и доступ") || !text.includes("Тамбур · Закрыт")
+          || !text.includes("Тамбур · Без охраны") || !text.includes("Тамбур · Сухо")) {
           throw new Error("security state is not semantic Russian copy: " + text);
         }
         if (text.includes("locked") || text.includes("disarmed") || text.includes("Устройство ·")) {
           throw new Error("raw Home Assistant state leaked into security card: " + text);
         }
-        const facts = findAll(security, (node) =>
-          String(node.className).split(" ").includes("catalog-hero-fact"));
-        if (facts.length !== 4 || !textOf(facts[2]).includes("0")
-          || !textOf(facts[2]).includes("Активно")) {
-          throw new Error("inactive security devices were counted as active");
+        const types = findAll(security, (node) =>
+          String(node.className).split(" ").includes("security-canon-type"));
+        if (types.length !== 3 || !types.some((node) => textOf(node).includes("Протечки"))
+          || !types.some((node) => textOf(node).includes("Двери и замки"))
+          || !types.some((node) => textOf(node).includes("Охрана"))) {
+          throw new Error("security contours are incomplete: " + types.map(textOf));
         }
         const cards = findAll(security, (node) =>
           String(node.className).split(" ").includes("inventory-device-card"));
-        if (cards.length !== 2) throw new Error("security cards missing");
+        if (cards.length !== 3) throw new Error("security physical cards missing");
         const lockPath = findAll(cards[0], (node) => node.tagName === "PATH")[0];
         const alarmPath = findAll(cards[1], (node) => node.tagName === "PATH")[0];
         if (!lockPath || !alarmPath || !lockPath.d || !alarmPath.d || lockPath.d === alarmPath.d) {
           throw new Error("lock and alarm must have distinct associative icons");
+        }
+        types.find((node) => textOf(node).includes("Протечки")).fire("click");
+        const filteredCards = findAll(security, (node) =>
+          String(node.className).split(" ").includes("inventory-device-card"));
+        if (filteredCards.length !== 1 || !textOf(filteredCards[0]).includes("Датчик протечки")) {
+          throw new Error("security contour did not drill down to its physical devices");
         }
             """,
         )
@@ -2762,7 +2783,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.51.65")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.51.66")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

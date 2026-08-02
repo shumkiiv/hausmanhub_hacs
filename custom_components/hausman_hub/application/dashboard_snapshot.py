@@ -255,6 +255,23 @@ def _presentation_members(
 
 
 def _state_label(entity: DashboardEntity) -> str:
+    if entity.domain == "binary_sensor":
+        semantic = {
+            "moisture": ("сухо", "обнаружена вода"),
+            "smoke": ("дыма нет", "обнаружен дым"),
+            "gas": ("газа нет", "обнаружен газ"),
+            "carbon_monoxide": ("угарного газа нет", "обнаружен угарный газ"),
+            "safety": ("в норме", "тревога"),
+            "problem": ("в норме", "обнаружена проблема"),
+            "motion": ("движения нет", "обнаружено движение"),
+            "occupancy": ("присутствия нет", "обнаружено присутствие"),
+            "presence": ("присутствия нет", "обнаружено присутствие"),
+            "opening": ("закрыто", "открыто"),
+            "door": ("закрыто", "открыто"),
+            "window": ("закрыто", "открыто"),
+        }.get(_device_class(entity) or "")
+        if semantic is not None and entity.state in {"off", "on"}:
+            return semantic[entity.state == "on"]
     labels = {
         "on": "включено",
         "off": "выключено",

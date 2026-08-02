@@ -882,6 +882,8 @@ class DashboardSnapshotTest(unittest.TestCase):
         self.assertEqual("Охрана", alarm["details"][0]["label"])
         self.assertEqual("охрана выключена", alarm["details"][0]["value"])
         self.assertEqual("moisture", leak["category"])
+        self.assertEqual("сухо", leak["stateLabel"])
+        self.assertEqual("сухо", leak["details"][0]["value"])
         self.assertNotEqual(lock["state"], lock["stateLabel"])
         self.assertNotEqual(alarm["state"], alarm["stateLabel"])
 

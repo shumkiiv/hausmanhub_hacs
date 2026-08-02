@@ -1,0 +1,235 @@
+/* Canonical tablet-style security overview with one card per physical device. */
+
+const SECURITY_CATEGORIES = new Set([
+  "security", "moisture", "smoke", "gas", "carbon_monoxide", "safety", "problem",
+  "occupancy", "presence", "motion", "opening", "door", "window",
+]);
+
+const TYPE_META = {
+  leaks: { label: "Протечки", icon: "shield", empty: "В норме" },
+  access: { label: "Двери и замки", icon: "lock", empty: "В норме" },
+  windows: { label: "Окна", icon: "rooms", empty: "В норме" },
+  motion: { label: "Движение", icon: "device", empty: "Спокойно" },
+  cameras: { label: "Камеры", icon: "camera", empty: "Под наблюдением" },
+  alarms: { label: "Охрана", icon: "alarm", empty: "Без тревог" },
+  fire: { label: "Дым и газ", icon: "shield", empty: "В норме" },
+};
+
+function securityDevices(panel) {
+  const devices = panel._homeDashboard && Array.isArray(panel._homeDashboard.devices)
+    ? panel._homeDashboard.devices : [];
+  const result = new Map();
+  devices.filter((device) => {
+    const domain = String(device.domain || "");
+    const category = String(device.category || "");
+    return SECURITY_CATEGORIES.has(category)
+      || ["lock", "camera", "alarm_control_panel"].includes(domain);
+  }).forEach((device) => {
+    const key = String(device.physicalId || device.id || device.entityId || device.name || "");
+    if (key && !result.has(key)) result.set(key, device);
+  });
+  return [...result.values()];
+}
+
+function securityType(device) {
+  const category = String(device.category || "");
+  const domain = String(device.domain || "");
+  const identity = `${device.name || ""} ${device.stateLabel || ""}`.toLocaleLowerCase("ru");
+  if (category === "moisture" || /протеч|water leak/.test(identity)) return "leaks";
+  if (["smoke", "gas", "carbon_monoxide", "safety", "problem"].includes(category)) return "fire";
+  if (domain === "camera") return "cameras";
+  if (domain === "alarm_control_panel") return "alarms";
+  if (category === "window" || /окн/.test(identity)) return "windows";
+  if (domain === "lock" || ["opening", "door"].includes(category) || /двер|замок|lock/.test(identity)) return "access";
+  if (["occupancy", "presence", "motion"].includes(category)) return "motion";
+  return "alarms";
+}
+
+function securityUnavailable(device) {
+  return Boolean(device.unavailable || device.state === "unavailable" || device.state === "unknown");
+}
+
+function securityNeedsAttention(device) {
+  if (securityUnavailable(device)) return true;
+  const state = String(device.state || "").toLowerCase();
+  const type = securityType(device);
+  if (type === "leaks" || type === "fire") return state === "on" || state === "triggered";
+  if (type === "access" || type === "windows") return ["on", "open", "opening", "unlocked", "jammed"].includes(state);
+  if (type === "alarms") return state === "triggered";
+  return false;
+}
+
+function securityStatus(device) {
+  if (securityUnavailable(device)) return "Нет связи";
+  const state = String(device.state || "").toLowerCase();
+  const type = securityType(device);
+  if (type === "leaks") return state === "on" ? "Обнаружена вода" : "Сухо";
+  if (type === "fire") return state === "on" || state === "triggered" ? "Тревога" : "В норме";
+  if (type === "motion") return state === "on" ? "Обнаружено движение" : "Движения нет";
+  if (type === "windows" || type === "access") {
+    if (["on", "open", "opening", "unlocked"].includes(state)) return "Открыто";
+    if (state === "jammed") return "Заклинило";
+    return "Закрыто";
+  }
+  if (state === "triggered") return "Тревога";
+  if (state.startsWith("armed_")) return "Охрана включена";
+  if (state === "disarmed") return "Без охраны";
+  return device.stateLabel || "Состояние неизвестно";
+}
+
+function renderSecurityHero(panel, container, devices, alarms, deps) {
+  const { el, svgIcon } = deps;
+  const activeAlarms = alarms.filter((alarm) => alarm.active === true);
+  const attentionDevices = devices.filter(securityNeedsAttention);
+  const hero = el("section", `security-canon-hero${activeAlarms.length ? " has-alarm" : ""}`);
+  const copy = el("div", "security-canon-hero-copy");
+  copy.appendChild(el("span", "security-canon-eyebrow", "БЕЗОПАСНОСТЬ ДОМА"));
+  copy.appendChild(el("h2", null, activeAlarms.length ? "Требуется внимание" : "Дом под наблюдением"));
+  copy.appendChild(el("p", null, activeAlarms.length
+    ? `${activeAlarms.length} активных тревог — откройте событие и проверьте помещение`
+    : attentionDevices.length
+      ? `${attentionDevices.length} устройств требуют проверки`
+      : "Активных тревог и открытых контуров нет"));
+  const metrics = el("div", "security-canon-hero-metrics");
+  [
+    [devices.length, "устройств", "shield"],
+    [activeAlarms.length, "тревог", "alarm"],
+    [devices.filter(securityNeedsAttention).length, "требуют внимания", "device"],
+  ].forEach(([value, label, iconName]) => {
+    const metric = el("div", "security-canon-hero-metric");
+    metric.appendChild(svgIcon(iconName));
+    const metricCopy = el("span");
+    metricCopy.appendChild(el("strong", null, String(value)));
+    metricCopy.appendChild(el("small", null, label));
+    metric.appendChild(metricCopy);
+    metrics.appendChild(metric);
+  });
+  copy.appendChild(metrics);
+  hero.appendChild(copy);
+  container.appendChild(hero);
+}
+
+function renderSecurityTypes(panel, container, devices, selected, choose, deps) {
+  const { el, svgIcon, setAttr } = deps;
+  const section = el("section", "security-canon-section");
+  const heading = el("div", "security-canon-heading");
+  heading.appendChild(el("h3", null, "Контуры безопасности"));
+  const all = el("button", `security-canon-all${selected ? "" : " is-active"}`, "Все устройства");
+  all.type = "button";
+  all.addEventListener("click", () => choose(null));
+  heading.appendChild(all);
+  section.appendChild(heading);
+  const grid = el("div", "security-canon-type-grid");
+  Object.entries(TYPE_META).forEach(([id, meta]) => {
+    const items = devices.filter((device) => securityType(device) === id);
+    if (!items.length) return;
+    const issues = items.filter(securityNeedsAttention).length;
+    const card = el("button", `security-canon-type${selected === id ? " is-selected" : ""}${issues ? " has-attention" : ""}`);
+    card.type = "button";
+    setAttr(card, "aria-pressed", selected === id ? "true" : "false");
+    card.addEventListener("click", () => choose(id));
+    const title = el("span", "security-canon-type-title");
+    title.appendChild(svgIcon(meta.icon));
+    title.appendChild(el("strong", null, meta.label));
+    title.appendChild(el("b", null, String(items.length)));
+    card.appendChild(title);
+    card.appendChild(el("span", issues ? "warn" : "ok", issues ? `${issues} требуют внимания` : meta.empty));
+    card.appendChild(el("small", null, `${items.length} физических устройств`));
+    grid.appendChild(card);
+  });
+  section.appendChild(grid);
+  container.appendChild(section);
+}
+
+function renderSecurityAttention(panel, container, devices, alarms, deps) {
+  const { el } = deps;
+  const items = devices.filter(securityNeedsAttention);
+  const activeAlarms = alarms.filter((alarm) => alarm.active === true);
+  const aside = el("aside", "security-canon-aside");
+  const status = el("section", "security-canon-side-card");
+  status.appendChild(el("h3", null, "Состояние"));
+  const rows = [
+    ["Охрана", devices.some((device) => String(device.state || "").startsWith("armed_")) ? "Включена" : "Без охраны"],
+    ["Тревоги", String(activeAlarms.length)],
+    ["Нет связи", String(devices.filter(securityUnavailable).length)],
+  ];
+  rows.forEach(([label, value]) => {
+    const row = el("div", "security-canon-state-row");
+    row.appendChild(el("span", null, label));
+    row.appendChild(el("strong", null, value));
+    status.appendChild(row);
+  });
+  aside.appendChild(status);
+  const attentionCard = el("section", "security-canon-side-card");
+  attentionCard.appendChild(el("h3", null, "Требуют внимания"));
+  if (!items.length && !activeAlarms.length) {
+    attentionCard.appendChild(el("p", "security-canon-empty", "Всё спокойно — проверять ничего не нужно."));
+  } else {
+    items.slice(0, 6).forEach((device) => {
+      const line = el("button", "security-canon-attention");
+      line.type = "button";
+      line.appendChild(el("strong", null, device.name || "Устройство"));
+      line.appendChild(el("span", null, `${device.roomName || "Без комнаты"} · ${securityStatus(device)}`));
+      line.addEventListener("click", () => {
+        const key = String(device.id || device.physicalId || device.entityId || "");
+        if (key) panel._openHomeCards.add(`device:${key}`);
+        panel._renderHomeSection("security", panel._shell.homeSections.security);
+      });
+      attentionCard.appendChild(line);
+    });
+  }
+  aside.appendChild(attentionCard);
+  return aside;
+}
+
+function renderSecurityDeviceCatalog(panel, container, devices, selected, deps) {
+  const { el } = deps;
+  const filtered = selected ? devices.filter((device) => securityType(device) === selected) : devices;
+  const section = el("section", "security-canon-section security-canon-devices");
+  const heading = el("div", "security-canon-heading");
+  heading.appendChild(el("h3", null, selected ? TYPE_META[selected].label : "Датчики и доступ"));
+  heading.appendChild(el("span", null, `${filtered.length} физических устройств`));
+  section.appendChild(heading);
+  if (!filtered.length) {
+    section.appendChild(el("p", "security-canon-empty", "Подходящие устройства пока не найдены."));
+  } else {
+    const grid = el("div", "inventory-device-grid security-canon-device-grid");
+    filtered.forEach((device) => grid.appendChild(panel._deviceInventoryCard({
+      ...device,
+      stateLabel: securityStatus(device),
+      tone: securityNeedsAttention(device) ? "warning" : "success",
+    })));
+    section.appendChild(grid);
+  }
+  container.appendChild(section);
+}
+
+export function renderSecurityOverview(panel, container, deps) {
+  container.innerHTML = "";
+  if (!panel._homeDashboard) {
+    const empty = deps.el("section", "card empty-state security-canon-empty-state");
+    empty.appendChild(deps.el("h2", null, "Безопасность"));
+    empty.appendChild(deps.el("p", null, "Данные безопасности пока недоступны. Проверьте подключение HausmanHub."));
+    container.appendChild(empty);
+    return;
+  }
+  const devices = securityDevices(panel);
+  const alarms = Array.isArray(panel._homeDashboard.alarms) ? panel._homeDashboard.alarms : [];
+  if (panel._securityTypeFilter === undefined) panel._securityTypeFilter = null;
+  renderSecurityHero(panel, container, devices, alarms, deps);
+  const layout = deps.el("div", "security-canon-layout");
+  const main = deps.el("div", "security-canon-main");
+  const choose = (value) => {
+    panel._securityTypeFilter = value;
+    panel._renderHomeSection("security", panel._shell.homeSections.security);
+  };
+  renderSecurityTypes(panel, main, devices, panel._securityTypeFilter, choose, deps);
+  renderSecurityDeviceCatalog(panel, main, devices, panel._securityTypeFilter, deps);
+  layout.appendChild(main);
+  layout.appendChild(renderSecurityAttention(panel, layout, devices, alarms, deps));
+  container.appendChild(layout);
+}
+
+renderSecurityOverview.securityDevices = securityDevices;
+renderSecurityOverview.securityType = securityType;
+renderSecurityOverview.securityStatus = securityStatus;
