@@ -41,6 +41,7 @@
 .energy-history-card { min-height:244px; padding:12px; }
 .energy-history-head { min-height:44px; }
 .energy-periods { display:flex; align-items:center; gap:6px; }
+.energy-history-controls { display:flex; align-items:center; gap:8px; }
 .energy-periods button { width:74px; min-height:30px; margin:0; padding:5px 8px; color:var(--hmh-text-dim); font-size:13px;
   border:0; border-radius:10px; background:transparent; box-shadow:none; }
 .energy-periods button.is-selected { color:var(--hmh-text); border:1px solid var(--hmh-accent); background:var(--hmh-raised); }

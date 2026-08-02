@@ -1,5 +1,3 @@
-/* Energy presentation shared by the overview card and the dedicated section. */
-
 const number = (value, digits = 1) => Number.isFinite(Number(value))
   ? new Intl.NumberFormat("ru-RU", { maximumFractionDigits: digits }).format(Number(value))
   : "—";
@@ -122,18 +120,28 @@ export function renderEnergyOverviewCard(panel, container, deps) {
 function renderEnergyHistoryChart(panel, source, deps, retry) {
   const { el, setAttr } = deps;
   const wrap = el("div", "energy-history");
-  const history = panel._energyHistory && panel._energyHistory[source.id];
+  const metric = panel._energyHistoryMetric || "power";
+  const store = metric === "energy" ? panel._energyConsumptionHistory : panel._energyHistory;
+  const history = store && store[source.id];
   const period = panel._energyHistoryPeriod || "day";
-  const labels = {
+  const powerLabels = {
     day: ["за последние 24 часа", "Почасовая средняя мощность · последние 24 часа"],
     week: ["за последние 7 дней", "Почасовая средняя мощность · последние 7 дней"],
     month: ["за последний месяц", "Средняя мощность по дням · последний месяц"],
     year: ["за последний год", "Средняя мощность по дням · последний год"],
   };
+  const energyLabels = {
+    day: ["за последние 24 часа", "Расход энергии по часам · последние 24 часа"],
+    week: ["за последние 7 дней", "Расход энергии по часам · последние 7 дней"],
+    month: ["за последний месяц", "Расход энергии по дням · последний месяц"],
+    year: ["за последний год", "Расход энергии по дням · последний год"],
+  };
+  const labels = metric === "energy" ? energyLabels : powerLabels;
+  const unit = metric === "energy" ? "кВт·ч" : "Вт";
   const values = Array.isArray(history) ? history.map((point) => Number(point.mean)).filter(Number.isFinite) : [];
   if (!values.length) {
     const empty = el("div", "energy-history-empty");
-    empty.appendChild(el("strong", null, panel._energyHistoryError ? "Не удалось получить историю" : "История мощности пока недоступна"));
+    empty.appendChild(el("strong", null, panel._energyHistoryError ? "Не удалось получить историю" : `История ${metric === "energy" ? "расхода" : "мощности"} пока недоступна`));
     empty.appendChild(el("span", null, panel._energyHistoryError
       ? "Проверьте Recorder Home Assistant и повторите загрузку."
       : "Текущие показания продолжают обновляться."));
@@ -153,8 +161,8 @@ function renderEnergyHistoryChart(panel, source, deps, retry) {
   const chart = el("canvas", "energy-history-canvas");
   chart.width = 960; chart.height = 220;
   setAttr(chart, "role", "img");
-  setAttr(chart, "aria-label", `График мощности ${source.name} ${labels[period][0]}`);
-  setAttr(chart, "title", `${number(values[values.length - 1])} Вт · ${labels[period][1]}`);
+  setAttr(chart, "aria-label", `График ${metric === "energy" ? "расхода энергии" : "мощности"} ${source.name} ${labels[period][0]}`);
+  setAttr(chart, "title", `${number(values[values.length - 1], metric === "energy" ? 3 : 1)} ${unit} · ${labels[period][1]}`);
   if (typeof chart.getContext === "function") {
     const context = chart.getContext("2d");
     if (context) {
@@ -186,7 +194,17 @@ function renderEnergyHistoryChart(panel, source, deps, retry) {
 
 function energyPeriodButtons(panel, container, deps) {
   const { el, setAttr } = deps;
-  const periods = el("div", "energy-periods");
+  const periods = el("div", "energy-history-controls");
+  const metrics = el("div", "energy-periods");
+  [["power", "Мощность"], ["energy", "Расход"]].forEach(([value, label]) => {
+    const selected = (panel._energyHistoryMetric || "power") === value;
+    const button = el("button", selected ? "is-selected" : "", label);
+    button.type = "button"; setAttr(button, "aria-pressed", selected ? "true" : "false");
+    button.addEventListener("click", () => { panel._energyHistoryMetric = value; panel._renderEnergySection(container); });
+    metrics.appendChild(button);
+  });
+  periods.appendChild(metrics);
+  const range = el("div", "energy-periods");
   [["day", "День"], ["week", "Неделя"], ["month", "Месяц"], ["year", "Год"]]
     .forEach(([value, label]) => {
       const selected = (panel._energyHistoryPeriod || "day") === value;
@@ -202,8 +220,9 @@ function energyPeriodButtons(panel, container, deps) {
         panel._renderEnergySection(container);
         loadEnergyHistory(panel);
       });
-      periods.appendChild(button);
+      range.appendChild(button);
     });
+  periods.appendChild(range);
   return periods;
 }
 
@@ -237,7 +256,7 @@ function renderDeviceDetail(panel, container, source, deps) {
   const chartCard = el("section", "card energy-device-chart-card");
   const chartHead = el("div", "energy-card-head energy-history-head");
   const chartCopy = el("div", "energy-card-title");
-  chartCopy.appendChild(el("h3", null, "История мощности"));
+  chartCopy.appendChild(el("h3", null, (panel._energyHistoryMetric || "power") === "energy" ? "История расхода" : "История мощности"));
   chartCopy.appendChild(el("small", null, "Фактические данные Recorder Home Assistant"));
   chartHead.appendChild(chartCopy);
   chartHead.appendChild(energyPeriodButtons(panel, container, deps));
@@ -485,9 +504,10 @@ function renderEnergySidebar(panel, container, energy, sources, deps) {
   summary.appendChild(el("h3", null, "Сводка"));
   summary.appendChild(el("strong", "energy-sidebar-primary", sourceMetric(energy, "currentPowerW", "Вт")));
   summary.appendChild(el("small", "energy-sidebar-caption", "Текущая нагрузка"));
-  const history = panel._energyHistory && panel._energyHistory.selection;
+  const historyStore = (panel._energyHistoryMetric || "power") === "energy" ? panel._energyConsumptionHistory : panel._energyHistory;
+  const history = historyStore && historyStore.selection;
   const peak = Array.isArray(history) && history.length
-    ? `${number(Math.max(...history.map((point) => Number(point.mean) || 0)))} Вт` : "—";
+    ? `${number(Math.max(...history.map((point) => Number(point.mean) || 0)))} ${(panel._energyHistoryMetric || "power") === "energy" ? "кВт·ч" : "Вт"}` : "—";
   [["Сегодня", sourceMetric(energy, "todayKwh", "кВт·ч", 2), ""],
     ["Пик", peak, ""],
     ["Напряжение", sourceMetric(energy, "voltageV", "В"), ""],
@@ -591,21 +611,24 @@ export async function loadEnergyHistory(panel) {
       "GET", `hausman_hub/v1/energy/history?${params.toString()}`,
     );
     const history = {};
+    const consumption = {};
     (response && Array.isArray(response.series) ? response.series : [])
-      .filter((series) => series.unit === "W" && series.metric === "power")
       .forEach((series) => {
+        if (![["power", "W"], ["energy", "kWh"]].some(([metric, unit]) => series.metric === metric && series.unit === unit)) return;
         const source = energy.sources.find((item) => item.id === series.sourceId
           || item.deviceId === series.deviceId);
         const key = series.scope === "selection" ? "selection" : (source && source.id || series.deviceId || series.sourceId);
-        history[key] = (series.points || []).map((point) => ({
+        const target = series.metric === "energy" ? consumption : history;
+        target[key] = (series.points || []).map((point) => ({
           start: point.at,
           mean: point.value,
         }));
       });
-    if (!history.selection) {
+    const aggregateSelection = (target) => {
+      if (target.selection) return;
       const selectedIds = new Set(selectedSources(energy).map((source) => source.id));
       const values = new Map();
-      Object.entries(history).forEach(([sourceId, points]) => {
+      Object.entries(target).forEach(([sourceId, points]) => {
         if (!selectedIds.has(sourceId)) return;
         (points || []).forEach((point) => {
           const value = Number(point.mean);
@@ -613,10 +636,13 @@ export async function loadEnergyHistory(panel) {
           values.set(point.start, (values.get(point.start) || 0) + value);
         });
       });
-      history.selection = [...values.entries()].sort(([left], [right]) => left.localeCompare(right))
+      target.selection = [...values.entries()].sort(([left], [right]) => left.localeCompare(right))
         .map(([start, mean]) => ({ start, mean }));
-    }
+    };
+    aggregateSelection(history);
+    aggregateSelection(consumption);
     panel._energyHistory = history;
+    panel._energyConsumptionHistory = consumption;
     panel._energyHistoryError = null;
   } catch (error) {
     panel._energyHistory = panel._energyHistory || {};

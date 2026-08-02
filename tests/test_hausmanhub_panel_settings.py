@@ -1034,6 +1034,14 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         if (!text.includes("История мощности") || !text.includes("Питание") || !text.includes("Об устройстве") || !text.includes("Автомат кухни") || !text.includes("DIN RCBO")) {
           throw new Error("energy device detail did not open: " + text);
         }
+        const consumption = findAll(panel._shell.homeSections.energy, (node) =>
+          node.tagName === "BUTTON" && node.textContent === "Расход")[0];
+        if (!consumption) throw new Error("energy consumption history selector is missing");
+        consumption.fire("click");
+        text = textOf(panel._shell.homeSections.energy);
+        if (!text.includes("История расхода") || (!text.includes("История расхода пока недоступна") && !text.includes("Не удалось получить историю"))) {
+          throw new Error("energy consumption history did not open: " + text);
+        }
         let confirmation = "";
         window.confirm = (message) => { confirmation = message; return false; };
         const powerOff = findAll(panel._shell.homeSections.energy, (node) =>
@@ -2914,7 +2922,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.51.70")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.51.71")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;
