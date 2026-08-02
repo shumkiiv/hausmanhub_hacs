@@ -1,5 +1,8 @@
 export function renderFirstRunRoom(card, deps) {
-const { el, setAttr, numberField, selectField, normalizedText, STRATEGY_ORDER, ROOM_SETUP_PANES } = deps;
+const {
+  el, setAttr, numberField, selectField, normalizedText,
+  ACTIVE_DEVICE_TYPES, STRATEGY_ORDER, ROOM_SETUP_PANES,
+} = deps;
   const room = (this._firstRun.options.rooms || []).find((item) => item.id === this._firstRun.roomId);
   if (!room) {
     this._firstRunBackToRooms();

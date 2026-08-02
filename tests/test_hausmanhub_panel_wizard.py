@@ -528,6 +528,19 @@ def ready_validation(draft: dict) -> dict:
 
 
 class PanelContourWizardTest(unittest.TestCase):
+    def test_room_review_receives_active_device_types_as_an_explicit_module_dependency(self) -> None:
+        room_setup = ROOM_SETUP_JS.read_text(encoding="utf-8")
+        panel = PANEL_JS.read_text(encoding="utf-8")
+
+        self.assertIn(
+            "ACTIVE_DEVICE_TYPES, STRATEGY_ORDER, ROOM_SETUP_PANES,",
+            room_setup,
+        )
+        self.assertIn(
+            "ACTIVE_DEVICE_TYPES, STRATEGY_ORDER, ROOM_SETUP_PANES,",
+            panel,
+        )
+
     def test_control_channel_is_explained_recommended_and_safely_confirmed(self) -> None:
         options = copy.deepcopy(DRAFT_OPTIONS)
         air_conditioner = next(

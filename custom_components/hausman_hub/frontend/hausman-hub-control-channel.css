@@ -1,13 +1,17 @@
-.device-channel-field { display:grid; grid-template-columns:minmax(190px,.75fr) minmax(250px,1.25fr);
-  align-items:center; gap:14px; margin:12px 0 0; padding:13px; border:1px solid var(--divider-color,#ddd);
+.entity-group.device-card { container-type:inline-size; }
+.device-channel-field { display:grid; grid-template-columns:minmax(0,.75fr) minmax(0,1.25fr);
+  align-items:center; gap:14px; width:100%; min-width:0; margin:12px 0 0; padding:13px;
+  box-sizing:border-box; border:1px solid var(--divider-color,#ddd);
   border-radius:13px; background:var(--secondary-background-color,#f2f4f5); }
+.device-channel-copy { min-width:0; }
 .device-channel-copy strong, .device-channel-copy small { display:block; }
 .device-channel-copy strong { font-size:14px; line-height:1.35; }
 .device-channel-copy small { margin-top:4px; color:var(--secondary-text-color,#727272); font-size:12px; line-height:1.45; }
-.device-channel-field select { width:100%; max-width:none; min-height:44px; }
+.device-channel-field select { width:100%; min-width:0; max-width:100%; min-height:44px; box-sizing:border-box; text-overflow:ellipsis; }
 .device-channel-assistant { margin-top:8px; overflow:hidden; border:1px solid var(--divider-color,#ddd);
   border-radius:13px; background:var(--card-background-color,#fff); }
 .channel-recommendation, .channel-test-row { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:13px 14px; }
+.channel-recommendation > div, .channel-test-copy { min-width:0; }
 .channel-recommendation { background:color-mix(in srgb,var(--primary-color,#4F8CFF) 9%,transparent); }
 .channel-recommendation strong, .channel-recommendation small,
 .channel-test-copy strong, .channel-test-copy small, .channel-current-help strong,
@@ -36,4 +40,7 @@ p.channel-current-help { margin:0; }
   .device-channel-field { grid-template-columns:minmax(0,1fr); }
   .channel-recommendation, .channel-test-row { align-items:flex-start; flex-direction:column; }
   .channel-recommendation-action, .channel-test-action { width:100%; }
+}
+@container (max-width:520px) {
+  .device-channel-field { grid-template-columns:minmax(0,1fr); align-items:start; }
 }

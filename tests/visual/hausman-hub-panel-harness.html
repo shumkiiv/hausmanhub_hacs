@@ -12,7 +12,7 @@
   <body>
     <hausman-hub-panel id="panel"></hausman-hub-panel>
     <script type="module">
-      import "../../custom_components/hausman_hub/frontend/hausman-hub-panel.js?v=1.52.1";
+      import "../../custom_components/hausman_hub/frontend/hausman-hub-panel.js?v=1.52.2";
       const params = new URLSearchParams(window.location.search);
       const panel = document.getElementById("panel");
       const theme = params.get("theme") === "dark" ? "dark" : "light";
@@ -21,7 +21,7 @@
       document.documentElement.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       document.body.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       panel._data = {
-        integration_version: "1.52.1",
+        integration_version: "1.52.2",
         readiness: { status: "ready", bridge_mode: "native", reasons: [] },
         snapshot: {
           rooms: [
@@ -246,7 +246,7 @@
       }
       panel._render();
       panel.shadowRoot.querySelector("link").href =
-        "../../custom_components/hausman_hub/frontend/hausman-hub-panel.css?v=1.52.1";
+        "../../custom_components/hausman_hub/frontend/hausman-hub-panel.css?v=1.52.2";
       if (screen === "assistant") {
         panel._assistant = {
           loaded: true,
