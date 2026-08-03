@@ -9,16 +9,30 @@ export function feedbackTone(message) {
 }
 
 export function applyFeedback(element, message, setAttr) {
-  element.textContent = message || "";
+  const text = message || "";
+  if (element._feedbackMessage !== text) {
+    if (element._feedbackTimer) clearTimeout(element._feedbackTimer);
+    element._feedbackMessage = text;
+    element._feedbackTimer = 0;
+    element._feedbackDismissed = false;
+  }
+  element.textContent = text;
   element.className = "notice";
-  if (!message) {
+  if (!text) {
     element.style.display = "none";
     return "info";
   }
-  const tone = feedbackTone(message);
+  const tone = feedbackTone(text);
   element.className = `notice is-${tone}`;
   setAttr(element, "role", tone === "error" ? "alert" : "status");
   setAttr(element, "aria-live", tone === "error" ? "assertive" : "polite");
-  element.style.display = "";
+  element.style.display = element._feedbackDismissed ? "none" : "";
+  if (tone === "success" && !element._feedbackDismissed && !element._feedbackTimer) {
+    element._feedbackTimer = setTimeout(() => {
+      element._feedbackTimer = 0;
+      element._feedbackDismissed = true;
+      element.style.display = "none";
+    }, 4500);
+  }
   return tone;
 }

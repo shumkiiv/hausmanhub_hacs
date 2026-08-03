@@ -1472,6 +1472,7 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         if (!save || save.disabled) throw new Error("explicit HA save action is unavailable");
         save.fire("click");
         await tick(4);
+        if (panel._busy) throw new Error("room binding save left the panel busy");
         const request = calls.find((call) => call.method === "POST"
           && call.path === "hausman_hub/v1/admin/device-area-assignments");
         if (!request || request.payload.snapshot_revision !== 77
