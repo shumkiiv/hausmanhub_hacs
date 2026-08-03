@@ -207,6 +207,13 @@ button.danger-button { color:#fff; border-color:color-mix(in srgb,var(--error-co
   background:var(--hmh-raised,#181E26); font-size:13px; }
 .first-run-wizard .wizard-progress span.is-current { border-color:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 58%,transparent);
   background:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 14%,var(--hmh-raised,#181E26)); color:var(--hmh-text,#E7ECF3); }
+.first-run-storage-state { display:grid; gap:8px; margin:18px 0; padding:16px 18px;
+  border:1px solid color-mix(in srgb,var(--hmh-accent,#4F8CFF) 24%,var(--hmh-border,#2F3845));
+  border-radius:15px; background:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 6%,var(--hmh-surface,#12171D)); }
+.first-run-storage-state-head { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.first-run-storage-state-head strong { font-size:17px; color:var(--hmh-text,#E7ECF3); }
+.first-run-storage-state p { margin:0; font-size:14px; line-height:1.5; }
+.first-run-storage-state p.muted { font-size:13px; }
 .first-run-wizard .room-block { border-color:var(--hmh-border,#2F3845); background:var(--hmh-surface,#12171D); }
 .first-run-wizard .room-summary { min-height:74px; padding:14px 16px; background:var(--hmh-raised,#181E26); }
 .first-run-wizard .room-editor { padding:14px 18px 22px; border-color:var(--hmh-border,#2F3845); }

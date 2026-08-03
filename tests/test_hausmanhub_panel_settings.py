@@ -695,7 +695,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
             {},
             """
         const text = textOf(panel.shadowRoot);
-        if (!text.includes("Первичная настройка климата")) {
+        if (!text.includes("Климатический контур ещё не настроен")) {
           throw new Error("first-run instruction missing");
         }
         if (!panel._shell.nav.hidden || panel._shell.wizard.hidden) {
@@ -3025,7 +3025,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.4")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.5")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

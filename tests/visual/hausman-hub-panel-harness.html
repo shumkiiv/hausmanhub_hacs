@@ -29,7 +29,7 @@
       });
     </script>
     <script type="module">
-      import "../../custom_components/hausman_hub/frontend/hausman-hub-panel.js?v=1.52.4";
+      import "../../custom_components/hausman_hub/frontend/hausman-hub-panel.js?v=1.52.5";
       const params = new URLSearchParams(window.location.search);
       const panel = document.getElementById("panel");
       const theme = params.get("theme") === "dark" ? "dark" : "light";
@@ -38,7 +38,7 @@
       document.documentElement.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       document.body.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       panel._data = {
-        integration_version: "1.52.4",
+        integration_version: "1.52.5",
         readiness: { status: "ready", bridge_mode: "native", reasons: [] },
         snapshot: {
           rooms: [
@@ -375,12 +375,19 @@
         panel._wizard.open = true;
         panel._wizard.setupRevision = panel._settings.setup.setup_revision;
       }
-      if (["first-run-room", "first-run-home", "first-run-validation"].includes(screen)) {
+      if (["first-run", "first-run-room", "first-run-home", "first-run-validation"].includes(screen)) {
         panel._settings.setup = {
           ...panel._settings.setup,
           status: "not_configured",
           editing_allowed: true,
         };
+        if (screen === "first-run") {
+          panel._settings.setup.rooms = [];
+          panel._settings.setup.summary = { room_count: 0, device_count: 0 };
+          panel._firstRun.step = "instructions";
+        }
+      }
+      if (["first-run-room", "first-run-home", "first-run-validation"].includes(screen)) {
         panel._firstRun.options = panel._wizard.options;
         panel._firstRun.setupRevision = panel._settings.setup.setup_revision;
         panel._firstRun.step = screen === "first-run-room"
@@ -411,7 +418,7 @@
       }
       panel._render();
       panel.shadowRoot.querySelector("link").href =
-        "../../custom_components/hausman_hub/frontend/hausman-hub-panel.css?v=1.52.4";
+        "../../custom_components/hausman_hub/frontend/hausman-hub-panel.css?v=1.52.5";
       if (screen === "assistant") {
         panel._assistant = {
           loaded: true,

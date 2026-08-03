@@ -1,32 +1,32 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.52.4";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.52.4";
-import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.52.4";
-import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.52.4";
-import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.52.4";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.52.4";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.52.4";
-import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.52.4";
-import { createKioskButton, createKioskDock, handleKioskPointerUp, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.52.4";
-import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.52.4";
-import { AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.52.4";
-import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.52.4";
-import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.52.4";
-import { renderClimateOverview } from "./hausman-hub-climate-overview.js?v=1.52.4";
-import { renderLightingOverview } from "./hausman-hub-lighting.js?v=1.52.4";
-import { renderRoomsOverview } from "./hausman-hub-rooms.js?v=1.52.4";
-import { renderMediaOverview } from "./hausman-hub-media-overview.js?v=1.52.4";
-import { renderSecurityOverview } from "./hausman-hub-security-overview.js?v=1.52.4";
-import { renderDevicesOverview } from "./hausman-hub-devices-overview.js?v=1.52.4";
-import { buildDiagnosticChecks, diagnosticSummaryText, renderDiagnosticDetails } from "./hausman-hub-diagnostics.js?v=1.52.4";
-import { renderRolloutReadiness } from "./hausman-hub-rollout.js?v=1.52.4";
-import { renderOverviewContent, renderOverviewHero } from "./hausman-hub-overview.js?v=1.52.4";
-import { renderPhysicalDeviceCard } from "./hausman-hub-device-card.js?v=1.52.4";
-import { recordTechnicalEvent as log, renderTechnicalLogCard } from "./hausman-hub-technical-log.js?v=1.52.4";
-import { applyFeedback } from "./hausman-hub-feedback.js?v=1.52.4";
-import { renderKiosk } from "./hausman-hub-kiosk.js?v=1.52.4";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.52.5";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.52.5";
+import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.52.5";
+import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.52.5";
+import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.52.5";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.52.5";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.52.5";
+import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.52.5";
+import { createKioskButton, createKioskDock, handleKioskPointerUp, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.52.5";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.52.5";
+import { AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.52.5";
+import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.52.5";
+import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.52.5";
+import { renderClimateOverview } from "./hausman-hub-climate-overview.js?v=1.52.5";
+import { renderLightingOverview } from "./hausman-hub-lighting.js?v=1.52.5";
+import { renderRoomsOverview } from "./hausman-hub-rooms.js?v=1.52.5";
+import { renderMediaOverview } from "./hausman-hub-media-overview.js?v=1.52.5";
+import { renderSecurityOverview } from "./hausman-hub-security-overview.js?v=1.52.5";
+import { renderDevicesOverview } from "./hausman-hub-devices-overview.js?v=1.52.5";
+import { buildDiagnosticChecks, diagnosticSummaryText, renderDiagnosticDetails } from "./hausman-hub-diagnostics.js?v=1.52.5";
+import { renderRolloutReadiness } from "./hausman-hub-rollout.js?v=1.52.5";
+import { renderOverviewContent, renderOverviewHero } from "./hausman-hub-overview.js?v=1.52.5";
+import { renderPhysicalDeviceCard } from "./hausman-hub-device-card.js?v=1.52.5";
+import { recordTechnicalEvent as log, renderTechnicalLogCard } from "./hausman-hub-technical-log.js?v=1.52.5";
+import { applyFeedback } from "./hausman-hub-feedback.js?v=1.52.5";
+import { renderKiosk } from "./hausman-hub-kiosk.js?v=1.52.5";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
-const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css?v=1.52.4";
+const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css?v=1.52.5";
 const DASHBOARD_API = "hausman_hub/v1/dashboard";
 const DEVICE_ACTIONS_API = "hausman_hub/v1/device-actions";
 const MODE_API = "hausman_hub/v1/admin/climate-mode";
@@ -2830,8 +2830,30 @@ class HausmanHubPanel extends HTMLElement {
     const card = el("article", "card");
     container.appendChild(card);
     if (this._firstRun.step === "instructions") {
-      card.appendChild(el("h2", null, "Первичная настройка климата"));
+      card.appendChild(el("h2", null, "Климатический контур ещё не настроен"));
       card.appendChild(el("p", "section-intro", "Мастер соберёт климатические устройства по комнатам и поможет быстро разобрать устройства без комнаты."));
+      const savedRoomCount = Number(setup && setup.summary && setup.summary.room_count) || 0;
+      const savedDeviceCount = Number(setup && setup.summary && setup.summary.device_count) || 0;
+      const storageState = el("div", "first-run-storage-state");
+      const storageStateHead = el("div", "first-run-storage-state-head");
+      storageStateHead.appendChild(el("span", "eyebrow", "Состояние конфигурации"));
+      storageStateHead.appendChild(el(
+        "strong",
+        null,
+        `${savedRoomCount} ${this._roomCountWord(savedRoomCount)} · ${savedDeviceCount} ${savedDeviceCount === 1 ? "устройство" : "устройств"}`
+      ));
+      storageState.appendChild(storageStateHead);
+      storageState.appendChild(el(
+        "p",
+        null,
+        "В текущем хранилище Home Assistant не найден сохранённый климатический контур. Поэтому открыт мастер, а не рабочая панель."
+      ));
+      storageState.appendChild(el(
+        "p",
+        "muted",
+        "Если контур уже настраивали, сначала проверьте резервную копию Home Assistant. Новый контур не создаётся автоматически и не заменяет прежние настройки."
+      ));
+      card.appendChild(storageState);
       const list = el("ol", "reasons");
       [
         "Сначала проверьте найденные комнаты и физические устройства.",

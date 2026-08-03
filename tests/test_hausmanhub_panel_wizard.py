@@ -1745,6 +1745,19 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         if (panel._activeSection !== "overview") {
           throw new Error("first-run exposed an ordinary section");
         }
+        const firstRunText = textOf(panel.shadowRoot);
+        if (!firstRunText.includes("Климатический контур ещё не настроен")) {
+          throw new Error("first-run reason is not explicit");
+        }
+        if (!firstRunText.includes("0 комнат · 0 устройств")) {
+          throw new Error("first-run saved configuration count is missing");
+        }
+        if (!firstRunText.includes("не найден сохранённый климатический контур")) {
+          throw new Error("first-run storage explanation is missing");
+        }
+        if (!firstRunText.includes("проверьте резервную копию Home Assistant")) {
+          throw new Error("first-run recovery guidance is missing");
+        }
         const progress = findAll(panel.shadowRoot, (node) =>
           String(node.className).split(" ").includes("wizard-progress"));
         if (progress.length) throw new Error("welcome screen must not masquerade as a setup step");
