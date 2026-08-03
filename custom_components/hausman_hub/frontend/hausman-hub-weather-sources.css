@@ -7,6 +7,7 @@
 .priority-source-row.is-primary .priority-source-number{color:#fff;background:var(--hmh-success,#248759)}
 .priority-source-copy{display:flex;flex-direction:column;gap:4px;min-width:0}.priority-source-copy strong,.priority-source-copy small{overflow-wrap:anywhere}
 .priority-source-copy small{color:var(--hmh-muted,#aeb7c4);line-height:1.35}.priority-source-actions{display:flex;align-items:center;gap:8px}
+.priority-source-copy .priority-source-id{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px;color:color-mix(in srgb,var(--hmh-muted,#aeb7c4) 82%,transparent)}
 .priority-source-status{align-self:flex-start;padding:4px 8px;border-radius:999px;font-size:12px;font-weight:700;line-height:1.2;background:var(--hmh-raised,#202731);color:var(--hmh-muted,#aeb7c4)}
 .priority-source-status.is-active{background:color-mix(in srgb,var(--hmh-success,#3ddc84) 18%,transparent);color:var(--hmh-success,#248759)}
 .priority-source-status.is-ready{background:color-mix(in srgb,var(--primary-color,#4f8cff) 12%,transparent);color:var(--primary-color,#4f8cff)}

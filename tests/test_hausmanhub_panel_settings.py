@@ -3030,7 +3030,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.9")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.10")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;
@@ -3316,6 +3316,42 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           "Недоступен — будет пропущен", "Используется сейчас",
         ]) {
           if (!text.includes(label)) throw new Error("priority UI missing: " + label);
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_priority_weather_picker_identifies_same_named_providers(self) -> None:
+        script = panel_script(
+            GET_PATHS,
+            {},
+            """
+        const candidates = [
+          { entity_id: "weather.forecast_home_assistant", name: "Прогноз HA",
+            device_name: "Forecast", available: true, domain: "weather", room_id: "" },
+          { entity_id: "weather.forecast_omsk", name: "Прогноз Омск",
+            device_name: "Forecast", available: true, domain: "weather", room_id: "" },
+        ];
+        const picker = panel._priorityChoicePicker({
+          title: "Наружная температура", candidates, current: [],
+          signalKind: "outdoor_temperature", onChange: () => {},
+        });
+        const text = textOf(picker.root);
+        for (const label of [
+          "Погода · Home Assistant", "weather.forecast_home_assistant",
+          "Погода · Омск", "weather.forecast_omsk",
+          "Первый источник будет основным", "Выбрать основным",
+        ]) {
+          if (!text.includes(label)) throw new Error("weather priority UI missing: " + label);
+        }
+        if (text.split("\\n").filter((part) => part === "Forecast").length) {
+          throw new Error("ambiguous generic weather name leaked into priority picker");
+        }
+        const buttons = findAll(picker.root, (node) =>
+          node.tagName === "BUTTON" && node.textContent === "Выбрать основным");
+        if (buttons.length !== 2 || buttons[0].value === buttons[1].value) {
+          throw new Error("distinct weather providers cannot be selected independently");
         }
             """,
         )

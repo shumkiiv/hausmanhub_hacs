@@ -70,18 +70,23 @@ export function signalCandidateDisplayName(candidate, peers, normalize) {
   }
   const name = candidate.device_name || candidate.name || candidate.entity_id;
   if (candidate.domain !== "weather") return name;
+  const normalizedName = normalize(name);
   const duplicate = peers.filter((peer) => (
     peer.domain === "weather"
-      && normalize(peer.name || peer.entity_id)
-        === normalize(candidate.name || candidate.entity_id)
+      && normalize(peer.device_name || peer.name || peer.entity_id) === normalizedName
   )).length > 1;
   const generic = /^(?:forecast|weather|прогноз|погода)$/i.test(
-    String(candidate.name || "").trim()
+    String(name || "").trim()
   );
   if (!duplicate && !generic) return name;
   const localized = /^(?:forecast|weather)$/i.test(String(name).trim())
     ? "Погода" : name;
   return `${localized} · ${weatherSourceDisplayName(candidate.entity_id)}`;
+}
+
+function appendWeatherSourceId(copy, candidate, el) {
+  if (candidate?.domain !== "weather" || !candidate.entity_id) return;
+  copy.appendChild(el("small", "priority-source-id", candidate.entity_id));
 }
 
 export function createHeatingTemperatureFields(config, deps) {
@@ -154,7 +159,7 @@ export function createPriorityChoicePicker(owner, config, deps) {
   fieldset.appendChild(selectedHeading);
   fieldset.appendChild(el(
     "div", "muted priority-source-kinds",
-    "Можно совместно использовать Уличные датчики и Погодные сервисы."
+    "Можно совместно использовать Уличные датчики и Погодные сервисы. Первый источник будет основным, остальные — резервными по порядку. У каждой погодной интеграции указан её идентификатор Home Assistant."
   ));
   fieldset.appendChild(selected);
   const chooser = el("details", "signal-chooser priority-source-chooser");
@@ -200,6 +205,7 @@ export function createPriorityChoicePicker(owner, config, deps) {
       copy.appendChild(el(
         "strong", null, owner._signalCandidateDisplayName(candidate, visible)
       ));
+      appendWeatherSourceId(copy, candidate, el);
       copy.appendChild(el(
         "small", null,
         index === 0
@@ -266,13 +272,14 @@ export function createPriorityChoicePicker(owner, config, deps) {
       copy.appendChild(el(
         "strong", null, owner._signalCandidateDisplayName(candidate, visible)
       ));
+      appendWeatherSourceId(copy, candidate, el);
       copy.appendChild(el(
         "small", null,
         `${owner._signalCandidateType(candidate, signalKind)} · ${owner._signalCandidateExplanation(candidate, signalKind)}`
       ));
       const add = el(
         "button", "secondary",
-        selectedValues.length ? "Добавить в резерв" : "Сделать основным"
+        selectedValues.length ? "Добавить резервным" : "Выбрать основным"
       );
       add.value = candidate.entity_id;
       add.disabled = selectedValues.length >= 8;
