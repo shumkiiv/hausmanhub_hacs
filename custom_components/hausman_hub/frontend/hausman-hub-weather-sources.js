@@ -21,6 +21,45 @@ export const HOME_SIGNAL_BINDINGS = [
   },
 ];
 
+export function homeEnvironmentSourcePayload(home) {
+  const stored = Array.isArray(home.outdoor_temperature_entity_ids)
+    ? home.outdoor_temperature_entity_ids
+    : Array.isArray(home.outdoor_temperature_entity_id)
+      ? home.outdoor_temperature_entity_id : [];
+  const sources = [...new Set(stored.filter((entityId) => (
+    typeof entityId === "string" && entityId
+  )))];
+  const primary = sources[0] || (
+    typeof home.outdoor_temperature_entity_id === "string"
+      ? home.outdoor_temperature_entity_id : null
+  );
+  return {
+    outdoor_temperature_entity_id: primary,
+    outdoor_temperature_entity_ids: sources.length
+      ? sources : (primary ? [primary] : []),
+  };
+}
+
+export function applyHomeSignalSelection(home, key, value) {
+  if (key !== "outdoor_temperature_entity_id") {
+    home[key] = value || null;
+    return;
+  }
+  const sources = Array.isArray(value) ? value : (value ? [value] : []);
+  home.outdoor_temperature_entity_ids = sources;
+  home.outdoor_temperature_entity_id = sources[0] || null;
+}
+
+export function homeEnvironmentSaveError(error) {
+  if (error?.status === 400) {
+    return "Home Assistant отклонил выбранный источник дома. Числовые пороги ниже корректны — проверьте блоки «Наружная температура», «Общее присутствие дома» и «Центральное отопление» выше, затем выберите недоступный источник повторно.";
+  }
+  if (error?.status === 409) {
+    return "Настройки дома изменились в Home Assistant. Обновите список источников и повторите сохранение.";
+  }
+  return "Не удалось связаться с Home Assistant. Выбранные значения сохранены в черновике; повторите после восстановления соединения.";
+}
+
 export function weatherSourceDisplayName(entityId) {
   const source = String(entityId || "").split(".", 2)[1] || "";
   const normalized = source.replace(/^(?:weather|forecast)_/, "");

@@ -973,6 +973,139 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
+    def test_home_continue_keeps_weather_priority_payload_unambiguous(self) -> None:
+        home_payload = copy.deepcopy(HOME_PAYLOAD)
+        home_payload["home"]["outdoor_temperature_entity_id"] = None
+        home_payload["home"]["outdoor_temperature_entity_ids"] = []
+        home_payload["candidates"]["outdoor_temperature"] = [
+            {
+                "entity_id": "weather.forecast_home_assistant",
+                "name": "Forecast",
+                "device_name": "Forecast",
+                "domain": "weather",
+                "available": True,
+                "room_id": "",
+            },
+            {
+                "entity_id": "weather.forecast_omsk",
+                "name": "Forecast",
+                "device_name": "Forecast",
+                "domain": "weather",
+                "available": True,
+                "room_id": "",
+            },
+        ]
+        script = panel_script(
+            get_payloads(home=home_payload),
+            {
+                "hausman_hub/v1/admin/home-environment": {
+                    "home": home_payload["home"],
+                    "setup_revision": 7,
+                }
+            },
+            """
+        panel._firstRun.home = JSON.parse(JSON.stringify(getTable[
+          "hausman_hub/v1/admin/home-environment"
+        ].home));
+        const card = document.createElement("div");
+        panel._renderFirstRunHome(card);
+        const choose = (entityId) => {
+          const choices = findAll(card, (node) =>
+            node.tagName === "BUTTON" && node.value === entityId);
+          if (choices.length !== 1) throw new Error("weather choice missing: " + entityId);
+          choices[0].fire("click");
+        };
+        choose("weather.forecast_home_assistant");
+        choose("weather.forecast_omsk");
+        const next = findAll(card, (node) =>
+          node.tagName === "BUTTON" && node.textContent === "Продолжить к проверке");
+        if (next.length !== 1) throw new Error("home continue action missing");
+        next[0].fire("click");
+        await tick();
+        const saved = calls.find((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/admin/home-environment");
+        if (!saved) throw new Error("home environment was not posted");
+        if (saved.payload.outdoor_temperature_entity_id
+          !== "weather.forecast_home_assistant") {
+          throw new Error("primary weather source was corrupted: "
+            + JSON.stringify(saved.payload.outdoor_temperature_entity_id));
+        }
+        if (saved.payload.outdoor_temperature_entity_ids.join(",")
+          !== "weather.forecast_home_assistant,weather.forecast_omsk") {
+          throw new Error("weather priority order was corrupted: "
+            + JSON.stringify(saved.payload.outdoor_temperature_entity_ids));
+        }
+        if (panel._firstRun.step !== "validation" || panel._firstRun.setupRevision !== 7) {
+          throw new Error("valid home sources did not advance to validation");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_home_save_error_points_to_sources_instead_of_valid_thresholds(self) -> None:
+        script = panel_script(
+            get_payloads(),
+            {"hausman_hub/v1/admin/home-environment": {"__fail": 400}},
+            """
+        panel._firstRun.home = {
+          central_heating_entity_id: null,
+          central_heating_temperature_on: 35,
+          central_heating_temperature_off: 30,
+          heating_lockout_high: 18,
+          heating_lockout_low: 16,
+          air_conditioner_minimum_outdoor_temperature: -5,
+          outdoor_temperature_entity_id: "weather.home",
+          outdoor_temperature_entity_ids: ["weather.home"],
+          presence_entity_id: null,
+        };
+        await panel._saveFirstRunHome();
+        if (!panel._firstRun.homeError.includes("отклонил выбранный источник")) {
+          throw new Error("source rejection is still hidden: " + panel._firstRun.homeError);
+        }
+        if (!panel._firstRun.homeError.includes("Числовые пороги ниже корректны")) {
+          throw new Error("valid thresholds are still blamed for the source error");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_home_save_recovers_priority_array_left_by_previous_ui(self) -> None:
+        script = panel_script(
+            get_payloads(),
+            {
+                "hausman_hub/v1/admin/home-environment": {
+                    "home": HOME_PAYLOAD["home"],
+                    "setup_revision": 8,
+                }
+            },
+            """
+        panel._firstRun.home = {
+          central_heating_entity_id: null,
+          central_heating_temperature_on: 35,
+          central_heating_temperature_off: 30,
+          heating_lockout_high: 18,
+          heating_lockout_low: 16,
+          air_conditioner_minimum_outdoor_temperature: -5,
+          outdoor_temperature_entity_id: ["weather.home", "sensor.outdoor_temperature"],
+          presence_entity_id: null,
+        };
+        await panel._saveFirstRunHome();
+        const saved = calls.find((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/admin/home-environment");
+        if (!saved || saved.payload.outdoor_temperature_entity_id !== "weather.home") {
+          throw new Error("legacy array was not repaired to one primary source");
+        }
+        if (saved.payload.outdoor_temperature_entity_ids.join(",")
+          !== "weather.home,sensor.outdoor_temperature") {
+          throw new Error("legacy priority order was not recovered");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_full_validation_explains_revision_conflict(self) -> None:
         script = panel_script(
             get_payloads(),
