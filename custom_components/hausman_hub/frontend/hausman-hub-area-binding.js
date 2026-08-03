@@ -1,3 +1,93 @@
+export function openFirstRunAreaCreator(panel, targetGroupId = null) {
+  panel._firstRun.areaCreator = {
+    error: "",
+    name: "",
+    open: true,
+    status: "",
+    targetGroupId,
+  };
+  panel._render();
+}
+
+export function closeFirstRunAreaCreator(panel) {
+  panel._firstRun.areaCreator = {
+    error: "",
+    name: "",
+    open: false,
+    status: "",
+    targetGroupId: null,
+  };
+  panel._render();
+}
+
+export async function createFirstRunArea(panel, rawName, normalizedText) {
+  if (panel._busy) return;
+  const creator = panel._firstRun.areaCreator;
+  const name = String(rawName || "").trim().replace(/\s+/g, " ");
+  creator.name = name;
+  creator.error = "";
+  creator.status = "";
+  if (!name) {
+    creator.error = "Введите название комнаты.";
+    panel._render();
+    return;
+  }
+  if (name.length > 64) {
+    creator.error = "Название комнаты должно быть не длиннее 64 символов.";
+    panel._render();
+    return;
+  }
+  const duplicate = ((panel._firstRun.options || {}).rooms || []).find(
+    (room) => normalizedText(room.name || room.id) === normalizedText(name)
+  );
+  if (duplicate) {
+    creator.error = `Комната «${duplicate.name || duplicate.id}» уже существует.`;
+    panel._render();
+    return;
+  }
+  const sendMessage = panel._hass?.connection?.sendMessagePromise;
+  if (typeof sendMessage !== "function") {
+    creator.error = "Home Assistant не предоставил команду создания комнаты. Обновите страницу и повторите попытку.";
+    panel._render();
+    return;
+  }
+  const targetGroupId = creator.targetGroupId;
+  panel._busy = true;
+  creator.status = "Создаю комнату в Home Assistant…";
+  panel._render();
+  try {
+    const created = await sendMessage.call(panel._hass.connection, {
+      type: "config/area_registry/create",
+      name,
+    });
+    const areaId = created && (created.area_id || created.id);
+    if (!areaId) throw new Error("area_id_missing");
+    await panel._loadFirstRunOptions(true);
+    const rooms = panel._firstRun.options && panel._firstRun.options.rooms;
+    if (Array.isArray(rooms) && !rooms.some((room) => room.id === areaId)) {
+      rooms.push({id: areaId, name, selectable: true, status: "available"});
+      rooms.sort((left, right) => String(left.name || left.id).localeCompare(
+        String(right.name || right.id), "ru"
+      ));
+    }
+    if (targetGroupId) panel._firstRun.areaAssignments[targetGroupId] = areaId;
+    panel._firstRun.areaCreator = {
+      error: "",
+      name: "",
+      open: false,
+      status: "",
+      targetGroupId: null,
+    };
+    panel._notice = `Комната «${name}» создана в Home Assistant.`;
+  } catch (error) {
+    creator.status = "";
+    creator.error = "Не удалось создать комнату. Проверьте права администратора и повторите попытку.";
+  } finally {
+    panel._busy = false;
+    panel._render();
+  }
+}
+
 function groupName(group) {
   const first = group[0] || {};
   return first.device_name || first.name || first.candidate_id || "Устройство";
@@ -87,9 +177,14 @@ function renderDeviceRow(panel, group, rooms, options, deps, nameCounts) {
         label: room.name || room.id,
         value: room.id,
       })),
+      [{ label: "＋ Создать новую комнату…", value: "__create_area__" }],
     ),
     panel._firstRunGroupRoom(group),
     () => {
+      if (picker.value === "__create_area__") {
+        panel._openFirstRunAreaCreator(panel._firstRunPhysicalGroupId(group));
+        return;
+      }
       panel._assignFirstRunGroup(group, picker.value);
       panel._render();
     },
@@ -107,6 +202,69 @@ function renderDeviceRow(panel, group, rooms, options, deps, nameCounts) {
   }
   row.appendChild(pickerLabel);
   return row;
+}
+
+function renderAreaCreator(panel, fields, deps) {
+  const { el } = deps;
+  const creator = panel._firstRun.areaCreator || {};
+  const heading = el("div", "binding-section-heading");
+  heading.appendChild(el("h3", "binding-heading", "Комнаты"));
+  const add = el("button", "secondary binding-add-room", "＋ Добавить комнату");
+  add.disabled = panel._busy;
+  add.addEventListener("click", () => panel._openFirstRunAreaCreator());
+  heading.appendChild(add);
+  fields.addRoom = add;
+
+  const fragment = el("div", "binding-room-section");
+  fragment.appendChild(heading);
+  if (!creator.open) return fragment;
+
+  const form = el("section", "binding-area-creator");
+  const copy = el("div", "binding-area-creator-copy");
+  copy.appendChild(el("strong", null, "Новая комната Home Assistant"));
+  copy.appendChild(el(
+    "small",
+    "muted",
+    creator.targetGroupId
+      ? "После создания комната будет выбрана для этого устройства. Привязка устройства применится после отдельного сохранения."
+      : "Комната сразу появится в реестре Home Assistant и станет доступна для устройств и климатического контура.",
+  ));
+  form.appendChild(copy);
+  const label = el("label", "binding-area-name");
+  label.appendChild(el("span", null, "Название комнаты"));
+  const input = el("input");
+  input.type = "text";
+  input.value = creator.name || "";
+  input.placeholder = "Например, Гостевая";
+  input.maxLength = 64;
+  input.autocomplete = "off";
+  input.addEventListener("input", () => {
+    creator.name = input.value;
+    creator.error = "";
+  });
+  label.appendChild(input);
+  form.appendChild(label);
+  const actions = el("div", "actions compact-actions binding-area-actions");
+  const cancel = el("button", "secondary", "Отмена");
+  cancel.disabled = panel._busy;
+  cancel.addEventListener("click", () => panel._closeFirstRunAreaCreator());
+  const create = el("button", null, "Создать комнату");
+  create.disabled = panel._busy;
+  create.addEventListener("click", () => panel._createFirstRunArea(input.value));
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      panel._createFirstRunArea(input.value);
+    }
+  });
+  actions.appendChild(cancel);
+  actions.appendChild(create);
+  form.appendChild(actions);
+  if (creator.status) form.appendChild(el("div", "binding-area-status", creator.status));
+  if (creator.error) form.appendChild(el("div", "field-error binding-area-error", creator.error));
+  fragment.appendChild(form);
+  fields.areaCreator = {cancel, create, input};
+  return fragment;
 }
 
 function renderDeviceList(panel, groups, rooms, options, deps, emptyText) {
@@ -169,8 +327,8 @@ export function renderFirstRunAreaBinding(card, helpers) {
   tools.appendChild(showLabel);
   card.appendChild(tools);
 
-  card.appendChild(el("h3", "binding-heading", "Комнаты"));
   const fields = { rooms: {} };
+  card.appendChild(renderAreaCreator(this, fields, deps));
   const roomList = el("div", "first-run-room-list");
   rooms.forEach((room) => {
     const state = this._firstRunRoomState(room);

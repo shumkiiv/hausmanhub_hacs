@@ -332,7 +332,7 @@ def panel_script(get_table: dict, post_table: dict, assertions: str) -> str:
         {{ filename: {str(DEVICE_BINDINGS_JS)!r} }}
       );
       vm.runInThisContext(
-        fs.readFileSync({str(AREA_BINDING_JS)!r}, "utf8").replace("export function renderFirstRunAreaBinding", "function renderFirstRunAreaBinding"),
+        fs.readFileSync({str(AREA_BINDING_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(AREA_BINDING_JS)!r} }}
       );
       vm.runInThisContext(
@@ -1435,6 +1435,115 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         }
         if (!textOf(panel.shadowRoot).includes("Привязки комнат сохранены")) {
           throw new Error("successful HA assignment feedback is missing");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_binding_step_creates_home_assistant_room_and_selects_it_for_device(self) -> None:
+        options = roomless_options()
+        script = panel_script(
+            get_payloads(options=options),
+            {},
+            """
+        const websocketCalls = [];
+        panel._hass.connection = {
+          sendMessagePromise: (payload) => {
+            websocketCalls.push(payload);
+            return Promise.resolve({area_id: "guest_room", name: payload.name});
+          },
+        };
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать настройку")[0].fire("click");
+        await tick();
+        const target = findAll(panel.shadowRoot, (node) =>
+          String(node.className).split(" ").includes("binding-device-row"))
+          .find((row) => textOf(row).includes("Komanchi Living SmartIR"));
+        const picker = findAll(target, (node) => node.tagName === "SELECT")[0];
+        picker.value = "__create_area__";
+        picker.fire("change");
+        const creator = panel._firstRunFields.areaCreator;
+        if (!creator || !textOf(panel.shadowRoot).includes("Новая комната Home Assistant")) {
+          throw new Error("inline Home Assistant room creator did not open");
+        }
+        creator.input.value = "  Гостевая   комната  ";
+        creator.create.fire("click");
+        await tick(12);
+        if (websocketCalls.length !== 1
+          || websocketCalls[0].type !== "config/area_registry/create"
+          || websocketCalls[0].name !== "Гостевая комната") {
+          throw new Error("native Home Assistant area request mismatch: "
+            + JSON.stringify(websocketCalls));
+        }
+        if (!panel._firstRun.options.rooms.some((room) =>
+          room.id === "guest_room" && room.name === "Гостевая комната")) {
+          throw new Error("created Home Assistant room was not added to room choices");
+        }
+        if (!Object.values(panel._firstRun.areaAssignments).includes("guest_room")) {
+          throw new Error("created room was not selected for the originating device");
+        }
+        if (!textOf(panel.shadowRoot).includes("Комната «Гостевая комната» создана")) {
+          throw new Error("room creation confirmation is missing");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_binding_step_rejects_empty_and_duplicate_room_names(self) -> None:
+        script = panel_script(
+            get_payloads(),
+            {},
+            """
+        const websocketCalls = [];
+        panel._hass.connection = {
+          sendMessagePromise: (payload) => {
+            websocketCalls.push(payload);
+            return Promise.resolve({area_id: "unexpected"});
+          },
+        };
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать настройку")[0].fire("click");
+        await tick();
+        panel._firstRunFields.addRoom.fire("click");
+        panel._firstRunFields.areaCreator.create.fire("click");
+        if (!textOf(panel.shadowRoot).includes("Введите название комнаты")) {
+          throw new Error("empty room name validation is missing");
+        }
+        panel._firstRunFields.areaCreator.input.value = "гостиная";
+        panel._firstRunFields.areaCreator.create.fire("click");
+        if (!textOf(panel.shadowRoot).includes("Комната «Гостиная» уже существует")) {
+          throw new Error("duplicate room name validation is missing");
+        }
+        if (websocketCalls.length !== 0) {
+          throw new Error("invalid room name reached Home Assistant");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_binding_step_keeps_room_form_open_when_home_assistant_rejects_creation(self) -> None:
+        script = panel_script(
+            get_payloads(),
+            {},
+            """
+        panel._hass.connection = {
+          sendMessagePromise: () => Promise.reject(new Error("forbidden")),
+        };
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать настройку")[0].fire("click");
+        await tick();
+        panel._firstRunFields.addRoom.fire("click");
+        panel._firstRunFields.areaCreator.input.value = "Гостевая";
+        panel._firstRunFields.areaCreator.create.fire("click");
+        await tick(6);
+        if (!panel._firstRun.areaCreator.open || panel._busy) {
+          throw new Error("failed creation closed the form or left the panel busy");
+        }
+        if (!textOf(panel.shadowRoot).includes("Не удалось создать комнату")) {
+          throw new Error("Home Assistant room creation error is not visible");
         }
             """,
         )
