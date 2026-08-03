@@ -1,0 +1,19 @@
+.intercom-settings-card { display:grid; gap:14px; }
+.intercom-settings-head { display:grid; grid-template-columns:54px minmax(0,1fr); align-items:center; gap:16px; }
+.intercom-settings-head h3, .intercom-settings-head p { margin:0; }
+.intercom-settings-head p { margin-top:5px; line-height:1.5; }
+.intercom-settings-icon { display:grid; place-items:center; width:54px; height:54px; border-radius:15px;
+  color:var(--hmh-accent,#4F8CFF); background:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 13%,var(--hmh-raised,#181E26)); }
+.intercom-settings-icon svg { width:25px; height:25px; }
+.intercom-device-select { min-width:0; }
+.intercom-settings-status { display:grid; gap:4px; padding:14px 16px; border-radius:14px;
+  color:var(--hmh-text-dim,#9AA7B4); background:color-mix(in srgb,var(--warning-color,#E4A11B) 7%,var(--hmh-raised,#181E26)); }
+.intercom-settings-status strong { color:var(--warning-color,#E4A11B); }
+.intercom-settings-status.is-ready { background:color-mix(in srgb,var(--success-color,#4CAF6E) 8%,var(--hmh-raised,#181E26)); }
+.intercom-settings-status.is-ready strong { color:var(--success-color,#4CAF6E); }
+.intercom-settings-actions { position:static; margin-top:2px; }
+@media (max-width:760px) {
+  .intercom-settings-head { grid-template-columns:44px minmax(0,1fr); }
+  .intercom-settings-icon { width:44px; height:44px; }
+  .intercom-settings-actions { width:100%; }
+}

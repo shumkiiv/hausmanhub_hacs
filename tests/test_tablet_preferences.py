@@ -53,6 +53,10 @@ class TabletPreferencesServiceTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(0, tablet["revision"])
         self.assertEqual(default_tablet_settings(), tablet["settings"])
+        self.assertEqual(
+            {"showQuickAccess": False, "deviceId": None},
+            tablet["settings"]["intercom"],
+        )
         self.assertEqual("both", energy["settings"]["displayUnits"])
         self.assertFalse(energy["settings"]["showVoltage"])
         self.assertEqual("separate", energy["settings"]["aggregation"])

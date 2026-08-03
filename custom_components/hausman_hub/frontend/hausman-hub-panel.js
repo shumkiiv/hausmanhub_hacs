@@ -1,35 +1,37 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.52.11";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.52.11";
-import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.52.11";
-import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.52.11";
-import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.52.11";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.52.11";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.52.11";
-import { closeFirstRunAreaCreator, createFirstRunArea, openFirstRunAreaCreator, renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.52.11";
-import { createKioskButton, createKioskDock, handleKioskPointerUp, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.52.11";
-import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.52.11";
-import { applyHomeSignalSelection, AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, homeEnvironmentSaveError, homeEnvironmentSourcePayload, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.52.11";
-import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.52.11";
-import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.52.11";
-import { renderClimateOverview } from "./hausman-hub-climate-overview.js?v=1.52.11";
-import { renderLightingOverview } from "./hausman-hub-lighting.js?v=1.52.11";
-import { renderRoomsOverview } from "./hausman-hub-rooms.js?v=1.52.11";
-import { renderMediaOverview } from "./hausman-hub-media-overview.js?v=1.52.11";
-import { renderSecurityOverview } from "./hausman-hub-security-overview.js?v=1.52.11";
-import { renderDevicesOverview } from "./hausman-hub-devices-overview.js?v=1.52.11";
-import { buildDiagnosticChecks, diagnosticSummaryText, renderDiagnosticDetails } from "./hausman-hub-diagnostics.js?v=1.52.11";
-import { renderRolloutReadiness } from "./hausman-hub-rollout.js?v=1.52.11";
-import { renderOverviewContent, renderOverviewHero } from "./hausman-hub-overview.js?v=1.52.11";
-import { renderPhysicalDeviceCard } from "./hausman-hub-device-card.js?v=1.52.11";
-import { recordTechnicalEvent as log, renderTechnicalLogCard } from "./hausman-hub-technical-log.js?v=1.52.11";
-import { applyFeedback } from "./hausman-hub-feedback.js?v=1.52.11";
-import { renderKiosk } from "./hausman-hub-kiosk.js?v=1.52.11";
-import { captureRoomValidation, clearFirstRunDraft, persistFirstRunDraft, reconcileRoomValidation, restoreFirstRunDraft, resumeFirstRunDraft } from "./hausman-hub-first-run-draft.js?v=1.52.11";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.52.12";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.52.12";
+import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.52.12";
+import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.52.12";
+import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.52.12";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.52.12";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.52.12";
+import { closeFirstRunAreaCreator, createFirstRunArea, openFirstRunAreaCreator, renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.52.12";
+import { createKioskButton, createKioskDock, handleKioskPointerUp, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, resolveIntercomQuickAction, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.52.12";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.52.12";
+import { applyHomeSignalSelection, AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, homeEnvironmentSaveError, homeEnvironmentSourcePayload, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.52.12";
+import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.52.12";
+import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.52.12";
+import { renderClimateOverview } from "./hausman-hub-climate-overview.js?v=1.52.12";
+import { renderLightingOverview } from "./hausman-hub-lighting.js?v=1.52.12";
+import { renderRoomsOverview } from "./hausman-hub-rooms.js?v=1.52.12";
+import { renderMediaOverview } from "./hausman-hub-media-overview.js?v=1.52.12";
+import { renderSecurityOverview } from "./hausman-hub-security-overview.js?v=1.52.12";
+import { renderDevicesOverview } from "./hausman-hub-devices-overview.js?v=1.52.12";
+import { buildDiagnosticChecks, diagnosticSummaryText, renderDiagnosticDetails } from "./hausman-hub-diagnostics.js?v=1.52.12";
+import { renderRolloutReadiness } from "./hausman-hub-rollout.js?v=1.52.12";
+import { renderOverviewContent, renderOverviewHero } from "./hausman-hub-overview.js?v=1.52.12";
+import { renderPhysicalDeviceCard } from "./hausman-hub-device-card.js?v=1.52.12";
+import { recordTechnicalEvent as log, renderTechnicalLogCard } from "./hausman-hub-technical-log.js?v=1.52.12";
+import { applyFeedback } from "./hausman-hub-feedback.js?v=1.52.12";
+import { renderKiosk } from "./hausman-hub-kiosk.js?v=1.52.12";
+import { captureRoomValidation, clearFirstRunDraft, persistFirstRunDraft, reconcileRoomValidation, restoreFirstRunDraft, resumeFirstRunDraft } from "./hausman-hub-first-run-draft.js?v=1.52.12";
+import { applyTabletProfile, isIntercomQuickAccessVisible, renderAppearanceSettings, renderIntercomSettings, syncIntercomQuickAccess } from "./hausman-hub-settings-profile.js?v=1.52.12";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
-const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css?v=1.52.11";
+const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css?v=1.52.12";
 const DASHBOARD_API = "hausman_hub/v1/dashboard";
 const DEVICE_ACTIONS_API = "hausman_hub/v1/device-actions";
+const PANEL_TABLET_PROFILE_API = "hausman_hub/v1/tablet-profile";
 const MODE_API = "hausman_hub/v1/admin/climate-mode";
 const HOME_API = "hausman_hub/v1/admin/home-environment";
 const WINDOWS_API = "hausman_hub/v1/admin/climate-room-signals";
@@ -96,6 +98,7 @@ const SETTINGS_VIEWS = [
   { id: "rooms", label: "Комнаты", description: "Комнаты, устройства и датчики" },
   { id: "bindings", label: "Привязки", description: "Сущности Home Assistant" },
   { id: "connection", label: "Подключение", description: "Связь с Home Assistant" },
+  { id: "intercom", label: "Домофон", description: "Устройство и быстрый доступ" },
   { id: "appearance", label: "Интерфейс", description: "Тема, анимация и подсказки" },
   { id: "system", label: "Диагностика", description: "Связь, компоненты и безопасное обслуживание" },
 ];
@@ -275,6 +278,9 @@ class HausmanHubPanel extends HTMLElement {
       data: null, error: false, fields: null, loaded: false, loading: false,
     };
     this._scenarios = { list: null, catalog: null, loading: false, error: false };
+    this._tabletProfile = null;
+    this._intercomDraft = { showQuickAccess: false, deviceId: null };
+    this._intercomDirty = false;
     this._scenarioEditor = null;
     this._settingsData = { connection_mode: "home_assistant", smart_home_center_url: "", home_assistant_url: "" };
     this._settingsBaseline = { ...this._settingsData };
@@ -582,6 +588,7 @@ class HausmanHubPanel extends HTMLElement {
         this._hass.callApi("GET", IR_CODE_BINDINGS_API).catch(() => ({ bindings: [] })),
         this._hass.callApi("GET", DASHBOARD_API).catch(() => null),
         this._hass.callApi("GET", SCENARIOS_CATALOG_API).catch(() => null),
+        this._hass.callApi("GET", PANEL_TABLET_PROFILE_API).catch(() => null),
       ]);
       this._data = results[0];
       this._settings = {
@@ -593,6 +600,7 @@ class HausmanHubPanel extends HTMLElement {
       };
       this._homeDashboard = results[6];
       this._scenarios.catalog = results[7];
+      if (typeof applyTabletProfile === "function") applyTabletProfile(this, results[8]);
       if (resumeFirstRunDraft(this)) await this._loadFirstRunOptions();
       const recovered = this._error;
       this._error = false;
@@ -723,6 +731,7 @@ class HausmanHubPanel extends HTMLElement {
     if (!this.shadowRoot) return;
     if (this._firstRunDraftReady) persistFirstRunDraft(this);
     this._ensureShell();
+    if (typeof syncIntercomQuickAccess === "function") syncIntercomQuickAccess(this);
     const shell = this._shell;
     shell.container.className = this._isFirstRunActive() || this._isFirstRunDeferred()
       ? "setup-shell" : "";
@@ -972,7 +981,7 @@ class HausmanHubPanel extends HTMLElement {
       scenarios, settings,
       homeSections,
       kioskButton, sidebarKiosk, kioskDock, kioskSurface,
-      renderKiosk: () => renderKiosk(this, kioskSurface, { el, svgIcon, setAttr, exit: () => kioskButton.click(), openIntercom: () => openIntercomFromRail(this) }),
+      renderKiosk: () => renderKiosk(this, kioskSurface, { el, svgIcon, setAttr, showIntercom: typeof isIntercomQuickAccessVisible === "function" && isIntercomQuickAccessVisible(this), exit: () => kioskButton.click(), openIntercom: () => openIntercomFromRail(this) }),
     };
     this._updateThemeSwitcher();
   }
@@ -5422,6 +5431,10 @@ class HausmanHubPanel extends HTMLElement {
     return renderHomeSection.homeDevices(this, sectionId, normalizedText);
   }
 
+  _resolveIntercomAction(deviceId, catalog) {
+    return resolveIntercomQuickAction(this._homeDevices("devices"), catalog, deviceId);
+  }
+
   _catalogTargets(device) {
     const catalog = this._scenarios.catalog && Array.isArray(this._scenarios.catalog.devices)
       ? this._scenarios.catalog.devices : [];
@@ -5729,6 +5742,13 @@ class HausmanHubPanel extends HTMLElement {
       value: this._settingsData.connection_mode === "center" ? "Совместимый API" : "HausmanHub в Home Assistant",
       status: { className: "is-ready", label: "Активно" },
     }));
+    const intercomConfigured = isIntercomQuickAccessVisible(this);
+    grid.appendChild(this._settingsOverviewLink({
+      viewId: "intercom", icon: "intercom", title: "Домофон",
+      description: "Устройство открытия и быстрый доступ на экранах управления",
+      value: intercomConfigured ? "Быстрый доступ включён" : "Не настроен",
+      status: { className: intercomConfigured ? "is-ready" : "is-warning", label: intercomConfigured ? "Готов" : "Скрыт" },
+    }));
     grid.appendChild(this._settingsOverviewLink({
       viewId: "appearance", icon: "sun", title: "Интерфейс и профиль",
       description: "Тема, размер, движение и подсказки для текущего пользователя",
@@ -5898,83 +5918,6 @@ class HausmanHubPanel extends HTMLElement {
     container.appendChild(pageActions);
   }
 
-  _renderAppearanceSettings(container) {
-    const card = el("section", "card settings-card interface-settings-card");
-    card.appendChild(el("h3", null, "Вид и удобство"));
-    card.appendChild(el("p", "muted settings-card-intro", "Параметры применяются сразу и сохраняются в профиле пользователя Home Assistant."));
-    const themeRow = el("label", "settings-toggle-row");
-    const themeCopy = el("span", "settings-toggle-copy");
-    themeCopy.appendChild(el("strong", null, "Тема панели"));
-    themeCopy.appendChild(el("small", null, "Следовать теме Home Assistant или использовать постоянную светлую либо тёмную тему."));
-    themeRow.appendChild(themeCopy);
-    const themeSelect = selectField(
-      [
-        { value: "auto", label: "Как в Home Assistant" },
-        { value: "light", label: "Светлая" },
-        { value: "dark", label: "Тёмная" },
-      ],
-      this._themeMode,
-      () => {
-        this._themeMode = themeSelect.value;
-        this._persistUserPreferences();
-        this._applyThemeMode();
-        this._render();
-      }
-    );
-    themeSelect.className = "settings-compact-select";
-    themeRow.appendChild(themeSelect);
-    card.appendChild(themeRow);
-    [
-      {
-        key: "large_text",
-        title: "Крупнее текст и элементы",
-        description: "Увеличить вторичные подписи и зоны нажатия для настенной панели.",
-      },
-      {
-        key: "reduced_motion",
-        title: "Уменьшить анимацию",
-        description: "Отключить плавные переходы, если движение отвлекает или устройство работает медленно.",
-      },
-      {
-        key: "show_hints",
-        title: "Показывать пояснения",
-        description: "Оставить короткие подсказки рядом с настройками, которые влияют на автоматику.",
-      },
-    ].forEach((preference) => {
-      const row = el("div", "settings-toggle-row");
-      const copy = el("span", "settings-toggle-copy");
-      copy.appendChild(el("strong", null, preference.title));
-      copy.appendChild(el("small", null, preference.description));
-      row.appendChild(copy);
-      const enabled = this._settingsPrefs[preference.key] === true;
-      const toggle = el("button", `settings-switch${enabled ? " is-on" : ""}`);
-      toggle.type = "button";
-      setAttr(toggle, "role", "switch");
-      setAttr(toggle, "aria-checked", enabled ? "true" : "false");
-      setAttr(toggle, "aria-label", preference.title);
-      toggle.appendChild(el("span", "settings-switch-status", enabled ? "Включено" : "Выключено"));
-      const track = el("span", "settings-switch-track");
-      track.appendChild(el("span", "settings-switch-knob"));
-      toggle.appendChild(track);
-      toggle.addEventListener("click", () => {
-        this._settingsPrefs[preference.key] = !enabled;
-        this._persistUserPreferences();
-        this._applyLocalPreferences();
-        this._render();
-      });
-      row.appendChild(toggle);
-      card.appendChild(row);
-    });
-    container.appendChild(card);
-    const note = el("section", "card settings-help-card settings-local-note");
-    note.appendChild(svgIcon("device"));
-    const copy = el("div");
-    copy.appendChild(el("strong", null, "Настройки относятся к вашему профилю"));
-    copy.appendChild(el("p", "muted", "Тема и доступность будут восстановлены на панелях с тем же пользователем Home Assistant и не меняют устройства или климат."));
-    note.appendChild(copy);
-    container.appendChild(note);
-  }
-
   async _copySystemSummary() {
     const text = diagnosticSummaryText(this, buildDiagnosticChecks(this, READINESS_LABELS));
     try {
@@ -6126,7 +6069,8 @@ class HausmanHubPanel extends HTMLElement {
       return;
     }
     if (activeView.id === "connection") this._renderConnectionSettings(container);
-    if (activeView.id === "appearance") this._renderAppearanceSettings(container);
+    if (activeView.id === "intercom") renderIntercomSettings(this, container, { el, setAttr, svgIcon });
+    if (activeView.id === "appearance") renderAppearanceSettings(this, container, { el, selectField, setAttr, svgIcon });
     if (activeView.id === "system") this._renderSystemSettings(container);
   }
 

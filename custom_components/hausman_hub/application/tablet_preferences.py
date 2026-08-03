@@ -64,7 +64,7 @@ def default_tablet_settings() -> dict[str, object]:
             "criticalVolumePercent": 100,
         },
         "dashboard": {"favoriteScenarioIds": [], "visibleDeviceIds": []},
-        "intercom": {"showQuickAccess": True, "deviceId": None},
+        "intercom": {"showQuickAccess": False, "deviceId": None},
     }
 
 

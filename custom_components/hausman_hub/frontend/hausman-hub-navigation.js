@@ -206,9 +206,14 @@ export function openRoomFromOverview(panel, room) {
   panel._activateSection("rooms");
 }
 
-export function resolveIntercomQuickAction(devices, catalog) {
+function intercomDeviceId(device) {
+  return String(device?.id || device?.deviceId || device?.physicalId || device?.entityId || "");
+}
+
+export function resolveIntercomQuickAction(devices, catalog, configuredDeviceId = null) {
   const normalized = (value) => String(value || "").trim().toLocaleLowerCase("ru");
   const device = (Array.isArray(devices) ? devices : []).find((candidate) => {
+    if (configuredDeviceId) return intercomDeviceId(candidate) === String(configuredDeviceId);
     const details = Array.isArray(candidate.details) ? candidate.details : [];
     const identity = normalized([
       candidate.name, candidate.entityId, candidate.physicalId, candidate.model,
@@ -234,17 +239,29 @@ export function resolveIntercomQuickAction(devices, catalog) {
 }
 
 export function openIntercomFromRail(panel) {
+  const configuredDeviceId = panel._tabletProfile?.settings?.intercom?.deviceId;
+  if (!configuredDeviceId) {
+    panel._activeSettingsView = "intercom";
+    panel._activateSection("settings");
+    panel._notice = "Домофон ещё не настроен. Выберите устройство в «Настройки → Домофон».";
+    panel._render();
+    return;
+  }
   const catalog = panel._scenarios.catalog && Array.isArray(panel._scenarios.catalog.devices)
     ? panel._scenarios.catalog.devices : [];
-  const command = resolveIntercomQuickAction(panel._homeDevices("devices"), catalog);
+  const command = resolveIntercomQuickAction(panel._homeDevices("devices"), catalog, configuredDeviceId);
   if (!command) {
-    panel._notice = "Домофон не найден среди устройств Home Assistant.";
-    panel._activateSection("security");
+    panel._activeSettingsView = "intercom";
+    panel._activateSection("settings");
+    panel._notice = "Настроенный домофон больше не найден. Выберите доступное устройство заново.";
+    panel._render();
     return;
   }
   if (!command.targetId || !command.actionId) {
-    panel._notice = `Для «${command.device.name || "Домофон"}» команда открытия пока не опубликована.`;
-    panel._activateSection("security");
+    panel._activeSettingsView = "intercom";
+    panel._activateSection("settings");
+    panel._notice = `Для «${command.device.name || "Домофон"}» команда открытия недоступна. Проверьте настройку устройства.`;
+    panel._render();
     return;
   }
   panel._executeDeviceAction(command.targetId, command.actionId, null);

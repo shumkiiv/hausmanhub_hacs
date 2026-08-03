@@ -26,6 +26,7 @@ DEVICES_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-devices-overview.js")
 TECHNICAL_LOG_JS = PANEL_JS.with_name("hausman-hub-technical-log.js")
 FEEDBACK_JS = PANEL_JS.with_name("hausman-hub-feedback.js")
 KIOSK_JS = PANEL_JS.with_name("hausman-hub-kiosk.js")
+SETTINGS_PROFILE_JS = PANEL_JS.with_name("hausman-hub-settings-profile.js")
 ROOM_SETUP_JS = PANEL_JS.with_name("hausman-hub-room-setup.js")
 DEVICE_INVENTORY_JS = PANEL_JS.with_name("hausman-hub-device-inventory.js")
 DEVICE_BINDINGS_JS = PANEL_JS.with_name("hausman-hub-device-bindings.js")
@@ -212,6 +213,31 @@ GET_PATHS = {
     "hausman_hub/v1/admin/home-environment": HOME_PAYLOAD,
     "hausman_hub/v1/admin/climate-room-signals": WINDOWS_PAYLOAD,
     "hausman_hub/v1/admin/climate-drafts/current": CONFIGURED_SETUP,
+    "hausman_hub/v1/tablet-profile": {
+        "revision": 0,
+        "settings": {
+            "startScreen": {"mode": "dashboard", "heroTargetId": None},
+            "kiosk": {"enabled": False, "enterAfterIdleSeconds": 300, "doubleTapToExit": True},
+            "displayAutomation": {
+                "enabled": False, "sensorEntityIds": [], "signalMode": "any",
+                "wakeBrightnessPercent": 100, "dimBrightnessPercent": 50,
+                "dimAfterSeconds": 60, "sleepAfterSeconds": 300,
+                "unavailablePolicy": "keep_awake",
+            },
+            "dayNight": {
+                "enabled": False, "dayStartsAt": "07:00", "nightStartsAt": "22:00",
+                "deepNightStartsAt": "00:30", "dayVolumePercent": 60,
+                "nightVolumePercent": 30, "deepNightVolumePercent": 15,
+                "appExitBrightnessPercent": 50,
+            },
+            "alerts": {
+                "lowBatteryThresholdPercent": 8, "lowBatterySnoozeMinutes": 60,
+                "criticalSoundEnabled": True, "criticalVolumePercent": 100,
+            },
+            "dashboard": {"favoriteScenarioIds": [], "visibleDeviceIds": []},
+            "intercom": {"showQuickAccess": False, "deviceId": None},
+        },
+    },
 }
 DEVICE_BINDINGS_PAYLOAD = {
     "contract": {"name": "hausman-hub-climate-device-binding-options", "version": 1},
@@ -566,6 +592,10 @@ def panel_script(
         {{ filename: {str(KIOSK_JS)!r} }}
       );
       vm.runInThisContext(
+        fs.readFileSync({str(SETTINGS_PROFILE_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(SETTINGS_PROFILE_JS)!r} }}
+      );
+      vm.runInThisContext(
         fs.readFileSync({str(PANEL_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, ""),
         {{ filename: {str(PANEL_JS)!r} }}
       );
@@ -804,6 +834,9 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         if (Object.values(persistentControls).some((control) => !control)) {
           throw new Error("persistent tablet controls are incomplete");
         }
+        if (persistentControls.intercom.style.display !== "none") {
+          throw new Error("unconfigured intercom quick access must stay hidden");
+        }
         for (const section of ordered) {
           panel._shell.tabs[section].fire("click");
           await tick();
@@ -870,8 +903,11 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         }
         setKioskState(panel, true);
         const kioskCopy = textOf(panel._shell.kioskSurface).replace(/\\s+/g, " ");
-        for (const required of ["HAUSMANHUB", "Климат", "Энергия", "Воздух", "Избранные сценарии", "Погода", "Дом сейчас", "Открыть домофон", "Без подтверждения"]) {
+        for (const required of ["HAUSMANHUB", "Климат", "Энергия", "Воздух", "Избранные сценарии", "Погода", "Дом сейчас"]) {
           if (!kioskCopy.includes(required)) throw new Error("kiosk panorama is incomplete: " + required);
+        }
+        if (kioskCopy.includes("Открыть домофон") || kioskCopy.includes("Без подтверждения")) {
+          throw new Error("unconfigured intercom leaked into kiosk panorama");
         }
         if (ordered.some((section) => panel._shell.sectionNodes[section].hidden === false)) {
           throw new Error("regular section stayed visible behind kiosk panorama");
@@ -882,6 +918,112 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         await tick();
         if (panel._kioskMode || panel._activeSection !== "climate" || panel._shell.sectionNodes.climate.hidden) {
           throw new Error("kiosk metric did not open its full section");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_intercom_requires_explicit_profile_and_saves_through_tablet_api(self) -> None:
+        profile = json.loads(json.dumps(GET_PATHS["hausman_hub/v1/tablet-profile"]))
+        profile["revision"] = 4
+        profile["settings"]["intercom"] = {
+            "showQuickAccess": True,
+            "deviceId": "entry_intercom",
+        }
+        dashboard = {
+            "devices": [
+                {
+                    "id": "entry_intercom",
+                    "physicalId": "entry_intercom",
+                    "entityId": "button.entry_intercom_open",
+                    "name": "Домофон у входа",
+                    "roomName": "Тамбур",
+                    "domain": "button",
+                    "category": "security",
+                    "details": [],
+                    "controls": [],
+                }
+            ],
+            "rooms": [],
+            "alarms": [],
+        }
+        catalog = {
+            "devices": [
+                {
+                    "entity_id": "button.entry_intercom_open",
+                    "target_id": "button.entry_intercom_open",
+                    "actions": [{"action_id": "press", "allowed_fields": []}],
+                }
+            ]
+        }
+        saved_profile = json.loads(json.dumps(profile))
+        saved_profile["revision"] = 5
+        script = panel_script(
+            GET_PATHS
+            | {
+                "hausman_hub/v1/tablet-profile": profile,
+                "hausman_hub/v1/dashboard": dashboard,
+                "hausman_hub/v1/admin/scenarios/catalog": catalog,
+            },
+            {"hausman_hub/v1/tablet-profile": saved_profile},
+            """
+        const headerIntercom = findAll(panel.shadowRoot, (node) =>
+          node.tagName === "BUTTON" && node["aria-label"] === "Открыть домофон")[0];
+        if (!headerIntercom || headerIntercom.style.display === "none") {
+          throw new Error("configured intercom quick access is hidden");
+        }
+        setKioskState(panel, true);
+        if (!textOf(panel._shell.kioskSurface).includes("Открыть домофон")) {
+          throw new Error("configured intercom is missing in kiosk");
+        }
+        setKioskState(panel, false);
+        panel._activateSection("settings");
+        panel._activateSettingsView("intercom");
+        const settingsText = textOf(panel._shell.settings);
+        if (!settingsText.includes("Домофон у входа") || !settingsText.includes("Устройство найдено")) {
+          throw new Error("intercom settings are not understandable: " + settingsText);
+        }
+        const quick = findAll(panel._shell.settings, (node) =>
+          node.tagName === "BUTTON" && node["aria-label"] === "Показывать быстрый доступ к домофону")[0];
+        quick.fire("click");
+        const save = findAll(panel._shell.settings, (node) =>
+          node.tagName === "BUTTON" && node.textContent === "Сохранить домофон")[0];
+        save.fire("click");
+        await tick();
+        const write = calls.find((call) => call.method === "PUT"
+          && call.path === "hausman_hub/v1/tablet-profile");
+        if (!write || write.payload.expectedRevision !== 4
+            || write.payload.settings.intercom.showQuickAccess !== false
+            || write.payload.settings.intercom.deviceId !== "entry_intercom") {
+          throw new Error("tablet profile write contract mismatch: " + JSON.stringify(write));
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_legacy_empty_intercom_profile_is_hidden_and_redirects_to_settings(self) -> None:
+        profile = json.loads(json.dumps(GET_PATHS["hausman_hub/v1/tablet-profile"]))
+        profile["settings"]["intercom"] = {"showQuickAccess": True, "deviceId": None}
+        script = panel_script(
+            GET_PATHS | {"hausman_hub/v1/tablet-profile": profile},
+            {},
+            """
+        const intercom = findAll(panel.shadowRoot, (node) =>
+          node.tagName === "BUTTON" && node["aria-label"] === "Открыть домофон")[0];
+        if (!intercom || intercom.style.display !== "none") {
+          throw new Error("legacy empty intercom profile must stay hidden");
+        }
+        openIntercomFromRail(panel);
+        if (panel._activeSection !== "settings" || panel._activeSettingsView !== "intercom") {
+          throw new Error("unconfigured intercom did not open its settings");
+        }
+        if (!textOf(panel.shadowRoot).includes("Домофон ещё не настроен")) {
+          throw new Error("unconfigured intercom explanation is missing");
+        }
+        if (calls.some((call) => call.path === "hausman_hub/v1/device-actions")) {
+          throw new Error("unconfigured intercom sent a device command");
         }
             """,
         )
@@ -3030,7 +3172,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.11")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.12")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

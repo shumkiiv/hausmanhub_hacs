@@ -137,7 +137,9 @@ function renderWeatherAndHome(panel, root, dashboard, deps) {
   weatherCard.appendChild(forecast); row.appendChild(weatherCard);
   const alarms = (Array.isArray(dashboard.alarms) ? dashboard.alarms : []).filter((alarm) => alarm.active);
   row.appendChild(sectionButton(panel, deps, `kiosk-panorama-card kiosk-panorama-home${alarms.length ? " is-alert" : ""}`, "security", "Дом сейчас", alarms.length ? `${alarms.length} тревог` : "Спокойно", `${dashboard.summary?.activeLights || 0} светильников · ${dashboard.summary?.activeClimate || 0} климатических систем`, "shield"));
-  const intercom = deps.el("button", "kiosk-panorama-intercom"); intercom.type = "button"; deps.setAttr(intercom, "aria-label", "Открыть домофон без подтверждения"); intercom.appendChild(deps.svgIcon("intercom")); intercom.appendChild(deps.el("strong", null, "Открыть домофон")); intercom.appendChild(deps.el("small", null, "Без подтверждения")); intercom.addEventListener("click", deps.openIntercom); row.appendChild(intercom);
+  if (deps.showIntercom) {
+    const intercom = deps.el("button", "kiosk-panorama-intercom"); intercom.type = "button"; deps.setAttr(intercom, "aria-label", "Открыть домофон без подтверждения"); intercom.appendChild(deps.svgIcon("intercom")); intercom.appendChild(deps.el("strong", null, "Открыть домофон")); intercom.appendChild(deps.el("small", null, "Без подтверждения")); intercom.addEventListener("click", deps.openIntercom); row.appendChild(intercom);
+  }
   root.appendChild(row);
 }
 
