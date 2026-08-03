@@ -28,7 +28,8 @@ class ClimateReferenceTest(unittest.TestCase):
         self.suite = load_climate_reference_suite()
 
     def test_packaged_suite_is_frozen_and_never_enables_commands(self) -> None:
-        self.assertTrue(CLIMATE_REFERENCE_PATH.is_relative_to(Path.cwd()))
+        repository_root = Path(__file__).resolve().parents[1]
+        self.assertTrue(CLIMATE_REFERENCE_PATH.is_relative_to(repository_root))
         self.assertEqual(
             CLIMATE_REFERENCE_SHA256,
             hashlib.sha256(CLIMATE_REFERENCE_PATH.read_bytes()).hexdigest(),

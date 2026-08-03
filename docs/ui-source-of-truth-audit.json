@@ -3,7 +3,7 @@
     "name": "hausman-hub-ui-source-of-truth-audit",
     "version": 1
   },
-  "audited_at": "2026-08-01",
+  "audited_at": "2026-08-03",
   "rules": {
     "product_design_file": "4vaAkBsKwtSyqJrr2X5RRs",
     "hacs_design_file": "UK1PgZUQQrvYJ7tRZzWyvo",
@@ -24,32 +24,26 @@
         "id": "267:644",
         "name": "00 • CANON — Shared",
         "purpose": "shared_canon",
+        "top_level_node_count": 18,
         "node_ids": [
           "247:582",
           "251:582",
           "255:582",
           "257:582",
           "261:618",
-          "262:644"
-        ]
-      },
-      {
-        "id": "267:645",
-        "name": "10 • CANON — HACS",
-        "purpose": "hacs_canon",
-        "node_ids": [
-          "192:543",
-          "215:547",
-          "220:549",
-          "222:549",
-          "224:549",
-          "226:549",
-          "228:549",
-          "232:549",
-          "237:582",
-          "276:11",
-          "280:582",
-          "282:582"
+          "262:644",
+          "270:643",
+          "290:64",
+          "291:64",
+          "292:64",
+          "293:64",
+          "294:64",
+          "295:64",
+          "296:64",
+          "297:64",
+          "298:64",
+          "299:64",
+          "300:64"
         ]
       },
       {
@@ -58,96 +52,109 @@
         "purpose": "archive",
         "top_level_node_count": 33
       }
-    ]
+    ],
+    "canonical_sizes": {
+      "290:64": [1280, 720],
+      "291:64": [1280, 901],
+      "292:64": [1280, 1158],
+      "293:64": [1280, 1018],
+      "294:64": [1280, 988],
+      "295:64": [1280, 901],
+      "296:64": [1280, 901],
+      "297:64": [1280, 1869],
+      "298:64": [1280, 2264],
+      "299:64": [1280, 901],
+      "300:64": [1280, 1166]
+    }
   },
   "surfaces": [
     {
       "id": "overview",
       "label": "Главная",
       "android": "implemented",
-      "android_figma": ["716:943", "784:1109"],
+      "android_figma": ["1001:2"],
       "hacs": "implemented_from_shared_canon",
-      "hacs_figma": ["276:11"]
+      "hacs_figma": ["290:64"]
     },
     {
       "id": "lighting",
       "label": "Освещение",
       "android": "implemented",
-      "android_figma": ["612:669"],
+      "android_figma": ["1001:4189"],
       "hacs": "implemented_with_shared_device_drilldown",
-      "hacs_figma": ["281:676"]
+      "hacs_figma": ["291:64"]
     },
     {
       "id": "climate",
       "label": "Климат",
       "android": "implemented",
-      "android_figma": ["619:397"],
-      "hacs": "functional_needs_visual_reconciliation",
-      "hacs_figma": ["257:582"]
+      "android_figma": ["1001:4190"],
+      "hacs": "implemented_from_shared_canon",
+      "hacs_figma": ["292:64"]
     },
     {
       "id": "rooms",
       "label": "Комнаты",
       "android": "implemented",
-      "android_figma": ["627:306"],
+      "android_figma": ["1001:4191"],
       "hacs": "implemented_with_shared_device_drilldown",
-      "hacs_figma": ["281:676"]
+      "hacs_figma": ["295:64"]
     },
     {
       "id": "media",
       "label": "Медиа",
       "android": "implemented",
-      "android_figma": ["634:494"],
+      "android_figma": ["1001:4192"],
       "hacs": "implemented_with_shared_device_drilldown",
-      "hacs_figma": ["237:582", "281:676"]
+      "hacs_figma": ["299:64"]
     },
     {
       "id": "security",
       "label": "Безопасность",
       "android": "implemented",
-      "android_figma": ["638:475"],
+      "android_figma": ["1001:4193"],
       "hacs": "implemented_with_shared_device_drilldown",
-      "hacs_figma": ["281:676"]
+      "hacs_figma": ["293:64"]
     },
     {
       "id": "devices",
       "label": "Устройства",
       "android": "implemented",
-      "android_figma": ["649:502"],
+      "android_figma": ["1001:4194"],
       "hacs": "implemented_with_shared_device_drilldown",
-      "hacs_figma": ["281:676"]
+      "hacs_figma": ["298:64"]
     },
     {
       "id": "energy",
       "label": "Энергия",
       "android": "implemented",
-      "android_figma": ["987:1368", "991:1368"],
-      "hacs": "shared_canon_available",
-      "hacs_figma": ["247:582", "251:582"]
+      "android_figma": ["1001:4195"],
+      "hacs": "implemented_from_shared_canon",
+      "hacs_figma": ["297:64"]
     },
     {
       "id": "scenarios",
       "label": "Сценарии",
       "android": "implemented",
-      "android_figma": ["661:645", "689:380"],
+      "android_figma": ["1001:4196"],
       "hacs": "implemented_from_guided_editor_canon",
-      "hacs_figma": ["255:582", "282:582"]
+      "hacs_figma": ["294:64"]
     },
     {
       "id": "settings",
       "label": "Настройки",
       "android": "implemented",
-      "android_figma": ["667:586"],
-      "hacs": "functional_needs_visual_reconciliation",
-      "hacs_figma": ["164:535"]
+      "android_figma": ["1001:4197"],
+      "hacs": "implemented_from_shared_canon",
+      "hacs_figma": ["296:64"]
     },
     {
       "id": "kiosk",
       "label": "Режим киоска",
       "android": "implemented",
-      "android_figma": ["752:1020", "785:1200"],
-      "hacs": "shared_canon_available",
-      "hacs_figma": ["261:618"]
+      "android_figma": ["1001:4198"],
+      "hacs": "implemented_from_shared_canon",
+      "hacs_figma": ["300:64"]
     }
   ]
 }

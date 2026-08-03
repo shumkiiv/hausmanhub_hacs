@@ -65,18 +65,18 @@ class UiSourceOfTruthAuditTest(unittest.TestCase):
         self.assertEqual(0, structure["nodes_deleted"])
         pages = {page["purpose"]: page for page in structure["pages"]}
         self.assertEqual(
-            {"shared_canon", "hacs_canon", "archive"},
+            {"shared_canon", "archive"},
             set(pages),
         )
         shared = set(pages["shared_canon"]["node_ids"])
-        hacs = set(pages["hacs_canon"]["node_ids"])
         self.assertTrue(shared)
-        self.assertTrue(hacs)
-        self.assertTrue(shared.isdisjoint(hacs))
+        self.assertEqual(18, pages["shared_canon"]["top_level_node_count"])
         self.assertEqual(
             structure["total_top_level_nodes"],
-            len(shared) + len(hacs) + pages["archive"]["top_level_node_count"],
+            len(shared) + pages["archive"]["top_level_node_count"],
         )
+        self.assertEqual([1280, 720], structure["canonical_sizes"]["290:64"])
+        self.assertEqual([1280, 988], structure["canonical_sizes"]["294:64"])
 
 
 if __name__ == "__main__":

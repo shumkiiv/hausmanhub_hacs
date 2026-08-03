@@ -541,6 +541,28 @@ class PanelContourWizardTest(unittest.TestCase):
             panel,
         )
 
+    def test_open_wizard_selects_visible_contour_view(self) -> None:
+        script = panel_script(
+            get_payloads(),
+            {},
+            """
+        panel._firstRun.completed = true;
+        panel._activeClimateView = "overview";
+        panel._openWizard(panel._settings.setup);
+        await tick();
+        if (panel._activeSection !== "climate" || panel._activeClimateView !== "contour") {
+          throw new Error("room wizard did not select the climate contour view: "
+            + panel._activeSection + "/" + panel._activeClimateView);
+        }
+        if (panel._shell.climateViews.contour.hidden
+          || !panel._shell.climateViews.overview.hidden) {
+          throw new Error("room wizard is not visible after opening");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_control_channel_is_explained_recommended_and_safely_confirmed(self) -> None:
         options = copy.deepcopy(DRAFT_OPTIONS)
         air_conditioner = next(
@@ -804,6 +826,31 @@ class PanelContourWizardTest(unittest.TestCase):
 
 
 class PanelFirstRunWizardTest(unittest.TestCase):
+    def test_ir_command_names_stay_internal_and_visible_labels_are_russian(self) -> None:
+        script = panel_script(
+            get_payloads(),
+            {},
+            """
+        const humidifier = panel._firstRunIrManualCommands({type: "humidifier", profiles: {}});
+        const conditioner = panel._firstRunIrManualCommands({
+          type: "air_conditioner",
+          profiles: {day: {target_temperature: 25}, night: {target_temperature: 24}},
+        });
+        if (JSON.stringify(humidifier) !== JSON.stringify([
+          {commandName: "humidifier.on", label: "Включить"},
+          {commandName: "humidifier.off", label: "Выключить"},
+        ])) throw new Error("humidifier IR labels are not localized");
+        if (!conditioner.some((item) => item.commandName === "ac.off" && item.label === "Выключить")
+          || !conditioner.some((item) => item.commandName === "ac.cool.25_0"
+            && item.label === "Охлаждение · 25.0 °C")
+          || conditioner.some((item) => /^(?:on|off|cool)\b/.test(item.label))) {
+          throw new Error("conditioner IR labels expose internal English command names");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_home_signal_draft_and_open_chooser_survive_background_render(self) -> None:
         home_payload = copy.deepcopy(HOME_PAYLOAD)
         home_payload["candidates"] = {
@@ -2734,7 +2781,7 @@ class PanelFirstRunWizardTest(unittest.TestCase):
           throw new Error("manual learning did not retry the first off command");
         }
         if (!textOf(panel.shadowRoot).includes("Готово")
-          || !textOf(panel.shadowRoot).includes("cool 25.0 °C")) {
+          || !textOf(panel.shadowRoot).includes("Охлаждение · 25.0 °C")) {
           throw new Error("manual sequence did not retain progress and profile presets");
         }
             """,

@@ -65,6 +65,7 @@ function appendMetric(deps, card, label, value, supporting) {
 
 export function renderOverviewHero(panel, container, readiness, deps) {
   const { el, svgIcon, setAttr } = deps;
+  const readinessStatus = readiness?.status || "not_ready";
   const dashboard = panel._homeDashboard || {};
   const rooms = Array.isArray(dashboard.rooms) ? dashboard.rooms : [];
   const devices = Array.isArray(dashboard.devices) ? dashboard.devices : [];
@@ -74,7 +75,7 @@ export function renderOverviewHero(panel, container, readiness, deps) {
   const overlay = el("div", "overview-canon-hero-overlay");
   const copy = el("div", "overview-canon-hero-copy");
   const homeName = dashboard.summary && dashboard.summary.homeName || "Дом";
-  copy.appendChild(el("span", "overview-canon-eyebrow", readiness.status === "ready" ? "Дом работает штатно" : "Требуется внимание"));
+  copy.appendChild(el("span", "overview-canon-eyebrow", readinessStatus === "ready" ? "Дом работает штатно" : "Требуется внимание"));
   copy.appendChild(el("h1", null, homeName));
   const facts = el("div", "overview-canon-hero-facts");
   [
@@ -95,8 +96,8 @@ export function renderOverviewHero(panel, container, readiness, deps) {
   details.addEventListener("click", () => panel._activateSection("rooms"));
   copy.appendChild(details);
   overlay.appendChild(copy);
-  const status = el("span", `overview-canon-state${readiness.status === "ready" ? " is-ready" : " is-attention"}`,
-    readiness.status === "ready" ? "Всё в порядке" : "Проверьте настройки");
+  const status = el("span", `overview-canon-state${readinessStatus === "ready" ? " is-ready" : " is-attention"}`,
+    readinessStatus === "ready" ? "Всё в порядке" : "Проверьте настройки");
   overlay.appendChild(status);
   hero.appendChild(overlay);
   const roomStrip = el("div", "overview-canon-room-strip");

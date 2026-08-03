@@ -101,7 +101,12 @@ class RepositoryBoundaryCheckTest(unittest.TestCase):
             root = Path(temporary_directory)
             outside_file = root / "outside-secret.txt"
             outside_file.write_text("must not be read", encoding="utf-8")
-            (root / "linked.txt").symlink_to(outside_file)
+            try:
+                (root / "linked.txt").symlink_to(outside_file)
+            except OSError as error:
+                if getattr(error, "winerror", None) == 1314:
+                    self.skipTest("Windows does not grant symbolic-link privileges")
+                raise
 
             index_content = b"safe indexed content"
             completed = subprocess.CompletedProcess(

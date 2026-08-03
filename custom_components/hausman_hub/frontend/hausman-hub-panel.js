@@ -1,32 +1,32 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.52.2";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.52.2";
-import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.52.2";
-import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.52.2";
-import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.52.2";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.52.2";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.52.2";
-import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.52.2";
-import { createKioskButton, createKioskDock, handleKioskPointerUp, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.52.2";
-import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.52.2";
-import { AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.52.2";
-import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.52.2";
-import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.52.2";
-import { renderClimateOverview } from "./hausman-hub-climate-overview.js?v=1.52.2";
-import { renderLightingOverview } from "./hausman-hub-lighting.js?v=1.52.2";
-import { renderRoomsOverview } from "./hausman-hub-rooms.js?v=1.52.2";
-import { renderMediaOverview } from "./hausman-hub-media-overview.js?v=1.52.2";
-import { renderSecurityOverview } from "./hausman-hub-security-overview.js?v=1.52.2";
-import { renderDevicesOverview } from "./hausman-hub-devices-overview.js?v=1.52.2";
-import { buildDiagnosticChecks, diagnosticSummaryText, renderDiagnosticDetails } from "./hausman-hub-diagnostics.js?v=1.52.2";
-import { renderRolloutReadiness } from "./hausman-hub-rollout.js?v=1.52.2";
-import { renderOverviewContent, renderOverviewHero } from "./hausman-hub-overview.js?v=1.52.2";
-import { renderPhysicalDeviceCard } from "./hausman-hub-device-card.js?v=1.52.2";
-import { recordTechnicalEvent as log, renderTechnicalLogCard } from "./hausman-hub-technical-log.js?v=1.52.2";
-import { applyFeedback } from "./hausman-hub-feedback.js?v=1.52.2";
-import { renderKiosk } from "./hausman-hub-kiosk.js?v=1.52.2";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.52.4";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.52.4";
+import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.52.4";
+import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.52.4";
+import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.52.4";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.52.4";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.52.4";
+import { renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.52.4";
+import { createKioskButton, createKioskDock, handleKioskPointerUp, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.52.4";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.52.4";
+import { AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.52.4";
+import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.52.4";
+import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.52.4";
+import { renderClimateOverview } from "./hausman-hub-climate-overview.js?v=1.52.4";
+import { renderLightingOverview } from "./hausman-hub-lighting.js?v=1.52.4";
+import { renderRoomsOverview } from "./hausman-hub-rooms.js?v=1.52.4";
+import { renderMediaOverview } from "./hausman-hub-media-overview.js?v=1.52.4";
+import { renderSecurityOverview } from "./hausman-hub-security-overview.js?v=1.52.4";
+import { renderDevicesOverview } from "./hausman-hub-devices-overview.js?v=1.52.4";
+import { buildDiagnosticChecks, diagnosticSummaryText, renderDiagnosticDetails } from "./hausman-hub-diagnostics.js?v=1.52.4";
+import { renderRolloutReadiness } from "./hausman-hub-rollout.js?v=1.52.4";
+import { renderOverviewContent, renderOverviewHero } from "./hausman-hub-overview.js?v=1.52.4";
+import { renderPhysicalDeviceCard } from "./hausman-hub-device-card.js?v=1.52.4";
+import { recordTechnicalEvent as log, renderTechnicalLogCard } from "./hausman-hub-technical-log.js?v=1.52.4";
+import { applyFeedback } from "./hausman-hub-feedback.js?v=1.52.4";
+import { renderKiosk } from "./hausman-hub-kiosk.js?v=1.52.4";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
-const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css?v=1.52.2";
+const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css?v=1.52.4";
 const DASHBOARD_API = "hausman_hub/v1/dashboard";
 const DEVICE_ACTIONS_API = "hausman_hub/v1/device-actions";
 const MODE_API = "hausman_hub/v1/admin/climate-mode";
@@ -88,7 +88,7 @@ const CLIMATE_VIEWS = [
   { id: "schedule", label: "Расписание", subtitle: "Границы профилей и автоматизация" },
   { id: "home", label: "Сигналы дома", subtitle: "Сигналы дома и отопление" },
   { id: "windows", label: "Сигналы комнат", subtitle: "Окна и присутствие по комнатам" },
-  { id: "assistant", label: "AI-помощник", subtitle: "Советы и статистика AI" },
+  { id: "assistant", label: "Умный помощник", subtitle: "Советы и статистика" },
 ];
 const SETTINGS_VIEWS = [
   { id: "overview", label: "Обзор", description: "Главные параметры и состояние" },
@@ -830,6 +830,13 @@ class HausmanHubPanel extends HTMLElement {
     themeButton.type = "button";
     themeButton.addEventListener("click", () => this._cycleThemeMode());
     headerActions.appendChild(themeButton);
+    const headerIntercom = el("button", "header-intercom");
+    headerIntercom.type = "button";
+    setAttr(headerIntercom, "aria-label", "Открыть домофон");
+    headerIntercom.appendChild(svgIcon("intercom", "header-intercom-icon"));
+    headerIntercom.appendChild(el("span", null, "Домофон"));
+    headerIntercom.addEventListener("click", () => openIntercomFromRail(this));
+    headerActions.appendChild(headerIntercom);
     const kioskButton = createKioskButton(this, "header-kiosk", { el, svgIcon });
     headerActions.appendChild(kioskButton);
     header.appendChild(headerActions);
@@ -1373,7 +1380,7 @@ class HausmanHubPanel extends HTMLElement {
     container.innerHTML = "";
     container.className = "assistant-screen";
     const heading = el("div", "section-heading");
-    heading.appendChild(el("h2", null, "Помощник AI"));
+    heading.appendChild(el("h2", null, "Умный помощник"));
     heading.appendChild(el("p", "section-intro", "Настройте поставщика и получайте советы по климату."));
     container.appendChild(heading);
     if (this._assistant.loading) {
@@ -1411,10 +1418,10 @@ class HausmanHubPanel extends HTMLElement {
     let baseUrl;
     let model;
     const presetLabel = el("label", "assistant-field");
-    presetLabel.appendChild(el("span", "assistant-field-label", "Поставщик AI"));
+    presetLabel.appendChild(el("span", "assistant-field-label", "Поставщик сервиса"));
     const preset = selectField([
       { value: "deepseek", label: "DeepSeek" },
-      { value: "openai", label: "OpenAI compatible" },
+      { value: "openai", label: "Совместимый с OpenAI" },
       { value: "custom", label: "Свой поставщик" },
     ], fields.preset, () => {
       fields.preset = preset.value;
@@ -1594,7 +1601,8 @@ class HausmanHubPanel extends HTMLElement {
     }
     container.innerHTML = "";
     const metrics = this._overviewMetrics(snapshot, setup);
-    const ready = readiness.status === "ready";
+    const readinessStatus = readiness && readiness.status || "not_ready";
+    const ready = readinessStatus === "ready";
     const card = el("div", "card hero overview-hero");
     const head = el("div", "overview-hero-head");
     const icon = el("span", "overview-hero-icon");
@@ -1604,7 +1612,7 @@ class HausmanHubPanel extends HTMLElement {
     copy.appendChild(el(
       "div",
       "hero-status",
-      ready ? "Дом в комфортном режиме" : (READINESS_LABELS[readiness.status] || "Состояние уточняется")
+      ready ? "Дом в комфортном режиме" : (READINESS_LABELS[readinessStatus] || "Состояние уточняется")
     ));
     copy.appendChild(el(
       "p",
@@ -2330,16 +2338,16 @@ class HausmanHubPanel extends HTMLElement {
   _firstRunIrManualCommands(device) {
     if (device.type === "humidifier") {
       return [
-        { commandName: "humidifier.on", label: "on" },
-        { commandName: "humidifier.off", label: "off" },
+        { commandName: "humidifier.on", label: "Включить" },
+        { commandName: "humidifier.off", label: "Выключить" },
       ];
     }
     const temperatures = [device.profiles.day, device.profiles.night]
       .map((profile) => Number(profile && profile.target_temperature))
       .filter((temperature) => Number.isFinite(temperature));
-    const commands = [{ commandName: "ac.off", label: "off" }];
+    const commands = [{ commandName: "ac.off", label: "Выключить" }];
     Array.from(new Set(temperatures)).forEach((temperature) => {
-      const label = `cool ${temperature.toFixed(1)} °C`;
+      const label = `Охлаждение · ${temperature.toFixed(1)} °C`;
       commands.push({
         commandName: `ac.cool.${temperature.toFixed(1).replace(".", "_")}`,
         label,
@@ -3502,6 +3510,7 @@ class HausmanHubPanel extends HTMLElement {
   _openWizard(setup) {
     if (setup.status !== "not_configured" && setup.editing_allowed !== true) return;
     this._activateSection("climate");
+    this._activateClimateView("contour");
     this._wizard.open = true;
     this._expandedWizardRooms.clear();
     this._wizard.setupRevision = setup.setup_revision;
@@ -5995,7 +6004,7 @@ class HausmanHubPanel extends HTMLElement {
 
     const danger = el("section", "card settings-card danger-settings-card");
     danger.appendChild(el("h3", null, "Сброс HausmanHub"));
-    danger.appendChild(el("p", "muted settings-card-intro", "Удаляет настройки климата, локальные привязки, сценарии, ИК-коды, AI и адреса подключения."));
+    danger.appendChild(el("p", "muted settings-card-intro", "Удаляет настройки климата, локальные привязки, сценарии, ИК-коды, умного помощника и адреса подключения."));
     danger.appendChild(el("div", "reset-preserves", "Комнаты, области, сущности и устройства Home Assistant останутся без изменений."));
     const dangerActions = el("div", "danger-actions");
     if (this._resetArmed) {

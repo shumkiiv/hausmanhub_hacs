@@ -4,6 +4,14 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>HausmanHub panel visual harness</title>
+    <script>
+      if (new URLSearchParams(window.location.search).get("figmaCapture") === "1") {
+        const captureScript = document.createElement("script");
+        captureScript.src = "https://mcp.figma.com/mcp/html-to-design/capture.js";
+        captureScript.async = true;
+        document.head.appendChild(captureScript);
+      }
+    </script>
     <style>
       html, body { min-height: 100%; margin: 0; background: #eef1f6; }
       hausman-hub-panel { min-height: 100vh; }
@@ -11,8 +19,17 @@
   </head>
   <body>
     <hausman-hub-panel id="panel"></hausman-hub-panel>
+    <script>
+      window.__hausmanHubHarnessErrors = [];
+      window.addEventListener("error", (event) => {
+        window.__hausmanHubHarnessErrors.push(String(event.error || event.message || "Unknown error"));
+      });
+      window.addEventListener("unhandledrejection", (event) => {
+        window.__hausmanHubHarnessErrors.push(String(event.reason || "Unhandled promise rejection"));
+      });
+    </script>
     <script type="module">
-      import "../../custom_components/hausman_hub/frontend/hausman-hub-panel.js?v=1.52.2";
+      import "../../custom_components/hausman_hub/frontend/hausman-hub-panel.js?v=1.52.4";
       const params = new URLSearchParams(window.location.search);
       const panel = document.getElementById("panel");
       const theme = params.get("theme") === "dark" ? "dark" : "light";
@@ -21,7 +38,7 @@
       document.documentElement.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       document.body.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       panel._data = {
-        integration_version: "1.52.2",
+        integration_version: "1.52.4",
         readiness: { status: "ready", bridge_mode: "native", reasons: [] },
         snapshot: {
           rooms: [
@@ -171,6 +188,66 @@
           ],
         },
       };
+      const harnessScenarioList = panel._scenarios.list;
+      window.__hausmanHubHarnessCalls = [];
+      const cloneHarnessValue = (value) => JSON.parse(JSON.stringify(value ?? null));
+      panel._hass = {
+        callApi: async (method, path, payload = null) => {
+          window.__hausmanHubHarnessCalls.push({ method, path, payload });
+          if (method === "GET" && path === "hausman_hub/v1/admin/panel") {
+            return cloneHarnessValue(panel._data);
+          }
+          if (method === "GET" && path === "hausman_hub/v1/admin/climate-mode") {
+            return cloneHarnessValue(panel._settings?.mode);
+          }
+          if (method === "GET" && path === "hausman_hub/v1/admin/home-environment") {
+            return cloneHarnessValue(panel._settings?.home);
+          }
+          if (method === "GET" && path === "hausman_hub/v1/admin/climate-room-signals") {
+            return cloneHarnessValue(panel._settings?.windows);
+          }
+          if (method === "GET" && path === "hausman_hub/v1/admin/climate-drafts/current") {
+            return cloneHarnessValue(panel._settings?.setup);
+          }
+          if (method === "GET" && path === "hausman_hub/v1/admin/ir-codes/bindings") {
+            return cloneHarnessValue(panel._settings?.irBindings || { bindings: [] });
+          }
+          if (method === "GET" && path === "hausman_hub/v1/dashboard") {
+            return cloneHarnessValue(panel._homeDashboard);
+          }
+          if (method === "GET" && path === "hausman_hub/v1/admin/scenarios") {
+            return cloneHarnessValue(harnessScenarioList);
+          }
+          if (method === "GET" && path === "hausman_hub/v1/admin/scenarios/catalog") {
+            return cloneHarnessValue(panel._scenarios.catalog);
+          }
+          if (method === "POST" && path === "hausman_hub/v1/admin/scenarios") {
+            const saved = {
+              ...payload,
+              id: payload.id || payload.scenario_id || `scenario.harness_${Date.now()}`,
+            };
+            const index = harnessScenarioList.scenarios.findIndex((item) => item.id === saved.id);
+            if (index >= 0) harnessScenarioList.scenarios[index] = saved;
+            else harnessScenarioList.scenarios.push(saved);
+            return { scenario: cloneHarnessValue(saved) };
+          }
+          if (method === "POST" && path === "hausman_hub/v1/admin/scenarios/delete") {
+            const index = harnessScenarioList.scenarios.findIndex((item) => item.id === payload.scenario_id);
+            if (index >= 0) harnessScenarioList.scenarios.splice(index, 1);
+            return { deleted: index >= 0 };
+          }
+          if (method === "POST" && path === "hausman_hub/v1/admin/scenarios/test") {
+            return { valid: true, issues: [] };
+          }
+          if (method === "POST" && path === "hausman_hub/v1/admin/scenarios/run") {
+            return { status: "confirmed", receipt: { confirmed: true } };
+          }
+          if (method === "POST" && path === "hausman_hub/v1/device-actions") {
+            return { status: "confirmed", receipt: { confirmed: true } };
+          }
+          return {};
+        },
+      };
       panel._homeDashboard = {
         summary: { homeName: "Дом" },
         rooms: [
@@ -235,10 +312,98 @@
         home_assistant_url: "https://homeassistant.local",
       };
       panel._settingsBaseline = { ...panel._settingsData };
+      panel._wizard.options = {
+        contract: { name: "hausman-hub-climate-setup-options", version: 1 },
+        generated_at: 1785241920000,
+        snapshot_revision: 77,
+        data_status: "current",
+        draft_creation_allowed: true,
+        display_names: {
+          modes: { automatic: "Автоматический", observe: "Наблюдение" },
+          strategies: { soft: "Плавная", normal: "Обычная", aggressive: "Быстрая" },
+          device_types: {
+            air_conditioner: "Кондиционер",
+            radiator_thermostat: "Термоголовка",
+            temperature_sensor: "Датчик температуры",
+            humidity_sensor: "Датчик влажности",
+          },
+        },
+        rooms: [
+          { id: "living", name: "Гостиная", status: "available", selectable: true },
+          { id: "kids", name: "Детская", status: "available", selectable: true },
+        ],
+        devices: [
+          {
+            candidate_id: "living-ac", candidate_key: "living-ac", name: "Кондиционер гостиная",
+            room_id: "living", suggested_types: ["air_conditioner"], recommended_type: "air_conditioner",
+            status: "available", suggested_room_id: "living", suggested_room_name: "Гостиная",
+            reason: "detected_room", can_add: true,
+          },
+          {
+            candidate_id: "living-temp", candidate_key: "living-temp", name: "Температура гостиной",
+            room_id: "living", suggested_types: ["temperature_sensor"], recommended_type: "temperature_sensor",
+            status: "available", suggested_room_id: "living", suggested_room_name: "Гостиная",
+            reason: "detected_room", can_add: true, device_group_id: "kojima-living",
+            device_name: "Климат Kojima гостиная", manufacturer: "KOJIMA",
+            model: "Temperature and humidity sensor",
+            image_url: "https://www.zigbee2mqtt.io/images/devices/KOJIMA-THS-ZG-LCD.png",
+          },
+          {
+            candidate_id: "living-humidity", candidate_key: "living-humidity", name: "Влажность гостиной",
+            room_id: "living", suggested_types: ["humidity_sensor"], recommended_type: "humidity_sensor",
+            status: "available", suggested_room_id: "living", suggested_room_name: "Гостиная",
+            reason: "detected_room", can_add: true, device_group_id: "kojima-living",
+            device_name: "Климат Kojima гостиная", manufacturer: "KOJIMA",
+            model: "Temperature and humidity sensor",
+            image_url: "https://www.zigbee2mqtt.io/images/devices/KOJIMA-THS-ZG-LCD.png",
+          },
+          {
+            candidate_id: "kids-trv", candidate_key: "kids-trv", name: "Термоголовка детская",
+            room_id: "kids", suggested_types: ["radiator_thermostat"], recommended_type: "radiator_thermostat",
+            status: "available", suggested_room_id: "kids", suggested_room_name: "Детская",
+            reason: "detected_room", can_add: true,
+          },
+        ],
+        control_channels: ["direct_wifi", "universal_ir", "yandex_remote"],
+      };
       panel._activeSection = params.get("section") || "overview";
       const screen = params.get("screen");
-      if (["contour", "profiles", "schedule", "home", "windows", "assistant"].includes(screen)) {
-        panel._activeClimateView = screen;
+      if (["contour", "wizard", "profiles", "schedule", "home", "windows", "assistant"].includes(screen)) {
+        panel._activeClimateView = screen === "wizard" ? "contour" : screen;
+      }
+      if (screen === "wizard") {
+        panel._wizard.open = true;
+        panel._wizard.setupRevision = panel._settings.setup.setup_revision;
+      }
+      if (["first-run-room", "first-run-home", "first-run-validation"].includes(screen)) {
+        panel._settings.setup = {
+          ...panel._settings.setup,
+          status: "not_configured",
+          editing_allowed: true,
+        };
+        panel._firstRun.options = panel._wizard.options;
+        panel._firstRun.setupRevision = panel._settings.setup.setup_revision;
+        panel._firstRun.step = screen === "first-run-room"
+          ? "room" : (screen === "first-run-home" ? "home" : "validation");
+        panel._firstRun.roomId = "living";
+        const livingRoom = panel._firstRun.options.rooms.find((room) => room.id === "living");
+        const livingState = panel._firstRunRoomState(livingRoom);
+        livingState.included = true;
+        Object.values(livingState.devices).forEach((device) => {
+          device.selected = ["living-ac", "living-temp", "living-humidity"].includes(device.candidateId);
+          if (device.candidateId === "living-ac") device.channel = "direct_wifi";
+        });
+        panel._firstRun.validRooms.add("living");
+        livingState.report = {
+          issues: [],
+          save_allowed: true,
+          status: "ready",
+        };
+        panel._firstRun.validation = {
+          issues: [],
+          save_allowed: true,
+          status: "ready",
+        };
       }
       const settingsView = params.get("settings");
       if (["overview", "rooms", "connection", "appearance", "system"].includes(settingsView)) {
@@ -246,7 +411,7 @@
       }
       panel._render();
       panel.shadowRoot.querySelector("link").href =
-        "../../custom_components/hausman_hub/frontend/hausman-hub-panel.css?v=1.52.2";
+        "../../custom_components/hausman_hub/frontend/hausman-hub-panel.css?v=1.52.4";
       if (screen === "assistant") {
         panel._assistant = {
           loaded: true,

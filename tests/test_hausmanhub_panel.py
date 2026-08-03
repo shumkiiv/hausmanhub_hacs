@@ -57,6 +57,8 @@ FEEDBACK_JS = PANEL_JS.with_name("hausman-hub-feedback.js")
 WIZARD_VALIDATION_CSS = PANEL_JS.with_name("hausman-hub-wizard-validation.css")
 CATALOG_CSS = PANEL_JS.with_name("hausman-hub-catalog.css")
 DEVICE_MAINTENANCE_CSS = PANEL_JS.with_name("hausman-hub-device-maintenance.css")
+DEVICES_OVERVIEW_CSS = PANEL_JS.with_name("hausman-hub-devices-overview.css")
+ROOMS_CSS = PANEL_JS.with_name("hausman-hub-rooms.css")
 MAX_PANEL_JS_BYTES = 280 * 1024
 MAX_HOME_SECTIONS_JS_BYTES = 16 * 1024
 MAX_ROOM_SETUP_JS_BYTES = 24 * 1024
@@ -104,7 +106,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertLessEqual(len(content.encode("utf-8")), MAX_PANEL_JS_BYTES)
         self.assertLessEqual(len(rollout.encode("utf-8")), 8 * 1024)
         self.assertLessEqual(len(overview.encode("utf-8")), 16 * 1024)
-        self.assertIn('hausman-hub-rollout.js?v=1.52.2', content)
+        self.assertIn('hausman-hub-rollout.js?v=1.52.4', content)
         self.assertLessEqual(len(weather_sources.encode("utf-8")), 24 * 1024)
         self.assertLessEqual(
             len(home_sections.encode("utf-8")), MAX_HOME_SECTIONS_JS_BYTES
@@ -140,7 +142,11 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertLessEqual(len(scenarios.encode("utf-8")), MAX_SCENARIOS_JS_BYTES)
         self.assertLessEqual(len(scenario_icons.encode("utf-8")), 12 * 1024)
         self.assertLessEqual(len(scenario_fields.encode("utf-8")), 12 * 1024)
-        self.assertIn('hausman-hub-scenario-fields.js?v=1.52.2', scenarios)
+        self.assertIn('hausman-hub-scenario-fields.js?v=1.52.4', scenarios)
+        self.assertIn('["on", "Включено"]', scenarios)
+        self.assertIn('["off", "Выключено"]', scenarios)
+        self.assertIn('placeholder: "например 23"', scenarios)
+        self.assertNotIn('placeholder: "включено / 23 / открыто"', scenarios)
         self.assertLessEqual(len(device_maintenance_css.encode("utf-8")), 8 * 1024)
         self.assertLessEqual(len(feedback.encode("utf-8")), 4 * 1024)
         self.assertIn("applyFeedback", feedback)
@@ -165,6 +171,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn("renderScenarioSection", scenarios)
         self.assertIn("renderOverviewHero", overview)
         self.assertIn("physicalDeviceCount(devices)", overview)
+        self.assertIn('readiness?.status || "not_ready"', overview)
         self.assertTrue(OVERVIEW_CSS.is_file())
         self.assertEqual(b"\x89PNG\r\n\x1a\n", OVERVIEW_HERO.read_bytes()[:8])
         self.assertIn("SCENARIO_ICON_GROUPS", scenario_icons)
@@ -172,6 +179,8 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn("renderHomeSection.roomCountWord", home_sections)
         self.assertGreaterEqual(scenario_icons.count('["'), 80)
         self.assertIn('el("button", "sidebar-intercom")', content)
+        self.assertIn('el("button", "header-intercom")', content)
+        self.assertIn(".header-intercom", PANEL_CSS.read_text(encoding="utf-8"))
         self.assertIn("openIntercomFromRail(this)", content)
         self.assertIn("export function openIntercomFromRail(panel)", navigation)
         self.assertIn('const preferences = ["open", "unlock", "turn_on", "press", "activate"]', navigation)
@@ -306,37 +315,37 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertLessEqual(len(catalog_styles.encode("utf-8")), 8 * 1024)
         self.assertLessEqual(len(energy_styles.encode("utf-8")), 18 * 1024)
         self.assertLessEqual(len(rollout_styles.encode("utf-8")), 4 * 1024)
-        self.assertIn('"/api/hausman_hub/panel/hausman-hub-panel.css?v=1.52.2"', content)
-        self.assertIn('hausman-hub-settings.css?v=1.52.2', styles)
-        self.assertIn('hausman-hub-diagnostics.css?v=1.52.2', styles)
-        self.assertIn('hausman-hub-switch.css?v=1.52.2', styles)
-        self.assertIn('hausman-hub-notice.css?v=1.52.2', styles)
+        self.assertIn('"/api/hausman_hub/panel/hausman-hub-panel.css?v=1.52.4"', content)
+        self.assertIn('hausman-hub-settings.css?v=1.52.4', styles)
+        self.assertIn('hausman-hub-diagnostics.css?v=1.52.4', styles)
+        self.assertIn('hausman-hub-switch.css?v=1.52.4', styles)
+        self.assertIn('hausman-hub-notice.css?v=1.52.4', styles)
         self.assertIn(".notice { position:fixed", notice_styles)
         self.assertIn(".notice { position:fixed; z-index:1040", notice_styles)
         self.assertIn(".notice.is-error", notice_styles)
-        self.assertIn('hausman-hub-device-maintenance.css?v=1.52.2', styles)
-        self.assertIn('hausman-hub-control-channel.css?v=1.52.2', styles)
+        self.assertIn('hausman-hub-device-maintenance.css?v=1.52.4', styles)
+        self.assertIn('hausman-hub-control-channel.css?v=1.52.4', styles)
         self.assertIn(".entity-group.device-card { container-type:inline-size; }", control_channel_styles)
         self.assertIn("grid-template-columns:minmax(0,.75fr) minmax(0,1.25fr)", control_channel_styles)
         self.assertIn(".device-channel-field select { width:100%; min-width:0; max-width:100%", control_channel_styles)
         self.assertIn("@container (max-width:520px)", control_channel_styles)
-        self.assertIn('hausman-hub-weather-sources.css?v=1.52.2', styles)
-        self.assertIn('hausman-hub-wizard-validation.css?v=1.52.2', styles)
-        self.assertIn('hausman-hub-catalog.css?v=1.52.2', styles)
-        self.assertIn('hausman-hub-media-device.css?v=1.52.2', styles)
-        self.assertIn('hausman-hub-device-card.css?v=1.52.2', styles)
+        self.assertIn('hausman-hub-weather-sources.css?v=1.52.4', styles)
+        self.assertIn('hausman-hub-wizard-validation.css?v=1.52.4', styles)
+        self.assertIn('hausman-hub-catalog.css?v=1.52.4', styles)
+        self.assertIn('hausman-hub-media-device.css?v=1.52.4', styles)
+        self.assertIn('hausman-hub-device-card.css?v=1.52.4', styles)
         self.assertIn(".device-sheet-backdrop { position:fixed", device_card_css)
         self.assertIn(".device-sheet {", device_card_css)
-        self.assertIn('hausman-hub-scenarios.css?v=1.52.2', styles)
+        self.assertIn('hausman-hub-scenarios.css?v=1.52.4', styles)
         self.assertIn('.scenario-editor-workspace { display:grid; grid-template-columns:286px minmax(0,1fr);', scenario_styles)
         self.assertIn('.scenario-editor-switch-track { position:relative; display:block!important;', scenario_styles)
         self.assertIn('.scenario-editor-overlay { position:fixed; z-index:1020;', scenario_styles)
-        self.assertIn('hausman-hub-climate-overview.css?v=1.52.2', styles)
-        self.assertIn('hausman-hub-navigation.css?v=1.52.2', styles)
-        self.assertIn('hausman-hub-kiosk.css?v=1.52.2', styles)
+        self.assertIn('hausman-hub-climate-overview.css?v=1.52.4', styles)
+        self.assertIn('hausman-hub-navigation.css?v=1.52.4', styles)
+        self.assertIn('hausman-hub-kiosk.css?v=1.52.4', styles)
         self.assertIn(".kiosk-panorama-metrics", kiosk_styles)
         self.assertIn(".kiosk-panorama-intercom", kiosk_styles)
-        self.assertIn('hausman-hub-rollout.css?v=1.52.2', styles)
+        self.assertIn('hausman-hub-rollout.css?v=1.52.4', styles)
         self.assertIn(":host(.kiosk-mode) .kiosk-dock", navigation_styles)
         self.assertIn(".banner { position:fixed", navigation_styles)
         self.assertIn(".banner { position:fixed; z-index:1041", navigation_styles)
@@ -354,6 +363,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn(".page-header { display:none; }", styles)
         self.assertIn("main.setup-shell { grid-template-columns:minmax(0,1fr); }", styles)
         self.assertIn("main.setup-shell > :not(.app-sidebar) { grid-column:1; }", styles)
+        self.assertIn("main.setup-shell .page-header { display:flex; }", styles)
         self.assertIn(".inventory-device-card { container-type:inline-size;", catalog_styles)
         self.assertIn(".device-value-action > span { grid-column:1 / -1;", catalog_styles)
         self.assertIn("grid-template-columns:minmax(0,1fr) auto", catalog_styles)
@@ -366,6 +376,16 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn(".energy-device-quick", energy_styles)
         self.assertIn(".energy-detail-layout", energy_styles)
         self.assertIn(".energy-device-chart-card", energy_styles)
+        devices_styles = DEVICES_OVERVIEW_CSS.read_text(encoding="utf-8")
+        self.assertIn("grid-template-columns:repeat(3,minmax(0,1fr))", devices_styles)
+        self.assertIn("grid-template-columns:24px minmax(0,1fr) auto", devices_styles)
+        self.assertIn("overflow-wrap:anywhere", devices_styles)
+        rooms_styles = ROOMS_CSS.read_text(encoding="utf-8")
+        self.assertIn("@media (max-width:1380px)", rooms_styles)
+        self.assertIn(
+            ".rooms-canon-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }",
+            rooms_styles,
+        )
         self.assertIn("выбранные источники", ENERGY_JS.read_text(encoding="utf-8"))
         self.assertIn("Питание подключённой линии будет снято", ENERGY_JS.read_text(encoding="utf-8"))
         self.assertIn("Фактические данные Recorder Home Assistant", ENERGY_JS.read_text(encoding="utf-8"))
@@ -396,6 +416,30 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn('el("section", "catalog-hero")', home_sections)
         self.assertIn('el("div", "catalog-toolbar")', home_sections)
         self.assertNotIn("this._error = false", activate_body)
+
+    def test_visual_harness_covers_the_room_wizard_with_realistic_options(self) -> None:
+        harness = (ROOT / "tests" / "visual" / "hausman-hub-panel-harness.html").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('screen === "wizard"', harness)
+        self.assertIn('"first-run-room"', harness)
+        self.assertIn('"first-run-home"', harness)
+        self.assertIn('"first-run-validation"', harness)
+        self.assertIn('panel._activeClimateView = screen === "wizard" ? "contour" : screen', harness)
+        self.assertIn("panel._wizard.open = true", harness)
+        self.assertIn('candidate_id: "living-temp"', harness)
+        self.assertIn('candidate_id: "living-humidity"', harness)
+        self.assertIn('candidate_id: "kids-trv"', harness)
+        self.assertIn("__hausmanHubHarnessErrors", harness)
+        self.assertIn("__hausmanHubHarnessCalls", harness)
+        self.assertIn('path === "hausman_hub/v1/admin/scenarios"', harness)
+        self.assertIn('path === "hausman_hub/v1/admin/scenarios/run"', harness)
+        self.assertIn('path === "hausman_hub/v1/device-actions"', harness)
+        self.assertIn('path === "hausman_hub/v1/admin/panel"', harness)
+        self.assertIn("cloneHarnessValue(panel._homeDashboard)", harness)
+        self.assertIn('get("figmaCapture") === "1"', harness)
+        self.assertNotIn('<script src="https://mcp.figma.com/', harness)
 
     def test_quick_scenario_actions_keep_cards_visible_and_render_notices(self) -> None:
         scenarios = SCENARIOS_JS.read_text(encoding="utf-8")
@@ -731,6 +775,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             node.tagName === "BUTTON"
             && !String(node.className).split(" ").includes("tab")
             && !String(node.className).split(" ").includes("theme-switch")
+            && !String(node.className).split(" ").includes("header-intercom")
             && !String(node.className).split(" ").includes("sidebar-intercom")
             && !String(node.className).split(" ").includes("kiosk-toggle")
         ))) {{
@@ -1076,7 +1121,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.52.2",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.52.4",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },

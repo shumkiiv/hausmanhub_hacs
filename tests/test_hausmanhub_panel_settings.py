@@ -1185,6 +1185,37 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
+    def test_overview_renders_with_missing_readiness_payload(self) -> None:
+        payloads = dict(GET_PATHS)
+        payloads["hausman_hub/v1/admin/panel"] = {
+            **PANEL_PAYLOAD,
+            "readiness": None,
+        }
+        payloads["hausman_hub/v1/dashboard"] = {
+            "summary": {"homeName": "Дом"},
+            "rooms": [],
+            "devices": [],
+            "alarms": [],
+            "scenarios": [],
+            "weather": {},
+        }
+        script = panel_script(
+            payloads,
+            {},
+            """
+        const hero = panel._shell.readiness;
+        const text = textOf(hero);
+        if (!text.includes("Проверьте настройки") || !text.includes("Требуется внимание")) {
+          throw new Error("overview did not render safe fallback for missing readiness: " + text);
+        }
+        if (panel._shell.statusPill.textContent !== "Состояние уточняется") {
+          throw new Error("header did not render unknown readiness safely");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_tablet_device_sections_group_physical_device_and_execute_action(self) -> None:
         payloads = dict(GET_PATHS)
         payloads["hausman_hub/v1/dashboard"] = {
@@ -1736,7 +1767,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const climateMainTab = panel._shell.tabs.climate;
         climateMainTab.fire("click");
         const subtabs = Object.values(panel._shell.climateTabs);
-        const expected = ["Обзор", "Контур", "Профили", "Расписание", "Сигналы дома", "Сигналы комнат", "AI-помощник"];
+        const expected = ["Обзор", "Контур", "Профили", "Расписание", "Сигналы дома", "Сигналы комнат", "Умный помощник"];
         if (JSON.stringify(subtabs.map((node) => node.textContent)) !== JSON.stringify(expected)) {
           throw new Error("climate subtab labels mismatch");
         }
@@ -1810,7 +1841,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const assistant = panel._shell.assistant;
         const text = textOf(assistant);
         for (const label of [
-          "Поставщик AI", "Ключ сохранён", "Последний совет", "Статистика вызовов",
+          "Умный помощник", "Поставщик сервиса", "Совместимый с OpenAI", "Ключ сохранён", "Последний совет", "Статистика вызовов",
           "Проверьте расхождение температур", "Превышение комфортного диапазона", "Гостиная",
           "Таймаут", "Готово",
         ]) {
@@ -2103,6 +2134,75 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         }
         if (panel._scenarioEditor !== null) throw new Error("editor stayed open after successful save");
         if (!textOf(panel.shadowRoot).includes("сохранён")) throw new Error("scenario success feedback missing");
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_scenario_state_selector_localizes_labels_and_saves_raw_ha_value(self) -> None:
+        payloads = dict(GET_PATHS)
+        payloads["hausman_hub/v1/admin/scenarios"] = {"scenarios": []}
+        payloads["hausman_hub/v1/admin/scenarios/catalog"] = {
+            "devices": [
+                {
+                    "target_id": "switch.living",
+                    "name": "Свет гостиной",
+                    "entity_id": "switch.living",
+                    "properties": [],
+                    "actions": [{"action_id": "turn_on", "title": "Включить"}],
+                }
+            ]
+        }
+        script = panel_script(
+            payloads,
+            {"hausman_hub/v1/admin/scenarios": {"ok": True, "status": "success"}},
+            """
+        panel._shell.tabs.scenarios.fire("click");
+        await tick();
+        const screen = panel._shell.scenarios;
+        findAll(screen, (node) => node.tagName === "BUTTON")
+          .find((node) => node.textContent === "+ Новый сценарий" || node.textContent === "Создать сценарий")
+          .fire("click");
+        const field = (label) => {
+          const wrapper = findAll(screen, (node) => String(node.className).split(" ").includes("scenario-editor-field"))
+            .find((node) => node.children[0] && node.children[0].textContent === label);
+          if (!wrapper) throw new Error("scenario field missing: " + label);
+          return wrapper.children.find((node) => ["INPUT", "TEXTAREA", "SELECT"].includes(node.tagName));
+        };
+        const title = field("Название");
+        title.value = "Проверка света";
+        title.fire("input");
+        findAll(screen, (node) => String(node.className).split(" ").includes("scenario-editor-step"))
+          .find((node) => textOf(node).includes("Когда")).fire("click");
+        let triggerType = field("Тип триггера");
+        triggerType.value = "device_state";
+        triggerType.fire("change");
+        let device = field("Устройство");
+        device.value = "switch.living";
+        device.fire("change");
+        const state = field("Состояние");
+        const enabledOption = state.children.find((option) => option.value === "on");
+        if (!enabledOption || enabledOption.textContent !== "Включено") {
+          throw new Error("localized state option does not preserve raw HA value");
+        }
+        state.value = "on";
+        state.fire("change");
+        if (panel._scenarioEditor.definition.triggers[0].value !== "on") {
+          throw new Error("localized selector stored a translated value");
+        }
+        panel._scenarioEditor.definition.actions = [{
+          id: "action-1", type: "device_action", targetId: "switch.living", actionId: "turn_on",
+        }];
+        panel._renderScenarios(screen);
+        findAll(screen, (node) => node.tagName === "BUTTON" && node.textContent === "Сохранить")[0].fire("click");
+        await tick();
+        await tick();
+        const request = calls.find((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/admin/scenarios");
+        if (!request || request.payload.definition.triggers[0].value !== "on") {
+          throw new Error("scenario API did not receive raw Home Assistant state: "
+            + JSON.stringify(request && request.payload));
+        }
             """,
         )
         completed = run_panel_script(script)
@@ -2925,7 +3025,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.2")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.4")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;
