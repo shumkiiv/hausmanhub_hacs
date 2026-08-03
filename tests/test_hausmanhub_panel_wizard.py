@@ -22,6 +22,7 @@ ROOM_CLIMATE_SOURCES_JS = PANEL_JS.with_name("hausman-hub-room-climate-sources.j
 DEVICE_INVENTORY_JS = PANEL_JS.with_name("hausman-hub-device-inventory.js")
 DEVICE_BINDINGS_JS = PANEL_JS.with_name("hausman-hub-device-bindings.js")
 AREA_BINDING_JS = PANEL_JS.with_name("hausman-hub-area-binding.js")
+FIRST_RUN_DRAFT_JS = PANEL_JS.with_name("hausman-hub-first-run-draft.js")
 NAVIGATION_JS = PANEL_JS.with_name("hausman-hub-navigation.js")
 ENERGY_JS = PANEL_JS.with_name("hausman-hub-energy.js")
 WEATHER_SOURCES_JS = PANEL_JS.with_name("hausman-hub-weather-sources.js")
@@ -292,6 +293,12 @@ def panel_script(get_table: dict, post_table: dict, assertions: str) -> str:
         removeEventListener() {{}},
       }};
       global.window = {{ confirm: () => true }};
+      const browserValues = new Map();
+      global.localStorage = {{
+        getItem: (key) => browserValues.has(key) ? browserValues.get(key) : null,
+        removeItem: (key) => browserValues.delete(key),
+        setItem: (key, value) => browserValues.set(key, String(value)),
+      }};
       global.HTMLElement = class {{
         attachShadow() {{
           this.shadowRoot = new FakeElement("shadow-root");
@@ -334,6 +341,10 @@ def panel_script(get_table: dict, post_table: dict, assertions: str) -> str:
       vm.runInThisContext(
         fs.readFileSync({str(AREA_BINDING_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(AREA_BINDING_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(FIRST_RUN_DRAFT_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(FIRST_RUN_DRAFT_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(NAVIGATION_JS)!r}, "utf8").replace(/export /g, ""),
@@ -1357,6 +1368,42 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
+    def test_page_reload_restores_current_room_step_and_device_selection(self) -> None:
+        script = panel_script(
+            get_payloads(),
+            {},
+            """
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать настройку")[0].fire("click");
+        await tick();
+        panel._firstRunFields.rooms.living.configure.fire("click");
+        const device = panel._firstRunFields.room.devices.find((item) =>
+          item.key === "candidate_ac:air_conditioner");
+        device.checkbox.checked = true;
+        device.checkbox.fire("change");
+        device.controlChannel.value = "direct_wifi";
+        device.controlChannel.fire("change");
+        panel._activeRoomSetupPane = "comfort";
+        panel._render();
+        const ReloadedPanel = registry.get("hausman-hub-panel");
+        const reloaded = new ReloadedPanel();
+        reloaded.hass = hass;
+        await tick(16);
+        if (reloaded._firstRun.step !== "room" || reloaded._firstRun.roomId !== "living") {
+          throw new Error("page reload did not restore the current room step");
+        }
+        if (reloaded._activeRoomSetupPane !== "comfort") {
+          throw new Error("page reload did not restore the room substep");
+        }
+        const restored = reloaded._firstRun.rooms.living.devices["candidate_ac:air_conditioner"];
+        if (!restored.selected || restored.channel !== "direct_wifi") {
+          throw new Error("page reload discarded the selected device or control channel");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_roomless_warning_lists_five_names_and_remaining_count(self) -> None:
         options = roomless_options()
         template = options["devices"][-1]
@@ -1435,6 +1482,39 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         }
         if (!textOf(panel.shadowRoot).includes("Привязки комнат сохранены")) {
           throw new Error("successful HA assignment feedback is missing");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_binding_draft_survives_full_page_reload(self) -> None:
+        options = roomless_options()
+        script = panel_script(
+            get_payloads(options=options),
+            {},
+            """
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать настройку")[0].fire("click");
+        await tick();
+        const target = findAll(panel.shadowRoot, (node) =>
+          String(node.className).split(" ").includes("binding-device-row"))
+          .find((row) => textOf(row).includes("Komanchi Living SmartIR"));
+        const picker = findAll(target, (node) => node.tagName === "SELECT")[0];
+        picker.value = "living";
+        picker.fire("change");
+        if (!Object.values(panel._firstRun.areaAssignments).includes("living")) {
+          throw new Error("binding fixture was not selected");
+        }
+        const ReloadedPanel = registry.get("hausman-hub-panel");
+        const reloaded = new ReloadedPanel();
+        reloaded.hass = hass;
+        await tick(16);
+        if (reloaded._firstRun.step !== "rooms") {
+          throw new Error("binding step was not restored after page reload");
+        }
+        if (!Object.values(reloaded._firstRun.areaAssignments).includes("living")) {
+          throw new Error("unsaved Home Assistant room binding was lost after page reload");
         }
             """,
         )

@@ -30,6 +30,7 @@ ROOM_CLIMATE_SOURCES_JS = PANEL_JS.with_name("hausman-hub-room-climate-sources.j
 DEVICE_INVENTORY_JS = PANEL_JS.with_name("hausman-hub-device-inventory.js")
 DEVICE_BINDINGS_JS = PANEL_JS.with_name("hausman-hub-device-bindings.js")
 AREA_BINDING_JS = PANEL_JS.with_name("hausman-hub-area-binding.js")
+FIRST_RUN_DRAFT_JS = PANEL_JS.with_name("hausman-hub-first-run-draft.js")
 NAVIGATION_JS = PANEL_JS.with_name("hausman-hub-navigation.js")
 NAVIGATION_CSS = PANEL_JS.with_name("hausman-hub-navigation.css")
 KIOSK_JS = PANEL_JS.with_name("hausman-hub-kiosk.js")
@@ -89,6 +90,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         device_inventory = DEVICE_INVENTORY_JS.read_text(encoding="utf-8")
         device_bindings = DEVICE_BINDINGS_JS.read_text(encoding="utf-8")
         area_binding = AREA_BINDING_JS.read_text(encoding="utf-8")
+        first_run_draft = FIRST_RUN_DRAFT_JS.read_text(encoding="utf-8")
         navigation = NAVIGATION_JS.read_text(encoding="utf-8")
         energy = ENERGY_JS.read_text(encoding="utf-8")
         weather_sources = WEATHER_SOURCES_JS.read_text(encoding="utf-8")
@@ -106,7 +108,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertLessEqual(len(content.encode("utf-8")), MAX_PANEL_JS_BYTES)
         self.assertLessEqual(len(rollout.encode("utf-8")), 8 * 1024)
         self.assertLessEqual(len(overview.encode("utf-8")), 16 * 1024)
-        self.assertIn('hausman-hub-rollout.js?v=1.52.6', content)
+        self.assertIn('hausman-hub-rollout.js?v=1.52.7', content)
         self.assertLessEqual(len(weather_sources.encode("utf-8")), 24 * 1024)
         self.assertLessEqual(
             len(home_sections.encode("utf-8")), MAX_HOME_SECTIONS_JS_BYTES
@@ -132,6 +134,8 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertLessEqual(
             len(area_binding.encode("utf-8")), MAX_AREA_BINDING_JS_BYTES
         )
+        self.assertLessEqual(len(first_run_draft.encode("utf-8")), 12 * 1024)
+        self.assertIn("restoreFirstRunDraft", first_run_draft)
         self.assertLessEqual(len(navigation.encode("utf-8")), MAX_NAVIGATION_JS_BYTES)
         self.assertLessEqual(len(energy.encode("utf-8")), MAX_ENERGY_JS_BYTES)
         self.assertLessEqual(
@@ -142,7 +146,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertLessEqual(len(scenarios.encode("utf-8")), MAX_SCENARIOS_JS_BYTES)
         self.assertLessEqual(len(scenario_icons.encode("utf-8")), 12 * 1024)
         self.assertLessEqual(len(scenario_fields.encode("utf-8")), 12 * 1024)
-        self.assertIn('hausman-hub-scenario-fields.js?v=1.52.6', scenarios)
+        self.assertIn('hausman-hub-scenario-fields.js?v=1.52.7', scenarios)
         self.assertIn('["on", "Включено"]', scenarios)
         self.assertIn('["off", "Выключено"]', scenarios)
         self.assertIn('placeholder: "например 23"', scenarios)
@@ -315,37 +319,37 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertLessEqual(len(catalog_styles.encode("utf-8")), 8 * 1024)
         self.assertLessEqual(len(energy_styles.encode("utf-8")), 18 * 1024)
         self.assertLessEqual(len(rollout_styles.encode("utf-8")), 4 * 1024)
-        self.assertIn('"/api/hausman_hub/panel/hausman-hub-panel.css?v=1.52.6"', content)
-        self.assertIn('hausman-hub-settings.css?v=1.52.6', styles)
-        self.assertIn('hausman-hub-diagnostics.css?v=1.52.6', styles)
-        self.assertIn('hausman-hub-switch.css?v=1.52.6', styles)
-        self.assertIn('hausman-hub-notice.css?v=1.52.6', styles)
+        self.assertIn('"/api/hausman_hub/panel/hausman-hub-panel.css?v=1.52.7"', content)
+        self.assertIn('hausman-hub-settings.css?v=1.52.7', styles)
+        self.assertIn('hausman-hub-diagnostics.css?v=1.52.7', styles)
+        self.assertIn('hausman-hub-switch.css?v=1.52.7', styles)
+        self.assertIn('hausman-hub-notice.css?v=1.52.7', styles)
         self.assertIn(".notice { position:fixed", notice_styles)
         self.assertIn(".notice { position:fixed; z-index:1040", notice_styles)
         self.assertIn(".notice.is-error", notice_styles)
-        self.assertIn('hausman-hub-device-maintenance.css?v=1.52.6', styles)
-        self.assertIn('hausman-hub-control-channel.css?v=1.52.6', styles)
+        self.assertIn('hausman-hub-device-maintenance.css?v=1.52.7', styles)
+        self.assertIn('hausman-hub-control-channel.css?v=1.52.7', styles)
         self.assertIn(".entity-group.device-card { container-type:inline-size; }", control_channel_styles)
         self.assertIn("grid-template-columns:minmax(0,.75fr) minmax(0,1.25fr)", control_channel_styles)
         self.assertIn(".device-channel-field select { width:100%; min-width:0; max-width:100%", control_channel_styles)
         self.assertIn("@container (max-width:520px)", control_channel_styles)
-        self.assertIn('hausman-hub-weather-sources.css?v=1.52.6', styles)
-        self.assertIn('hausman-hub-wizard-validation.css?v=1.52.6', styles)
-        self.assertIn('hausman-hub-catalog.css?v=1.52.6', styles)
-        self.assertIn('hausman-hub-media-device.css?v=1.52.6', styles)
-        self.assertIn('hausman-hub-device-card.css?v=1.52.6', styles)
+        self.assertIn('hausman-hub-weather-sources.css?v=1.52.7', styles)
+        self.assertIn('hausman-hub-wizard-validation.css?v=1.52.7', styles)
+        self.assertIn('hausman-hub-catalog.css?v=1.52.7', styles)
+        self.assertIn('hausman-hub-media-device.css?v=1.52.7', styles)
+        self.assertIn('hausman-hub-device-card.css?v=1.52.7', styles)
         self.assertIn(".device-sheet-backdrop { position:fixed", device_card_css)
         self.assertIn(".device-sheet {", device_card_css)
-        self.assertIn('hausman-hub-scenarios.css?v=1.52.6', styles)
+        self.assertIn('hausman-hub-scenarios.css?v=1.52.7', styles)
         self.assertIn('.scenario-editor-workspace { display:grid; grid-template-columns:286px minmax(0,1fr);', scenario_styles)
         self.assertIn('.scenario-editor-switch-track { position:relative; display:block!important;', scenario_styles)
         self.assertIn('.scenario-editor-overlay { position:fixed; z-index:1020;', scenario_styles)
-        self.assertIn('hausman-hub-climate-overview.css?v=1.52.6', styles)
-        self.assertIn('hausman-hub-navigation.css?v=1.52.6', styles)
-        self.assertIn('hausman-hub-kiosk.css?v=1.52.6', styles)
+        self.assertIn('hausman-hub-climate-overview.css?v=1.52.7', styles)
+        self.assertIn('hausman-hub-navigation.css?v=1.52.7', styles)
+        self.assertIn('hausman-hub-kiosk.css?v=1.52.7', styles)
         self.assertIn(".kiosk-panorama-metrics", kiosk_styles)
         self.assertIn(".kiosk-panorama-intercom", kiosk_styles)
-        self.assertIn('hausman-hub-rollout.css?v=1.52.6', styles)
+        self.assertIn('hausman-hub-rollout.css?v=1.52.7', styles)
         self.assertIn(":host(.kiosk-mode) .kiosk-dock", navigation_styles)
         self.assertIn(".banner { position:fixed", navigation_styles)
         self.assertIn(".banner { position:fixed; z-index:1041", navigation_styles)
@@ -693,6 +697,10 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             {{ filename: {str(AREA_BINDING_JS)!r} }}
           );
           vm.runInThisContext(
+            fs.readFileSync({str(FIRST_RUN_DRAFT_JS)!r}, "utf8").replace(/export /g, ""),
+            {{ filename: {str(FIRST_RUN_DRAFT_JS)!r} }}
+          );
+          vm.runInThisContext(
             fs.readFileSync({str(NAVIGATION_JS)!r}, "utf8").replace(/export /g, ""),
             {{ filename: {str(NAVIGATION_JS)!r} }}
           );
@@ -870,6 +878,10 @@ THEME_TEST_HARNESS = """
     { filename: __AREA_BINDING_JS__ }
   );
   vm.runInThisContext(
+    fs.readFileSync(__FIRST_RUN_DRAFT_JS__, "utf8").replace(/export /g, ""),
+    { filename: __FIRST_RUN_DRAFT_JS__ }
+  );
+  vm.runInThisContext(
     fs.readFileSync(__NAVIGATION_JS__, "utf8").replace(/export /g, ""),
     { filename: __NAVIGATION_JS__ }
   );
@@ -920,7 +932,8 @@ class PanelThemeSwitcherTest(unittest.TestCase):
             .replace("__ROOM_SETUP_JS__", repr(str(ROOM_SETUP_JS)))
             .replace("__DEVICE_INVENTORY_JS__", repr(str(DEVICE_INVENTORY_JS)))
             .replace("__DEVICE_BINDINGS_JS__", repr(str(DEVICE_BINDINGS_JS)))
-            .replace("__AREA_BINDING_JS__", repr(str(AREA_BINDING_JS)))) + body
+            .replace("__AREA_BINDING_JS__", repr(str(AREA_BINDING_JS)))
+            .replace("__FIRST_RUN_DRAFT_JS__", repr(str(FIRST_RUN_DRAFT_JS)))) + body
         script = script.replace("__NAVIGATION_JS__", repr(str(NAVIGATION_JS)))
         script = script.replace("__ENERGY_JS__", repr(str(ENERGY_JS)))
         script = script.replace("__DEVICE_CARD_JS__", repr(str(DEVICE_CARD_JS)))
@@ -1121,7 +1134,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.52.6",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.52.7",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },
