@@ -136,6 +136,68 @@ function restoreRoom(panel, room, savedState, keepValidation) {
   state.report = keepValidation ? jsonClone(source.report, null) : null;
 }
 
+function roomValidationFingerprint(panel, roomId) {
+  const options = panel._firstRun.options;
+  const room = options && (options.rooms || []).find((item) => item.id === roomId);
+  const state = room && panel._firstRun.rooms[roomId];
+  if (!room || !state) return null;
+  const candidates = new Map();
+  panel._firstRunRoomCandidates(roomId).forEach((candidate) => {
+    const candidateKey = candidate.candidate_key || candidate.candidate_id;
+    (Array.isArray(candidate.suggested_types) ? candidate.suggested_types : []).forEach((type) => {
+      candidates.set(`${candidateKey}:${type}`, {
+        roomId: candidate.room_id || "",
+        status: candidate.status || "",
+      });
+    });
+  });
+  const selected = Object.entries(state.devices || {})
+    .filter(([, device]) => device.selected === true)
+    .map(([key, device]) => {
+      const candidate = candidates.get(key);
+      if (!candidate) return null;
+      return [key, device.channel || "", candidate.roomId, candidate.status];
+    });
+  if (selected.some((device) => device === null)) return null;
+  selected.sort((left, right) => left[0].localeCompare(right[0], "ru"));
+  return JSON.stringify({
+    day: state.day,
+    included: state.included === true,
+    maxTemperature: state.maxTemperature,
+    minTemperature: state.minTemperature,
+    night: state.night,
+    selected,
+  });
+}
+
+export function captureRoomValidation(panel) {
+  const validRooms = new Set(panel._firstRun.validRooms);
+  return {
+    fingerprints: new Map(Array.from(validRooms).map((roomId) => (
+      [roomId, roomValidationFingerprint(panel, roomId)]
+    ))),
+    validRooms,
+  };
+}
+
+export function reconcileRoomValidation(panel, previous) {
+  const stillValidRooms = new Set();
+  Object.entries(panel._firstRun.rooms).forEach(([roomId, state]) => {
+    const previousFingerprint = previous.fingerprints.get(roomId);
+    const currentFingerprint = roomValidationFingerprint(panel, roomId);
+    if (
+      previous.validRooms.has(roomId)
+      && previousFingerprint !== null
+      && previousFingerprint === currentFingerprint
+    ) {
+      stillValidRooms.add(roomId);
+    } else {
+      state.report = null;
+    }
+  });
+  panel._firstRun.validRooms = stillValidRooms;
+}
+
 export function restoreFirstRunDraft(panel, storage = browserStorage(), now = Date.now()) {
   const firstRun = panel?._firstRun;
   if (panel) panel._firstRunDraftReady = true;

@@ -1352,9 +1352,12 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         if (!added || added.checkbox.checked || added.checkbox.disabled) {
           throw new Error("refresh did not merge a new selectable candidate as unchecked");
         }
-        if (panel._firstRun.rooms.living.report || panel._firstRun.validRooms.size
-          || panel._firstRun.validation) {
-          throw new Error("refresh did not invalidate stale validation results");
+        if (!panel._firstRun.rooms.living.report
+          || !panel._firstRun.validRooms.has("living")) {
+          throw new Error("refresh discarded the unchanged configured room");
+        }
+        if (panel._firstRun.validation) {
+          throw new Error("refresh retained stale whole-home validation");
         }
         panel._firstRun.rooms.living.included = true;
         const collected = panel._firstRunPayload(["living"]);
@@ -1362,6 +1365,49 @@ class PanelFirstRunWizardTest(unittest.TestCase):
           device.type === "air_conditioner");
         if (!refreshedAc || refreshedAc.candidate_id !== "candidate_ac_refreshed") {
           throw new Error("draft did not use the refreshed candidate id");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_refresh_invalidates_room_when_selected_device_disappears(self) -> None:
+        options = copy.deepcopy(DRAFT_OPTIONS)
+        refreshed = copy.deepcopy(DRAFT_OPTIONS)
+        refreshed["devices"] = [
+            candidate for candidate in refreshed["devices"]
+            if candidate["candidate_key"] != "candidate_ac"
+        ]
+        script = panel_script(
+            get_payloads(options=options),
+            {},
+            """
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать настройку")[0].fire("click");
+        await tick();
+        panel._firstRunFields.rooms.living.configure.fire("click");
+        const ac = panel._firstRunFields.room.devices.find((item) =>
+          item.key === "candidate_ac:air_conditioner");
+        ac.checkbox.checked = true;
+        ac.checkbox.fire("change");
+        ac.controlChannel.value = "direct_wifi";
+        ac.controlChannel.fire("change");
+        ["temperature_sensor", "humidity_sensor"].forEach((type) => {
+          const source = panel._firstRunFields.room.devices.find((item) => item.type === type);
+          source.checkbox.checked = true;
+          source.checkbox.fire("change");
+        });
+        panel._firstRun.rooms.living.report = {status: "ready", save_allowed: true};
+        panel._firstRun.validRooms.add("living");
+        getTable["hausman_hub/v1/admin/climate-drafts"] = """
+            + json.dumps(refreshed, ensure_ascii=False)
+            + """;
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Обновить список устройств")[0].fire("click");
+        await tick();
+        if (panel._firstRun.validRooms.has("living")
+          || panel._firstRun.rooms.living.report) {
+          throw new Error("refresh retained validation after a selected device disappeared");
         }
             """,
         )
@@ -1467,6 +1513,8 @@ class PanelFirstRunWizardTest(unittest.TestCase):
           || panel._firstRun.rooms.living.devices["candidate_smartir:air_conditioner"].selected) {
           throw new Error("area draft leaked into the climate contour draft");
         }
+        panel._firstRun.rooms.living.report = {status: "ready", save_allowed: true};
+        panel._firstRun.validRooms.add("living");
         const save = findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
           && node.textContent === "Сохранить привязки в Home Assistant")[0];
         if (!save || save.disabled) throw new Error("explicit HA save action is unavailable");
@@ -1483,6 +1531,10 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         }
         if (!textOf(panel.shadowRoot).includes("Привязки комнат сохранены")) {
           throw new Error("successful HA assignment feedback is missing");
+        }
+        if (!panel._firstRun.validRooms.has("living")
+          || !panel._firstRun.rooms.living.report) {
+          throw new Error("saving an unrelated room binding discarded configured rooms");
         }
             """,
         )
