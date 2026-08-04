@@ -7,6 +7,7 @@
 .inventory-device-visual.is-fallback .icon { width:31px; height:31px; }
 .inventory-device-chevron { color:var(--hmh-text-dim,#9AA7B4); font-size:25px; line-height:1; }
 .inventory-device-card[open] > .inventory-device-summary::after { content:none; }
+.inventory-device-card:not([open]) > .device-sheet-backdrop { display:none; pointer-events:none; }
 .device-sheet-backdrop { position:fixed; z-index:1010; inset:0; display:grid; place-items:center; padding:28px;
   border:0; background:rgba(4,8,13,.68); backdrop-filter:blur(12px); }
 .device-sheet { position:relative; width:min(880px,calc(100vw - 56px)); max-height:min(820px,calc(100vh - 56px)); overflow:auto;

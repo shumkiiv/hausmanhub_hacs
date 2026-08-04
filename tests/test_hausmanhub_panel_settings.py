@@ -3414,6 +3414,8 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         for rule in (
             "max-width:1440px",
             "overflow-x:auto",
+            "@container hausmanhub-panel (max-width:1049px)",
+            ".page-header-actions { flex:1 1 100%; width:100%; margin-left:0",
             "@media (max-width:640px)",
             "@media (max-width:380px)",
             "grid-template-columns:minmax(0,1fr)",
@@ -3432,7 +3434,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.29")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.30")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;
