@@ -1583,6 +1583,86 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
+    def test_page_reload_restores_current_setup_revision_and_room_check_works(self) -> None:
+        checked_draft = draft_for(
+            [{
+                "id": "living",
+                "name": "Гостиная",
+                "targets": {
+                    "target_temperature": 25,
+                    "target_humidity": 53,
+                    "strategy": "normal",
+                },
+                "devices": [{
+                    "candidate_id": "candidate_ac",
+                    "name": "Кондиционер",
+                    "type": "air_conditioner",
+                    "type_name": "Кондиционер",
+                }],
+            }]
+        )
+        script = panel_script(
+            get_payloads(),
+            {
+                "hausman_hub/v1/admin/climate-drafts": checked_draft,
+                "hausman_hub/v1/admin/climate-drafts/validate": ready_validation(checked_draft),
+            },
+            """
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать настройку")[0].fire("click");
+        await tick();
+        panel._firstRunFields.rooms.living.configure.fire("click");
+        const device = panel._firstRunFields.room.devices.find((item) =>
+          item.key === "candidate_ac:air_conditioner");
+        device.checkbox.checked = true;
+        device.checkbox.fire("change");
+        device.controlChannel.value = "direct_wifi";
+        device.controlChannel.fire("change");
+        ["temperature_sensor", "humidity_sensor"].forEach((type) => {
+          const source = panel._firstRunFields.room.devices.find((item) => item.type === type);
+          source.checkbox.checked = true;
+          source.checkbox.fire("change");
+        });
+        panel._activeRoomSetupPane = "review";
+        panel._render();
+
+        const ReloadedPanel = registry.get("hausman-hub-panel");
+        const reloaded = new ReloadedPanel();
+        reloaded.hass = hass;
+        await tick(16);
+        if (reloaded._firstRun.setupRevision !== 5) {
+          throw new Error("page reload lost the authoritative setup revision");
+        }
+        const check = findAll(reloaded.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Проверить комнату")[0];
+        if (!check || check.disabled) throw new Error("room check is unavailable after reload");
+        check.fire("click");
+        await tick(4);
+        if (!reloaded._firstRun.validRooms.has("living")) {
+          throw new Error("room check did not work after a full page reload");
+        }
+        const request = calls.find((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/admin/climate-drafts");
+        if (!request || request.payload.setup_revision !== 5) {
+          throw new Error("room check sent a stale setup revision after reload");
+        }
+        const verifiedReload = new ReloadedPanel();
+        verifiedReload.hass = hass;
+        await tick(16);
+        if (!verifiedReload._firstRun.validRooms.has("living")
+          || verifiedReload._firstRun.rooms.living.report?.status !== "ready") {
+          throw new Error("verified room became unconfigured after the next page reload");
+        }
+        const finish = findAll(verifiedReload.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Завершить")[0];
+        if (!finish || finish.disabled) {
+          throw new Error("verified room did not retain its completion action after reload");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_roomless_warning_lists_five_names_and_remaining_count(self) -> None:
         options = roomless_options()
         template = options["devices"][-1]
