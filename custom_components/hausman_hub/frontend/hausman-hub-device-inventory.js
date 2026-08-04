@@ -213,7 +213,7 @@ function detailPanel(panel, el, device, maintenance, repaint) {
   });
   roomLabel.appendChild(room);
   form.appendChild(roomLabel);
-  const save = el("button", "primary", state.action === "update" ? "Сохраняем…" : "Сохранить в Home Assistant");
+  const save = el("button", "primary", state.action === "update" ? "Сохраняем…" : "Сохранить имя и комнату");
   save.type = "button";
   save.disabled = Boolean(state.action);
   save.addEventListener("click", () => runAction(panel, device, "update", {
@@ -227,7 +227,7 @@ function detailPanel(panel, el, device, maintenance, repaint) {
   open.href = maintenance.haUrl;
   open.title = "Открыть исходную карточку, сущности и автоматизации устройства";
   actions.appendChild(open);
-  const identify = el("button", null, maintenance.identifySupported ? "Найти устройство" : "Поиск не поддерживается");
+  const identify = el("button", "secondary", maintenance.identifySupported ? "Найти устройство" : "Поиск не поддерживается");
   identify.type = "button";
   identify.disabled = !maintenance.identifySupported || Boolean(state.action);
   identify.title = maintenance.identifySupported
@@ -235,7 +235,7 @@ function detailPanel(panel, el, device, maintenance, repaint) {
     : "Устройство не предоставляет команду Identify/Locate, поэтому фиктивный поиск не показывается.";
   identify.addEventListener("click", () => runAction(panel, device, "identify", { confirmed: true }, repaint));
   actions.appendChild(identify);
-  const remove = el("button", "danger subtle", "Удалить из реестра");
+  const remove = el("button", "secondary danger-outline", "Удалить из Home Assistant");
   remove.type = "button";
   remove.disabled = maintenance.deleteBlocked || Boolean(state.action);
   remove.title = maintenance.deleteBlocked

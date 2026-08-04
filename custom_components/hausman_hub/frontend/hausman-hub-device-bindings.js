@@ -336,8 +336,15 @@ function renderActions(panel, container, helpers) {
     container.appendChild(feedback);
   }
   const actions = el("div", "settings-page-actions native-binding-actions");
-  actions.appendChild(el("span", "settings-actions-state", isDirty(panel) ? "Есть непроверенные изменения" : "Изменений нет"));
-  const reset = el("button", "secondary", "Отменить выбор");
+  const dirty = isDirty(panel);
+  const readyToSave = dirty && state.preview?.save_allowed === true;
+  const actionStatus = readyToSave
+    ? el("span", "settings-actions-state is-ready", "Проверка пройдена — можно сохранить")
+    : dirty
+      ? el("span", "settings-actions-state is-warning", "Есть изменения — требуется проверка")
+      : el("span", "settings-actions-state", "Все привязки сохранены");
+  actions.appendChild(actionStatus);
+  const reset = el("button", "secondary", "Отменить изменения");
   reset.disabled = panel._busy || !isDirty(panel);
   reset.addEventListener("click", () => {
     cancelScheduledPreview(state);
@@ -347,13 +354,13 @@ function renderActions(panel, container, helpers) {
     state.status = "";
     panel._render();
   });
-  const check = el("button", "secondary", "Проверить");
+  const check = el("button", "secondary", "Проверить изменения");
   check.disabled = panel._busy || !changes(panel).length;
   check.addEventListener("click", () => {
     cancelScheduledPreview(state);
     preview(panel);
   });
-  const saveButton = el("button", null, "Сохранить привязки");
+  const saveButton = el("button", null, "Сохранить в Home Assistant");
   saveButton.disabled = panel._busy || state.preview?.save_allowed !== true;
   saveButton.addEventListener("click", () => save(panel));
   actions.appendChild(reset);

@@ -2762,7 +2762,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const text = textOf(screen);
         for (const label of [
           "Связи с устройствами Home Assistant", "Служебное восстановление",
-          "Кондиционер гостиная", "Нужно выбрать", "Проверить", "Сохранить привязки",
+          "Кондиционер гостиная", "Нужно выбрать", "Проверить изменения", "Сохранить в Home Assistant",
           "В этой комнате", "Во всём доме", "Проверка безопасна", "Единственное доступное совпадение",
         ]) {
           if (!text.includes(label)) throw new Error("binding wizard text missing: " + label);
@@ -2787,9 +2787,9 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         await new Promise((resolve) => setTimeout(resolve, 400));
         screen = panel._shell.settings;
         const check = findAll(screen, (node) => node.tagName === "BUTTON"
-          && node.textContent === "Проверить")[0];
+          && node.textContent === "Проверить изменения")[0];
         const saveBefore = findAll(screen, (node) => node.tagName === "BUTTON"
-          && node.textContent === "Сохранить привязки")[0];
+          && node.textContent === "Сохранить в Home Assistant")[0];
         if (!check || check.disabled || saveBefore.disabled) {
           throw new Error("automatic preview did not enable safe save");
         }
@@ -2803,8 +2803,11 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("binding preview payload mismatch: " + JSON.stringify(previewPost));
         }
         screen = panel._shell.settings;
+        if (!textOf(screen).includes("Проверка пройдена — можно сохранить")) {
+          throw new Error("binding action state did not explain that saving is available");
+        }
         const save = findAll(screen, (node) => node.tagName === "BUTTON"
-          && node.textContent === "Сохранить привязки")[0];
+          && node.textContent === "Сохранить в Home Assistant")[0];
         if (save.disabled) throw new Error("save stayed disabled after successful preview");
         save.fire("click");
         await tick(10);
@@ -3060,14 +3063,14 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         card.fire("click");
         await tick();
         const text = textOf(screen);
-        for (const label of ["Где используется", "Не используется настройками HausmanHub", "Возможности устройства", "Показать состав", "Открыть в Home Assistant", "Найти устройство", "Удалить из реестра"]) {
+        for (const label of ["Где используется", "Не используется настройками HausmanHub", "Возможности устройства", "Показать состав", "Открыть в Home Assistant", "Найти устройство", "Удалить из Home Assistant"]) {
           if (!text.includes(label)) throw new Error("maintenance action missing: " + label);
         }
         const name = findAll(screen, (node) => node.tagName === "INPUT" && node.maxLength === 128)[0];
         const room = findAll(screen, (node) => node.tagName === "SELECT")[0];
         name.value = "Главный датчик";
         room.value = "kids";
-        findAll(screen, (node) => node.tagName === "BUTTON" && node.textContent === "Сохранить в Home Assistant")[0].fire("click");
+        findAll(screen, (node) => node.tagName === "BUTTON" && node.textContent === "Сохранить имя и комнату")[0].fire("click");
         await tick(10);
         const save = calls.find((call) => call.method === "POST" && call.path === "hausman_hub/v1/admin/device-maintenance" && call.payload.action === "update");
         if (!save || save.payload.expectedRevision !== "0123456789abcdef"
@@ -3135,7 +3138,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         if (rows.length !== 18) throw new Error("inventory pagination did not reveal remaining rows");
         findAll(rows[0], (node) => String(node.className).includes("device-inventory-summary"))[0].fire("click");
         await tick();
-        findAll(screen, (node) => node.tagName === "BUTTON" && node.textContent === "Удалить из реестра")[0].fire("click");
+        findAll(screen, (node) => node.tagName === "BUTTON" && node.textContent === "Удалить из Home Assistant")[0].fire("click");
         if (calls.some((call) => call.method === "POST" && call.payload.action === "delete")) {
           throw new Error("delete ran before the inline confirmation");
         }
@@ -3193,8 +3196,8 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         await tick();
         const text = textOf(screen);
         for (const label of [
-          "Отдельная сущность Home Assistant", "Сохранить в Home Assistant",
-          "Открыть в Home Assistant", "Удалить из реестра",
+          "Отдельная сущность Home Assistant", "Сохранить имя и комнату",
+          "Открыть в Home Assistant", "Удалить из Home Assistant",
         ]) {
           if (!text.includes(label)) throw new Error("entity-only maintenance action missing: " + label);
         }
@@ -3228,7 +3231,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.18")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.19")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

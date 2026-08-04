@@ -166,10 +166,6 @@
   border-radius:16px; background:color-mix(in srgb,var(--hmh-bg,#0B0F14) 88%,transparent);
   box-shadow:0 14px 34px rgba(0,0,0,.34); backdrop-filter:blur(18px); }
 .settings-page-actions button { min-height:48px; margin:0; padding:0 20px; }
-.settings-actions-state { margin:0 8px; color:var(--hmh-text-dim,#9AA7B4); font-size:13px; }
-.settings-page-actions button:not(.secondary) { border:1px solid color-mix(in srgb,var(--hmh-accent,#4F8CFF) 62%,transparent);
-  background:linear-gradient(145deg,color-mix(in srgb,var(--hmh-accent,#4F8CFF) 76%,#17233A),color-mix(in srgb,var(--hmh-accent,#4F8CFF) 54%,#17233A));
-  box-shadow:0 8px 22px color-mix(in srgb,var(--hmh-accent,#4F8CFF) 18%,transparent); }
 .danger-settings-card { border-color:color-mix(in srgb,var(--error-color,#E5534B) 28%,var(--hmh-border,#2F3845)); }
 .danger-settings-card::before { background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--error-color,#E5534B) 50%,transparent),transparent); }
 .danger-settings-card > h3::before { background:var(--error-color,#E5534B); box-shadow:0 0 18px color-mix(in srgb,var(--error-color,#E5534B) 42%,transparent); }
