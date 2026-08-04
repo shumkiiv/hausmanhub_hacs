@@ -1,3 +1,5 @@
+import { dupAttention, dupCompare, dupFilter, dupGroups, dupGuide, dupSize, dupView } from "./hausman-hub-inventory-duplicates.js?v=1.52.20";
+
 const DEVICE_MAINTENANCE_API = "hausman_hub/v1/admin/device-maintenance";
 const Z2M_DEVICE_IMAGE =
   /^https:\/\/www\.zigbee2mqtt\.io\/images\/devices\/(?:[A-Za-z0-9._~-]|%[0-9A-F]{2})+\.png$/;
@@ -25,21 +27,6 @@ const STATUS_LABELS = {
   empty: "Без сущностей",
   disabled: "Отключено",
 };
-
-function isAttention(device) {
-  return device.possibleDuplicate === true || !device.roomId || device.status !== "available";
-}
-
-function matchesFilter(device, filter) {
-  if (filter === "all") return true;
-  if (filter === "attention") return isAttention(device);
-  if (filter === "unassigned") return !device.roomId;
-  if (filter === "unavailable") return device.status === "unavailable";
-  if (filter === "virtual") return device.kind === "virtual";
-  if (filter === "entity_only") return device.kind === "entity_only";
-  if (filter === "duplicates") return device.possibleDuplicate === true;
-  return true;
-}
 
 function metric(el, value, label, tone = "") {
   const item = el("div", `device-inventory-metric${tone ? ` ${tone}` : ""}`);
@@ -121,7 +108,7 @@ async function runAction(panel, device, action, payload, repaint) {
   }
 }
 
-function detailPanel(panel, el, device, maintenance, repaint) {
+function detailPanel(panel, el, device, maintenance, repaint, duplicateGroupSize = 1) {
   const detail = el("div", "device-maintenance-detail");
   const state = stateFor(panel);
   if (state.loading) {
@@ -140,6 +127,8 @@ function detailPanel(panel, el, device, maintenance, repaint) {
     detail.appendChild(el("p", "muted", "Запись уже удалена или изменилась. Обновите инвентаризацию."));
     return detail;
   }
+
+  dupGuide(detail, el, device, duplicateGroupSize);
 
   const overview = el("div", "device-maintenance-overview");
   const usage = el("section", "device-maintenance-usage");
@@ -172,6 +161,7 @@ function detailPanel(panel, el, device, maintenance, repaint) {
     entities.forEach((item) => {
       const entity = el("div", "device-maintenance-entity-row");
       entity.appendChild(el("strong", null, item.name || "Сущность"));
+      entity.appendChild(el("code", "device-maintenance-entity-id", item.id || "Идентификатор не указан"));
       entity.appendChild(el("small", "muted", item.disabled ? "Отключена в Home Assistant" : "Доступна в Home Assistant"));
       rows.appendChild(entity);
     });
@@ -280,9 +270,9 @@ function detailPanel(panel, el, device, maintenance, repaint) {
   return detail;
 }
 
-function inventoryRow(panel, el, device, repaint) {
+function inventoryRow(panel, el, device, repaint, duplicateGroupSize = 1, duplicateGroupPosition = 1) {
   const expanded = panel._inventoryDeviceId === device.id;
-  const row = el("article", `device-inventory-row${isAttention(device) ? " needs-attention" : ""}${expanded ? " is-expanded" : ""}`);
+  const row = el("article", `device-inventory-row${dupAttention(device, duplicateGroupSize) ? " needs-attention" : ""}${expanded ? " is-expanded" : ""}${duplicateGroupSize > 1 ? " is-duplicate-group" : ""}`);
   const summary = el("button", "device-inventory-summary");
   summary.type = "button";
   if (typeof summary.setAttribute === "function") {
@@ -318,8 +308,15 @@ function inventoryRow(panel, el, device, repaint) {
   composition.appendChild(el("strong", null, `${count} ${capabilityLabel}`));
   summary.appendChild(composition);
   const status = el("div", `device-inventory-status is-${device.status || "available"}`);
-  status.appendChild(el("strong", null, device.possibleDuplicate ? "Возможный дубль" : STATUS_LABELS[device.status] || "Состояние неизвестно"));
-  if (device.reason) status.appendChild(el("small", null, device.reason));
+  const duplicate = dupView(device, duplicateGroupSize, duplicateGroupPosition);
+  if (duplicate) {
+    status.className += ` ${duplicate.className}`;
+    status.appendChild(el("strong", null, duplicate.title));
+    status.appendChild(el("small", null, duplicate.detail));
+  } else {
+    status.appendChild(el("strong", null, STATUS_LABELS[device.status] || "Состояние неизвестно"));
+    if (device.reason) status.appendChild(el("small", null, device.reason));
+  }
   summary.appendChild(status);
   summary.appendChild(el("span", "device-inventory-chevron", expanded ? "⌃" : "⌄"));
   summary.addEventListener("click", () => {
@@ -331,7 +328,7 @@ function inventoryRow(panel, el, device, repaint) {
   if (expanded) {
     const maintenance = stateFor(panel).data && stateFor(panel).data.devicesById
       ? stateFor(panel).data.devicesById[device.id] : null;
-    row.appendChild(detailPanel(panel, el, device, maintenance, repaint));
+    row.appendChild(detailPanel(panel, el, device, maintenance, repaint, duplicateGroupSize));
   }
   return row;
 }
@@ -341,6 +338,7 @@ export function renderDeviceInventory(panel, container, helpers) {
   const inventory = panel._homeDashboard && panel._homeDashboard.inventory;
   const devices = inventory && Array.isArray(inventory.devices) ? inventory.devices : [];
   if (!devices.length) return;
+  const duplicateGroups = dupGroups(devices);
   const summary = inventory.summary || {};
   const section = el("section", "card device-inventory");
   const heading = el("div", "device-inventory-heading-row");
@@ -375,17 +373,31 @@ export function renderDeviceInventory(panel, container, helpers) {
   const defaultFilter = Number(summary.attentionCount) > 0 ? "attention" : "all";
   let activeFilter = panel._inventoryFilter || defaultFilter;
   const list = el("div", "device-inventory-list");
+  const filterNote = el("div", "device-inventory-filter-note");
+  filterNote.appendChild(el("strong", null, "Как выбрать запись"));
+  filterNote.appendChild(el("span", null, "Оставьте рекомендуемую основную запись. Копию удаляйте только после проверки разделов «Где используется» и «Возможности устройства»."));
   const search = el("input", "device-inventory-search");
   const renderRows = () => {
     list.innerHTML = "";
+    filterNote.hidden = activeFilter !== "duplicates";
     const query = normalizedText(search.value || "");
     panel._inventoryQuery = search.value || "";
-    const matching = devices.filter((device) => matchesFilter(device, activeFilter) && (!query || normalizedText([
+    const matching = devices.filter((device) => dupFilter(
+      device, activeFilter, dupSize(duplicateGroups, device),
+    ) && (!query || normalizedText([
       device.name, device.roomName, device.manufacturer, device.model, ...(device.domains || []),
-    ].filter(Boolean).join(" ")).includes(query)));
+    ].filter(Boolean).join(" ")).includes(query))).sort(dupCompare);
     const limit = Number(panel._inventoryLimit) || INVENTORY_PAGE_SIZE;
     const visible = matching.slice(0, limit);
-    visible.forEach((device) => list.appendChild(inventoryRow(panel, el, device, renderRows)));
+    const groupPositions = new Map();
+    visible.forEach((device) => {
+      const groupKey = device.canonicalId || device.id;
+      const position = (groupPositions.get(groupKey) || 0) + 1;
+      groupPositions.set(groupKey, position);
+      list.appendChild(inventoryRow(
+        panel, el, device, renderRows, duplicateGroups.get(groupKey) || 1, position,
+      ));
+    });
     if (!visible.length) {
       const empty = el("div", "device-inventory-empty");
       empty.appendChild(el("strong", null, "Ничего не найдено"));
@@ -426,6 +438,7 @@ export function renderDeviceInventory(panel, container, helpers) {
   });
   toolbar.appendChild(search);
   section.appendChild(toolbar);
+  section.appendChild(filterNote);
   section.appendChild(list);
   renderRows();
   container.appendChild(section);

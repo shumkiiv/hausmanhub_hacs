@@ -15,6 +15,21 @@
 .device-inventory-neutral { color:var(--hmh-text-dim,#9AA7B4); font-size:27px; line-height:1; }
 .device-inventory-chevron { justify-self:end; color:var(--hmh-text-dim,#9AA7B4); font-size:20px; }
 .device-maintenance-detail { padding:18px; border-top:1px solid var(--hmh-border,#2F3845); background:color-mix(in srgb,var(--hmh-surface,#12171D) 74%,transparent); }
+.device-inventory-row.is-duplicate-group .device-inventory-summary { background:color-mix(in srgb,var(--warning-color,#E4A11B) 3%,transparent); }
+.device-inventory-status.is-canonical strong { color:var(--success-color,#4CAF6E); }
+.device-inventory-status.is-copy strong { color:var(--warning-color,#E4A11B); }
+.device-inventory-filter-note { display:flex; align-items:center; gap:12px; margin-top:12px; padding:11px 14px;
+  border:1px solid color-mix(in srgb,var(--warning-color,#E4A11B) 28%,var(--hmh-border,#2F3845)); border-radius:12px;
+  background:color-mix(in srgb,var(--warning-color,#E4A11B) 6%,var(--hmh-raised,#181E26)); }
+.device-inventory-filter-note[hidden] { display:none; }
+.device-inventory-filter-note strong { flex:0 0 auto; font-size:13px; }
+.device-inventory-filter-note span { color:var(--hmh-text-dim,#9AA7B4); font-size:12px; line-height:1.4; }
+.device-maintenance-duplicate-guide { margin-bottom:12px; padding:13px 15px; border:1px solid color-mix(in srgb,var(--warning-color,#E4A11B) 30%,var(--hmh-border,#2F3845));
+  border-radius:12px; background:color-mix(in srgb,var(--warning-color,#E4A11B) 7%,var(--hmh-raised,#181E26)); }
+.device-maintenance-duplicate-guide.is-canonical { border-color:color-mix(in srgb,var(--success-color,#4CAF6E) 30%,var(--hmh-border,#2F3845));
+  background:color-mix(in srgb,var(--success-color,#4CAF6E) 7%,var(--hmh-raised,#181E26)); }
+.device-maintenance-duplicate-guide strong { font-size:14px; }
+.device-maintenance-duplicate-guide p { margin:4px 0 0; font-size:13px; line-height:1.45; }
 .device-maintenance-overview { display:grid; grid-template-columns:minmax(0,1.25fr) minmax(240px,.75fr); gap:12px; }
 .device-maintenance-overview section { min-width:0; padding:14px; border-radius:12px; background:var(--hmh-raised,#181E26); }
 .device-maintenance-overview h4 { margin:0 0 9px; font-size:14px; }
@@ -25,6 +40,7 @@
 .device-maintenance-entity-row { display:grid; gap:2px; padding:8px 10px; border-radius:9px;
   background:color-mix(in srgb,var(--hmh-surface,#12171D) 74%,transparent); }
 .device-maintenance-entity-row strong { font-size:13px; }
+.device-maintenance-entity-id { overflow-wrap:anywhere; color:var(--hmh-text-dim,#9AA7B4); font:500 11px/1.35 ui-monospace,SFMono-Regular,Consolas,monospace; }
 .device-maintenance-entity-row small { font-size:12px; }
 .device-maintenance-use { display:grid; gap:3px; padding:8px 0; border-top:1px solid var(--hmh-border,#2F3845); }
 .device-maintenance-use:first-of-type { padding-top:0; border-top:0; }

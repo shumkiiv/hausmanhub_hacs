@@ -1,4 +1,4 @@
-import { roomHeroImage } from "./hausman-hub-room-icons.js?v=1.52.19";
+import { roomHeroImage } from "./hausman-hub-room-icons.js?v=1.52.20";
 
 /**
  * Canonical compact Hero for tablet-style library pages.

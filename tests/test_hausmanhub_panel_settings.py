@@ -29,6 +29,7 @@ KIOSK_JS = PANEL_JS.with_name("hausman-hub-kiosk.js")
 SETTINGS_PROFILE_JS = PANEL_JS.with_name("hausman-hub-settings-profile.js")
 ROOM_SETUP_JS = PANEL_JS.with_name("hausman-hub-room-setup.js")
 DEVICE_INVENTORY_JS = PANEL_JS.with_name("hausman-hub-device-inventory.js")
+INVENTORY_DUPLICATES_JS = PANEL_JS.with_name("hausman-hub-inventory-duplicates.js")
 DEVICE_BINDINGS_JS = PANEL_JS.with_name("hausman-hub-device-bindings.js")
 AREA_BINDING_JS = PANEL_JS.with_name("hausman-hub-area-binding.js")
 FIRST_RUN_DRAFT_JS = PANEL_JS.with_name("hausman-hub-first-run-draft.js")
@@ -532,7 +533,11 @@ def panel_script(
         {{ filename: {str(ROOM_SETUP_JS)!r} }}
       );
       vm.runInThisContext(
-        fs.readFileSync({str(DEVICE_INVENTORY_JS)!r}, "utf8").replace("export function renderDeviceInventory", "function renderDeviceInventory"),
+        fs.readFileSync({str(INVENTORY_DUPLICATES_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(INVENTORY_DUPLICATES_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(DEVICE_INVENTORY_JS)!r}, "utf8").replace(/^import[\s\S]*?from .*;\s*/, "").replace("export function renderDeviceInventory", "function renderDeviceInventory"),
         {{ filename: {str(DEVICE_INVENTORY_JS)!r} }}
       );
       vm.runInThisContext(
@@ -2995,9 +3000,20 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         let text = textOf(screen);
         for (const label of [
           "Устройства Home Assistant", "физических устройств", "отдельных сущностей", "Обновить список",
-          "Возможный дубль", "Не привязано",
+          "Рекомендуется оставить", "Копия записи", "Основная запись · 1 из 2", "Не привязано",
         ]) {
           if (!text.includes(label)) throw new Error("inventory text missing: " + label);
+        }
+        const duplicates = findAll(screen, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Возможные дубли")[0];
+        duplicates.fire("click");
+        const duplicateRows = findAll(screen, (node) =>
+          String(node.className).split(" ").includes("device-inventory-row"));
+        if (duplicateRows.length !== 2
+          || !textOf(duplicateRows[0]).includes("Рекомендуется оставить")
+          || !textOf(duplicateRows[1]).includes("Копия записи")
+          || !textOf(screen).includes("Оставьте рекомендуемую основную запись")) {
+          throw new Error("duplicate filter did not expose the complete comparison group");
         }
         const all = findAll(screen, (node) => node.tagName === "BUTTON"
           && node.textContent === "Все")[0];
@@ -3063,7 +3079,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         card.fire("click");
         await tick();
         const text = textOf(screen);
-        for (const label of ["Где используется", "Не используется настройками HausmanHub", "Возможности устройства", "Показать состав", "Открыть в Home Assistant", "Найти устройство", "Удалить из Home Assistant"]) {
+        for (const label of ["Где используется", "Не используется настройками HausmanHub", "Возможности устройства", "Показать состав", "sensor.value", "Открыть в Home Assistant", "Найти устройство", "Удалить из Home Assistant"]) {
           if (!text.includes(label)) throw new Error("maintenance action missing: " + label);
         }
         const name = findAll(screen, (node) => node.tagName === "INPUT" && node.maxLength === 128)[0];
@@ -3231,7 +3247,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.19")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.20")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;
