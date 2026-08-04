@@ -422,9 +422,11 @@ class ClimateRuntime:
         """Return explicit native HA entity choices for saved devices."""
 
         async with self._lock:
+            catalog = self._native_entity_catalog_unlocked()
+            await self._async_reconcile_native_registry_unlocked(catalog)
             return climate_device_binding_options(
                 self._registry,
-                self._native_entity_catalog_unlocked(),
+                catalog,
             )
 
     async def async_preview_climate_device_bindings(
@@ -2124,6 +2126,21 @@ class ClimateRuntime:
                 "the native Home Assistant entity catalog is unavailable"
             )
         return catalog()
+
+    async def _async_reconcile_native_registry_unlocked(self, catalog) -> None:
+        """Persist exact endpoint recovery once HA entities finish loading."""
+
+        registry, changed = reconcile_native_climate_registry(
+            self._registry,
+            catalog,
+        )
+        if not changed:
+            return
+        validate_contour_bindings(self._contours, registry)
+        await self._registry_store.async_save(registry)
+        self._registry = registry
+        self._central_heating_on = None
+        self.last_error = None
 
     def _safe_now(self) -> int:
         value = self._now_ms()

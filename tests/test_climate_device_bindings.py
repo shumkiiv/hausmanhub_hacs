@@ -336,6 +336,19 @@ class _BindingStateView:
         return self.value
 
 
+class _DelayedBindingStateView:
+    def __init__(self, ready: ClimateHaEntityCatalog) -> None:
+        self._values = iter(
+            (
+                ClimateHaEntityCatalog(rooms=ready.rooms, entries=()),
+                ready,
+            )
+        )
+
+    def binding_entity_catalog(self) -> ClimateHaEntityCatalog:
+        return next(self._values)
+
+
 class ClimateDeviceBindingRuntimeTest(unittest.IsolatedAsyncioTestCase):
     async def test_start_persists_recovered_native_binding(self) -> None:
         source = registry()
@@ -368,6 +381,45 @@ class ClimateDeviceBindingRuntimeTest(unittest.IsolatedAsyncioTestCase):
         await runtime.async_start()
 
         self.assertEqual(1, len(store.saved))
+        self.assertEqual(
+            "climate.living_ac",
+            store.value.device("living_ac").endpoints[0].entity_id,
+        )
+
+    async def test_binding_page_recovers_entities_loaded_after_runtime_start(self) -> None:
+        source = registry()
+        native_device = source.device("living_ac")
+        native_registry = ClimateRegistry(
+            rooms=source.rooms,
+            devices=(
+                ClimateDevice(
+                    device_id=native_device.device_id,
+                    name=native_device.name,
+                    room_id=native_device.room_id,
+                    kind=native_device.kind,
+                    source_id="climate.living_ac",
+                    control_scope=native_device.control_scope,
+                    control_owner=native_device.control_owner,
+                    capabilities=native_device.capabilities,
+                    endpoints=(),
+                ),
+            ),
+        )
+        store = _MemoryRegistryStore(native_registry)
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=SafeConfiguration(mode="read-only"),
+            registry_store=store,
+            ha_state_view=_DelayedBindingStateView(catalog()),
+        )
+
+        await runtime.async_start()
+        self.assertEqual([], store.saved)
+
+        options = await runtime.async_climate_device_binding_options()
+
+        self.assertEqual(1, len(store.saved))
+        self.assertEqual(1, options["summary"]["bound_count"])
         self.assertEqual(
             "climate.living_ac",
             store.value.device("living_ac").endpoints[0].entity_id,
