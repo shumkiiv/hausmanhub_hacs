@@ -331,7 +331,9 @@ def panel_script(get_table: dict, post_table: dict, assertions: str) -> str:
         {{ filename: {str(ROOM_CLIMATE_SOURCES_JS)!r} }}
       );
       vm.runInThisContext(
-        fs.readFileSync({str(DEVICE_INVENTORY_JS)!r}, "utf8").replace("export function renderDeviceInventory", "function renderDeviceInventory"),
+        fs.readFileSync({str(DEVICE_INVENTORY_JS)!r}, "utf8")
+          .replace(/^import .*;\\s*/gm, "")
+          .replace("export function renderDeviceInventory", "function renderDeviceInventory"),
         {{ filename: {str(DEVICE_INVENTORY_JS)!r} }}
       );
       vm.runInThisContext(
@@ -351,7 +353,8 @@ def panel_script(get_table: dict, post_table: dict, assertions: str) -> str:
         {{ filename: {str(NAVIGATION_JS)!r} }}
       );
       vm.runInThisContext(
-        fs.readFileSync({str(ENERGY_JS)!r}, "utf8").replace(/export /g, ""),
+        fs.readFileSync({str(ENERGY_JS)!r}, "utf8")
+          .replace(/^import .*;\\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(ENERGY_JS)!r} }}
       );
       vm.runInThisContext(
@@ -367,27 +370,33 @@ def panel_script(get_table: dict, post_table: dict, assertions: str) -> str:
         {{ filename: {str(SCENARIOS_JS)!r} }}
       );
       vm.runInThisContext(
-        fs.readFileSync({str(CLIMATE_OVERVIEW_JS)!r}, "utf8").replace(/export /g, ""),
+        fs.readFileSync({str(CLIMATE_OVERVIEW_JS)!r}, "utf8")
+          .replace(/^import .*;\\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(CLIMATE_OVERVIEW_JS)!r} }}
       );
       vm.runInThisContext(
-        fs.readFileSync({str(LIGHTING_OVERVIEW_JS)!r}, "utf8").replace(/export /g, ""),
+        fs.readFileSync({str(LIGHTING_OVERVIEW_JS)!r}, "utf8")
+          .replace(/^import .*;\\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(LIGHTING_OVERVIEW_JS)!r} }}
       );
       vm.runInThisContext(
-        fs.readFileSync({str(ROOMS_OVERVIEW_JS)!r}, "utf8").replace(/export /g, ""),
+        fs.readFileSync({str(ROOMS_OVERVIEW_JS)!r}, "utf8")
+          .replace(/^import .*;\\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(ROOMS_OVERVIEW_JS)!r} }}
       );
       vm.runInThisContext(
-        fs.readFileSync({str(MEDIA_OVERVIEW_JS)!r}, "utf8").replace(/export /g, ""),
+        fs.readFileSync({str(MEDIA_OVERVIEW_JS)!r}, "utf8")
+          .replace(/^import .*;\\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(MEDIA_OVERVIEW_JS)!r} }}
       );
       vm.runInThisContext(
-        fs.readFileSync({str(SECURITY_OVERVIEW_JS)!r}, "utf8").replace(/export /g, ""),
+        fs.readFileSync({str(SECURITY_OVERVIEW_JS)!r}, "utf8")
+          .replace(/^import .*;\\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(SECURITY_OVERVIEW_JS)!r} }}
       );
       vm.runInThisContext(
-        fs.readFileSync({str(DEVICES_OVERVIEW_JS)!r}, "utf8").replace(/export /g, ""),
+        fs.readFileSync({str(DEVICES_OVERVIEW_JS)!r}, "utf8")
+          .replace(/^import .*;\\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(DEVICES_OVERVIEW_JS)!r} }}
       );
       vm.runInThisContext(

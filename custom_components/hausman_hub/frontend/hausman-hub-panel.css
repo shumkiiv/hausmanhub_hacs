@@ -1,36 +1,37 @@
-@import url("./hausman-hub-tokens.css?v=1.52.21");
-@import url("./hausman-hub-overview.css?v=1.52.21");
-@import url("./hausman-hub-library-hero.css?v=1.52.21");
-@import url("./hausman-hub-settings.css?v=1.52.21");
-@import url("./hausman-hub-diagnostics.css?v=1.52.21");
-@import url("./hausman-hub-switch.css?v=1.52.21");
-@import url("./hausman-hub-notice.css?v=1.52.21");
-@import url("./hausman-hub-device-maintenance.css?v=1.52.21");
-@import url("./hausman-hub-device-bindings.css?v=1.52.21");
-@import url("./hausman-hub-energy.css?v=1.52.21");
-@import url("./hausman-hub-energy-chart.css?v=1.52.21");
-@import url("./hausman-hub-control-channel.css?v=1.52.21");
-@import url("./hausman-hub-weather-sources.css?v=1.52.21");
-@import url("./hausman-hub-wizard-validation.css?v=1.52.21");
-@import url("./hausman-hub-catalog.css?v=1.52.21");
-@import url("./hausman-hub-media-device.css?v=1.52.21");
-@import url("./hausman-hub-device-card.css?v=1.52.21");
-@import url("./hausman-hub-scenarios.css?v=1.52.21");
-@import url("./hausman-hub-climate-overview.css?v=1.52.21");
-@import url("./hausman-hub-lighting.css?v=1.52.21");
-@import url("./hausman-hub-rooms.css?v=1.52.21");
-@import url("./hausman-hub-media-overview.css?v=1.52.21");
-@import url("./hausman-hub-security-overview.css?v=1.52.21");
-@import url("./hausman-hub-devices-overview.css?v=1.52.21");
-@import url("./hausman-hub-navigation.css?v=1.52.21");
-@import url("./hausman-hub-rollout.css?v=1.52.21");
-@import url("./hausman-hub-technical-log.css?v=1.52.21");
-@import url("./hausman-hub-kiosk.css?v=1.52.21");
-@import url("./hausman-hub-area-binding.css?v=1.52.21");
-@import url("./hausman-hub-intercom.css?v=1.52.21");
-@import url("./hausman-hub-buttons.css?v=1.52.21");
+@import url("./hausman-hub-tokens.css?v=1.52.22");
+@import url("./hausman-hub-overview.css?v=1.52.22");
+@import url("./hausman-hub-library-hero.css?v=1.52.22");
+@import url("./hausman-hub-settings.css?v=1.52.22");
+@import url("./hausman-hub-diagnostics.css?v=1.52.22");
+@import url("./hausman-hub-switch.css?v=1.52.22");
+@import url("./hausman-hub-notice.css?v=1.52.22");
+@import url("./hausman-hub-device-maintenance.css?v=1.52.22");
+@import url("./hausman-hub-device-bindings.css?v=1.52.22");
+@import url("./hausman-hub-energy.css?v=1.52.22");
+@import url("./hausman-hub-energy-chart.css?v=1.52.22");
+@import url("./hausman-hub-control-channel.css?v=1.52.22");
+@import url("./hausman-hub-weather-sources.css?v=1.52.22");
+@import url("./hausman-hub-wizard-validation.css?v=1.52.22");
+@import url("./hausman-hub-catalog.css?v=1.52.22");
+@import url("./hausman-hub-media-device.css?v=1.52.22");
+@import url("./hausman-hub-device-card.css?v=1.52.22");
+@import url("./hausman-hub-scenarios.css?v=1.52.22");
+@import url("./hausman-hub-climate-overview.css?v=1.52.22");
+@import url("./hausman-hub-lighting.css?v=1.52.22");
+@import url("./hausman-hub-rooms.css?v=1.52.22");
+@import url("./hausman-hub-media-overview.css?v=1.52.22");
+@import url("./hausman-hub-security-overview.css?v=1.52.22");
+@import url("./hausman-hub-devices-overview.css?v=1.52.22");
+@import url("./hausman-hub-navigation.css?v=1.52.22");
+@import url("./hausman-hub-rollout.css?v=1.52.22");
+@import url("./hausman-hub-technical-log.css?v=1.52.22");
+@import url("./hausman-hub-kiosk.css?v=1.52.22");
+@import url("./hausman-hub-area-binding.css?v=1.52.22");
+@import url("./hausman-hub-intercom.css?v=1.52.22");
+@import url("./hausman-hub-buttons.css?v=1.52.22");
 
 :host { display:block; box-sizing:border-box; width:100%; min-height:100%; overflow-x:hidden;
+  container-name:hausmanhub-panel; container-type:inline-size;
   font-family:var(--primary-font-family,sans-serif);
   color:var(--primary-text-color,#E7ECF3); background:var(--primary-background-color,#0B0F14); }
 :host(.theme-light) .card { box-shadow:0 5px 9px rgba(22,28,38,.09); }
@@ -587,7 +588,7 @@ label.signal-option > input[type="radio"] { grid-column:1; width:18px; min-heigh
 .advisory-list li::before { content:""; position:absolute; left:0; top:.5em; width:8px; height:8px;
   border-radius:50%; background:var(--primary-color,#03a9f4); }
 .advisory-list.is-risk li::before { background:var(--warning-color,#ef6c00); }
-@media (min-width:1050px) {
+@container hausmanhub-panel (min-width:1050px) {
   main { display:grid; grid-template-columns:238px minmax(0,1fr); align-items:start; column-gap:28px;
     max-width:1600px; padding:28px 34px 56px; }
   main > :not(.app-sidebar) { grid-column:2; min-width:0; }

@@ -43,6 +43,9 @@ SCENARIOS_JS = PANEL_JS.with_name("hausman-hub-scenarios.js")
 SCENARIO_ICONS_JS = PANEL_JS.with_name("hausman-hub-scenario-icons.js")
 SCENARIO_FIELDS_JS = PANEL_JS.with_name("hausman-hub-scenario-fields.js")
 SETTINGS_CSS = PANEL_JS.with_name("hausman-hub-settings.css")
+OVERVIEW_CSS = PANEL_JS.with_name("hausman-hub-overview.css")
+SECURITY_OVERVIEW_CSS = PANEL_JS.with_name("hausman-hub-security-overview.css")
+DEVICES_OVERVIEW_CSS = PANEL_JS.with_name("hausman-hub-devices-overview.css")
 DIAGNOSTICS_JS = PANEL_JS.with_name("hausman-hub-diagnostics.js")
 ROLLOUT_JS = PANEL_JS.with_name("hausman-hub-rollout.js")
 OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-overview.js")
@@ -2672,6 +2675,28 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
+    def test_composite_cards_keep_structure_inside_home_assistant_sidebar(self) -> None:
+        panel_css = PANEL_CSS.read_text(encoding="utf-8")
+        overview_css = OVERVIEW_CSS.read_text(encoding="utf-8")
+        security_css = SECURITY_OVERVIEW_CSS.read_text(encoding="utf-8")
+        devices_css = DEVICES_OVERVIEW_CSS.read_text(encoding="utf-8")
+        settings_css = SETTINGS_CSS.read_text(encoding="utf-8")
+
+        self.assertIn("container-name:hausmanhub-panel", panel_css)
+        self.assertIn("@container hausmanhub-panel (min-width:1050px)", panel_css)
+        self.assertIn(
+            ".overview-canon-primary-card, .overview-canon-light-card, .overview-canon-side-card",
+            overview_css,
+        )
+        self.assertIn("flex-direction:column; white-space:normal", overview_css)
+        self.assertIn("repeat(auto-fit,minmax(min(100%,240px),1fr))", overview_css)
+        self.assertIn("flex-direction:column", security_css)
+        self.assertIn("white-space:normal", security_css)
+        self.assertIn("flex-direction:column", devices_css)
+        self.assertIn("white-space:normal", devices_css)
+        self.assertIn("repeat(auto-fit,minmax(min(100%,420px),1fr))", settings_css)
+        self.assertIn("text-align:left; white-space:normal", settings_css)
+
     def test_system_diagnostics_explain_component_health_without_private_ids(self) -> None:
         payloads = dict(GET_PATHS)
         payloads["hausman_hub/v1/dashboard"] = {
@@ -3247,7 +3272,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.21")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.22")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

@@ -21,8 +21,11 @@
 .overview-canon-room-strip button.is-active { color:#E6EAF2; background:rgba(79,140,255,.2); }
 .overview-canon-room-strip button.is-active:disabled { opacity:1; cursor:default; }
 .overview-canon-room-strip .icon { width:18px; height:18px; }
-.overview-canon-primary-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; margin-top:16px; }
+.overview-canon-primary-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr)); gap:16px; margin-top:16px; }
 .overview-canon-primary-card, .overview-canon-light-card, .overview-canon-side-card { min-width:0; margin:0; padding:20px; border:1px solid var(--hmh-border-default); border-radius:16px; color:var(--hmh-text-primary); background:var(--hmh-surface-card); text-align:left; box-shadow:0 8px 24px rgba(0,0,0,.2); }
+.overview-canon-primary-card, .overview-canon-light-card, .overview-canon-side-card {
+  display:flex; align-items:flex-start; justify-content:flex-start; flex-direction:column; white-space:normal;
+}
 .overview-canon-primary-card { min-height:132px; }
 .overview-canon-primary-card:hover, .overview-canon-light-card:hover, .overview-canon-side-card:hover { border-color:color-mix(in srgb,var(--hmh-accent-primary) 44%,var(--hmh-border-default)); background:var(--hmh-surface-raised); }
 .overview-canon-label { display:block; color:var(--hmh-text-secondary); font-size:14px; font-weight:600; }
@@ -45,7 +48,7 @@
 .overview-canon-play .icon { width:20px; height:20px; }
 .overview-canon-lower-grid { display:grid; grid-template-columns:minmax(0,2.2fr) minmax(260px,.8fr); gap:16px; margin-top:16px; }
 .overview-canon-lower-main, .overview-canon-side { display:grid; gap:16px; align-content:start; }
-.overview-canon-lower-main { grid-template-columns:1.4fr .8fr; }
+.overview-canon-lower-main { grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr)); }
 .overview-canon-lower-main .energy-overview-card, .overview-canon-light-card { min-height:148px; }
 .overview-canon-side-card { min-height:112px; }
 .overview-canon-side-card.is-alert { border-color:color-mix(in srgb,var(--hmh-status-danger) 55%,var(--hmh-border-default)); }
