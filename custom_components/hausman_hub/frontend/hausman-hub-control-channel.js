@@ -82,6 +82,48 @@ export function resolveControlChannelTest(owner, choice, channel = null) {
   };
 }
 
+function controlChannelReceiptState(receipt) {
+  const status = receipt && typeof receipt.status === "string" ? receipt.status : "";
+  const confirmed = receipt?.confirmed === true || ["confirmed", "up_to_date"].includes(status);
+  const accepted = confirmed || receipt?.accepted === true || status === "pending";
+  const failed = ["denied", "failed", "partial", "unavailable"].includes(status)
+    || receipt?.accepted === false;
+  return { accepted, confirmed, failed, status };
+}
+
+export function summarizeControlChannelReceipts(probe, restored) {
+  const probeState = controlChannelReceiptState(probe);
+  const restoreState = controlChannelReceiptState(restored);
+  if (restoreState.failed || !restoreState.accepted) {
+    return {
+      status: "failed",
+      title: "Возврат настройки не подтверждён",
+      detail: "Тестовая команда отправлялась, но исходное значение не подтверждено. Проверьте текущее заданное значение устройства.",
+    };
+  }
+  if (probeState.failed || !probeState.accepted) {
+    return {
+      status: "failed",
+      title: "Тест не подтверждён",
+      detail: restoreState.confirmed
+        ? "Пробное значение не подтвердилось; исходная настройка успешно восстановлена."
+        : "Пробное значение не подтвердилось; команда возврата принята, но ещё проверяется.",
+    };
+  }
+  if (probeState.confirmed && restoreState.confirmed) {
+    return {
+      status: "confirmed",
+      title: "Канал работает",
+      detail: "Устройство подтвердило тестовое значение и возврат исходной настройки.",
+    };
+  }
+  return {
+    status: "pending",
+    title: "Подтверждение ещё ожидается",
+    detail: "Home Assistant принял тест и возврат исходного значения, но устройство пока не подтвердило оба состояния.",
+  };
+}
+
 export function recommendControlChannel(owner, choice) {
   const available = new Set(((owner._firstRun.options || {}).control_channels || []));
   if (candidateCanUseConfiguredRoute(choice)

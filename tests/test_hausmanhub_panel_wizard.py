@@ -548,6 +548,42 @@ def ready_validation(draft: dict) -> dict:
 
 
 class PanelContourWizardTest(unittest.TestCase):
+    def test_channel_receipts_never_show_pending_or_failed_restore_as_success(self) -> None:
+        script = panel_script(
+            get_payloads(),
+            {},
+            """
+        const confirmed = summarizeControlChannelReceipts(
+          {status: "confirmed"}, {status: "up_to_date"}
+        );
+        const pending = summarizeControlChannelReceipts(
+          {status: "pending", accepted: true}, {status: "pending", accepted: true}
+        );
+        const restoreFailed = summarizeControlChannelReceipts(
+          {status: "confirmed"}, {status: "failed", accepted: false}
+        );
+        const probeFailed = summarizeControlChannelReceipts(
+          {status: "denied", accepted: false}, {status: "confirmed"}
+        );
+        if (confirmed.status !== "confirmed" || confirmed.title !== "Канал работает") {
+          throw new Error("observed receipt pair was not recognized as confirmed");
+        }
+        if (pending.status !== "pending" || pending.title.includes("работает")) {
+          throw new Error("pending receipt pair was presented as success");
+        }
+        if (restoreFailed.status !== "failed"
+          || !restoreFailed.title.includes("Возврат настройки")) {
+          throw new Error("failed restoration did not receive a dedicated warning");
+        }
+        if (probeFailed.status !== "failed"
+          || !probeFailed.detail.includes("исходная настройка успешно восстановлена")) {
+          throw new Error("failed probe did not explain the successful rollback");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_wizard_persists_the_last_interaction_before_page_unload(self) -> None:
         panel_source = PANEL_JS.read_text(encoding="utf-8")
         self.assertIn(

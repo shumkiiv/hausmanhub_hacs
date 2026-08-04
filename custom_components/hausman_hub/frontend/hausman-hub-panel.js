@@ -1,35 +1,35 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.52.28";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.52.28";
-import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.52.28";
-import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.52.28";
-import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.52.28";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.52.28";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.52.28";
-import { closeFirstRunAreaCreator, createFirstRunArea, openFirstRunAreaCreator, renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.52.28";
-import { createKioskButton, createKioskDock, handleKioskPointerUp, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, resolveIntercomQuickAction, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.52.28";
-import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.52.28";
-import { applyHomeSignalSelection, AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, homeEnvironmentSaveError, homeEnvironmentSourcePayload, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.52.28";
-import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.52.28";
-import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.52.28";
-import { renderClimateOverview } from "./hausman-hub-climate-overview.js?v=1.52.28";
-import { renderLightingOverview } from "./hausman-hub-lighting.js?v=1.52.28";
-import { renderRoomsOverview } from "./hausman-hub-rooms.js?v=1.52.28";
-import { renderMediaOverview } from "./hausman-hub-media-overview.js?v=1.52.28";
-import { renderSecurityOverview } from "./hausman-hub-security-overview.js?v=1.52.28";
-import { renderDevicesOverview } from "./hausman-hub-devices-overview.js?v=1.52.28";
-import { buildDiagnosticChecks, diagnosticSummaryText, renderDiagnosticDetails } from "./hausman-hub-diagnostics.js?v=1.52.28";
-import { renderRolloutReadiness } from "./hausman-hub-rollout.js?v=1.52.28";
-import { renderOverviewContent, renderOverviewHero } from "./hausman-hub-overview.js?v=1.52.28";
-import { renderPhysicalDeviceCard } from "./hausman-hub-device-card.js?v=1.52.28";
-import { recordTechnicalEvent as log, renderTechnicalLogCard } from "./hausman-hub-technical-log.js?v=1.52.28";
-import { applyFeedback } from "./hausman-hub-feedback.js?v=1.52.28";
-import { renderKiosk } from "./hausman-hub-kiosk.js?v=1.52.28";
-import { captureRoomValidation, clearFirstRunDraft, persistFirstRunDraft, reconcileRoomValidation, restoreFirstRunDraft, resumeFirstRunDraft } from "./hausman-hub-first-run-draft.js?v=1.52.28";
-import { applyTabletProfile, isIntercomQuickAccessVisible, renderAppearanceSettings, renderIntercomSettings, syncIntercomQuickAccess } from "./hausman-hub-settings-profile.js?v=1.52.28";
-import { renderSettingsRooms, saveRoomType } from "./hausman-hub-settings-rooms.js?v=1.52.28";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.52.29";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.52.29";
+import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.52.29";
+import { resolveControlChannelTest, summarizeControlChannelReceipts } from "./hausman-hub-control-channel.js?v=1.52.29";
+import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.52.29";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.52.29";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.52.29";
+import { closeFirstRunAreaCreator, createFirstRunArea, openFirstRunAreaCreator, renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.52.29";
+import { createKioskButton, createKioskDock, handleKioskPointerUp, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, resolveIntercomQuickAction, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.52.29";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.52.29";
+import { applyHomeSignalSelection, AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, homeEnvironmentSaveError, homeEnvironmentSourcePayload, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.52.29";
+import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.52.29";
+import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.52.29";
+import { renderClimateOverview } from "./hausman-hub-climate-overview.js?v=1.52.29";
+import { renderLightingOverview } from "./hausman-hub-lighting.js?v=1.52.29";
+import { renderRoomsOverview } from "./hausman-hub-rooms.js?v=1.52.29";
+import { renderMediaOverview } from "./hausman-hub-media-overview.js?v=1.52.29";
+import { renderSecurityOverview } from "./hausman-hub-security-overview.js?v=1.52.29";
+import { renderDevicesOverview } from "./hausman-hub-devices-overview.js?v=1.52.29";
+import { buildDiagnosticChecks, diagnosticSummaryText, renderDiagnosticDetails } from "./hausman-hub-diagnostics.js?v=1.52.29";
+import { renderRolloutReadiness } from "./hausman-hub-rollout.js?v=1.52.29";
+import { renderOverviewContent, renderOverviewHero } from "./hausman-hub-overview.js?v=1.52.29";
+import { renderPhysicalDeviceCard } from "./hausman-hub-device-card.js?v=1.52.29";
+import { recordTechnicalEvent as log, renderTechnicalLogCard } from "./hausman-hub-technical-log.js?v=1.52.29";
+import { applyFeedback } from "./hausman-hub-feedback.js?v=1.52.29";
+import { renderKiosk } from "./hausman-hub-kiosk.js?v=1.52.29";
+import { captureRoomValidation, clearFirstRunDraft, persistFirstRunDraft, reconcileRoomValidation, restoreFirstRunDraft, resumeFirstRunDraft } from "./hausman-hub-first-run-draft.js?v=1.52.29";
+import { applyTabletProfile, isIntercomQuickAccessVisible, renderAppearanceSettings, renderIntercomSettings, syncIntercomQuickAccess } from "./hausman-hub-settings-profile.js?v=1.52.29";
+import { renderSettingsRooms, saveRoomType } from "./hausman-hub-settings-rooms.js?v=1.52.29";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
-const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css?v=1.52.28";
+const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css?v=1.52.29";
 const DASHBOARD_API = "hausman_hub/v1/dashboard";
 const DEVICE_ACTIONS_API = "hausman_hub/v1/device-actions";
 const PANEL_TABLET_PROFILE_API = "hausman_hub/v1/tablet-profile";
@@ -2116,25 +2116,7 @@ class HausmanHubPanel extends HTMLElement {
         actionId: plan.actionId,
         value: plan.value,
       });
-      if (probe && probe.confirmed === true && restored && restored.confirmed === true) {
-        return {
-          status: "confirmed",
-          title: "Канал работает",
-          detail: "Устройство подтвердило тестовое значение и возврат исходной настройки.",
-        };
-      }
-      if (probe && probe.accepted === true && restored && restored.accepted === true) {
-        return {
-          status: "pending",
-          title: "Команды отправлены",
-          detail: "Home Assistant принял тест и возврат исходного значения, но устройство не подтвердило оба состояния.",
-        };
-      }
-      return {
-        status: "failed",
-        title: "Устройство не ответило",
-        detail: (probe && probe.message) || "Тест или возврат исходной настройки не подтверждён. Проверьте устройство.",
-      };
+      return summarizeControlChannelReceipts(probe, restored);
     } catch (error) {
       try {
         await this._hass.callApi("POST", DEVICE_ACTIONS_API, {
