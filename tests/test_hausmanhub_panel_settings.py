@@ -50,6 +50,7 @@ DEVICES_OVERVIEW_CSS = PANEL_JS.with_name("hausman-hub-devices-overview.css")
 DIAGNOSTICS_JS = PANEL_JS.with_name("hausman-hub-diagnostics.js")
 ROLLOUT_JS = PANEL_JS.with_name("hausman-hub-rollout.js")
 OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-overview.js")
+OVERVIEW_HERO_STATE_JS = PANEL_JS.with_name("hausman-hub-overview-hero-state.js")
 ROOM_ICONS_JS = PANEL_JS.with_name("hausman-hub-room-icons.js")
 HERO_ROOM_NAVIGATION_JS = PANEL_JS.with_name("hausman-hub-hero-room-navigation.js")
 LIBRARY_HERO_JS = PANEL_JS.with_name("hausman-hub-library-hero.js")
@@ -612,6 +613,10 @@ def panel_script(
       vm.runInThisContext(
         fs.readFileSync({str(LIBRARY_HERO_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(LIBRARY_HERO_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(OVERVIEW_HERO_STATE_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
+        {{ filename: {str(OVERVIEW_HERO_STATE_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(OVERVIEW_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
@@ -1470,6 +1475,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         }
         payloads["hausman_hub/v1/dashboard"] = {
             "summary": {"homeName": "Дом"},
+            "localIso": "2026-08-05T12:40:00+06:00",
             "rooms": [
                 {"id": "living", "name": "Гостиная", "temp": 24.5, "humidity": 46, "targetTemp": 25, "targetHumidity": 45},
                 {"id": "bedroom", "name": "Спальня", "temp": 23.5, "humidity": 50, "targetTemp": 24, "targetHumidity": 50},
@@ -1506,6 +1512,19 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         }
         if (byClass("overview-canon-primary-card").length !== 3) {
           throw new Error("canonical first row must contain three cards");
+        }
+        const stableHero = byClass("overview-canon-hero")[0];
+        const stableMedia = byClass("overview-canon-hero-media")[0];
+        panel._homeDashboard = { ...panel._homeDashboard, localIso: "2026-08-05T12:40:15+06:00" };
+        panel._render();
+        if (byClass("overview-canon-hero")[0] !== stableHero
+          || byClass("overview-canon-hero-media")[0] !== stableMedia) {
+          throw new Error("volatile dashboard timestamp recreated the Hero");
+        }
+        panel._homeDashboard = { ...panel._homeDashboard, localIso: "", weather: {} };
+        panel._render();
+        if (byClass("overview-canon-hero-media")[0] !== stableMedia) {
+          throw new Error("partial dashboard response replaced the stable Hero image");
         }
         const homeButton = findAll(overview, (node) => node.tagName === "BUTTON"
           && node["aria-current"] === "page")[0];
@@ -3434,7 +3453,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.30")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.31")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

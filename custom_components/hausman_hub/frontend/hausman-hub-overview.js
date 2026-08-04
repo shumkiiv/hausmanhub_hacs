@@ -1,5 +1,5 @@
-import { createHeroRoomNavigation } from "./hausman-hub-hero-room-navigation.js?v=1.52.30";
-import { roomHeroImage } from "./hausman-hub-room-icons.js?v=1.52.30";
+import { createHeroRoomNavigation } from "./hausman-hub-hero-room-navigation.js?v=1.52.31";
+import { overviewHeroRenderKey, stableOverviewHeroImage } from "./hausman-hub-overview-hero-state.js?v=1.52.31";
 
 const CLIMATE_DOMAINS = new Set(["climate", "humidifier", "fan"]);
 
@@ -78,7 +78,7 @@ export function renderOverviewHero(panel, container, readiness, deps) {
   if (panel._overviewHeroRoomId && !selectedRoom) panel._overviewHeroRoomId = null;
   const hero = el("section", "overview-canon-hero");
   const media = el("div", "overview-canon-hero-media");
-  let currentImage = roomHeroImage(selectedRoom, dashboard.summary, dashboard.localIso);
+  let currentImage = stableOverviewHeroImage(panel, selectedRoom, dashboard);
   media.style.backgroundImage = `url("${currentImage}")`;
   hero.appendChild(media);
   const overlay = el("div", "overview-canon-hero-overlay");
@@ -118,7 +118,7 @@ export function renderOverviewHero(panel, container, readiness, deps) {
   };
   const selectHeroRoom = (room, animate = true) => {
     panel._overviewHeroRoomId = room?.id || null;
-    const nextImage = roomHeroImage(room, dashboard.summary, dashboard.localIso);
+    const nextImage = stableOverviewHeroImage(panel, room, dashboard);
     if (nextImage !== currentImage) {
       if (animate) media.classList.add("is-changing");
       media.style.backgroundImage = `url("${nextImage}")`;
@@ -140,6 +140,7 @@ export function renderOverviewHero(panel, container, readiness, deps) {
       details.hidden = false;
       details.textContent = "Подробнее о доме";
       status.textContent = readinessStatus === "ready" ? "Всё в порядке" : "Проверьте настройки";
+      panel._overviewHeroRenderKey = overviewHeroRenderKey(panel, readiness);
       return;
     }
     eyebrow.textContent = "Состояние комнаты";
@@ -150,6 +151,7 @@ export function renderOverviewHero(panel, container, readiness, deps) {
     renderFact("device", String(Array.isArray(room.deviceIds) ? room.deviceIds.length : 0), "устройств");
     details.hidden = true;
     status.textContent = room.climateRunning ? "Климат работает" : (room.status || "Обычный режим");
+    panel._overviewHeroRenderKey = overviewHeroRenderKey(panel, readiness);
   };
   roomNavigation.bind(selectHeroRoom);
   selectHeroRoom(selectedRoom, false);
