@@ -152,6 +152,70 @@ def climate_device_binding_options(
     }
 
 
+def reconcile_native_climate_registry(
+    registry: ClimateRegistry,
+    catalog: ClimateHaEntityCatalog,
+) -> tuple[ClimateRegistry, bool]:
+    """Restore exact HA endpoints and current room names without guessing.
+
+    Early versions of the native room wizard persisted the selected Home
+    Assistant entity in ``source_id`` but left ``endpoints`` empty whenever
+    that entity already belonged to an HA area.  The device then looked like a
+    legacy source-engine binding after restart.  Reconcile only an exact entity
+    that still exists, has the expected kind, and remains in the same HA room.
+    """
+
+    if not isinstance(registry, ClimateRegistry):
+        raise ClimateDeviceBindingViolation("climate registry is unavailable")
+    if not isinstance(catalog, ClimateHaEntityCatalog):
+        raise ClimateDeviceBindingViolation("Home Assistant catalog is unavailable")
+
+    catalog_rooms = {room.room_id: room.name for room in catalog.rooms}
+    rooms = tuple(
+        replace(room, name=catalog_rooms[room.room_id])
+        if room.room_id in catalog_rooms and catalog_rooms[room.room_id] != room.name
+        else room
+        for room in registry.rooms
+    )
+    devices: list[ClimateDevice] = []
+    for device in registry.devices:
+        updated = device
+        if device.endpoint(_binding_role(device.kind)) is None:
+            source_ids = (device.source_id,)
+            native_prefix = "hausmanhub-native-"
+            if device.source_id.startswith(native_prefix):
+                source_ids = (
+                    device.source_id.removeprefix(native_prefix),
+                    device.source_id,
+                )
+            entry = next(
+                (
+                    candidate
+                    for source_id in source_ids
+                    if (candidate := catalog.entry(source_id)) is not None
+                    and candidate.room_id == device.room_id
+                    and device.kind in native_candidate_kinds(candidate)
+                ),
+                None,
+            )
+            if entry is not None:
+                updated = _with_binding(device, entry)
+        devices.append(updated)
+
+    changed = rooms != registry.rooms or tuple(devices) != registry.devices
+    if not changed:
+        return registry, False
+    return (
+        ClimateRegistry(
+            version=registry.version,
+            home=registry.home,
+            rooms=rooms,
+            devices=tuple(devices),
+        ),
+        True,
+    )
+
+
 def preview_climate_device_bindings(
     registry: ClimateRegistry,
     catalog: ClimateHaEntityCatalog,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -207,6 +208,7 @@ async def async_dashboard_snapshot(
     hass: HomeAssistant,
     scenario_service: ScenarioService | None = None,
     energy_settings: HausmanHubSettings | None = None,
+    climate_targets: Mapping[str, tuple[float, int]] | None = None,
 ) -> dict[str, object]:
     """Collect current HA registries and project one side-effect-free payload."""
 
@@ -282,6 +284,7 @@ async def async_dashboard_snapshot(
         home_name=_non_empty_string(getattr(hass.config, "location_name", None))
         or "Дом",
         energy_settings=energy_settings,
+        climate_targets=climate_targets,
     )
     weather_entity = next(
         (entity for entity in entity_values if entity.domain == "weather"), None

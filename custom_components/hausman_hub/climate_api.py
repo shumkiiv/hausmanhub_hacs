@@ -372,18 +372,22 @@ class DashboardView(_ClimateView):
         # energy source for a perfectly valid local administrator session.
         if not _is_local_dashboard_request(request):
             return _forbidden(self)
-        if self._runtime() is None:
+        runtime = self._runtime()
+        if runtime is None:
             return self._unavailable()
         data = self._hass.data.get(DOMAIN, {})
         scenario_service = data.get("scenario_service")
         preferences = data.get("tablet_preferences_service")
         try:
+            target_reader = getattr(runtime, "async_dashboard_climate_targets", None)
+            climate_targets = await target_reader() if callable(target_reader) else None
             payload = await async_dashboard_snapshot(
                 self._hass,
                 scenario_service if scenario_service is not None else None,
                 preferences.energy_for_dashboard
                 if isinstance(preferences, TabletPreferencesService)
                 else None,
+                climate_targets,
             )
         except Exception:
             return self._unavailable()
@@ -445,12 +449,16 @@ class EnergyHistoryView(_ClimateView):
         data = self._hass.data.get(DOMAIN, {})
         preferences = data.get("tablet_preferences_service")
         try:
+            runtime = self._runtime()
+            target_reader = getattr(runtime, "async_dashboard_climate_targets", None)
+            climate_targets = await target_reader() if callable(target_reader) else None
             dashboard = await async_dashboard_snapshot(
                 self._hass,
                 data.get("scenario_service"),
                 preferences.energy_for_dashboard
                 if isinstance(preferences, TabletPreferencesService)
                 else None,
+                climate_targets,
             )
             payload = await async_energy_history(
                 self._hass,

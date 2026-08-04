@@ -48,6 +48,7 @@ from .climate_device_bindings import (
     apply_climate_device_bindings,
     climate_device_binding_options,
     preview_climate_device_bindings,
+    reconcile_native_climate_registry,
 )
 from .climate_equipment import build_climate_equipment_snapshot
 from .ai_assistant_evidence import ai_evidence_from_observation
@@ -287,13 +288,29 @@ class ClimateRuntime:
 
         async with self._lock:
             try:
-                self._registry = await self._registry_store.async_load()
-                self._contours = (
+                registry = await self._registry_store.async_load()
+                contours = (
                     await self._contour_store.async_load()
                     if self._contour_store is not None
                     else ContourRegistry()
                 )
-                validate_contour_bindings(self._contours, self._registry)
+                registry_changed = False
+                if self._ha_state_view is not None:
+                    try:
+                        registry, registry_changed = reconcile_native_climate_registry(
+                            registry,
+                            self._native_entity_catalog_unlocked(),
+                        )
+                    except Exception:
+                        # Endpoint recovery is a best-effort compatibility repair.
+                        # A broken or not-yet-ready HA catalog must not make an
+                        # otherwise valid persisted registry unavailable.
+                        registry_changed = False
+                validate_contour_bindings(contours, registry)
+                if registry_changed:
+                    await self._registry_store.async_save(registry)
+                self._registry = registry
+                self._contours = contours
                 now = self._safe_now()
                 loaded_protection = (
                     await self._protection_store.async_load()
@@ -323,6 +340,23 @@ class ClimateRuntime:
                 # Base HausmanHub remains available; climate endpoints fail closed and
                 # an administrator can replace a damaged local registry.
                 self.last_error = type(error).__name__
+
+    async def async_dashboard_climate_targets(
+        self,
+    ) -> dict[str, tuple[float, int]]:
+        """Return effective HausmanHub comfort goals for the shared dashboard."""
+
+        async with self._lock:
+            contour = self._contours.contour(CLIMATE_CONTOUR_ID)
+            if contour is None:
+                return {}
+            return {
+                room.room_id: (
+                    room.active_settings.target_temperature,
+                    room.active_settings.target_humidity,
+                )
+                for room in contour.rooms
+            }
 
     async def async_public_snapshot(self) -> dict[str, object]:
         """Refresh and return the private-id-free tablet contract."""

@@ -9,6 +9,12 @@ import hashlib
 from typing import Any
 
 from ..domain.hub_settings import HausmanHubSettings
+from ..domain.contours import (
+    CLIMATE_TARGET_HUMIDITY_DEFAULT,
+    CLIMATE_TARGET_TEMPERATURE_DEFAULT,
+    CLIMATE_TARGET_TEMPERATURE_MAXIMUM,
+    CLIMATE_TARGET_TEMPERATURE_MINIMUM,
+)
 
 
 DASHBOARD_CONTRACT_NAME = "universal-home"
@@ -667,6 +673,7 @@ def build_dashboard_snapshot(
     home_name: str = "Дом",
     state_revision: int | None = None,
     energy_settings: HausmanHubSettings | None = None,
+    climate_targets: Mapping[str, tuple[float, int]] | None = None,
 ) -> dict[str, object]:
     """Project one immutable, read-only universal dashboard snapshot."""
 
@@ -933,11 +940,36 @@ def build_dashboard_snapshot(
         )
         climate = _room_climate(room_entities)
         climate_state = climate.state if climate is not None else None
-        target = (
+        device_target = (
             _number(climate.attributes.get("temperature"))
             if climate is not None
             else None
         )
+        configured_target = (
+            climate_targets.get(area.area_id)
+            if climate_targets is not None
+            else None
+        )
+        if configured_target is not None:
+            target = float(configured_target[0])
+            target_humidity = int(configured_target[1])
+        elif climate_targets is not None and climate is not None:
+            target = CLIMATE_TARGET_TEMPERATURE_DEFAULT
+            target_humidity = CLIMATE_TARGET_HUMIDITY_DEFAULT
+        else:
+            target = (
+                device_target
+                if device_target is not None
+                and CLIMATE_TARGET_TEMPERATURE_MINIMUM
+                <= device_target
+                <= CLIMATE_TARGET_TEMPERATURE_MAXIMUM
+                else (
+                    CLIMATE_TARGET_TEMPERATURE_DEFAULT
+                    if climate is not None and device_target is not None
+                    else None
+                )
+            )
+            target_humidity = None
         temperature = _sensor_value(room_entities, "temperature")
         if temperature is None and climate is not None:
             temperature = _number(climate.attributes.get("current_temperature"))
@@ -963,6 +995,7 @@ def build_dashboard_snapshot(
                 "temp": temperature,
                 "humidity": humidity,
                 "targetTemp": target,
+                "targetHumidity": target_humidity,
                 "minTargetTemp": target,
                 "manualTarget": False,
                 "manualControl": False,

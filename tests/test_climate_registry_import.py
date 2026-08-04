@@ -11,6 +11,7 @@ from custom_components.hausman_hub.application.climate_native_projections import
 )
 from custom_components.hausman_hub.application.climate_native_setup import (
     ClimateHaCatalogEntry,
+    ClimateHaCatalogRoom,
     ClimateHaEntityCatalog,
     build_native_climate_setup_snapshot,
 )
@@ -38,6 +39,77 @@ from tests.test_climate_import import source_payload
 
 
 class ClimateRegistryImportTest(unittest.TestCase):
+    def test_native_entities_keep_endpoints_when_already_assigned_to_an_area(self) -> None:
+        observation = ClimateObservationSnapshot(
+            observed_at=1,
+            source_generated_at=1,
+            data_status=ClimateDataStatus.FRESH,
+            home=ClimateHomeObservation(),
+            control=ClimateControlObservation(),
+            rooms=(
+                ClimateRoomObservation(
+                    room_id="living",
+                    name="Гостиная",
+                    data_status=ClimateDataStatus.FRESH,
+                    mode=ClimateRoomMode.AUTO,
+                ),
+            ),
+            devices=(),
+        )
+        catalog = ClimateHaEntityCatalog(
+            rooms=(ClimateHaCatalogRoom(room_id="living", name="Гостиная"),),
+            entries=(
+                ClimateHaCatalogEntry(
+                    entity_id="climate.living_ac",
+                    domain="climate",
+                    state="off",
+                    device_class=None,
+                    supported_features=385,
+                    friendly_name="Кондиционер",
+                    available=True,
+                    last_updated_ms=1,
+                    room_id="living",
+                    hvac_modes=("off", "cool", "heat"),
+                ),
+                ClimateHaCatalogEntry(
+                    entity_id="sensor.living_temperature",
+                    domain="sensor",
+                    state="25.0",
+                    device_class="temperature",
+                    supported_features=0,
+                    friendly_name="Температура",
+                    available=True,
+                    last_updated_ms=1,
+                    room_id="living",
+                ),
+            ),
+        )
+        snapshot = build_native_climate_setup_snapshot(
+            ClimateRegistry(),
+            observation,
+            catalog,
+        )
+
+        result = import_managed_climate_selection(
+            snapshot,
+            room_ids=["living"],
+            source_ids=["climate.living_ac", "sensor.living_temperature"],
+            source_kinds={
+                "climate.living_ac": "air_conditioner",
+                "sensor.living_temperature": "temperature_sensor",
+            },
+        )
+
+        by_kind = {device.kind.value: device for device in result.devices}
+        self.assertEqual(
+            "climate.living_ac",
+            by_kind["air_conditioner"].endpoints[0].entity_id,
+        )
+        self.assertEqual(
+            "sensor.living_temperature",
+            by_kind["temperature_sensor"].endpoints[0].entity_id,
+        )
+
     def test_managed_selection_keeps_an_explicit_supported_device_kind(self) -> None:
         source = source_payload()
         source["devices"][0]["category"] = "floor_heating"  # type: ignore[index]

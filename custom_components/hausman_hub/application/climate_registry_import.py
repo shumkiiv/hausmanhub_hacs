@@ -281,7 +281,7 @@ def import_managed_climate_selection(
             ClimateDeviceKind.TEMPERATURE_SENSOR,
             ClimateDeviceKind.HUMIDITY_SENSOR,
         }
-        native = candidate.room_id == ""
+        native = _is_native_entity_candidate(candidate)
         registry = add_import_candidate_to_registry(
             registry,
             snapshot,
@@ -305,15 +305,38 @@ def import_managed_climate_selection(
             source_engine_binding=(
                 not passive and not native and not candidate.endpoints
             ),
-            room_id_override=room_id if native else None,
+            room_id_override=room_id if native and not candidate.room_id else None,
             registry_source_id=(
-                f"hausmanhub-native-{candidate.source_id}" if native else None
+                f"hausmanhub-native-{candidate.source_id}"
+                if native and not candidate.room_id
+                else None
             ),
             observation_entity_id=(
                 candidate.source_id if native and passive else None
             ),
         )
     return registry
+
+
+def _is_native_entity_candidate(candidate: ImportedClimateDevice) -> bool:
+    """Identify a discovery candidate backed by one real HA entity.
+
+    A native entity may already belong to an HA area.  Room assignment is
+    therefore not a valid discriminator between native discovery and the
+    legacy source engine.
+    """
+
+    domain, separator, object_id = candidate.source_id.partition(".")
+    return bool(
+        separator
+        and object_id
+        and candidate.domain
+        and domain == candidate.domain
+        and (
+            domain == "sensor"
+            or any(domain in domains for domains in _CONTROL_DOMAINS.values())
+        )
+    )
 
 
 def candidate_control_domain(kind: object) -> str | tuple[str, ...] | None:

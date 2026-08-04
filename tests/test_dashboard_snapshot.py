@@ -530,6 +530,52 @@ class DashboardSnapshotTest(unittest.TestCase):
         self.assertEqual("bad", alarm["level"])
         self.assertEqual("kitchen", alarm["roomId"])
 
+    def test_contour_target_overrides_frost_protection_setpoint(self) -> None:
+        snapshot = build_dashboard_snapshot(
+            areas=(DashboardArea("bedroom", "Спальня"),),
+            devices=(DashboardDevice("trv", "Термоголовка", "bedroom"),),
+            entities=(
+                DashboardEntity(
+                    "climate.bedroom_trv",
+                    "climate",
+                    "off",
+                    "Термоголовка",
+                    {"temperature": 7.0, "current_temperature": 24.0},
+                    "trv",
+                    "bedroom",
+                ),
+            ),
+            generated_at_ms=1,
+            local_iso="2026-08-04T13:00:00+06:00",
+            climate_targets={"bedroom": (25.0, 45)},
+        )
+
+        room = snapshot["rooms"][0]
+        self.assertEqual(25.0, room["targetTemp"])
+        self.assertEqual(45, room["targetHumidity"])
+        self.assertEqual(25.0, snapshot["summary"]["targetTemp"])
+
+    def test_invalid_raw_thermostat_target_uses_comfort_default(self) -> None:
+        snapshot = build_dashboard_snapshot(
+            areas=(DashboardArea("bedroom", "Спальня"),),
+            devices=(DashboardDevice("trv", "Термоголовка", "bedroom"),),
+            entities=(
+                DashboardEntity(
+                    "climate.bedroom_trv",
+                    "climate",
+                    "off",
+                    "Термоголовка",
+                    {"temperature": 7.0, "current_temperature": 24.0},
+                    "trv",
+                    "bedroom",
+                ),
+            ),
+            generated_at_ms=1,
+            local_iso="2026-08-04T13:00:00+06:00",
+        )
+
+        self.assertEqual(25.0, snapshot["rooms"][0]["targetTemp"])
+
     def test_inventory_canonicalizes_only_probable_virtual_duplicates(self) -> None:
         snapshot = build_dashboard_snapshot(
             areas=(DashboardArea("kids", "Детская"), DashboardArea("living", "Гостиная")),

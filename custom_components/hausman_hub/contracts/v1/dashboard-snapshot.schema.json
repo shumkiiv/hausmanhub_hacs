@@ -144,6 +144,7 @@
         "temp": { "type": ["number", "null"] },
         "humidity": { "type": ["number", "null"] },
         "targetTemp": { "type": ["number", "null"] },
+        "targetHumidity": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
         "minTargetTemp": { "type": ["number", "null"] },
         "manualTarget": { "type": "boolean" },
         "manualControl": { "type": "boolean" },

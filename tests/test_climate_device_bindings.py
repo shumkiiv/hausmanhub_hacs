@@ -9,6 +9,7 @@ from custom_components.hausman_hub.application.climate_device_bindings import (
     apply_climate_device_bindings,
     climate_device_binding_options,
     preview_climate_device_bindings,
+    reconcile_native_climate_registry,
 )
 from custom_components.hausman_hub.application.climate_native_setup import (
     ClimateHaCatalogEntry,
@@ -111,6 +112,54 @@ def catalog(*, living_available: bool = True) -> ClimateHaEntityCatalog:
 
 
 class ClimateDeviceBindingTest(unittest.TestCase):
+    def test_reconcile_restores_exact_native_endpoints_and_current_room_name(self) -> None:
+        source = ClimateRegistry(
+            rooms=(ClimateRoom(room_id="living", name="Гостиная"),),
+            devices=(
+                ClimateDevice(
+                    device_id="living_ac",
+                    name="Кондиционер",
+                    room_id="living",
+                    kind=ClimateDeviceKind.AIR_CONDITIONER,
+                    source_id="climate.living_ac",
+                    control_scope=ClimateControlScope.MANAGED,
+                    control_owner=ClimateControlOwner.CLIMATE_CORE,
+                    capabilities=(
+                        ClimateCapability.POWER,
+                        ClimateCapability.TARGET_TEMPERATURE,
+                    ),
+                    endpoints=(),
+                ),
+            ),
+        )
+        source_catalog = ClimateHaEntityCatalog(
+            rooms=(ClimateHaCatalogRoom(room_id="living", name="Спальня"),),
+            entries=(catalog(living_available=False).entries[0],),
+        )
+
+        updated, changed = reconcile_native_climate_registry(
+            source,
+            source_catalog,
+        )
+
+        self.assertTrue(changed)
+        self.assertEqual("Спальня", updated.room("living").name)
+        self.assertEqual(
+            "climate.living_ac",
+            updated.device("living_ac").endpoints[0].entity_id,
+        )
+        self.assertEqual(
+            {"device_count": 1, "bound_count": 1, "missing_count": 0, "candidate_count": 1},
+            climate_device_binding_options(updated, source_catalog)["summary"],
+        )
+
+    def test_reconcile_never_guesses_a_legacy_or_cross_room_source(self) -> None:
+        source = registry()
+        updated, changed = reconcile_native_climate_registry(source, catalog())
+
+        self.assertFalse(changed)
+        self.assertIs(updated, source)
+
     def test_options_are_explicit_room_aware_and_never_auto_select(self) -> None:
         options = climate_device_binding_options(registry(), catalog())
 
@@ -288,6 +337,42 @@ class _BindingStateView:
 
 
 class ClimateDeviceBindingRuntimeTest(unittest.IsolatedAsyncioTestCase):
+    async def test_start_persists_recovered_native_binding(self) -> None:
+        source = registry()
+        native_device = source.device("living_ac")
+        native_registry = ClimateRegistry(
+            rooms=source.rooms,
+            devices=(
+                ClimateDevice(
+                    device_id=native_device.device_id,
+                    name=native_device.name,
+                    room_id=native_device.room_id,
+                    kind=native_device.kind,
+                    source_id="climate.living_ac",
+                    control_scope=native_device.control_scope,
+                    control_owner=native_device.control_owner,
+                    capabilities=native_device.capabilities,
+                    endpoints=(),
+                ),
+                source.device("kids_temperature"),
+            ),
+        )
+        store = _MemoryRegistryStore(native_registry)
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=SafeConfiguration(mode="read-only"),
+            registry_store=store,
+            ha_state_view=_BindingStateView(catalog()),
+        )
+
+        await runtime.async_start()
+
+        self.assertEqual(1, len(store.saved))
+        self.assertEqual(
+            "climate.living_ac",
+            store.value.device("living_ac").endpoints[0].entity_id,
+        )
+
     async def test_runtime_saves_only_after_preview_and_without_executor(self) -> None:
         store = _MemoryRegistryStore(registry())
         runtime = ClimateRuntime(
