@@ -117,7 +117,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     scenario_store = HomeAssistantScenarioStore(hass, entry.entry_id)
     scenario_catalog = await async_build_scenario_catalog(hass)
-    scenario_service = ScenarioService(hass, scenario_store, scenario_catalog)
+    scenario_service = ScenarioService(
+        hass,
+        scenario_store,
+        scenario_catalog,
+        catalog_loader=lambda: async_build_scenario_catalog(hass),
+    )
     await scenario_service.async_load()
     scenario_executor = ScenarioExecutor(
         hass, scenario_catalog, scenario_service.async_run_scenario

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from .scenarios import (
     ScenarioCatalog,
@@ -73,11 +73,13 @@ class ScenarioService:
         store: object,
         catalog: ScenarioCatalog,
         executor: object | None = None,
+        catalog_loader: Callable[[], Awaitable[ScenarioCatalog]] | None = None,
     ):
         self._hass = hass
         self._store = store
         self._catalog = catalog
         self._executor = executor
+        self._catalog_loader = catalog_loader
         self._registry: ScenarioRegistry | None = None
         self._lock = asyncio.Lock()
 
@@ -118,6 +120,20 @@ class ScenarioService:
 
         self._executor = executor
 
+    async def async_refresh_catalog(self) -> ScenarioCatalog:
+        """Refresh controllable HA entities without reloading the integration."""
+
+        if self._catalog_loader is None:
+            return self._catalog
+        catalog = await self._catalog_loader()
+        if not isinstance(catalog, ScenarioCatalog):
+            raise ScenarioServiceError("Catalog refresh returned invalid data", status=500)
+        self._catalog = catalog
+        replace_catalog = getattr(self._executor, "replace_catalog", None)
+        if callable(replace_catalog):
+            replace_catalog(catalog)
+        return catalog
+
     async def async_list_scenarios(self) -> tuple[Scenario, ...]:
         """Return all stored scenarios ordered by title."""
 
@@ -155,6 +171,7 @@ class ScenarioService:
     ) -> Scenario:
         """Create or replace a scenario atomically."""
 
+        await self.async_refresh_catalog()
         async with self._lock:
             registry = self._ensure_loaded()
             raw_definition = payload.get("definition")
@@ -246,6 +263,7 @@ class ScenarioService:
     ) -> dict[str, Any]:
         """Validate a scenario definition and return a dry-run trace."""
 
+        await self.async_refresh_catalog()
         registry = self._ensure_loaded()
         raw_definition = payload.get("definition", payload)
         try:
@@ -314,6 +332,7 @@ class ScenarioService:
     ) -> dict[str, Any]:
         """Execute a scenario via the configured executor."""
 
+        await self.async_refresh_catalog()
         scenario = await self.async_get_scenario(scenario_id)
         if not scenario.enabled:
             raise ScenarioServiceError(
@@ -338,6 +357,7 @@ class ScenarioService:
     ) -> dict[str, Any]:
         """Execute one catalog action through the shared strict executor."""
 
+        await self.async_refresh_catalog()
         if self._executor is None:
             raise ScenarioServiceError("Executor not configured", status=500)
         return await self._executor.async_execute_device_action(
