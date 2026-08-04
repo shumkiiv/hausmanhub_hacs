@@ -29,7 +29,7 @@
       });
     </script>
     <script type="module">
-      import "../../custom_components/hausman_hub/frontend/hausman-hub-panel.js?v=1.52.17";
+      import "../../custom_components/hausman_hub/frontend/hausman-hub-panel.js?v=1.52.18";
       const params = new URLSearchParams(window.location.search);
       const panel = document.getElementById("panel");
       const theme = params.get("theme") === "dark" ? "dark" : "light";
@@ -38,7 +38,7 @@
       document.documentElement.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       document.body.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       panel._data = {
-        integration_version: "1.52.17",
+        integration_version: "1.52.18",
         readiness: { status: "ready", bridge_mode: "native", reasons: [] },
         snapshot: {
           rooms: [
@@ -214,6 +214,22 @@
           }
           if (method === "GET" && path === "hausman_hub/v1/dashboard") {
             return cloneHarnessValue(panel._homeDashboard);
+          }
+          if (method === "GET" && path.startsWith("hausman_hub/v1/energy/history?")) {
+            const at = (index) => new Date(Date.now() - (23 - index) * 3600000).toISOString();
+            const points = (base, wave, slope = 1.8) => Array.from({ length: 24 }, (_, index) => ({
+              at: at(index),
+              value: Math.max(0, base + Math.sin(index * .72) * wave + index * slope),
+            }));
+            return {
+              contract: { name: "hausman-hub-energy-history", version: 1 },
+              series: [
+                { sourceId: "breaker-232", deviceId: "breaker-232", scope: "device", metric: "power", unit: "W", points: points(6, 3) },
+                { sourceId: "breaker-233", deviceId: "breaker-233", scope: "device", metric: "power", unit: "W", points: points(180, 54) },
+                { sourceId: "breaker-232", deviceId: "breaker-232", scope: "device", metric: "energy", unit: "kWh", points: points(.012, .004, .001) },
+                { sourceId: "breaker-233", deviceId: "breaker-233", scope: "device", metric: "energy", unit: "kWh", points: points(.18, .06, .006) },
+              ],
+            };
           }
           if (method === "GET" && path === "hausman_hub/v1/admin/scenarios") {
             return cloneHarnessValue(harnessScenarioList);
@@ -430,7 +446,7 @@
       }
       panel._render();
       panel.shadowRoot.querySelector("link").href =
-        "../../custom_components/hausman_hub/frontend/hausman-hub-panel.css?v=1.52.17";
+        "../../custom_components/hausman_hub/frontend/hausman-hub-panel.css?v=1.52.18";
       if (screen === "assistant") {
         panel._assistant = {
           loaded: true,

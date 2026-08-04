@@ -34,6 +34,7 @@ AREA_BINDING_JS = PANEL_JS.with_name("hausman-hub-area-binding.js")
 FIRST_RUN_DRAFT_JS = PANEL_JS.with_name("hausman-hub-first-run-draft.js")
 NAVIGATION_JS = PANEL_JS.with_name("hausman-hub-navigation.js")
 ENERGY_JS = PANEL_JS.with_name("hausman-hub-energy.js")
+ENERGY_CHART_JS = PANEL_JS.with_name("hausman-hub-energy-chart.js")
 WEATHER_SOURCES_JS = PANEL_JS.with_name("hausman-hub-weather-sources.js")
 MEDIA_DEVICE_JS = PANEL_JS.with_name("hausman-hub-media-device.js")
 DEVICE_CARD_JS = PANEL_JS.with_name("hausman-hub-device-card.js")
@@ -551,7 +552,11 @@ def panel_script(
         {{ filename: {str(NAVIGATION_JS)!r} }}
       );
       vm.runInThisContext(
-        fs.readFileSync({str(ENERGY_JS)!r}, "utf8").replace(/export /g, ""),
+        fs.readFileSync({str(ENERGY_CHART_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(ENERGY_CHART_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(ENERGY_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(ENERGY_JS)!r} }}
       );
       vm.runInThisContext(
@@ -1174,6 +1179,34 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         if (!poweredOffStatus || !String(poweredOffStatus.className).includes("is-powered-off")) {
           throw new Error("powered-off energy source must use a neutral status tone");
         }
+        panel._energyHistory = { selection: [
+          { start: "2026-08-04T12:00:00+06:00", mean: 320 },
+          { start: "2026-08-04T13:00:00+06:00", mean: 540 },
+          { start: "2026-08-04T14:00:00+06:00", mean: 410 },
+        ] };
+        panel._renderEnergySection(panel._shell.homeSections.energy);
+        const chartMetrics = findAll(panel._shell.homeSections.energy, (node) =>
+          String(node.className).split(" ").includes("energy-chart-metric"));
+        if (chartMetrics.length !== 4 || !chartMetrics.some((node) => textOf(node).includes("Среднее"))
+            || !chartMetrics.some((node) => textOf(node).includes("Пик"))) {
+          throw new Error("energy chart must expose readable summary metrics: "
+            + chartMetrics.length + " / " + textOf(panel._shell.homeSections.energy));
+        }
+        panel._energyDraft.useAllDevices = false;
+        panel._energyDraft.selectedDeviceIds = [];
+        panel._renderEnergySection(panel._shell.homeSections.energy);
+        const sourceCheckbox = findAll(panel._shell.homeSections.energy, (node) =>
+          node.tagName === "INPUT" && node.type === "checkbox")[0];
+        const initiallyDisabledSave = findAll(panel._shell.homeSections.energy, (node) =>
+          node.tagName === "BUTTON" && node.textContent === "Сохранить настройки")[0];
+        if (!sourceCheckbox || !initiallyDisabledSave || !initiallyDisabledSave.disabled) {
+          throw new Error("selective source state is incomplete");
+        }
+        sourceCheckbox.checked = true;
+        sourceCheckbox.fire("change");
+        if (initiallyDisabledSave.disabled) {
+          throw new Error("energy save must become available immediately after source selection");
+        }
         const both = findAll(panel._shell.homeSections.energy, (node) =>
           node.tagName === "BUTTON" && node.textContent === "Вт + А")[0];
         both.fire("click");
@@ -1182,7 +1215,8 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         save.fire("click");
         await tick(10);
         const post = calls.find((call) => call.method === "PUT" && call.path === "hausman_hub/v1/energy-settings");
-        if (!post || post.payload.expectedRevision !== 0 || post.payload.settings.displayUnits !== "both" || post.payload.settings.useAllDevices !== true) {
+        if (!post || post.payload.expectedRevision !== 0 || post.payload.settings.displayUnits !== "both" || post.payload.settings.useAllDevices !== false
+            || post.payload.settings.selectedDeviceIds.length !== 1) {
           throw new Error("energy settings post mismatch: " + JSON.stringify(post));
         }
         panel._shell.tabs.energy.fire("click");
@@ -3194,7 +3228,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.17")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.18")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

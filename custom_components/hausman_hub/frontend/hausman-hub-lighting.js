@@ -1,4 +1,4 @@
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.17";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.18";
 
 const LIGHTING_EXCLUSIONS = [
   "ambilight", "глазок", "домофон", "пульт", "очистител", "аквариум", "aquarium",

@@ -1,3 +1,5 @@
+import { renderEnergyHistoryChart } from "./hausman-hub-energy-chart.js?v=1.52.18";
+
 const number = (value, digits = 1) => Number.isFinite(Number(value))
   ? new Intl.NumberFormat("ru-RU", { maximumFractionDigits: digits }).format(Number(value))
   : "—";
@@ -117,85 +119,10 @@ export function renderEnergyOverviewCard(panel, container, deps) {
   container.appendChild(card);
 }
 
-function renderEnergyHistoryChart(panel, source, deps, retry) {
-  const { el, setAttr } = deps;
-  const wrap = el("div", "energy-history");
-  const metric = panel._energyHistoryMetric || "power";
-  const store = metric === "energy" ? panel._energyConsumptionHistory : panel._energyHistory;
-  const history = store && store[source.id];
-  const period = panel._energyHistoryPeriod || "day";
-  const powerLabels = {
-    day: ["за последние 24 часа", "Почасовая средняя мощность · последние 24 часа"],
-    week: ["за последние 7 дней", "Почасовая средняя мощность · последние 7 дней"],
-    month: ["за последний месяц", "Средняя мощность по дням · последний месяц"],
-    year: ["за последний год", "Средняя мощность по дням · последний год"],
-  };
-  const energyLabels = {
-    day: ["за последние 24 часа", "Расход энергии по часам · последние 24 часа"],
-    week: ["за последние 7 дней", "Расход энергии по часам · последние 7 дней"],
-    month: ["за последний месяц", "Расход энергии по дням · последний месяц"],
-    year: ["за последний год", "Расход энергии по дням · последний год"],
-  };
-  const labels = metric === "energy" ? energyLabels : powerLabels;
-  const unit = metric === "energy" ? "кВт·ч" : "Вт";
-  const values = Array.isArray(history) ? history.map((point) => Number(point.mean)).filter(Number.isFinite) : [];
-  if (!values.length) {
-    const empty = el("div", "energy-history-empty");
-    empty.appendChild(el("strong", null, panel._energyHistoryError ? "Не удалось получить историю" : `История ${metric === "energy" ? "расхода" : "мощности"} пока недоступна`));
-    empty.appendChild(el("span", null, panel._energyHistoryError
-      ? "Проверьте Recorder Home Assistant и повторите загрузку."
-      : "Текущие показания продолжают обновляться."));
-    const button = el("button", "secondary", "Обновить");
-    button.type = "button"; button.disabled = panel._energyHistoryLoading; button.addEventListener("click", retry);
-    empty.appendChild(button); wrap.appendChild(empty); return wrap;
-  }
-  const max = Math.max(...values);
-  const min = Math.min(...values);
-  const span = Math.max(max - min, max * .12, 1);
-  const bucketSize = Math.max(1, Math.ceil(values.length / 36));
-  const visible = [];
-  for (let index = 0; index < values.length; index += bucketSize) {
-    const bucket = values.slice(index, index + bucketSize);
-    visible.push(bucket.reduce((sum, value) => sum + value, 0) / bucket.length);
-  }
-  const chart = el("canvas", "energy-history-canvas");
-  chart.width = 960; chart.height = 220;
-  setAttr(chart, "role", "img");
-  setAttr(chart, "aria-label", `График ${metric === "energy" ? "расхода энергии" : "мощности"} ${source.name} ${labels[period][0]}`);
-  setAttr(chart, "title", `${number(values[values.length - 1], metric === "energy" ? 3 : 1)} ${unit} · ${labels[period][1]}`);
-  if (typeof chart.getContext === "function") {
-    const context = chart.getContext("2d");
-    if (context) {
-      const width = chart.width;
-      const height = chart.height;
-      const pad = { left: 20, right: 20, top: 20, bottom: 28 };
-      context.strokeStyle = "rgba(132, 151, 177, .18)"; context.lineWidth = 1;
-      for (let row = 0; row < 4; row += 1) {
-        const y = pad.top + ((height - pad.top - pad.bottom) / 3) * row;
-        context.beginPath(); context.moveTo(pad.left, y); context.lineTo(width - pad.right, y); context.stroke();
-      }
-      const points = visible.map((value, index) => ({
-        x: pad.left + (index / Math.max(visible.length - 1, 1)) * (width - pad.left - pad.right),
-        y: pad.top + (1 - ((value - min) / span)) * (height - pad.top - pad.bottom),
-      }));
-      const fill = context.createLinearGradient(0, pad.top, 0, height - pad.bottom);
-      fill.addColorStop(0, "rgba(79, 140, 255, .28)"); fill.addColorStop(1, "rgba(79, 140, 255, 0)");
-      context.beginPath();
-      points.forEach((point, index) => index ? context.lineTo(point.x, point.y) : context.moveTo(point.x, point.y));
-      context.lineTo(points[points.length - 1].x, height - pad.bottom); context.lineTo(points[0].x, height - pad.bottom);
-      context.closePath(); context.fillStyle = fill; context.fill(); context.beginPath();
-      points.forEach((point, index) => index ? context.lineTo(point.x, point.y) : context.moveTo(point.x, point.y));
-      context.strokeStyle = "#4F8CFF"; context.lineWidth = 5; context.lineJoin = "round"; context.lineCap = "round"; context.stroke();
-    }
-  }
-  wrap.appendChild(chart); wrap.appendChild(el("div", "energy-chart-caption", labels[period][1]));
-  return wrap;
-}
-
 function energyPeriodButtons(panel, container, deps) {
   const { el, setAttr } = deps;
   const periods = el("div", "energy-history-controls");
-  const metrics = el("div", "energy-periods");
+  const metrics = el("div", "energy-periods energy-history-metrics");
   [["power", "Мощность"], ["energy", "Расход"]].forEach(([value, label]) => {
     const selected = (panel._energyHistoryMetric || "power") === value;
     const button = el("button", selected ? "is-selected" : "", label);
@@ -204,7 +131,7 @@ function energyPeriodButtons(panel, container, deps) {
     metrics.appendChild(button);
   });
   periods.appendChild(metrics);
-  const range = el("div", "energy-periods");
+  const range = el("div", "energy-periods energy-history-ranges");
   [["day", "День"], ["week", "Неделя"], ["month", "Месяц"], ["year", "Год"]]
     .forEach(([value, label]) => {
       const selected = (panel._energyHistoryPeriod || "day") === value;
@@ -480,6 +407,7 @@ function compactEnergySettings(panel, container, energy, deps) {
       const selected = new Set(draft.selectedDeviceIds);
       if (checkbox.checked) selected.add(source.id); else selected.delete(source.id);
       draft.selectedDeviceIds = [...selected];
+      save.disabled = panel._energySettingsSaving || (!draft.useAllDevices && !draft.selectedDeviceIds.length);
     });
     label.appendChild(checkbox);
     const copy = el("span");
@@ -491,7 +419,7 @@ function compactEnergySettings(panel, container, energy, deps) {
   card.appendChild(sources);
   const save = el("button", "energy-settings-save", "Сохранить настройки");
   save.type = "button";
-  save.disabled = panel._busy || (!draft.useAllDevices && !draft.selectedDeviceIds.length);
+  save.disabled = panel._energySettingsSaving || (!draft.useAllDevices && !draft.selectedDeviceIds.length);
   save.addEventListener("click", () => panel._saveEnergySettings());
   card.appendChild(save);
   return card;
@@ -625,7 +553,7 @@ export async function loadEnergyHistory(panel) {
         }));
       });
     const aggregateSelection = (target) => {
-      if (target.selection) return;
+      delete target.selection;
       const selectedIds = new Set(selectedSources(energy).map((source) => source.id));
       const values = new Map();
       Object.entries(target).forEach(([sourceId, points]) => {

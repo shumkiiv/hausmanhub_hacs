@@ -1,0 +1,50 @@
+.energy-history-card { min-height:318px; padding:12px; }
+.energy-history-head { min-height:44px; }
+.energy-periods { display:flex; align-items:center; gap:6px; }
+.energy-history-controls { display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:8px; min-width:0; }
+.energy-periods button { min-width:68px; min-height:34px; margin:0; padding:6px 10px; color:var(--hmh-text-dim); font-size:13px;
+  line-height:1.15; white-space:nowrap; border:0; border-radius:10px; background:transparent; box-shadow:none; }
+.energy-history-metrics button { min-width:96px; }
+.energy-periods button.is-selected { color:var(--hmh-text); border:1px solid var(--hmh-accent); background:var(--hmh-raised); }
+.energy-periods button:disabled { cursor:wait; opacity:.68; }
+.energy-history-layout { display:grid; grid-template-columns:minmax(0,1fr) 275px; gap:10px; min-height:240px; margin-top:8px; }
+.energy-history { position:relative; min-width:0; min-height:0; margin:0; padding:10px 12px; overflow:hidden;
+  border:1px solid var(--hmh-border); border-radius:14px; background:var(--hmh-raised); }
+.energy-chart-metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:6px; margin-bottom:6px; }
+.energy-chart-metric { display:block; min-width:0; padding:7px 9px; border-radius:10px; background:var(--hmh-surface); }
+.energy-chart-metric small, .energy-chart-metric strong { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.energy-chart-metric small { color:var(--hmh-text-dim); font-size:10px; text-transform:uppercase; }
+.energy-chart-metric strong { margin-top:3px; color:var(--hmh-text); font-size:14px; }
+.energy-chart-plot { position:relative; min-height:154px; }
+.energy-history-canvas { display:block; width:100%; height:154px; }
+.energy-history-empty { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:8px;
+  padding:24px; text-align:center; color:var(--hmh-text-dim); font-size:14px; }
+.energy-history-empty strong { color:var(--hmh-text); font-size:17px; }
+.energy-history-empty span { max-width:520px; line-height:1.4; }
+.energy-history-empty button { min-height:34px; margin:2px 0 0; padding:6px 14px; }
+.energy-chart-caption { position:absolute; right:72px; top:5px; color:var(--hmh-text-dim); font-size:10px; text-align:right; }
+.energy-current-sources { display:flex; flex-direction:column; gap:8px; min-width:0; padding:12px; border:1px solid var(--hmh-border);
+  border-radius:14px; background:var(--hmh-raised); }
+.energy-current-sources h4 { margin:0; font-size:17px; }
+.energy-current-source { display:flex; flex:1 1 0; align-items:center; justify-content:space-between; gap:10px; min-height:52px; margin:0;
+  padding:8px 10px; text-align:left; color:var(--hmh-text); border:0; border-radius:11px; background:var(--hmh-surface); box-shadow:none; }
+.energy-current-source > span, .energy-current-source strong, .energy-current-source small { display:block; min-width:0; }
+.energy-current-source > span { overflow:hidden; }
+.energy-current-source strong, .energy-current-source small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.energy-current-source strong { font-size:14px; }
+.energy-current-source small { margin-top:3px; color:var(--hmh-text-dim); font-size:11px; }
+.energy-current-source b { flex:0 0 auto; color:var(--hmh-accent); font-size:14px; }
+.energy-sources-empty { display:grid; flex:1 1 auto; place-items:center; color:var(--hmh-text-dim); font-size:14px; }
+
+@media (max-width:900px) {
+  .energy-history-layout { grid-template-columns:1fr; height:auto; }
+  .energy-history { min-height:236px; }
+  .energy-current-sources { min-height:120px; }
+}
+@media (max-width:620px) {
+  .energy-periods { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); width:100%; }
+  .energy-periods button { width:auto; }
+  .energy-history-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .energy-history-metrics button { min-width:0; }
+  .energy-chart-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}

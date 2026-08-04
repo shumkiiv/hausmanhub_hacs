@@ -1,4 +1,4 @@
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.17";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.18";
 
 function roomNormalized(value) {
   return String(value || "").trim().toLocaleLowerCase("ru");

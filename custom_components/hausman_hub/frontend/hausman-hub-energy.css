@@ -38,37 +38,6 @@
 .energy-metric.is-accent > strong { color:var(--hmh-accent); }
 .energy-metric.is-success > strong { color:#41D17D; }
 
-.energy-history-card { min-height:244px; padding:12px; }
-.energy-history-head { min-height:44px; }
-.energy-periods { display:flex; align-items:center; gap:6px; }
-.energy-history-controls { display:flex; align-items:center; gap:8px; }
-.energy-periods button { width:74px; min-height:30px; margin:0; padding:5px 8px; color:var(--hmh-text-dim); font-size:13px;
-  border:0; border-radius:10px; background:transparent; box-shadow:none; }
-.energy-periods button.is-selected { color:var(--hmh-text); border:1px solid var(--hmh-accent); background:var(--hmh-raised); }
-.energy-periods button:disabled { cursor:wait; opacity:.68; }
-.energy-history-layout { display:grid; grid-template-columns:minmax(0,1fr) 275px; gap:10px; height:172px; margin-top:8px; }
-.energy-history { position:relative; min-width:0; min-height:0; margin:0; padding:10px 16px 28px; overflow:hidden;
-  border:1px solid var(--hmh-border); border-radius:14px; background:var(--hmh-raised); }
-.energy-history-canvas { display:block; width:100%; height:100%; min-height:132px; }
-.energy-history-empty { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:8px;
-  padding:24px; text-align:center; color:var(--hmh-text-dim); font-size:14px; }
-.energy-history-empty strong { color:var(--hmh-text); font-size:17px; }
-.energy-history-empty span { max-width:520px; line-height:1.4; }
-.energy-history-empty button { min-height:34px; margin:2px 0 0; padding:6px 14px; }
-.energy-chart-caption { position:absolute; right:24px; bottom:7px; left:24px; color:var(--hmh-text-dim); font-size:11px; text-align:center; }
-.energy-current-sources { display:flex; flex-direction:column; gap:8px; min-width:0; padding:12px; border:1px solid var(--hmh-border);
-  border-radius:14px; background:var(--hmh-raised); }
-.energy-current-sources h4 { margin:0; font-size:17px; }
-.energy-current-source { display:flex; flex:1 1 0; align-items:center; justify-content:space-between; gap:10px; min-height:52px; margin:0;
-  padding:8px 10px; text-align:left; color:var(--hmh-text); border:0; border-radius:11px; background:var(--hmh-surface); box-shadow:none; }
-.energy-current-source > span, .energy-current-source strong, .energy-current-source small { display:block; min-width:0; }
-.energy-current-source > span { overflow:hidden; }
-.energy-current-source strong, .energy-current-source small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.energy-current-source strong { font-size:14px; }
-.energy-current-source small { margin-top:3px; color:var(--hmh-text-dim); font-size:11px; }
-.energy-current-source b { flex:0 0 auto; color:var(--hmh-accent); font-size:14px; }
-.energy-sources-empty { display:grid; flex:1 1 auto; place-items:center; color:var(--hmh-text-dim); font-size:14px; }
-
 .energy-devices-panel { min-height:270px; padding:12px; }
 .energy-devices-toolbar { min-height:44px; }
 .energy-device-controls { display:flex; align-items:center; gap:6px; }
@@ -194,9 +163,6 @@
 }
 @media (max-width:900px) {
   .energy-metric-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
-  .energy-history-layout { grid-template-columns:1fr; height:auto; }
-  .energy-history { min-height:180px; }
-  .energy-current-sources { min-height:120px; }
   .energy-sidebar { grid-template-columns:1fr; }
   .energy-compact-settings { grid-column:auto; }
   .energy-devices-toolbar { align-items:flex-start; flex-direction:column; }
@@ -213,8 +179,6 @@
 }
 @media (max-width:620px) {
   .energy-card-head { align-items:flex-start; flex-direction:column; }
-  .energy-periods { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); width:100%; }
-  .energy-periods button { width:auto; }
   .energy-device-card { grid-template-columns:1fr; }
   .energy-device-card-open { grid-template-columns:52px minmax(0,1fr) 18px;
     grid-template-areas:"visual identity chevron" "visual live chevron"; gap:7px 10px; }
