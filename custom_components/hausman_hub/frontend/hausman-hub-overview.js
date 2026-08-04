@@ -1,3 +1,5 @@
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.15";
+
 const CLIMATE_DOMAINS = new Set(["climate", "humidifier", "fan"]);
 
 function validNumbers(values) {
@@ -111,7 +113,7 @@ export function renderOverviewHero(panel, container, readiness, deps) {
   rooms.slice(0, 6).forEach((room) => {
     const button = el("button");
     button.type = "button";
-    button.appendChild(svgIcon("rooms"));
+    button.appendChild(roomSvgIcon(roomIconName(room)));
     button.appendChild(el("span", null, room.name));
     setAttr(button, "aria-label", `Открыть комнату ${room.name}`);
     button.addEventListener("click", () => deps.openRoom(room));
