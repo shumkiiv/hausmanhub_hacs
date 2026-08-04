@@ -1,4 +1,5 @@
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.23";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.24";
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.24";
 
 function roomNormalized(value) {
   return String(value || "").trim().toLocaleLowerCase("ru");
@@ -78,7 +79,7 @@ function openRoomOverview(panel, container, room, devices, deps) {
   sheet.appendChild(close);
   const head = el("div", "rooms-detail-head");
   const icon = el("span", "rooms-detail-icon");
-  icon.appendChild(svgIcon("rooms"));
+  icon.appendChild(roomSvgIcon(roomIconName(room)));
   head.appendChild(icon);
   const copy = el("div");
   copy.appendChild(el("span", "rooms-detail-eyebrow", "КОМНАТА"));
@@ -186,7 +187,7 @@ function renderRoomCards(panel, container, rooms, grouped, deps) {
       card.type = "button";
       setAttr(card, "aria-label", `Открыть комнату ${room.name}`);
       const icon = el("span", "rooms-canon-card-icon");
-      icon.appendChild(svgIcon("rooms"));
+      icon.appendChild(roomSvgIcon(roomIconName(room)));
       card.appendChild(icon);
       const copy = el("span", "rooms-canon-card-copy");
       copy.appendChild(el("strong", null, room.name));

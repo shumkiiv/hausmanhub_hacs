@@ -1,34 +1,35 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.52.23";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.52.23";
-import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.52.23";
-import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.52.23";
-import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.52.23";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.52.23";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.52.23";
-import { closeFirstRunAreaCreator, createFirstRunArea, openFirstRunAreaCreator, renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.52.23";
-import { createKioskButton, createKioskDock, handleKioskPointerUp, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, resolveIntercomQuickAction, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.52.23";
-import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.52.23";
-import { applyHomeSignalSelection, AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, homeEnvironmentSaveError, homeEnvironmentSourcePayload, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.52.23";
-import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.52.23";
-import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.52.23";
-import { renderClimateOverview } from "./hausman-hub-climate-overview.js?v=1.52.23";
-import { renderLightingOverview } from "./hausman-hub-lighting.js?v=1.52.23";
-import { renderRoomsOverview } from "./hausman-hub-rooms.js?v=1.52.23";
-import { renderMediaOverview } from "./hausman-hub-media-overview.js?v=1.52.23";
-import { renderSecurityOverview } from "./hausman-hub-security-overview.js?v=1.52.23";
-import { renderDevicesOverview } from "./hausman-hub-devices-overview.js?v=1.52.23";
-import { buildDiagnosticChecks, diagnosticSummaryText, renderDiagnosticDetails } from "./hausman-hub-diagnostics.js?v=1.52.23";
-import { renderRolloutReadiness } from "./hausman-hub-rollout.js?v=1.52.23";
-import { renderOverviewContent, renderOverviewHero } from "./hausman-hub-overview.js?v=1.52.23";
-import { renderPhysicalDeviceCard } from "./hausman-hub-device-card.js?v=1.52.23";
-import { recordTechnicalEvent as log, renderTechnicalLogCard } from "./hausman-hub-technical-log.js?v=1.52.23";
-import { applyFeedback } from "./hausman-hub-feedback.js?v=1.52.23";
-import { renderKiosk } from "./hausman-hub-kiosk.js?v=1.52.23";
-import { captureRoomValidation, clearFirstRunDraft, persistFirstRunDraft, reconcileRoomValidation, restoreFirstRunDraft, resumeFirstRunDraft } from "./hausman-hub-first-run-draft.js?v=1.52.23";
-import { applyTabletProfile, isIntercomQuickAccessVisible, renderAppearanceSettings, renderIntercomSettings, syncIntercomQuickAccess } from "./hausman-hub-settings-profile.js?v=1.52.23";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.52.24";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.52.24";
+import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.52.24";
+import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.52.24";
+import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.52.24";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.52.24";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.52.24";
+import { closeFirstRunAreaCreator, createFirstRunArea, openFirstRunAreaCreator, renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.52.24";
+import { createKioskButton, createKioskDock, handleKioskPointerUp, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, resolveIntercomQuickAction, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.52.24";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.52.24";
+import { applyHomeSignalSelection, AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, homeEnvironmentSaveError, homeEnvironmentSourcePayload, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.52.24";
+import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.52.24";
+import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.52.24";
+import { renderClimateOverview } from "./hausman-hub-climate-overview.js?v=1.52.24";
+import { renderLightingOverview } from "./hausman-hub-lighting.js?v=1.52.24";
+import { renderRoomsOverview } from "./hausman-hub-rooms.js?v=1.52.24";
+import { renderMediaOverview } from "./hausman-hub-media-overview.js?v=1.52.24";
+import { renderSecurityOverview } from "./hausman-hub-security-overview.js?v=1.52.24";
+import { renderDevicesOverview } from "./hausman-hub-devices-overview.js?v=1.52.24";
+import { buildDiagnosticChecks, diagnosticSummaryText, renderDiagnosticDetails } from "./hausman-hub-diagnostics.js?v=1.52.24";
+import { renderRolloutReadiness } from "./hausman-hub-rollout.js?v=1.52.24";
+import { renderOverviewContent, renderOverviewHero } from "./hausman-hub-overview.js?v=1.52.24";
+import { renderPhysicalDeviceCard } from "./hausman-hub-device-card.js?v=1.52.24";
+import { recordTechnicalEvent as log, renderTechnicalLogCard } from "./hausman-hub-technical-log.js?v=1.52.24";
+import { applyFeedback } from "./hausman-hub-feedback.js?v=1.52.24";
+import { renderKiosk } from "./hausman-hub-kiosk.js?v=1.52.24";
+import { captureRoomValidation, clearFirstRunDraft, persistFirstRunDraft, reconcileRoomValidation, restoreFirstRunDraft, resumeFirstRunDraft } from "./hausman-hub-first-run-draft.js?v=1.52.24";
+import { applyTabletProfile, isIntercomQuickAccessVisible, renderAppearanceSettings, renderIntercomSettings, syncIntercomQuickAccess } from "./hausman-hub-settings-profile.js?v=1.52.24";
+import { renderSettingsRooms, saveRoomType } from "./hausman-hub-settings-rooms.js?v=1.52.24";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
-const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css?v=1.52.23";
+const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css?v=1.52.24";
 const DASHBOARD_API = "hausman_hub/v1/dashboard";
 const DEVICE_ACTIONS_API = "hausman_hub/v1/device-actions";
 const PANEL_TABLET_PROFILE_API = "hausman_hub/v1/tablet-profile";
@@ -305,6 +306,7 @@ class HausmanHubPanel extends HTMLElement {
     this._tabletProfile = null;
     this._intercomDraft = { showQuickAccess: false, deviceId: null };
     this._intercomDirty = false;
+    this._roomTypeSaving = new Set();
     this._scenarioEditor = null;
     this._settingsData = { connection_mode: "home_assistant", smart_home_center_url: "", home_assistant_url: "" };
     this._settingsBaseline = { ...this._settingsData };
@@ -5800,61 +5802,18 @@ class HausmanHubPanel extends HTMLElement {
   }
 
   _renderSettingsRooms(container) {
-    const setup = this._settings.setup || {};
-    const rooms = Array.isArray(setup.rooms) ? setup.rooms : [];
-    const intro = el("section", "card settings-room-summary");
-    intro.appendChild(svgIcon("rooms", "settings-room-summary-icon"));
-    const copy = el("div", "settings-room-summary-copy");
-    copy.appendChild(el("h3", null, "Комнаты и устройства"));
-    copy.appendChild(el("p", "muted", "Сначала проверьте привязку физических устройств к комнатам Home Assistant. Затем выберите, какие из них измеряют климат и выполняют команды."));
-    intro.appendChild(copy);
-    const edit = el("button", null, setup.status === "not_configured" ? "Начать настройку" : "Настроить комнаты");
-    edit.disabled = this._busy || (setup.status !== "not_configured" && setup.editing_allowed !== true);
-    edit.addEventListener("click", () => this._openWizard(setup));
-    intro.appendChild(edit);
-    container.appendChild(intro);
-    renderDeviceBindingCallout(this, container, { el, svgIcon });
-    renderDeviceInventory(this, container, { el, normalizedText });
-
-    const roomGrid = el("div", "settings-room-grid");
-    rooms.forEach((room) => {
-      const roomCard = el("article", "settings-room-card");
-      const head = el("div", "settings-room-card-head");
-      head.appendChild(svgIcon("home"));
-      const roomCopy = el("div");
-      roomCopy.appendChild(el("strong", null, room.name || room.id || "Комната"));
-      const devices = Array.isArray(room.devices) ? room.devices : [];
-      roomCopy.appendChild(el("small", null, `${devices.length} ${devices.length === 1 ? "устройство" : "устройств"}`));
-      head.appendChild(roomCopy);
-      roomCard.appendChild(head);
-      const roles = Array.from(new Set((room.devices || []).map((device) => device.type).filter(Boolean)));
-      roomCard.appendChild(el("p", "muted", roles.length
-        ? `Доступно для управления: ${roles.length} ${roles.length === 1 ? "тип устройства" : "типов устройств"}.`
-        : "Исполнительные устройства пока не выбраны."));
-      roomGrid.appendChild(roomCard);
+    renderSettingsRooms(this, container, {
+      el,
+      normalizedText,
+      renderDeviceBindingCallout,
+      renderDeviceInventory,
+      roomSetupPanes: ROOM_SETUP_PANES,
+      svgIcon,
     });
-    if (!rooms.length) {
-      const empty = el("div", "card settings-empty-state");
-      empty.appendChild(el("strong", null, "Комнаты ещё не настроены"));
-      empty.appendChild(el("p", "muted", "Мастер сначала покажет комнаты Home Assistant и устройства без комнаты, чтобы их можно было быстро разобрать."));
-      roomGrid.appendChild(empty);
-    }
-    container.appendChild(roomGrid);
+  }
 
-    const guide = el("section", "card settings-guide-card");
-    guide.appendChild(el("h3", null, "Как устроена настройка комнаты"));
-    const steps = el("div", "settings-guide-steps");
-    ROOM_SETUP_PANES.forEach((pane, index) => {
-      const step = el("div", "settings-guide-step");
-      step.appendChild(el("span", null, String(index + 1)));
-      const stepCopy = el("div");
-      stepCopy.appendChild(el("strong", null, pane.label));
-      stepCopy.appendChild(el("small", null, pane.description));
-      step.appendChild(stepCopy);
-      steps.appendChild(step);
-    });
-    guide.appendChild(steps);
-    container.appendChild(guide);
+  async _saveRoomType(room, roomType) {
+    await saveRoomType(this, room, roomType, DASHBOARD_API);
   }
 
   _syncSettingsDirty() {

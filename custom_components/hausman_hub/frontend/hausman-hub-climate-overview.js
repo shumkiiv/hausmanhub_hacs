@@ -1,6 +1,7 @@
 /* Climate control surface shared with the tablet information architecture. */
 
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.23";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.24";
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.24";
 
 const CATEGORY_DEFINITIONS = [
   { id: "conditioner", title: "Кондиционеры", icon: "snow", pattern: /кондиционер|air.?condition|smartir|\bac\b/ },
@@ -304,7 +305,7 @@ function renderRooms(panel, container, rooms, devices, deps) {
     setAttr(card, "aria-label", `Открыть климат комнаты ${room.name}`);
     const title = el("span", "climate-room-title");
     const roomIcon = el("span", "climate-room-icon");
-    roomIcon.appendChild(svgIcon("home"));
+    roomIcon.appendChild(roomSvgIcon(roomIconName(room)));
     title.appendChild(roomIcon);
     const roomCopy = el("span");
     roomCopy.appendChild(el("strong", null, room.name || "Комната"));

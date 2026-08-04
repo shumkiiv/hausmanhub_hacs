@@ -27,6 +27,7 @@ TECHNICAL_LOG_JS = PANEL_JS.with_name("hausman-hub-technical-log.js")
 FEEDBACK_JS = PANEL_JS.with_name("hausman-hub-feedback.js")
 KIOSK_JS = PANEL_JS.with_name("hausman-hub-kiosk.js")
 SETTINGS_PROFILE_JS = PANEL_JS.with_name("hausman-hub-settings-profile.js")
+SETTINGS_ROOMS_JS = PANEL_JS.with_name("hausman-hub-settings-rooms.js")
 ROOM_SETUP_JS = PANEL_JS.with_name("hausman-hub-room-setup.js")
 DEVICE_INVENTORY_JS = PANEL_JS.with_name("hausman-hub-device-inventory.js")
 INVENTORY_DUPLICATES_JS = PANEL_JS.with_name("hausman-hub-inventory-duplicates.js")
@@ -629,6 +630,10 @@ def panel_script(
         {{ filename: {str(SETTINGS_PROFILE_JS)!r} }}
       );
       vm.runInThisContext(
+        fs.readFileSync({str(SETTINGS_ROOMS_JS)!r}, "utf8").replace(/^import[\s\S]*?from .*;\s*/m, "").replace(/export /g, ""),
+        {{ filename: {str(SETTINGS_ROOMS_JS)!r} }}
+      );
+      vm.runInThisContext(
         fs.readFileSync({str(PANEL_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, ""),
         {{ filename: {str(PANEL_JS)!r} }}
       );
@@ -652,6 +657,12 @@ def panel_script(
             if (message.type === "frontend/set_user_data") {{
               userPreferenceValue = message.value;
               return Promise.resolve();
+            }}
+            if (message.type === "config/area_registry/update") {{
+              return Promise.resolve({{
+                area_id: message.area_id,
+                icon: message.icon,
+              }});
             }}
             return Promise.reject(new Error("unexpected WS " + message.type));
           }},
@@ -1058,6 +1069,75 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         }
         if (calls.some((call) => call.path === "hausman_hub/v1/device-actions")) {
           throw new Error("unconfigured intercom sent a device command");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_room_purpose_is_saved_to_home_assistant_area_registry(self) -> None:
+        dashboard = {
+            "summary": {},
+            "rooms": [
+                {
+                    "id": "room_alice",
+                    "name": "Комната Алисы",
+                    "icon": None,
+                    "deviceIds": [],
+                },
+                {
+                    "id": "shower",
+                    "name": "Душевая",
+                    "icon": None,
+                    "deviceIds": [],
+                },
+            ],
+            "devices": [],
+            "alarms": [],
+        }
+        script = panel_script(
+            GET_PATHS | {"hausman_hub/v1/dashboard": dashboard},
+            {},
+            """
+        panel._activateSection("settings");
+        panel._activateSettingsView("rooms");
+        let screen = panel._shell.settings;
+        const roomCards = findAll(screen, (node) =>
+          String(node.className || "").split(" ").includes("settings-room-card"));
+        if (roomCards.length !== 2) {
+          throw new Error("all Home Assistant rooms are not shown");
+        }
+        const aliceCard = roomCards.find((node) => textOf(node).includes("Комната Алисы"));
+        const showerCard = roomCards.find((node) => textOf(node).includes("Душевая"));
+        if (!aliceCard || !showerCard) throw new Error("named rooms are missing");
+        const aliceSelect = findAll(aliceCard, (node) =>
+          String(node.className || "").split(" ").includes("settings-room-type-select"))[0];
+        const showerSelect = findAll(showerCard, (node) =>
+          String(node.className || "").split(" ").includes("settings-room-type-select"))[0];
+        const optionLabels = findAll(screen, (node) => node.tagName === "OPTION")
+          .map((node) => node.textContent);
+        if (!optionLabels.includes("Детская") || !optionLabels.includes("Ванная или душевая")) {
+          throw new Error("canonical tablet room purposes are missing");
+        }
+        aliceSelect.value = "child";
+        aliceSelect.fire("change");
+        const save = findAll(aliceCard, (node) =>
+          String(node.className || "").split(" ").includes("settings-room-type-save"))[0];
+        if (!save || save.disabled) throw new Error("room purpose cannot be saved");
+        save.fire("click");
+        await tick();
+        const update = wsMessages.find((message) =>
+          message.type === "config/area_registry/update" && message.area_id === "room_alice");
+        if (!update || update.icon !== "mdi:human-child") {
+          throw new Error("canonical room icon was not written to Area Registry: "
+            + JSON.stringify(update));
+        }
+        if (!panel._homeDashboard.rooms.find((room) => room.id === "room_alice")
+          || !String(panel._notice || "").includes("сохранено в Home Assistant")) {
+          throw new Error("saved room purpose is not reflected in the interface");
+        }
+        if (showerSelect.value !== "bathroom") {
+          throw new Error("existing room name fallback is not mapped to bathroom");
         }
             """,
         )
@@ -3336,7 +3416,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.23")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.24")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

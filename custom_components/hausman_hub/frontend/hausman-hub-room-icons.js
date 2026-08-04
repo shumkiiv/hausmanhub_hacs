@@ -16,6 +16,32 @@ const ROOM_ICON_PATHS = {
   category: "M12 2 2 7l10 5 9-4.5V17h2V7zm-7.47 5L12 3.26 19.47 7 12 10.74zM5 11.3v5L12 20l7-3.7v-5L12 15z",
 };
 
+/**
+ * Canonical room purposes used by the tablet. Home Assistant stores the MDI
+ * icon on the area, so every HausmanHub surface reads the same semantic value.
+ */
+export const ROOM_TYPE_OPTIONS = [
+  { id: "rooms", label: "Обычная комната", mdiIcon: "mdi:door-open" },
+  { id: "living", label: "Гостиная", mdiIcon: "mdi:sofa" },
+  { id: "kitchen", label: "Кухня", mdiIcon: "mdi:fridge-outline" },
+  { id: "bedroom", label: "Спальня", mdiIcon: "mdi:bed" },
+  { id: "child", label: "Детская", mdiIcon: "mdi:human-child" },
+  { id: "bathroom", label: "Ванная или душевая", mdiIcon: "mdi:bathtub" },
+  { id: "toilet", label: "Туалет или санузел", mdiIcon: "mdi:human-male-female" },
+  { id: "hallway", label: "Прихожая или коридор", mdiIcon: "mdi:door" },
+  { id: "office", label: "Кабинет", mdiIcon: "mdi:briefcase" },
+  { id: "terrace", label: "Балкон или терраса", mdiIcon: "mdi:balcony" },
+  { id: "spa", label: "Спа или сауна", mdiIcon: "mdi:hot-tub" },
+  { id: "storage", label: "Кладовая", mdiIcon: "mdi:archive" },
+  { id: "category", label: "Другое", mdiIcon: "mdi:shape" },
+];
+
+const ROOM_TYPE_BY_MDI_ICON = new Map(ROOM_TYPE_OPTIONS.map((item) => [item.mdiIcon, item.id]));
+
+export function canonicalRoomMdiIcon(type) {
+  return ROOM_TYPE_OPTIONS.find((item) => item.id === type)?.mdiIcon || "mdi:door-open";
+}
+
 const HERO_ASSET_ROOT = "/api/hausman_hub/panel/assets";
 const HERO_ASSETS = {
   living: { prefix: "hero_room_living_", suffix: ".webp" },
@@ -42,6 +68,8 @@ function containsAny(identity, values) {
 /** Translate HA room identity into the same semantic category as the tablet. */
 export function roomIconName(room) {
   const identity = roomIdentity(room);
+  const explicit = ROOM_TYPE_BY_MDI_ICON.get(String(room?.icon || "").trim().toLocaleLowerCase("ru-RU"));
+  if (explicit) return explicit;
   if (containsAny(identity, ["kids", "child", "detsk", "дет", "human-male-child", "human-female-child", "toy", "teddy", "playroom"])) return "child";
   if (containsAny(identity, ["living", "gostin", "гост", "sofa", "lounge"])) return "living";
   if (containsAny(identity, ["kitchen", "kukhn", "кух", "countertop", "fridge", "chef"])) return "kitchen";

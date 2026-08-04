@@ -1,4 +1,5 @@
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.23";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.24";
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.24";
 
 const LIGHTING_EXCLUSIONS = [
   "ambilight", "глазок", "домофон", "пульт", "очистител", "аквариум", "aquarium",
@@ -130,7 +131,8 @@ function renderLightingRooms(panel, container, rooms, devices, deps) {
     card.type = "button";
     setAttr(card, "aria-label", `Открыть освещение комнаты ${name}`);
     const icon = el("span", "lighting-room-icon");
-    icon.appendChild(svgIcon("rooms"));
+    const room = rooms.find((candidate) => candidate.name === name) || { name };
+    icon.appendChild(roomSvgIcon(roomIconName(room)));
     card.appendChild(icon);
     const cardCopy = el("span", "lighting-room-copy");
     cardCopy.appendChild(el("strong", null, name));

@@ -1,4 +1,5 @@
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.23";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.24";
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.24";
 
 function mediaOverviewNormalized(value) { return String(value || "").trim().toLocaleLowerCase("ru"); }
 function mediaOverviewKey(device) { return device.physicalId || device.id || device.entityId; }
@@ -50,7 +51,7 @@ function renderMediaZones(container, rooms, devices, deps) {
   devices.forEach((device) => {
     const room = mediaOverviewRoom(device, rooms);
     const id = room ? room.id : "unassigned";
-    if (!groups.has(id)) groups.set(id, { name: room ? room.name : "Не распределено", devices: [] });
+    if (!groups.has(id)) groups.set(id, { name: room ? room.name : "Не распределено", room, devices: [] });
     groups.get(id).devices.push(device);
   });
   const section = el("section", "media-canon-section");
@@ -71,7 +72,9 @@ function renderMediaZones(container, rooms, devices, deps) {
   [...groups.values()].forEach((group) => {
     const card = el("article", `media-zone-card${group.devices.some(mediaOverviewUnavailable) ? " has-warning" : ""}`);
     const head = el("div", "media-zone-head");
-    const icon = el("span"); icon.appendChild(svgIcon("media")); head.appendChild(icon);
+    const icon = el("span");
+    icon.appendChild(group.room ? roomSvgIcon(roomIconName(group.room)) : svgIcon("media"));
+    head.appendChild(icon);
     head.appendChild(el("strong", null, group.name));
     head.appendChild(el("b", null, String(group.devices.length)));
     card.appendChild(head);
