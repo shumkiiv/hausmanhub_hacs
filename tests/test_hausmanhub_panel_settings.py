@@ -45,6 +45,7 @@ DIAGNOSTICS_JS = PANEL_JS.with_name("hausman-hub-diagnostics.js")
 ROLLOUT_JS = PANEL_JS.with_name("hausman-hub-rollout.js")
 OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-overview.js")
 ROOM_ICONS_JS = PANEL_JS.with_name("hausman-hub-room-icons.js")
+LIBRARY_HERO_JS = PANEL_JS.with_name("hausman-hub-library-hero.js")
 DIAGNOSTICS_CSS = PANEL_JS.with_name("hausman-hub-diagnostics.css")
 SWITCH_CSS = PANEL_JS.with_name("hausman-hub-switch.css")
 DEVICE_BINDINGS_CSS = PANEL_JS.with_name("hausman-hub-device-bindings.css")
@@ -502,27 +503,27 @@ def panel_script(
         {{ filename: {str(HOME_SECTIONS_JS)!r} }}
       );
       vm.runInThisContext(
-        fs.readFileSync({str(CLIMATE_OVERVIEW_JS)!r}, "utf8").replace(/export /g, ""),
+        fs.readFileSync({str(CLIMATE_OVERVIEW_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(CLIMATE_OVERVIEW_JS)!r} }}
       );
       vm.runInThisContext(
-        fs.readFileSync({str(LIGHTING_OVERVIEW_JS)!r}, "utf8").replace(/export /g, ""),
+        fs.readFileSync({str(LIGHTING_OVERVIEW_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(LIGHTING_OVERVIEW_JS)!r} }}
       );
       vm.runInThisContext(
-        fs.readFileSync({str(ROOMS_OVERVIEW_JS)!r}, "utf8").replace(/export /g, ""),
+        fs.readFileSync({str(ROOMS_OVERVIEW_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(ROOMS_OVERVIEW_JS)!r} }}
       );
       vm.runInThisContext(
-        fs.readFileSync({str(MEDIA_OVERVIEW_JS)!r}, "utf8").replace(/export /g, ""),
+        fs.readFileSync({str(MEDIA_OVERVIEW_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(MEDIA_OVERVIEW_JS)!r} }}
       );
       vm.runInThisContext(
-        fs.readFileSync({str(SECURITY_OVERVIEW_JS)!r}, "utf8").replace(/export /g, ""),
+        fs.readFileSync({str(SECURITY_OVERVIEW_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(SECURITY_OVERVIEW_JS)!r} }}
       );
       vm.runInThisContext(
-        fs.readFileSync({str(DEVICES_OVERVIEW_JS)!r}, "utf8").replace(/export /g, ""),
+        fs.readFileSync({str(DEVICES_OVERVIEW_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(DEVICES_OVERVIEW_JS)!r} }}
       );
       vm.runInThisContext(
@@ -588,6 +589,10 @@ def panel_script(
       vm.runInThisContext(
         fs.readFileSync({str(ROOM_ICONS_JS)!r}, "utf8").replace(/SVG_NAMESPACE/g, "ROOM_ICON_SVG_NAMESPACE").replace(/export /g, ""),
         {{ filename: {str(ROOM_ICONS_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(LIBRARY_HERO_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
+        {{ filename: {str(LIBRARY_HERO_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(OVERVIEW_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
@@ -694,7 +699,8 @@ def run_panel_script(script: str) -> subprocess.CompletedProcess[str]:
     """Execute one panel scenario in Node and return the completed process."""
 
     return subprocess.run(
-        ("node", "--input-type=commonjs", "--eval", script),
+        ("node", "--input-type=commonjs"),
+        input=script,
         check=False,
         capture_output=True,
         text=True,
@@ -3188,7 +3194,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.16")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.17")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

@@ -1,7 +1,8 @@
 /* Scenario library and editor shared with the HausmanHub tablet contract. */
 
-import { scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.16";
-import { scenarioEditorIssues, scenarioField, scenarioIconField, scenarioSelectField, scenarioToggle } from "./hausman-hub-scenario-fields.js?v=1.52.16";
+import { scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.17";
+import { scenarioEditorIssues, scenarioField, scenarioIconField, scenarioSelectField, scenarioToggle } from "./hausman-hub-scenario-fields.js?v=1.52.17";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.17";
 
 const TRIGGER_TYPES = [
   ["manual", "Ручной запуск"], ["time", "По времени"],
@@ -519,18 +520,16 @@ export function renderScenarioSection(panel, container, deps) {
   const enabledCount = items.filter((item) => item.enabled !== false).length;
   const favoriteCount = items.filter((item) => item.favorite === true).length;
 
-  const hero = el("section", "scenario-library-hero");
-  const heroCopy = el("div", "scenario-library-hero-copy");
-  heroCopy.appendChild(el("span", "scenario-library-kicker", "СЦЕНАРИИ ДОМА"));
-  heroCopy.appendChild(el("h2", null, "Дом работает по вашим правилам"));
-  heroCopy.appendChild(el("p", null, "Собирайте устройства, условия и расписание в понятные действия. Каждый запуск подтверждается Home Assistant."));
-  hero.appendChild(heroCopy);
-  const heroStats = el("div", "scenario-library-stats");
-  [[String(items.length), "всего"], [String(enabledCount), "включено"], [String(favoriteCount), "на главной"]].forEach(([value, label]) => {
-    const stat = el("div"); stat.appendChild(el("strong", null, value)); stat.appendChild(el("span", null, label)); heroStats.appendChild(stat);
-  });
-  hero.appendChild(heroStats);
-  container.appendChild(hero);
+  container.appendChild(createLibraryHero(panel, {
+    eyebrow: "СЦЕНАРИИ ДОМА",
+    title: "Дом работает по вашим правилам",
+    subtitle: "Собирайте устройства, условия и расписание в понятные действия. Каждый запуск подтверждается Home Assistant.",
+    facts: [
+      { label: "Всего", value: items.length },
+      { label: "Включено", value: enabledCount },
+      { label: "На главной", value: favoriteCount },
+    ],
+  }, deps));
 
   const card = el("section", "card scenarios-card scenario-library");
   const heading = el("div", "scenarios-heading scenario-library-toolbar");

@@ -1,5 +1,7 @@
 /* Canonical tablet-style security overview with one card per physical device. */
 
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.17";
+
 const SECURITY_CATEGORIES = new Set([
   "security", "moisture", "smoke", "gas", "carbon_monoxide", "safety", "problem",
   "occupancy", "presence", "motion", "opening", "door", "window",
@@ -78,35 +80,23 @@ function securityStatus(device) {
 }
 
 function renderSecurityHero(panel, container, devices, alarms, deps) {
-  const { el, svgIcon } = deps;
   const activeAlarms = alarms.filter((alarm) => alarm.active === true);
   const attentionDevices = devices.filter(securityNeedsAttention);
-  const hero = el("section", `security-canon-hero${activeAlarms.length ? " has-alarm" : ""}`);
-  const copy = el("div", "security-canon-hero-copy");
-  copy.appendChild(el("span", "security-canon-eyebrow", "БЕЗОПАСНОСТЬ ДОМА"));
-  copy.appendChild(el("h2", null, activeAlarms.length ? "Требуется внимание" : "Дом под наблюдением"));
-  copy.appendChild(el("p", null, activeAlarms.length
-    ? `${activeAlarms.length} активных тревог — откройте событие и проверьте помещение`
-    : attentionDevices.length
-      ? `${attentionDevices.length} устройств требуют проверки`
-      : "Активных тревог и открытых контуров нет"));
-  const metrics = el("div", "security-canon-hero-metrics");
-  [
-    [devices.length, "устройств", "shield"],
-    [activeAlarms.length, "тревог", "alarm"],
-    [devices.filter(securityNeedsAttention).length, "требуют внимания", "device"],
-  ].forEach(([value, label, iconName]) => {
-    const metric = el("div", "security-canon-hero-metric");
-    metric.appendChild(svgIcon(iconName));
-    const metricCopy = el("span");
-    metricCopy.appendChild(el("strong", null, String(value)));
-    metricCopy.appendChild(el("small", null, label));
-    metric.appendChild(metricCopy);
-    metrics.appendChild(metric);
-  });
-  copy.appendChild(metrics);
-  hero.appendChild(copy);
-  container.appendChild(hero);
+  container.appendChild(createLibraryHero(panel, {
+    eyebrow: "БЕЗОПАСНОСТЬ ДОМА",
+    title: activeAlarms.length ? "Требуется внимание" : "Дом под наблюдением",
+    subtitle: activeAlarms.length
+      ? `${activeAlarms.length} активных тревог — откройте событие и проверьте помещение`
+      : attentionDevices.length
+        ? `${attentionDevices.length} устройств требуют проверки`
+        : "Активных тревог и открытых контуров нет",
+    warning: activeAlarms.length > 0 || attentionDevices.length > 0,
+    facts: [
+      { label: "Устройства", value: devices.length },
+      { label: "Тревоги", value: activeAlarms.length, warning: activeAlarms.length > 0 },
+      { label: "Требуют внимания", value: attentionDevices.length, warning: attentionDevices.length > 0 },
+    ],
+  }, deps));
 }
 
 function renderSecurityTypes(panel, container, devices, selected, choose, deps) {

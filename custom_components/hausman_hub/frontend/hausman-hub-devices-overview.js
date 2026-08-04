@@ -1,5 +1,7 @@
 /* Canonical physical-device catalog shared with the tablet information hierarchy. */
 
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.17";
+
 const DEVICE_CATEGORY_META = {
   lighting: { label: "Освещение", icon: "lightbulb" },
   climate: { label: "Климат", icon: "thermometer" },
@@ -60,31 +62,22 @@ function deviceWord(count) {
   return "устройств";
 }
 
-function renderDevicesHero(container, devices, deps) {
-  const { el, svgIcon } = deps;
+function renderDevicesHero(panel, container, devices, deps) {
   const active = devices.filter(deviceCatalogActive).length;
   const offline = devices.filter(deviceCatalogUnavailable).length;
-  const hero = el("section", "devices-canon-hero");
-  const copy = el("div", "devices-canon-hero-copy");
-  copy.appendChild(el("span", "devices-canon-eyebrow", "ФИЗИЧЕСКИЕ УСТРОЙСТВА ДОМА"));
-  copy.appendChild(el("h2", null, `${devices.length} ${deviceWord(devices.length)}`));
-  copy.appendChild(el("p", null, offline
-    ? `${active} активны · ${offline} требуют проверки связи`
-    : `${active} активны · все устройства на связи`));
-  const metrics = el("div", "devices-canon-metrics");
-  [[devices.length, "всего", "device"], [active, "активны", "shield"], [offline, "без связи", "warning"]]
-    .forEach(([value, label, iconName]) => {
-      const metric = el("div", "devices-canon-metric");
-      metric.appendChild(svgIcon(iconName));
-      const metricCopy = el("span");
-      metricCopy.appendChild(el("strong", null, String(value)));
-      metricCopy.appendChild(el("small", null, label));
-      metric.appendChild(metricCopy);
-      metrics.appendChild(metric);
-    });
-  copy.appendChild(metrics);
-  hero.appendChild(copy);
-  container.appendChild(hero);
+  container.appendChild(createLibraryHero(panel, {
+    eyebrow: "ФИЗИЧЕСКИЕ УСТРОЙСТВА ДОМА",
+    title: `${devices.length} ${deviceWord(devices.length)}`,
+    subtitle: offline
+      ? `${active} активны · ${offline} требуют проверки связи`
+      : `${active} активны · все устройства на связи`,
+    warning: offline > 0,
+    facts: [
+      { label: "Всего", value: devices.length },
+      { label: "Активны", value: active },
+      { label: "Без связи", value: offline, warning: offline > 0 },
+    ],
+  }, deps));
 }
 
 function renderDeviceCategoryFilters(panel, container, devices, selected, select, deps) {
@@ -211,7 +204,7 @@ export function renderDevicesOverview(panel, container, deps) {
   }
   const devices = physicalDevices(panel);
   if (panel._deviceCategoryFilter === undefined) panel._deviceCategoryFilter = null;
-  renderDevicesHero(container, devices, deps);
+  renderDevicesHero(panel, container, devices, deps);
   const layout = deps.el("div", "devices-canon-layout");
   const main = deps.el("div", "devices-canon-main");
   const select = (value) => {

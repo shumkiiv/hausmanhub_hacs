@@ -1,5 +1,7 @@
 /* Climate control surface shared with the tablet information architecture. */
 
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.17";
+
 const CATEGORY_DEFINITIONS = [
   { id: "conditioner", title: "Кондиционеры", icon: "snow", pattern: /кондиционер|air.?condition|smartir|\bac\b/ },
   { id: "trv", title: "Термоголовки", icon: "radiator", pattern: /термоголов|радиатор|radiator|thermostatic|\btrv\b/ },
@@ -91,33 +93,19 @@ function deviceIsActive(device) {
 }
 
 function createHero(panel, rooms, devices, deps) {
-  const { el, svgIcon } = deps;
-  const hero = el("section", "climate-dashboard-hero");
-  const copy = el("div", "climate-dashboard-hero-copy");
-  const icon = el("span", "climate-dashboard-hero-icon");
-  icon.appendChild(svgIcon("thermometer"));
-  copy.appendChild(icon);
-  const heading = el("div");
-  heading.appendChild(el("h2", null, "Климат по комнатам"));
-  heading.appendChild(el("p", null, "Текущие показатели, цели и оборудование в одном месте"));
-  copy.appendChild(heading);
-  hero.appendChild(copy);
-
-  const facts = el("div", "climate-dashboard-facts");
-  const values = [
-    ["Сейчас", temperature(average(rooms.map((room) => room.temp)))],
-    ["Влажность", humidity(average(rooms.map((room) => room.humidity)))],
-    ["Работает", `${devices.filter(deviceIsActive).length} из ${devices.length}`],
-    ["Без связи", String(devices.filter((device) => device.unavailable).length)],
-  ];
-  values.forEach(([label, value], index) => {
-    const fact = el("div", `climate-dashboard-fact${index === 3 && value !== "0" ? " has-warning" : ""}`);
-    fact.appendChild(el("strong", null, value));
-    fact.appendChild(el("span", null, label));
-    facts.appendChild(fact);
-  });
-  hero.appendChild(facts);
-  return hero;
+  const unavailable = devices.filter((device) => device.unavailable).length;
+  return createLibraryHero(panel, {
+    eyebrow: "КЛИМАТ ДОМА",
+    title: "Климат по комнатам",
+    subtitle: "Текущие показатели, цели и оборудование в одном месте",
+    warning: unavailable > 0,
+    facts: [
+      { label: "Сейчас", value: temperature(average(rooms.map((room) => room.temp))) },
+      { label: "Влажность", value: humidity(average(rooms.map((room) => room.humidity))) },
+      { label: "Работает", value: `${devices.filter(deviceIsActive).length} из ${devices.length}` },
+      { label: "Без связи", value: unavailable, warning: unavailable > 0 },
+    ],
+  }, deps);
 }
 
 function productImage(device, deps) {

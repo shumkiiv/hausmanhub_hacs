@@ -1,3 +1,5 @@
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.17";
+
 const LIGHTING_EXCLUSIONS = [
   "ambilight", "глазок", "домофон", "пульт", "очистител", "аквариум", "aquarium",
 ];
@@ -51,34 +53,21 @@ function deviceCountWord(count) {
 }
 
 function createLightingHero(panel, rooms, devices, deps) {
-  const { el, svgIcon } = deps;
   const active = devices.filter(deviceIsActive).length;
   const unavailable = devices.filter((device) => device.unavailable || device.state === "unavailable").length;
   const roomNames = new Set(devices.map((device) => roomNameFor(device, rooms)).filter((name) => name !== "Без комнаты"));
   const activeRooms = new Set(devices.filter(deviceIsActive).map((device) => roomNameFor(device, rooms)).filter((name) => name !== "Без комнаты"));
-  const hero = el("section", "lighting-dashboard-hero");
-  const copy = el("div", "lighting-dashboard-hero-copy");
-  const icon = el("span", "lighting-dashboard-hero-icon");
-  icon.appendChild(svgIcon("lightbulb"));
-  copy.appendChild(icon);
-  const identity = el("div");
-  identity.appendChild(el("h2", null, active ? "Свет включён" : "Свет выключен"));
-  identity.appendChild(el("p", null, "Управляйте комнатами и каждым физическим устройством отдельно"));
-  copy.appendChild(identity);
-  hero.appendChild(copy);
-  const facts = el("div", "lighting-dashboard-hero-facts");
-  [
-    [`${activeRooms.size} из ${roomNames.size}`, "комнат со светом"],
-    [`${active} из ${devices.length}`, "устройств включено"],
-    [String(unavailable), "без связи"],
-  ].forEach(([value, label]) => {
-    const fact = el("span", "lighting-dashboard-hero-fact");
-    fact.appendChild(el("strong", null, value));
-    fact.appendChild(el("small", null, label));
-    facts.appendChild(fact);
-  });
-  hero.appendChild(facts);
-  return hero;
+  return createLibraryHero(panel, {
+    eyebrow: "ОСВЕЩЕНИЕ ДОМА",
+    title: active ? "Свет включён" : "Свет выключен",
+    subtitle: "Управляйте комнатами и каждым физическим устройством отдельно",
+    warning: unavailable > 0,
+    facts: [
+      { label: "Комнаты со светом", value: `${activeRooms.size} из ${roomNames.size}` },
+      { label: "Устройства включены", value: `${active} из ${devices.length}` },
+      { label: "Без связи", value: unavailable, warning: unavailable > 0 },
+    ],
+  }, deps);
 }
 
 function closeSheet(panel, container) {

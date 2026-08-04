@@ -1,3 +1,5 @@
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.17";
+
 function roomNormalized(value) {
   return String(value || "").trim().toLocaleLowerCase("ru");
 }
@@ -111,31 +113,21 @@ function openRoomOverview(panel, container, room, devices, deps) {
   container.appendChild(backdrop);
 }
 
-function renderRoomsHero(container, rooms, devices, deps) {
-  const { el, svgIcon } = deps;
+function renderRoomsHero(panel, container, rooms, devices, deps) {
   const active = devices.filter(roomDeviceActive).length;
   const unavailable = devices.filter(roomDeviceUnavailable).length;
-  const hero = el("section", "rooms-canon-hero");
-  const copy = el("div", "rooms-canon-hero-copy");
-  const icon = el("span", "rooms-canon-hero-icon");
-  icon.appendChild(svgIcon("rooms"));
-  copy.appendChild(icon);
-  const identity = el("div");
-  identity.appendChild(el("h2", null, "Дом по комнатам"));
-  identity.appendChild(el("p", null, "Каждая карточка открывает все физические устройства выбранной комнаты"));
-  copy.appendChild(identity);
-  hero.appendChild(copy);
-  const facts = el("div", "rooms-canon-hero-facts");
-  [[String(rooms.length), "Комнаты"], [String(devices.length), "Устройства"],
-    [String(active), "Активно"], [String(unavailable), "Без связи"]]
-    .forEach(([value, label]) => {
-      const fact = el("span");
-      fact.appendChild(el("strong", null, value));
-      fact.appendChild(el("small", null, label));
-      facts.appendChild(fact);
-    });
-  hero.appendChild(facts);
-  container.appendChild(hero);
+  container.appendChild(createLibraryHero(panel, {
+    eyebrow: "КОМНАТЫ ДОМА",
+    title: "Дом по комнатам",
+    subtitle: "Каждая карточка открывает все физические устройства выбранной комнаты",
+    warning: unavailable > 0,
+    facts: [
+      { label: "Комнаты", value: rooms.length },
+      { label: "Устройства", value: devices.length },
+      { label: "Активно", value: active },
+      { label: "Без связи", value: unavailable, warning: unavailable > 0 },
+    ],
+  }, deps));
 }
 
 function roomMatchesFilter(room, devices, filter) {
@@ -237,7 +229,7 @@ export function renderRoomsOverview(panel, container, deps) {
     if (room) grouped.get(room.id).push(device);
   });
   const page = deps.el("div", "rooms-canon-page");
-  renderRoomsHero(page, rooms, devices, deps);
+  renderRoomsHero(panel, page, rooms, devices, deps);
   renderRoomCards(panel, page, rooms, grouped, deps);
   const requested = panel._roomOverviewOverlay
     || rooms.find((room) => panel._openHomeCards && panel._openHomeCards.has(`room:${room.id}`))?.id;

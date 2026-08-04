@@ -1,3 +1,5 @@
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.17";
+
 function mediaOverviewNormalized(value) { return String(value || "").trim().toLocaleLowerCase("ru"); }
 function mediaOverviewKey(device) { return device.physicalId || device.id || device.entityId; }
 function mediaOverviewUnavailable(device) { return Boolean(device.unavailable || device.state === "unavailable"); }
@@ -23,32 +25,23 @@ function mediaOverviewDeviceWord(count) {
   return "устройств";
 }
 
-function renderMediaOverviewHero(container, devices, deps) {
-  const { el, svgIcon } = deps;
+function renderMediaOverviewHero(panel, container, devices, deps) {
   const playing = devices.filter(mediaOverviewPlaying);
   const available = devices.filter((device) => !mediaOverviewUnavailable(device));
   const tv = devices.filter(mediaOverviewIsTv).length;
   const focus = playing[0] || available[0] || devices[0];
-  const hero = el("section", "media-canon-hero");
-  const copy = el("div", "media-canon-hero-copy");
-  const icon = el("span", "media-canon-hero-icon");
-  icon.appendChild(svgIcon("media"));
-  copy.appendChild(icon);
-  const identity = el("div");
-  identity.appendChild(el("span", "media-canon-eyebrow", playing.length ? "СЕЙЧАС ВОСПРОИЗВОДИТСЯ" : "МЕДИА ДОМА"));
-  identity.appendChild(el("h2", null, focus ? (focus.name || "Медиоустройство") : "Медиа не настроено"));
   const source = focus && focus.attributes && (focus.attributes.media_title || focus.attributes.app_name || focus.attributes.source);
-  identity.appendChild(el("p", null, source || (focus && focus.roomName) || "Телевизоры и аудиосистемы по комнатам"));
-  copy.appendChild(identity);
-  hero.appendChild(copy);
-  const facts = el("div", "media-canon-hero-facts");
-  [[String(devices.length), "Устройства"], [String(playing.length), "Воспроизводят"],
-    [String(available.length), "На связи"], [String(tv), "Телевизоры"]]
-    .forEach(([value, label]) => {
-      const fact = el("span"); fact.appendChild(el("strong", null, value)); fact.appendChild(el("small", null, label)); facts.appendChild(fact);
-    });
-  hero.appendChild(facts);
-  container.appendChild(hero);
+  container.appendChild(createLibraryHero(panel, {
+    eyebrow: playing.length ? "СЕЙЧАС ВОСПРОИЗВОДИТСЯ" : "МЕДИА ДОМА",
+    title: focus ? (focus.name || "Медиоустройство") : "Медиа не настроено",
+    subtitle: source || (focus && focus.roomName) || "Телевизоры и аудиосистемы по комнатам",
+    facts: [
+      { label: "Устройства", value: devices.length },
+      { label: "Воспроизводят", value: playing.length },
+      { label: "На связи", value: available.length },
+      { label: "Телевизоры", value: tv },
+    ],
+  }, deps));
 }
 
 function renderMediaZones(container, rooms, devices, deps) {
@@ -121,7 +114,7 @@ export function renderMediaOverview(panel, container, deps) {
     .filter(mediaOverviewIsDevice).forEach((device) => unique.set(mediaOverviewKey(device), device));
   const devices = [...unique.values()];
   const page = deps.el("div", "media-canon-page");
-  renderMediaOverviewHero(page, devices, deps);
+  renderMediaOverviewHero(panel, page, devices, deps);
   renderMediaZones(page, rooms, devices, deps);
   renderMediaDeviceGrid(panel, page, devices, deps);
   container.appendChild(page);
