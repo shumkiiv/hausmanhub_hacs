@@ -1,35 +1,35 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.52.24";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.52.24";
-import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.52.24";
-import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.52.24";
-import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.52.24";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.52.24";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.52.24";
-import { closeFirstRunAreaCreator, createFirstRunArea, openFirstRunAreaCreator, renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.52.24";
-import { createKioskButton, createKioskDock, handleKioskPointerUp, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, resolveIntercomQuickAction, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.52.24";
-import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.52.24";
-import { applyHomeSignalSelection, AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, homeEnvironmentSaveError, homeEnvironmentSourcePayload, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.52.24";
-import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.52.24";
-import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.52.24";
-import { renderClimateOverview } from "./hausman-hub-climate-overview.js?v=1.52.24";
-import { renderLightingOverview } from "./hausman-hub-lighting.js?v=1.52.24";
-import { renderRoomsOverview } from "./hausman-hub-rooms.js?v=1.52.24";
-import { renderMediaOverview } from "./hausman-hub-media-overview.js?v=1.52.24";
-import { renderSecurityOverview } from "./hausman-hub-security-overview.js?v=1.52.24";
-import { renderDevicesOverview } from "./hausman-hub-devices-overview.js?v=1.52.24";
-import { buildDiagnosticChecks, diagnosticSummaryText, renderDiagnosticDetails } from "./hausman-hub-diagnostics.js?v=1.52.24";
-import { renderRolloutReadiness } from "./hausman-hub-rollout.js?v=1.52.24";
-import { renderOverviewContent, renderOverviewHero } from "./hausman-hub-overview.js?v=1.52.24";
-import { renderPhysicalDeviceCard } from "./hausman-hub-device-card.js?v=1.52.24";
-import { recordTechnicalEvent as log, renderTechnicalLogCard } from "./hausman-hub-technical-log.js?v=1.52.24";
-import { applyFeedback } from "./hausman-hub-feedback.js?v=1.52.24";
-import { renderKiosk } from "./hausman-hub-kiosk.js?v=1.52.24";
-import { captureRoomValidation, clearFirstRunDraft, persistFirstRunDraft, reconcileRoomValidation, restoreFirstRunDraft, resumeFirstRunDraft } from "./hausman-hub-first-run-draft.js?v=1.52.24";
-import { applyTabletProfile, isIntercomQuickAccessVisible, renderAppearanceSettings, renderIntercomSettings, syncIntercomQuickAccess } from "./hausman-hub-settings-profile.js?v=1.52.24";
-import { renderSettingsRooms, saveRoomType } from "./hausman-hub-settings-rooms.js?v=1.52.24";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.52.25";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.52.25";
+import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.52.25";
+import { resolveControlChannelTest } from "./hausman-hub-control-channel.js?v=1.52.25";
+import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.52.25";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.52.25";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.52.25";
+import { closeFirstRunAreaCreator, createFirstRunArea, openFirstRunAreaCreator, renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.52.25";
+import { createKioskButton, createKioskDock, handleKioskPointerUp, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, resolveIntercomQuickAction, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.52.25";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.52.25";
+import { applyHomeSignalSelection, AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, homeEnvironmentSaveError, homeEnvironmentSourcePayload, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.52.25";
+import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.52.25";
+import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.52.25";
+import { renderClimateOverview } from "./hausman-hub-climate-overview.js?v=1.52.25";
+import { renderLightingOverview } from "./hausman-hub-lighting.js?v=1.52.25";
+import { renderRoomsOverview } from "./hausman-hub-rooms.js?v=1.52.25";
+import { renderMediaOverview } from "./hausman-hub-media-overview.js?v=1.52.25";
+import { renderSecurityOverview } from "./hausman-hub-security-overview.js?v=1.52.25";
+import { renderDevicesOverview } from "./hausman-hub-devices-overview.js?v=1.52.25";
+import { buildDiagnosticChecks, diagnosticSummaryText, renderDiagnosticDetails } from "./hausman-hub-diagnostics.js?v=1.52.25";
+import { renderRolloutReadiness } from "./hausman-hub-rollout.js?v=1.52.25";
+import { renderOverviewContent, renderOverviewHero } from "./hausman-hub-overview.js?v=1.52.25";
+import { renderPhysicalDeviceCard } from "./hausman-hub-device-card.js?v=1.52.25";
+import { recordTechnicalEvent as log, renderTechnicalLogCard } from "./hausman-hub-technical-log.js?v=1.52.25";
+import { applyFeedback } from "./hausman-hub-feedback.js?v=1.52.25";
+import { renderKiosk } from "./hausman-hub-kiosk.js?v=1.52.25";
+import { captureRoomValidation, clearFirstRunDraft, persistFirstRunDraft, reconcileRoomValidation, restoreFirstRunDraft, resumeFirstRunDraft } from "./hausman-hub-first-run-draft.js?v=1.52.25";
+import { applyTabletProfile, isIntercomQuickAccessVisible, renderAppearanceSettings, renderIntercomSettings, syncIntercomQuickAccess } from "./hausman-hub-settings-profile.js?v=1.52.25";
+import { renderSettingsRooms, saveRoomType } from "./hausman-hub-settings-rooms.js?v=1.52.25";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
-const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css?v=1.52.24";
+const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css?v=1.52.25";
 const DASHBOARD_API = "hausman_hub/v1/dashboard";
 const DEVICE_ACTIONS_API = "hausman_hub/v1/device-actions";
 const PANEL_TABLET_PROFILE_API = "hausman_hub/v1/tablet-profile";
@@ -191,6 +191,8 @@ const ICON_PATHS = {
   camera: "M9 4 7.17 6H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-3.17L15 4zm3 13a4 4 0 1 1 0-8 4 4 0 0 1 0 8m0-2a2 2 0 1 0 0-4 2 2 0 0 0 0 4",
   settings: "M19.43 12.98c.04-.32.07-.65.07-.98s-.03-.66-.08-.98l2.11-1.65-2-3.46-2.49 1a7.2 7.2 0 0 0-1.69-.98L15 3.27h-4l-.35 2.66c-.61.25-1.17.59-1.69.98l-2.49-1-2 3.46 2.11 1.65c-.05.32-.08.66-.08.98s.03.66.08.98l-2.11 1.65 2 3.46 2.49-1c.52.4 1.08.73 1.69.98L11 20.73h4l.35-2.66c.61-.25 1.17-.58 1.69-.98l2.49 1 2-3.46zM13 17a5 5 0 1 1 0-10 5 5 0 0 1 0 10m0-3a2 2 0 1 0 0-4 2 2 0 0 0 0 4",
   chevron: "M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z",
+  "chevron-left": "M15.41 16.59 10.83 12l4.58-4.59L14 6l-6 6 6 6z",
+  "chevron-right": "M8.59 16.59 13.17 12 8.59 7.41 10 6l6 6-6 6z",
   device: "M4 6h18V4H4c-1.1 0-2 .9-2 2v11H0v3h14v-3H4zm19 2h-6c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h6c.55 0 1-.45 1-1V9c0-.55-.45-1-1-1m-1 9h-4v-7h4z",
   warning: "M1 21h22L12 2zm12-3h-2v-2h2zm0-4h-2v-4h2z",
   trash: "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6zm3.46-7.12 1.41-1.41L12 11.59l1.12-1.12 1.41 1.41L13.41 13l1.12 1.12-1.41 1.41L12 14.41l-1.12 1.12-1.41-1.41L10.59 13zM15.5 4l-1-1h-5l-1 1H5v2h14V4z",

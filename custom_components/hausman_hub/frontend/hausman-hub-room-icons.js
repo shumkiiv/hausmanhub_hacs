@@ -57,6 +57,27 @@ const HERO_ASSETS = {
   other: { prefix: "hero_room_other_", suffix: ".webp" },
 };
 
+// The tablet uses these higher-resolution approved masters for Home/Living and
+// Kitchen. HACS deliberately resolves the exact same files, not a parallel set.
+const PREMIUM_HERO_ASSETS = {
+  living: {
+    morning: "hero_living_room_morning.png",
+    day: "hero_living_room_day.png",
+    evening: "hero_living_room_golden_hour.png",
+    night: "hero_living_room_night.png",
+    rain: "hero_living_room_rain.png",
+    snow: "hero_premium_living_snow_v2.png",
+  },
+  kitchen: {
+    morning: "hero_kitchen_morning.png",
+    day: "hero_room_kitchen_day.webp",
+    evening: "hero_kitchen_evening.png",
+    night: "hero_premium_kitchen_night_v2.png",
+    rain: "hero_premium_kitchen_rain_v3.png",
+    snow: "hero_premium_kitchen_snow_v2.png",
+  },
+};
+
 function roomIdentity(room) {
   return `${room?.id || ""} ${room?.name || ""} ${room?.icon || ""}`.toLocaleLowerCase("ru-RU");
 }
@@ -106,6 +127,8 @@ export function roomHeroImage(room, summary = {}, localIso = "") {
   const icon = room ? roomIconName(room) : "living";
   const category = HERO_ASSETS[icon] ? icon : "other";
   const state = heroWeather(summary.weatherCondition) || heroPeriod(localIso);
+  const premium = PREMIUM_HERO_ASSETS[category]?.[state];
+  if (premium) return `${HERO_ASSET_ROOT}/${premium}`;
   const asset = HERO_ASSETS[category];
   return `${HERO_ASSET_ROOT}/${asset.prefix}${state}${asset.suffix}`;
 }

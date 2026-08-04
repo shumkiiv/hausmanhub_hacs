@@ -1,4 +1,5 @@
-import { roomHeroImage, roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.24";
+import { createHeroRoomNavigation } from "./hausman-hub-hero-room-navigation.js?v=1.52.25";
+import { roomHeroImage } from "./hausman-hub-room-icons.js?v=1.52.25";
 
 const CLIMATE_DOMAINS = new Set(["climate", "humidifier", "fan"]);
 
@@ -77,7 +78,8 @@ export function renderOverviewHero(panel, container, readiness, deps) {
   if (panel._overviewHeroRoomId && !selectedRoom) panel._overviewHeroRoomId = null;
   const hero = el("section", "overview-canon-hero");
   const media = el("div", "overview-canon-hero-media");
-  media.style.backgroundImage = `url("${roomHeroImage(selectedRoom, dashboard.summary, dashboard.localIso)}")`;
+  let currentImage = roomHeroImage(selectedRoom, dashboard.summary, dashboard.localIso);
+  media.style.backgroundImage = `url("${currentImage}")`;
   hero.appendChild(media);
   const overlay = el("div", "overview-canon-hero-overlay");
   const copy = el("div", "overview-canon-hero-copy");
@@ -101,23 +103,8 @@ export function renderOverviewHero(panel, container, readiness, deps) {
     readinessStatus === "ready" ? "Всё в порядке" : "Проверьте настройки");
   overlay.appendChild(status);
   hero.appendChild(overlay);
-  const roomStrip = el("div", "overview-canon-room-strip");
-  const home = el("button");
-  home.type = "button";
-  home.appendChild(svgIcon("home"));
-  home.appendChild(el("span", null, "Дом"));
-  roomStrip.appendChild(home);
-  const roomButtons = new Map();
-  rooms.forEach((room) => {
-    const button = el("button");
-    button.type = "button";
-    button.appendChild(roomSvgIcon(roomIconName(room)));
-    button.appendChild(el("span", null, room.name));
-    setAttr(button, "aria-label", `Показать комнату ${room.name}`);
-    roomButtons.set(room.id, button);
-    roomStrip.appendChild(button);
-  });
-  hero.appendChild(roomStrip);
+  const roomNavigation = createHeroRoomNavigation(panel, rooms, { el, setAttr, svgIcon });
+  hero.appendChild(roomNavigation.element);
   container.appendChild(hero);
 
   const formatTemperature = (value) => validNumber(value) ? `${Number(value).toFixed(1).replace(".0", "").replace(".", ",")} °C` : "Нет данных";
@@ -129,19 +116,19 @@ export function renderOverviewHero(panel, container, readiness, deps) {
     fact.appendChild(el("small", null, label));
     facts.appendChild(fact);
   };
-  const selectHeroRoom = (room) => {
+  const selectHeroRoom = (room, animate = true) => {
     panel._overviewHeroRoomId = room?.id || null;
-    media.classList.add("is-changing");
-    media.style.backgroundImage = `url("${roomHeroImage(room, dashboard.summary, dashboard.localIso)}")`;
-    const scheduleFrame = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (callback) => callback();
-    scheduleFrame(() => media.classList.remove("is-changing"));
-    home.classList.toggle("is-active", !room);
-    if (!room) setAttr(home, "aria-current", "page"); else home.removeAttribute("aria-current");
-    roomButtons.forEach((button, roomId) => {
-      const active = roomId === room?.id;
-      button.classList.toggle("is-active", active);
-      if (active) setAttr(button, "aria-current", "page"); else button.removeAttribute("aria-current");
-    });
+    const nextImage = roomHeroImage(room, dashboard.summary, dashboard.localIso);
+    if (nextImage !== currentImage) {
+      if (animate) media.classList.add("is-changing");
+      media.style.backgroundImage = `url("${nextImage}")`;
+      currentImage = nextImage;
+      if (animate) {
+        const scheduleFrame = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (callback) => callback();
+        scheduleFrame(() => media.classList.remove("is-changing"));
+      }
+    }
+    roomNavigation.setActive(room, animate);
     facts.innerHTML = "";
     if (!room) {
       eyebrow.textContent = readinessStatus === "ready" ? "Дом работает штатно" : "Требуется внимание";
@@ -164,9 +151,8 @@ export function renderOverviewHero(panel, container, readiness, deps) {
     details.hidden = true;
     status.textContent = room.climateRunning ? "Климат работает" : (room.status || "Обычный режим");
   };
-  home.addEventListener("click", () => selectHeroRoom(null));
-  rooms.forEach((room) => roomButtons.get(room.id)?.addEventListener("click", () => selectHeroRoom(room)));
-  selectHeroRoom(selectedRoom);
+  roomNavigation.bind(selectHeroRoom);
+  selectHeroRoom(selectedRoom, false);
 }
 
 function renderPrimaryCards(panel, container, dashboard, deps) {

@@ -51,6 +51,7 @@ DIAGNOSTICS_JS = PANEL_JS.with_name("hausman-hub-diagnostics.js")
 ROLLOUT_JS = PANEL_JS.with_name("hausman-hub-rollout.js")
 OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-overview.js")
 ROOM_ICONS_JS = PANEL_JS.with_name("hausman-hub-room-icons.js")
+HERO_ROOM_NAVIGATION_JS = PANEL_JS.with_name("hausman-hub-hero-room-navigation.js")
 LIBRARY_HERO_JS = PANEL_JS.with_name("hausman-hub-library-hero.js")
 DIAGNOSTICS_CSS = PANEL_JS.with_name("hausman-hub-diagnostics.css")
 SWITCH_CSS = PANEL_JS.with_name("hausman-hub-switch.css")
@@ -603,6 +604,10 @@ def panel_script(
       vm.runInThisContext(
         fs.readFileSync({str(ROOM_ICONS_JS)!r}, "utf8").replace(/SVG_NAMESPACE/g, "ROOM_ICON_SVG_NAMESPACE").replace(/export /g, ""),
         {{ filename: {str(ROOM_ICONS_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(HERO_ROOM_NAVIGATION_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
+        {{ filename: {str(HERO_ROOM_NAVIGATION_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(LIBRARY_HERO_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
@@ -1534,6 +1539,17 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         homeButton.fire("click");
         if (heroTitle.textContent !== "Дом" || panel._overviewHeroRoomId !== null) {
           throw new Error("home control did not restore the home hero state");
+        }
+        const roomArrows = findAll(currentOverview, (node) =>
+          String(node.className || "").split(" ").includes("overview-canon-room-arrow"));
+        if (roomArrows.length !== 2) throw new Error("cyclic room navigation arrows are missing");
+        roomArrows[1].fire("click");
+        if (heroTitle.textContent !== "Гостиная" || panel._overviewHeroRoomId !== "living") {
+          throw new Error("next room arrow did not select the next Hero slide");
+        }
+        roomArrows[0].fire("click");
+        if (heroTitle.textContent !== "Дом" || panel._overviewHeroRoomId !== null) {
+          throw new Error("previous room arrow did not cycle back to Home");
         }
             """,
         )
@@ -3416,7 +3432,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.24")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.25")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;
