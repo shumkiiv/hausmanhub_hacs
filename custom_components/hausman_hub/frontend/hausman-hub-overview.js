@@ -1,4 +1,4 @@
-import { roomHeroImage, roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.22";
+import { roomHeroImage, roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.23";
 
 const CLIMATE_DOMAINS = new Set(["climate", "humidifier", "fan"]);
 

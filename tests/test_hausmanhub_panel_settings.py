@@ -1064,6 +1064,70 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
+    def test_intercom_picker_includes_catalog_only_doorphone_and_hides_unrelated_devices(self) -> None:
+        profile = json.loads(json.dumps(GET_PATHS["hausman_hub/v1/tablet-profile"]))
+        profile["settings"]["intercom"] = {"showQuickAccess": False, "deviceId": None}
+        dashboard = {
+            "devices": [
+                {
+                    "id": "bathroom_fan",
+                    "physicalId": "bathroom_fan",
+                    "entityId": "switch.bathroom_fan",
+                    "name": "Вытяжка ванна",
+                    "roomName": "Ванная",
+                    "details": [],
+                }
+            ],
+            "rooms": [],
+            "alarms": [],
+        }
+        catalog = {
+            "devices": [
+                {
+                    "name": "Домофон 2",
+                    "entity_id": "button.domofon_2",
+                    "target_id": "entity_domofon_2",
+                    "actions": [{"action_id": "press", "allowed_fields": []}],
+                },
+                {
+                    "name": "Вытяжка ванна",
+                    "entity_id": "switch.bathroom_fan",
+                    "target_id": "entity_bathroom_fan",
+                    "actions": [{"action_id": "turn_on", "allowed_fields": []}],
+                },
+            ]
+        }
+        script = panel_script(
+            GET_PATHS
+            | {
+                "hausman_hub/v1/tablet-profile": profile,
+                "hausman_hub/v1/dashboard": dashboard,
+                "hausman_hub/v1/admin/scenarios/catalog": catalog,
+            },
+            {},
+            """
+        panel._activateSection("settings");
+        panel._activateSettingsView("intercom");
+        const select = findAll(panel._shell.settings, (node) =>
+          node.tagName === "SELECT" && String(node.className).includes("intercom-device-select"))[0];
+        const labels = findAll(select, (node) => node.tagName === "OPTION")
+          .map((option) => option.textContent);
+        if (!labels.includes("Домофон 2")) {
+          throw new Error("catalog-only Домофон 2 is missing: " + JSON.stringify(labels));
+        }
+        if (labels.some((label) => label.includes("Вытяжка"))) {
+          throw new Error("unrelated controllable device leaked into intercom picker: " + JSON.stringify(labels));
+        }
+        select.value = "button.domofon_2";
+        select.fire("change");
+        if (panel._intercomDraft.deviceId !== "button.domofon_2") {
+          throw new Error("catalog-only intercom selection was not stored in draft");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_physical_device_card_prefers_zigbee_image_and_opens_fixed_dialog(self) -> None:
         script = panel_script(
             GET_PATHS,
@@ -3272,7 +3336,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.22")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.23")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

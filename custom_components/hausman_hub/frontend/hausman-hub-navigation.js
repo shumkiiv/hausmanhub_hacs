@@ -210,32 +210,67 @@ function intercomDeviceId(device) {
   return String(device?.id || device?.deviceId || device?.physicalId || device?.entityId || "");
 }
 
+function intercomIdentity(value) {
+  return String(value || "").trim().toLocaleLowerCase("ru");
+}
+
+function isIntercomIdentity(value) {
+  return /(домофон|intercom|doorbell|глазок)/.test(intercomIdentity(value));
+}
+
+function intercomTargetCommand(target) {
+  const preferences = ["open", "unlock", "open_cover", "open_valve", "turn_on", "press", "activate"];
+  for (const actionId of preferences) {
+    const action = (target?.actions || []).find((candidate) => candidate.action_id === actionId);
+    if (action && !(action.allowed_fields || []).includes("value")) {
+      return { targetId: target.target_id, actionId };
+    }
+  }
+  return null;
+}
+
+function catalogIntercomDevice(target) {
+  return {
+    id: String(target?.entity_id || target?.target_id || ""),
+    entityId: target?.entity_id || null,
+    name: target?.name || target?.entity_id || "Домофон",
+    roomName: target?.room_name || null,
+    catalogOnly: true,
+  };
+}
+
 export function resolveIntercomQuickAction(devices, catalog, configuredDeviceId = null) {
-  const normalized = (value) => String(value || "").trim().toLocaleLowerCase("ru");
-  const device = (Array.isArray(devices) ? devices : []).find((candidate) => {
+  const catalogTargets = Array.isArray(catalog) ? catalog : [];
+  const homeDevices = Array.isArray(devices) ? devices : [];
+  const configuredId = String(configuredDeviceId || "");
+  const device = homeDevices.find((candidate) => {
     if (configuredDeviceId) return intercomDeviceId(candidate) === String(configuredDeviceId);
     const details = Array.isArray(candidate.details) ? candidate.details : [];
-    const identity = normalized([
+    const identity = intercomIdentity([
       candidate.name, candidate.entityId, candidate.physicalId, candidate.model,
       ...details.flatMap((detail) => [detail.label, detail.entityId]),
     ].filter(Boolean).join(" "));
-    return /(домофон|intercom|doorbell|глазок)/.test(identity);
+    return isIntercomIdentity(identity);
   });
-  if (!device) return null;
-  const entityIds = new Set([device.entityId].concat(
-    Array.isArray(device.details) ? device.details.map((item) => item.entityId) : []
-  ).filter(Boolean));
-  const targets = (Array.isArray(catalog) ? catalog : []).filter((target) => entityIds.has(target.entity_id));
-  const preferences = ["open", "unlock", "turn_on", "press", "activate"];
-  for (const actionId of preferences) {
-    for (const target of targets) {
-      const action = (target.actions || []).find((candidate) => candidate.action_id === actionId);
-      if (action && !(action.allowed_fields || []).includes("value")) {
-        return { device, targetId: target.target_id, actionId };
-      }
+  if (device) {
+    const entityIds = new Set([device.entityId].concat(
+      Array.isArray(device.details) ? device.details.map((item) => item.entityId) : []
+    ).filter(Boolean));
+    for (const target of catalogTargets.filter((candidate) => entityIds.has(candidate.entity_id))) {
+      const command = intercomTargetCommand(target);
+      if (command) return { device, ...command };
     }
   }
-  return { device, targetId: null, actionId: null };
+  const catalogTarget = catalogTargets.find((target) => {
+    const targetId = String(target?.target_id || "");
+    const entityId = String(target?.entity_id || "");
+    if (configuredId) return configuredId === targetId || configuredId === entityId;
+    return isIntercomIdentity([target?.name, entityId, targetId].filter(Boolean).join(" "));
+  });
+  const command = intercomTargetCommand(catalogTarget);
+  return catalogTarget && command
+    ? { device: catalogIntercomDevice(catalogTarget), ...command }
+    : null;
 }
 
 export function openIntercomFromRail(panel) {

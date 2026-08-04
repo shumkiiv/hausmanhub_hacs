@@ -8,6 +8,21 @@ function deviceId(device) {
   return String(device?.id || device?.deviceId || device?.physicalId || device?.entityId || "");
 }
 
+function isIntercomCatalogTarget(target) {
+  const identity = [target?.name, target?.entity_id, target?.target_id]
+    .filter(Boolean).join(" ").toLocaleLowerCase("ru");
+  return /(домофон|intercom|doorbell|глазок)/.test(identity);
+}
+
+function isIntercomPhysicalDevice(device) {
+  const details = Array.isArray(device?.details) ? device.details : [];
+  const identity = [
+    device?.name, device?.entityId, device?.physicalId, device?.model,
+    ...details.flatMap((detail) => [detail?.label, detail?.entityId]),
+  ].filter(Boolean).join(" ").toLocaleLowerCase("ru");
+  return /(домофон|intercom|doorbell|глазок)/.test(identity);
+}
+
 export function applyTabletProfile(panel, profile) {
   if (!profile?.settings?.intercom || panel._intercomDirty) return;
   panel._tabletProfile = profile;
@@ -34,11 +49,32 @@ export function syncIntercomQuickAccess(panel) {
 function candidates(panel) {
   const catalog = Array.isArray(panel._scenarios?.catalog?.devices)
     ? panel._scenarios.catalog.devices : [];
-  return panel._homeDevices("devices").map((device) => ({
+  const physical = panel._homeDevices("devices").filter(isIntercomPhysicalDevice).map((device) => ({
     device,
     id: deviceId(device),
     command: panel._resolveIntercomAction?.(deviceId(device), catalog),
-  })).filter((item) => item.id && item.command);
+  })).filter((item) => item.id && item.command?.targetId && item.command?.actionId);
+  const usedTargets = new Set(physical.map((item) => item.command.targetId));
+  const catalogOnly = catalog.filter((target) => (
+    isIntercomCatalogTarget(target) && !usedTargets.has(target.target_id)
+  )).map((target) => {
+    const id = String(target.entity_id || target.target_id || "");
+    const command = panel._resolveIntercomAction?.(id, catalog);
+    return {
+      id,
+      command,
+      device: {
+        id,
+        entityId: target.entity_id || null,
+        name: target.name || target.entity_id || "Домофон",
+        roomName: target.room_name || null,
+        catalogOnly: true,
+      },
+    };
+  }).filter((item) => item.id && item.command?.targetId && item.command?.actionId);
+  return physical.concat(catalogOnly).sort((left, right) => (
+    String(left.device.name || "").localeCompare(String(right.device.name || ""), "ru")
+  ));
 }
 
 export async function saveIntercomSettings(panel) {
