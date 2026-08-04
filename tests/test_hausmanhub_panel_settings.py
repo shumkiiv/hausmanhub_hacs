@@ -44,6 +44,7 @@ SETTINGS_CSS = PANEL_JS.with_name("hausman-hub-settings.css")
 DIAGNOSTICS_JS = PANEL_JS.with_name("hausman-hub-diagnostics.js")
 ROLLOUT_JS = PANEL_JS.with_name("hausman-hub-rollout.js")
 OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-overview.js")
+ROOM_ICONS_JS = PANEL_JS.with_name("hausman-hub-room-icons.js")
 DIAGNOSTICS_CSS = PANEL_JS.with_name("hausman-hub-diagnostics.css")
 SWITCH_CSS = PANEL_JS.with_name("hausman-hub-switch.css")
 DEVICE_BINDINGS_CSS = PANEL_JS.with_name("hausman-hub-device-bindings.css")
@@ -378,6 +379,7 @@ def panel_script(
           this.style = {{}};
           this.value = "";
           this.checked = false;
+          this.attributes = {{}};
           this._listeners = {{}};
           this.parentElement = null;
           this.classList = {{
@@ -401,6 +403,15 @@ def panel_script(
           child.parentElement = this;
           this.children.push(child);
           return child;
+        }}
+        setAttribute(name, value) {{
+          this.attributes[name] = String(value);
+          this[name] = String(value);
+          if (name === "class") this.className = String(value);
+        }}
+        removeAttribute(name) {{
+          delete this.attributes[name];
+          delete this[name];
         }}
         addEventListener(type, handler) {{
           (this._listeners[type] = this._listeners[type] || []).push(handler);
@@ -575,7 +586,11 @@ def panel_script(
         {{ filename: {str(ROLLOUT_JS)!r} }}
       );
       vm.runInThisContext(
-        fs.readFileSync({str(OVERVIEW_JS)!r}, "utf8").replace(/export /g, ""),
+        fs.readFileSync({str(ROOM_ICONS_JS)!r}, "utf8").replace(/SVG_NAMESPACE/g, "ROOM_ICON_SVG_NAMESPACE").replace(/export /g, ""),
+        {{ filename: {str(ROOM_ICONS_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(OVERVIEW_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(OVERVIEW_JS)!r} }}
       );
       vm.runInThisContext(
@@ -1297,8 +1312,8 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         }
         const homeButton = findAll(overview, (node) => node.tagName === "BUTTON"
           && node["aria-current"] === "page")[0];
-        if (!homeButton || !homeButton.disabled) {
-          throw new Error("current home control must be explicit and non-interactive");
+        if (!homeButton || homeButton.disabled) {
+          throw new Error("home slide must be the active selectable hero state");
         }
         const climateCard = byClass("overview-canon-primary-card")[0];
         climateCard.fire("click");
@@ -1307,25 +1322,26 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         }
         panel._shell.tabs.overview.fire("click");
         const roomCard = findAll(panel._shell.sectionNodes.overview, (node) =>
-          node.tagName === "BUTTON" && String(node["aria-label"]).includes("Гостиная"))[0];
+          node.tagName === "BUTTON" && String(node["aria-label"]).includes("Спальня"))[0];
         roomCard.fire("click");
-        if (panel._activeSection !== "rooms") {
-          throw new Error("overview room did not open rooms");
+        if (panel._activeSection !== "overview") {
+          throw new Error("room switch navigated away from the hero");
         }
-        const expandedRoom = findAll(panel._shell.homeSections.rooms, (node) =>
-          String(node.className).split(" ").includes("rooms-detail-sheet"))[0];
-        if (!expandedRoom || !textOf(expandedRoom).includes("Гостиная")
-          || !textOf(expandedRoom).includes("Устройства комнаты")) {
-          throw new Error("selected room detail was not opened after navigation");
+        const currentOverview = panel._shell.sectionNodes.overview;
+        const heroTitle = findAll(currentOverview, (node) => node.tagName === "H1")[0];
+        const heroMedia = byClass("overview-canon-hero-media")[0];
+        if (!heroTitle || heroTitle.textContent !== "Спальня"
+          || !textOf(currentOverview).includes("23,5 °C")
+          || !String(heroMedia?.style?.backgroundImage).includes("hero_room_bedroom_")) {
+          throw new Error("selected room did not replace the hero content and image");
         }
-        const closeRoom = findAll(expandedRoom, (node) =>
-          String(node.className).split(" ").includes("rooms-detail-close"))[0];
-        closeRoom.fire("click");
-        panel._sectionRenderKeys.rooms = null;
-        panel._render();
         if (findAll(panel._shell.homeSections.rooms, (node) =>
           String(node.className).split(" ").includes("rooms-detail-sheet")).length) {
-          throw new Error("closed room detail reopened after render");
+          throw new Error("room switch opened a separate detail sheet");
+        }
+        homeButton.fire("click");
+        if (heroTitle.textContent !== "Дом" || panel._overviewHeroRoomId !== null) {
+          throw new Error("home control did not restore the home hero state");
         }
             """,
         )
@@ -3172,7 +3188,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.15")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.16")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

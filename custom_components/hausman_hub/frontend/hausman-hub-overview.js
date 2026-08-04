@@ -1,4 +1,4 @@
-import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.15";
+import { roomHeroImage, roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.16";
 
 const CLIMATE_DOMAINS = new Set(["climate", "humidifier", "fan"]);
 
@@ -73,29 +73,28 @@ export function renderOverviewHero(panel, container, readiness, deps) {
   const devices = Array.isArray(dashboard.devices) ? dashboard.devices : [];
   const scenarios = Array.isArray(dashboard.scenarios) ? dashboard.scenarios : [];
   container.innerHTML = "";
+  const selectedRoom = rooms.find((room) => room.id === panel._overviewHeroRoomId) || null;
+  if (panel._overviewHeroRoomId && !selectedRoom) panel._overviewHeroRoomId = null;
   const hero = el("section", "overview-canon-hero");
+  const media = el("div", "overview-canon-hero-media");
+  media.style.backgroundImage = `url("${roomHeroImage(selectedRoom, dashboard.summary, dashboard.localIso)}")`;
+  hero.appendChild(media);
   const overlay = el("div", "overview-canon-hero-overlay");
   const copy = el("div", "overview-canon-hero-copy");
   const homeName = dashboard.summary && dashboard.summary.homeName || "Дом";
-  copy.appendChild(el("span", "overview-canon-eyebrow", readinessStatus === "ready" ? "Дом работает штатно" : "Требуется внимание"));
-  copy.appendChild(el("h1", null, homeName));
+  const eyebrow = el("span", "overview-canon-eyebrow");
+  const title = el("h1");
+  copy.appendChild(eyebrow);
+  copy.appendChild(title);
   const facts = el("div", "overview-canon-hero-facts");
-  [
-    ["rooms", String(rooms.length), "комнат"],
-    ["device", String(physicalDeviceCount(devices)), "устройств"],
-    ["energy", String(activeCount(devices)), "активно"],
-    ["play", String(scenarios.length), "сценариев"],
-  ].forEach(([iconName, value, label]) => {
-    const fact = el("span", "overview-canon-hero-fact");
-    fact.appendChild(svgIcon(iconName));
-    fact.appendChild(el("strong", null, value));
-    fact.appendChild(el("small", null, label));
-    facts.appendChild(fact);
-  });
   copy.appendChild(facts);
   const details = el("button", "overview-canon-hero-action", "Подробнее о доме");
   details.type = "button";
-  details.addEventListener("click", () => panel._activateSection("rooms"));
+  details.addEventListener("click", () => {
+    const room = rooms.find((candidate) => candidate.id === panel._overviewHeroRoomId);
+    if (room) deps.openRoom(room);
+    else panel._activateSection("rooms");
+  });
   copy.appendChild(details);
   overlay.appendChild(copy);
   const status = el("span", `overview-canon-state${readinessStatus === "ready" ? " is-ready" : " is-attention"}`,
@@ -103,24 +102,71 @@ export function renderOverviewHero(panel, container, readiness, deps) {
   overlay.appendChild(status);
   hero.appendChild(overlay);
   const roomStrip = el("div", "overview-canon-room-strip");
-  const home = el("button", "is-active");
+  const home = el("button");
   home.type = "button";
-  home.disabled = true;
-  setAttr(home, "aria-current", "page");
   home.appendChild(svgIcon("home"));
   home.appendChild(el("span", null, "Дом"));
   roomStrip.appendChild(home);
-  rooms.slice(0, 6).forEach((room) => {
+  const roomButtons = new Map();
+  rooms.forEach((room) => {
     const button = el("button");
     button.type = "button";
     button.appendChild(roomSvgIcon(roomIconName(room)));
     button.appendChild(el("span", null, room.name));
-    setAttr(button, "aria-label", `Открыть комнату ${room.name}`);
-    button.addEventListener("click", () => deps.openRoom(room));
+    setAttr(button, "aria-label", `Показать комнату ${room.name}`);
+    roomButtons.set(room.id, button);
     roomStrip.appendChild(button);
   });
   hero.appendChild(roomStrip);
   container.appendChild(hero);
+
+  const formatTemperature = (value) => validNumber(value) ? `${Number(value).toFixed(1).replace(".0", "").replace(".", ",")} °C` : "Нет данных";
+  const formatHumidity = (value) => validNumber(value) ? `${Math.round(Number(value))} %` : null;
+  const renderFact = (iconName, value, label) => {
+    const fact = el("span", "overview-canon-hero-fact");
+    fact.appendChild(svgIcon(iconName));
+    fact.appendChild(el("strong", null, value));
+    fact.appendChild(el("small", null, label));
+    facts.appendChild(fact);
+  };
+  const selectHeroRoom = (room) => {
+    panel._overviewHeroRoomId = room?.id || null;
+    media.classList.add("is-changing");
+    media.style.backgroundImage = `url("${roomHeroImage(room, dashboard.summary, dashboard.localIso)}")`;
+    const scheduleFrame = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (callback) => callback();
+    scheduleFrame(() => media.classList.remove("is-changing"));
+    home.classList.toggle("is-active", !room);
+    if (!room) setAttr(home, "aria-current", "page"); else home.removeAttribute("aria-current");
+    roomButtons.forEach((button, roomId) => {
+      const active = roomId === room?.id;
+      button.classList.toggle("is-active", active);
+      if (active) setAttr(button, "aria-current", "page"); else button.removeAttribute("aria-current");
+    });
+    facts.innerHTML = "";
+    if (!room) {
+      eyebrow.textContent = readinessStatus === "ready" ? "Дом работает штатно" : "Требуется внимание";
+      title.textContent = homeName;
+      renderFact("rooms", String(rooms.length), "комнат");
+      renderFact("device", String(physicalDeviceCount(devices)), "устройств");
+      renderFact("energy", String(activeCount(devices)), "активно");
+      renderFact("play", String(scenarios.length), "сценариев");
+      details.hidden = false;
+      details.textContent = "Подробнее о доме";
+      status.textContent = readinessStatus === "ready" ? "Всё в порядке" : "Проверьте настройки";
+      return;
+    }
+    eyebrow.textContent = "Состояние комнаты";
+    title.textContent = room.name;
+    renderFact("thermometer", formatTemperature(room.temp), "температура");
+    renderFact("water", formatHumidity(room.humidity) || "Нет данных", "влажность");
+    renderFact("thermometer", formatTemperature(room.targetTemp), "цель");
+    renderFact("device", String(Array.isArray(room.deviceIds) ? room.deviceIds.length : 0), "устройств");
+    details.hidden = true;
+    status.textContent = room.climateRunning ? "Климат работает" : (room.status || "Обычный режим");
+  };
+  home.addEventListener("click", () => selectHeroRoom(null));
+  rooms.forEach((room) => roomButtons.get(room.id)?.addEventListener("click", () => selectHeroRoom(room)));
+  selectHeroRoom(selectedRoom);
 }
 
 function renderPrimaryCards(panel, container, dashboard, deps) {

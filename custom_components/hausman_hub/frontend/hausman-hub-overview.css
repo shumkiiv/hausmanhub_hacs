@@ -1,6 +1,8 @@
 .overview-canon-hero { position:relative; min-height:360px; overflow:hidden; border:1px solid var(--hmh-border-default); border-radius:20px;
-  background:var(--hmh-surface-card) url("./assets/dashboard-hero-living-room-day.png") center 54%/cover no-repeat; box-shadow:0 16px 44px rgba(0,0,0,.32); }
-.overview-canon-hero-overlay { display:flex; min-height:306px; align-items:flex-start; justify-content:space-between; gap:24px; padding:34px;
+  background:var(--hmh-surface-card); box-shadow:0 16px 44px rgba(0,0,0,.32); }
+.overview-canon-hero-media { position:absolute; inset:0; z-index:0; background-position:center; background-size:cover; opacity:1; transform:scale(1); transition:opacity .28s ease,transform .5s ease; }
+.overview-canon-hero-media.is-changing { opacity:.42; transform:scale(1.008); }
+.overview-canon-hero-overlay { position:relative; z-index:1; display:flex; min-height:306px; align-items:flex-start; justify-content:space-between; gap:24px; padding:34px;
   background:linear-gradient(90deg,rgba(11,15,20,.88) 0%,rgba(11,15,20,.62) 32%,rgba(11,15,20,.06) 68%); }
 .overview-canon-hero-copy { width:min(440px,58%); color:#E6EAF2; }
 .overview-canon-eyebrow { display:block; margin-bottom:8px; color:#A3AAB7; font-size:14px; font-weight:600; }
@@ -14,7 +16,7 @@
 .overview-canon-state { align-self:flex-start; padding:8px 12px; border:1px solid rgba(230,234,242,.15); border-radius:999px; color:#E6EAF2; background:rgba(18,23,29,.66); backdrop-filter:blur(12px); font-size:13px; font-weight:650; }
 .overview-canon-state.is-ready::before, .overview-canon-state.is-attention::before { content:""; display:inline-block; width:8px; height:8px; margin-right:8px; border-radius:50%; background:var(--hmh-status-success); }
 .overview-canon-state.is-attention::before { background:var(--hmh-status-warning); }
-.overview-canon-room-strip { position:absolute; inset:auto 12px 12px; display:flex; gap:7px; min-width:0; padding:7px; overflow-x:auto; border:1px solid rgba(230,234,242,.14); border-radius:14px; background:rgba(11,15,20,.72); backdrop-filter:blur(18px); }
+.overview-canon-room-strip { position:absolute; z-index:2; inset:auto 12px 12px; display:flex; gap:7px; min-width:0; padding:7px; overflow-x:auto; border:1px solid rgba(230,234,242,.14); border-radius:14px; background:rgba(11,15,20,.72); backdrop-filter:blur(18px); }
 .overview-canon-room-strip button { display:flex; flex:0 0 auto; min-height:40px; align-items:center; gap:8px; margin:0; padding:8px 14px; color:#A3AAB7; background:transparent; box-shadow:none; }
 .overview-canon-room-strip button.is-active { color:#E6EAF2; background:rgba(79,140,255,.2); }
 .overview-canon-room-strip button.is-active:disabled { opacity:1; cursor:default; }

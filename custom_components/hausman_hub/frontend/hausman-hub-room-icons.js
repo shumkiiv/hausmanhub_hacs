@@ -16,6 +16,21 @@ const ROOM_ICON_PATHS = {
   category: "M12 2 2 7l10 5 9-4.5V17h2V7zm-7.47 5L12 3.26 19.47 7 12 10.74zM5 11.3v5L12 20l7-3.7v-5L12 15z",
 };
 
+const HERO_ASSET_ROOT = "/api/hausman_hub/panel/assets";
+const HERO_ASSETS = {
+  living: { prefix: "hero_room_living_", suffix: ".webp" },
+  kitchen: { prefix: "hero_room_kitchen_", suffix: ".webp" },
+  bedroom: { prefix: "hero_room_bedroom_", suffix: ".webp" },
+  bathroom: { prefix: "hero_room_bathroom_", suffix: "_v2.jpg" },
+  toilet: { prefix: "hero_room_toilet_", suffix: "_v2.jpg" },
+  hallway: { prefix: "hero_room_hallway_", suffix: "_v2.jpg" },
+  office: { prefix: "hero_room_office_", suffix: ".webp" },
+  child: { prefix: "hero_room_kids_", suffix: "_v2.jpg" },
+  terrace: { prefix: "hero_room_winter_garden_", suffix: ".webp" },
+  spa: { prefix: "hero_room_spa_", suffix: ".webp" },
+  other: { prefix: "hero_room_other_", suffix: ".webp" },
+};
+
 function roomIdentity(room) {
   return `${room?.id || ""} ${room?.name || ""} ${room?.icon || ""}`.toLocaleLowerCase("ru-RU");
 }
@@ -40,6 +55,31 @@ export function roomIconName(room) {
   if (containsAny(identity, ["storage", "pantry", "kladov", "кладов", "inventory", "archive"])) return "storage";
   if (containsAny(identity, ["other", "misc", "проч", "category"])) return "category";
   return "rooms";
+}
+
+function heroPeriod(localIso) {
+  const matchedHour = String(localIso || "").match(/T(\d{2}):/);
+  const hour = matchedHour ? Number(matchedHour[1]) : new Date().getHours();
+  if (hour >= 6 && hour <= 10) return "morning";
+  if (hour >= 11 && hour <= 16) return "day";
+  if (hour >= 17 && hour <= 21) return "evening";
+  return "night";
+}
+
+function heroWeather(condition) {
+  const value = String(condition || "").toLocaleLowerCase("en-US");
+  if (["snow", "sleet", "hail"].some((token) => value.includes(token))) return "snow";
+  if (["rain", "pour", "lightning", "drizzle"].some((token) => value.includes(token))) return "rain";
+  return null;
+}
+
+/** Resolve the same room/time/weather matrix used by the Android Hero. */
+export function roomHeroImage(room, summary = {}, localIso = "") {
+  const icon = room ? roomIconName(room) : "living";
+  const category = HERO_ASSETS[icon] ? icon : "other";
+  const state = heroWeather(summary.weatherCondition) || heroPeriod(localIso);
+  const asset = HERO_ASSETS[category];
+  return `${HERO_ASSET_ROOT}/${asset.prefix}${state}${asset.suffix}`;
 }
 
 export function roomSvgIcon(name) {
