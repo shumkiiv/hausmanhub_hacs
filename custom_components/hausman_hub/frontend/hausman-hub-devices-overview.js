@@ -1,6 +1,6 @@
 /* Canonical physical-device catalog shared with the tablet information hierarchy. */
 
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.20";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.21";
 
 const DEVICE_CATEGORY_META = {
   lighting: { label: "Освещение", icon: "lightbulb" },
