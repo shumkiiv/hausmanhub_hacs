@@ -19,6 +19,11 @@ function channelIdentity(choice) {
     .filter(Boolean).join(" ").toLocaleLowerCase("ru-RU");
 }
 
+function candidateCanUseConfiguredRoute(choice) {
+  const candidate = choice && choice.candidate ? choice.candidate : {};
+  return candidate.status !== "unavailable" && candidate.can_add !== false;
+}
+
 function matchingDashboardDevice(owner, choice) {
   const candidate = choice && choice.candidate ? choice.candidate : {};
   const devices = owner._homeDashboard && Array.isArray(owner._homeDashboard.devices)
@@ -79,7 +84,9 @@ export function resolveControlChannelTest(owner, choice, channel = null) {
 
 export function recommendControlChannel(owner, choice) {
   const available = new Set(((owner._firstRun.options || {}).control_channels || []));
-  if (/(?:yandex|яндекс|yndx)/.test(channelIdentity(choice)) && available.has("yandex_remote")) {
+  if (candidateCanUseConfiguredRoute(choice)
+    && /(?:yandex|яндекс|yndx)/.test(channelIdentity(choice))
+    && available.has("yandex_remote")) {
     return { channel: "yandex_remote", reason: "Устройство определено как управляемое через интеграцию Яндекса." };
   }
   if (resolveControlChannelTest(owner, choice, "direct_wifi").ready && available.has("direct_wifi")) {

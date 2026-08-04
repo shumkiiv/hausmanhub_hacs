@@ -846,6 +846,46 @@ class PanelContourWizardTest(unittest.TestCase):
 
 
 class PanelFirstRunWizardTest(unittest.TestCase):
+    def test_deleted_yandex_candidate_is_not_recommended_as_a_live_channel(self) -> None:
+        script = panel_script(
+            get_payloads(),
+            {},
+            """
+        const owner = {
+          _firstRun: {options: {
+            control_channels: ["universal_ir", "yandex_remote", "direct_wifi"],
+            ir_remotes: [{entity_id: "remote.pult_broadlink_gostinnaia"}],
+          }},
+          _homeDashboard: {devices: []},
+        };
+        const deletedYandex = {
+          candidate: {
+            name: "Кондиционер Яндекса",
+            manufacturer: "Yandex",
+            status: "unavailable",
+            can_add: false,
+          },
+          device: {channel: null},
+          type: "air_conditioner",
+        };
+        const deletedRecommendation = recommendControlChannel(owner, deletedYandex);
+        if (deletedRecommendation.channel !== "universal_ir"
+          || deletedRecommendation.channel === "yandex_remote") {
+          throw new Error("deleted Yandex entity was recommended as a live control route");
+        }
+        const liveYandex = {
+          ...deletedYandex,
+          candidate: {...deletedYandex.candidate, status: "available", can_add: true},
+        };
+        const liveRecommendation = recommendControlChannel(owner, liveYandex);
+        if (liveRecommendation.channel !== "yandex_remote") {
+          throw new Error("available Yandex entity lost its explicit route");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_ir_command_names_stay_internal_and_visible_labels_are_russian(self) -> None:
         script = panel_script(
             get_payloads(),
