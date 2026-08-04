@@ -584,6 +584,49 @@ class PanelContourWizardTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
+    def test_open_wizard_adopts_new_server_revision_without_losing_room_selection(self) -> None:
+        script = panel_script(
+            get_payloads(),
+            {},
+            """
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать настройку")[0].fire("click");
+        await tick();
+        panel._firstRunFields.rooms.living.configure.fire("click");
+        const device = panel._firstRunFields.room.devices.find((item) =>
+          item.key === "candidate_ac:air_conditioner");
+        device.checkbox.checked = true;
+        device.checkbox.fire("change");
+        device.controlChannel.value = "direct_wifi";
+        device.controlChannel.fire("change");
+        const refreshedSetup = JSON.parse(JSON.stringify(getTable[
+          "hausman_hub/v1/admin/climate-drafts/current"
+        ]));
+        refreshedSetup.setup_revision = 6;
+        getTable["hausman_hub/v1/admin/climate-drafts/current"] = refreshedSetup;
+        const optionCallsBefore = calls.filter((call) => call.method === "GET"
+          && call.path === "hausman_hub/v1/admin/climate-drafts").length;
+        await panel._load();
+        await tick();
+        const optionCallsAfter = calls.filter((call) => call.method === "GET"
+          && call.path === "hausman_hub/v1/admin/climate-drafts").length;
+        const restored = panel._firstRun.rooms.living.devices[
+          "candidate_ac:air_conditioner"
+        ];
+        if (panel._firstRun.setupRevision !== 6) {
+          throw new Error("open wizard kept a stale setup revision");
+        }
+        if (optionCallsAfter !== optionCallsBefore + 1) {
+          throw new Error("revision change did not refresh the device inventory exactly once");
+        }
+        if (!restored.selected || restored.channel !== "direct_wifi") {
+          throw new Error("revision refresh discarded the room device selection");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_room_review_receives_active_device_types_as_an_explicit_module_dependency(self) -> None:
         room_setup = ROOM_SETUP_JS.read_text(encoding="utf-8")
         panel = PANEL_JS.read_text(encoding="utf-8")

@@ -3,7 +3,7 @@ import {
   ROOM_TYPE_OPTIONS,
   roomIconName,
   roomSvgIcon,
-} from "./hausman-hub-room-icons.js?v=1.52.27";
+} from "./hausman-hub-room-icons.js?v=1.52.28";
 
 /** Render room purpose selection backed by the Home Assistant Area Registry. */
 export function renderSettingsRooms(panel, container, deps) {
