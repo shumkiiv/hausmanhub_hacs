@@ -548,6 +548,42 @@ def ready_validation(draft: dict) -> dict:
 
 
 class PanelContourWizardTest(unittest.TestCase):
+    def test_wizard_persists_the_last_interaction_before_page_unload(self) -> None:
+        panel_source = PANEL_JS.read_text(encoding="utf-8")
+        self.assertIn(
+            'window.addEventListener("pagehide", this._persistFirstRunBeforeUnload)',
+            panel_source,
+        )
+        self.assertIn(
+            'window.removeEventListener("pagehide", this._persistFirstRunBeforeUnload)',
+            panel_source,
+        )
+        script = panel_script(
+            get_payloads(),
+            {},
+            """
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать настройку")[0].fire("click");
+        await tick();
+        panel._firstRunFields.rooms.living.configure.fire("click");
+        panel._activeRoomSetupPane = "limits";
+        panel._firstRun.rooms.living.day.temperature = 26;
+        panel._persistFirstRunBeforeUnload();
+        const ReloadedPanel = registry.get("hausman-hub-panel");
+        const reloaded = new ReloadedPanel();
+        reloaded.hass = hass;
+        await tick(16);
+        if (reloaded._firstRun.step !== "room"
+          || reloaded._firstRun.roomId !== "living"
+          || reloaded._activeRoomSetupPane !== "limits"
+          || reloaded._firstRun.rooms.living.day.temperature !== 26) {
+          throw new Error("pagehide did not persist the final wizard interaction");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_room_review_receives_active_device_types_as_an_explicit_module_dependency(self) -> None:
         room_setup = ROOM_SETUP_JS.read_text(encoding="utf-8")
         panel = PANEL_JS.read_text(encoding="utf-8")
