@@ -1262,6 +1262,37 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
+    def test_physical_sensor_card_formats_primary_measurement_with_unit(self) -> None:
+        script = panel_script(
+            GET_PATHS,
+            {},
+            """
+        const device = {
+          id: "temperature_sensor",
+          entityId: "sensor.room_temperature",
+          physicalId: "temperature_sensor",
+          name: "Климат комнаты",
+          roomName: "Гостиная",
+          domain: "sensor",
+          state: "20.5",
+          stateLabel: "20.5",
+          active: false,
+          unavailable: false,
+          details: [
+            { entityId: "sensor.room_temperature", label: "Температура", value: "20.5 °C", state: "20.5" },
+          ],
+        };
+        const card = panel._deviceInventoryCard(device);
+        const summary = findAll(card, (node) => node.tagName === "SUMMARY")[0];
+        const text = textOf(summary);
+        if (!text.includes("20,5 °C") || text.includes("20.5")) {
+          throw new Error("numeric primary state is not localized with its unit: " + text);
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_energy_section_configures_units_and_opens_one_physical_device(self) -> None:
         dashboard = {
             "devices": [
@@ -1482,9 +1513,10 @@ class PanelSettingsSectionsTest(unittest.TestCase):
                 {"id": "office", "name": "Кабинет", "temp": None, "humidity": None, "targetTemp": None, "targetHumidity": None},
             ],
             "devices": [
-                {"id": "light.main", "physicalId": "light-fixture", "domain": "light", "state": "on"},
-                {"id": "light.level", "physicalId": "light-fixture", "domain": "light", "state": "on"},
-                {"id": "climate.living", "physicalId": "ac-living", "domain": "climate", "state": "cool"},
+                {"id": "light.main", "physicalId": "light-fixture", "domain": "light", "state": "on", "active": True},
+                {"id": "light.level", "physicalId": "light-fixture", "domain": "light", "state": "on", "active": True},
+                {"id": "climate.living", "physicalId": "ac-living", "domain": "climate", "state": "cool", "active": False},
+                {"id": "sensor.temperature", "physicalId": "temperature-sensor", "domain": "sensor", "state": "24.5", "active": False},
             ],
             "alarms": [],
             "scenarios": [{"id": "morning", "title": "Доброе утро", "favorite": True}],
@@ -1509,6 +1541,11 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           String(node.className).split(" ").includes(name));
         if (byClass("overview-canon-hero-fact").length !== 4) {
           throw new Error("canonical hero must contain four facts");
+        }
+        const heroFacts = byClass("overview-canon-hero-fact");
+        const activeValue = findAll(heroFacts[2], (node) => node.tagName === "STRONG")[0];
+        if (!activeValue || activeValue.textContent !== "2") {
+          throw new Error("numeric sensors were counted as active devices: " + JSON.stringify(heroFacts.map(textOf)));
         }
         if (byClass("overview-canon-primary-card").length !== 3) {
           throw new Error("canonical first row must contain three cards");
@@ -3453,7 +3490,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.31")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.32")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

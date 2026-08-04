@@ -10,7 +10,7 @@ function physicalCount(devices) {
 }
 
 function activeCount(devices) {
-  return devices.filter((device) => !device.unavailable && (device.active === true || !["off", "idle", "standby", "unknown", "unavailable"].includes(device.state))).length;
+  return devices.filter((device) => !device.unavailable && device.active === true).length;
 }
 
 function batteryAlerts(devices) {

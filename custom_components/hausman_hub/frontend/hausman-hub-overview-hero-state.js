@@ -1,4 +1,4 @@
-import { roomHeroImage } from "./hausman-hub-room-icons.js?v=1.52.31";
+import { roomHeroImage } from "./hausman-hub-room-icons.js?v=1.52.32";
 
 function heroSummary(dashboard) {
   const summary = dashboard?.summary && typeof dashboard.summary === "object"
@@ -12,9 +12,7 @@ function physicalDeviceCount(devices) {
 }
 
 function activeCount(devices) {
-  return devices.filter((device) => !device.unavailable && (
-    device.active === true || !["off", "idle", "standby", "unknown", "unavailable"].includes(device.state)
-  )).length;
+  return devices.filter((device) => !device.unavailable && device.active === true).length;
 }
 
 export function stableOverviewHeroImage(panel, room, dashboard) {

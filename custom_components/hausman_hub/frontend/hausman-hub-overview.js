@@ -1,5 +1,5 @@
-import { createHeroRoomNavigation } from "./hausman-hub-hero-room-navigation.js?v=1.52.31";
-import { overviewHeroRenderKey, stableOverviewHeroImage } from "./hausman-hub-overview-hero-state.js?v=1.52.31";
+import { createHeroRoomNavigation } from "./hausman-hub-hero-room-navigation.js?v=1.52.32";
+import { overviewHeroRenderKey, stableOverviewHeroImage } from "./hausman-hub-overview-hero-state.js?v=1.52.32";
 
 const CLIMATE_DOMAINS = new Set(["climate", "humidifier", "fan"]);
 
@@ -33,9 +33,7 @@ function physicalDeviceCount(devices) {
 }
 
 function activeCount(devices, predicate = () => true) {
-  return devices.filter((device) => predicate(device) && !device.unavailable && (
-    device.active === true || !["off", "idle", "standby", "unknown", "unavailable"].includes(device.state)
-  )).length;
+  return devices.filter((device) => predicate(device) && !device.unavailable && device.active === true).length;
 }
 
 function weatherLabel(condition) {

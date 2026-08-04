@@ -1,5 +1,5 @@
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.31";
-import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.31";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.32";
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.32";
 
 function mediaOverviewNormalized(value) { return String(value || "").trim().toLocaleLowerCase("ru"); }
 function mediaOverviewKey(device) { return device.physicalId || device.id || device.entityId; }

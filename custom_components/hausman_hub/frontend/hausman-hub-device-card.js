@@ -45,8 +45,33 @@ function normalized(value) {
   return String(value == null ? "" : value).trim().toLocaleLowerCase("ru");
 }
 
+function localizedNumericValue(value) {
+  const source = String(value == null ? "" : value).trim();
+  const match = source.match(/^(-?\d+(?:[.,]\d+)?)(\s*.*)$/);
+  if (!match) return source;
+  const numeric = Number(match[1].replace(",", "."));
+  if (!Number.isFinite(numeric)) return source;
+  const formatted = numeric.toLocaleString("ru-RU", { maximumFractionDigits: 3 });
+  const suffix = match[2].trim();
+  return suffix ? `${formatted} ${suffix}` : formatted;
+}
+
+function primaryMeasurement(device) {
+  const rawState = String(device && device.state || "").trim();
+  const rawLabel = String(device && device.stateLabel || "").trim();
+  if (!/^-?\d+(?:[.,]\d+)?$/.test(rawLabel || rawState)) return "";
+  if (device && device.primaryValue) return localizedNumericValue(device.primaryValue);
+  const primaryDetail = (Array.isArray(device && device.details) ? device.details : []).find((detail) => (
+    detail && detail.entityId && device.entityId && detail.entityId === device.entityId
+  ));
+  if (primaryDetail) return localizedNumericValue(primaryDetail.value ?? primaryDetail.state);
+  return localizedNumericValue(rawLabel || rawState);
+}
+
 export function localizedDeviceState(device) {
   if (device && device.unavailable) return "Нет связи";
+  const measurement = primaryMeasurement(device);
+  if (measurement) return measurement;
   const rawState = normalized(device && device.state);
   const rawLabel = normalized(device && device.stateLabel);
   return STATE_LABELS[rawLabel] || STATE_LABELS[rawState]
