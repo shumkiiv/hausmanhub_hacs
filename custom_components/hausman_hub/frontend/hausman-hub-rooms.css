@@ -26,8 +26,9 @@
 .rooms-canon-card-icon { display:grid; place-items:center; width:48px; height:48px; border-radius:15px; background:color-mix(in srgb,var(--hmh-accent) 13%,transparent); color:var(--hmh-accent); }
 .rooms-canon-card-icon svg { width:25px; height:25px; }
 .rooms-canon-card-copy,.rooms-canon-card-climate { display:flex; flex-direction:column; gap:5px; min-width:0; }
-.rooms-canon-card-copy strong { overflow:hidden; font-size:18px; text-overflow:ellipsis; white-space:nowrap; }
-.rooms-canon-card-copy small,.rooms-canon-card-climate small { color:var(--hmh-text-dim); font-size:13px; }
+.rooms-canon-card-copy strong { display:-webkit-box; overflow:hidden; font-size:18px; line-height:1.25; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
+.rooms-canon-card-copy small { overflow:hidden; color:var(--hmh-text-dim); font-size:13px; text-overflow:ellipsis; white-space:nowrap; }
+.rooms-canon-card-climate small { color:var(--hmh-text-dim); font-size:13px; white-space:nowrap; }
 .rooms-canon-card-climate { align-items:flex-end; }
 .rooms-canon-card-climate strong { font-size:18px; }
 .rooms-canon-card-chevron { color:var(--hmh-text-dim); font-size:26px; }
