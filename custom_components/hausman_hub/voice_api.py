@@ -30,6 +30,7 @@ DOMAIN = "hausman_hub"
 DATA_VOICE_SERVICE = "voice_greeting_service"
 DATA_VOICE_VIEWS = "voice_greeting_views"
 DATA_VOICE_UNSUBSCRIBE = "voice_greeting_unsubscribe"
+DATA_VOICE_TASKS = "voice_greeting_tasks"
 
 VOICE_GREETING_PATH = f"{API_BASE_PATH}/voice/yandex-greeting"
 VOICE_GREETING_TEST_PATH = f"{VOICE_GREETING_PATH}/test"
@@ -73,6 +74,12 @@ async def async_start_voice_greeting(hass: HomeAssistant, entry: Any) -> VoiceGr
     data[DATA_VOICE_SERVICE] = service
 
     unsubscribers = []
+    tasks: set[Any] = data.setdefault(DATA_VOICE_TASKS, set())
+
+    def _schedule(coro: Any) -> None:
+        task = hass.async_create_task(coro)
+        tasks.add(task)
+        task.add_done_callback(tasks.discard)
 
     def _state_changed(event: Any) -> None:
         event_data = getattr(event, "data", {})
@@ -80,7 +87,7 @@ async def async_start_voice_greeting(hass: HomeAssistant, entry: Any) -> VoiceGr
             return
         old = getattr(event_data.get("old_state"), "state", None)
         new = getattr(event_data.get("new_state"), "state", None)
-        hass.async_create_task(service.async_home_mode_changed(old, new))
+        _schedule(service.async_home_mode_changed(old, new))
 
     async def _yandex_intent(event: Any) -> None:
         event_data = getattr(event, "data", {})
@@ -90,7 +97,7 @@ async def async_start_voice_greeting(hass: HomeAssistant, entry: Any) -> VoiceGr
             await gateway.async_publish_dialog_answer(answer)
 
     def _intent_listener(event: Any) -> None:
-        hass.async_create_task(_yandex_intent(event))
+        _schedule(_yandex_intent(event))
 
     bus = getattr(hass, "bus", None)
     if bus is not None:
@@ -113,6 +120,8 @@ def clear_voice_greeting(hass: HomeAssistant, entry_id: str) -> None:
     service = data.get(DATA_VOICE_SERVICE)
     if isinstance(service, VoiceGreetingService):
         data.pop(DATA_VOICE_SERVICE, None)
+    for task in data.pop(DATA_VOICE_TASKS, set()) or ():
+        task.cancel()
     for unsubscribe in data.pop(DATA_VOICE_UNSUBSCRIBE, ()) or ():
         unsubscribe()
 
@@ -210,9 +219,14 @@ class VoiceGreetingTestView(_VoiceViewBase):
                 headers=NO_STORE_HEADERS,
             )
         receipt = await service.async_test(payload)
-        status = (
-            HTTPStatus.BAD_REQUEST
-            if receipt["code"] == "invalid_request"
-            else HTTPStatus.ACCEPTED
+        if receipt["code"] == "invalid_request":
+            return self.json_message(
+                receipt["detail"],
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        return self.json(
+            receipt,
+            status_code=HTTPStatus.ACCEPTED,
+            headers=NO_STORE_HEADERS,
         )
-        return self.json(receipt, status_code=status, headers=NO_STORE_HEADERS)

@@ -103,6 +103,9 @@ class VoiceGreetingService:
             )
             await self._store.async_save(updated)
             self._state = updated
+            # A saved disable, station change, or text change must invalidate a
+            # greeting that is still waiting inside delaySeconds.
+            self._watcher_epoch += 1
         self._emit(
             voice_receipt(
                 self._command_id(),
@@ -234,7 +237,14 @@ class VoiceGreetingService:
         if delay > 0:
             await self._sleep(delay)
         current = await self._gateway.async_away_state()
-        if epoch != self._watcher_epoch or current != "off":
+        if epoch != self._watcher_epoch:
+            return self._finish(
+                accepted=True, confirmed=False, code="cancelled",
+                detail="Настройки изменились до истечения задержки, речь отменена",
+                station_entity_id=station_id,
+                operation="voice.yandexGreeting.run",
+            )
+        if current != "off":
             return self._finish(
                 accepted=True, confirmed=False, code="mode_changed",
                 detail="Режим дома изменился до истечения задержки, речь отменена",

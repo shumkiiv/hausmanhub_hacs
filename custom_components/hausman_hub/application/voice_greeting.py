@@ -105,6 +105,7 @@ def validate_voice_greeting_settings(value: object) -> dict[str, Any]:
 
 def validate_voice_test_request(value: object) -> dict[str, Any]:
     if not isinstance(value, dict) or set(value) != {
+        "contract",
         "stationEntityId",
         "useCurrentHomeState",
         "includeGreeting",
@@ -115,6 +116,11 @@ def validate_voice_test_request(value: object) -> dict[str, Any]:
     }:
         raise VoiceGreetingViolation("voice test request fields are invalid")
     result = deepcopy(value)
+    if result.pop("contract") != {
+        "name": VOICE_TEST_REQUEST_CONTRACT_NAME,
+        "version": VOICE_TEST_REQUEST_CONTRACT_VERSION,
+    }:
+        raise VoiceGreetingViolation("voice test request contract is invalid")
     station = result["stationEntityId"]
     if not isinstance(station, str) or not _MEDIA_PLAYER.fullmatch(station):
         raise VoiceGreetingViolation("stationEntityId must be a media_player entity")

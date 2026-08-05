@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from copy import deepcopy
 from datetime import datetime, timezone
 import unittest
@@ -182,6 +183,10 @@ class VoiceGreetingServiceTest(unittest.IsolatedAsyncioTestCase):
 
     def _test_request(self, **overrides: object) -> dict[str, object]:
         request: dict[str, object] = {
+            "contract": {
+                "name": "hausman-hub-voice-greeting-test-request",
+                "version": 1,
+            },
             "stationEntityId": "media_player.yandex_station_demo",
             "useCurrentHomeState": True,
             "includeGreeting": True,
@@ -264,6 +269,38 @@ class VoiceGreetingServiceTest(unittest.IsolatedAsyncioTestCase):
         receipt = await self.service.async_home_mode_changed("on", "off")
         self.assertEqual("mode_changed", receipt["code"])
         self.assertFalse(receipt["confirmed"])
+        self.assertEqual([], self.gateway.spoken)
+
+    async def test_saved_settings_cancel_a_pending_greeting(self) -> None:
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def blocked_sleep(_: float) -> None:
+            started.set()
+            await release.wait()
+
+        service = VoiceGreetingService(
+            self.store,
+            self.gateway,
+            now=lambda: NOW,
+            id_factory=lambda: f"voice-test-{next(self.ids):03d}",
+            sleep=blocked_sleep,
+            publish_receipt=lambda receipt, operation: self.receipts.append(
+                (receipt, operation)
+            ),
+        )
+        await service.async_load()
+        await service.async_replace(0, self._enabled_settings())
+        pending = asyncio.create_task(service.async_home_mode_changed("on", "off"))
+        await started.wait()
+
+        disabled = self._enabled_settings()
+        disabled["enabled"] = False
+        await service.async_replace(1, disabled)
+        release.set()
+
+        receipt = await pending
+        self.assertEqual("cancelled", receipt["code"])
         self.assertEqual([], self.gateway.spoken)
 
     async def test_watcher_reports_unavailable_summary_and_station(self) -> None:
@@ -430,6 +467,10 @@ class VoiceDialogTest(unittest.TestCase):
 class VoiceTestRequestValidationTest(unittest.TestCase):
     def test_request_validation(self) -> None:
         valid = {
+            "contract": {
+                "name": "hausman-hub-voice-greeting-test-request",
+                "version": 1,
+            },
             "stationEntityId": "media_player.yandex_station_demo",
             "useCurrentHomeState": True,
             "includeGreeting": True,
@@ -446,6 +487,7 @@ class VoiceTestRequestValidationTest(unittest.TestCase):
             {**valid, "speechText": "x" * 513},
             {**valid, "stationEntityId": "light.kitchen"},
             {**valid, "summaryItems": ["unknown_block"]},
+            {**valid, "contract": {"name": "other", "version": 1}},
         ):
             with self.assertRaises(VoiceGreetingViolation):
                 validate_voice_test_request(broken)
@@ -474,6 +516,16 @@ class VoiceApiViewSourceTest(unittest.TestCase):
                 r"(?<![_a-z])status\s*=",
                 f"self.json call must use status_code, not status: {call}",
             )
+
+    def test_unload_cancels_pending_voice_tasks(self) -> None:
+        from pathlib import Path
+
+        source = Path(
+            "custom_components/hausman_hub/voice_api.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('DATA_VOICE_TASKS = "voice_greeting_tasks"', source)
+        self.assertIn("tasks.add(task)", source)
+        self.assertIn("task.cancel()", source)
 
 
 if __name__ == "__main__":
