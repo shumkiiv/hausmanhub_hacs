@@ -1,5 +1,5 @@
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.38";
-import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.38";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.39";
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.39";
 
 function roomNormalized(value) {
   return String(value || "").trim().toLocaleLowerCase("ru");

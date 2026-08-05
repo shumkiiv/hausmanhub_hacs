@@ -185,9 +185,38 @@ class VoiceGreetingService:
 
         settings = self._document()["settings"]
         if not settings["enabled"]:
-            return None
+            return self._finish(
+                accepted=False,
+                confirmed=False,
+                code="cancelled",
+                detail="Voice contour is disabled, greeting not scheduled",
+                station_entity_id=settings["stationEntityId"],
+                operation="voice.yandexGreeting.run",
+            )
         if old_state != "on" or new_state != "off":
-            return None
+            return self._finish(
+                accepted=False,
+                confirmed=False,
+                code="cancelled",
+                detail=f"Transition {old_state}->{new_state} is not a home return",
+                station_entity_id=settings["stationEntityId"],
+                operation="voice.yandexGreeting.run",
+            )
+        try:
+            return await self._run_greeting(settings)
+        except Exception as exc:  # pragma: no cover - live diagnostics
+            return self._finish(
+                accepted=True,
+                confirmed=False,
+                code="provider_error",
+                detail=f"Voice contour error: {type(exc).__name__}: {exc}"[:180],
+                station_entity_id=settings["stationEntityId"],
+                operation="voice.yandexGreeting.run",
+            )
+
+    async def _run_greeting(self, settings: dict[str, Any]) -> dict[str, Any] | None:
+        """Body of the away->home greeting, isolated for error reporting."""
+
         station_id = settings["stationEntityId"]
         self._watcher_epoch += 1
         epoch = self._watcher_epoch
@@ -259,19 +288,22 @@ class VoiceGreetingService:
             return None
         if not isinstance(text, str) or not text.strip():
             return None
-        snapshot = await self._snapshot()
-        greeting = await self._summary_speech(settings, include_follow_up=True)
-        return await dialog_answer(
-            text.strip(),
-            rooms=snapshot["rooms"],
-            co2_ppm=snapshot["co2Ppm"],
-            leaks=snapshot["leaks"],
-            openings=snapshot["openings"],
-            hazards=snapshot["hazards"],
-            low_batteries=snapshot["lowBatteries"],
-            greeting_speech=greeting,
-            conversation=self._gateway.async_conversation,
-        )
+        try:
+            snapshot = await self._snapshot()
+            greeting = await self._summary_speech(settings, include_follow_up=True)
+            return await dialog_answer(
+                text.strip(),
+                rooms=snapshot["rooms"],
+                co2_ppm=snapshot["co2Ppm"],
+                leaks=snapshot["leaks"],
+                openings=snapshot["openings"],
+                hazards=snapshot["hazards"],
+                low_batteries=snapshot["lowBatteries"],
+                greeting_speech=greeting,
+                conversation=self._gateway.async_conversation,
+            )
+        except Exception as exc:  # pragma: no cover - live diagnostics
+            return f"Voice dialog error: {type(exc).__name__}: {exc}"[:180]
 
     async def _summary_speech(
         self, settings: dict[str, Any], *, include_follow_up: bool

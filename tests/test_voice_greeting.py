@@ -237,8 +237,11 @@ class VoiceGreetingServiceTest(unittest.IsolatedAsyncioTestCase):
         await self.service.async_replace(0, self._enabled_settings())
         self.receipts.clear()
 
-        self.assertIsNone(await self.service.async_home_mode_changed("off", "off"))
-        self.assertIsNone(await self.service.async_home_mode_changed("off", "on"))
+        ignored = await self.service.async_home_mode_changed("off", "off")
+        self.assertEqual("cancelled", ignored["code"])
+        ignored = await self.service.async_home_mode_changed("off", "on")
+        self.assertEqual("cancelled", ignored["code"])
+        self.receipts.clear()
 
         receipt = await self.service.async_home_mode_changed("on", "off")
         self.assertEqual("spoken", receipt["code"])
@@ -284,9 +287,12 @@ class VoiceGreetingServiceTest(unittest.IsolatedAsyncioTestCase):
         receipt = await self.service.async_home_mode_changed("on", "off")
         self.assertEqual("station_unavailable", receipt["code"])
 
-    async def test_watcher_disabled_does_nothing(self) -> None:
-        self.assertIsNone(await self.service.async_home_mode_changed("on", "off"))
-        self.assertEqual([], self.receipts)
+    async def test_watcher_disabled_reports_cancelled(self) -> None:
+        receipt = await self.service.async_home_mode_changed("on", "off")
+        self.assertEqual("cancelled", receipt["code"])
+        self.assertFalse(receipt["accepted"])
+        operations = [op for _, op in self.receipts]
+        self.assertEqual(["voice.yandexGreeting.run"], operations)
         self.assertEqual([], self.gateway.spoken)
 
     async def test_dialog_turn_requires_opt_in(self) -> None:
