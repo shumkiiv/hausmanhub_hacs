@@ -211,6 +211,11 @@ class ScenarioExecutor:
         """Generate a unique execution trace id."""
         return uuid.uuid4().hex
 
+    def replace_catalog(self, catalog: ScenarioCatalog) -> None:
+        """Use the latest HA entities for following validations and commands."""
+
+        self._catalog = catalog
+
     async def async_execute_device_action(
         self,
         target_id: str,

@@ -50,6 +50,7 @@ DEVICES_OVERVIEW_CSS = PANEL_JS.with_name("hausman-hub-devices-overview.css")
 DIAGNOSTICS_JS = PANEL_JS.with_name("hausman-hub-diagnostics.js")
 ROLLOUT_JS = PANEL_JS.with_name("hausman-hub-rollout.js")
 OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-overview.js")
+OVERVIEW_HERO_STATE_JS = PANEL_JS.with_name("hausman-hub-overview-hero-state.js")
 ROOM_ICONS_JS = PANEL_JS.with_name("hausman-hub-room-icons.js")
 HERO_ROOM_NAVIGATION_JS = PANEL_JS.with_name("hausman-hub-hero-room-navigation.js")
 LIBRARY_HERO_JS = PANEL_JS.with_name("hausman-hub-library-hero.js")
@@ -614,6 +615,10 @@ def panel_script(
         {{ filename: {str(LIBRARY_HERO_JS)!r} }}
       );
       vm.runInThisContext(
+        fs.readFileSync({str(OVERVIEW_HERO_STATE_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
+        {{ filename: {str(OVERVIEW_HERO_STATE_JS)!r} }}
+      );
+      vm.runInThisContext(
         fs.readFileSync({str(OVERVIEW_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(OVERVIEW_JS)!r} }}
       );
@@ -675,6 +680,9 @@ def panel_script(
         callApi: (method, path, payload) => {{
           calls.push({{ method, path, payload }});
           if (method === "GET") {{
+            if (path.startsWith("hausman_hub/v1/energy/history?") && "__energy_history__" in getTable) {{
+              return Promise.resolve(getTable.__energy_history__);
+            }}
             if (!(path in getTable)) return Promise.reject(new Error("unexpected GET " + path));
             const result = getTable[path];
             if (result && result.__fail) return Promise.reject(new Error("GET failed"));
@@ -1257,6 +1265,37 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
+    def test_physical_sensor_card_formats_primary_measurement_with_unit(self) -> None:
+        script = panel_script(
+            GET_PATHS,
+            {},
+            """
+        const device = {
+          id: "temperature_sensor",
+          entityId: "sensor.room_temperature",
+          physicalId: "temperature_sensor",
+          name: "Климат комнаты",
+          roomName: "Гостиная",
+          domain: "sensor",
+          state: "20.5",
+          stateLabel: "20.5",
+          active: false,
+          unavailable: false,
+          details: [
+            { entityId: "sensor.room_temperature", label: "Температура", value: "20.5 °C", state: "20.5" },
+          ],
+        };
+        const card = panel._deviceInventoryCard(device);
+        const summary = findAll(card, (node) => node.tagName === "SUMMARY")[0];
+        const text = textOf(summary);
+        if (!text.includes("20,5 °C") || text.includes("20.5")) {
+          throw new Error("numeric primary state is not localized with its unit: " + text);
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_energy_section_configures_units_and_opens_one_physical_device(self) -> None:
         dashboard = {
             "devices": [
@@ -1317,13 +1356,45 @@ class PanelSettingsSectionsTest(unittest.TestCase):
                     "revision": 0,
                     "settings": dashboard["energy"]["settings"],
                 },
+                "__energy_history__": {
+                    "series": [
+                        {
+                            "sourceId": "device_0123456789abcdef",
+                            "deviceId": "device_0123456789abcdef",
+                            "metric": "power",
+                            "unit": "W",
+                            "scope": "device",
+                            "points": [
+                                {"at": "2026-08-04T12:00:00+06:00", "value": 320},
+                                {"at": "2026-08-04T13:00:00+06:00", "value": 540},
+                            ],
+                        },
+                        {
+                            "sourceId": "device_0123456789abcdef",
+                            "deviceId": "device_0123456789abcdef",
+                            "metric": "energy",
+                            "unit": "kWh",
+                            "scope": "device",
+                            "points": [
+                                {"at": "2026-08-04T12:00:00+06:00", "value": 0.18},
+                                {"at": "2026-08-04T13:00:00+06:00", "value": 0.24},
+                            ],
+                        },
+                    ],
+                },
             },
             {"hausman_hub/v1/energy-settings": {"revision": 1}},
             """
+        restoreNavigationFromLocation(panel, false, PANEL_SECTIONS, CLIMATE_VIEWS, SETTINGS_VIEWS);
+        await panel._load();
+        await tick();
+        if (!calls.some((call) => call.method === "GET" && call.path.startsWith("hausman_hub/v1/energy/history?"))) {
+          throw new Error("energy deep link did not load Recorder history");
+        }
         panel._shell.tabs.energy.fire("click");
         await tick();
         let text = textOf(panel._shell.homeSections.energy);
-        if (!text.includes("Энергия сейчас") || !text.includes("850") || !text.includes("230,1") || !text.includes("Торшер") || !text.includes("Выключен") || !text.includes("питание отключено") || !text.includes("Устройства энергии") || !text.includes("Карточка на главной") || text.includes("Единый источник истины")) {
+        if (!text.includes("Энергия сейчас") || !text.includes("850") || !text.includes("230,1") || !text.includes("0,42 кВт·ч") || !text.includes("Торшер") || !text.includes("Выключен") || !text.includes("питание отключено") || !text.includes("Устройства энергии") || !text.includes("Карточка на главной") || text.includes("Единый источник истины")) {
           throw new Error("energy summary is incomplete: " + text);
         }
         const rows = findAll(panel._shell.homeSections.energy, (node) =>
@@ -1403,7 +1474,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         if (!consumption) throw new Error("energy consumption history selector is missing");
         consumption.fire("click");
         text = textOf(panel._shell.homeSections.energy);
-        if (!text.includes("История расхода") || (!text.includes("История расхода пока недоступна") && !text.includes("Не удалось получить историю"))) {
+        if (!text.includes("История расхода") || (!text.includes("За период") && !text.includes("История расхода пока недоступна") && !text.includes("Не удалось получить историю"))) {
           throw new Error("energy consumption history did not open: " + text);
         }
         let confirmation = "";
@@ -1419,6 +1490,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("cancelled breaker command reached the API");
         }
             """,
+            before_panel='setWindowLocation("https://homeassistant.local/hausman-hub?hh_section=energy");',
         )
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
@@ -1470,15 +1542,17 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         }
         payloads["hausman_hub/v1/dashboard"] = {
             "summary": {"homeName": "Дом"},
+            "localIso": "2026-08-05T12:40:00+06:00",
             "rooms": [
                 {"id": "living", "name": "Гостиная", "temp": 24.5, "humidity": 46, "targetTemp": 25, "targetHumidity": 45},
                 {"id": "bedroom", "name": "Спальня", "temp": 23.5, "humidity": 50, "targetTemp": 24, "targetHumidity": 50},
                 {"id": "office", "name": "Кабинет", "temp": None, "humidity": None, "targetTemp": None, "targetHumidity": None},
             ],
             "devices": [
-                {"id": "light.main", "physicalId": "light-fixture", "domain": "light", "state": "on"},
-                {"id": "light.level", "physicalId": "light-fixture", "domain": "light", "state": "on"},
-                {"id": "climate.living", "physicalId": "ac-living", "domain": "climate", "state": "cool"},
+                {"id": "light.main", "physicalId": "light-fixture", "domain": "light", "state": "on", "active": True},
+                {"id": "light.level", "physicalId": "light-fixture", "domain": "light", "state": "on", "active": True},
+                {"id": "climate.living", "physicalId": "ac-living", "domain": "climate", "state": "cool", "active": False},
+                {"id": "sensor.temperature", "physicalId": "temperature-sensor", "domain": "sensor", "state": "24.5", "active": False},
             ],
             "alarms": [],
             "scenarios": [{"id": "morning", "title": "Доброе утро", "favorite": True}],
@@ -1504,8 +1578,26 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         if (byClass("overview-canon-hero-fact").length !== 4) {
           throw new Error("canonical hero must contain four facts");
         }
+        const heroFacts = byClass("overview-canon-hero-fact");
+        const activeValue = findAll(heroFacts[2], (node) => node.tagName === "STRONG")[0];
+        if (!activeValue || activeValue.textContent !== "2") {
+          throw new Error("numeric sensors were counted as active devices: " + JSON.stringify(heroFacts.map(textOf)));
+        }
         if (byClass("overview-canon-primary-card").length !== 3) {
           throw new Error("canonical first row must contain three cards");
+        }
+        const stableHero = byClass("overview-canon-hero")[0];
+        const stableMedia = byClass("overview-canon-hero-media")[0];
+        panel._homeDashboard = { ...panel._homeDashboard, localIso: "2026-08-05T12:40:15+06:00" };
+        panel._render();
+        if (byClass("overview-canon-hero")[0] !== stableHero
+          || byClass("overview-canon-hero-media")[0] !== stableMedia) {
+          throw new Error("volatile dashboard timestamp recreated the Hero");
+        }
+        panel._homeDashboard = { ...panel._homeDashboard, localIso: "", weather: {} };
+        panel._render();
+        if (byClass("overview-canon-hero-media")[0] !== stableMedia) {
+          throw new Error("partial dashboard response replaced the stable Hero image");
         }
         const homeButton = findAll(overview, (node) => node.tagName === "BUTTON"
           && node["aria-current"] === "page")[0];
@@ -1916,13 +2008,32 @@ class PanelSettingsSectionsTest(unittest.TestCase):
             """
         await tick();
         panel._shell.tabs.media.fire("click");
-        const media = panel._shell.homeSections.media;
+        let media = panel._shell.homeSections.media;
         const mediaText = textOf(media);
         if (!mediaText.includes("СЕЙЧАС ВОСПРОИЗВОДИТСЯ")
           || !mediaText.includes("По комнатам") || !mediaText.includes("Медиаустройства")
           || !mediaText.includes("Кинопоиск")) {
           throw new Error("canonical media hierarchy is incomplete: " + mediaText);
         }
+        const zone = findAll(media, (node) =>
+          String(node.className).split(" ").includes("media-zone-card"))[0];
+        if (!zone || zone.tagName !== "BUTTON"
+            || !String(zone["aria-label"] || "").startsWith("Открыть медиоустройства комнаты")) {
+          throw new Error("media room is not an accessible drill-down control");
+        }
+        zone.fire("click");
+        await tick();
+        media = panel._shell.homeSections.media;
+        const zoneSheet = findAll(media, (node) =>
+          String(node.className).split(" ").includes("media-zone-sheet"))[0];
+        if (!zoneSheet || !textOf(zoneSheet).includes("выберите устройство для управления")
+            || findAll(zoneSheet, (node) =>
+              String(node.className).split(" ").includes("media-device-card")).length !== 1) {
+          throw new Error("media room drill-down did not show its physical devices");
+        }
+        findAll(zoneSheet, (node) =>
+          String(node.className).split(" ").includes("media-zone-sheet-close"))[0].fire("click");
+        if (panel._mediaOverlay !== null) throw new Error("media room overlay state was not cleared");
         const cards = findAll(media, (node) =>
           String(node.className).split(" ").includes("media-device-card"));
         if (cards.length !== 1) throw new Error("TV did not render as one physical card");
@@ -3414,6 +3525,8 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         for rule in (
             "max-width:1440px",
             "overflow-x:auto",
+            "@container hausmanhub-panel (max-width:1049px)",
+            ".page-header-actions { flex:1 1 100%; width:100%; margin-left:0",
             "@media (max-width:640px)",
             "@media (max-width:380px)",
             "grid-template-columns:minmax(0,1fr)",
@@ -3432,7 +3545,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.25")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.37")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

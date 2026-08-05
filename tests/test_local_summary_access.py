@@ -2238,7 +2238,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.25", panel.payload["integration_version"])
+        self.assertEqual("1.52.37", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
@@ -2679,6 +2679,67 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertEqual(200, catalog.status)
         self.assertIn("devices", catalog.payload)
         self.assertEqual(400, unknown_action.status)
+
+    def test_public_device_action_route_returns_confirmed_receipt(self) -> None:
+        """One tablet command crosses the HTTP boundary with read-back evidence."""
+
+        path = "/api/hausman_hub/v1/device-actions"
+        view = next(item for item in self.hass.http.views if item.url == path)
+        service = self.hass.data["hausman_hub"]["scenario_service"]
+        executions: list[tuple[str, str, object]] = []
+
+        async def execute_device_action(
+            target_id: str,
+            action_id: str,
+            value: object,
+        ) -> dict[str, object]:
+            executions.append((target_id, action_id, value))
+            return {
+                "requestId": "request-1",
+                "targetId": target_id,
+                "accepted": True,
+                "confirmed": True,
+                "status": "confirmed",
+                "statusName": "Выполнено",
+                "observedState": "on",
+            }
+
+        service.async_execute_device_action = execute_device_action
+        tablet = reader_user("system-users")
+        response = asyncio.run(
+            view.post(
+                FakeJsonRequest(
+                    "192.168.1.20",
+                    tablet,
+                    path,
+                    {"targetId": "living-light", "actionId": "turn_on"},
+                )
+            )
+        )
+
+        self.assertEqual(200, response.status)
+        self.assertEqual(
+            {"name": "hausman-hub-device-action-receipt", "version": 1},
+            response.payload["contract"],
+        )
+        self.assertTrue(response.payload["accepted"])
+        self.assertTrue(response.payload["confirmed"])
+        self.assertEqual("confirmed", response.payload["status"])
+        self.assertEqual("no-store", response.headers.get("Cache-Control"))
+        self.assertEqual([("living-light", "turn_on", None)], executions)
+
+        forbidden = asyncio.run(
+            view.post(
+                FakeJsonRequest(
+                    "192.168.1.20",
+                    reader_user("system-admin", admin=True),
+                    path,
+                    {"targetId": "living-light", "actionId": "turn_on"},
+                )
+            )
+        )
+        self.assertEqual(403, forbidden.status)
+        self.assertEqual([("living-light", "turn_on", None)], executions)
 
     def test_view_rejects_disallowed_origins_before_reading_the_home(self) -> None:
         """Only ordinary home-network source ranges may read the summary."""

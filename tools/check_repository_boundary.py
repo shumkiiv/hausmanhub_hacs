@@ -109,12 +109,82 @@ def git_index_files(
     root: Path,
     paths: Iterable[PurePosixPath],
 ) -> tuple[RepositoryFile, ...]:
-    """Read safe relative paths from the Git index without following links."""
+    """Read safe relative paths from the Git index in one batch.
+
+    Invoking ``git show`` once per file made the release gate start hundreds of
+    processes on Windows.  Blob ids come from the index itself and ``cat-file``
+    returns their bytes without consulting or following working-tree paths.
+    """
+
+    requested_paths = tuple(paths)
+    if not requested_paths:
+        return ()
+
+    indexed_blobs = git_index_blob_ids(root)
+    try:
+        blob_ids = tuple(indexed_blobs[path] for path in requested_paths)
+    except KeyError as exc:
+        raise RepositoryCheckError(f"Git index does not contain {exc.args[0]}") from exc
+
+    result = run_git_with_input(
+        root,
+        "cat-file",
+        "--batch",
+        input_bytes=b"\n".join(blob_ids) + b"\n",
+    )
+    return parse_batch_blobs(requested_paths, blob_ids, result.stdout)
+
+
+def git_index_blob_ids(root: Path) -> dict[PurePosixPath, bytes]:
+    """Return stage-zero blob ids keyed by their checked index paths."""
+
+    result = run_git(root, "ls-files", "--stage", "-z")
+    blobs: dict[PurePosixPath, bytes] = {}
+    for raw_entry in result.stdout.split(b"\0"):
+        if not raw_entry:
+            continue
+        try:
+            raw_header, raw_path = raw_entry.split(b"\t", 1)
+            _, raw_blob_id, raw_stage = raw_header.split()
+        except ValueError as exc:
+            raise RepositoryCheckError("Git returned invalid index data") from exc
+        if raw_stage != b"0":
+            raise RepositoryCheckError("Git index contains an unresolved conflict")
+        path = checked_relative_path(raw_path)
+        if path in blobs:
+            raise RepositoryCheckError(f"Git returned duplicate index data for {path}")
+        blobs[path] = raw_blob_id
+    return blobs
+
+
+def parse_batch_blobs(
+    paths: tuple[PurePosixPath, ...],
+    blob_ids: tuple[bytes, ...],
+    output: bytes,
+) -> tuple[RepositoryFile, ...]:
+    """Parse deterministic ``git cat-file --batch`` output."""
 
     files: list[RepositoryFile] = []
-    for relative_path in paths:
-        result = run_git(root, "show", f":{relative_path.as_posix()}")
-        files.append(RepositoryFile(relative_path, result.stdout))
+    offset = 0
+    for path, expected_blob_id in zip(paths, blob_ids, strict=True):
+        header_end = output.find(b"\n", offset)
+        if header_end < 0:
+            raise RepositoryCheckError("Git returned truncated batch data")
+        header = output[offset:header_end].split()
+        if len(header) != 3 or header[0] != expected_blob_id or header[1] != b"blob":
+            raise RepositoryCheckError("Git returned invalid batch blob metadata")
+        try:
+            size = int(header[2])
+        except ValueError as exc:
+            raise RepositoryCheckError("Git returned invalid batch blob size") from exc
+        content_start = header_end + 1
+        content_end = content_start + size
+        if content_end >= len(output) or output[content_end : content_end + 1] != b"\n":
+            raise RepositoryCheckError("Git returned truncated batch blob content")
+        files.append(RepositoryFile(path, output[content_start:content_end]))
+        offset = content_end + 1
+    if offset != len(output):
+        raise RepositoryCheckError("Git returned unexpected trailing batch data")
     return tuple(files)
 
 
@@ -139,6 +209,25 @@ def run_git(root: Path, *arguments: str) -> subprocess.CompletedProcess[bytes]:
             cwd=root,
             check=True,
             capture_output=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise RepositoryCheckError(str(exc)) from exc
+
+
+def run_git_with_input(
+    root: Path,
+    *arguments: str,
+    input_bytes: bytes,
+) -> subprocess.CompletedProcess[bytes]:
+    """Run one local Git read command with fixed binary standard input."""
+
+    try:
+        return subprocess.run(
+            ("git", *arguments),
+            cwd=root,
+            check=True,
+            capture_output=True,
+            input=input_bytes,
         )
     except (OSError, subprocess.CalledProcessError) as exc:
         raise RepositoryCheckError(str(exc)) from exc

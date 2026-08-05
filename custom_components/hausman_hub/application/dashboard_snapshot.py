@@ -873,8 +873,20 @@ def build_dashboard_snapshot(
             registry_device.area_id if registry_device is not None else None
         )
         area = area_by_id.get(area_id) if area_id is not None else None
-        unavailable = all(member.state in _UNAVAILABLE_STATES for member in members)
-        active = any(member.state in _ACTIVE_STATES for member in members)
+        # Reachability and activity describe the controllable device itself, not
+        # its auxiliary telemetry. A humidifier may expose an unavailable
+        # ``humidifier`` entity while its temperature and humidity sensors keep
+        # returning values. Treating every member equally made that physical
+        # device appear online even though no command could reach it.
+        operational_members = [
+            member for member in members if member.domain in _PHYSICAL_DOMAINS
+        ] or members
+        unavailable = all(
+            member.state in _UNAVAILABLE_STATES for member in operational_members
+        )
+        active = not unavailable and any(
+            member.state in _ACTIVE_STATES for member in operational_members
+        )
         name = registry_device.name if registry_device is not None else primary.name
         details = _device_details(name, members)
         electrical = _energy_measurements(members)

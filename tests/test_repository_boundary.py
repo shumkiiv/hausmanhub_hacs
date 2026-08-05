@@ -110,9 +110,9 @@ class RepositoryBoundaryCheckTest(unittest.TestCase):
 
             index_content = b"safe indexed content"
             completed = subprocess.CompletedProcess(
-                ("git", "show", ":linked.txt"),
+                ("git", "cat-file", "--batch"),
                 0,
-                stdout=index_content,
+                stdout=b"abc123 blob 20\n" + index_content + b"\n",
                 stderr=b"",
             )
             with ExitStack() as stack:
@@ -123,8 +123,15 @@ class RepositoryBoundaryCheckTest(unittest.TestCase):
                         return_value=(PurePosixPath("linked.txt"),),
                     )
                 )
-                run_git = stack.enter_context(
-                    patch.object(boundary, "run_git", return_value=completed)
+                blob_ids = stack.enter_context(
+                    patch.object(
+                        boundary,
+                        "git_index_blob_ids",
+                        return_value={PurePosixPath("linked.txt"): b"abc123"},
+                    )
+                )
+                run_git_with_input = stack.enter_context(
+                    patch.object(boundary, "run_git_with_input", return_value=completed)
                 )
                 files = tracked_files(root)
 
@@ -133,22 +140,35 @@ class RepositoryBoundaryCheckTest(unittest.TestCase):
             files,
         )
         file_list.assert_called_once_with(root, "ls-files")
-        run_git.assert_called_once_with(root, "show", ":linked.txt")
+        blob_ids.assert_called_once_with(root)
+        run_git_with_input.assert_called_once_with(
+            root,
+            "cat-file",
+            "--batch",
+            input_bytes=b"abc123\n",
+        )
 
     def test_staged_files_reads_only_the_indexed_changed_paths(self) -> None:
         staged_path = PurePosixPath("docs/new-file.txt")
         completed = subprocess.CompletedProcess(
-            ("git", "show", ":docs/new-file.txt"),
+            ("git", "cat-file", "--batch"),
             0,
-            stdout=b"safe staged content",
+            stdout=b"def456 blob 19\nsafe staged content\n",
             stderr=b"",
         )
         with ExitStack() as stack:
             file_list = stack.enter_context(
                 patch.object(boundary, "git_file_list", return_value=(staged_path,))
             )
-            run_git = stack.enter_context(
-                patch.object(boundary, "run_git", return_value=completed)
+            blob_ids = stack.enter_context(
+                patch.object(
+                    boundary,
+                    "git_index_blob_ids",
+                    return_value={staged_path: b"def456"},
+                )
+            )
+            run_git_with_input = stack.enter_context(
+                patch.object(boundary, "run_git_with_input", return_value=completed)
             )
             files = staged_files(ROOT)
 
@@ -160,7 +180,13 @@ class RepositoryBoundaryCheckTest(unittest.TestCase):
             "--name-only",
             "--diff-filter=ACMR",
         )
-        run_git.assert_called_once_with(ROOT, "show", ":docs/new-file.txt")
+        blob_ids.assert_called_once_with(ROOT)
+        run_git_with_input.assert_called_once_with(
+            ROOT,
+            "cat-file",
+            "--batch",
+            input_bytes=b"def456\n",
+        )
 
 
 if __name__ == "__main__":

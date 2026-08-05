@@ -1,5 +1,5 @@
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.25";
-import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.25";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.37";
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.37";
 
 function mediaOverviewNormalized(value) { return String(value || "").trim().toLocaleLowerCase("ru"); }
 function mediaOverviewKey(device) { return device.physicalId || device.id || device.entityId; }
@@ -26,6 +26,48 @@ function mediaOverviewDeviceWord(count) {
   return "устройств";
 }
 
+function refreshMediaOverlay(panel) {
+  if (panel._sectionRenderKeys) panel._sectionRenderKeys.media = null;
+  if (typeof panel._render === "function") panel._render();
+}
+
+function requestMediaZone(panel, title, devices) {
+  panel._mediaOverlay = {
+    title,
+    deviceKeys: devices.map(mediaOverviewKey).filter(Boolean),
+  };
+  refreshMediaOverlay(panel);
+}
+
+function renderMediaZoneSheet(panel, container, title, devices, deps) {
+  const { el, setAttr } = deps;
+  const backdrop = el("div", "media-zone-sheet-backdrop");
+  const sheet = el("section", "media-zone-sheet");
+  setAttr(sheet, "role", "dialog");
+  setAttr(sheet, "aria-modal", "true");
+  setAttr(sheet, "aria-label", `Медиа в комнате ${title}`);
+  const close = el("button", "media-zone-sheet-close", "×");
+  close.type = "button";
+  setAttr(close, "aria-label", "Закрыть");
+  const dismiss = () => {
+    panel._mediaOverlay = null;
+    if (backdrop.remove) backdrop.remove();
+  };
+  close.addEventListener("click", dismiss);
+  backdrop.addEventListener("click", (event) => { if (event.target === backdrop) dismiss(); });
+  sheet.appendChild(close);
+  const heading = el("div", "media-zone-sheet-heading");
+  heading.appendChild(el("h3", null, title));
+  heading.appendChild(el("p", null, `${devices.length} ${mediaOverviewDeviceWord(devices.length)} · выберите устройство для управления`));
+  sheet.appendChild(heading);
+  const grid = el("div", "inventory-device-grid media-zone-sheet-grid");
+  devices.forEach((device) => grid.appendChild(panel._deviceInventoryCard(device)));
+  if (!devices.length) grid.appendChild(el("div", "empty-state", "В этой комнате медиоустройства пока не найдены."));
+  sheet.appendChild(grid);
+  backdrop.appendChild(sheet);
+  container.appendChild(backdrop);
+}
+
 function renderMediaOverviewHero(panel, container, devices, deps) {
   const playing = devices.filter(mediaOverviewPlaying);
   const available = devices.filter((device) => !mediaOverviewUnavailable(device));
@@ -45,8 +87,8 @@ function renderMediaOverviewHero(panel, container, devices, deps) {
   }, deps));
 }
 
-function renderMediaZones(container, rooms, devices, deps) {
-  const { el, svgIcon } = deps;
+function renderMediaZones(panel, container, rooms, devices, deps) {
+  const { el, svgIcon, setAttr } = deps;
   const groups = new Map();
   devices.forEach((device) => {
     const room = mediaOverviewRoom(device, rooms);
@@ -70,7 +112,9 @@ function renderMediaZones(container, rooms, devices, deps) {
   section.appendChild(heading);
   const grid = el("div", "media-zone-grid");
   [...groups.values()].forEach((group) => {
-    const card = el("article", `media-zone-card${group.devices.some(mediaOverviewUnavailable) ? " has-warning" : ""}`);
+    const card = el("button", `media-zone-card${group.devices.some(mediaOverviewUnavailable) ? " has-warning" : ""}`);
+    card.type = "button";
+    setAttr(card, "aria-label", `Открыть медиоустройства комнаты ${group.name}`);
     const head = el("div", "media-zone-head");
     const icon = el("span");
     icon.appendChild(group.room ? roomSvgIcon(roomIconName(group.room)) : svgIcon("media"));
@@ -82,6 +126,8 @@ function renderMediaZones(container, rooms, devices, deps) {
     const playing = group.devices.filter(mediaOverviewPlaying).length;
     const unavailable = group.devices.filter(mediaOverviewUnavailable).length;
     card.appendChild(el("small", unavailable ? `${unavailable} без связи` : (playing ? `${playing} воспроизводит` : "Все устройства на связи")));
+    card.appendChild(el("span", "media-zone-open", "Открыть устройства ›"));
+    card.addEventListener("click", () => requestMediaZone(panel, group.name, group.devices));
     grid.appendChild(card);
   });
   section.appendChild(grid);
@@ -118,7 +164,12 @@ export function renderMediaOverview(panel, container, deps) {
   const devices = [...unique.values()];
   const page = deps.el("div", "media-canon-page");
   renderMediaOverviewHero(panel, page, devices, deps);
-  renderMediaZones(page, rooms, devices, deps);
+  renderMediaZones(panel, page, rooms, devices, deps);
   renderMediaDeviceGrid(panel, page, devices, deps);
+  if (panel._mediaOverlay) {
+    const keys = new Set(panel._mediaOverlay.deviceKeys || []);
+    const matches = devices.filter((device) => keys.has(mediaOverviewKey(device)));
+    renderMediaZoneSheet(panel, page, panel._mediaOverlay.title, matches, deps);
+  }
   container.appendChild(page);
 }

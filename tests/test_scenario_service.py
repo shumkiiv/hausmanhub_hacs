@@ -34,7 +34,21 @@ class _FakeStore:
 class _FakeExecutor:
     def __init__(self) -> None:
         self.runs: list[tuple[Any, str]] = []
+        self.catalogs: list[ScenarioCatalog] = []
+        self.device_actions: list[tuple[str, str, object]] = []
         self._counter = 0
+
+    def replace_catalog(self, catalog: ScenarioCatalog) -> None:
+        self.catalogs.append(catalog)
+
+    async def async_execute_device_action(
+        self,
+        target_id: str,
+        action_id: str,
+        value: object | None = None,
+    ) -> dict[str, Any]:
+        self.device_actions.append((target_id, action_id, value))
+        return {"accepted": True, "confirmed": True, "status": "confirmed"}
 
     def new_run_id(self) -> str:
         self._counter += 1
@@ -150,6 +164,53 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
         result = await self.service.async_test_scenario(_valid_payload())
         self.assertTrue(result["valid"])
         self.assertEqual(result["action_count"], 1)
+
+    async def test_device_action_refreshes_catalog_before_execution(self) -> None:
+        refreshed = ScenarioCatalog(
+            devices={
+                "late_light": ScenarioDeviceEntry(
+                    target_id="late_light",
+                    name="Late Zigbee light",
+                    entity_id="light.late",
+                    actions=(
+                        ScenarioDeviceAction(
+                            action_id="turn_on",
+                            title="On",
+                            domain="light",
+                            service="turn_on",
+                            allowed_fields=frozenset(),
+                        ),
+                    ),
+                )
+            },
+            scenarios={},
+        )
+        refreshes = 0
+
+        async def load_catalog() -> ScenarioCatalog:
+            nonlocal refreshes
+            refreshes += 1
+            return refreshed
+
+        service = ScenarioService(
+            None,
+            self.store,
+            self.catalog,
+            self.executor,
+            catalog_loader=load_catalog,
+        )
+        await service.async_load()
+
+        receipt = await service.async_execute_device_action(
+            "late_light",
+            "turn_on",
+        )
+
+        self.assertEqual(1, refreshes)
+        self.assertIs(refreshed, service._catalog)
+        self.assertEqual([refreshed], self.executor.catalogs)
+        self.assertEqual([("late_light", "turn_on", None)], self.executor.device_actions)
+        self.assertTrue(receipt["confirmed"])
 
     async def test_get_scenario_found(self) -> None:
         await self.service.async_update_scenario(_valid_payload())

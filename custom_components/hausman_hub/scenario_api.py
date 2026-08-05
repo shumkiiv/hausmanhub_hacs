@@ -88,7 +88,7 @@ class ScenarioCatalogView(_ScenarioView):
         service = self._service_ready()
         if service is None:
             return self._unavailable()
-        catalog = service._catalog  # noqa: SLF001
+        catalog = await service.async_refresh_catalog()
         devices = [
             {
                 "target_id": device.target_id,

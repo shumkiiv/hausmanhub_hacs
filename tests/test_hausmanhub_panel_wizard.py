@@ -548,6 +548,121 @@ def ready_validation(draft: dict) -> dict:
 
 
 class PanelContourWizardTest(unittest.TestCase):
+    def test_channel_receipts_never_show_pending_or_failed_restore_as_success(self) -> None:
+        script = panel_script(
+            get_payloads(),
+            {},
+            """
+        const confirmed = summarizeControlChannelReceipts(
+          {status: "confirmed"}, {status: "up_to_date"}
+        );
+        const pending = summarizeControlChannelReceipts(
+          {status: "pending", accepted: true}, {status: "pending", accepted: true}
+        );
+        const restoreFailed = summarizeControlChannelReceipts(
+          {status: "confirmed"}, {status: "failed", accepted: false}
+        );
+        const probeFailed = summarizeControlChannelReceipts(
+          {status: "denied", accepted: false}, {status: "confirmed"}
+        );
+        if (confirmed.status !== "confirmed" || confirmed.title !== "Канал работает") {
+          throw new Error("observed receipt pair was not recognized as confirmed");
+        }
+        if (pending.status !== "pending" || pending.title.includes("работает")) {
+          throw new Error("pending receipt pair was presented as success");
+        }
+        if (restoreFailed.status !== "failed"
+          || !restoreFailed.title.includes("Возврат настройки")) {
+          throw new Error("failed restoration did not receive a dedicated warning");
+        }
+        if (probeFailed.status !== "failed"
+          || !probeFailed.detail.includes("исходная настройка успешно восстановлена")) {
+          throw new Error("failed probe did not explain the successful rollback");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_wizard_persists_the_last_interaction_before_page_unload(self) -> None:
+        panel_source = PANEL_JS.read_text(encoding="utf-8")
+        self.assertIn(
+            'window.addEventListener("pagehide", this._persistFirstRunBeforeUnload)',
+            panel_source,
+        )
+        self.assertIn(
+            'window.removeEventListener("pagehide", this._persistFirstRunBeforeUnload)',
+            panel_source,
+        )
+        script = panel_script(
+            get_payloads(),
+            {},
+            """
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать настройку")[0].fire("click");
+        await tick();
+        panel._firstRunFields.rooms.living.configure.fire("click");
+        panel._activeRoomSetupPane = "limits";
+        panel._firstRun.rooms.living.day.temperature = 26;
+        panel._persistFirstRunBeforeUnload();
+        const ReloadedPanel = registry.get("hausman-hub-panel");
+        const reloaded = new ReloadedPanel();
+        reloaded.hass = hass;
+        await tick(16);
+        if (reloaded._firstRun.step !== "room"
+          || reloaded._firstRun.roomId !== "living"
+          || reloaded._activeRoomSetupPane !== "limits"
+          || reloaded._firstRun.rooms.living.day.temperature !== 26) {
+          throw new Error("pagehide did not persist the final wizard interaction");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_open_wizard_adopts_new_server_revision_without_losing_room_selection(self) -> None:
+        script = panel_script(
+            get_payloads(),
+            {},
+            """
+        findAll(panel.shadowRoot, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Начать настройку")[0].fire("click");
+        await tick();
+        panel._firstRunFields.rooms.living.configure.fire("click");
+        const device = panel._firstRunFields.room.devices.find((item) =>
+          item.key === "candidate_ac:air_conditioner");
+        device.checkbox.checked = true;
+        device.checkbox.fire("change");
+        device.controlChannel.value = "direct_wifi";
+        device.controlChannel.fire("change");
+        const refreshedSetup = JSON.parse(JSON.stringify(getTable[
+          "hausman_hub/v1/admin/climate-drafts/current"
+        ]));
+        refreshedSetup.setup_revision = 6;
+        getTable["hausman_hub/v1/admin/climate-drafts/current"] = refreshedSetup;
+        const optionCallsBefore = calls.filter((call) => call.method === "GET"
+          && call.path === "hausman_hub/v1/admin/climate-drafts").length;
+        await panel._load();
+        await tick();
+        const optionCallsAfter = calls.filter((call) => call.method === "GET"
+          && call.path === "hausman_hub/v1/admin/climate-drafts").length;
+        const restored = panel._firstRun.rooms.living.devices[
+          "candidate_ac:air_conditioner"
+        ];
+        if (panel._firstRun.setupRevision !== 6) {
+          throw new Error("open wizard kept a stale setup revision");
+        }
+        if (optionCallsAfter !== optionCallsBefore + 1) {
+          throw new Error("revision change did not refresh the device inventory exactly once");
+        }
+        if (!restored.selected || restored.channel !== "direct_wifi") {
+          throw new Error("revision refresh discarded the room device selection");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_room_review_receives_active_device_types_as_an_explicit_module_dependency(self) -> None:
         room_setup = ROOM_SETUP_JS.read_text(encoding="utf-8")
         panel = PANEL_JS.read_text(encoding="utf-8")
@@ -846,6 +961,46 @@ class PanelContourWizardTest(unittest.TestCase):
 
 
 class PanelFirstRunWizardTest(unittest.TestCase):
+    def test_deleted_yandex_candidate_is_not_recommended_as_a_live_channel(self) -> None:
+        script = panel_script(
+            get_payloads(),
+            {},
+            """
+        const owner = {
+          _firstRun: {options: {
+            control_channels: ["universal_ir", "yandex_remote", "direct_wifi"],
+            ir_remotes: [{entity_id: "remote.pult_broadlink_gostinnaia"}],
+          }},
+          _homeDashboard: {devices: []},
+        };
+        const deletedYandex = {
+          candidate: {
+            name: "Кондиционер Яндекса",
+            manufacturer: "Yandex",
+            status: "unavailable",
+            can_add: false,
+          },
+          device: {channel: null},
+          type: "air_conditioner",
+        };
+        const deletedRecommendation = recommendControlChannel(owner, deletedYandex);
+        if (deletedRecommendation.channel !== "universal_ir"
+          || deletedRecommendation.channel === "yandex_remote") {
+          throw new Error("deleted Yandex entity was recommended as a live control route");
+        }
+        const liveYandex = {
+          ...deletedYandex,
+          candidate: {...deletedYandex.candidate, status: "available", can_add: true},
+        };
+        const liveRecommendation = recommendControlChannel(owner, liveYandex);
+        if (liveRecommendation.channel !== "yandex_remote") {
+          throw new Error("available Yandex entity lost its explicit route");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_ir_command_names_stay_internal_and_visible_labels_are_russian(self) -> None:
         script = panel_script(
             get_payloads(),
