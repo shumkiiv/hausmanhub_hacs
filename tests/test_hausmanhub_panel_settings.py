@@ -1906,10 +1906,19 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           "Климат по комнатам", "Обзор климата", "Комнаты и цели",
           "Кондиционеры", "Термоголовки", "Тёплый пол", "Увлажнители",
           "Очистители", "Вытяжки", "Гостиная", "Детская", "24.5 °C", "46 %",
-          "Кабинет", "Нет данных", "Цель не задана",
+          "Кабинет",
         ]) {
           if (!text.includes(label)) throw new Error("climate tablet text missing: " + label + " :: " + text);
         }
+        const roomTabs = findAll(climate, (node) =>
+          String(node.className).split(" ").includes("climate-room-tab"));
+        if (roomTabs.length !== 3) throw new Error("climate room tabs mismatch: " + roomTabs.length);
+        roomTabs.find((node) => textOf(node).includes("Кабинет")).fire("click");
+        const officeText = textOf(climate);
+        if (!officeText.includes("Нет данных") || !officeText.includes("Цель не задана")) {
+          throw new Error("climate room tab did not switch the focus card: " + officeText);
+        }
+        roomTabs.find((node) => textOf(node).includes("Гостиная")).fire("click");
         if (text.includes("0 °C") || text.includes("0 %")) {
           throw new Error("null climate reading was coerced to zero: " + text);
         }

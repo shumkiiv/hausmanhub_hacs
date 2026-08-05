@@ -5,8 +5,8 @@ import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.40
 
 const CATEGORY_DEFINITIONS = [
   { id: "conditioner", title: "Кондиционеры", icon: "snow", pattern: /кондиционер|air.?condition|smartir|\bac\b/ },
-  { id: "trv", title: "Термоголовки", icon: "radiator", pattern: /термоголов|радиатор|radiator|thermostatic|\btrv\b/ },
-  { id: "floor", title: "Тёплый пол", icon: "floorHeat", pattern: /т[её]пл.*пол|floor.?heat/ },
+  { id: "trv", title: "Термоголовки", icon: "thermometer", pattern: /термоголов|радиатор|radiator|thermostatic|\btrv\b/ },
+  { id: "floor", title: "Тёплый пол", icon: "thermometer", pattern: /т[её]пл.*пол|floor.?heat/ },
   { id: "humidifier", title: "Увлажнители", icon: "water", pattern: /увлажн|humidifier/ },
   { id: "purifier", title: "Очистители", icon: "air", pattern: /очистител|purifier|air.?clean/ },
   { id: "ventilation", title: "Вытяжки", icon: "air", pattern: /вытяж|вентил|ventilat|exhaust/ },
@@ -15,8 +15,6 @@ const CATEGORY_DEFINITIONS = [
 const CATEGORY_ICON_PATHS = {
   snow: "M11 2h2v3.17l2.83-1.63 1 1.73L14 6.9l2.75 1.58 2.75-1.58 1 1.73-2.75 1.59v3.56l2.75 1.59-1 1.73-2.75-1.58L14 17.1l2.83 1.63-1 1.73L13 18.83V22h-2v-3.17l-2.83 1.63-1-1.73L10 17.1l-2.75-1.58-2.75 1.58-1-1.73 2.75-1.59v-3.56L3.5 8.63l1-1.73 2.75 1.58L10 6.9 7.17 5.27l1-1.73L11 5.17z",
   air: "M4 10h10.5a2.5 2.5 0 1 0-2.45-3H10a4.5 4.5 0 1 1 4.5 5H4zm0 4h13.5a4.5 4.5 0 1 1-4.5 4.5h2a2.5 2.5 0 1 0 2.5-2.5H4zm0-8h4v2H4z",
-  radiator: "M5 4h2v16H5zm4 0h2v16H9zm4 0h2v16h-2zm4 0h2v16h-2zM3 6h2v12H3zm16 0h2v12h-2z",
-  floorHeat: "M3 17h18v2H3zm1-5h3v-2H4a3 3 0 0 1 0-6h4v2H4a1 1 0 0 0 0 2h3a3 3 0 0 1 0 6H4zm8 2v-2h3a1 1 0 0 0 0-2h-3a3 3 0 0 1 0-6h4v2h-4a1 1 0 0 0 0 2h3a3 3 0 0 1 0 6z",
 };
 
 function climateIcon(name, deps) {
@@ -289,7 +287,7 @@ function renderRooms(panel, container, rooms, devices, deps) {
   const head = el("div", "climate-section-heading");
   const copy = el("div");
   copy.appendChild(el("h3", null, "Комнаты и цели"));
-  copy.appendChild(el("p", null, "Показатели и индивидуальные цели читаются одним взглядом"));
+  copy.appendChild(el("p", null, "Выберите комнату — показатели и цель видны сразу"));
   head.appendChild(copy);
   section.appendChild(head);
   if (!rooms.length) {
@@ -297,10 +295,17 @@ function renderRooms(panel, container, rooms, devices, deps) {
     container.appendChild(section);
     return;
   }
-  const grid = el("div", "climate-room-grid");
-  rooms.forEach((room) => {
+  if (!panel._climateRoomUi) panel._climateRoomUi = { roomId: null };
+  const selectedRoom = rooms.find((room) => room.id === panel._climateRoomUi.roomId) || rooms[0];
+  panel._climateRoomUi.roomId = selectedRoom.id;
+  const tabs = el("div", "climate-room-tabs");
+  setAttr(tabs, "role", "tablist");
+  setAttr(tabs, "aria-label", "Комнаты климата");
+  const focus = el("div", "climate-room-focus");
+  const renderFocus = (room) => {
+    focus.innerHTML = "";
     const matches = roomDevices(room, devices);
-    const card = el("button", "climate-room-card");
+    const card = el("button", "climate-room-card is-focus");
     card.type = "button";
     setAttr(card, "aria-label", `Открыть климат комнаты ${room.name}`);
     const title = el("span", "climate-room-title");
@@ -323,9 +328,32 @@ function renderRooms(panel, container, rooms, devices, deps) {
     card.appendChild(facts);
     card.appendChild(el("span", "climate-room-open", "Открыть устройства ›"));
     card.addEventListener("click", () => requestClimateSheet(panel, room.name || "Комната", matches));
-    grid.appendChild(card);
+    focus.appendChild(card);
+  };
+  const chips = [];
+  rooms.forEach((room) => {
+    const active = room.id === selectedRoom.id;
+    const chip = el("button", `climate-room-tab${active ? " is-active" : ""}`);
+    chip.type = "button";
+    setAttr(chip, "role", "tab");
+    setAttr(chip, "aria-selected", active ? "true" : "false");
+    chip.appendChild(roomSvgIcon(roomIconName(room)));
+    chip.appendChild(el("span", null, room.name || "Комната"));
+    chip.addEventListener("click", () => {
+      panel._climateRoomUi.roomId = room.id;
+      chips.forEach((candidate) => {
+        const on = candidate === chip;
+        candidate.classList.toggle("is-active", on);
+        setAttr(candidate, "aria-selected", on ? "true" : "false");
+      });
+      renderFocus(room);
+    });
+    chips.push(chip);
+    tabs.appendChild(chip);
   });
-  section.appendChild(grid);
+  section.appendChild(tabs);
+  section.appendChild(focus);
+  renderFocus(selectedRoom);
   container.appendChild(section);
 }
 
