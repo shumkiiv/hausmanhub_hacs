@@ -72,12 +72,12 @@ function renderMediaOverviewHero(panel, container, devices, deps) {
   const playing = devices.filter(mediaOverviewPlaying);
   const available = devices.filter((device) => !mediaOverviewUnavailable(device));
   const tv = devices.filter(mediaOverviewIsTv).length;
-  const focus = playing[0] || available[0] || devices[0];
-  const source = focus && focus.attributes && (focus.attributes.media_title || focus.attributes.app_name || focus.attributes.source);
+  const unavailable = devices.length - available.length;
   container.appendChild(createLibraryHero(panel, {
-    eyebrow: playing.length ? "СЕЙЧАС ВОСПРОИЗВОДИТСЯ" : "МЕДИА ДОМА",
-    title: focus ? (focus.name || "Медиоустройство") : "Медиа не настроено",
-    subtitle: source || (focus && focus.roomName) || "Телевизоры и аудиосистемы по комнатам",
+    eyebrow: "МЕДИА ДОМА",
+    title: "Медиа по комнатам",
+    subtitle: "Телевизоры, колонки и медиаплееры по комнатам",
+    warning: unavailable > 0,
     facts: [
       { label: "Устройства", value: devices.length },
       { label: "Воспроизводят", value: playing.length },

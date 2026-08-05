@@ -84,12 +84,8 @@ function renderSecurityHero(panel, container, devices, alarms, deps) {
   const attentionDevices = devices.filter(securityNeedsAttention);
   container.appendChild(createLibraryHero(panel, {
     eyebrow: "БЕЗОПАСНОСТЬ ДОМА",
-    title: activeAlarms.length ? "Требуется внимание" : "Дом под наблюдением",
-    subtitle: activeAlarms.length
-      ? `${activeAlarms.length} активных тревог — откройте событие и проверьте помещение`
-      : attentionDevices.length
-        ? `${attentionDevices.length} устройств требуют проверки`
-        : "Активных тревог и открытых контуров нет",
+    title: "Безопасность дома",
+    subtitle: "Датчики, камеры, доступ и тревоги",
     warning: activeAlarms.length > 0 || attentionDevices.length > 0,
     facts: [
       { label: "Устройства", value: devices.length },

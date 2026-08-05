@@ -67,10 +67,8 @@ function renderDevicesHero(panel, container, devices, deps) {
   const offline = devices.filter(deviceCatalogUnavailable).length;
   container.appendChild(createLibraryHero(panel, {
     eyebrow: "ФИЗИЧЕСКИЕ УСТРОЙСТВА ДОМА",
-    title: `${devices.length} ${deviceWord(devices.length)}`,
-    subtitle: offline
-      ? `${active} активны · ${offline} требуют проверки связи`
-      : `${active} активны · все устройства на связи`,
+    title: "Устройства дома",
+    subtitle: "Все физические устройства дома без дублирования функций",
     warning: offline > 0,
     facts: [
       { label: "Всего", value: devices.length },

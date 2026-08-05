@@ -2010,7 +2010,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         panel._shell.tabs.media.fire("click");
         let media = panel._shell.homeSections.media;
         const mediaText = textOf(media);
-        if (!mediaText.includes("СЕЙЧАС ВОСПРОИЗВОДИТСЯ")
+        if (!mediaText.includes("МЕДИА ДОМА") || !mediaText.includes("Медиа по комнатам")
           || !mediaText.includes("По комнатам") || !mediaText.includes("Медиаустройства")
           || !mediaText.includes("Кинопоиск")) {
           throw new Error("canonical media hierarchy is incomplete: " + mediaText);
@@ -2108,7 +2108,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         panel._shell.tabs.security.fire("click");
         const security = panel._shell.homeSections.security;
         const text = textOf(security);
-        if (!text.includes("Дом под наблюдением") || !text.includes("Контуры безопасности")
+        if (!text.includes("Безопасность дома") || !text.includes("Контуры безопасности")
           || !text.includes("Датчики и доступ") || !text.includes("Тамбур · Закрыт")
           || !text.includes("Тамбур · Без охраны") || !text.includes("Тамбур · Сухо")) {
           throw new Error("security state is not semantic Russian copy: " + text);
