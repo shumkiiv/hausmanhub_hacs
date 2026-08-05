@@ -18,3 +18,8 @@
 .security-canon-device-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 @media(max-width:1120px){.security-canon-layout{grid-template-columns:1fr}.security-canon-aside{position:static;grid-template-columns:repeat(2,minmax(0,1fr))}.security-canon-type-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:720px){.security-canon-hero{min-height:330px;padding:25px}.security-canon-hero h2{font-size:31px}.security-canon-hero-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;padding-top:38px}.security-canon-type-grid,.security-canon-device-grid,.security-canon-aside{grid-template-columns:1fr}.security-canon-section{padding:16px}}
+
+summary.security-canon-devices-summary{cursor:pointer;list-style:none}
+summary.security-canon-devices-summary::-webkit-details-marker{display:none}
+summary.security-canon-devices-summary::after{content:"›";color:var(--hmh-text-dim);font-size:24px;transition:transform .16s ease}
+details.security-canon-devices[open]>summary.security-canon-devices-summary::after{transform:rotate(90deg)}

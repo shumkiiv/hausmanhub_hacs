@@ -120,7 +120,6 @@ function renderSecurityTypes(panel, container, devices, selected, choose, deps) 
     title.appendChild(el("b", null, String(items.length)));
     card.appendChild(title);
     card.appendChild(el("span", issues ? "warn" : "ok", issues ? `${issues} требуют внимания` : meta.empty));
-    card.appendChild(el("small", null, `${items.length} физических устройств`));
     grid.appendChild(card);
   });
   section.appendChild(grid);
@@ -171,8 +170,14 @@ function renderSecurityAttention(panel, container, devices, alarms, deps) {
 function renderSecurityDeviceCatalog(panel, container, devices, selected, deps) {
   const { el } = deps;
   const filtered = selected ? devices.filter((device) => securityType(device) === selected) : devices;
-  const section = el("section", "security-canon-section security-canon-devices");
-  const heading = el("div", "security-canon-heading");
+  const deviceKey = (device) => String(device.id || device.physicalId || device.entityId || "");
+  const anyCardOpen = filtered.some((device) => panel._openHomeCards.has(`device:${deviceKey(device)}`));
+  const section = el("details", "security-canon-section security-canon-devices");
+  section.open = Boolean(selected) || anyCardOpen || panel._securityCatalogOpen === true;
+  section.addEventListener("toggle", () => {
+    panel._securityCatalogOpen = section.open;
+  });
+  const heading = el("summary", "security-canon-heading security-canon-devices-summary");
   heading.appendChild(el("h3", null, selected ? TYPE_META[selected].label : "Датчики и доступ"));
   heading.appendChild(el("span", null, `${filtered.length} физических устройств`));
   section.appendChild(heading);
