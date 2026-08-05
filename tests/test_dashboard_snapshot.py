@@ -355,6 +355,81 @@ class DashboardSnapshotTest(unittest.TestCase):
         self.assertFalse(self.snapshot["capabilities"]["events"])
         self.assertTrue(all(not device["actions"] for device in self.snapshot["devices"]))
 
+    def test_unavailable_control_is_not_masked_by_available_telemetry(self) -> None:
+        snapshot = build_dashboard_snapshot(
+            areas=(DashboardArea("living", "Гостиная"),),
+            devices=(DashboardDevice("humidifier", "Увлажнитель", "living"),),
+            entities=(
+                DashboardEntity(
+                    "humidifier.living",
+                    "humidifier",
+                    "unavailable",
+                    "Увлажнитель",
+                    {},
+                    "humidifier",
+                    "living",
+                ),
+                DashboardEntity(
+                    "sensor.living_humidity",
+                    "sensor",
+                    "53",
+                    "Влажность",
+                    {"device_class": "humidity", "unit_of_measurement": "%"},
+                    "humidifier",
+                    "living",
+                ),
+                DashboardEntity(
+                    "sensor.living_temperature",
+                    "sensor",
+                    "25",
+                    "Температура",
+                    {"device_class": "temperature", "unit_of_measurement": "°C"},
+                    "humidifier",
+                    "living",
+                ),
+            ),
+            generated_at_ms=1,
+            local_iso="2026-08-05T12:00:00+06:00",
+        )
+
+        device = snapshot["devices"][0]
+        self.assertTrue(device["unavailable"])
+        self.assertFalse(device["active"])
+        self.assertEqual("bad", device["tone"])
+
+    def test_multi_control_device_is_online_when_one_control_is_available(self) -> None:
+        snapshot = build_dashboard_snapshot(
+            areas=(DashboardArea("living", "Гостиная"),),
+            devices=(DashboardDevice("switch", "Выключатель", "living"),),
+            entities=(
+                DashboardEntity(
+                    "switch.living_left",
+                    "switch",
+                    "unavailable",
+                    "Левая клавиша",
+                    {},
+                    "switch",
+                    "living",
+                ),
+                DashboardEntity(
+                    "switch.living_right",
+                    "switch",
+                    "off",
+                    "Правая клавиша",
+                    {},
+                    "switch",
+                    "living",
+                ),
+            ),
+            generated_at_ms=1,
+            local_iso="2026-08-05T12:00:00+06:00",
+        )
+
+        device = snapshot["devices"][0]
+        self.assertFalse(device["unavailable"])
+        self.assertFalse(device["active"])
+        self.assertEqual("neutral", device["tone"])
+
     def test_energy_groups_measurements_by_physical_device(self) -> None:
         energy = self.snapshot["energy"]
         self.assertTrue(energy["available"])
