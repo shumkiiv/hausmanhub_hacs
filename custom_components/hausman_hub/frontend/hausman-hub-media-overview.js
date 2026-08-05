@@ -136,11 +136,11 @@ function renderMediaZones(panel, container, rooms, devices, deps) {
 
 function renderMediaDeviceGrid(panel, container, devices, deps) {
   const { el } = deps;
-  const section = el("section", "media-canon-section");
-  const heading = el("div", "media-canon-heading");
-  heading.appendChild(el("h3", null, "Медиаустройства"));
-  heading.appendChild(el("span", null, `${devices.length} ${mediaOverviewDeviceWord(devices.length)}`));
-  section.appendChild(heading);
+  const section = el("details", "media-canon-section media-canon-all");
+  const summary = el("summary", "media-canon-heading media-canon-all-summary");
+  summary.appendChild(el("h3", null, "Медиаустройства"));
+  summary.appendChild(el("span", null, `${devices.length} ${mediaOverviewDeviceWord(devices.length)}`));
+  section.appendChild(summary);
   const grid = el("div", "inventory-device-grid media-canon-device-grid");
   devices.forEach((device) => grid.appendChild(panel._deviceInventoryCard(device)));
   if (!devices.length) grid.appendChild(el("div", "empty-state", "Физические медиоустройства пока не найдены."));
