@@ -73,11 +73,13 @@ class CompleteClimateStorageRestartTest(unittest.IsolatedAsyncioTestCase):
         self.module_patch.start()
         sys.modules.pop("custom_components.hausman_hub.climate_storage", None)
         sys.modules.pop("custom_components.hausman_hub.contour_storage", None)
+        sys.modules.pop("custom_components.hausman_hub.climate_operation_storage", None)
         self.hass = MagicMock()
 
     def tearDown(self) -> None:
         sys.modules.pop("custom_components.hausman_hub.climate_storage", None)
         sys.modules.pop("custom_components.hausman_hub.contour_storage", None)
+        sys.modules.pop("custom_components.hausman_hub.climate_operation_storage", None)
         self.module_patch.stop()
 
     def _stores(self, entry_id: str):
@@ -156,6 +158,33 @@ class CompleteClimateStorageRestartTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             contour_registry_to_payload(contours),
             self.fake_store.backing["hausman_hub.contours.entry_1"],
+        )
+
+    async def test_tablet_operation_ledger_survives_store_reconstruction(self) -> None:
+        from custom_components.hausman_hub.climate_operation_storage import (
+            HomeAssistantClimateOperationStore,
+        )
+
+        payload = {
+            "version": 1,
+            "records": [
+                {
+                    "request_id": "tablet.climate.0001",
+                    "fingerprint": "a" * 64,
+                    "receipt": {"operation_id": "b" * 32},
+                }
+            ],
+        }
+        first = HomeAssistantClimateOperationStore(self.hass, "entry_1")
+        await first.async_save(payload)
+
+        restarted = HomeAssistantClimateOperationStore(self.hass, "entry_1")
+
+        self.assertEqual(payload, await restarted.async_load())
+        self.assertEqual(1, restarted._store.version)
+        self.assertEqual(
+            payload,
+            self.fake_store.backing["hausman_hub.climate_operations.entry_1"],
         )
 
     async def test_storage_is_isolated_by_entry_and_keeps_schema_versions(self) -> None:

@@ -47,10 +47,15 @@ class AndroidModelCompatibilityTest(unittest.TestCase):
         )
         self.assertEqual(
             {
+                "contract": {
+                    "name": "hausman-hub-climate-action-request",
+                    "version": 1,
+                },
                 "request_id": "android-check-1",
+                "expected_state_revision": self.home["state_revision"],
                 "action": "set_room_target",
                 "room_id": "living",
-                "target_temperature": 18.0,
+                "parameters": {"target_temperature": 18.0},
             },
             model.rooms[0].actions[0].request,
         )

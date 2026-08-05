@@ -203,6 +203,7 @@ def check_android_payload(
                 room_id,
                 action_code,
                 action_index,
+                state_revision,
                 inputs,
             )
             _validate_with(
@@ -301,12 +302,19 @@ def _android_action_request(
     room_id: str,
     action: str,
     action_index: int,
+    state_revision: int,
     inputs: dict[str, Any],
 ) -> dict[str, object]:
     request: dict[str, object] = {
+        "contract": {
+            "name": "hausman-hub-climate-action-request",
+            "version": 1,
+        },
         "request_id": f"android-check-{action_index + 1}",
+        "expected_state_revision": state_revision,
         "action": action,
         "room_id": room_id,
+        "parameters": {},
     }
     if action == "set_room_target":
         action_inputs = _object(inputs.get(action), f"action {action} inputs")
@@ -314,10 +322,12 @@ def _android_action_request(
             action_inputs.get("target_temperature"),
             "target temperature input",
         )
-        request["target_temperature"] = _double(
-            temperature.get("minimum"),
-            "target temperature minimum",
-        )
+        request["parameters"] = {
+            "target_temperature": _double(
+                temperature.get("minimum"),
+                "target temperature minimum",
+            )
+        }
     elif action != "turn_room_off":
         raise AndroidCompatibilityError(f"Android action {action} is unsupported")
     return request

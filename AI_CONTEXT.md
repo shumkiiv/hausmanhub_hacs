@@ -1,8 +1,31 @@
 # HausmanHub AI Context
 
-Last updated: 2026-07-28 (release 1.27.0 published and deployed).
+Last updated: 2026-08-05 (tablet climate API backend prepared on a feature branch).
 
 ## Current work
+
+- Tablet climate API backend is prepared on branch
+  `codex/climate-api-backend`, based on integration `1.52.40`:
+  - Contract pin: `hausmanhub-contracts` `0.18.0`, commit `0e7fa65`.
+  - New local tablet routes: `GET /api/hausman_hub/v1/climate/runtime`,
+    `POST /api/hausman_hub/v1/climate/actions`, and
+    `GET /api/hausman_hub/v1/climate/operations/{operation_id}`.
+  - The public request boundary accepts only stable room IDs and typed climate
+    parameters. Home Assistant entity IDs and arbitrary service targets are
+    rejected.
+  - Operation identity is persisted before native execution. Duplicate retries
+    return the same receipt and never repeat a physical command after restart.
+  - Runtime snapshots expose disabled, shadow/readiness, canary, managed and
+    stale states without giving the tablet control before existing server gates
+    allow it.
+  - Final local release gate passed: 1191 tests, 4 skipped, all fixture,
+    Android compatibility, HACS package, naming and repository safety checks
+    passed. The checker builds contract `0.18.0` action envelopes.
+  - No files under `frontend/` were changed. Manifest version and frontend cache
+    references stay at `1.52.40` until the Kimi client handoff is accepted and a
+    coordinated release is assembled.
+  - Next: commit and push the backend branch, then verify production bindings
+    and collect shadow evidence without sending device commands.
 
 - Release 1.27.0 (wizard IR-code learning for universal IR contours)
   is RELEASED and DEPLOYED, 2026-07-28:

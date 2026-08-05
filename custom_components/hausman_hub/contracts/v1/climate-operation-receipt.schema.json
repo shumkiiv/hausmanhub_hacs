@@ -1,58 +1,143 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/shumkiiv/hausmanhub_hacs/contracts/v1/climate-operation-receipt.schema.json",
-  "title": "HausmanHub climate operation receipt v1",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/climate-operation-receipt.schema.json",
+  "title": "HausmanHub tablet climate operation receipt v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["contract", "operation_id", "request_id", "action", "room_id", "device_id", "status", "execution", "created_at", "updated_at", "known"],
+  "required": [
+    "contract",
+    "operation_id",
+    "request_id",
+    "action",
+    "room_id",
+    "expected_state_revision",
+    "resulting_state_revision",
+    "status",
+    "accepted",
+    "confirmed",
+    "final",
+    "duplicate",
+    "reason",
+    "message",
+    "read_back",
+    "created_at",
+    "updated_at",
+    "expires_at"
+  ],
   "properties": {
     "contract": {
       "type": "object",
       "additionalProperties": false,
       "required": ["name", "version"],
       "properties": {
-        "name": {"const": "hausman-hub-operation"},
+        "name": {"const": "hausman-hub-climate-operation"},
         "version": {"const": 1}
       }
     },
     "operation_id": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
-    "request_id": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"},
-    "action": {"type": ["string", "null"]},
+    "request_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"},
+    "action": {
+      "enum": [
+        "set_home_targets",
+        "set_room_target",
+        "clear_room_override",
+        "set_room_mode",
+        "set_room_humidity_target",
+        "set_room_min_target",
+        "set_room_target_strategy",
+        "turn_room_off"
+      ]
+    },
     "room_id": {"type": ["string", "null"], "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
-    "device_id": {"type": ["string", "null"], "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
-    "status": {"enum": ["accepted", "pending", "confirmed", "rejected", "timed_out", "unknown"]},
-    "execution": {"enum": ["shadow", "canary", null]},
-    "created_at": {"type": ["integer", "null"], "minimum": 0},
-    "updated_at": {"type": ["integer", "null"], "minimum": 0},
-    "known": {"type": "boolean"}
+    "expected_state_revision": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+    "resulting_state_revision": {"type": ["integer", "null"], "minimum": 0, "maximum": 9007199254740991},
+    "status": {"enum": ["pending", "confirmed", "partial", "rejected", "unavailable", "timed_out"]},
+    "accepted": {"type": "boolean"},
+    "confirmed": {"type": "boolean"},
+    "final": {"type": "boolean"},
+    "duplicate": {"type": "boolean"},
+    "reason": {
+      "enum": [
+        "none",
+        "climate_disabled",
+        "shadow_only",
+        "state_stale",
+        "authority_not_ready",
+        "room_not_in_canary",
+        "registry_mismatch",
+        "cooldown_active",
+        "operation_pending",
+        "action_unsupported",
+        "device_unavailable",
+        "read_back_mismatch",
+        "confirmation_timeout",
+        "internal_error"
+      ]
+    },
+    "message": {"type": "string", "minLength": 1, "maxLength": 500},
+    "read_back": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attempted", "matched", "observed_at", "evidence"],
+      "properties": {
+        "attempted": {"type": "boolean"},
+        "matched": {"type": ["boolean", "null"]},
+        "observed_at": {"type": ["integer", "null"], "minimum": 0},
+        "evidence": {"type": "object", "additionalProperties": true, "maxProperties": 16}
+      }
+    },
+    "created_at": {"type": "integer", "minimum": 0},
+    "updated_at": {"type": "integer", "minimum": 0},
+    "expires_at": {"type": "integer", "minimum": 0}
   },
   "allOf": [
     {
-      "if": {"properties": {"known": {"const": false}}, "required": ["known"]},
+      "if": {"properties": {"status": {"const": "pending"}}, "required": ["status"]},
       "then": {
         "properties": {
-          "request_id": {"const": null},
-          "action": {"const": null},
-          "room_id": {"const": null},
-          "device_id": {"const": null},
-          "status": {"const": "unknown"},
-          "execution": {"const": null},
-          "created_at": {"const": null},
-          "updated_at": {"const": null}
+          "accepted": {"const": true},
+          "confirmed": {"const": false},
+          "final": {"const": false},
+          "reason": {"const": "none"},
+          "resulting_state_revision": {"const": null}
         }
       }
     },
     {
-      "if": {"properties": {"known": {"const": true}}, "required": ["known"]},
+      "if": {"properties": {"status": {"const": "confirmed"}}, "required": ["status"]},
       "then": {
         "properties": {
-          "request_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"},
-          "action": {"type": "string"},
-          "room_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
-          "status": {"enum": ["accepted", "pending", "confirmed", "rejected", "timed_out"]},
-          "execution": {"enum": ["shadow", "canary"]},
-          "created_at": {"type": "integer", "minimum": 0},
-          "updated_at": {"type": "integer", "minimum": 0}
+          "accepted": {"const": true},
+          "confirmed": {"const": true},
+          "final": {"const": true},
+          "reason": {"const": "none"},
+          "resulting_state_revision": {"type": "integer"},
+          "read_back": {
+            "properties": {"attempted": {"const": true}, "matched": {"const": true}}
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"status": {"enum": ["rejected", "unavailable"]}}, "required": ["status"]},
+      "then": {
+        "properties": {
+          "accepted": {"const": false},
+          "confirmed": {"const": false},
+          "final": {"const": true},
+          "reason": {"not": {"const": "none"}},
+          "resulting_state_revision": {"const": null}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"status": {"enum": ["partial", "timed_out"]}}, "required": ["status"]},
+      "then": {
+        "properties": {
+          "accepted": {"const": true},
+          "confirmed": {"const": false},
+          "final": {"const": true},
+          "reason": {"not": {"const": "none"}}
         }
       }
     }

@@ -435,6 +435,42 @@
             }
           }
         },
+        "climate_runtime": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available",
+            "phase",
+            "commands_enabled",
+            "read_path",
+            "action_path",
+            "operation_path_template",
+            "read_method",
+            "action_method",
+            "operation_method",
+            "durable_idempotency",
+            "receipt_events",
+            "read_contract",
+            "request_contract",
+            "receipt_contract"
+          ],
+          "properties": {
+            "available": {"type": "boolean"},
+            "phase": {"enum": ["disabled", "shadow", "ready_for_canary", "canary", "managed", "unavailable"]},
+            "commands_enabled": {"type": "boolean"},
+            "read_path": {"const": "/api/hausman_hub/v1/climate/runtime"},
+            "action_path": {"const": "/api/hausman_hub/v1/climate/actions"},
+            "operation_path_template": {"const": "/api/hausman_hub/v1/climate/operations/{operation_id}"},
+            "read_method": {"const": "GET"},
+            "action_method": {"const": "POST"},
+            "operation_method": {"const": "GET"},
+            "durable_idempotency": {"const": true},
+            "receipt_events": {"const": true},
+            "read_contract": {"$ref": "#/$defs/climate_runtime_contract"},
+            "request_contract": {"$ref": "#/$defs/climate_action_request_contract"},
+            "receipt_contract": {"$ref": "#/$defs/operation_receipt_contract"}
+          }
+        },
         "voice_greeting": {
           "type": "object",
           "additionalProperties": false,
@@ -647,6 +683,15 @@
         }
       }
     },
+    "climate_runtime_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-climate-runtime"},
+        "version": {"const": 1}
+      }
+    },
     "operation_query_contract": {
       "type": "object",
       "additionalProperties": false,
@@ -672,7 +717,7 @@
       ],
       "properties": {
         "name": {
-          "const": "hausman-hub-operation"
+          "const": "hausman-hub-climate-operation"
         },
         "version": {
           "const": 1

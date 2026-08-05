@@ -1,0 +1,8 @@
+{
+  "contract": { "name": "hausman-hub-error", "version": 1 },
+  "code": "revision_conflict",
+  "message": "Настройки изменились на другом клиенте. Обновите данные и повторите попытку.",
+  "retryable": true,
+  "requestId": "request-example",
+  "details": { "expectedRevision": 3, "actualRevision": 4 }
+}

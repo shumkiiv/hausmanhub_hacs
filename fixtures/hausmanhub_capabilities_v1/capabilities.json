@@ -160,6 +160,22 @@
         "action": "/api/hausman_hub/v1/scenarios/action"
       }
     },
+    "climate_runtime": {
+      "available": false,
+      "phase": "unavailable",
+      "commands_enabled": false,
+      "read_path": "/api/hausman_hub/v1/climate/runtime",
+      "action_path": "/api/hausman_hub/v1/climate/actions",
+      "operation_path_template": "/api/hausman_hub/v1/climate/operations/{operation_id}",
+      "read_method": "GET",
+      "action_method": "POST",
+      "operation_method": "GET",
+      "durable_idempotency": true,
+      "receipt_events": true,
+      "read_contract": {"name": "hausman-hub-climate-runtime", "version": 1},
+      "request_contract": {"name": "hausman-hub-climate-action-request", "version": 1},
+      "receipt_contract": {"name": "hausman-hub-climate-operation", "version": 1}
+    },
     "voice_greeting": {
       "available": false,
       "provider": "alexxit_yandex_station",

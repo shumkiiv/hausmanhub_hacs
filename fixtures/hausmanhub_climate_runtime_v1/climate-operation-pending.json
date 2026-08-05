@@ -1,0 +1,20 @@
+{
+  "contract": {"name": "hausman-hub-climate-operation", "version": 1},
+  "operation_id": "0123456789abcdef0123456789abcdef",
+  "request_id": "tablet.climate.0001",
+  "action": "set_room_target",
+  "room_id": "living",
+  "expected_state_revision": 42,
+  "resulting_state_revision": null,
+  "status": "pending",
+  "accepted": true,
+  "confirmed": false,
+  "final": false,
+  "duplicate": false,
+  "reason": "none",
+  "message": "Команда принята и ожидает подтверждения состояния.",
+  "read_back": {"attempted": false, "matched": null, "observed_at": null, "evidence": {}},
+  "created_at": 1785949320000,
+  "updated_at": 1785949320000,
+  "expires_at": 1785949380000
+}

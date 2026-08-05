@@ -1,0 +1,13 @@
+{
+  "contract": {"name": "hausman-hub-climate-runtime", "version": 1},
+  "generated_at": 1785949200000,
+  "state_revision": 40,
+  "phase": "disabled",
+  "authority": "legacy_climate_core",
+  "fresh": true,
+  "commands_enabled": false,
+  "blocked_reasons": ["climate_disabled"],
+  "home_control": {"enabled": false, "allowed_actions": [], "blocked_reasons": ["climate_disabled"]},
+  "rooms": [],
+  "active_operations": []
+}

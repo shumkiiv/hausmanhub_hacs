@@ -1,0 +1,37 @@
+{
+  "contract": {"name": "hausman-hub-climate-runtime", "version": 1},
+  "generated_at": 1785949260000,
+  "state_revision": 41,
+  "phase": "shadow",
+  "authority": "legacy_climate_core",
+  "fresh": true,
+  "commands_enabled": false,
+  "blocked_reasons": ["shadow_only", "registry_mismatch"],
+  "home_control": {"enabled": false, "allowed_actions": [], "blocked_reasons": ["shadow_only"]},
+  "rooms": [
+    {
+      "id": "living",
+      "name": "Гостиная",
+      "temperature": 25.8,
+      "humidity": 44,
+      "target_temperature": 24,
+      "target_humidity": 45,
+      "minimum_temperature": 18,
+      "mode": "automatic",
+      "target_strategy": "normal",
+      "authority": "legacy_climate_core",
+      "control": {"enabled": false, "allowed_actions": [], "blocked_reasons": ["shadow_only"]},
+      "devices": [
+        {
+          "id": "living_ac",
+          "name": "Кондиционер в гостиной",
+          "kind": "air_conditioner",
+          "available": true,
+          "state": "working",
+          "cooldown": null
+        }
+      ]
+    }
+  ],
+  "active_operations": []
+}

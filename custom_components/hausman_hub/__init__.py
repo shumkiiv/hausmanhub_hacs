@@ -100,6 +100,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     ir_code_service.set_binding_validator(climate_runtime)
     await climate_runtime.async_start()
+    from .application.climate_tablet import (
+        ClimateTabletService,
+        ClimateTabletUnavailable,
+    )
+    from .climate_operation_storage import HomeAssistantClimateOperationStore
+
+    climate_tablet = ClimateTabletService(
+        climate_runtime,
+        HomeAssistantClimateOperationStore(hass, entry.entry_id),
+        local_now=dt_util.now,
+    )
+    try:
+        await climate_tablet.async_load()
+    except ClimateTabletUnavailable:
+        climate_tablet = None
     from .ai_assistant_setup import async_start_ai_assistant
     from .climate_schedule import async_start_climate_schedule
     from .climate_shadow import async_start_climate_shadow
@@ -136,6 +151,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         scenario_service,
         ir_code_service,
         climate_shadow,
+        climate_tablet,
     )
     from .realtime_api import register_event_stream
 
