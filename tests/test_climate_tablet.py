@@ -84,6 +84,7 @@ class FakeRuntime:
             climate_bridge_mode=ClimateControlMode.MANAGED,
         )
         self.commands: list[dict[str, object]] = []
+        self.result_status = ContourApplyStatus.CONFIRMED
 
     async def async_public_snapshot(self) -> dict[str, object]:
         return copy.deepcopy(self.home)
@@ -94,7 +95,7 @@ class FakeRuntime:
         del now
         self.commands.append(copy.deepcopy(payload))
         return SimpleNamespace(
-            status=ContourApplyStatus.CONFIRMED,
+            status=self.result_status,
             confirmed_room_count=1,
             accepted_count=1,
         )
@@ -102,7 +103,7 @@ class FakeRuntime:
     async def async_home_climate_targets(self, payload: object) -> object:
         self.commands.append(copy.deepcopy(payload))
         return SimpleNamespace(
-            status=ContourApplyStatus.CONFIRMED,
+            status=self.result_status,
             confirmed_room_count=1,
             accepted_count=1,
         )
@@ -121,8 +122,15 @@ class ClimateTabletProjectionTest(unittest.TestCase):
         room = payload["rooms"][0]
         self.assertEqual(["set_room_target"], room["control"]["allowed_actions"])
         self.assertEqual("air_conditioner", room["devices"][0]["kind"])
+        self.assertEqual("managed", room["devices"][0]["control_scope"])
         self.assertEqual("working", room["devices"][0]["state"])
         self.assertIsNone(room["devices"][0]["cooldown"])
+        self.assertEqual(
+            {"minimum": 18, "maximum": 28, "step": 0.5},
+            room["temperature_range"],
+        )
+        self.assertEqual("day", room["active_profile"])
+        self.assertFalse(room["temporary_override"]["active"])
         contract_validator("climate-runtime.schema.json").validate(payload)
 
     def test_stale_projection_remains_visible_and_disables_every_action(self) -> None:
@@ -216,7 +224,41 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(1, len(self.runtime.commands))
         self.assertEqual("pending", self.store.saved[0]["records"][0]["receipt"]["status"])
         self.assertEqual("confirmed", self.store.saved[1]["records"][0]["receipt"]["status"])
+        snapshot = await self.service.async_snapshot()
+        self.assertEqual(
+            receipt["operation_id"],
+            snapshot["rooms"][0]["devices"][0]["last_confirmed_operation"][
+                "operation_id"
+            ],
+        )
         contract_validator("climate-operation-receipt.schema.json").validate(receipt)
+
+    async def test_pending_operation_confirms_from_read_back_without_reexecution(self) -> None:
+        self.runtime.result_status = ContourApplyStatus.PENDING
+        request = action_request(self.home["state_revision"])
+        pending = await self.service.async_execute(request)
+        self.runtime.home["state_revision"] += 1
+        self.runtime.home["rooms"][0]["target_temperature"] = 23.5
+        temporary = self.runtime.home["contours"][0]["rooms"][0][
+            "temporary_temperature"
+        ]
+        temporary.update(
+            {
+                "active": True,
+                "temperature": 23.5,
+                "ends": "next_schedule_change",
+                "ends_at": "2026-08-05T23:00:00+00:00",
+            }
+        )
+
+        confirmed = await self.service.async_operation(pending["operation_id"])
+
+        self.assertEqual("confirmed", confirmed["status"])
+        self.assertTrue(confirmed["read_back"]["matched"])
+        self.assertEqual(1, len(self.runtime.commands))
+        contract_validator("climate-operation-receipt.schema.json").validate(
+            confirmed
+        )
 
     async def test_restart_restores_final_receipt_without_reexecution(self) -> None:
         request = action_request(self.home["state_revision"])

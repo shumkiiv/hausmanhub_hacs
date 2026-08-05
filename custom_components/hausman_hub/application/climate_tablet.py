@@ -127,6 +127,7 @@ class ClimateTabletActionRequest:
 @dataclass(frozen=True, slots=True)
 class _StoredOperation:
     fingerprint: str
+    request: ClimateTabletActionRequest
     receipt: dict[str, object]
 
 
@@ -227,6 +228,7 @@ def climate_tablet_snapshot(
     *,
     climate_mode: str,
     active_operations: tuple[dict[str, object], ...] = (),
+    confirmed_operations: tuple[dict[str, object], ...] = (),
     generated_at: int | None = None,
 ) -> dict[str, object]:
     """Project the strict runtime contract from the existing native home model."""
@@ -273,6 +275,14 @@ def climate_tablet_snapshot(
         for operation in active_operations
         if operation.get("status") == "pending"
     }
+    confirmed_by_room: dict[str | None, dict[str, object]] = {}
+    for operation in sorted(
+        confirmed_operations,
+        key=lambda item: item.get("updated_at", 0),
+    ):
+        room_id = operation.get("room_id")
+        if room_id is None or isinstance(room_id, str):
+            confirmed_by_room[room_id] = operation
     scopes = {
         device.get("control_scope")
         for room in rooms_value
@@ -337,6 +347,24 @@ def climate_tablet_snapshot(
             if isinstance(saved_profiles, Mapping) and isinstance(active_profile, str)
             else None
         )
+        action_inputs = (
+            room.get("control", {}).get("action_inputs", {})
+            if isinstance(room.get("control"), Mapping)
+            else {}
+        )
+        room_target_input = (
+            action_inputs.get("set_room_target", {}).get("target_temperature", {})
+            if isinstance(action_inputs, Mapping)
+            else {}
+        )
+        humidity_input = (
+            action_inputs.get("set_room_humidity_target", {}).get(
+                "target_humidity", {}
+            )
+            if isinstance(action_inputs, Mapping)
+            else {}
+        )
+        last_confirmed = confirmed_by_room.get(room_id) or confirmed_by_room.get(None)
         projected_rooms.append(
             {
                 "id": room_id,
@@ -346,6 +374,18 @@ def climate_tablet_snapshot(
                 "target_temperature": room.get("target_temperature"),
                 "target_humidity": room.get("target_humidity"),
                 "minimum_temperature": 18,
+                "temperature_range": _public_range(
+                    room_target_input,
+                    minimum=18,
+                    maximum=28,
+                    step=0.5,
+                ),
+                "humidity_range": _public_range(
+                    humidity_input,
+                    minimum=30,
+                    maximum=70,
+                    step=1,
+                ),
                 "mode": room.get("mode") if room.get("mode") in {
                     "automatic", "manual", "off", "unknown"
                 } else "unknown",
@@ -358,6 +398,28 @@ def climate_tablet_snapshot(
                         else "unknown"
                     )
                 ),
+                "active_profile": (
+                    active_profile if active_profile in {"day", "night"} else None
+                ),
+                "temporary_override": {
+                    "active": (
+                        isinstance(temporary, Mapping)
+                        and temporary.get("active") is True
+                    ),
+                    "target_temperature": (
+                        temporary.get("temperature")
+                        if isinstance(temporary, Mapping)
+                        and temporary.get("active") is True
+                        else None
+                    ),
+                    "ends_at": (
+                        temporary.get("ends_at")
+                        if isinstance(temporary, Mapping)
+                        and temporary.get("active") is True
+                        and isinstance(temporary.get("ends_at"), str)
+                        else None
+                    ),
+                },
                 "authority": (
                     "legacy_climate_core" if shadow else "hausman_hub"
                 ),
@@ -366,7 +428,9 @@ def climate_tablet_snapshot(
                     "allowed_actions": allowed_actions,
                     "blocked_reasons": room_reasons,
                 },
-                "devices": [_project_device(device) for device in devices],
+                "devices": [
+                    _project_device(device, last_confirmed) for device in devices
+                ],
             }
         )
     execution = contour.get("execution") if isinstance(contour, Mapping) else None
@@ -460,11 +524,12 @@ class ClimateTabletService:
         operations: dict[str, str] = {}
         for item in payload["records"]:
             if not isinstance(item, Mapping) or set(item) != {
-                "request_id", "fingerprint", "receipt"
+                "request_id", "fingerprint", "request", "receipt"
             }:
                 raise ClimateTabletUnavailable("stored climate operation is invalid")
             request_id = item.get("request_id")
             fingerprint = item.get("fingerprint")
+            request_payload = item.get("request")
             receipt = item.get("receipt")
             if (
                 not isinstance(request_id, str)
@@ -474,11 +539,21 @@ class ClimateTabletService:
                 or not isinstance(receipt, Mapping)
             ):
                 raise ClimateTabletUnavailable("stored climate operation fields are invalid")
+            try:
+                request = parse_climate_tablet_action(request_payload)
+            except ClimateTabletViolation as error:
+                raise ClimateTabletUnavailable(
+                    "stored climate operation request is invalid"
+                ) from error
+            if request.request_id != request_id or request.fingerprint != fingerprint:
+                raise ClimateTabletUnavailable("stored climate operation request is invalid")
             normalized = _validate_receipt(dict(receipt))
+            if not _receipt_matches_request(normalized, request):
+                raise ClimateTabletUnavailable("stored climate operation receipt is invalid")
             operation_id = normalized["operation_id"]
             if request_id in records or operation_id in operations:
                 raise ClimateTabletUnavailable("stored climate operation is duplicated")
-            records[request_id] = _StoredOperation(fingerprint, normalized)
+            records[request_id] = _StoredOperation(fingerprint, request, normalized)
             operations[operation_id] = request_id
         if len(records) > MAX_CLIMATE_OPERATION_RECORDS:
             raise ClimateTabletUnavailable("stored climate operation history is too large")
@@ -490,17 +565,24 @@ class ClimateTabletService:
 
         async with self._lock:
             await self._expire_pending_unlocked()
+            await self._refresh_pending_unlocked()
             mode = _climate_mode(self._runtime)
             active = tuple(
                 _operation_summary(record.receipt)
                 for record in self._records_by_request.values()
                 if record.receipt.get("final") is False
             )
+            confirmed = tuple(
+                _operation_summary(record.receipt)
+                for record in self._records_by_request.values()
+                if record.receipt.get("status") == "confirmed"
+            )
             if mode == "disabled":
                 return climate_tablet_snapshot(
                     None,
                     climate_mode=mode,
                     active_operations=active,
+                    confirmed_operations=confirmed,
                     generated_at=self._safe_now(),
                 )
             try:
@@ -511,6 +593,7 @@ class ClimateTabletService:
                 home,
                 climate_mode=mode,
                 active_operations=active,
+                confirmed_operations=confirmed,
             )
 
     async def async_execute(self, payload: object) -> dict[str, object]:
@@ -519,6 +602,7 @@ class ClimateTabletService:
         request = parse_climate_tablet_action(payload)
         async with self._lock:
             await self._expire_pending_unlocked()
+            await self._refresh_pending_unlocked()
             prior = self._records_by_request.get(request.request_id)
             if prior is not None:
                 if prior.fingerprint != request.fingerprint:
@@ -585,6 +669,7 @@ class ClimateTabletService:
             raise ClimateTabletOperationNotFound(operation_id)
         async with self._lock:
             await self._expire_pending_unlocked()
+            await self._refresh_pending_unlocked()
             request_id = self._request_by_operation.get(operation_id)
             if request_id is None:
                 raise ClimateTabletOperationNotFound(operation_id)
@@ -606,8 +691,16 @@ class ClimateTabletService:
             for record in self._records_by_request.values()
             if record.receipt.get("final") is False
         )
+        confirmed = tuple(
+            _operation_summary(record.receipt)
+            for record in self._records_by_request.values()
+            if record.receipt.get("status") == "confirmed"
+        )
         return climate_tablet_snapshot(
-            home, climate_mode=mode, active_operations=active
+            home,
+            climate_mode=mode,
+            active_operations=active,
+            confirmed_operations=confirmed,
         )
 
     async def _async_dispatch(self, request: ClimateTabletActionRequest) -> object:
@@ -650,7 +743,7 @@ class ClimateTabletService:
     ) -> None:
         normalized = _validate_receipt(receipt)
         self._records_by_request[request.request_id] = _StoredOperation(
-            request.fingerprint, normalized
+            request.fingerprint, request, normalized
         )
         self._request_by_operation[normalized["operation_id"]] = request.request_id
 
@@ -659,6 +752,7 @@ class ClimateTabletService:
             {
                 "request_id": request_id,
                 "fingerprint": record.fingerprint,
+                "request": _request_payload(record.request),
                 "receipt": record.receipt,
             }
             for request_id, record in self._records_by_request.items()
@@ -672,15 +766,8 @@ class ClimateTabletService:
             receipt = record.receipt
             if receipt.get("final") is not False or now < receipt["expires_at"]:
                 continue
-            request = ClimateTabletActionRequest(
-                request_id=request_id,
-                expected_state_revision=receipt["expected_state_revision"],
-                action=receipt["action"],
-                room_id=receipt["room_id"],
-                parameters={},
-            )
             timed_out = _terminal_receipt(
-                request,
+                record.request,
                 receipt["operation_id"],
                 status="timed_out",
                 reason="confirmation_timeout",
@@ -689,7 +776,34 @@ class ClimateTabletService:
                 updated_at=now,
             )
             self._records_by_request[request_id] = _StoredOperation(
-                record.fingerprint, timed_out
+                record.fingerprint, record.request, timed_out
+            )
+            changed = True
+        if changed:
+            await self._async_save()
+
+    async def _refresh_pending_unlocked(self) -> None:
+        pending = [
+            (request_id, record)
+            for request_id, record in self._records_by_request.items()
+            if record.receipt.get("status") == "pending"
+        ]
+        if not pending:
+            return
+        try:
+            snapshot = await self._snapshot_unlocked()
+        except ClimateTabletUnavailable:
+            return
+        now = self._safe_now()
+        changed = False
+        for request_id, record in pending:
+            if not _request_matches_snapshot(record.request, snapshot):
+                continue
+            receipt = _confirmed_after_read_back(record.receipt, snapshot, now)
+            self._records_by_request[request_id] = _StoredOperation(
+                record.fingerprint,
+                record.request,
+                receipt,
             )
             changed = True
         if changed:
@@ -714,17 +828,64 @@ class ClimateTabletService:
         return value
 
 
-def _project_device(device: object) -> dict[str, object]:
+def _project_device(
+    device: object,
+    last_confirmed: Mapping[str, object] | None,
+) -> dict[str, object]:
     if not isinstance(device, Mapping):
         raise ClimateTabletUnavailable("climate device projection is invalid")
     return {
         "id": device.get("id"),
         "name": device.get("name"),
         "kind": device.get("kind"),
+        "control_scope": (
+            device.get("control_scope")
+            if device.get("control_scope") in {"observed", "canary", "managed"}
+            else "observed"
+        ),
         "available": device.get("available") is True,
         "state": device.get("state"),
         "cooldown": None,
+        "last_confirmed_operation": (
+            {
+                "operation_id": last_confirmed["operation_id"],
+                "action": last_confirmed["action"],
+                "updated_at": last_confirmed["updated_at"],
+            }
+            if last_confirmed is not None
+            else None
+        ),
     }
+
+
+def _public_range(
+    value: object,
+    *,
+    minimum: int | float,
+    maximum: int | float,
+    step: int | float,
+) -> dict[str, int | float]:
+    if not isinstance(value, Mapping):
+        return {"minimum": minimum, "maximum": maximum, "step": step}
+    candidate_minimum = value.get("minimum")
+    candidate_maximum = value.get("maximum")
+    candidate_step = value.get("step")
+    if (
+        isinstance(candidate_minimum, (int, float))
+        and not isinstance(candidate_minimum, bool)
+        and isinstance(candidate_maximum, (int, float))
+        and not isinstance(candidate_maximum, bool)
+        and isinstance(candidate_step, (int, float))
+        and not isinstance(candidate_step, bool)
+        and candidate_minimum <= candidate_maximum
+        and candidate_step > 0
+    ):
+        return {
+            "minimum": candidate_minimum,
+            "maximum": candidate_maximum,
+            "step": candidate_step,
+        }
+    return {"minimum": minimum, "maximum": maximum, "step": step}
 
 
 def _disabled_snapshot(generated_at: int | None) -> dict[str, object]:
@@ -824,6 +985,115 @@ def _pending_receipt(
         "updated_at": now,
         "expires_at": now + CLIMATE_OPERATION_TTL_MS,
     }
+
+
+def _request_payload(request: ClimateTabletActionRequest) -> dict[str, object]:
+    return {
+        "contract": {"name": CLIMATE_ACTION_CONTRACT_NAME, "version": 1},
+        "request_id": request.request_id,
+        "expected_state_revision": request.expected_state_revision,
+        "action": request.action,
+        "room_id": request.room_id,
+        "parameters": dict(request.parameters),
+    }
+
+
+def _receipt_matches_request(
+    receipt: Mapping[str, object],
+    request: ClimateTabletActionRequest,
+) -> bool:
+    return (
+        receipt.get("request_id") == request.request_id
+        and receipt.get("action") == request.action
+        and receipt.get("room_id") == request.room_id
+        and receipt.get("expected_state_revision")
+        == request.expected_state_revision
+    )
+
+
+def _request_matches_snapshot(
+    request: ClimateTabletActionRequest,
+    snapshot: Mapping[str, object],
+) -> bool:
+    if snapshot.get("fresh") is not True:
+        return False
+    rooms = snapshot.get("rooms")
+    if not isinstance(rooms, list) or not rooms:
+        return False
+    if request.action == "set_home_targets":
+        for room in rooms:
+            if not isinstance(room, Mapping):
+                return False
+            if (
+                "target_temperature" in request.parameters
+                and room.get("target_temperature")
+                != request.parameters["target_temperature"]
+            ):
+                return False
+            if (
+                "target_humidity" in request.parameters
+                and room.get("target_humidity")
+                != request.parameters["target_humidity"]
+            ):
+                return False
+        return True
+    room = next(
+        (
+            item
+            for item in rooms
+            if isinstance(item, Mapping) and item.get("id") == request.room_id
+        ),
+        None,
+    )
+    if not isinstance(room, Mapping):
+        return False
+    temporary = room.get("temporary_override")
+    if not isinstance(temporary, Mapping):
+        return False
+    if request.action == "set_room_target":
+        return (
+            temporary.get("active") is True
+            and temporary.get("target_temperature")
+            == request.parameters.get("target_temperature")
+            and room.get("target_temperature")
+            == request.parameters.get("target_temperature")
+        )
+    if request.action == "clear_room_override":
+        return temporary.get("active") is False
+    return False
+
+
+def _confirmed_after_read_back(
+    pending: Mapping[str, object],
+    snapshot: Mapping[str, object],
+    observed_at: int,
+) -> dict[str, object]:
+    rooms = snapshot.get("rooms")
+    receipt = {
+        **pending,
+        "resulting_state_revision": snapshot.get("state_revision"),
+        "status": "confirmed",
+        "accepted": True,
+        "confirmed": True,
+        "final": True,
+        "duplicate": False,
+        "reason": "none",
+        "message": "Климатическое действие подтверждено повторным чтением состояния.",
+        "read_back": {
+            "attempted": True,
+            "matched": True,
+            "observed_at": observed_at,
+            "evidence": {
+                "room_count": len(rooms) if isinstance(rooms, list) else 0,
+            },
+        },
+        "updated_at": observed_at,
+        "expires_at": max(
+            pending["created_at"] + CLIMATE_OPERATION_TTL_MS,
+            observed_at,
+        ),
+    }
+    return _validate_receipt(receipt)
 
 
 def _receipt_from_contour_result(

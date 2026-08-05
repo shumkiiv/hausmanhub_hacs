@@ -17,8 +17,12 @@
       "target_temperature": 24,
       "target_humidity": 45,
       "minimum_temperature": 18,
+      "temperature_range": {"minimum": 18, "maximum": 28, "step": 0.5},
+      "humidity_range": {"minimum": 30, "maximum": 70, "step": 1},
       "mode": "automatic",
       "target_strategy": "normal",
+      "active_profile": "day",
+      "temporary_override": {"active": false, "target_temperature": null, "ends_at": null},
       "authority": "hausman_hub",
       "control": {"enabled": true, "allowed_actions": ["set_room_target", "turn_room_off"], "blocked_reasons": []},
       "devices": [
@@ -26,9 +30,15 @@
           "id": "living_ac",
           "name": "Кондиционер в гостиной",
           "kind": "air_conditioner",
+          "control_scope": "canary",
           "available": true,
           "state": "working",
-          "cooldown": {"active": false, "remaining_seconds": 0, "reason": "none"}
+          "cooldown": {"active": false, "remaining_seconds": 0, "reason": "none"},
+          "last_confirmed_operation": {
+            "operation_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "action": "set_room_target",
+            "updated_at": 1785949260000
+          }
         }
       ]
     },
@@ -40,8 +50,12 @@
       "target_temperature": 23,
       "target_humidity": 45,
       "minimum_temperature": 18,
+      "temperature_range": {"minimum": 18, "maximum": 28, "step": 0.5},
+      "humidity_range": {"minimum": 30, "maximum": 70, "step": 1},
       "mode": "automatic",
       "target_strategy": "soft",
+      "active_profile": "night",
+      "temporary_override": {"active": false, "target_temperature": null, "ends_at": null},
       "authority": "legacy_climate_core",
       "control": {"enabled": false, "allowed_actions": [], "blocked_reasons": ["room_not_in_canary"]},
       "devices": []

@@ -6,7 +6,7 @@ Last updated: 2026-08-05 (tablet climate API backend prepared on a feature branc
 
 - Tablet climate API backend is prepared on branch
   `codex/climate-api-backend`, based on integration `1.52.40`:
-  - Contract pin: `hausmanhub-contracts` `0.18.0`, commit `0e7fa65`.
+  - Contract pin: `hausmanhub-contracts` `0.18.0`, commit `b2e4c8b`.
   - New local tablet routes: `GET /api/hausman_hub/v1/climate/runtime`,
     `POST /api/hausman_hub/v1/climate/actions`, and
     `GET /api/hausman_hub/v1/climate/operations/{operation_id}`.
@@ -21,7 +21,11 @@ Last updated: 2026-08-05 (tablet climate API backend prepared on a feature branc
   - A follow-up closes the shadow projection gap: general `shadow` mode can
     read native observations while the climate writer stays disabled. The
     tablet sees `legacy_climate_core`, no actions and `climate_shadow_only`.
-  - Final local release gate passed: 1193 tests, 4 skipped, all fixture,
+  - The runtime now publishes room ranges, active profile, temporary override,
+    device control scope and the latest confirmed operation. A persisted
+    pending operation can become confirmed through a later read-only status
+    check; no command method is called during this re-observation.
+  - Final local release gate passed: 1194 tests, 4 skipped, all fixture,
     Android compatibility, HACS package, naming and repository safety checks
     passed. The checker builds contract `0.18.0` action envelopes.
   - No files under `frontend/` were changed. Manifest version and frontend cache

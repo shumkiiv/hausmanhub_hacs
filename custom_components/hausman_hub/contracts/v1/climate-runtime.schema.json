@@ -92,6 +92,48 @@
     "stable_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
     "temperature": {"type": ["number", "null"], "minimum": 5, "maximum": 40},
     "humidity": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+    "temperature_range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimum", "maximum", "step"],
+      "properties": {
+        "minimum": {"type": "number", "minimum": 5, "maximum": 40},
+        "maximum": {"type": "number", "minimum": 5, "maximum": 40},
+        "step": {"type": "number", "exclusiveMinimum": 0, "maximum": 5}
+      }
+    },
+    "humidity_range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimum", "maximum", "step"],
+      "properties": {
+        "minimum": {"type": "integer", "minimum": 0, "maximum": 100},
+        "maximum": {"type": "integer", "minimum": 0, "maximum": 100},
+        "step": {"type": "integer", "minimum": 1, "maximum": 20}
+      }
+    },
+    "temporary_override": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["active", "target_temperature", "ends_at"],
+      "properties": {
+        "active": {"type": "boolean"},
+        "target_temperature": {"$ref": "#/$defs/temperature"},
+        "ends_at": {"type": ["string", "null"], "format": "date-time"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"active": {"const": true}}, "required": ["active"]},
+          "then": {"properties": {"target_temperature": {"type": "number"}}},
+          "else": {
+            "properties": {
+              "target_temperature": {"type": "null"},
+              "ends_at": {"type": "null"}
+            }
+          }
+        }
+      ]
+    },
     "action": {
       "enum": [
         "set_home_targets",
@@ -188,14 +230,30 @@
     "device": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "name", "kind", "available", "state", "cooldown"],
+      "required": ["id", "name", "kind", "control_scope", "available", "state", "cooldown", "last_confirmed_operation"],
       "properties": {
         "id": {"$ref": "#/$defs/stable_id"},
         "name": {"type": "string", "minLength": 1, "maxLength": 120},
         "kind": {"enum": ["air_conditioner", "radiator_thermostat", "humidifier", "floor_heating", "temperature_sensor", "humidity_sensor"]},
+        "control_scope": {"enum": ["observed", "canary", "managed"]},
         "available": {"type": "boolean"},
         "state": {"enum": ["working", "idle", "off", "unavailable", "unknown"]},
-        "cooldown": {"oneOf": [{"$ref": "#/$defs/cooldown"}, {"type": "null"}]}
+        "cooldown": {"oneOf": [{"$ref": "#/$defs/cooldown"}, {"type": "null"}]},
+        "last_confirmed_operation": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["operation_id", "action", "updated_at"],
+              "properties": {
+                "operation_id": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+                "action": {"$ref": "#/$defs/action"},
+                "updated_at": {"type": "integer", "minimum": 0}
+              }
+            },
+            {"type": "null"}
+          ]
+        }
       }
     },
     "room": {
@@ -209,8 +267,12 @@
         "target_temperature",
         "target_humidity",
         "minimum_temperature",
+        "temperature_range",
+        "humidity_range",
         "mode",
         "target_strategy",
+        "active_profile",
+        "temporary_override",
         "authority",
         "control",
         "devices"
@@ -223,8 +285,12 @@
         "target_temperature": {"$ref": "#/$defs/temperature"},
         "target_humidity": {"$ref": "#/$defs/humidity"},
         "minimum_temperature": {"$ref": "#/$defs/temperature"},
+        "temperature_range": {"$ref": "#/$defs/temperature_range"},
+        "humidity_range": {"$ref": "#/$defs/humidity_range"},
         "mode": {"enum": ["automatic", "manual", "off", "unknown"]},
         "target_strategy": {"enum": ["soft", "normal", "aggressive", "unknown"]},
+        "active_profile": {"enum": ["day", "night", null]},
+        "temporary_override": {"$ref": "#/$defs/temporary_override"},
         "authority": {"enum": ["legacy_climate_core", "hausman_hub", "none", "unknown"]},
         "control": {"$ref": "#/$defs/control"},
         "devices": {"type": "array", "items": {"$ref": "#/$defs/device"}, "maxItems": 32}
