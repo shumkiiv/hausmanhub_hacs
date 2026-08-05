@@ -215,4 +215,4 @@ class VoiceGreetingTestView(_VoiceViewBase):
             if receipt["code"] == "invalid_request"
             else HTTPStatus.ACCEPTED
         )
-        return self.json(receipt, status=status, headers=NO_STORE_HEADERS)
+        return self.json(receipt, status_code=status, headers=NO_STORE_HEADERS)

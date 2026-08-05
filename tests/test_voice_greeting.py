@@ -445,5 +445,30 @@ class VoiceTestRequestValidationTest(unittest.TestCase):
                 validate_voice_test_request(broken)
 
 
+class VoiceApiViewSourceTest(unittest.TestCase):
+    """Static guards for the Home Assistant view layer.
+
+    The view module imports Home Assistant, so it cannot be imported here.
+    These checks scan the source and pin the HomeAssistantView.json call
+    signature: the keyword is ``status_code``, not ``status`` (a bare
+    ``status=`` raises TypeError on a real Home Assistant and breaks the
+    endpoint with HTTP 500, as observed on the live instance).
+    """
+
+    def test_json_calls_use_status_code_keyword(self) -> None:
+        import re
+        from pathlib import Path
+
+        source = Path(
+            "custom_components/hausman_hub/voice_api.py"
+        ).read_text(encoding="utf-8")
+        for call in re.findall(r"self\.json\([^)]*\)", source):
+            self.assertNotRegex(
+                call,
+                r"(?<![_a-z])status\s*=",
+                f"self.json call must use status_code, not status: {call}",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
