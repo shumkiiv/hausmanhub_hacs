@@ -1972,13 +1972,32 @@ class PanelSettingsSectionsTest(unittest.TestCase):
             """
         await tick();
         panel._shell.tabs.media.fire("click");
-        const media = panel._shell.homeSections.media;
+        let media = panel._shell.homeSections.media;
         const mediaText = textOf(media);
         if (!mediaText.includes("СЕЙЧАС ВОСПРОИЗВОДИТСЯ")
           || !mediaText.includes("По комнатам") || !mediaText.includes("Медиаустройства")
           || !mediaText.includes("Кинопоиск")) {
           throw new Error("canonical media hierarchy is incomplete: " + mediaText);
         }
+        const zone = findAll(media, (node) =>
+          String(node.className).split(" ").includes("media-zone-card"))[0];
+        if (!zone || zone.tagName !== "BUTTON"
+            || !String(zone["aria-label"] || "").startsWith("Открыть медиоустройства комнаты")) {
+          throw new Error("media room is not an accessible drill-down control");
+        }
+        zone.fire("click");
+        await tick();
+        media = panel._shell.homeSections.media;
+        const zoneSheet = findAll(media, (node) =>
+          String(node.className).split(" ").includes("media-zone-sheet"))[0];
+        if (!zoneSheet || !textOf(zoneSheet).includes("выберите устройство для управления")
+            || findAll(zoneSheet, (node) =>
+              String(node.className).split(" ").includes("media-device-card")).length !== 1) {
+          throw new Error("media room drill-down did not show its physical devices");
+        }
+        findAll(zoneSheet, (node) =>
+          String(node.className).split(" ").includes("media-zone-sheet-close"))[0].fire("click");
+        if (panel._mediaOverlay !== null) throw new Error("media room overlay state was not cleared");
         const cards = findAll(media, (node) =>
           String(node.className).split(" ").includes("media-device-card"));
         if (cards.length !== 1) throw new Error("TV did not render as one physical card");
@@ -3490,7 +3509,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.34")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.35")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;
