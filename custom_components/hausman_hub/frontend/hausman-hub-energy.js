@@ -1,4 +1,4 @@
-import { renderEnergyHistoryChart } from "./hausman-hub-energy-chart.js?v=1.52.35";
+import { renderEnergyHistoryChart } from "./hausman-hub-energy-chart.js?v=1.52.36";
 
 const number = (value, digits = 1) => Number.isFinite(Number(value))
   ? new Intl.NumberFormat("ru-RU", { maximumFractionDigits: digits }).format(Number(value))
@@ -7,6 +7,16 @@ const number = (value, digits = 1) => Number.isFinite(Number(value))
 function sourceMetric(source, key, unit, digits = 1) {
   return source && source[key] !== null && source[key] !== undefined
     ? `${number(source[key], digits)} ${unit}` : "—";
+}
+
+function energyTodayKwh(panel, energy) {
+  const snapshotValue = energy && energy.todayKwh;
+  if (snapshotValue !== null && snapshotValue !== undefined && Number.isFinite(Number(snapshotValue))) {
+    return Number(snapshotValue);
+  }
+  const cachedValue = panel && panel._energyTodayKwh;
+  return cachedValue !== null && cachedValue !== undefined && Number.isFinite(Number(cachedValue))
+    ? Number(cachedValue) : null;
 }
 
 function selectedSources(energy) {
@@ -467,11 +477,13 @@ function renderEnergySidebar(panel, container, energy, sources, deps) {
 export function renderEnergySection(panel, container, deps) {
   const { el, svgIcon, setAttr } = deps;
   container.innerHTML = "";
-  const energy = panel._homeDashboard && panel._homeDashboard.energy;
-  if (!energy) {
+  const snapshotEnergy = panel._homeDashboard && panel._homeDashboard.energy;
+  if (!snapshotEnergy) {
     container.appendChild(el("div", "card empty-state", "Данные энергии пока недоступны."));
     return;
   }
+  const todayKwh = energyTodayKwh(panel, snapshotEnergy);
+  const energy = todayKwh === null ? snapshotEnergy : { ...snapshotEnergy, todayKwh };
   const source = energy.sources.find((item) => item.id === panel._energySelectedDeviceId);
   if (source) {
     renderDeviceDetail(panel, container, source, deps);
@@ -569,6 +581,12 @@ export async function loadEnergyHistory(panel) {
     };
     aggregateSelection(history);
     aggregateSelection(consumption);
+    if (period === "day") {
+      const dayValues = consumption.selection || [];
+      panel._energyTodayKwh = dayValues.length
+        ? dayValues.reduce((sum, point) => sum + (Number(point.mean) || 0), 0)
+        : null;
+    }
     panel._energyHistory = history;
     panel._energyConsumptionHistory = consumption;
     panel._energyHistoryError = null;

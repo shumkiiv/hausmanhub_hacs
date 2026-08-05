@@ -680,6 +680,9 @@ def panel_script(
         callApi: (method, path, payload) => {{
           calls.push({{ method, path, payload }});
           if (method === "GET") {{
+            if (path.startsWith("hausman_hub/v1/energy/history?") && "__energy_history__" in getTable) {{
+              return Promise.resolve(getTable.__energy_history__);
+            }}
             if (!(path in getTable)) return Promise.reject(new Error("unexpected GET " + path));
             const result = getTable[path];
             if (result && result.__fail) return Promise.reject(new Error("GET failed"));
@@ -1353,13 +1356,45 @@ class PanelSettingsSectionsTest(unittest.TestCase):
                     "revision": 0,
                     "settings": dashboard["energy"]["settings"],
                 },
+                "__energy_history__": {
+                    "series": [
+                        {
+                            "sourceId": "device_0123456789abcdef",
+                            "deviceId": "device_0123456789abcdef",
+                            "metric": "power",
+                            "unit": "W",
+                            "scope": "device",
+                            "points": [
+                                {"at": "2026-08-04T12:00:00+06:00", "value": 320},
+                                {"at": "2026-08-04T13:00:00+06:00", "value": 540},
+                            ],
+                        },
+                        {
+                            "sourceId": "device_0123456789abcdef",
+                            "deviceId": "device_0123456789abcdef",
+                            "metric": "energy",
+                            "unit": "kWh",
+                            "scope": "device",
+                            "points": [
+                                {"at": "2026-08-04T12:00:00+06:00", "value": 0.18},
+                                {"at": "2026-08-04T13:00:00+06:00", "value": 0.24},
+                            ],
+                        },
+                    ],
+                },
             },
             {"hausman_hub/v1/energy-settings": {"revision": 1}},
             """
+        restoreNavigationFromLocation(panel, false, PANEL_SECTIONS, CLIMATE_VIEWS, SETTINGS_VIEWS);
+        await panel._load();
+        await tick();
+        if (!calls.some((call) => call.method === "GET" && call.path.startsWith("hausman_hub/v1/energy/history?"))) {
+          throw new Error("energy deep link did not load Recorder history");
+        }
         panel._shell.tabs.energy.fire("click");
         await tick();
         let text = textOf(panel._shell.homeSections.energy);
-        if (!text.includes("Энергия сейчас") || !text.includes("850") || !text.includes("230,1") || !text.includes("Торшер") || !text.includes("Выключен") || !text.includes("питание отключено") || !text.includes("Устройства энергии") || !text.includes("Карточка на главной") || text.includes("Единый источник истины")) {
+        if (!text.includes("Энергия сейчас") || !text.includes("850") || !text.includes("230,1") || !text.includes("0,42 кВт·ч") || !text.includes("Торшер") || !text.includes("Выключен") || !text.includes("питание отключено") || !text.includes("Устройства энергии") || !text.includes("Карточка на главной") || text.includes("Единый источник истины")) {
           throw new Error("energy summary is incomplete: " + text);
         }
         const rows = findAll(panel._shell.homeSections.energy, (node) =>
@@ -1439,7 +1474,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         if (!consumption) throw new Error("energy consumption history selector is missing");
         consumption.fire("click");
         text = textOf(panel._shell.homeSections.energy);
-        if (!text.includes("История расхода") || (!text.includes("История расхода пока недоступна") && !text.includes("Не удалось получить историю"))) {
+        if (!text.includes("История расхода") || (!text.includes("За период") && !text.includes("История расхода пока недоступна") && !text.includes("Не удалось получить историю"))) {
           throw new Error("energy consumption history did not open: " + text);
         }
         let confirmation = "";
@@ -1455,6 +1490,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("cancelled breaker command reached the API");
         }
             """,
+            before_panel='setWindowLocation("https://homeassistant.local/hausman-hub?hh_section=energy");',
         )
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
@@ -3509,7 +3545,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.35")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.36")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;
