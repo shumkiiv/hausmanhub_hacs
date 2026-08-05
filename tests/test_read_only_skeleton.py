@@ -2227,6 +2227,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             "ir_code_service.py",
             "weather_ha_gateway.py",
             "device_maintenance_gateway.py",
+            "voice_greeting_ha_gateway.py",
         }
         source = "\n".join(
             path.read_text(encoding="utf-8").lower()
@@ -2290,6 +2291,34 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             "async_fire(",
         ):
             self.assertNotIn(forbidden_surface, ir_code_service_source.lower())
+
+        voice_gateway_source = (
+            INTEGRATION / "voice_greeting_ha_gateway.py"
+        ).read_text(encoding="utf-8")
+        self.assertEqual(2, voice_gateway_source.count("hass.services.async_call("))
+        self.assertIn('"media_player"', voice_gateway_source)
+        self.assertIn('"play_media"', voice_gateway_source)
+        self.assertIn('"conversation"', voice_gateway_source)
+        self.assertIn('"process"', voice_gateway_source)
+        self.assertIn("blocking=True", voice_gateway_source)
+        for forbidden_surface in (
+            "async_register_entity_service",
+            "async_register(",
+            "requests",
+            "websocket",
+            "async_set(",
+        ):
+            self.assertNotIn(forbidden_surface, voice_gateway_source.lower())
+        voice_api_source = (INTEGRATION / "voice_api.py").read_text(
+            encoding="utf-8"
+        ).lower()
+        for forbidden_surface in (
+            "hass.services",
+            "async_call(",
+            "async_fire(",
+            "async_set(",
+        ):
+            self.assertNotIn(forbidden_surface, voice_api_source)
 
         sensor_source = (INTEGRATION / "sensor.py").read_text(encoding="utf-8")
         self.assertIn("HOME_SUMMARY_COUNT_KEYS", sensor_source)

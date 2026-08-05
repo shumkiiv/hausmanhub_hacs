@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hausmanhub/contracts/v1/voice-command-receipt.schema.json",
+  "title": "HausmanHub voice command receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "commandId",
+    "accepted",
+    "confirmed",
+    "code",
+    "detail",
+    "stationEntityId",
+    "timestamp"
+  ],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "hausman-hub-voice-command-receipt" },
+        "version": { "const": 1 }
+      }
+    },
+    "commandId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "accepted": { "type": "boolean" },
+    "confirmed": { "type": "boolean" },
+    "code": {
+      "enum": [
+        "saved",
+        "scheduled",
+        "spoken",
+        "cancelled",
+        "station_unavailable",
+        "station_not_found",
+        "mode_changed",
+        "summary_unavailable",
+        "dialog_not_supported",
+        "conversation_timeout",
+        "provider_error",
+        "invalid_request"
+      ]
+    },
+    "detail": { "type": "string", "minLength": 1, "maxLength": 500 },
+    "stationEntityId": {
+      "type": ["string", "null"],
+      "pattern": "^media_player\\.[a-z0-9_]+$",
+      "maxLength": 128
+    },
+    "revision": { "type": "integer", "minimum": 0 },
+    "echo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["includeGreeting", "summaryItems", "includeFollowUp"],
+      "properties": {
+        "includeGreeting": { "type": "boolean" },
+        "summaryItems": {
+          "type": "array",
+          "items": {
+            "enum": ["temperature", "humidity", "air_quality", "security"]
+          },
+          "uniqueItems": true
+        },
+        "includeFollowUp": { "type": "boolean" }
+      }
+    },
+    "timestamp": { "type": "string", "format": "date-time" }
+  }
+}

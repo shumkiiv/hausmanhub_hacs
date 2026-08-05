@@ -328,9 +328,15 @@ class ClimateCapabilitiesView(_ClimateView):
         if self._runtime() is None:
             return self._unavailable()
         data = self._hass.data.get(DOMAIN, {})
+        voice_stations: tuple[dict[str, object], ...] = ()
+        voice_service = data.get("voice_greeting_service")
+        if voice_service is not None:
+            voice_stations = tuple(await voice_service.async_stations())
         return self.json(
             api_capabilities_snapshot(
-                device_actions_available=data.get("scenario_service") is not None
+                device_actions_available=data.get("scenario_service") is not None,
+                voice_available=voice_service is not None,
+                voice_stations=voice_stations,
             ),
             headers=NO_STORE_HEADERS,
         )

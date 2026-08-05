@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hausmanhub/contracts/v1/voice-greeting-test-request.schema.json",
+  "title": "HausmanHub voice greeting test request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "stationEntityId",
+    "useCurrentHomeState",
+    "includeGreeting",
+    "summaryItems",
+    "includeFollowUp",
+    "speechText",
+    "openDialog"
+  ],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "hausman-hub-voice-greeting-test-request" },
+        "version": { "const": 1 }
+      }
+    },
+    "stationEntityId": {
+      "type": "string",
+      "pattern": "^media_player\\.[a-z0-9_]+$",
+      "maxLength": 128
+    },
+    "useCurrentHomeState": { "type": "boolean" },
+    "includeGreeting": { "type": "boolean" },
+    "summaryItems": {
+      "type": "array",
+      "items": {
+        "enum": ["temperature", "humidity", "air_quality", "security"]
+      },
+      "minItems": 0,
+      "maxItems": 4,
+      "uniqueItems": true
+    },
+    "includeFollowUp": { "type": "boolean" },
+    "speechText": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "openDialog": { "type": "boolean" }
+  }
+}

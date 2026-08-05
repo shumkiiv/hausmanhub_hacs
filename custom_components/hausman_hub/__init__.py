@@ -135,6 +135,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .realtime_api import register_event_stream
 
     register_event_stream(hass, entry.entry_id)
+    from .voice_api import async_start_voice_greeting
+
+    await async_start_voice_greeting(hass, entry)
     from .panel import async_register_hausmanhub_panel
 
     await async_register_hausmanhub_panel(hass)
@@ -153,8 +156,10 @@ async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     from .climate_api import clear_climate_api
     from .local_summary import clear_local_summary_access
     from .realtime_api import clear_event_stream
+    from .voice_api import clear_voice_greeting
 
     clear_event_stream(hass, entry.entry_id)
+    clear_voice_greeting(hass, entry.entry_id)
     clear_climate_api(hass, entry.entry_id)
 
     try:
@@ -183,11 +188,13 @@ async def _close_running_duplicate_hausmanhub_entries(
     from .climate_api import clear_climate_api
     from .local_summary import clear_local_summary_access
     from .realtime_api import clear_event_stream
+    from .voice_api import clear_voice_greeting
 
     loaded_entries = tuple(hass.config_entries.async_loaded_entries(domain))
     for loaded_entry in loaded_entries:
         clear_local_summary_access(hass, loaded_entry)
         clear_event_stream(hass, loaded_entry.entry_id)
+        clear_voice_greeting(hass, loaded_entry.entry_id)
         clear_climate_api(hass, loaded_entry.entry_id)
     for loaded_entry in loaded_entries:
         await hass.config_entries.async_unload(loaded_entry.entry_id)
@@ -253,6 +260,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .climate_api import clear_climate_api
     from .local_summary import clear_local_summary_access
     from .realtime_api import clear_event_stream
+    from .voice_api import clear_voice_greeting
 
     unloaded = await hass.config_entries.async_unload_platforms(
         entry,
@@ -262,6 +270,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _clear_hausmanhub_state_values(hass, entry)
         clear_local_summary_access(hass, entry)
         clear_event_stream(hass, entry.entry_id)
+        clear_voice_greeting(hass, entry.entry_id)
         clear_climate_api(hass, entry.entry_id)
         from .panel import unregister_hausmanhub_panel
 

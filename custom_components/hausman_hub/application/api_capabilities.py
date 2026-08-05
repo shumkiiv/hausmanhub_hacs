@@ -43,10 +43,14 @@ SCENARIOS_TEST_PATH = f"{SCENARIOS_PATH}/test"
 SCENARIOS_DELETE_PATH = f"{SCENARIOS_PATH}/delete"
 SCENARIOS_RUN_PATH = f"{SCENARIOS_PATH}/run"
 SCENARIOS_ACTION_PATH = f"{SCENARIOS_PATH}/action"
+VOICE_GREETING_PATH = f"{API_BASE_PATH}/voice/yandex-greeting"
+VOICE_GREETING_TEST_PATH = f"{VOICE_GREETING_PATH}/test"
 
 
 def api_capabilities_snapshot(
-    *, device_actions_available: bool = True
+    *, device_actions_available: bool = True,
+    voice_available: bool = False,
+    voice_stations: tuple[dict[str, object], ...] = (),
 ) -> dict[str, object]:
     """Describe only the stable, local, tablet-facing HausmanHub API surface."""
 
@@ -203,6 +207,20 @@ def api_capabilities_snapshot(
                     "run": SCENARIOS_RUN_PATH,
                     "action": SCENARIOS_ACTION_PATH,
                 },
+            },
+            "voice_greeting": {
+                "available": voice_available,
+                "provider": "alexxit_yandex_station",
+                "dialogSupported": voice_available,
+                "path": VOICE_GREETING_PATH,
+                "methods": ["GET", "PUT"],
+                "testPath": VOICE_GREETING_TEST_PATH,
+                "optimistic_locking": True,
+                "response_contract": {
+                    "name": "hausman-hub-voice-greeting-config",
+                    "version": 1,
+                },
+                "stations": list(voice_stations),
             },
         },
     }

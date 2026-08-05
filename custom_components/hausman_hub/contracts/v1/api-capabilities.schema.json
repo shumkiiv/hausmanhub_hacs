@@ -252,7 +252,13 @@
         "tablet_profile": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["available", "path", "methods", "optimistic_locking", "response_contract"],
+          "required": [
+            "available",
+            "path",
+            "methods",
+            "optimistic_locking",
+            "response_contract"
+          ],
           "properties": {
             "available": { "type": "boolean" },
             "path": { "const": "/api/hausman_hub/v1/tablet-profile" },
@@ -278,7 +284,13 @@
         "energy_settings": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["available", "path", "methods", "optimistic_locking", "response_contract"],
+          "required": [
+            "available",
+            "path",
+            "methods",
+            "optimistic_locking",
+            "response_contract"
+          ],
           "properties": {
             "available": { "type": "boolean" },
             "path": { "const": "/api/hausman_hub/v1/energy-settings" },
@@ -422,11 +434,80 @@
               }
             }
           }
+        },
+        "voice_greeting": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available",
+            "provider",
+            "dialogSupported",
+            "path",
+            "methods",
+            "testPath",
+            "optimistic_locking",
+            "response_contract",
+            "stations"
+          ],
+          "properties": {
+            "available": { "type": "boolean" },
+            "provider": { "const": "alexxit_yandex_station" },
+            "dialogSupported": { "type": "boolean" },
+            "path": { "const": "/api/hausman_hub/v1/voice/yandex-greeting" },
+            "methods": {
+              "type": "array",
+              "prefixItems": [{ "const": "GET" }, { "const": "PUT" }],
+              "items": false,
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "testPath": {
+              "const": "/api/hausman_hub/v1/voice/yandex-greeting/test"
+            },
+            "optimistic_locking": { "const": true },
+            "response_contract": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "version"],
+              "properties": {
+                "name": { "const": "hausman-hub-voice-greeting-config" },
+                "version": { "const": 1 }
+              }
+            },
+            "stations": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/voice_station" }
+            }
+          }
         }
       }
     }
   },
   "$defs": {
+    "voice_station": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entityId",
+        "name",
+        "roomId",
+        "roomName",
+        "available",
+        "localDialogSupported"
+      ],
+      "properties": {
+        "entityId": {
+          "type": "string",
+          "pattern": "^media_player\\.[a-z0-9_]+$",
+          "maxLength": 128
+        },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "roomId": { "type": ["string", "null"], "maxLength": 128 },
+        "roomName": { "type": ["string", "null"], "maxLength": 120 },
+        "available": { "type": "boolean" },
+        "localDialogSupported": { "type": "boolean" }
+      }
+    },
     "device_action_request_contract": {
       "type": "object",
       "additionalProperties": false,

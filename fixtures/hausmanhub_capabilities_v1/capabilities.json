@@ -97,7 +97,10 @@
     "tablet_profile": {
       "available": true,
       "path": "/api/hausman_hub/v1/tablet-profile",
-      "methods": ["GET", "PUT"],
+      "methods": [
+        "GET",
+        "PUT"
+      ],
       "optimistic_locking": true,
       "response_contract": {
         "name": "hausman-hub-tablet-profile",
@@ -107,7 +110,10 @@
     "energy_settings": {
       "available": true,
       "path": "/api/hausman_hub/v1/energy-settings",
-      "methods": ["GET", "PUT"],
+      "methods": [
+        "GET",
+        "PUT"
+      ],
       "optimistic_locking": true,
       "response_contract": {
         "name": "hausman-hub-energy-settings",
@@ -142,7 +148,9 @@
       "test": true,
       "delete": true,
       "run": true,
-      "definitionVersions": [1],
+      "definitionVersions": [
+        1
+      ],
       "paths": {
         "list": "/api/hausman_hub/v1/scenarios",
         "catalog": "/api/hausman_hub/v1/scenarios/catalog",
@@ -151,6 +159,23 @@
         "run": "/api/hausman_hub/v1/scenarios/run",
         "action": "/api/hausman_hub/v1/scenarios/action"
       }
+    },
+    "voice_greeting": {
+      "available": false,
+      "provider": "alexxit_yandex_station",
+      "dialogSupported": false,
+      "path": "/api/hausman_hub/v1/voice/yandex-greeting",
+      "methods": [
+        "GET",
+        "PUT"
+      ],
+      "testPath": "/api/hausman_hub/v1/voice/yandex-greeting/test",
+      "optimistic_locking": true,
+      "response_contract": {
+        "name": "hausman-hub-voice-greeting-config",
+        "version": 1
+      },
+      "stations": []
     }
   }
 }
