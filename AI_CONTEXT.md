@@ -18,7 +18,10 @@ Last updated: 2026-08-05 (tablet climate API backend prepared on a feature branc
   - Runtime snapshots expose disabled, shadow/readiness, canary, managed and
     stale states without giving the tablet control before existing server gates
     allow it.
-  - Final local release gate passed: 1191 tests, 4 skipped, all fixture,
+  - A follow-up closes the shadow projection gap: general `shadow` mode can
+    read native observations while the climate writer stays disabled. The
+    tablet sees `legacy_climate_core`, no actions and `climate_shadow_only`.
+  - Final local release gate passed: 1193 tests, 4 skipped, all fixture,
     Android compatibility, HACS package, naming and repository safety checks
     passed. The checker builds contract `0.18.0` action envelopes.
   - No files under `frontend/` were changed. Manifest version and frontend cache

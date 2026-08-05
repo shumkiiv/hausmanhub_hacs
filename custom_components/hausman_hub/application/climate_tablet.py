@@ -233,8 +233,9 @@ def climate_tablet_snapshot(
 
     if climate_mode == "disabled":
         return _disabled_snapshot(generated_at)
-    if climate_mode != "managed" or not isinstance(home, Mapping):
+    if climate_mode not in {"shadow", "managed"} or not isinstance(home, Mapping):
         raise ClimateTabletUnavailable("climate runtime is unavailable")
+    shadow = climate_mode == "shadow"
     climate = home.get("climate")
     rooms_value = home.get("rooms")
     contours_value = home.get("contours")
@@ -279,8 +280,10 @@ def climate_tablet_snapshot(
         for device in room.get("devices", [])
         if isinstance(device, Mapping)
     }
-    phase = "managed" if "managed" in scopes else (
-        "canary" if "canary" in scopes else "ready_for_canary"
+    phase = "shadow" if shadow else (
+        "managed" if "managed" in scopes else (
+            "canary" if "canary" in scopes else "ready_for_canary"
+        )
     )
     projected_rooms: list[dict[str, object]] = []
     any_room_enabled = False
@@ -297,6 +300,8 @@ def climate_tablet_snapshot(
             else None
         )
         room_reasons: list[str] = []
+        if shadow:
+            room_reasons.append("shadow_only")
         if not fresh:
             room_reasons.append("state_stale")
         if not reconciliation_matches:
@@ -307,7 +312,8 @@ def climate_tablet_snapshot(
             room_reasons.append("operation_pending")
         allowed_actions: list[str] = []
         if (
-            not room_reasons
+            not shadow
+            and not room_reasons
             and isinstance(temporary, Mapping)
             and temporary.get("available") is True
         ):
@@ -352,7 +358,9 @@ def climate_tablet_snapshot(
                         else "unknown"
                     )
                 ),
-                "authority": "hausman_hub",
+                "authority": (
+                    "legacy_climate_core" if shadow else "hausman_hub"
+                ),
                 "control": {
                     "enabled": enabled,
                     "allowed_actions": allowed_actions,
@@ -366,17 +374,29 @@ def climate_tablet_snapshot(
         execution.get("settings_apply") if isinstance(execution, Mapping) else None
     )
     home_allowed = bool(
-        fresh
+        not shadow
+        and fresh
         and reconciliation_matches
         and isinstance(settings_apply, Mapping)
         and settings_apply.get("available") is True
         and not active_operations
     )
-    home_reasons = [] if home_allowed else _aggregate_block_reasons(
-        fresh=fresh,
-        reconciliation_matches=reconciliation_matches,
-        pending=bool(active_operations),
-    )
+    if home_allowed:
+        home_reasons = []
+    elif shadow:
+        home_reasons = ["shadow_only"]
+        if not fresh:
+            home_reasons.append("state_stale")
+        if not reconciliation_matches:
+            home_reasons.append("registry_mismatch")
+        if active_operations:
+            home_reasons.append("operation_pending")
+    else:
+        home_reasons = _aggregate_block_reasons(
+            fresh=fresh,
+            reconciliation_matches=reconciliation_matches,
+            pending=bool(active_operations),
+        )
     commands_enabled = any_room_enabled or home_allowed
     blocked_reasons = [] if commands_enabled else list(home_reasons)
     if not blocked_reasons and not commands_enabled:
@@ -389,7 +409,7 @@ def climate_tablet_snapshot(
         "generated_at": observed_at,
         "state_revision": revision,
         "phase": phase,
-        "authority": "hausman_hub",
+        "authority": "legacy_climate_core" if shadow else "hausman_hub",
         "fresh": fresh,
         "commands_enabled": commands_enabled,
         "blocked_reasons": blocked_reasons,
@@ -764,9 +784,15 @@ def _require_action_allowed(
         control = room.get("control") if isinstance(room, Mapping) else None
     allowed = control.get("allowed_actions") if isinstance(control, Mapping) else None
     if not isinstance(allowed, list) or request.action not in allowed:
-        reason = "climate_disabled" if snapshot.get("phase") == "disabled" else (
-            "climate_state_stale" if snapshot.get("fresh") is False else "climate_authority_not_ready"
-        )
+        phase = snapshot.get("phase")
+        if phase == "disabled":
+            reason = "climate_disabled"
+        elif phase == "shadow":
+            reason = "climate_shadow_only"
+        elif snapshot.get("fresh") is False:
+            reason = "climate_state_stale"
+        else:
+            reason = "climate_authority_not_ready"
         raise ClimateTabletViolation("climate action is not currently allowed", code=reason)
 
 
@@ -1013,8 +1039,12 @@ def _operation_summary(receipt: Mapping[str, object]) -> dict[str, object]:
 
 def _climate_mode(runtime: ClimateTabletRuntime) -> str:
     configuration = getattr(runtime, "configuration", None)
-    mode = getattr(getattr(configuration, "climate_bridge_mode", None), "value", None)
-    return mode if isinstance(mode, str) else "disabled"
+    bridge_mode = getattr(
+        getattr(configuration, "climate_bridge_mode", None), "value", None
+    )
+    if bridge_mode == "managed":
+        return "managed"
+    return "shadow" if getattr(configuration, "mode", None) == "shadow" else "disabled"
 
 
 def _require_room(room_id: object) -> None:

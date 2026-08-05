@@ -80,7 +80,8 @@ class FakeRuntime:
     def __init__(self, home: dict[str, object]) -> None:
         self.home = copy.deepcopy(home)
         self.configuration = SimpleNamespace(
-            climate_bridge_mode=ClimateControlMode.MANAGED
+            mode="shadow",
+            climate_bridge_mode=ClimateControlMode.MANAGED,
         )
         self.commands: list[dict[str, object]] = []
 
@@ -134,6 +135,21 @@ class ClimateTabletProjectionTest(unittest.TestCase):
         self.assertEqual(["state_stale"], payload["blocked_reasons"])
         self.assertEqual([], payload["home_control"]["allowed_actions"])
         self.assertEqual([], payload["rooms"][0]["control"]["allowed_actions"])
+        contract_validator("climate-runtime.schema.json").validate(payload)
+
+    def test_shadow_projection_keeps_observations_and_disables_every_action(self) -> None:
+        payload = climate_tablet_snapshot(managed_home(), climate_mode="shadow")
+
+        self.assertEqual("shadow", payload["phase"])
+        self.assertEqual("legacy_climate_core", payload["authority"])
+        self.assertFalse(payload["commands_enabled"])
+        self.assertEqual("living", payload["rooms"][0]["id"])
+        self.assertEqual(
+            [], payload["rooms"][0]["control"]["allowed_actions"]
+        )
+        self.assertIn(
+            "shadow_only", payload["rooms"][0]["control"]["blocked_reasons"]
+        )
         contract_validator("climate-runtime.schema.json").validate(payload)
 
     def test_disabled_projection_never_reads_or_invents_room_state(self) -> None:
@@ -254,6 +270,27 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual([], self.runtime.commands)
         self.assertEqual([], self.store.saved)
+
+    async def test_shadow_runtime_reads_state_without_exposing_commands(self) -> None:
+        self.runtime.configuration = SimpleNamespace(
+            mode="shadow",
+            climate_bridge_mode=ClimateControlMode.DISABLED,
+        )
+
+        snapshot = await self.service.async_snapshot()
+
+        self.assertEqual("shadow", snapshot["phase"])
+        self.assertEqual("living", snapshot["rooms"][0]["id"])
+        self.assertFalse(snapshot["commands_enabled"])
+        self.assertEqual([], self.runtime.commands)
+
+        with self.assertRaises(ClimateTabletViolation) as raised:
+            await self.service.async_execute(
+                action_request(snapshot["state_revision"])
+            )
+        self.assertEqual("climate_shadow_only", raised.exception.code)
+        self.assertEqual([], self.store.saved)
+        self.assertEqual([], self.runtime.commands)
 
     async def test_unknown_operation_is_not_found(self) -> None:
         with self.assertRaises(ClimateTabletOperationNotFound):
