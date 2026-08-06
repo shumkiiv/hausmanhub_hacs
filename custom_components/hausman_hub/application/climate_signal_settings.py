@@ -106,6 +106,10 @@ ROOM_SIGNAL_FIELDS = frozenset(
 ROOM_SIGNAL_BATCH_FIELDS = frozenset({"rooms"})
 MAX_ROOM_SIGNAL_UPDATES = 128
 CLIMATE_MODE_FIELDS = frozenset({"mode", "expected_mode", "confirm"})
+CLIMATE_MODE_ROLLOUT_OVERRIDE_FIELD = "rollout_override"
+CLIMATE_MODE_ALLOWED_FIELDS = frozenset(
+    set(CLIMATE_MODE_FIELDS) | {CLIMATE_MODE_ROLLOUT_OVERRIDE_FIELD}
+)
 
 
 class ClimateSignalSettingsViolation(ValueError):
@@ -418,9 +422,11 @@ def validate_climate_mode_update(
 ) -> str:
     """Validate one explicit climate control mode transition."""
 
-    if not isinstance(payload, Mapping) or set(payload.keys()) != set(
-        CLIMATE_MODE_FIELDS
+    if not isinstance(payload, Mapping) or not set(payload.keys()) <= set(
+        CLIMATE_MODE_ALLOWED_FIELDS
     ):
+        raise ClimateSignalSettingsViolation("invalid_mode_update")
+    if not set(CLIMATE_MODE_FIELDS) <= set(payload.keys()):
         raise ClimateSignalSettingsViolation("invalid_mode_update")
     mode = payload["mode"]
     if not isinstance(mode, str) or mode not in CLIMATE_MODES:
@@ -431,6 +437,9 @@ def validate_climate_mode_update(
         raise ClimateSignalSettingsViolation("confirmation_required")
     if payload["confirm"] is not None and type(payload["confirm"]) is not bool:
         raise ClimateSignalSettingsViolation("invalid_confirmation")
+    override = payload.get(CLIMATE_MODE_ROLLOUT_OVERRIDE_FIELD)
+    if override is not None and type(override) is not bool:
+        raise ClimateSignalSettingsViolation("invalid_rollout_override")
     return mode
 
 

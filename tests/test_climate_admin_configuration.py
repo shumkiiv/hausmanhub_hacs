@@ -1388,6 +1388,59 @@ class ClimateAdminConfigurationRoutesTest(unittest.TestCase):
         self.assertEqual(409, blocked_by_shadow.status)
         self.assertEqual([], self.updated_options)
 
+    def test_climate_mode_managed_owner_rollout_override(self) -> None:
+        path = "/api/hausman_hub/v1/admin/climate-mode"
+        self._inject_runtime(configured=True)
+
+        false_override = self._post(
+            path,
+            self._admin(),
+            {
+                "mode": "managed",
+                "expected_mode": "disabled",
+                "confirm": True,
+                "rollout_override": False,
+            },
+        )
+        self.assertEqual(409, false_override.status)
+        self.assertEqual([], self.updated_options)
+
+        invalid_override = self._post(
+            path,
+            self._admin(),
+            {
+                "mode": "managed",
+                "expected_mode": "disabled",
+                "confirm": True,
+                "rollout_override": "yes",
+            },
+        )
+        self.assertEqual(400, invalid_override.status)
+        self.assertEqual([], self.updated_options)
+
+        with self.assertLogs(
+            "custom_components.hausman_hub.climate_api", level="WARNING"
+        ) as captured:
+            overridden = self._post(
+                path,
+                self._admin(),
+                {
+                    "mode": "managed",
+                    "expected_mode": "disabled",
+                    "confirm": True,
+                    "rollout_override": True,
+                },
+            )
+        self.assertEqual(200, overridden.status)
+        self.assertTrue(overridden.payload["rollout"]["commands_enabled"])
+        self.assertTrue(overridden.payload["rollout"]["rollout_override"])
+        self.assertTrue(
+            any("rollout gate overridden" in line for line in captured.output)
+        )
+        self.assertEqual(1, len(self.updated_options))
+        _, options = self.updated_options[0]
+        self.assertEqual("managed", options["climate_bridge_mode"])
+
     def test_climate_mode_starts_only_one_shadow_verified_canary_room(self) -> None:
         from dataclasses import replace
         from unittest.mock import AsyncMock

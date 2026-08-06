@@ -7,6 +7,7 @@ from datetime import timedelta
 from http import HTTPStatus
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network, ip_address
 import json
+import logging
 import pathlib
 from typing import TYPE_CHECKING, Any, Final
 
@@ -118,6 +119,8 @@ def _integration_version() -> str | None:
     version = manifest.get("version")
     return version if type(version) is str and version else None
 
+
+_LOGGER = logging.getLogger(__name__)
 
 ADMIN_IMPORT_PATH = "/api/hausman_hub/v1/admin/climate-import"
 ADMIN_LEGACY_SETTINGS_PREVIEW_PATH = (
@@ -1645,17 +1648,22 @@ class ClimateAdminClimateModeView(_ClimateView):
                 headers=NO_STORE_HEADERS,
             )
         rollout = status.get("rollout")
-        if (
-            mode == "managed"
-            and (
-                not isinstance(rollout, dict)
-                or rollout.get("enable_allowed") is not True
-            )
-        ):
-            return self.json_message(
-                "Сначала завершите shadow-проверку и подготовьте одну пилотную комнату.",
-                HTTPStatus.CONFLICT,
-                headers=NO_STORE_HEADERS,
+        gate_allows = (
+            isinstance(rollout, dict) and rollout.get("enable_allowed") is True
+        )
+        rollout_override = payload.get("rollout_override") is True
+        if mode == "managed" and not gate_allows:
+            if rollout_override is not True:
+                return self.json_message(
+                    "Сначала завершите shadow-проверку и подготовьте одну пилотную комнату.",
+                    HTTPStatus.CONFLICT,
+                    headers=NO_STORE_HEADERS,
+                )
+            _LOGGER.warning(
+                "Climate rollout gate overridden by a local administrator: "
+                "managed mode enabled without completed shadow evidence "
+                "(rollout reasons=%s)",
+                rollout.get("reasons") if isinstance(rollout, dict) else None,
             )
         entries = self._hass.config_entries.async_entries(DOMAIN)
         if len(entries) != 1:
@@ -1714,6 +1722,7 @@ class ClimateAdminClimateModeView(_ClimateView):
                     ),
                     "enable_allowed": False,
                     "commands_enabled": mode == "managed",
+                    "rollout_override": rollout_override,
                 },
             },
             headers=NO_STORE_HEADERS,
