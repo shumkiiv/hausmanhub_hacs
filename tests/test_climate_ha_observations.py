@@ -6,6 +6,7 @@ from dataclasses import replace
 import unittest
 
 from custom_components.hausman_hub.application.climate_ha_observations import (
+    MAX_NATIVE_STATE_AGE_MS,
     ClimateHaEntityState,
     ClimateHaObservationViolation,
     build_native_ha_climate_observation,
@@ -52,7 +53,7 @@ from custom_components.hausman_hub.domain.contours import (
 )
 
 NOW = 1_800_000_000_000
-STALE = NOW - 10 * 60 * 1000
+STALE = NOW - MAX_NATIVE_STATE_AGE_MS - 5 * 60 * 1000
 
 
 class MemoryStates:

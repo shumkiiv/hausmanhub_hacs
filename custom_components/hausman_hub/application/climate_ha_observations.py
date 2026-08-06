@@ -45,7 +45,11 @@ from ..domain.climate_observation import (
 from ..domain.climate_protection import ClimateProtectionMemory
 from ..domain.contours import ContourDefinition, ContourMode
 
-MAX_NATIVE_STATE_AGE_MS = 5 * 60 * 1000
+# Battery room climate sensors (Zigbee temperature/humidity) commonly report
+# every 10-40 minutes while the room drifts slowly, so a shorter window would
+# keep managed rooms stuck behind the freshness guard. Window safety does not
+# depend on this threshold: it uses the dedicated window entity state.
+MAX_NATIVE_STATE_AGE_MS = 30 * 60 * 1000
 MAX_STATE_LENGTH = 64
 MAX_ATTRIBUTES = 64
 _OBSERVATION_DEVICE_KINDS = {
