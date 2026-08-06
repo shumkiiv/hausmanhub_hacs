@@ -49,18 +49,6 @@
 .settings-room-summary-copy p { max-width:760px; margin:6px 0 0; line-height:1.5; }
 .settings-room-summary > button { min-height:46px; margin:0; }
 .settings-room-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin:14px 0; }
-.settings-room-card { display:flex; flex-direction:column; min-height:230px; padding:18px; border:1px solid color-mix(in srgb,var(--hmh-border,#2F3845) 82%,transparent);
-  border-radius:16px; background:var(--hmh-surface,#12171D); }
-.settings-room-card-head { display:flex; align-items:center; gap:12px; }
-.settings-room-card-head > .icon { width:21px; height:21px; padding:10px; box-sizing:content-box; border-radius:12px;
-  color:var(--hmh-text,#E7ECF3); background:var(--hmh-raised,#181E26); }
-.settings-room-card-head strong, .settings-room-card-head small { display:block; }
-.settings-room-card-head strong { font-size:17px; }
-.settings-room-card-head small { margin-top:3px; color:var(--hmh-text-dim,#9AA7B4); }
-.settings-room-card p { margin:14px 0 0; font-size:14px; line-height:1.45; }
-.settings-room-type-field { display:grid; gap:7px; min-width:0; margin-top:16px; }
-.settings-room-type-field select { width:100%; min-width:0; min-height:44px; }
-.settings-room-type-field small { min-height:38px; font-size:12px; line-height:1.45; }
 .settings-room-type-save { align-self:stretch; min-height:42px; margin:14px 0 0; }
 .settings-empty-state { grid-column:1 / -1; padding:24px; }
 .settings-empty-state p { margin:7px 0 0; }
