@@ -1,5 +1,23 @@
 # История версий
 
+## 1.52.43 - 2026-08-06
+
+- Планшетный климатический runtime API (contracts 0.18.0): новые
+  `GET /climate/runtime`, `POST /climate/actions` и
+  `GET /climate/operations/{operation_id}` с durable idempotency на базе
+  Store, динамической capability `climate_tablet_runtime`, command-free
+  shadow-проекцией и read-only подтверждением pending. Мерge веток
+  `codex/climate-api-backend` и `codex/climate-production-audit`.
+- Добавлен read-only инструмент production-аудита климата
+  (`tools/audit_production_climate.py`), терпимый к per-endpoint 403.
+- Унификация интерфейса панели (все 10 пунктов
+  `docs/design/UI_UNIFICATION_PLAN.md`): единый статичный hero во всех
+  разделах, климат — комнаты чипами с одной focus-карточкой, свёрнутые
+  дублирующие каталоги медиа и безопасности, группировка каталога
+  устройств по комнатам, редактирование назначения комнаты перенесено в
+  шторку комнаты, исправлены layout карточек и выделение чипов.
+  Merge ветки `kimi/ui-unification`.
+
 ## 1.52.42 - 2026-08-06
 
 - Окно свежести комнатных датчиков климата увеличено с 5 до 30 минут:
