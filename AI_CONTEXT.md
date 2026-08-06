@@ -1,9 +1,28 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-05 (tablet climate API backend prepared on a feature branch).
+Last updated: 2026-08-06 (read-only production climate audit tool prepared).
 
 ## Current work
 
+- Read-only production climate audit tool is prepared on branch
+  `codex/climate-production-audit`, stacked on `codex/climate-api-backend`:
+  - `tools/audit_production_climate.py` performs HTTP GET requests only
+    against a live HACS: `/api/config`, `/capabilities`,
+    `admin/climate-mode` (rollout and cutover), `admin/climate-readiness`,
+    `admin/climate-registry`, `admin/climate-device-bindings`,
+    `admin/climate-shadow-comparison` and `admin/climate-shadow-window`.
+  - Admin access is read at runtime from a JSON file outside the workspace
+    (default `/home/ivsh/.config/hausmanhub/ha_admin_access.json`, keys
+    `base_url` and `token`). The token is never printed or persisted.
+  - Raw responses contain private entity IDs and are saved outside the
+    repository (`<access dir>/audit/<UTC timestamp>/`, mode 0700/0600);
+    stdout shows only a sanitized summary without entity IDs.
+  - Exit codes: 2 missing/invalid access file, 3 authorization failure,
+    4 unreachable endpoint or non-JSON response.
+  - `tests/test_audit_production_climate.py`: 11 tests; full suite 1202
+    passed, 4 skipped; `tools/check_local_release.py` passed.
+  - Blocked only by the external access file: the HA long-lived admin token
+    must be created by the owner in the Home Assistant UI.
 - Tablet climate API backend is prepared on branch
   `codex/climate-api-backend`, based on integration `1.52.40`:
   - Contract pin: `hausmanhub-contracts` `0.18.0`, commit `b2e4c8b`.
