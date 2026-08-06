@@ -204,6 +204,36 @@ def _attach_catalog_actions(
         capabilities["actions"] = action_count > 0
 
 
+async def _refresh_catalog_for_missing_pinned(
+    scenario_service: ScenarioService | None,
+    pinned_entity_ids: frozenset[str] | None,
+) -> None:
+    """Refresh the cached catalog when a user-pinned entity is absent.
+
+    The startup catalog scan can run before late integrations (TUYA,
+    yandex_station) publish their entities; without a refresh the pinned
+    intercom stays visible yet loses its open action until someone edits
+    scenarios.  The dashboard read path repairs exactly that case lazily.
+    """
+
+    if not pinned_entity_ids or scenario_service is None:
+        return
+    catalog = getattr(scenario_service, "_catalog", None)
+    known = {
+        getattr(device, "entity_id", None)
+        for device in getattr(catalog, "devices", {}).values()
+    }
+    if all(entity_id in known for entity_id in pinned_entity_ids):
+        return
+    refresh = getattr(scenario_service, "async_refresh_catalog", None)
+    if not callable(refresh):
+        return
+    try:
+        await refresh()
+    except Exception:  # the read path must stay available
+        return
+
+
 async def async_dashboard_snapshot(
     hass: HomeAssistant,
     scenario_service: ScenarioService | None = None,
@@ -329,5 +359,6 @@ async def async_dashboard_snapshot(
     capabilities = payload.get("capabilities")
     if isinstance(capabilities, dict):
         capabilities["weatherDetails"] = bool(weather_payload["available"])
+    await _refresh_catalog_for_missing_pinned(scenario_service, pinned_entity_ids)
     _attach_catalog_actions(payload, scenario_service)
     return payload

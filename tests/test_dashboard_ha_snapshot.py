@@ -254,5 +254,75 @@ class DashboardHaSnapshotTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(2, payload["inventory"]["devices"][0]["entityCount"])
 
+
+class _RefreshingScenarioService:
+    def __init__(self, *, with_pinned: bool) -> None:
+        self.refresh_calls = 0
+        self._with_pinned = with_pinned
+        self._catalog = SimpleNamespace(devices={})
+
+    async def async_refresh_catalog(self) -> object:
+        self.refresh_calls += 1
+        if self._with_pinned:
+            action = SimpleNamespace(action_id="turn_on", title="Включить")
+            device = SimpleNamespace(
+                target_id="entity_intercom",
+                entity_id="switch.intercom",
+                name="Домофон",
+                actions=(action,),
+            )
+            self._catalog = SimpleNamespace(devices={device.target_id: device})
+        return self._catalog
+
+
+class _FailingRefreshScenarioService:
+    def __init__(self) -> None:
+        self.refresh_calls = 0
+        self._catalog = SimpleNamespace(devices={})
+
+    async def async_refresh_catalog(self) -> object:
+        self.refresh_calls += 1
+        raise RuntimeError("catalog scan failed")
+
+
+class RefreshCatalogForMissingPinnedTest(unittest.IsolatedAsyncioTestCase):
+    async def test_refresh_is_triggered_when_pinned_entity_is_unknown(self) -> None:
+        service = _RefreshingScenarioService(with_pinned=True)
+
+        await dashboard_ha_snapshot._refresh_catalog_for_missing_pinned(
+            service, frozenset({"switch.intercom"})
+        )
+
+        self.assertEqual(1, service.refresh_calls)
+        self.assertIn("switch.intercom", service._catalog.devices["entity_intercom"].entity_id)
+
+    async def test_refresh_is_skipped_when_pinned_entity_is_known(self) -> None:
+        service = _RefreshingScenarioService(with_pinned=True)
+        await service.async_refresh_catalog()
+
+        await dashboard_ha_snapshot._refresh_catalog_for_missing_pinned(
+            service, frozenset({"switch.intercom"})
+        )
+
+        self.assertEqual(1, service.refresh_calls)
+
+    async def test_refresh_is_skipped_without_pinned_entities(self) -> None:
+        service = _RefreshingScenarioService(with_pinned=False)
+
+        await dashboard_ha_snapshot._refresh_catalog_for_missing_pinned(service, None)
+        await dashboard_ha_snapshot._refresh_catalog_for_missing_pinned(service, frozenset())
+
+        self.assertEqual(0, service.refresh_calls)
+
+    async def test_refresh_failure_keeps_the_read_path_available(self) -> None:
+        service = _FailingRefreshScenarioService()
+
+        await dashboard_ha_snapshot._refresh_catalog_for_missing_pinned(
+            service, frozenset({"switch.intercom"})
+        )
+
+        self.assertEqual(1, service.refresh_calls)
+
+
 if __name__ == "__main__":
     unittest.main()
