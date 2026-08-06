@@ -1,8 +1,57 @@
 # HausmanHub AI Context
 
-Last updated: 2026-07-28 (release 1.27.0 published and deployed).
+Last updated: 2026-08-06 (read-only production climate audit tool prepared).
 
 ## Current work
+
+- Read-only production climate audit tool is prepared on branch
+  `codex/climate-production-audit`, stacked on `codex/climate-api-backend`:
+  - `tools/audit_production_climate.py` performs HTTP GET requests only
+    against a live HACS: `/api/config`, `/capabilities`,
+    `admin/climate-mode` (rollout and cutover), `admin/climate-readiness`,
+    `admin/climate-registry`, `admin/climate-device-bindings`,
+    `admin/climate-shadow-comparison` and `admin/climate-shadow-window`.
+  - Admin access is read at runtime from a JSON file outside the workspace
+    (default `/home/ivsh/.config/hausmanhub/ha_admin_access.json`, keys
+    `base_url` and `token`). The token is never printed or persisted.
+  - Raw responses contain private entity IDs and are saved outside the
+    repository (`<access dir>/audit/<UTC timestamp>/`, mode 0700/0600);
+    stdout shows only a sanitized summary without entity IDs.
+  - Exit codes: 2 missing/invalid access file, 3 authorization failure,
+    4 unreachable endpoint or non-JSON response.
+  - `tests/test_audit_production_climate.py`: 11 tests; full suite 1202
+    passed, 4 skipped; `tools/check_local_release.py` passed.
+  - Blocked only by the external access file: the HA long-lived admin token
+    must be created by the owner in the Home Assistant UI.
+- Tablet climate API backend is prepared on branch
+  `codex/climate-api-backend`, based on integration `1.52.40`:
+  - Contract pin: `hausmanhub-contracts` `0.18.0`, commit `b2e4c8b`.
+  - New local tablet routes: `GET /api/hausman_hub/v1/climate/runtime`,
+    `POST /api/hausman_hub/v1/climate/actions`, and
+    `GET /api/hausman_hub/v1/climate/operations/{operation_id}`.
+  - The public request boundary accepts only stable room IDs and typed climate
+    parameters. Home Assistant entity IDs and arbitrary service targets are
+    rejected.
+  - Operation identity is persisted before native execution. Duplicate retries
+    return the same receipt and never repeat a physical command after restart.
+  - Runtime snapshots expose disabled, shadow/readiness, canary, managed and
+    stale states without giving the tablet control before existing server gates
+    allow it.
+  - A follow-up closes the shadow projection gap: general `shadow` mode can
+    read native observations while the climate writer stays disabled. The
+    tablet sees `legacy_climate_core`, no actions and `climate_shadow_only`.
+  - The runtime now publishes room ranges, active profile, temporary override,
+    device control scope and the latest confirmed operation. A persisted
+    pending operation can become confirmed through a later read-only status
+    check; no command method is called during this re-observation.
+  - Final local release gate passed: 1194 tests, 4 skipped, all fixture,
+    Android compatibility, HACS package, naming and repository safety checks
+    passed. The checker builds contract `0.18.0` action envelopes.
+  - No files under `frontend/` were changed. Manifest version and frontend cache
+    references stay at `1.52.40` until the Kimi client handoff is accepted and a
+    coordinated release is assembled.
+  - Next: commit and push the backend branch, then verify production bindings
+    and collect shadow evidence without sending device commands.
 
 - Release 1.27.0 (wizard IR-code learning for universal IR contours)
   is RELEASED and DEPLOYED, 2026-07-28:

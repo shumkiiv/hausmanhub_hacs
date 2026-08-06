@@ -16,6 +16,9 @@ from homeassistant.util import dt as dt_util
 
 from .application.api_capabilities import (
     CAPABILITIES_PATH,
+    CLIMATE_ACTION_PATH,
+    CLIMATE_OPERATION_PATH,
+    CLIMATE_RUNTIME_PATH,
     CONTOURS_PATH,
     CONTOUR_APPLY_PATH,
     CONTOUR_APPLY_PREVIEW_PATH,
@@ -27,6 +30,12 @@ from .application.api_capabilities import (
     TABLET_PROFILE_PATH,
     TEMPORARY_TEMPERATURE_PATH,
     api_capabilities_snapshot,
+)
+from .application.climate_tablet import (
+    ClimateTabletOperationNotFound,
+    ClimateTabletService,
+    ClimateTabletUnavailable,
+    ClimateTabletViolation,
 )
 from .application.ai_assistant import AiAssistantService
 from .application.ai_assistant_config import (
@@ -103,6 +112,7 @@ DATA_CLIMATE_RUNTIME = "climate_runtime"
 DATA_CLIMATE_VIEWS = "climate_views"
 DATA_AI_ASSISTANT = "ai_assistant"
 DATA_CLIMATE_SHADOW = "climate_shadow"
+DATA_CLIMATE_TABLET = "climate_tablet"
 
 
 def _integration_version() -> str | None:
@@ -181,6 +191,7 @@ def register_climate_api(
     scenario_service: ScenarioService | None = None,
     ir_code_service: object | None = None,
     climate_shadow: ClimateShadowWindowService | None = None,
+    climate_tablet: ClimateTabletService | None = None,
 ) -> None:
     """Register fixed routes once and point them at the loaded HausmanHub runtime."""
 
@@ -194,6 +205,8 @@ def register_climate_api(
         data["ir_code_service"] = ir_code_service
     if climate_shadow is not None:
         data[DATA_CLIMATE_SHADOW] = climate_shadow
+    if climate_tablet is not None:
+        data[DATA_CLIMATE_TABLET] = climate_tablet
     if DATA_CLIMATE_VIEWS not in data:
         views = [
             ClimateCapabilitiesView(hass),
@@ -202,6 +215,9 @@ def register_climate_api(
             TabletProfileView(hass),
             EnergySettingsView(hass),
             ClimateHomeView(hass),
+            ClimateRuntimeView(hass),
+            ClimateActionView(hass),
+            ClimateOperationView(hass),
             ContoursView(hass),
             ContourApplyPreviewView(hass),
             ContourApplyView(hass),
@@ -268,6 +284,7 @@ def clear_climate_api(hass: HomeAssistant, entry_id: str) -> None:
         data.pop("settings_service", None)
         data.pop("tablet_preferences_service", None)
         data.pop(DATA_CLIMATE_SHADOW, None)
+        data.pop(DATA_CLIMATE_TABLET, None)
 
 
 class _ClimateView(HomeAssistantView):
@@ -316,6 +333,12 @@ class _ClimateView(HomeAssistantView):
             else None
         )
 
+    def _climate_tablet(self) -> ClimateTabletService | None:
+        if self._runtime() is None:
+            return None
+        candidate = self._hass.data.get(DOMAIN, {}).get(DATA_CLIMATE_TABLET)
+        return candidate if isinstance(candidate, ClimateTabletService) else None
+
 
 class ClimateCapabilitiesView(_ClimateView):
     """Advertise only installed, stable HausmanHub tablet API capabilities."""
@@ -335,11 +358,29 @@ class ClimateCapabilitiesView(_ClimateView):
         voice_service = data.get("voice_greeting_service")
         if voice_service is not None:
             voice_stations = tuple(await voice_service.async_stations())
+        climate_tablet = self._climate_tablet()
+        climate_phase = "unavailable"
+        climate_commands_enabled = False
+        climate_runtime_available = climate_tablet is not None
+        if climate_tablet is not None:
+            try:
+                climate_snapshot = await climate_tablet.async_snapshot()
+            except ClimateTabletUnavailable:
+                climate_runtime_available = False
+            else:
+                phase = climate_snapshot.get("phase")
+                climate_phase = phase if isinstance(phase, str) else "unavailable"
+                climate_commands_enabled = (
+                    climate_snapshot.get("commands_enabled") is True
+                )
         return self.json(
             api_capabilities_snapshot(
                 device_actions_available=data.get("scenario_service") is not None,
                 voice_available=voice_service is not None,
                 voice_stations=voice_stations,
+                climate_runtime_available=climate_runtime_available,
+                climate_phase=climate_phase,
+                climate_commands_enabled=climate_commands_enabled,
             ),
             headers=NO_STORE_HEADERS,
         )
@@ -364,6 +405,148 @@ class ClimateHomeView(_ClimateView):
         except Exception:
             return self._unavailable()
         return self.json(payload, headers=NO_STORE_HEADERS)
+
+
+class ClimateRuntimeView(_ClimateView):
+    """Serve the canonical tablet climate projection without side effects."""
+
+    url = CLIMATE_RUNTIME_PATH
+    name = "api:hausman_hub:climate_runtime"
+
+    async def get(self, request: Any) -> Any:
+        if not _is_exact_request(request, CLIMATE_RUNTIME_PATH):
+            return _not_found(self)
+        if not _is_local_tablet_request(request):
+            return _forbidden(self)
+        service = self._climate_tablet()
+        if service is None:
+            return _api_error(
+                self,
+                "unavailable",
+                "Климатический API HausmanHub недоступен.",
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                retryable=True,
+            )
+        try:
+            payload = await service.async_snapshot()
+        except ClimateTabletUnavailable:
+            return _api_error(
+                self,
+                "unavailable",
+                "Климатический API HausmanHub недоступен.",
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                retryable=True,
+            )
+        return self.json(payload, headers=NO_STORE_HEADERS)
+
+
+class ClimateActionView(_ClimateView):
+    """Accept one strict, durably idempotent tablet climate action."""
+
+    url = CLIMATE_ACTION_PATH
+    name = "api:hausman_hub:climate_action"
+
+    async def post(self, request: Any) -> Any:
+        if not _is_exact_request(request, CLIMATE_ACTION_PATH):
+            return _not_found(self)
+        if not _is_local_tablet_request(request):
+            return _forbidden(self)
+        service = self._climate_tablet()
+        if service is None:
+            return _api_error(
+                self,
+                "unavailable",
+                "Климатический API HausmanHub недоступен.",
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                retryable=True,
+            )
+        try:
+            payload = await _request_json(request)
+            receipt = await service.async_execute(payload)
+        except ClimateTabletViolation as error:
+            status = (
+                HTTPStatus.BAD_REQUEST
+                if error.code == "invalid_request"
+                else HTTPStatus.CONFLICT
+            )
+            return _api_error(
+                self,
+                error.code,
+                str(error),
+                status,
+                retryable=error.code in {"revision_conflict", "climate_state_stale"},
+            )
+        except (ValueError, json.JSONDecodeError):
+            return _api_error(
+                self,
+                "invalid_request",
+                "Запрос климатического действия некорректен.",
+                HTTPStatus.BAD_REQUEST,
+                retryable=False,
+            )
+        except ClimateTabletUnavailable:
+            return _api_error(
+                self,
+                "unavailable",
+                "Климатический API HausmanHub недоступен.",
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                retryable=True,
+            )
+        publish_command_receipt(
+            self._hass,
+            receipt,
+            operation="climate.tablet_action",
+        )
+        return self.json(
+            receipt,
+            status_code=HTTPStatus.ACCEPTED,
+            headers=NO_STORE_HEADERS,
+        )
+
+
+class ClimateOperationView(_ClimateView):
+    """Read one persisted operation without repeating the command."""
+
+    url = CLIMATE_OPERATION_PATH
+    name = "api:hausman_hub:climate_operation"
+
+    async def get(self, request: Any, operation_id: str) -> Any:
+        if (
+            getattr(request, "query_string", None) != ""
+            or getattr(request, "path", None)
+            != CLIMATE_OPERATION_PATH.replace("{operation_id}", operation_id)
+        ):
+            return _not_found(self)
+        if not _is_local_tablet_request(request):
+            return _forbidden(self)
+        service = self._climate_tablet()
+        if service is None:
+            return _api_error(
+                self,
+                "unavailable",
+                "Климатический API HausmanHub недоступен.",
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                retryable=True,
+            )
+        try:
+            receipt = await service.async_operation(operation_id)
+        except ClimateTabletOperationNotFound:
+            return _api_error(
+                self,
+                "climate_operation_not_found",
+                "Климатическая операция не найдена.",
+                HTTPStatus.NOT_FOUND,
+                retryable=False,
+            )
+        except ClimateTabletUnavailable:
+            return _api_error(
+                self,
+                "unavailable",
+                "Климатический API HausmanHub недоступен.",
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                retryable=True,
+            )
+        return self.json(receipt, headers=NO_STORE_HEADERS)
 
 
 class DashboardView(_ClimateView):
@@ -2519,5 +2702,27 @@ def _forbidden(view: HomeAssistantView) -> Any:
     return view.json_message(
         "Local HausmanHub access is required.",
         HTTPStatus.FORBIDDEN,
+        headers=NO_STORE_HEADERS,
+    )
+
+
+def _api_error(
+    view: HomeAssistantView,
+    code: str,
+    message: str,
+    status: HTTPStatus,
+    *,
+    retryable: bool,
+) -> Any:
+    """Return the strict public error envelope used by the new tablet routes."""
+
+    return view.json(
+        {
+            "contract": {"name": "hausman-hub-error", "version": 1},
+            "code": code,
+            "message": message,
+            "retryable": retryable,
+        },
+        status_code=status,
         headers=NO_STORE_HEADERS,
     )

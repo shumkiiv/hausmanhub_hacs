@@ -504,7 +504,7 @@ class NativeObservationRuntimeTest(unittest.IsolatedAsyncioTestCase):
     """The internal pipeline runs from native states without the bridge."""
 
     async def test_native_pipeline_never_touches_the_bridge(self) -> None:
-        view = CountingStateView(healthy_states(ac_state="cool"))
+        view = MutableStateView(safe_stop_states())
         instance = runtime(ClimateControlMode.MANAGED, view)
         await instance.async_start()
 
@@ -1726,25 +1726,29 @@ class NativeProjectionSwitchTest(unittest.IsolatedAsyncioTestCase):
             admin["candidates"][0]["source_id"],  # type: ignore[index]
         )
 
-    async def test_disabled_projections_never_touch_the_bridge(self) -> None:
+    async def test_shadow_public_projection_reads_without_enabling_writes(self) -> None:
         view = CountingStateView(healthy_states(ac_state="cool"))
-        instance = runtime(
+        instance = native_application_runtime(
             ClimateControlMode.DISABLED,
             view,
+            ReflectingStrictExecutor(view),
             scope=ClimateControlScope.MANAGED,
         )
         await instance.async_start()
 
+        public = await instance.async_public_snapshot()
         contours = await instance.async_contours_snapshot()
         readiness = await instance.async_readiness()
         for call in (
-            instance.async_public_snapshot,
             instance.async_admin_import_snapshot,
             instance.async_contour_apply_preview,
         ):
             with self.assertRaises(ClimateRuntimeUnavailable):
                 await call()
 
+        self.assertEqual("hausman-hub-home", public["contract"]["name"])
+        self.assertEqual("living", public["rooms"][0]["id"])
+        self.assertFalse(public["rooms"][0]["control"]["enabled"])
         self.assertEqual("unavailable", contours["contours"][0]["status"])  # type: ignore[index]
         self.assertEqual("disabled", readiness["status"])
         self.assertEqual(["bridge_disabled"], readiness["reasons"])

@@ -1,0 +1,41 @@
+{
+  "contract": {"name": "hausman-hub-climate-runtime", "version": 1},
+  "generated_at": 1785949380000,
+  "state_revision": 43,
+  "phase": "managed",
+  "authority": "hausman_hub",
+  "fresh": true,
+  "commands_enabled": true,
+  "blocked_reasons": [],
+  "home_control": {"enabled": true, "allowed_actions": ["set_home_targets"], "blocked_reasons": []},
+  "rooms": [
+    {
+      "id": "living",
+      "name": "Гостиная",
+      "temperature": 24.5,
+      "humidity": 45,
+      "target_temperature": 24,
+      "target_humidity": 45,
+      "minimum_temperature": 18,
+      "temperature_range": {"minimum": 18, "maximum": 28, "step": 0.5},
+      "humidity_range": {"minimum": 30, "maximum": 70, "step": 1},
+      "mode": "automatic",
+      "target_strategy": "normal",
+      "active_profile": "day",
+      "temporary_override": {"active": true, "target_temperature": 24, "ends_at": "2026-08-05T23:00:00+03:00"},
+      "authority": "hausman_hub",
+      "control": {"enabled": true, "allowed_actions": ["set_room_target", "clear_room_override", "set_room_mode", "turn_room_off"], "blocked_reasons": []},
+      "devices": []
+    }
+  ],
+  "active_operations": [
+    {
+      "operation_id": "0123456789abcdef0123456789abcdef",
+      "request_id": "tablet.climate.0001",
+      "action": "set_room_target",
+      "room_id": "living",
+      "status": "pending",
+      "updated_at": 1785949380000
+    }
+  ]
+}

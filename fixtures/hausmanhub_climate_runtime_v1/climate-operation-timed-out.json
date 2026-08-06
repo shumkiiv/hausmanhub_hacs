@@ -1,0 +1,20 @@
+{
+  "contract": {"name": "hausman-hub-climate-operation", "version": 1},
+  "operation_id": "abcdef0123456789abcdef0123456789",
+  "request_id": "tablet.climate.0003",
+  "action": "set_room_target",
+  "room_id": "living",
+  "expected_state_revision": 43,
+  "resulting_state_revision": null,
+  "status": "timed_out",
+  "accepted": true,
+  "confirmed": false,
+  "final": true,
+  "duplicate": false,
+  "reason": "confirmation_timeout",
+  "message": "Устройство не подтвердило новое состояние за отведённое время.",
+  "read_back": {"attempted": true, "matched": false, "observed_at": 1785949440000, "evidence": {"target_temperature": 24}},
+  "created_at": 1785949380000,
+  "updated_at": 1785949440000,
+  "expires_at": 1785949440000
+}

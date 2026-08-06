@@ -1,0 +1,20 @@
+{
+  "contract": {"name": "hausman-hub-climate-operation", "version": 1},
+  "operation_id": "fedcba9876543210fedcba9876543210",
+  "request_id": "tablet.climate.0002",
+  "action": "set_room_target",
+  "room_id": "bedroom",
+  "expected_state_revision": 42,
+  "resulting_state_revision": null,
+  "status": "rejected",
+  "accepted": false,
+  "confirmed": false,
+  "final": true,
+  "duplicate": false,
+  "reason": "room_not_in_canary",
+  "message": "Комната не включена в пилотное управление.",
+  "read_back": {"attempted": false, "matched": null, "observed_at": null, "evidence": {}},
+  "created_at": 1785949320000,
+  "updated_at": 1785949320000,
+  "expires_at": 1785949380000
+}

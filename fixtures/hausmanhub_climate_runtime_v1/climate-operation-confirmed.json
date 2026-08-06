@@ -1,0 +1,20 @@
+{
+  "contract": {"name": "hausman-hub-climate-operation", "version": 1},
+  "operation_id": "0123456789abcdef0123456789abcdef",
+  "request_id": "tablet.climate.0001",
+  "action": "set_room_target",
+  "room_id": "living",
+  "expected_state_revision": 42,
+  "resulting_state_revision": 43,
+  "status": "confirmed",
+  "accepted": true,
+  "confirmed": true,
+  "final": true,
+  "duplicate": false,
+  "reason": "none",
+  "message": "Целевая температура подтверждена чтением состояния.",
+  "read_back": {"attempted": true, "matched": true, "observed_at": 1785949325000, "evidence": {"target_temperature": 23.5}},
+  "created_at": 1785949320000,
+  "updated_at": 1785949325000,
+  "expires_at": 1785949380000
+}

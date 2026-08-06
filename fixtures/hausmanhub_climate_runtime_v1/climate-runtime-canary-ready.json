@@ -1,0 +1,65 @@
+{
+  "contract": {"name": "hausman-hub-climate-runtime", "version": 1},
+  "generated_at": 1785949320000,
+  "state_revision": 42,
+  "phase": "canary",
+  "authority": "hausman_hub",
+  "fresh": true,
+  "commands_enabled": true,
+  "blocked_reasons": [],
+  "home_control": {"enabled": false, "allowed_actions": [], "blocked_reasons": ["room_not_in_canary"]},
+  "rooms": [
+    {
+      "id": "living",
+      "name": "Гостиная",
+      "temperature": 25.8,
+      "humidity": 44,
+      "target_temperature": 24,
+      "target_humidity": 45,
+      "minimum_temperature": 18,
+      "temperature_range": {"minimum": 18, "maximum": 28, "step": 0.5},
+      "humidity_range": {"minimum": 30, "maximum": 70, "step": 1},
+      "mode": "automatic",
+      "target_strategy": "normal",
+      "active_profile": "day",
+      "temporary_override": {"active": false, "target_temperature": null, "ends_at": null},
+      "authority": "hausman_hub",
+      "control": {"enabled": true, "allowed_actions": ["set_room_target", "turn_room_off"], "blocked_reasons": []},
+      "devices": [
+        {
+          "id": "living_ac",
+          "name": "Кондиционер в гостиной",
+          "kind": "air_conditioner",
+          "control_scope": "canary",
+          "available": true,
+          "state": "working",
+          "cooldown": {"active": false, "remaining_seconds": 0, "reason": "none"},
+          "last_confirmed_operation": {
+            "operation_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "action": "set_room_target",
+            "updated_at": 1785949260000
+          }
+        }
+      ]
+    },
+    {
+      "id": "bedroom",
+      "name": "Спальня",
+      "temperature": 23.2,
+      "humidity": 48,
+      "target_temperature": 23,
+      "target_humidity": 45,
+      "minimum_temperature": 18,
+      "temperature_range": {"minimum": 18, "maximum": 28, "step": 0.5},
+      "humidity_range": {"minimum": 30, "maximum": 70, "step": 1},
+      "mode": "automatic",
+      "target_strategy": "soft",
+      "active_profile": "night",
+      "temporary_override": {"active": false, "target_temperature": null, "ends_at": null},
+      "authority": "legacy_climate_core",
+      "control": {"enabled": false, "allowed_actions": [], "blocked_reasons": ["room_not_in_canary"]},
+      "devices": []
+    }
+  ],
+  "active_operations": []
+}

@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/api-error.schema.json",
+  "title": "HausmanHub API error v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "code", "message", "retryable"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "hausman-hub-error" },
+        "version": { "const": 1 }
+      }
+    },
+    "code": {
+      "enum": [
+        "invalid_request",
+        "forbidden",
+        "not_found",
+        "conflict",
+        "revision_conflict",
+        "capability_unavailable",
+        "command_not_confirmed",
+        "climate_disabled",
+        "climate_shadow_only",
+        "climate_state_stale",
+        "climate_authority_not_ready",
+        "climate_cooldown",
+        "climate_operation_pending",
+        "climate_registry_mismatch",
+        "climate_action_unsupported",
+        "climate_operation_not_found",
+        "scenario_disabled",
+        "rate_limited",
+        "unavailable",
+        "internal_error"
+      ]
+    },
+    "message": { "type": "string", "minLength": 1, "maxLength": 500 },
+    "retryable": { "type": "boolean" },
+    "requestId": { "type": ["string", "null"], "maxLength": 128 },
+    "details": { "type": "object", "additionalProperties": true }
+  }
+}

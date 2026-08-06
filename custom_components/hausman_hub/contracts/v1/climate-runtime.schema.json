@@ -1,0 +1,325 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/climate-runtime.schema.json",
+  "title": "HausmanHub tablet climate runtime v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "generated_at",
+    "state_revision",
+    "phase",
+    "authority",
+    "fresh",
+    "commands_enabled",
+    "blocked_reasons",
+    "home_control",
+    "rooms",
+    "active_operations"
+  ],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-climate-runtime"},
+        "version": {"const": 1}
+      }
+    },
+    "generated_at": {"type": "integer", "minimum": 0},
+    "state_revision": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+    "phase": {
+      "enum": ["disabled", "shadow", "ready_for_canary", "canary", "managed", "unavailable"]
+    },
+    "authority": {"enum": ["legacy_climate_core", "hausman_hub", "none", "unknown"]},
+    "fresh": {"type": "boolean"},
+    "commands_enabled": {"type": "boolean"},
+    "blocked_reasons": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/block_reason"},
+      "uniqueItems": true,
+      "maxItems": 16
+    },
+    "home_control": {"$ref": "#/$defs/control"},
+    "rooms": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/room"},
+      "maxItems": 128
+    },
+    "active_operations": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/active_operation"},
+      "maxItems": 64
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"commands_enabled": {"const": true}}, "required": ["commands_enabled"]},
+      "then": {
+        "properties": {
+          "phase": {"enum": ["canary", "managed"]},
+          "authority": {"const": "hausman_hub"},
+          "fresh": {"const": true},
+          "blocked_reasons": {"maxItems": 0}
+        },
+        "anyOf": [
+          {
+            "properties": {
+              "home_control": {
+                "type": "object",
+                "required": ["enabled"],
+                "properties": {"enabled": {"const": true}}
+              }
+            }
+          },
+          {
+            "properties": {
+              "rooms": {"contains": {"$ref": "#/$defs/enabled_room"}, "minContains": 1}
+            }
+          }
+        ]
+      },
+      "else": {
+        "properties": {
+          "home_control": {"$ref": "#/$defs/disabled_control"},
+          "rooms": {"not": {"contains": {"$ref": "#/$defs/enabled_room"}}}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "stable_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+    "temperature": {"type": ["number", "null"], "minimum": 5, "maximum": 40},
+    "humidity": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+    "temperature_range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimum", "maximum", "step"],
+      "properties": {
+        "minimum": {"type": "number", "minimum": 5, "maximum": 40},
+        "maximum": {"type": "number", "minimum": 5, "maximum": 40},
+        "step": {"type": "number", "exclusiveMinimum": 0, "maximum": 5}
+      }
+    },
+    "humidity_range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimum", "maximum", "step"],
+      "properties": {
+        "minimum": {"type": "integer", "minimum": 0, "maximum": 100},
+        "maximum": {"type": "integer", "minimum": 0, "maximum": 100},
+        "step": {"type": "integer", "minimum": 1, "maximum": 20}
+      }
+    },
+    "temporary_override": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["active", "target_temperature", "ends_at"],
+      "properties": {
+        "active": {"type": "boolean"},
+        "target_temperature": {"$ref": "#/$defs/temperature"},
+        "ends_at": {"type": ["string", "null"], "format": "date-time"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"active": {"const": true}}, "required": ["active"]},
+          "then": {"properties": {"target_temperature": {"type": "number"}}},
+          "else": {
+            "properties": {
+              "target_temperature": {"type": "null"},
+              "ends_at": {"type": "null"}
+            }
+          }
+        }
+      ]
+    },
+    "action": {
+      "enum": [
+        "set_home_targets",
+        "set_room_target",
+        "clear_room_override",
+        "set_room_mode",
+        "set_room_humidity_target",
+        "set_room_min_target",
+        "set_room_target_strategy",
+        "turn_room_off"
+      ]
+    },
+    "block_reason": {
+      "enum": [
+        "climate_disabled",
+        "shadow_only",
+        "state_stale",
+        "authority_not_ready",
+        "room_not_in_canary",
+        "registry_mismatch",
+        "cooldown_active",
+        "operation_pending",
+        "action_unsupported",
+        "device_unavailable"
+      ]
+    },
+    "control": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "allowed_actions", "blocked_reasons"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "allowed_actions": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/action"},
+          "uniqueItems": true,
+          "maxItems": 8
+        },
+        "blocked_reasons": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/block_reason"},
+          "uniqueItems": true,
+          "maxItems": 16
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"enabled": {"const": true}}, "required": ["enabled"]},
+          "then": {
+            "properties": {
+              "allowed_actions": {"minItems": 1},
+              "blocked_reasons": {"maxItems": 0}
+            }
+          },
+          "else": {
+            "properties": {
+              "allowed_actions": {"maxItems": 0},
+              "blocked_reasons": {"minItems": 1}
+            }
+          }
+        }
+      ]
+    },
+    "disabled_control": {
+      "allOf": [
+        {"$ref": "#/$defs/control"},
+        {"properties": {"enabled": {"const": false}, "allowed_actions": {"maxItems": 0}}}
+      ]
+    },
+    "cooldown": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["active", "remaining_seconds", "reason"],
+      "properties": {
+        "active": {"type": "boolean"},
+        "remaining_seconds": {"type": "integer", "minimum": 0, "maximum": 86400},
+        "reason": {"enum": ["none", "minimum_runtime", "minimum_idle", "rate_limit"]}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"active": {"const": true}}, "required": ["active"]},
+          "then": {
+            "properties": {
+              "remaining_seconds": {"minimum": 1},
+              "reason": {"not": {"const": "none"}}
+            }
+          },
+          "else": {
+            "properties": {"remaining_seconds": {"const": 0}, "reason": {"const": "none"}}
+          }
+        }
+      ]
+    },
+    "device": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "kind", "control_scope", "available", "state", "cooldown", "last_confirmed_operation"],
+      "properties": {
+        "id": {"$ref": "#/$defs/stable_id"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 120},
+        "kind": {"enum": ["air_conditioner", "radiator_thermostat", "humidifier", "floor_heating", "temperature_sensor", "humidity_sensor"]},
+        "control_scope": {"enum": ["observed", "canary", "managed"]},
+        "available": {"type": "boolean"},
+        "state": {"enum": ["working", "idle", "off", "unavailable", "unknown"]},
+        "cooldown": {"oneOf": [{"$ref": "#/$defs/cooldown"}, {"type": "null"}]},
+        "last_confirmed_operation": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["operation_id", "action", "updated_at"],
+              "properties": {
+                "operation_id": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+                "action": {"$ref": "#/$defs/action"},
+                "updated_at": {"type": "integer", "minimum": 0}
+              }
+            },
+            {"type": "null"}
+          ]
+        }
+      }
+    },
+    "room": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "temperature",
+        "humidity",
+        "target_temperature",
+        "target_humidity",
+        "minimum_temperature",
+        "temperature_range",
+        "humidity_range",
+        "mode",
+        "target_strategy",
+        "active_profile",
+        "temporary_override",
+        "authority",
+        "control",
+        "devices"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/stable_id"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 120},
+        "temperature": {"$ref": "#/$defs/temperature"},
+        "humidity": {"$ref": "#/$defs/humidity"},
+        "target_temperature": {"$ref": "#/$defs/temperature"},
+        "target_humidity": {"$ref": "#/$defs/humidity"},
+        "minimum_temperature": {"$ref": "#/$defs/temperature"},
+        "temperature_range": {"$ref": "#/$defs/temperature_range"},
+        "humidity_range": {"$ref": "#/$defs/humidity_range"},
+        "mode": {"enum": ["automatic", "manual", "off", "unknown"]},
+        "target_strategy": {"enum": ["soft", "normal", "aggressive", "unknown"]},
+        "active_profile": {"enum": ["day", "night", null]},
+        "temporary_override": {"$ref": "#/$defs/temporary_override"},
+        "authority": {"enum": ["legacy_climate_core", "hausman_hub", "none", "unknown"]},
+        "control": {"$ref": "#/$defs/control"},
+        "devices": {"type": "array", "items": {"$ref": "#/$defs/device"}, "maxItems": 32}
+      }
+    },
+    "enabled_room": {
+      "type": "object",
+      "required": ["authority", "control"],
+      "properties": {
+        "authority": {"const": "hausman_hub"},
+        "control": {
+          "type": "object",
+          "required": ["enabled", "allowed_actions"],
+          "properties": {"enabled": {"const": true}, "allowed_actions": {"minItems": 1}}
+        }
+      }
+    },
+    "active_operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation_id", "request_id", "action", "room_id", "status", "updated_at"],
+      "properties": {
+        "operation_id": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+        "request_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"},
+        "action": {"$ref": "#/$defs/action"},
+        "room_id": {"type": ["string", "null"], "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+        "status": {"enum": ["pending", "confirmed", "partial", "rejected", "unavailable", "timed_out"]},
+        "updated_at": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

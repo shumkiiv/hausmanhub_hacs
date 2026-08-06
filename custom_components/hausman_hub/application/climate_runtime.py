@@ -362,8 +362,16 @@ class ClimateRuntime:
         """Refresh and return the private-id-free tablet contract."""
 
         async with self._lock:
-            if self.configuration.climate_bridge_mode is ClimateControlMode.MANAGED:
-                observation = await self._async_native_climate_observation_unlocked()
+            if (
+                self.configuration.climate_bridge_mode is ClimateControlMode.MANAGED
+                or self.configuration.mode == "shadow"
+            ):
+                observation = await self._async_native_climate_observation_unlocked(
+                    allow_disabled=(
+                        self.configuration.climate_bridge_mode
+                        is ClimateControlMode.DISABLED
+                    )
+                )
                 if observation.data_status is ClimateDataStatus.UNAVAILABLE:
                     raise ClimateSnapshotUnavailable("climate state is unavailable")
                 return native_android_climate_snapshot(

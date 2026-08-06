@@ -45,12 +45,18 @@ SCENARIOS_RUN_PATH = f"{SCENARIOS_PATH}/run"
 SCENARIOS_ACTION_PATH = f"{SCENARIOS_PATH}/action"
 VOICE_GREETING_PATH = f"{API_BASE_PATH}/voice/yandex-greeting"
 VOICE_GREETING_TEST_PATH = f"{VOICE_GREETING_PATH}/test"
+CLIMATE_RUNTIME_PATH = f"{API_BASE_PATH}/climate/runtime"
+CLIMATE_ACTION_PATH = f"{API_BASE_PATH}/climate/actions"
+CLIMATE_OPERATION_PATH = f"{API_BASE_PATH}/climate/operations/{{operation_id}}"
 
 
 def api_capabilities_snapshot(
     *, device_actions_available: bool = True,
     voice_available: bool = False,
     voice_stations: tuple[dict[str, object], ...] = (),
+    climate_runtime_available: bool = False,
+    climate_phase: str = "unavailable",
+    climate_commands_enabled: bool = False,
 ) -> dict[str, object]:
     """Describe only the stable, local, tablet-facing HausmanHub API surface."""
 
@@ -148,6 +154,31 @@ def api_capabilities_snapshot(
                 "response_contract": {
                     "name": CLIMATE_CONTROL_RECEIPT_CONTRACT_NAME,
                     "version": CLIMATE_CONTROL_RECEIPT_CONTRACT_VERSION,
+                },
+            },
+            "climate_runtime": {
+                "available": climate_runtime_available,
+                "phase": climate_phase,
+                "commands_enabled": climate_commands_enabled,
+                "read_path": CLIMATE_RUNTIME_PATH,
+                "action_path": CLIMATE_ACTION_PATH,
+                "operation_path_template": CLIMATE_OPERATION_PATH,
+                "read_method": "GET",
+                "action_method": "POST",
+                "operation_method": "GET",
+                "durable_idempotency": True,
+                "receipt_events": True,
+                "read_contract": {
+                    "name": "hausman-hub-climate-runtime",
+                    "version": 1,
+                },
+                "request_contract": {
+                    "name": "hausman-hub-climate-action-request",
+                    "version": 1,
+                },
+                "receipt_contract": {
+                    "name": "hausman-hub-climate-operation",
+                    "version": 1,
                 },
             },
             "tablet_profile": {
