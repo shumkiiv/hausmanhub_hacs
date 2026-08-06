@@ -35,7 +35,17 @@ button.climate-category-card:hover { transform:translateY(-1px); border-color:co
 .climate-category-copy strong { font-size:16px; line-height:1.3; }
 .climate-category-copy small { margin-top:5px; color:var(--hmh-text-dim,#9AA7B4); font-size:13px; }
 .climate-category-chevron { color:var(--hmh-text-dim,#9AA7B4); font-size:25px; }
-.climate-room-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+.climate-room-tabs { display:flex; gap:8px; margin-bottom:14px; overflow-x:auto; scrollbar-width:none; }
+.climate-room-tabs::-webkit-scrollbar { display:none; width:0; height:0; }
+button.climate-room-tab { display:inline-flex; flex:0 0 auto; align-items:center; gap:8px; min-height:42px; margin:0; padding:8px 14px;
+  border:1px solid var(--hmh-border,#2F3845); border-radius:12px; background:transparent; color:var(--hmh-text-dim,#9AA7B4);
+  box-shadow:none; font-weight:650; white-space:nowrap; }
+button.climate-room-tab .icon { width:18px; height:18px; }
+button.climate-room-tab:hover { border-color:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 42%,var(--hmh-border,#2F3845)); color:var(--hmh-text,#E7ECF3); }
+button.climate-room-tab.is-active { border-color:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 55%,var(--hmh-border,#2F3845));
+  background:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 12%,transparent); color:var(--hmh-text,#E7ECF3); }
+button.climate-room-tab:focus-visible { outline:2px solid color-mix(in srgb,var(--hmh-accent,#4F8CFF) 58%,transparent); outline-offset:-2px; }
+.climate-room-focus button.climate-room-card.is-focus { width:100%; }
 button.climate-room-card { display:flex; flex-direction:column; min-height:178px; margin:0; padding:17px; overflow:hidden; border:1px solid var(--hmh-border,#2F3845);
   border-radius:16px; color:var(--hmh-text,#E7ECF3); text-align:left; background:var(--hmh-raised,#181E26); box-shadow:none; }
 button.climate-room-card:hover { border-color:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 48%,var(--hmh-border,#2F3845)); }
@@ -89,7 +99,7 @@ button.climate-product-card:hover { border-color:color-mix(in srgb,var(--hmh-acc
   .climate-dashboard-hero { padding:22px; }
   .climate-dashboard-facts { grid-template-columns:repeat(2,minmax(0,1fr)); gap:15px 0; }
   .climate-dashboard-fact:nth-child(3) { border-left:0; }
-  .climate-category-grid,.climate-room-grid,.climate-sheet-device-grid { grid-template-columns:1fr; }
+  .climate-category-grid,.climate-sheet-device-grid { grid-template-columns:1fr; }
   .climate-device-sheet-backdrop { padding:12px; }
   .climate-device-sheet { width:calc(100vw - 24px); max-height:calc(100vh - 24px); border-radius:19px; }
   .climate-sheet-body { padding:2px 16px 20px; }

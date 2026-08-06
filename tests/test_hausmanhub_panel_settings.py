@@ -1112,29 +1112,30 @@ class PanelSettingsSectionsTest(unittest.TestCase):
             GET_PATHS | {"hausman_hub/v1/dashboard": dashboard},
             {},
             """
-        panel._activateSection("settings");
-        panel._activateSettingsView("rooms");
-        let screen = panel._shell.settings;
+        panel._activateSection("rooms");
+        let screen = panel._shell.homeSections.rooms;
         const roomCards = findAll(screen, (node) =>
-          String(node.className || "").split(" ").includes("settings-room-card"));
+          String(node.className || "").split(" ").includes("rooms-canon-card"));
         if (roomCards.length !== 2) {
           throw new Error("all Home Assistant rooms are not shown");
         }
         const aliceCard = roomCards.find((node) => textOf(node).includes("Комната Алисы"));
         const showerCard = roomCards.find((node) => textOf(node).includes("Душевая"));
         if (!aliceCard || !showerCard) throw new Error("named rooms are missing");
-        const aliceSelect = findAll(aliceCard, (node) =>
+        aliceCard.fire("click");
+        let sheet = findAll(screen, (node) =>
+          String(node.className || "").split(" ").includes("rooms-detail-sheet"))[0];
+        if (!sheet) throw new Error("room detail sheet did not open");
+        const aliceSelect = findAll(sheet, (node) =>
           String(node.className || "").split(" ").includes("settings-room-type-select"))[0];
-        const showerSelect = findAll(showerCard, (node) =>
-          String(node.className || "").split(" ").includes("settings-room-type-select"))[0];
-        const optionLabels = findAll(screen, (node) => node.tagName === "OPTION")
+        const optionLabels = findAll(sheet, (node) => node.tagName === "OPTION")
           .map((node) => node.textContent);
         if (!optionLabels.includes("Детская") || !optionLabels.includes("Ванная или душевая")) {
           throw new Error("canonical tablet room purposes are missing");
         }
         aliceSelect.value = "child";
         aliceSelect.fire("change");
-        const save = findAll(aliceCard, (node) =>
+        const save = findAll(sheet, (node) =>
           String(node.className || "").split(" ").includes("settings-room-type-save"))[0];
         if (!save || save.disabled) throw new Error("room purpose cannot be saved");
         save.fire("click");
@@ -1149,6 +1150,16 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           || !String(panel._notice || "").includes("сохранено в Home Assistant")) {
           throw new Error("saved room purpose is not reflected in the interface");
         }
+        screen = panel._shell.homeSections.rooms;
+        findAll(screen, (node) =>
+          String(node.className || "").split(" ").includes("rooms-detail-close"))[0].fire("click");
+        findAll(screen, (node) =>
+          String(node.className || "").split(" ").includes("rooms-canon-card")
+          && textOf(node).includes("Душевая"))[0].fire("click");
+        sheet = findAll(screen, (node) =>
+          String(node.className || "").split(" ").includes("rooms-detail-sheet"))[0];
+        const showerSelect = findAll(sheet, (node) =>
+          String(node.className || "").split(" ").includes("settings-room-type-select"))[0];
         if (showerSelect.value !== "bathroom") {
           throw new Error("existing room name fallback is not mapped to bathroom");
         }
@@ -1906,10 +1917,19 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           "Климат по комнатам", "Обзор климата", "Комнаты и цели",
           "Кондиционеры", "Термоголовки", "Тёплый пол", "Увлажнители",
           "Очистители", "Вытяжки", "Гостиная", "Детская", "24.5 °C", "46 %",
-          "Кабинет", "Нет данных", "Цель не задана",
+          "Кабинет",
         ]) {
           if (!text.includes(label)) throw new Error("climate tablet text missing: " + label + " :: " + text);
         }
+        const roomTabs = findAll(climate, (node) =>
+          String(node.className).split(" ").includes("climate-room-tab"));
+        if (roomTabs.length !== 3) throw new Error("climate room tabs mismatch: " + roomTabs.length);
+        roomTabs.find((node) => textOf(node).includes("Кабинет")).fire("click");
+        const officeText = textOf(climate);
+        if (!officeText.includes("Нет данных") || !officeText.includes("Цель не задана")) {
+          throw new Error("climate room tab did not switch the focus card: " + officeText);
+        }
+        roomTabs.find((node) => textOf(node).includes("Гостиная")).fire("click");
         if (text.includes("0 °C") || text.includes("0 %")) {
           throw new Error("null climate reading was coerced to zero: " + text);
         }
@@ -2010,7 +2030,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         panel._shell.tabs.media.fire("click");
         let media = panel._shell.homeSections.media;
         const mediaText = textOf(media);
-        if (!mediaText.includes("СЕЙЧАС ВОСПРОИЗВОДИТСЯ")
+        if (!mediaText.includes("МЕДИА ДОМА") || !mediaText.includes("Медиа по комнатам")
           || !mediaText.includes("По комнатам") || !mediaText.includes("Медиаустройства")
           || !mediaText.includes("Кинопоиск")) {
           throw new Error("canonical media hierarchy is incomplete: " + mediaText);
@@ -2108,7 +2128,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         panel._shell.tabs.security.fire("click");
         const security = panel._shell.homeSections.security;
         const text = textOf(security);
-        if (!text.includes("Дом под наблюдением") || !text.includes("Контуры безопасности")
+        if (!text.includes("Безопасность дома") || !text.includes("Контуры безопасности")
           || !text.includes("Датчики и доступ") || !text.includes("Тамбур · Закрыт")
           || !text.includes("Тамбур · Без охраны") || !text.includes("Тамбур · Сухо")) {
           throw new Error("security state is not semantic Russian copy: " + text);

@@ -22,9 +22,10 @@
 .overview-canon-room-arrow { display:grid; place-items:center; width:42px; min-width:42px; height:40px; min-height:40px; margin:0; padding:0; border:1px solid rgba(230,234,242,.16); border-radius:11px; color:#E6EAF2; background:rgba(18,23,29,.82); box-shadow:none; }
 .overview-canon-room-arrow:hover { border-color:rgba(79,140,255,.72); background:rgba(79,140,255,.18); }
 .overview-canon-room-arrow .icon { width:20px; height:20px; }
-.overview-canon-room-strip button { display:flex; flex:0 0 auto; min-height:40px; align-items:center; gap:8px; margin:0; padding:8px 14px; color:#A3AAB7; background:transparent; box-shadow:none; }
-.overview-canon-room-strip button.is-active { color:#E6EAF2; background:rgba(79,140,255,.2); }
+.overview-canon-room-strip button { display:flex; flex:0 0 auto; min-height:40px; align-items:center; gap:8px; margin:0; padding:8px 14px; border-color:transparent; border-radius:11px; color:#A3AAB7; background:transparent; box-shadow:none; }
+.overview-canon-room-strip button.is-active { border-color:rgba(148,180,255,.5); color:#E6EAF2; background:rgba(79,140,255,.2); }
 .overview-canon-room-strip button.is-active:disabled { opacity:1; cursor:default; }
+.overview-canon-room-strip button:focus-visible { outline:2px solid rgba(148,180,255,.85); outline-offset:-2px; }
 .overview-canon-room-strip .icon { width:18px; height:18px; }
 .overview-canon-primary-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr)); gap:16px; margin-top:16px; }
 .overview-canon-primary-card, .overview-canon-light-card, .overview-canon-side-card { min-width:0; margin:0; padding:20px; border:1px solid var(--hmh-border-default); border-radius:16px; color:var(--hmh-text-primary); background:var(--hmh-surface-card); text-align:left; box-shadow:0 8px 24px rgba(0,0,0,.2); }

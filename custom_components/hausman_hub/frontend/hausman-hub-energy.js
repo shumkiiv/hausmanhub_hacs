@@ -1,4 +1,5 @@
-import { renderEnergyHistoryChart } from "./hausman-hub-energy-chart.js?v=1.52.42";
+import { renderEnergyHistoryChart } from "./hausman-hub-energy-chart.js?v=1.52.40";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.40";
 
 const number = (value, digits = 1) => Number.isFinite(Number(value))
   ? new Intl.NumberFormat("ru-RU", { maximumFractionDigits: digits }).format(Number(value))
@@ -489,12 +490,20 @@ export function renderEnergySection(panel, container, deps) {
     renderDeviceDetail(panel, container, source, deps);
     return;
   }
-  const heading = el("div", "home-section-heading energy-section-heading");
-  const copy = el("div");
-  copy.appendChild(el("h2", null, "Энергия"));
-  copy.appendChild(el("p", "section-intro", "Потребление, нагрузка и управление источниками"));
-  heading.appendChild(copy);
-  container.appendChild(heading);
+  const voltage = Number(energy.voltageV);
+  const voltageOutOfRange = Number.isFinite(voltage) && (voltage < 207 || voltage > 253);
+  container.appendChild(createLibraryHero(panel, {
+    eyebrow: "ЭНЕРГИЯ ДОМА",
+    title: "Энергия дома",
+    subtitle: "Потребление, нагрузка и управление источниками",
+    warning: voltageOutOfRange,
+    facts: [
+      { label: "Мощность", value: sourceMetric(energy, "currentPowerW", "Вт") },
+      { label: "Ток", value: sourceMetric(energy, "currentA", "А", 2) },
+      { label: "Напряжение", value: sourceMetric(energy, "voltageV", "В"), warning: voltageOutOfRange },
+      { label: "Сегодня", value: sourceMetric(energy, "todayKwh", "кВт·ч", 2) },
+    ],
+  }, deps));
   const pageLayout = el("div", "energy-page-layout");
   const mainColumn = el("div", "energy-main-column");
   const selected = selectedSources(energy);

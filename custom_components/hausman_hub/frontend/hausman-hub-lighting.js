@@ -60,7 +60,7 @@ function createLightingHero(panel, rooms, devices, deps) {
   const activeRooms = new Set(devices.filter(deviceIsActive).map((device) => roomNameFor(device, rooms)).filter((name) => name !== "Без комнаты"));
   return createLibraryHero(panel, {
     eyebrow: "ОСВЕЩЕНИЕ ДОМА",
-    title: active ? "Свет включён" : "Свет выключен",
+    title: "Освещение дома",
     subtitle: "Управляйте комнатами и каждым физическим устройством отдельно",
     warning: unavailable > 0,
     facts: [
