@@ -280,6 +280,47 @@ class RunAuditTest(unittest.TestCase):
             self.assertTrue((output_dir / "summary.json").is_file())
             self.assertIn("climate_mode", summary)
 
+    def test_tablet_only_403_is_recorded_and_audit_continues(self) -> None:
+        by_path = {
+            result.path: result.payload for result in _fake_results()
+        }
+
+        def opener(request: object, timeout: float) -> _FakeResponse:
+            url = getattr(request, "full_url")
+            path = url.replace("http://ha.local:8123", "")
+            if path == "/api/hausman_hub/v1/capabilities":
+                raise _http_error(403)
+            return _FakeResponse(by_path[path])
+
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory) / "audit"
+            results, summary = run_audit(
+                ACCESS, output_dir=output_dir, timeout=5.0, opener=opener
+            )
+        self.assertEqual(len(ENDPOINTS), len(results))
+        capabilities = next(r for r in results if r.name == "capabilities")
+        self.assertEqual(403, capabilities.status)
+        self.assertIsNone(capabilities.payload)
+        self.assertEqual(403, summary["endpoints"]["capabilities"])
+        self.assertIn("climate_mode", summary)
+
+    def test_core_endpoint_auth_failure_aborts_the_audit(self) -> None:
+        by_path = {
+            result.path: result.payload for result in _fake_results()
+        }
+
+        def opener(request: object, timeout: float) -> _FakeResponse:
+            url = getattr(request, "full_url")
+            path = url.replace("http://ha.local:8123", "")
+            if path == "/api/config":
+                raise _http_error(401)
+            return _FakeResponse(by_path[path])
+
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory) / "audit"
+            with self.assertRaises(AuditAuthorizationError):
+                run_audit(ACCESS, output_dir=output_dir, timeout=5.0, opener=opener)
+
 
 if __name__ == "__main__":
     unittest.main()

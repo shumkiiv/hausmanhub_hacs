@@ -58,6 +58,10 @@ class AccessFileError(ValueError):
 class AuditAuthorizationError(PermissionError):
     """Raised when Home Assistant rejects the provided admin token."""
 
+    def __init__(self, message: str, *, status: int) -> None:
+        super().__init__(message)
+        self.status = status
+
 
 class AuditRequestError(RuntimeError):
     """Raised when an endpoint cannot be reached or parsed."""
@@ -132,8 +136,8 @@ def http_get_json(
     except urllib.error.HTTPError as error:
         if error.code in (401, 403):
             raise AuditAuthorizationError(
-                f"{path} answered HTTP {error.code}; the token is missing, "
-                "expired or the user is not a local administrator"
+                f"{path} answered HTTP {error.code}",
+                status=error.code,
             ) from error
         raise AuditRequestError(f"{path} answered HTTP {error.code}") from error
     except (urllib.error.URLError, TimeoutError, OSError) as error:
@@ -295,7 +299,7 @@ def build_summary(results: list[EndpointResult]) -> dict[str, Any]:
     for result in results:
         summary["endpoints"][result.name] = result.status
         handler = handlers.get(result.name)
-        if handler is not None:
+        if handler is not None and isinstance(result.payload, dict):
             handler(result.payload, summary)
     return summary
 
@@ -318,7 +322,14 @@ def run_audit(
     timeout: float,
     opener: Any = None,
 ) -> tuple[list[EndpointResult], dict[str, Any]]:
-    """Fetch every audit endpoint with GET and persist raw responses."""
+    """Fetch every audit endpoint with GET and persist raw responses.
+
+    A per-endpoint failure is recorded with its HTTP status (0 for
+    transport/parse errors) and the audit continues: least-privilege
+    routes legitimately answer 403 to an admin token.  The audit aborts
+    only when the core endpoint rejects the token itself or no endpoint
+    answered at all.
+    """
 
     if not isinstance(output_dir, Path):
         raise TypeError("output directory must be a Path")
@@ -326,20 +337,39 @@ def run_audit(
     os.chmod(output_dir, 0o700)
     results: list[EndpointResult] = []
     for name, path in ENDPOINTS:
-        fetched = http_get_json(access, path, timeout=timeout, opener=opener)
-        result = EndpointResult(
-            name=name,
-            path=path,
-            status=fetched.status,
-            payload=fetched.payload,
-        )
+        try:
+            fetched = http_get_json(access, path, timeout=timeout, opener=opener)
+            result = EndpointResult(
+                name=name,
+                path=path,
+                status=fetched.status,
+                payload=fetched.payload,
+            )
+        except AuditAuthorizationError as error:
+            result = EndpointResult(name=name, path=path, status=error.status, payload=None)
+        except AuditRequestError:
+            result = EndpointResult(name=name, path=path, status=0, payload=None)
         results.append(result)
         raw_path = output_dir / f"{name}.json"
+        raw_payload = (
+            result.payload
+            if result.payload is not None
+            else {"error": "endpoint_unavailable", "status": result.status}
+        )
         raw_path.write_text(
-            json.dumps(result.payload, ensure_ascii=False, indent=2, sort_keys=True),
+            json.dumps(raw_payload, ensure_ascii=False, indent=2, sort_keys=True),
             encoding="utf-8",
         )
         os.chmod(raw_path, 0o600)
+    core = next(result for result in results if result.name == "core_config")
+    if core.status in (401, 403):
+        raise AuditAuthorizationError(
+            "core /api/config answered HTTP "
+            f"{core.status}; the token is missing, expired or invalid",
+            status=core.status,
+        )
+    if not any(result.status == 200 for result in results):
+        raise AuditRequestError("no audit endpoint answered successfully")
     summary = build_summary(results)
     summary_path = output_dir / "summary.json"
     summary_path.write_text(format_summary(summary) + "\n", encoding="utf-8")
