@@ -1,5 +1,5 @@
 import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.40";
-import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.40";
+import { canonicalRoomMdiIcon, ROOM_TYPE_OPTIONS, roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.40";
 
 function roomNormalized(value) {
   return String(value || "").trim().toLocaleLowerCase("ru");
@@ -99,6 +99,33 @@ function openRoomOverview(panel, container, room, devices, deps) {
       facts.appendChild(fact);
     });
   sheet.appendChild(facts);
+  const purpose = el("div", "rooms-detail-purpose");
+  const purposeField = el("label", "rooms-detail-purpose-field");
+  purposeField.appendChild(el("span", "assistant-field-label", "Назначение комнаты"));
+  const select = el("select", "settings-room-type-select");
+  const currentType = roomIconName(room);
+  ROOM_TYPE_OPTIONS.forEach((item) => {
+    const option = el("option", null, item.label);
+    option.value = item.id;
+    option.selected = item.id === currentType;
+    select.appendChild(option);
+  });
+  select.value = currentType;
+  purposeField.appendChild(select);
+  purpose.appendChild(purposeField);
+  const alreadyCanonical = String(room.icon || "").toLowerCase() === canonicalRoomMdiIcon(currentType);
+  const save = el("button", "secondary settings-room-type-save", "Сохранить назначение");
+  save.type = "button";
+  save.disabled = panel._roomTypeSaving.has(room.id) || alreadyCanonical;
+  select.disabled = panel._roomTypeSaving.has(room.id);
+  select.addEventListener("change", () => {
+    save.disabled = panel._roomTypeSaving.has(room.id)
+      || (select.value === currentType && alreadyCanonical);
+  });
+  save.addEventListener("click", () => panel._saveRoomType(room, select.value));
+  purpose.appendChild(save);
+  purpose.appendChild(el("small", "muted", "Название комнаты не изменится. В Area Registry Home Assistant сохранится только каноническая иконка."));
+  sheet.appendChild(purpose);
   const title = el("div", "rooms-detail-section-title");
   title.appendChild(el("h3", null, "Устройства комнаты"));
   title.appendChild(el("span", null, `${devices.length} ${roomDeviceWord(devices.length)}`));
