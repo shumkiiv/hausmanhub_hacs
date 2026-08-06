@@ -35,8 +35,10 @@ export function renderSettingsRooms(panel, container, deps) {
     container.appendChild(empty);
   }
 
-  const guide = el("section", "card settings-guide-card");
-  guide.appendChild(el("h3", null, "Как устроена настройка комнаты"));
+  const guide = el("details", "card settings-guide-card");
+  const guideSummary = el("summary", "settings-guide-summary");
+  guideSummary.appendChild(el("h3", null, "Как устроена настройка комнаты"));
+  guide.appendChild(guideSummary);
   const steps = el("div", "settings-guide-steps");
   roomSetupPanes.forEach((pane, index) => {
     const step = el("div", "settings-guide-step");

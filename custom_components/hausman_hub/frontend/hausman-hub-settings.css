@@ -269,3 +269,9 @@ button.danger-button { color:#fff; border-color:color-mix(in srgb,var(--error-co
   .device-inventory-room, .device-inventory-status { grid-column:1; }
   .device-inventory-chevron { grid-column:2; grid-row:1; }
 }
+
+summary.settings-guide-summary { cursor:pointer; list-style:none; }
+summary.settings-guide-summary::-webkit-details-marker { display:none; }
+summary.settings-guide-summary h3 { display:inline; }
+summary.settings-guide-summary::after { content:"›"; float:right; color:var(--hmh-text-dim,#9AA7B4); font-size:22px; transition:transform .16s ease; }
+details.settings-guide-card[open] > summary.settings-guide-summary::after { transform:rotate(90deg); }
