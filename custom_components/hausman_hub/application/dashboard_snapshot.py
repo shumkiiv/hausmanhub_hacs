@@ -674,8 +674,15 @@ def build_dashboard_snapshot(
     state_revision: int | None = None,
     energy_settings: HausmanHubSettings | None = None,
     climate_targets: Mapping[str, tuple[float, int]] | None = None,
+    pinned_entity_ids: Iterable[str] | None = None,
 ) -> dict[str, object]:
     """Project one immutable, read-only universal dashboard snapshot."""
+
+    pinned_ids = frozenset(
+        value.strip()
+        for value in (pinned_entity_ids or ())
+        if isinstance(value, str) and value.strip()
+    )
 
     area_by_id = {area.area_id: area for area in areas}
     device_by_id = {device.device_id: device for device in devices}
@@ -842,7 +849,11 @@ def build_dashboard_snapshot(
             device_by_id.get(source_device_id) if source_device_id is not None else None
         )
         if registry_device is not None and _is_virtual_device(registry_device, members):
-            continue
+            # Virtual duplicate projections stay hidden unless the user pinned
+            # one of their entities (for example the intercom) in the tablet
+            # profile: an explicitly chosen device must remain reachable.
+            if not any(member.entity_id in pinned_ids for member in members):
+                continue
         if source_device_id in merged_media_sources:
             members = list(
                 {

@@ -91,6 +91,22 @@ class TabletPreferencesServiceTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(TabletPreferencesViolation):
             await self.service.async_replace_tablet(0, tablet)
 
+    async def test_pinned_entity_ids_follow_the_intercom_setting(self) -> None:
+        self.assertEqual(frozenset(), self.service.tablet_pinned_entity_ids)
+
+        changed = default_tablet_settings()
+        changed["intercom"]["deviceId"] = " switch.entry_intercom "
+        await self.service.async_replace_tablet(0, changed)
+        self.assertEqual(
+            frozenset({"switch.entry_intercom"}),
+            self.service.tablet_pinned_entity_ids,
+        )
+
+        cleared = self.service.tablet
+        cleared["settings"]["intercom"]["deviceId"] = None
+        await self.service.async_replace_tablet(1, cleared["settings"])
+        self.assertEqual(frozenset(), self.service.tablet_pinned_entity_ids)
+
         energy = energy_settings_from_legacy(HausmanHubSettings())
         energy["selectedDeviceIds"] = ["sensor.private_entity"]
         with self.assertRaises(TabletPreferencesViolation):

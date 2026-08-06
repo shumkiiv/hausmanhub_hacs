@@ -219,6 +219,22 @@ class TabletPreferencesService:
     def energy_for_dashboard(self) -> HausmanHubSettings:
         return energy_as_hub_settings(self._document("energy")["settings"])
 
+    @property
+    def tablet_pinned_entity_ids(self) -> frozenset[str]:
+        """Entity ids explicitly chosen in the tablet profile.
+
+        Devices selected by the user (currently the intercom) must stay
+        visible in the dashboard projection even when they would otherwise
+        be hidden as virtual duplicate projections.
+        """
+
+        settings = self._document("tablet")["settings"]
+        intercom = settings.get("intercom") if isinstance(settings, dict) else None
+        device_id = intercom.get("deviceId") if isinstance(intercom, dict) else None
+        if isinstance(device_id, str) and device_id.strip():
+            return frozenset({device_id.strip()})
+        return frozenset()
+
     async def async_replace_tablet(
         self, expected_revision: object, settings: object
     ) -> dict[str, object]:

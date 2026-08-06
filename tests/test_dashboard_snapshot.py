@@ -347,6 +347,57 @@ class DashboardSnapshotTest(unittest.TestCase):
         )
         self.assertEqual(2, snapshot["inventory"]["summary"]["virtualCount"])
 
+    def test_pinned_virtual_projection_stays_visible(self) -> None:
+        """A user-pinned device (tablet intercom) must survive virtual hiding."""
+
+        def build(pinned: tuple[str, ...]) -> dict[str, object]:
+            return build_dashboard_snapshot(
+                areas=(DashboardArea("entry", "Прихожая"),),
+                devices=(
+                    DashboardDevice(
+                        "intercom-device",
+                        "Домофон 2",
+                        "entry",
+                        "T-01",
+                        "TUYA INC.",
+                        integrations=("yandex_station",),
+                    ),
+                ),
+                entities=(
+                    DashboardEntity(
+                        "switch.entry_intercom",
+                        "switch",
+                        "off",
+                        "Домофон 2",
+                        {},
+                        "intercom-device",
+                        "entry",
+                    ),
+                ),
+                generated_at_ms=1,
+                local_iso="2026-08-06T20:00:00+03:00",
+                pinned_entity_ids=pinned,
+            )
+
+        hidden = build(())
+        self.assertEqual([], hidden["devices"])
+        self.assertEqual(
+            "virtual",
+            next(
+                device["kind"]
+                for device in hidden["inventory"]["devices"]
+                if device["name"] == "Домофон 2"
+            ),
+        )
+        shown = build(("switch.entry_intercom",))
+        self.assertEqual(["Домофон 2"], [device["name"] for device in shown["devices"]])
+        intercom = shown["devices"][0]
+        self.assertEqual("switch.entry_intercom", intercom["entityId"])
+        self.assertEqual("entry", intercom["roomId"])
+        self.assertFalse(intercom["unavailable"])
+        unrelated = build(("switch.some_other_device",))
+        self.assertEqual([], unrelated["devices"])
+
     def test_snapshot_is_read_only_and_filters_private_attributes(self) -> None:
         serialized = json.dumps(self.snapshot, ensure_ascii=False)
         self.assertNotIn("access_token", serialized)

@@ -580,6 +580,9 @@ class DashboardView(_ClimateView):
                 if isinstance(preferences, TabletPreferencesService)
                 else None,
                 climate_targets,
+                preferences.tablet_pinned_entity_ids
+                if isinstance(preferences, TabletPreferencesService)
+                else None,
             )
         except Exception:
             return self._unavailable()
@@ -651,6 +654,9 @@ class EnergyHistoryView(_ClimateView):
                 if isinstance(preferences, TabletPreferencesService)
                 else None,
                 climate_targets,
+                preferences.tablet_pinned_entity_ids
+                if isinstance(preferences, TabletPreferencesService)
+                else None,
             )
             payload = await async_energy_history(
                 self._hass,
