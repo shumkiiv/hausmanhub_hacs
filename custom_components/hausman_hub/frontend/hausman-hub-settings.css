@@ -3,7 +3,7 @@
   font-size:12px; font-weight:700; letter-spacing:.09em; text-transform:uppercase; }
 .settings-heading h2 { margin:0; font-size:30px; line-height:1.2; letter-spacing:-.025em; }
 .settings-heading .section-intro { margin:7px 0 0; font-size:16px; }
-.settings-subnav { display:flex; gap:6px; margin-bottom:22px; padding:6px; overflow-x:auto;
+.settings-subnav { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:22px; padding:6px;
   border:1px solid color-mix(in srgb,var(--hmh-border,#2F3845) 82%,transparent); border-radius:16px;
   background:color-mix(in srgb,var(--hmh-surface,#12171D) 82%,transparent); }
 .settings-subnav button { flex:1 0 auto; min-height:44px; margin:0; padding:9px 18px; border:1px solid transparent;
