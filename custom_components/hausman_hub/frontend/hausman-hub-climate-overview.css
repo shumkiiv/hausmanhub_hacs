@@ -24,7 +24,7 @@
 .climate-category-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
 button.climate-category-card { display:grid; grid-template-columns:52px minmax(0,1fr) auto; align-items:center; gap:13px; min-height:82px; margin:0; padding:14px;
   border:1px solid var(--hmh-border,#2F3845); border-radius:15px; color:var(--hmh-text,#E7ECF3); text-align:left;
-  background:var(--hmh-raised,#181E26); box-shadow:none; transition:border-color .18s ease,transform .18s ease,background .18s ease; }
+  background:var(--hmh-raised,#181E26); box-shadow:none; transition:border-color .18s ease,transform .18s ease; }
 button.climate-category-card:hover { transform:translateY(-1px); border-color:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 55%,var(--hmh-border,#2F3845));
   background:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 7%,var(--hmh-raised,#181E26)); }
 .climate-category-icon { display:grid; place-items:center; width:52px; height:52px; border-radius:14px; color:var(--hmh-accent,#4F8CFF);
