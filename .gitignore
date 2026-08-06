@@ -32,3 +32,4 @@ LLM_WIKI/Sessions/
 
 # Local agent plans and run state
 .omo/
+.codex-*.log
