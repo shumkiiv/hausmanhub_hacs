@@ -124,26 +124,49 @@ function renderDevicesCatalog(panel, container, devices, selected, deps) {
   heading.appendChild(search);
   section.appendChild(heading);
   const filtered = selected ? devices.filter((device) => deviceCatalogCategory(device) === selected) : devices;
-  const grid = el("div", "inventory-device-grid devices-canon-device-grid");
+  const byRoom = new Map();
   filtered.forEach((device) => {
-    const card = panel._deviceInventoryCard(device);
-    setAttr(card, "data-search", [device.name, device.roomName, device.manufacturer, device.model]
-      .filter(Boolean).join(" ").toLocaleLowerCase("ru"));
-    grid.appendChild(card);
+    const room = device.roomName || "Без комнаты";
+    if (!byRoom.has(room)) byRoom.set(room, []);
+    byRoom.get(room).push(device);
   });
+  const groups = [];
+  [...byRoom.entries()].sort(([left], [right]) => left.localeCompare(right, "ru"))
+    .forEach(([room, roomDevices]) => {
+      const group = el("div", "devices-canon-room");
+      const groupHead = el("div", "devices-canon-room-heading");
+      groupHead.appendChild(el("h4", null, room));
+      groupHead.appendChild(el("span", null, `${roomDevices.length} ${deviceWord(roomDevices.length)}`));
+      group.appendChild(groupHead);
+      const grid = el("div", "inventory-device-grid devices-canon-device-grid");
+      const cards = roomDevices.map((device) => {
+        const card = panel._deviceInventoryCard(device);
+        setAttr(card, "data-search", [device.name, device.roomName, device.manufacturer, device.model]
+          .filter(Boolean).join(" ").toLocaleLowerCase("ru"));
+        grid.appendChild(card);
+        return card;
+      });
+      group.appendChild(grid);
+      section.appendChild(group);
+      groups.push({ group, cards });
+    });
   const empty = el("p", "devices-canon-empty", "По этому запросу устройства не найдены.");
   empty.hidden = true;
   const applySearch = () => {
     const query = String(search.value || "").trim().toLocaleLowerCase("ru");
     let visible = 0;
-    Array.from(grid.children || []).forEach((card) => {
-      card.hidden = Boolean(query && !String(card.dataset.search || "").includes(query));
-      if (!card.hidden) visible += 1;
+    groups.forEach(({ group, cards }) => {
+      let groupVisible = 0;
+      cards.forEach((card) => {
+        card.hidden = Boolean(query && !String(card.dataset.search || "").includes(query));
+        if (!card.hidden) groupVisible += 1;
+      });
+      group.hidden = groupVisible === 0;
+      visible += groupVisible;
     });
     empty.hidden = visible !== 0;
   };
   search.addEventListener("input", applySearch);
-  section.appendChild(grid);
   section.appendChild(empty);
   container.appendChild(section);
 }
