@@ -1077,9 +1077,18 @@ class ClimateRuntime:
     ) -> ContourApplyReceipt:
         try:
             observation = await self._async_native_climate_observation_unlocked()
-        except ClimateRuntimeUnavailable:
+        except ClimateRuntimeUnavailable as error:
+            _LOGGER.warning(
+                "climate contour apply %s reobserve cannot observe: %s",
+                request_id,
+                type(error).__name__,
+            )
             return prior.receipt
         if observation.data_status is ClimateDataStatus.UNAVAILABLE:
+            _LOGGER.warning(
+                "climate contour apply %s reobserve observation is unavailable",
+                request_id,
+            )
             return prior.receipt
         verified = build_contour_apply_plan(
             contour,

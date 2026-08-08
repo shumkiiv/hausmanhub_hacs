@@ -1,5 +1,5 @@
-import { createHeroRoomNavigation } from "./hausman-hub-hero-room-navigation.js?v=1.52.52";
-import { overviewHeroRenderKey, stableOverviewHeroImage } from "./hausman-hub-overview-hero-state.js?v=1.52.52";
+import { createHeroRoomNavigation } from "./hausman-hub-hero-room-navigation.js?v=1.52.53";
+import { overviewHeroRenderKey, stableOverviewHeroImage } from "./hausman-hub-overview-hero-state.js?v=1.52.53";
 
 const CLIMATE_DOMAINS = new Set(["climate", "humidifier", "fan"]);
 
