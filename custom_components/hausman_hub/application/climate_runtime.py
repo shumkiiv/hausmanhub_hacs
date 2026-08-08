@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from datetime import datetime
+import logging
 import time
 from typing import Protocol
 
@@ -152,6 +153,8 @@ from .contour_apply import (
 
 _CLIMATE_READBACK_ATTEMPTS = 33
 _CLIMATE_READBACK_INTERVAL_SECONDS = 0.25
+
+_LOGGER = logging.getLogger(__name__)
 from .contour_override import (
     TemporaryTemperatureAction,
     TemporaryTemperatureViolation,
@@ -1089,6 +1092,11 @@ class ClimateRuntime:
                 confirmed_room_count=confirmed,
                 reasons=(),
             ).receipt
+        _LOGGER.warning(
+            "climate contour apply %s reobserve is not confirmed: %s",
+            request_id,
+            _contour_apply_diagnostics(verified),
+        )
         return self._contour_applications.update(
             request_id,
             status=prior.receipt.status,
@@ -1142,6 +1150,11 @@ class ClimateRuntime:
                 ).receipt
             if attempt + 1 < _CLIMATE_READBACK_ATTEMPTS:
                 await asyncio.sleep(_CLIMATE_READBACK_INTERVAL_SECONDS)
+        _LOGGER.warning(
+            "climate contour apply %s stayed unconfirmed after read-back: %s",
+            request_id,
+            _contour_apply_diagnostics(verified),
+        )
         return self._contour_applications.update(
             request_id,
             status=ContourApplyStatus.PENDING,
@@ -2182,6 +2195,42 @@ def _bounded_completed_count(value: object, maximum: int) -> int:
     if type(value) is int and 0 <= value <= maximum:
         return value
     return 0
+
+
+def _contour_apply_diagnostics(plan) -> dict[str, object]:
+    """Project gate and comparison facts for an unconfirmed apply log line."""
+
+    native = plan.native_plan
+    return {
+        "denials": [reason.value for reason in native.denial_reasons],
+        "aligned_rooms": list(native.initially_aligned_room_ids),
+        "gates": [
+            {
+                "room": gate.room_id,
+                "status": gate.status.value,
+                "reasons": [reason.value for reason in gate.reasons],
+            }
+            for gate in native.room_gates
+        ],
+        "comparison": [
+            {
+                "room": room.room_id,
+                "status": room.status.value,
+                "reasons": [reason.value for reason in room.reasons],
+                "devices": [
+                    {
+                        "id": device.device_id,
+                        "status": device.status.value,
+                        "reasons": [reason.value for reason in device.reasons],
+                        "planned": device.planned_action.value,
+                        "observed": device.observed_activity.value,
+                    }
+                    for device in room.devices
+                ],
+            }
+            for room in native.comparison.rooms
+        ],
+    }
 
 
 def _registry_preview_payload(
