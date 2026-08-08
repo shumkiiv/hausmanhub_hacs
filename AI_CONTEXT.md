@@ -1,9 +1,18 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-06 (read-only production climate audit tool prepared).
+Last updated: 2026-08-08 (1.52.48/1.52.49: room-scoped apply, TRV safe_off, last_reported freshness; гостиная в боевом режиме).
 
 ## Current work
 
+- 2026-08-08 (Kimi, по явному поручению владельца вместо Codex): выпущены и
+  задеплоены `1.52.48` (room-scoped contour apply через optional `room_ids`,
+  contracts 0.19.0) и `1.52.49` (stop-действие термоголовки переводится в
+  `climate.set_temperature` 10 °C; свежесть наблюдений по `last_reported`).
+  Гостиная: первый боевой apply исполнил 3/3 команды. Открытый backend-долг:
+  30-минутное окно freshness против устройств, которые не репортят без смены
+  состояния (SmartIR, deerma) — apply/reobserve проходят только в свежее окно
+  датчиков. Подробности: workspace `docs/migration/CURRENT_STATE.md`
+  (секция 2026-08-08) и `LLM_WIKI/Sessions/2026-08-08-kimi-living-room-managed-b.md`.
 - Read-only production climate audit tool is prepared on branch
   `codex/climate-production-audit`, stacked on `codex/climate-api-backend`:
   - `tools/audit_production_climate.py` performs HTTP GET requests only
