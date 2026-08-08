@@ -1,18 +1,24 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-08 (1.52.48/1.52.49: room-scoped apply, TRV safe_off, last_reported freshness; гостиная в боевом режиме).
+Last updated: 2026-08-08 (1.52.48-1.52.54: room-scoped apply, TRV safe_off, last_reported freshness, StrEnum hvac_action fix; гостиная подтверждена квитанцией confirmed).
 
 ## Current work
 
 - 2026-08-08 (Kimi, по явному поручению владельца вместо Codex): выпущены и
   задеплоены `1.52.48` (room-scoped contour apply через optional `room_ids`,
-  contracts 0.19.0) и `1.52.49` (stop-действие термоголовки переводится в
-  `climate.set_temperature` 10 °C; свежесть наблюдений по `last_reported`).
-  Гостиная: первый боевой apply исполнил 3/3 команды. Открытый backend-долг:
-  30-минутное окно freshness против устройств, которые не репортят без смены
-  состояния (SmartIR, deerma) — apply/reobserve проходят только в свежее окно
-  датчиков. Подробности: workspace `docs/migration/CURRENT_STATE.md`
-  (секция 2026-08-08) и `LLM_WIKI/Sessions/2026-08-08-kimi-living-room-managed-b.md`.
+  contracts 0.19.0), `1.52.49` (stop-действие термоголовки переводится в
+  `climate.set_temperature` 10 °C; свежесть наблюдений по `last_reported`),
+  `1.52.50` (`quiet=False` не лимит), `1.52.51`-`1.52.53` (диагностические
+  warning-логи apply) и `1.52.54` (фикс: `hvac_action` как StrEnum
+  `HVACAction` больше не выбрасывается фильтром атрибутов state view;
+  без него TRV в режиме `heat` всегда наблюдалась `heating`, квитанция не
+  подтверждалась, а managed-цикл дожимал план комнаты каждую минуту).
+  Гостиная: заявка `admin-gostinaia-managed-2026-08-08-07` завершилась
+  `confirmed`, комната aligned, лишние IR-команды прекращены. Открытый
+  backend-долг: 30-минутное окно freshness против устройств, которые не
+  репортят без смены состояния (SmartIR, deerma). Подробности: workspace
+  `docs/migration/CURRENT_STATE.md` (секция 2026-08-08) и
+  `LLM_WIKI/Sessions/2026-08-08-kimi-living-room-managed-b.md`.
 - Read-only production climate audit tool is prepared on branch
   `codex/climate-production-audit`, stacked on `codex/climate-api-backend`:
   - `tools/audit_production_climate.py` performs HTTP GET requests only
