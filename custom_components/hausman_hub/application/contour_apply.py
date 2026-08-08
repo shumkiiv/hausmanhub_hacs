@@ -423,14 +423,23 @@ class _ContourApplyLedger:
         return value
 
 
-def parse_contour_apply_request(payload: object) -> tuple[str, str]:
-    """Require one explicit, idempotent confirmation from UI or Android."""
+def parse_contour_apply_request(payload: object) -> tuple[str, str, tuple[str, ...] | None]:
+    """Require one explicit, idempotent confirmation from UI or Android.
+
+    An optional ``room_ids`` scope limits the application to the listed
+    configured rooms; without it the whole contour is applied.
+    """
 
     if not isinstance(payload, Mapping) or any(
         not isinstance(key, str) for key in payload
     ):
         raise ContourApplyViolation("contour apply request must be an object")
-    if set(payload) != {"request_id", "contour_id", "confirm"}:
+    if not {"request_id", "contour_id", "confirm"} <= set(payload) <= {
+        "request_id",
+        "contour_id",
+        "confirm",
+        "room_ids",
+    }:
         raise ContourApplyViolation("contour apply request fields are invalid")
     request_id = payload.get("request_id")
     contour_id = payload.get("contour_id")
@@ -440,7 +449,21 @@ def parse_contour_apply_request(payload: object) -> tuple[str, str]:
         raise ContourApplyViolation("only the climate contour can be applied")
     if payload.get("confirm") is not True:
         raise ContourApplyViolation("contour apply requires explicit confirmation")
-    return request_id, contour_id
+    room_ids = payload.get("room_ids")
+    if room_ids is None:
+        return request_id, contour_id, None
+    if (
+        not isinstance(room_ids, list)
+        or not room_ids
+        or len(room_ids) > 64
+        or any(
+            not isinstance(room_id, str) or _STABLE_ID.fullmatch(room_id) is None
+            for room_id in room_ids
+        )
+        or len(room_ids) != len(set(room_ids))
+    ):
+        raise ContourApplyViolation("contour apply room scope is invalid")
+    return request_id, contour_id, tuple(room_ids)
 
 
 def build_contour_apply_plan(

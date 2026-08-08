@@ -11,6 +11,17 @@
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"
     },
     "contour_id": {"const": "climate"},
-    "confirm": {"const": true}
+    "confirm": {"const": true},
+    "room_ids": {
+      "type": "array",
+      "description": "Optional room scope. When present, only the listed configured rooms are applied; when absent, the whole contour is applied.",
+      "minItems": 1,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+      }
+    }
   }
 }

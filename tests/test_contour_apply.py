@@ -421,7 +421,7 @@ class NativeClimateApplicationPlannerTest(unittest.TestCase):
 class ContourApplyRequestTest(unittest.TestCase):
     def test_request_requires_exact_explicit_confirmation(self) -> None:
         self.assertEqual(
-            ("android-1", "climate"),
+            ("android-1", "climate", None),
             parse_contour_apply_request(
                 {
                     "request_id": "android-1",
@@ -448,6 +448,38 @@ class ContourApplyRequestTest(unittest.TestCase):
                 ContourApplyViolation
             ):
                 parse_contour_apply_request(invalid)
+
+    def test_request_accepts_optional_room_scope(self) -> None:
+        self.assertEqual(
+            ("admin-1", "climate", ("living",)),
+            parse_contour_apply_request(
+                {
+                    "request_id": "admin-1",
+                    "contour_id": "climate",
+                    "confirm": True,
+                    "room_ids": ["living"],
+                }
+            ),
+        )
+        for invalid_scope in (
+            "living",
+            [],
+            ["living", "living"],
+            ["Living"],
+            ["living", 1],
+            ["living"] * 65,
+        ):
+            with self.subTest(room_ids=invalid_scope), self.assertRaises(
+                ContourApplyViolation
+            ):
+                parse_contour_apply_request(
+                    {
+                        "request_id": "admin-1",
+                        "contour_id": "climate",
+                        "confirm": True,
+                        "room_ids": invalid_scope,
+                    }
+                )
 
     def test_temporary_temperature_request_is_bounded_and_explicit(self) -> None:
         request = parse_temporary_temperature_request(

@@ -1,0 +1,6 @@
+{
+  "request_id": "admin-climate-room-0001",
+  "contour_id": "climate",
+  "confirm": true,
+  "room_ids": ["living"]
+}

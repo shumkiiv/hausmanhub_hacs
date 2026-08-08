@@ -817,6 +817,166 @@ class NativeApplicationRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertIs(applied.status, ContourApplyStatus.CONFIRMED)
         self.assertEqual(1, len(executor.calls))
 
+    def _two_room_apply_runtime(
+        self,
+    ) -> tuple[ClimateRuntime, ReflectingStrictExecutor]:
+        base_registry = native_registry(ClimateControlScope.MANAGED)
+        base_contours = native_contours()
+        base_contour = base_contours.contour("climate")
+        if base_contour is None:
+            raise AssertionError("native climate contour is unavailable")
+        kids_room = ClimateRoom(
+            "kids",
+            "Kids room",
+            window_entity_id="binary_sensor.kids_window",
+        )
+        kids_ac = ClimateDevice(
+            device_id="kids_ac",
+            name="Kids AC",
+            room_id="kids",
+            kind=ClimateDeviceKind.AIR_CONDITIONER,
+            source_id="synthetic-ac-source-kids",
+            control_scope=ClimateControlScope.CANARY,
+            control_owner=ClimateControlOwner.CLIMATE_CORE,
+            capabilities=(
+                ClimateCapability.POWER,
+                ClimateCapability.TARGET_TEMPERATURE,
+                ClimateCapability.HVAC_MODE,
+                ClimateCapability.FAN_MODE,
+            ),
+            endpoints=(
+                ClimateEndpoint(ClimateEndpointRole.CONTROL, "climate.kids_ac"),
+            ),
+        )
+        kids_temperature = ClimateDevice(
+            device_id="kids_temperature",
+            name="Kids temperature",
+            room_id="kids",
+            kind=ClimateDeviceKind.TEMPERATURE_SENSOR,
+            source_id="synthetic-temperature-source-kids",
+            control_scope=ClimateControlScope.OBSERVED,
+            control_owner=ClimateControlOwner.OBSERVED,
+            capabilities=(),
+            endpoints=(
+                ClimateEndpoint(
+                    ClimateEndpointRole.TEMPERATURE,
+                    "sensor.kids_temperature",
+                ),
+            ),
+        )
+        registry = ClimateRegistry(
+            rooms=(*base_registry.rooms, kids_room),
+            devices=(*base_registry.devices, kids_ac, kids_temperature),
+        )
+        kids_contour_room = ClimateContourRoom(
+            room_id="kids",
+            device_ids=("kids_ac", "kids_temperature"),
+            day_profile=base_contour.rooms[0].day_profile,
+            night_profile=base_contour.rooms[0].night_profile,
+            active_profile=ClimateProfile.DAY,
+        )
+        contours = replace(
+            base_contours,
+            contours=(
+                replace(
+                    base_contour,
+                    rooms=(*base_contour.rooms, kids_contour_room),
+                ),
+            ),
+        )
+        states = safe_stop_states()
+        states.update(
+            {
+                "climate.kids_ac": ha_state("climate.kids_ac", "cool"),
+                "sensor.kids_temperature": ha_state(
+                    "sensor.kids_temperature", "24.0"
+                ),
+                "binary_sensor.kids_window": ha_state(
+                    "binary_sensor.kids_window", "off"
+                ),
+            }
+        )
+        view = MutableStateView(states)
+        executor = ReflectingStrictExecutor(view)
+        instance = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateControlMode.MANAGED),
+            registry_store=MemoryStore(registry),
+            contour_store=MemoryStore(contours),
+            strict_ha_call_executor=executor,
+            ha_state_view=view,
+            now_ms=lambda: NOW,
+            local_now=lambda: datetime(2026, 7, 19, 12, 0),
+        )
+        return instance, executor
+
+    async def test_room_scoped_apply_skips_unmanaged_rooms(self) -> None:
+        instance, executor = self._two_room_apply_runtime()
+        await instance.async_start()
+
+        blocked = await instance.async_apply_contour(
+            {
+                "request_id": "native-apply-all-denied",
+                "contour_id": "climate",
+                "confirm": True,
+            }
+        )
+        self.assertIs(blocked.status, ContourApplyStatus.UNAVAILABLE)
+        self.assertEqual(("engine_rejected",), blocked.reasons)
+        self.assertEqual(0, blocked.command_count)
+        self.assertEqual([], executor.calls)
+
+        receipt = await instance.async_apply_contour(
+            {
+                "request_id": "native-apply-living-only",
+                "contour_id": "climate",
+                "confirm": True,
+                "room_ids": ["living"],
+            }
+        )
+
+        self.assertIs(receipt.status, ContourApplyStatus.CONFIRMED)
+        self.assertEqual(1, receipt.room_count)
+        self.assertEqual(1, receipt.command_count)
+        self.assertEqual(receipt.command_count, receipt.accepted_count)
+        self.assertEqual(1, len(executor.calls))
+        self.assertTrue(
+            all(call.entity_id.startswith("climate.living") for call in executor.calls[0])
+        )
+
+    async def test_room_scoped_apply_rejects_unknown_and_conflicting_scope(self) -> None:
+        instance, executor = self._two_room_apply_runtime()
+        await instance.async_start()
+
+        with self.assertRaises(ContourApplyViolation):
+            await instance.async_apply_contour(
+                {
+                    "request_id": "native-apply-unknown-room",
+                    "contour_id": "climate",
+                    "confirm": True,
+                    "room_ids": ["attic"],
+                }
+            )
+
+        first = await instance.async_apply_contour(
+            {
+                "request_id": "native-apply-scope-idem",
+                "contour_id": "climate",
+                "confirm": True,
+                "room_ids": ["living"],
+            }
+        )
+        self.assertIs(first.status, ContourApplyStatus.CONFIRMED)
+        with self.assertRaises(ContourApplyViolation):
+            await instance.async_apply_contour(
+                {
+                    "request_id": "native-apply-scope-idem",
+                    "contour_id": "climate",
+                    "confirm": True,
+                }
+            )
+        self.assertEqual(1, len(executor.calls))
+
     async def test_schedule_uses_native_application_without_the_poison_bridge(
         self,
     ) -> None:

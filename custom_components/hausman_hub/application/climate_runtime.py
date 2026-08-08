@@ -729,7 +729,7 @@ class ClimateRuntime:
     async def async_apply_contour(self, payload: object) -> ContourApplyReceipt:
         """Idempotently apply three supported settings after explicit consent."""
 
-        request_id, contour_id = parse_contour_apply_request(payload)
+        request_id, contour_id, room_scope = parse_contour_apply_request(payload)
         async with self._lock:
             self._require_native_contour_apply_mode()
             return await self._async_apply_native_contour_unlocked(
@@ -738,6 +738,7 @@ class ClimateRuntime:
                 context=ClimateControlContext(
                     action=ClimateControlAction.APPLY_SAVED_SETTINGS,
                 ),
+                room_ids=room_scope,
                 desired_state_changes=ClimateDesiredStateChanges(0, 0, 0),
             )
 
