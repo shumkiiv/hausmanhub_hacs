@@ -97,7 +97,9 @@ def _translate_device(
         limits.append(ClimateHaCallLimit.HOLD_STATE)
     else:
         calls = _service_calls(device, plan, limits, ir_code_service=ir_code_service)
-    if plan.quiet is not None and not any(
+    # quiet=False is the absence of a quiet requirement, not a request;
+    # only an explicit quiet=True that cannot be expressed limits the plan.
+    if plan.quiet and not any(
         call.service is ClimateHaService.REMOTE_SEND_COMMAND for call in calls
     ):
         limits.append(ClimateHaCallLimit.QUIET_NOT_TRANSLATED)

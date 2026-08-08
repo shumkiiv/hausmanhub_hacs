@@ -264,10 +264,7 @@ class ClimateHaAdapterTest(unittest.TestCase):
         plan = build_climate_ha_call_plan(registry, isolation)
 
         (device,) = plan.room("living").devices  # type: ignore[union-attr]
-        self.assertEqual(
-            (ClimateHaCallLimit.QUIET_NOT_TRANSLATED,),
-            device.limits,
-        )
+        self.assertEqual((), device.limits)
         services = tuple(call.service for call in device.calls)
         self.assertEqual(
             (
@@ -316,10 +313,7 @@ class ClimateHaAdapterTest(unittest.TestCase):
         (device,) = plan.room("living").devices  # type: ignore[union-attr]
         self.assertEqual((), device.calls)
         self.assertEqual(
-            (
-                ClimateHaCallLimit.MISSING_CAPABILITY,
-                ClimateHaCallLimit.QUIET_NOT_TRANSLATED,
-            ),
+            (ClimateHaCallLimit.MISSING_CAPABILITY,),
             device.limits,
         )
 

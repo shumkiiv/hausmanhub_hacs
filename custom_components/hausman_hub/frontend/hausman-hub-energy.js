@@ -1,5 +1,5 @@
-import { renderEnergyHistoryChart } from "./hausman-hub-energy-chart.js?v=1.52.49";
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.49";
+import { renderEnergyHistoryChart } from "./hausman-hub-energy-chart.js?v=1.52.50";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.50";
 
 const number = (value, digits = 1) => Number.isFinite(Number(value))
   ? new Intl.NumberFormat("ru-RU", { maximumFractionDigits: digits }).format(Number(value))

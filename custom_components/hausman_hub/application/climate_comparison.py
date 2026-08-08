@@ -342,7 +342,9 @@ def _compare_settings(
         (plan.quiet, observed.quiet),
     )
     for planned, current in pairs:
-        if planned is None:
+        # None means no planned preference; False (quiet) means the same:
+        # only an explicit truthy requirement limits the comparison.
+        if planned is None or planned is False:
             continue
         if current is None:
             reasons.append(ClimateComparisonReason.DEVICE_SETTING_UNOBSERVED)
