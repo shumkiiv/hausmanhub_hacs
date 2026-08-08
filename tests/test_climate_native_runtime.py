@@ -1848,6 +1848,28 @@ class HomeAssistantStateViewTest(unittest.TestCase):
         )
         self.assertEqual(NOW, state.last_updated_ms)
 
+    def test_view_keeps_enum_hvac_action_values(self) -> None:
+        from enum import StrEnum
+
+        class _HvacAction(StrEnum):
+            IDLE = "idle"
+
+        hass = _FakeHass(
+            {
+                "climate.living_trv": _FakeState(
+                    "heat",
+                    {"hvac_action": _HvacAction.IDLE},
+                ),
+            }
+        )
+        view = HomeAssistantClimateStateView(hass)  # type: ignore[arg-type]
+
+        state = view.entity_state("climate.living_trv")
+
+        self.assertIsNotNone(state)
+        assert state is not None
+        self.assertEqual("idle", state.attributes["hvac_action"])
+
     def test_view_prefers_last_reported_over_last_updated(self) -> None:
         hass = _FakeHass(
             {

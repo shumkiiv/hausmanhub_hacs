@@ -64,11 +64,14 @@ class HomeAssistantClimateStateView:
         state = self._hass.states.get(entity_id)
         if state is None or len(state.state) > MAX_STATE_LENGTH:
             return None
+        # isinstance, not an exact-type check: HA stores StrEnum values such as
+        # HVACAction in state attributes. An exact-type check silently drops
+        # hvac_action, and an idle radiator thermostat then misreads as heating.
         attributes = {
             key: value
             for key, value in state.attributes.items()
             if key in _OBSERVED_ATTRIBUTES
-            and type(value) in {str, int, float, bool}
+            and isinstance(value, (str, int, float, bool))
         }
         # Prefer last_reported (HA 2023.9+): sensors that periodically report an
         # unchanged value stay fresh, while a dead device stops reporting at all.
