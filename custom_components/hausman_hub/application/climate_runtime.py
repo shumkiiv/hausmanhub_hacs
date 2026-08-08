@@ -1006,6 +1006,12 @@ class ClimateRuntime:
         )
         record = self._contour_applications.begin(request_id, plan, context)
         if not plan.native_plan.preflight_permitted or not plan.strict_calls:
+            if not plan.native_plan.preflight_permitted:
+                _LOGGER.warning(
+                    "climate contour apply %s rejected by gates: %s",
+                    request_id,
+                    _contour_apply_diagnostics(plan),
+                )
             return record.receipt
 
         if self._strict_ha_call_executor is None:
