@@ -1779,9 +1779,20 @@ class _FakeState:
         self.last_updated = _FakeTimestamp()
 
 
+class _FakeReportedState(_FakeState):
+    def __init__(self, state: str, attributes: dict[str, object]) -> None:
+        super().__init__(state, attributes)
+        self.last_reported = _FakeReportedTimestamp()
+
+
 class _FakeTimestamp:
     def timestamp(self) -> float:
         return NOW / 1000
+
+
+class _FakeReportedTimestamp:
+    def timestamp(self) -> float:
+        return (NOW + 60_000) / 1000
 
 
 class _FakeStates:
@@ -1836,6 +1847,23 @@ class HomeAssistantStateViewTest(unittest.TestCase):
             dict(state.attributes),
         )
         self.assertEqual(NOW, state.last_updated_ms)
+
+    def test_view_prefers_last_reported_over_last_updated(self) -> None:
+        hass = _FakeHass(
+            {
+                "sensor.living_temperature": _FakeReportedState(
+                    "24.8",
+                    {"humidity": 52},
+                ),
+            }
+        )
+        view = HomeAssistantClimateStateView(hass)  # type: ignore[arg-type]
+
+        state = view.entity_state("sensor.living_temperature")
+
+        self.assertIsNotNone(state)
+        assert state is not None
+        self.assertEqual(NOW + 60_000, state.last_updated_ms)
 
     def test_missing_and_oversized_states_stay_unobserved(self) -> None:
         hass = _FakeHass(

@@ -9,6 +9,7 @@ from ..domain.climate import (
     ClimateEndpointRole,
     ClimateRegistry,
 )
+from ..domain.climate_equipment import CLIMATE_TRV_SAFE_OFF_TARGET
 from ..domain.climate_ha_calls import (
     ClimateHaCallLimit,
     ClimateHaCallPlanSnapshot,
@@ -155,6 +156,20 @@ def _service_calls(
             ),
         )
     calls: list[ClimateHaServiceCall] = []
+    if (
+        device.kind is ClimateDeviceKind.RADIATOR_THERMOSTAT
+        and plan.action in _STOP_ACTIONS
+    ):
+        # A TRV has no power relay; driving its setpoint to the frost-protection
+        # minimum closes the valve, which is the safe-off state.
+        calls.append(
+            ClimateHaServiceCall(
+                service=ClimateHaService.CLIMATE_SET_TEMPERATURE,
+                entity_id=entity_id,
+                temperature=CLIMATE_TRV_SAFE_OFF_TARGET,
+            )
+        )
+        return tuple(calls)
     if plan.action in _STOP_ACTIONS:
         calls.append(
             ClimateHaServiceCall(
@@ -209,6 +224,8 @@ def _required_capabilities(
             return frozenset({ClimateCapability.POWER})
         return None
     if action in _STOP_ACTIONS:
+        if kind is ClimateDeviceKind.RADIATOR_THERMOSTAT:
+            return frozenset({ClimateCapability.TARGET_TEMPERATURE})
         if kind in {
             ClimateDeviceKind.AIR_CONDITIONER,
             ClimateDeviceKind.FLOOR_HEATING,

@@ -44,6 +44,7 @@ from custom_components.hausman_hub.domain.climate_observation import (
     ClimateWindowState,
 )
 from custom_components.hausman_hub.domain.climate_policy import (
+    ClimateFinalDeviceAction,
     resolve_climate_room_policy,
 )
 from custom_components.hausman_hub.domain.climate_resolution import (
@@ -620,6 +621,54 @@ class ClimateHaAdapterTest(unittest.TestCase):
         (call,) = device.calls
         self.assertIs(call.service, ClimateHaService.CLIMATE_SET_TEMPERATURE)
         self.assertEqual(19.5, call.temperature)
+        self.assertEqual("climate.reference_trv", call.entity_id)
+        self.assertEqual((), device.limits)
+
+    def test_thermostat_safe_off_translates_to_frost_protection_setpoint(self) -> None:
+        policy = climate_reference_policy("heating_off_leaves_trv_untouched")
+        registry = ClimateRegistry(
+            rooms=(ClimateRoom(room_id="reference_room", name="Эталон"),),
+            devices=(
+                ClimateDevice(
+                    device_id="reference_radiator_thermostat",
+                    name="TRV",
+                    room_id="reference_room",
+                    kind=ClimateDeviceKind.RADIATOR_THERMOSTAT,
+                    source_id="reference-trv-source",
+                    control_scope=ClimateControlScope.MANAGED,
+                    control_owner=ClimateControlOwner.CLIMATE_CORE,
+                    capabilities=(ClimateCapability.TARGET_TEMPERATURE,),
+                    endpoints=(
+                        ClimateEndpoint(
+                            ClimateEndpointRole.CONTROL,
+                            "climate.reference_trv",
+                        ),
+                    ),
+                ),
+            ),
+        )
+        isolation = ClimateIsolationSnapshot(
+            contour_id="climate",
+            contour_mode=ContourMode.AUTOMATIC,
+            observed_at=policy.observed_at,
+            rooms=(
+                ClimateIsolatedRoomResult(
+                    room_id="reference_room",
+                    status=ClimateRoomIsolationStatus.READY,
+                    reasons=(),
+                    failed_device_ids=(),
+                    policy=policy,
+                ),
+            ),
+        )
+
+        plan = build_climate_ha_call_plan(registry, isolation)
+
+        (device,) = plan.room("reference_room").devices  # type: ignore[union-attr]
+        self.assertIs(ClimateFinalDeviceAction.SAFE_OFF, device.action)
+        (call,) = device.calls
+        self.assertIs(call.service, ClimateHaService.CLIMATE_SET_TEMPERATURE)
+        self.assertEqual(10.0, call.temperature)
         self.assertEqual("climate.reference_trv", call.entity_id)
         self.assertEqual((), device.limits)
 
