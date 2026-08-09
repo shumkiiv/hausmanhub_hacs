@@ -1,9 +1,15 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-08 (1.52.48-1.52.54: room-scoped apply, TRV safe_off, last_reported freshness, StrEnum hvac_action fix; гостиная подтверждена квитанцией confirmed).
+Last updated: 2026-08-09 (1.52.48-1.52.55: room-scoped apply, TRV safe_off, StrEnum hvac_action fix, 3-часовое окно свежести комнатных датчиков; гостиная подтверждена квитанцией confirmed).
 
 ## Current work
 
+- 2026-08-09 (Kimi): выпущена и задеплоена `1.52.55` — у комнатных датчиков
+  температуры/влажности своё окно свежести 3 часа
+  (`MAX_ROOM_SENSOR_STATE_AGE_MS`); пассивные zigbee-датчики с провалами
+  репортов больше не роняют комнату в `stale` и не блокируют apply/reobserve.
+  Backend-долг freshness закрыт. Внутреннее расписание термоголовки гостиной
+  отключено в z2m (все дни плоские 16 °C) по решению владельца.
 - 2026-08-08 (Kimi, по явному поручению владельца вместо Codex): выпущены и
   задеплоены `1.52.48` (room-scoped contour apply через optional `room_ids`,
   contracts 0.19.0), `1.52.49` (stop-действие термоголовки переводится в
@@ -14,10 +20,8 @@ Last updated: 2026-08-08 (1.52.48-1.52.54: room-scoped apply, TRV safe_off, last
   без него TRV в режиме `heat` всегда наблюдалась `heating`, квитанция не
   подтверждалась, а managed-цикл дожимал план комнаты каждую минуту).
   Гостиная: заявка `admin-gostinaia-managed-2026-08-08-07` завершилась
-  `confirmed`, комната aligned, лишние IR-команды прекращены. Открытый
-  backend-долг: 30-минутное окно freshness против устройств, которые не
-  репортят без смены состояния (SmartIR, deerma). Подробности: workspace
-  `docs/migration/CURRENT_STATE.md` (секция 2026-08-08) и
+  `confirmed`, комната aligned, лишние IR-команды прекращены. Подробности:
+  workspace `docs/migration/CURRENT_STATE.md` (секция 2026-08-08) и
   `LLM_WIKI/Sessions/2026-08-08-kimi-living-room-managed-b.md`.
 - Read-only production climate audit tool is prepared on branch
   `codex/climate-production-audit`, stacked on `codex/climate-api-backend`:
