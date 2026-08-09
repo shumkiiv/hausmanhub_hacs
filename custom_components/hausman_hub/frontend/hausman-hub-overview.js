@@ -172,8 +172,8 @@ function renderPrimaryCards(panel, container, dashboard, deps) {
   const comfortCard = cardButton(deps, "overview-canon-primary-card is-comfort", "climate", panel);
   const deviations = rooms.map((room) => validNumber(room.temp) && validNumber(room.targetTemp)
     ? Math.abs(Number(room.temp) - Number(room.targetTemp)) : null).filter(Number.isFinite);
-  const stable = deviations.length && Math.max(...deviations) <= 1;
-  appendMetric(deps, comfortCard, "Комфорт в доме", stable ? "В норме" : (deviations.length ? "Выравнивается" : "Нет данных"),
+  const stable = deviations.length && Math.max(...deviations) <= 1.5;
+  appendMetric(deps, comfortCard, "Комфорт в доме", stable ? "В порядке" : (deviations.length ? "Выравнивается" : "Нет данных"),
     stable ? "Температура близка к целям комнат" : "Откройте климат для подробностей");
   row.appendChild(comfortCard);
   container.appendChild(row);
