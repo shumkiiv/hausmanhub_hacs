@@ -17,7 +17,7 @@
 .overview-canon-state.is-ready::before, .overview-canon-state.is-attention::before { content:""; display:inline-block; width:8px; height:8px; margin-right:8px; border-radius:50%; background:var(--hmh-status-success); }
 .overview-canon-state.is-attention::before { background:var(--hmh-status-warning); }
 .overview-canon-room-navigation { position:absolute; z-index:2; inset:auto 12px 12px; display:grid; grid-template-columns:42px minmax(0,1fr) 42px; align-items:center; gap:6px; min-width:0; padding:7px; border:1px solid rgba(230,234,242,.14); border-radius:14px; background:rgba(11,15,20,.72); backdrop-filter:blur(18px); }
-.overview-canon-room-strip { display:flex; gap:7px; min-width:0; overflow-x:auto; scrollbar-width:none; scroll-behavior:smooth; }
+.overview-canon-room-strip { display:flex; gap:7px; min-width:0; overflow-x:auto; scrollbar-width:none; scroll-behavior:smooth; padding:12px 2px; margin:-12px -2px; }
 .overview-canon-room-strip::-webkit-scrollbar { display:none; width:0; height:0; }
 .overview-canon-room-arrow { display:grid; place-items:center; width:42px; min-width:42px; height:40px; min-height:40px; margin:0; padding:0; border:1px solid rgba(230,234,242,.16); border-radius:11px; color:#E6EAF2; background:rgba(18,23,29,.82); box-shadow:none; }
 .overview-canon-room-arrow:hover { border-color:rgba(79,140,255,.72); background:rgba(79,140,255,.18); }
