@@ -137,6 +137,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         scenario_store,
         scenario_catalog,
         catalog_loader=lambda: async_build_scenario_catalog(hass),
+        intercom_entity_resolver=lambda: next(
+            iter(tablet_preferences_service.tablet_pinned_entity_ids), None
+        ),
     )
     await scenario_service.async_load()
     scenario_executor = ScenarioExecutor(

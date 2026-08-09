@@ -279,7 +279,10 @@ def clear_climate_api(hass: HomeAssistant, entry_id: str) -> None:
     if runtime is not None and runtime.entry_id == entry_id:
         data.pop(DATA_CLIMATE_RUNTIME, None)
         data.pop(DATA_AI_ASSISTANT, None)
-        data.pop("scenario_service", None)
+        scenario_service = data.pop("scenario_service", None)
+        cancel_release = getattr(scenario_service, "cancel_intercom_release", None)
+        if callable(cancel_release):
+            cancel_release(turn_off_now=True)
         data.pop("ir_code_service", None)
         data.pop("settings_service", None)
         data.pop("tablet_preferences_service", None)

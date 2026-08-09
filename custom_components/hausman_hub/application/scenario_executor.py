@@ -580,6 +580,11 @@ class ScenarioExecutor:
             raise RuntimeError("Home Assistant async_call is not available")
         await call(domain, service, service_data, blocking=True)
 
+    async def async_release_intercom_switch(self, entity_id: str) -> None:
+        """Return the intercom relay to off after the hold window."""
+
+        await self._call_service("switch", "turn_off", {"entity_id": entity_id})
+
 
 def _device_action_confirmed(state: object, action_id: str, value: object | None) -> bool:
     """Compare one post-call state with the requested semantic action."""

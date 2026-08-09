@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import unittest
 from typing import Any
 
@@ -256,6 +257,151 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ScenarioServiceError) as ctx:
             await self.service.async_run_scenario("scenario_1")
         self.assertEqual(ctx.exception.status, 500)
+
+
+class _FakeHass:
+    def __init__(self) -> None:
+        self.created_tasks: list[asyncio.Task[Any]] = []
+
+    def async_create_task(self, coro: Any) -> asyncio.Task[Any]:
+        task = asyncio.ensure_future(coro)
+        self.created_tasks.append(task)
+        return task
+
+
+class _FakeReleaseExecutor:
+    def __init__(self) -> None:
+        self.releases: list[str] = []
+
+    async def async_release_intercom_switch(self, entity_id: str) -> None:
+        self.releases.append(entity_id)
+
+
+class _FakeCallLater:
+    def __init__(self) -> None:
+        self.calls: list[tuple[float, Any]] = []
+        self.cancelled = 0
+
+    def __call__(self, hass: Any, delay: float, callback: Any) -> Any:
+        self.calls.append((delay, callback))
+
+        def cancel() -> None:
+            self.cancelled += 1
+
+        return cancel
+
+
+def _intercom_catalog() -> ScenarioCatalog:
+    entry = ScenarioDeviceEntry(
+        target_id="intercom_target",
+        name="Домофон",
+        entity_id="switch.prikhozhaia_domofon_2",
+        actions=(
+            ScenarioDeviceAction(
+                action_id="turn_on",
+                title="Open",
+                domain="switch",
+                service="turn_on",
+                allowed_fields=frozenset(),
+            ),
+        ),
+    )
+    return ScenarioCatalog(devices={"intercom_target": entry}, scenarios={})
+
+
+class ScenarioServiceIntercomReleaseTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.hass = _FakeHass()
+        self.call_later = _FakeCallLater()
+        self.executor = _FakeReleaseExecutor()
+        self.service = ScenarioService(
+            self.hass,
+            _FakeStore(),
+            _intercom_catalog(),
+            self.executor,
+            intercom_entity_resolver=lambda: "switch.prikhozhaia_domofon_2",
+            call_later=self.call_later,
+        )
+
+    async def test_release_scheduled_and_fires_turn_off(self) -> None:
+        seconds = await self.service.async_schedule_intercom_release(
+            "intercom_target", "turn_on"
+        )
+        self.assertEqual(seconds, 15)
+        self.assertEqual(len(self.call_later.calls), 1)
+        delay, callback = self.call_later.calls[0]
+        self.assertEqual(delay, 15)
+        await callback(None)
+        self.assertEqual(self.executor.releases, ["switch.prikhozhaia_domofon_2"])
+
+    async def test_release_skips_unrelated_target(self) -> None:
+        self.assertIsNone(
+            await self.service.async_schedule_intercom_release("device_abc", "turn_on")
+        )
+        self.assertEqual(self.call_later.calls, [])
+
+    async def test_release_skips_non_turn_on_action(self) -> None:
+        self.assertIsNone(
+            await self.service.async_schedule_intercom_release(
+                "intercom_target", "turn_off"
+            )
+        )
+        self.assertEqual(self.call_later.calls, [])
+
+    async def test_release_matches_configured_target_id(self) -> None:
+        service = ScenarioService(
+            self.hass,
+            _FakeStore(),
+            _intercom_catalog(),
+            self.executor,
+            intercom_entity_resolver=lambda: "intercom_target",
+            call_later=self.call_later,
+        )
+        seconds = await service.async_schedule_intercom_release(
+            "intercom_target", "turn_on"
+        )
+        self.assertEqual(seconds, 15)
+
+    async def test_repeat_press_extends_hold(self) -> None:
+        await self.service.async_schedule_intercom_release("intercom_target", "turn_on")
+        await self.service.async_schedule_intercom_release("intercom_target", "turn_on")
+        self.assertEqual(self.call_later.cancelled, 1)
+        self.assertEqual(len(self.call_later.calls), 2)
+
+    async def test_cancel_release_turns_off_now(self) -> None:
+        await self.service.async_schedule_intercom_release("intercom_target", "turn_on")
+        self.service.cancel_intercom_release(turn_off_now=True)
+        self.assertEqual(self.call_later.cancelled, 1)
+        await asyncio.gather(*self.hass.created_tasks)
+        self.assertEqual(self.executor.releases, ["switch.prikhozhaia_domofon_2"])
+
+    async def test_cancel_without_turn_off_keeps_executor_quiet(self) -> None:
+        await self.service.async_schedule_intercom_release("intercom_target", "turn_on")
+        self.service.cancel_intercom_release()
+        self.assertEqual(self.call_later.cancelled, 1)
+        self.assertEqual(self.executor.releases, [])
+
+    async def test_no_resolver_no_release(self) -> None:
+        service = ScenarioService(self.hass, _FakeStore(), _intercom_catalog())
+        self.assertIsNone(
+            await service.async_schedule_intercom_release("intercom_target", "turn_on")
+        )
+
+    async def test_release_without_executor_is_skipped_safely(self) -> None:
+        service = ScenarioService(
+            self.hass,
+            _FakeStore(),
+            _intercom_catalog(),
+            intercom_entity_resolver=lambda: "switch.prikhozhaia_domofon_2",
+            call_later=self.call_later,
+        )
+        seconds = await service.async_schedule_intercom_release(
+            "intercom_target", "turn_on"
+        )
+        self.assertEqual(seconds, 15)
+        _, callback = self.call_later.calls[0]
+        await callback(None)
+        self.assertEqual(self.executor.releases, [])
 
 
 if __name__ == "__main__":

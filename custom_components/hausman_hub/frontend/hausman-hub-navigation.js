@@ -210,6 +210,11 @@ function intercomDeviceId(device) {
   return String(device?.id || device?.deviceId || device?.physicalId || device?.entityId || "");
 }
 
+function intercomDeviceIds(device) {
+  return [device?.id, device?.deviceId, device?.physicalId, device?.entityId]
+    .filter(Boolean).map((value) => String(value));
+}
+
 function intercomIdentity(value) {
   return String(value || "").trim().toLocaleLowerCase("ru");
 }
@@ -244,7 +249,7 @@ export function resolveIntercomQuickAction(devices, catalog, configuredDeviceId 
   const homeDevices = Array.isArray(devices) ? devices : [];
   const configuredId = String(configuredDeviceId || "");
   const device = homeDevices.find((candidate) => {
-    if (configuredDeviceId) return intercomDeviceId(candidate) === String(configuredDeviceId);
+    if (configuredDeviceId) return intercomDeviceIds(candidate).includes(configuredId);
     const details = Array.isArray(candidate.details) ? candidate.details : [];
     const identity = intercomIdentity([
       candidate.name, candidate.entityId, candidate.physicalId, candidate.model,

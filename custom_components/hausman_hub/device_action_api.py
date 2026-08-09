@@ -15,6 +15,7 @@ from .climate_api import (
     NO_STORE_HEADERS,
     _forbidden,
     _is_exact_request,
+    _is_local_admin_request,
     _is_local_tablet_request,
     _not_found,
     _request_json,
@@ -40,7 +41,9 @@ class DeviceActionView(HomeAssistantView):
     async def post(self, request: Any) -> Any:
         if not _is_exact_request(request, DEVICE_ACTIONS_PATH):
             return _not_found(self)
-        if not _is_local_tablet_request(request):
+        if not (
+            _is_local_tablet_request(request) or _is_local_admin_request(request)
+        ):
             return _forbidden(self)
         service = self._hass.data.get(DOMAIN, {}).get("scenario_service")
         if not isinstance(service, ScenarioService):
@@ -82,6 +85,11 @@ class DeviceActionView(HomeAssistantView):
             action_id,
             payload.get("value"),
         )
+        release_seconds = None
+        if result.get("accepted") is True:
+            release_seconds = await service.async_schedule_intercom_release(
+                target_id, action_id
+            )
         response = {
             "contract": {
                 "name": "hausman-hub-device-action-receipt",
@@ -89,6 +97,8 @@ class DeviceActionView(HomeAssistantView):
             },
             **result,
         }
+        if release_seconds is not None:
+            response["autoReleaseSeconds"] = release_seconds
         publish_command_receipt(self._hass, response, operation="device_action")
         return self.json(
             response,

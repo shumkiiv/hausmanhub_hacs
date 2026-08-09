@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
@@ -20,6 +21,18 @@ from ..domain.scenarios import (
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
+
+_LOGGER = logging.getLogger(__name__)
+
+INTERCOM_RELEASE_SECONDS = 15
+
+
+def _default_call_later(
+    hass: HomeAssistant, delay: float, callback: Callable[[Any], Awaitable[None]]
+) -> Callable[[], None]:
+    from homeassistant.helpers.event import async_call_later  # noqa: PLC0415
+
+    return async_call_later(hass, delay, callback)
 
 
 def _str_or_default(payload: dict[str, Any], key: str, default: str) -> str:
@@ -74,12 +87,21 @@ class ScenarioService:
         catalog: ScenarioCatalog,
         executor: object | None = None,
         catalog_loader: Callable[[], Awaitable[ScenarioCatalog]] | None = None,
+        intercom_entity_resolver: Callable[[], str | None] | None = None,
+        call_later: Callable[
+            [HomeAssistant, float, Callable[[Any], Awaitable[None]]],
+            Callable[[], None],
+        ] | None = None,
     ):
         self._hass = hass
         self._store = store
         self._catalog = catalog
         self._executor = executor
         self._catalog_loader = catalog_loader
+        self._intercom_entity_resolver = intercom_entity_resolver
+        self._call_later = call_later or _default_call_later
+        self._intercom_release_cancel: Callable[[], None] | None = None
+        self._intercom_release_entity: str | None = None
         self._registry: ScenarioRegistry | None = None
         self._lock = asyncio.Lock()
 
@@ -365,3 +387,71 @@ class ScenarioService:
             action_id,
             value,
         )
+
+    async def async_schedule_intercom_release(
+        self,
+        target_id: str,
+        action_id: str,
+    ) -> int | None:
+        """Hold the intercom relay open, then always return it to off.
+
+        The door strike must be energised only for a short pulse. A repeated
+        press extends the hold, exactly like the retired Node-RED flow did.
+        Returns the hold length in seconds when a release was scheduled.
+        """
+
+        if action_id != "turn_on" or self._intercom_entity_resolver is None:
+            return None
+        configured = self._intercom_entity_resolver()
+        if not configured:
+            return None
+        device = self._catalog.device(target_id)
+        entity_id = getattr(device, "entity_id", None)
+        if not entity_id or not entity_id.startswith("switch."):
+            return None
+        if configured not in {entity_id, target_id}:
+            return None
+        self._cancel_intercom_release()
+        self._intercom_release_entity = entity_id
+
+        async def _async_release(_now: Any) -> None:
+            self._intercom_release_cancel = None
+            self._intercom_release_entity = None
+            release = self._intercom_release_callable()
+            if release is None:
+                _LOGGER.warning(
+                    "intercom release for %s skipped: executor is not configured",
+                    entity_id,
+                )
+                return
+            try:
+                await release(entity_id)
+            except Exception:  # noqa: BLE001
+                _LOGGER.warning(
+                    "intercom release turn_off failed for %s", entity_id, exc_info=True
+                )
+
+        self._intercom_release_cancel = self._call_later(
+            self._hass, INTERCOM_RELEASE_SECONDS, _async_release
+        )
+        return INTERCOM_RELEASE_SECONDS
+
+    def cancel_intercom_release(self, *, turn_off_now: bool = False) -> None:
+        """Cancel a pending intercom release, optionally switching off now."""
+
+        entity_id = self._intercom_release_entity
+        self._cancel_intercom_release()
+        release = self._intercom_release_callable()
+        if turn_off_now and entity_id is not None and release is not None:
+            self._hass.async_create_task(release(entity_id))
+
+    def _intercom_release_callable(self) -> Callable[[str], Awaitable[None]] | None:
+        release = getattr(self._executor, "async_release_intercom_switch", None)
+        return release if callable(release) else None
+
+    def _cancel_intercom_release(self) -> None:
+        cancel = self._intercom_release_cancel
+        self._intercom_release_cancel = None
+        self._intercom_release_entity = None
+        if cancel is not None:
+            cancel()

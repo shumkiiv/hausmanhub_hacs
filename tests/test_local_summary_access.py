@@ -2822,7 +2822,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertEqual(400, unknown_action.status)
 
     def test_public_device_action_route_returns_confirmed_receipt(self) -> None:
-        """One tablet command crosses the HTTP boundary with read-back evidence."""
+        """Tablet and local admin commands cross the HTTP boundary with read-back evidence."""
 
         path = "/api/hausman_hub/v1/device-actions"
         view = next(item for item in self.hass.http.views if item.url == path)
@@ -2869,7 +2869,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertEqual("no-store", response.headers.get("Cache-Control"))
         self.assertEqual([("living-light", "turn_on", None)], executions)
 
-        forbidden = asyncio.run(
+        admin = asyncio.run(
             view.post(
                 FakeJsonRequest(
                     "192.168.1.20",
@@ -2879,8 +2879,24 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 )
             )
         )
+        self.assertEqual(200, admin.status)
+        self.assertEqual(
+            [("living-light", "turn_on", None), ("living-light", "turn_on", None)],
+            executions,
+        )
+
+        forbidden = asyncio.run(
+            view.post(
+                FakeJsonRequest(
+                    "192.168.1.20",
+                    reader_user("system-read-only"),
+                    path,
+                    {"targetId": "living-light", "actionId": "turn_on"},
+                )
+            )
+        )
         self.assertEqual(403, forbidden.status)
-        self.assertEqual([("living-light", "turn_on", None)], executions)
+        self.assertEqual(2, len(executions))
 
     def test_view_rejects_disallowed_origins_before_reading_the_home(self) -> None:
         """Only ordinary home-network source ranges may read the summary."""

@@ -49,11 +49,16 @@ export function syncIntercomQuickAccess(panel) {
 function candidates(panel) {
   const catalog = Array.isArray(panel._scenarios?.catalog?.devices)
     ? panel._scenarios.catalog.devices : [];
-  const physical = panel._homeDevices("devices").filter(isIntercomPhysicalDevice).map((device) => ({
-    device,
-    id: deviceId(device),
-    command: panel._resolveIntercomAction?.(deviceId(device), catalog),
-  })).filter((item) => item.id && item.command?.targetId && item.command?.actionId);
+  const physical = panel._homeDevices("devices").filter(isIntercomPhysicalDevice).map((device) => {
+    const id = String(device.entityId || deviceId(device));
+    return {
+      device,
+      id,
+      aliases: [device.id, device.deviceId, device.physicalId, device.entityId]
+        .filter(Boolean).map((value) => String(value)),
+      command: panel._resolveIntercomAction?.(id, catalog),
+    };
+  }).filter((item) => item.id && item.command?.targetId && item.command?.actionId);
   const usedTargets = new Set(physical.map((item) => item.command.targetId));
   const catalogOnly = catalog.filter((target) => (
     isIntercomCatalogTarget(target) && !usedTargets.has(target.target_id)
@@ -62,6 +67,7 @@ function candidates(panel) {
     const command = panel._resolveIntercomAction?.(id, catalog);
     return {
       id,
+      aliases: [target.entity_id, target.target_id].filter(Boolean).map((value) => String(value)),
       command,
       device: {
         id,
@@ -124,6 +130,9 @@ export function renderIntercomSettings(panel, container, deps) {
   }
   const available = candidates(panel);
   const currentId = String(panel._intercomDraft?.deviceId || "");
+  const matchesCurrent = (item) => item.id === currentId
+    || (Array.isArray(item.aliases) && item.aliases.includes(currentId));
+  const current = currentId ? available.find(matchesCurrent) : null;
   const field = el("label", "settings-field");
   field.appendChild(el("span", "assistant-field-label", "Устройство домофона"));
   const select = el("select", "intercom-device-select");
@@ -135,12 +144,12 @@ export function renderIntercomSettings(panel, container, deps) {
     option.value = item.id;
     select.appendChild(option);
   });
-  if (currentId && !available.some((item) => item.id === currentId)) {
+  if (currentId && !current) {
     const missing = el("option", null, "Настроенное устройство больше недоступно");
     missing.value = currentId;
     select.appendChild(missing);
   }
-  select.value = currentId;
+  select.value = current ? current.id : currentId;
   field.appendChild(select);
   field.appendChild(el("small", "settings-field-help", available.length
     ? "Показаны только устройства, для которых Home Assistant предоставляет безопасную команду открытия без дополнительного значения."
@@ -163,9 +172,9 @@ export function renderIntercomSettings(panel, container, deps) {
   quick.appendChild(track);
   quickRow.appendChild(quick);
   card.appendChild(quickRow);
-  const status = el("div", `intercom-settings-status${currentId && available.some((item) => item.id === currentId) ? " is-ready" : " is-warning"}`);
+  const status = el("div", `intercom-settings-status${current ? " is-ready" : " is-warning"}`);
   status.appendChild(el("strong", null, currentId ? "Проверка настройки" : "Домофон не настроен"));
-  status.appendChild(el("span", null, currentId && available.some((item) => item.id === currentId)
+  status.appendChild(el("span", null, current
     ? "Устройство найдено, команда открытия доступна."
     : "Быстрый доступ скрыт и команды не отправляются."));
   card.appendChild(status);
