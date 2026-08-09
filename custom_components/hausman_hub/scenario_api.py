@@ -32,6 +32,8 @@ from .application.api_capabilities import (
     SCENARIOS_PATH,
     SCENARIOS_RUN_PATH,
     SCENARIOS_TEST_PATH,
+    SCENARIOS_UPCOMING_CANCEL_PATH,
+    SCENARIOS_UPCOMING_PATH,
 )
 from .domain.scenarios import ScenarioDefinition, _scenario_to_payload
 from .realtime_api import publish_command_receipt
@@ -455,6 +457,81 @@ class _TabletScenarioAccess:
         return _is_local_tablet_request(request)
 
 
+class ScenarioUpcomingView(_ScenarioView):
+    """List upcoming scheduled scenario runs for the panel and the tablet."""
+
+    url = SCENARIOS_UPCOMING_PATH
+    name = "api:hausman_hub:scenario_upcoming"
+
+    def _authorized(self, request: Any) -> bool:
+        return _is_local_tablet_request(request) or _is_local_admin_request(request)
+
+    async def get(self, request: Any) -> Any:
+        if not _is_exact_request(request, self.url):
+            return _not_found(self)
+        if not self._authorized(request):
+            return _forbidden(self)
+        service = self._service_ready()
+        if service is None:
+            return self._unavailable()
+        return self.json(
+            await service.async_list_upcoming_events(),
+            headers=NO_STORE_HEADERS,
+        )
+
+
+class ScenarioUpcomingCancelView(_ScenarioView):
+    """Skip one concrete scheduled run (skip-once)."""
+
+    url = SCENARIOS_UPCOMING_CANCEL_PATH
+    name = "api:hausman_hub:scenario_upcoming_cancel"
+
+    def _authorized(self, request: Any) -> bool:
+        return _is_local_tablet_request(request) or _is_local_admin_request(request)
+
+    async def post(self, request: Any) -> Any:
+        if not _is_exact_request(request, self.url):
+            return _not_found(self)
+        if not self._authorized(request):
+            return _forbidden(self)
+        service = self._service_ready()
+        if service is None:
+            return self._unavailable()
+        try:
+            payload = await _request_json(request)
+        except ValueError as error:
+            return self.json_message(
+                str(error), HTTPStatus.BAD_REQUEST, headers=NO_STORE_HEADERS
+            )
+        if not isinstance(payload, Mapping):
+            return self.json_message(
+                "Request body must be a JSON object.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        scenario_id = payload.get("scenarioId")
+        trigger_id = payload.get("triggerId")
+        run_at = payload.get("runAt")
+        if not all(
+            isinstance(value, str) and value
+            for value in (scenario_id, trigger_id, run_at)
+        ):
+            return self.json_message(
+                "scenarioId, triggerId and runAt are required.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        try:
+            receipt = await service.async_cancel_upcoming(
+                scenario_id, trigger_id, run_at
+            )
+        except ScenarioServiceError as error:
+            return self.json_message(
+                error.message, error.status, headers=NO_STORE_HEADERS
+            )
+        return self.json(receipt, headers=NO_STORE_HEADERS)
+
+
 class TabletScenarioCatalogView(_TabletScenarioAccess, ScenarioCatalogView):
     url = SCENARIOS_CATALOG_PATH
     name = "api:hausman_hub:tablet_scenarios_catalog"
@@ -582,4 +659,6 @@ def scenario_api_views(
         TabletScenarioDeleteView(hass),
         TabletScenarioRunView(hass),
         TabletScenarioActionView(hass),
+        ScenarioUpcomingView(hass),
+        ScenarioUpcomingCancelView(hass),
     )

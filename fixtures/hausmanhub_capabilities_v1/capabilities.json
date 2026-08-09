@@ -148,6 +148,7 @@
       "test": true,
       "delete": true,
       "run": true,
+      "upcoming": true,
       "definitionVersions": [
         1
       ],
@@ -157,7 +158,9 @@
         "test": "/api/hausman_hub/v1/scenarios/test",
         "delete": "/api/hausman_hub/v1/scenarios/delete",
         "run": "/api/hausman_hub/v1/scenarios/run",
-        "action": "/api/hausman_hub/v1/scenarios/action"
+        "action": "/api/hausman_hub/v1/scenarios/action",
+        "upcoming": "/api/hausman_hub/v1/scenarios/upcoming",
+        "upcomingCancel": "/api/hausman_hub/v1/scenarios/upcoming/cancel"
       }
     },
     "climate_runtime": {

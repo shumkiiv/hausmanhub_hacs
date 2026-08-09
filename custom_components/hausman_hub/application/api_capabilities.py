@@ -43,6 +43,8 @@ SCENARIOS_TEST_PATH = f"{SCENARIOS_PATH}/test"
 SCENARIOS_DELETE_PATH = f"{SCENARIOS_PATH}/delete"
 SCENARIOS_RUN_PATH = f"{SCENARIOS_PATH}/run"
 SCENARIOS_ACTION_PATH = f"{SCENARIOS_PATH}/action"
+SCENARIOS_UPCOMING_PATH = f"{SCENARIOS_PATH}/upcoming"
+SCENARIOS_UPCOMING_CANCEL_PATH = f"{SCENARIOS_UPCOMING_PATH}/cancel"
 VOICE_GREETING_PATH = f"{API_BASE_PATH}/voice/yandex-greeting"
 VOICE_GREETING_TEST_PATH = f"{VOICE_GREETING_PATH}/test"
 CLIMATE_RUNTIME_PATH = f"{API_BASE_PATH}/climate/runtime"
@@ -229,6 +231,7 @@ def api_capabilities_snapshot(
                 "test": True,
                 "delete": True,
                 "run": True,
+                "upcoming": True,
                 "definitionVersions": [1],
                 "paths": {
                     "list": SCENARIOS_PATH,
@@ -237,6 +240,8 @@ def api_capabilities_snapshot(
                     "delete": SCENARIOS_DELETE_PATH,
                     "run": SCENARIOS_RUN_PATH,
                     "action": SCENARIOS_ACTION_PATH,
+                    "upcoming": SCENARIOS_UPCOMING_PATH,
+                    "upcomingCancel": SCENARIOS_UPCOMING_CANCEL_PATH,
                 },
             },
             "voice_greeting": {

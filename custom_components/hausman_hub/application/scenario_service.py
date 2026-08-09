@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 import logging
 import time
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
+from .scenario_schedule import (
+    ScheduledRun,
+    compute_upcoming_runs,
+    prune_skip_keys,
+    skip_key_for,
+)
 from .scenarios import (
     ScenarioCatalog,
     ScenarioDefinitionViolation,
@@ -92,6 +99,9 @@ class ScenarioService:
             [HomeAssistant, float, Callable[[Any], Awaitable[None]]],
             Callable[[], None],
         ] | None = None,
+        sun_times_provider: Callable[[], tuple[datetime | None, datetime | None]] | None = None,
+        now_provider: Callable[[], datetime] | None = None,
+        schedule_store: object | None = None,
     ):
         self._hass = hass
         self._store = store
@@ -100,6 +110,10 @@ class ScenarioService:
         self._catalog_loader = catalog_loader
         self._intercom_entity_resolver = intercom_entity_resolver
         self._call_later = call_later or _default_call_later
+        self._sun_times_provider = sun_times_provider
+        self._now_provider = now_provider
+        self._schedule_store = schedule_store
+        self._skipped_runs: set[str] = set()
         self._intercom_release_cancel: Callable[[], None] | None = None
         self._intercom_release_entity: str | None = None
         self._registry: ScenarioRegistry | None = None
@@ -115,6 +129,132 @@ class ScenarioService:
             self._registry = ScenarioRegistry.from_storage(loaded)
         else:
             self._registry = ScenarioRegistry()
+        if self._schedule_store is not None:
+            payload = await self._schedule_store.async_load()
+            raw = payload.get("skips", ()) if isinstance(payload, dict) else ()
+            self._skipped_runs = prune_skip_keys(
+                (key for key in raw if isinstance(key, str)),
+                self._now_local().date().isoformat(),
+            )
+
+    def _now_local(self) -> datetime:
+        if self._now_provider is not None:
+            return self._now_provider()
+        from homeassistant.util import dt as dt_util  # noqa: PLC0415
+
+        return dt_util.now()
+
+    def _sun_times(self) -> tuple[datetime | None, datetime | None]:
+        if self._sun_times_provider is not None:
+            return self._sun_times_provider()
+        state = self._hass.states.get("sun.sun")
+        attributes = getattr(state, "attributes", {}) if state is not None else {}
+        from homeassistant.util import dt as dt_util  # noqa: PLC0415
+
+        return (
+            dt_util.parse_datetime(str(attributes.get("next_rising") or "")),
+            dt_util.parse_datetime(str(attributes.get("next_setting") or "")),
+        )
+
+    def scheduled_trigger_items(self) -> tuple[tuple[str, str, str, object], ...]:
+        """(scenario_id, trigger_id, trigger type, value) for armed triggers."""
+
+        registry = self._ensure_loaded()
+        items: list[tuple[str, str, str, object]] = []
+        for scenario in registry.scenarios:
+            if not scenario.enabled:
+                continue
+            for trigger in scenario.definition.triggers:
+                if trigger.type.value in ("time", "sunrise", "sunset"):
+                    items.append(
+                        (scenario.id, trigger.id, trigger.type.value, trigger.value)
+                    )
+        return tuple(items)
+
+    def _upcoming_runs(self) -> list[ScheduledRun]:
+        registry = self._ensure_loaded()
+        now = self._now_local()
+        next_sunrise, next_sunset = self._sun_times()
+        return compute_upcoming_runs(
+            registry.scenarios, now, next_sunrise, next_sunset, self._skipped_runs
+        )
+
+    async def async_list_upcoming_events(self) -> dict[str, Any]:
+        """Public payload: upcoming scheduled runs, next run per trigger."""
+
+        runs = self._upcoming_runs()
+        return {
+            "generatedAt": self._now_local().astimezone(timezone.utc).isoformat(),
+            "events": [
+                {
+                    "scenarioId": run.scenario_id,
+                    "scenarioTitle": run.scenario_title,
+                    "triggerId": run.trigger_id,
+                    "triggerType": run.trigger_type,
+                    "runAt": run.run_at.isoformat(),
+                    "cancellable": True,
+                }
+                for run in runs
+            ],
+        }
+
+    async def async_cancel_upcoming(
+        self,
+        scenario_id: str,
+        trigger_id: str,
+        run_at: str,
+    ) -> dict[str, Any]:
+        """Skip one concrete scheduled occurrence (the one the client saw)."""
+
+        try:
+            requested = datetime.fromisoformat(run_at)
+        except (TypeError, ValueError) as error:
+            raise ScenarioServiceError(
+                "runAt must be an ISO datetime string", status=400
+            ) from error
+        match = next(
+            (
+                run
+                for run in self._upcoming_runs()
+                if run.scenario_id == scenario_id
+                and run.trigger_id == trigger_id
+                and run.run_at == requested
+            ),
+            None,
+        )
+        if match is None:
+            raise ScenarioServiceError(
+                "Scheduled run not found or already cancelled", status=404
+            )
+        self._skipped_runs.add(match.skip_key)
+        await self._async_persist_skips()
+        return {
+            "cancelled": True,
+            "scenarioId": match.scenario_id,
+            "triggerId": match.trigger_id,
+            "runAt": match.run_at.isoformat(),
+        }
+
+    async def async_consume_skip(
+        self, scenario_id: str, trigger_id: str, day: str
+    ) -> bool:
+        """At fire time: True means this occurrence was cancelled by the user."""
+
+        key = skip_key_for(scenario_id, trigger_id, day)
+        if key not in self._skipped_runs:
+            return False
+        self._skipped_runs.discard(key)
+        await self._async_persist_skips()
+        return True
+
+    async def _async_persist_skips(self) -> None:
+        if self._schedule_store is None:
+            return
+        today = self._now_local().date().isoformat()
+        self._skipped_runs = prune_skip_keys(self._skipped_runs, today)
+        save = getattr(self._schedule_store, "async_save", None)
+        if save is not None:
+            await save({"version": 1, "skips": sorted(self._skipped_runs)})
 
     async def async_save(self, registry: ScenarioRegistry) -> None:
         """Persist the provided registry."""

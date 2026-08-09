@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/scenario-upcoming-events.schema.json",
+  "title": "HausmanHub scenario upcoming events v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["generatedAt", "events"],
+  "properties": {
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "events": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/upcomingEvent" }
+    }
+  },
+  "$defs": {
+    "upcomingEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scenarioId", "scenarioTitle", "triggerId", "triggerType", "runAt", "cancellable"],
+      "properties": {
+        "scenarioId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "scenarioTitle": { "type": "string", "maxLength": 256 },
+        "triggerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "triggerType": { "enum": ["time", "sunrise", "sunset"] },
+        "runAt": { "type": "string", "format": "date-time" },
+        "cancellable": { "type": "boolean" }
+      }
+    }
+  }
+}

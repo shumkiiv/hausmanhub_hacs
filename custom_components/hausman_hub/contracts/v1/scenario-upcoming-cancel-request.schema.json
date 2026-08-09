@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/scenario-upcoming-cancel-request.schema.json",
+  "title": "HausmanHub scenario upcoming cancel request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["scenarioId", "triggerId", "runAt"],
+  "properties": {
+    "scenarioId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "triggerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "runAt": { "type": "string", "format": "date-time" }
+  }
+}

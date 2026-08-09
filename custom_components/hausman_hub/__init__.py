@@ -128,6 +128,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .application.scenario_catalog import async_build_scenario_catalog
     from .application.scenario_executor import ScenarioExecutor
     from .application.scenario_service import ScenarioService
+    from .scenario_schedule import async_start_scenario_schedule
+    from .scenario_schedule_storage import HomeAssistantScenarioScheduleStore
     from .scenario_storage import HomeAssistantScenarioStore
 
     scenario_store = HomeAssistantScenarioStore(hass, entry.entry_id)
@@ -140,12 +142,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         intercom_entity_resolver=lambda: next(
             iter(tablet_preferences_service.tablet_pinned_entity_ids), None
         ),
+        schedule_store=HomeAssistantScenarioScheduleStore(hass, entry.entry_id),
     )
     await scenario_service.async_load()
     scenario_executor = ScenarioExecutor(
         hass, scenario_catalog, scenario_service.async_run_scenario
     )
     scenario_service.set_executor(scenario_executor)
+    await async_start_scenario_schedule(hass, entry, scenario_service)
 
     register_climate_api(
         hass,

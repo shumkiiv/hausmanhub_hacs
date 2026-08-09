@@ -72,13 +72,27 @@
             "response_contract"
           ],
           "properties": {
-            "available": { "type": "boolean" },
-            "path": { "const": "/api/hausman_hub/v1/device-actions" },
-            "method": { "const": "POST" },
-            "requires_confirmation": { "const": false },
-            "receipt_read_back": { "const": true },
-            "request_contract": { "$ref": "#/$defs/device_action_request_contract" },
-            "response_contract": { "$ref": "#/$defs/device_action_receipt_contract" }
+            "available": {
+              "type": "boolean"
+            },
+            "path": {
+              "const": "/api/hausman_hub/v1/device-actions"
+            },
+            "method": {
+              "const": "POST"
+            },
+            "requires_confirmation": {
+              "const": false
+            },
+            "receipt_read_back": {
+              "const": true
+            },
+            "request_contract": {
+              "$ref": "#/$defs/device_action_request_contract"
+            },
+            "response_contract": {
+              "$ref": "#/$defs/device_action_receipt_contract"
+            }
           }
         },
         "dashboard_snapshot": {
@@ -237,10 +251,18 @@
             "response_contract"
           ],
           "properties": {
-            "available": {"const": true},
-            "path": {"const": "/api/hausman_hub/v1/contours/home-targets"},
-            "method": {"const": "POST"},
-            "requires_confirmation": {"const": true},
+            "available": {
+              "const": true
+            },
+            "path": {
+              "const": "/api/hausman_hub/v1/contours/home-targets"
+            },
+            "method": {
+              "const": "POST"
+            },
+            "requires_confirmation": {
+              "const": true
+            },
             "request_contract": {
               "$ref": "#/$defs/home_climate_targets_request_contract"
             },
@@ -260,23 +282,43 @@
             "response_contract"
           ],
           "properties": {
-            "available": { "type": "boolean" },
-            "path": { "const": "/api/hausman_hub/v1/tablet-profile" },
+            "available": {
+              "type": "boolean"
+            },
+            "path": {
+              "const": "/api/hausman_hub/v1/tablet-profile"
+            },
             "methods": {
               "type": "array",
-              "prefixItems": [{ "const": "GET" }, { "const": "PUT" }],
+              "prefixItems": [
+                {
+                  "const": "GET"
+                },
+                {
+                  "const": "PUT"
+                }
+              ],
               "items": false,
               "minItems": 2,
               "maxItems": 2
             },
-            "optimistic_locking": { "const": true },
+            "optimistic_locking": {
+              "const": true
+            },
             "response_contract": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["name", "version"],
+              "required": [
+                "name",
+                "version"
+              ],
               "properties": {
-                "name": { "const": "hausman-hub-tablet-profile" },
-                "version": { "const": 1 }
+                "name": {
+                  "const": "hausman-hub-tablet-profile"
+                },
+                "version": {
+                  "const": 1
+                }
               }
             }
           }
@@ -292,23 +334,43 @@
             "response_contract"
           ],
           "properties": {
-            "available": { "type": "boolean" },
-            "path": { "const": "/api/hausman_hub/v1/energy-settings" },
+            "available": {
+              "type": "boolean"
+            },
+            "path": {
+              "const": "/api/hausman_hub/v1/energy-settings"
+            },
             "methods": {
               "type": "array",
-              "prefixItems": [{ "const": "GET" }, { "const": "PUT" }],
+              "prefixItems": [
+                {
+                  "const": "GET"
+                },
+                {
+                  "const": "PUT"
+                }
+              ],
               "items": false,
               "minItems": 2,
               "maxItems": 2
             },
-            "optimistic_locking": { "const": true },
+            "optimistic_locking": {
+              "const": true
+            },
             "response_contract": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["name", "version"],
+              "required": [
+                "name",
+                "version"
+              ],
               "properties": {
-                "name": { "const": "hausman-hub-energy-settings" },
-                "version": { "const": 1 }
+                "name": {
+                  "const": "hausman-hub-energy-settings"
+                },
+                "version": {
+                  "const": 1
+                }
               }
             }
           }
@@ -316,19 +378,40 @@
         "energy_history": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["available", "path", "method", "read_only", "response_contract"],
+          "required": [
+            "available",
+            "path",
+            "method",
+            "read_only",
+            "response_contract"
+          ],
           "properties": {
-            "available": { "type": "boolean" },
-            "path": { "const": "/api/hausman_hub/v1/energy/history" },
-            "method": { "const": "GET" },
-            "read_only": { "const": true },
+            "available": {
+              "type": "boolean"
+            },
+            "path": {
+              "const": "/api/hausman_hub/v1/energy/history"
+            },
+            "method": {
+              "const": "GET"
+            },
+            "read_only": {
+              "const": true
+            },
             "response_contract": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["name", "version"],
+              "required": [
+                "name",
+                "version"
+              ],
               "properties": {
-                "name": { "const": "hausman-hub-energy-history" },
-                "version": { "const": 1 }
+                "name": {
+                  "const": "hausman-hub-energy-history"
+                },
+                "version": {
+                  "const": 1
+                }
               }
             }
           }
@@ -345,20 +428,39 @@
             "heartbeat_seconds"
           ],
           "properties": {
-            "available": { "const": true },
-            "path": { "const": "/api/hausman_hub/v1/events" },
-            "method": { "const": "GET" },
-            "transport": { "const": "text/event-stream" },
+            "available": {
+              "const": true
+            },
+            "path": {
+              "const": "/api/hausman_hub/v1/events"
+            },
+            "method": {
+              "const": "GET"
+            },
+            "transport": {
+              "const": "text/event-stream"
+            },
             "response_contract": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["name", "version"],
+              "required": [
+                "name",
+                "version"
+              ],
               "properties": {
-                "name": { "const": "hausman-hub-event" },
-                "version": { "const": 1 }
+                "name": {
+                  "const": "hausman-hub-event"
+                },
+                "version": {
+                  "const": 1
+                }
               }
             },
-            "heartbeat_seconds": { "type": "integer", "minimum": 5, "maximum": 120 }
+            "heartbeat_seconds": {
+              "type": "integer",
+              "minimum": 5,
+              "maximum": 120
+            }
           }
         },
         "scenarios": {
@@ -430,8 +532,17 @@
                 },
                 "action": {
                   "const": "/api/hausman_hub/v1/scenarios/action"
+                },
+                "upcoming": {
+                  "const": "/api/hausman_hub/v1/scenarios/upcoming"
+                },
+                "upcomingCancel": {
+                  "const": "/api/hausman_hub/v1/scenarios/upcoming/cancel"
                 }
               }
+            },
+            "upcoming": {
+              "const": true
             }
           }
         },
@@ -455,20 +566,55 @@
             "receipt_contract"
           ],
           "properties": {
-            "available": {"type": "boolean"},
-            "phase": {"enum": ["disabled", "shadow", "ready_for_canary", "canary", "managed", "unavailable"]},
-            "commands_enabled": {"type": "boolean"},
-            "read_path": {"const": "/api/hausman_hub/v1/climate/runtime"},
-            "action_path": {"const": "/api/hausman_hub/v1/climate/actions"},
-            "operation_path_template": {"const": "/api/hausman_hub/v1/climate/operations/{operation_id}"},
-            "read_method": {"const": "GET"},
-            "action_method": {"const": "POST"},
-            "operation_method": {"const": "GET"},
-            "durable_idempotency": {"const": true},
-            "receipt_events": {"const": true},
-            "read_contract": {"$ref": "#/$defs/climate_runtime_contract"},
-            "request_contract": {"$ref": "#/$defs/climate_action_request_contract"},
-            "receipt_contract": {"$ref": "#/$defs/operation_receipt_contract"}
+            "available": {
+              "type": "boolean"
+            },
+            "phase": {
+              "enum": [
+                "disabled",
+                "shadow",
+                "ready_for_canary",
+                "canary",
+                "managed",
+                "unavailable"
+              ]
+            },
+            "commands_enabled": {
+              "type": "boolean"
+            },
+            "read_path": {
+              "const": "/api/hausman_hub/v1/climate/runtime"
+            },
+            "action_path": {
+              "const": "/api/hausman_hub/v1/climate/actions"
+            },
+            "operation_path_template": {
+              "const": "/api/hausman_hub/v1/climate/operations/{operation_id}"
+            },
+            "read_method": {
+              "const": "GET"
+            },
+            "action_method": {
+              "const": "POST"
+            },
+            "operation_method": {
+              "const": "GET"
+            },
+            "durable_idempotency": {
+              "const": true
+            },
+            "receipt_events": {
+              "const": true
+            },
+            "read_contract": {
+              "$ref": "#/$defs/climate_runtime_contract"
+            },
+            "request_contract": {
+              "$ref": "#/$defs/climate_action_request_contract"
+            },
+            "receipt_contract": {
+              "$ref": "#/$defs/operation_receipt_contract"
+            }
           }
         },
         "voice_greeting": {
@@ -486,13 +632,28 @@
             "stations"
           ],
           "properties": {
-            "available": { "type": "boolean" },
-            "provider": { "const": "alexxit_yandex_station" },
-            "dialogSupported": { "type": "boolean" },
-            "path": { "const": "/api/hausman_hub/v1/voice/yandex-greeting" },
+            "available": {
+              "type": "boolean"
+            },
+            "provider": {
+              "const": "alexxit_yandex_station"
+            },
+            "dialogSupported": {
+              "type": "boolean"
+            },
+            "path": {
+              "const": "/api/hausman_hub/v1/voice/yandex-greeting"
+            },
             "methods": {
               "type": "array",
-              "prefixItems": [{ "const": "GET" }, { "const": "PUT" }],
+              "prefixItems": [
+                {
+                  "const": "GET"
+                },
+                {
+                  "const": "PUT"
+                }
+              ],
               "items": false,
               "minItems": 2,
               "maxItems": 2
@@ -500,19 +661,30 @@
             "testPath": {
               "const": "/api/hausman_hub/v1/voice/yandex-greeting/test"
             },
-            "optimistic_locking": { "const": true },
+            "optimistic_locking": {
+              "const": true
+            },
             "response_contract": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["name", "version"],
+              "required": [
+                "name",
+                "version"
+              ],
               "properties": {
-                "name": { "const": "hausman-hub-voice-greeting-config" },
-                "version": { "const": 1 }
+                "name": {
+                  "const": "hausman-hub-voice-greeting-config"
+                },
+                "version": {
+                  "const": 1
+                }
               }
             },
             "stations": {
               "type": "array",
-              "items": { "$ref": "#/$defs/voice_station" }
+              "items": {
+                "$ref": "#/$defs/voice_station"
+              }
             }
           }
         }
@@ -537,29 +709,63 @@
           "pattern": "^media_player\\.[a-z0-9_]+$",
           "maxLength": 128
         },
-        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
-        "roomId": { "type": ["string", "null"], "maxLength": 128 },
-        "roomName": { "type": ["string", "null"], "maxLength": 120 },
-        "available": { "type": "boolean" },
-        "localDialogSupported": { "type": "boolean" }
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "roomId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 128
+        },
+        "roomName": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 120
+        },
+        "available": {
+          "type": "boolean"
+        },
+        "localDialogSupported": {
+          "type": "boolean"
+        }
       }
     },
     "device_action_request_contract": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "version"],
+      "required": [
+        "name",
+        "version"
+      ],
       "properties": {
-        "name": { "const": "hausman-hub-device-action-request" },
-        "version": { "const": 1 }
+        "name": {
+          "const": "hausman-hub-device-action-request"
+        },
+        "version": {
+          "const": 1
+        }
       }
     },
     "device_action_receipt_contract": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "version"],
+      "required": [
+        "name",
+        "version"
+      ],
       "properties": {
-        "name": { "const": "hausman-hub-device-action-receipt" },
-        "version": { "const": 1 }
+        "name": {
+          "const": "hausman-hub-device-action-receipt"
+        },
+        "version": {
+          "const": 1
+        }
       }
     },
     "dashboard_contract": {
@@ -661,10 +867,17 @@
     "home_climate_targets_request_contract": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "version"],
+      "required": [
+        "name",
+        "version"
+      ],
       "properties": {
-        "name": {"const": "hausman-hub-home-climate-targets-request"},
-        "version": {"const": 1}
+        "name": {
+          "const": "hausman-hub-home-climate-targets-request"
+        },
+        "version": {
+          "const": 1
+        }
       }
     },
     "climate_action_request_contract": {
@@ -686,10 +899,17 @@
     "climate_runtime_contract": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "version"],
+      "required": [
+        "name",
+        "version"
+      ],
       "properties": {
-        "name": {"const": "hausman-hub-climate-runtime"},
-        "version": {"const": 1}
+        "name": {
+          "const": "hausman-hub-climate-runtime"
+        },
+        "version": {
+          "const": 1
+        }
       }
     },
     "operation_query_contract": {
