@@ -219,12 +219,28 @@ const ICON_STROKE_PATHS = {
   ],
 };
 
-const THEME_MODES = ["auto", "light", "dark"];
+const THEME_MODES = ["auto", "daynight", "light", "dark"];
+const DAYNIGHT_DAY_START_HOUR = 6;
+const DAYNIGHT_NIGHT_START_HOUR = 22;
 const THEME_MODE_META = {
   auto: { icon: "auto", label: "Тема: авто (следует Home Assistant)", hint: "авто" },
+  daynight: { icon: "sun", label: "Тема: день/ночь (по времени суток)", hint: "день/ночь" },
   light: { icon: "sun", label: "Тема: светлая", hint: "светлая" },
   dark: { icon: "moon", label: "Тема: тёмная", hint: "тёмная" },
 };
+
+function isDaytimeNow(now = new Date()) {
+  const hour = now.getHours();
+  return hour >= DAYNIGHT_DAY_START_HOUR && hour < DAYNIGHT_NIGHT_START_HOUR;
+}
+
+function msUntilNextDaynightBoundary(now = new Date()) {
+  const boundaryHour = isDaytimeNow(now) ? DAYNIGHT_NIGHT_START_HOUR : DAYNIGHT_DAY_START_HOUR;
+  const next = new Date(now.getTime());
+  next.setHours(boundaryHour, 0, 30, 0);
+  if (next.getTime() <= now.getTime()) next.setDate(next.getDate() + 1);
+  return next.getTime() - now.getTime();
+}
 
 function svgIcon(name, className) {
   const svg = document.createElementNS(SVG_NAMESPACE, "svg");
@@ -334,6 +350,7 @@ class HausmanHubPanel extends HTMLElement {
     this._notice = "";
     this._technicalLog = [];
     this._themeMode = "auto";
+    this._daynightTimer = null;
     this._preferencesLoaded = false;
     this._preferencesLoading = false;
     this._preferencesDirty = false;
@@ -467,6 +484,10 @@ class HausmanHubPanel extends HTMLElement {
     this._persistFirstRunBeforeUnload();
     if (this._timer) clearInterval(this._timer);
     this._timer = null;
+    if (this._daynightTimer && typeof window !== "undefined" && typeof window.clearTimeout === "function") {
+      window.clearTimeout(this._daynightTimer);
+    }
+    this._daynightTimer = null;
     if (this._styleRevealTimer && typeof window !== "undefined" && typeof window.clearTimeout === "function") {
       window.clearTimeout(this._styleRevealTimer);
     }
@@ -518,12 +539,29 @@ class HausmanHubPanel extends HTMLElement {
 
   _applyThemeMode() {
     const darkMode = !!(this._hass && this._hass.themes && this._hass.themes.darkMode);
-    const effective = this._themeMode === "auto" ? (darkMode ? "dark" : "light") : this._themeMode;
+    let effective = this._themeMode;
+    if (this._themeMode === "auto") effective = darkMode ? "dark" : "light";
+    if (this._themeMode === "daynight") effective = isDaytimeNow() ? "light" : "dark";
     if (this.classList && typeof this.classList.toggle === "function") {
       this.classList.toggle("theme-light", effective === "light");
     }
     this._updateThemeSwitcher();
     this._applyLocalPreferences();
+    this._scheduleDaynightTimer();
+  }
+
+  _scheduleDaynightTimer() {
+    if (this._daynightTimer && typeof window !== "undefined" && typeof window.clearTimeout === "function") {
+      window.clearTimeout(this._daynightTimer);
+    }
+    this._daynightTimer = null;
+    if (this._themeMode !== "daynight") return;
+    if (typeof window === "undefined" || typeof window.setTimeout !== "function") return;
+    this._daynightTimer = window.setTimeout(() => {
+      this._daynightTimer = null;
+      this._applyThemeMode();
+      this._render();
+    }, msUntilNextDaynightBoundary());
   }
 
   _applyLocalPreferences() {

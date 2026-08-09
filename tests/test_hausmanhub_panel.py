@@ -1220,10 +1220,17 @@ class PanelThemeSwitcherTest(unittest.TestCase):
     throw new Error("auto aria-label mismatch: " + s.label);
   }
   if (s.hint !== "авто") throw new Error("auto hint missing");
+  const expectDayLight = (() => { const h = new Date().getHours(); return h >= 6 && h < 22; })();
+  button.click();
+  s = state();
+  if (s.mode !== "daynight" || s.light !== expectDayLight || s.label !== "Тема: день/ночь (по времени суток)") {
+    throw new Error("auto -> daynight cycle failed");
+  }
+  if (s.hint !== "день/ночь") throw new Error("daynight hint missing");
   button.click();
   s = state();
   if (s.mode !== "light" || !s.light || s.label !== "Тема: светлая") {
-    throw new Error("auto -> light cycle failed");
+    throw new Error("daynight -> light cycle failed");
   }
   panel.hass = pendingHass(false);
   if (!panel.classList.contains("theme-light")) {

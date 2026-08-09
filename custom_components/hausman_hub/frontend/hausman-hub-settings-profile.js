@@ -216,10 +216,11 @@ export function renderAppearanceSettings(panel, container, deps) {
   const themeRow = el("label", "settings-toggle-row");
   const themeCopy = el("span", "settings-toggle-copy");
   themeCopy.appendChild(el("strong", null, "Тема панели"));
-  themeCopy.appendChild(el("small", null, "Следовать теме Home Assistant или использовать постоянную светлую либо тёмную тему."));
+  themeCopy.appendChild(el("small", null, "Следовать теме Home Assistant, менять тему по времени суток (светлая с 6:00 до 22:00, фон главной тоже дневной или ночной) или использовать постоянную светлую либо тёмную тему."));
   themeRow.appendChild(themeCopy);
   const themeSelect = selectField([
     { value: "auto", label: "Как в Home Assistant" },
+    { value: "daynight", label: "День/ночь по времени" },
     { value: "light", label: "Светлая" },
     { value: "dark", label: "Тёмная" },
   ], panel._themeMode, () => {
