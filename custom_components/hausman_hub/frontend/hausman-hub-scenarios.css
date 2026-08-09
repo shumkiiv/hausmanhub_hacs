@@ -66,14 +66,14 @@
 .scenario-editor-flow { display:grid; gap:4px; margin:0 4px 10px; padding:14px; border:1px solid var(--hmh-border,#2F3845); border-radius:13px; background:var(--hmh-raised,#181E26); }
 .scenario-editor-flow strong { font-size:16px; }
 .scenario-editor-flow small { color:var(--hmh-muted,#AAB4C2); font-size:12px; line-height:1.4; }
-.scenario-editor-step { display:grid; grid-template-columns:34px minmax(0,1fr) auto; align-items:center; gap:10px; min-height:64px; margin:0; padding:10px; border:1px solid transparent; border-radius:13px; color:var(--hmh-muted,#AAB4C2); background:transparent; box-shadow:none; text-align:left; }
-.scenario-editor-step:hover { border-color:var(--hmh-border,#2F3845); background:color-mix(in srgb,var(--hmh-raised,#181E26) 72%,transparent); }
+.scenario-editor-step { display:grid; grid-template-columns:34px minmax(0,1fr) auto; align-items:center; gap:10px; min-height:64px; margin:0; padding:10px; border:1px solid color-mix(in srgb,var(--hmh-border,#2F3845) 72%,transparent); border-radius:13px; color:var(--hmh-text,#E7ECF3); background:color-mix(in srgb,var(--hmh-raised,#181E26) 55%,transparent); box-shadow:none; text-align:left; }
+.scenario-editor-step:hover { border-color:color-mix(in srgb,var(--hmh-accent,#4D8DFF) 38%,var(--hmh-border,#2F3845)); background:color-mix(in srgb,var(--hmh-raised,#181E26) 82%,transparent); }
 .scenario-editor-step.is-active { border-color:color-mix(in srgb,var(--hmh-accent,#4D8DFF) 54%,var(--hmh-border,#2F3845)); color:var(--hmh-text,#E7ECF3); background:color-mix(in srgb,var(--hmh-accent,#4D8DFF) 11%,var(--hmh-raised,#181E26)); }
 .scenario-editor-step-index { display:grid; place-items:center; width:32px; height:32px; border-radius:50%; background:var(--hmh-raised,#181E26); font-size:13px; font-weight:800; }
 .scenario-editor-step.is-active .scenario-editor-step-index { color:#fff; background:var(--hmh-accent,#4D8DFF); }
 .scenario-editor-step-copy { display:grid; gap:3px; min-width:0; }
 .scenario-editor-step-copy b { font-size:14px; }
-.scenario-editor-step-copy small { overflow:hidden; font-size:11px; font-weight:400; line-height:1.35; text-overflow:ellipsis; white-space:nowrap; }
+.scenario-editor-step-copy small { overflow:hidden; color:var(--hmh-muted,#AAB4C2); font-size:11px; font-weight:400; line-height:1.35; text-overflow:ellipsis; white-space:nowrap; }
 .scenario-editor-step-issue { display:grid; place-items:center; min-width:22px; height:22px; border-radius:50%; color:var(--hmh-warning,#E4A54B); background:color-mix(in srgb,var(--hmh-warning,#E4A54B) 12%,transparent); font-size:12px; font-weight:800; }
 .scenario-editor-body { display:grid; gap:16px; overflow:auto; padding:22px 28px 28px; }
 .scenario-editor-panel { display:grid; gap:14px; padding:20px; border:1px solid var(--hmh-border,#2F3845); border-radius:16px; background:var(--hmh-surface,#12171D); }
