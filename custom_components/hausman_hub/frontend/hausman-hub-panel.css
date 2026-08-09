@@ -172,7 +172,7 @@ section { min-width:0; }
 .inventory-device-card { min-width:0; overflow:hidden; border:1px solid var(--hmh-border,#2F3845); border-radius:16px;
   background:var(--hmh-raised,#181E26); box-shadow:0 6px 20px rgba(0,0,0,.18); }
 .inventory-device-card[open] { border-color:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 45%,var(--hmh-border,#2F3845)); }
-.inventory-device-card.is-unavailable { opacity:.78; }
+.inventory-device-card.is-unavailable { border-color:color-mix(in srgb,#F1B84B 42%,var(--hmh-border,#2F3845)); }
 .inventory-device-summary { display:flex; align-items:center; gap:14px; min-height:88px; padding:14px 16px; cursor:pointer; list-style:none; }
 .inventory-device-summary::-webkit-details-marker, .room-inventory-summary::-webkit-details-marker { display:none; }
 .inventory-device-summary::after { content:none; }
@@ -472,7 +472,7 @@ label.signal-option > input[type="radio"] { grid-column:1; width:18px; min-heigh
  .ir-source-card { margin:14px 0; padding:15px; border:1px solid var(--divider-color,#ddd);
    border-radius:14px; background:var(--secondary-background-color,#f2f4f5); }
  .ir-source-card.is-recommended { border-color:color-mix(in srgb,var(--primary-color,#03a9f4) 48%,var(--divider-color,#ddd)); }
- .ir-source-card.is-muted { opacity:.82; }
+ .ir-source-card.is-muted { background:color-mix(in srgb,var(--secondary-background-color,#f2f4f5) 72%,transparent); }
  .ir-device-summary { display:flex; flex-wrap:wrap; align-items:center; gap:7px; margin:0 0 14px; }
  .ir-code-list { display:grid; gap:7px; margin-top:10px; }
  .ir-code-row { display:grid; grid-template-columns:minmax(0,1fr) auto auto; align-items:center; gap:8px;
@@ -544,7 +544,7 @@ label.signal-option > input[type="radio"] { grid-column:1; width:18px; min-heigh
 .scenario-row { display:grid; grid-template-columns:48px minmax(0,1fr) auto; align-items:center; gap:18px;
   min-width:0; min-height:84px; padding:16px; border:1px solid color-mix(in srgb,var(--hmh-border,#2F3845) 78%,transparent);
   border-radius:14px; background:var(--hmh-surface,#12171D); }
-.scenario-row.is-disabled { opacity:.82; }
+.scenario-row.is-disabled .scenario-icon { color:var(--hmh-muted,#AAB4C2); }
 .scenario-icon { display:grid; place-items:center; width:48px; height:48px; border-radius:14px;
   color:var(--hmh-text,#E7ECF3); background:var(--hmh-raised,#181E26); }
 .scenario-icon .icon { width:24px; height:24px; }

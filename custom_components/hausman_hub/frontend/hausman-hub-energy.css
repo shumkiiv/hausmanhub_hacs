@@ -50,7 +50,7 @@
   gap:10px; width:100%; min-height:88px; margin:0; padding:9px 10px; color:var(--hmh-text); border:1px solid var(--hmh-border);
   border-radius:14px; background:var(--hmh-raised); box-shadow:none; }
 .energy-device-card:hover { border-color:color-mix(in srgb,var(--hmh-accent) 55%,var(--hmh-border)); background:var(--hmh-hover); }
-.energy-device-card.is-unavailable { border-color:color-mix(in srgb,#F1B84B 55%,var(--hmh-border)); opacity:.75; }
+.energy-device-card.is-unavailable { border-color:color-mix(in srgb,#F1B84B 55%,var(--hmh-border)); }
 .energy-device-card-open { display:grid; grid-template-columns:66px minmax(180px,1.6fr) 170px 125px 105px 18px; align-items:center;
   gap:12px; min-width:0; min-height:68px; margin:0; padding:0; text-align:left; color:var(--hmh-text); border:0; border-radius:12px;
   background:transparent; box-shadow:none; }

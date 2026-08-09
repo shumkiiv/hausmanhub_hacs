@@ -76,7 +76,7 @@ button.climate-room-card:hover { border-color:color-mix(in srgb,var(--hmh-accent
 button.climate-product-card { display:grid; grid-template-columns:76px minmax(0,1fr) 10px; align-items:center; gap:14px; min-height:106px; margin:0; padding:14px;
   border:1px solid var(--hmh-border,#2F3845); border-radius:16px; color:var(--hmh-text,#E7ECF3); text-align:left; background:var(--hmh-raised,#181E26); box-shadow:none; }
 button.climate-product-card:hover { border-color:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 52%,var(--hmh-border,#2F3845)); }
-.climate-product-card.is-unavailable { opacity:.72; }
+.climate-product-card.is-unavailable { border-color:color-mix(in srgb,#F1B84B 42%,var(--hmh-border,#2F3845)); }
 .climate-product-image { display:grid; place-items:center; width:76px; height:76px; overflow:hidden; border-radius:13px; background:radial-gradient(circle at 50% 40%,rgba(255,255,255,.1),transparent 68%); }
 .climate-product-image img { display:block; width:100%; height:100%; object-fit:contain; }
 .climate-product-image.is-fallback { color:var(--hmh-text-dim,#9AA7B4); background:var(--hmh-surface,#12171D); }
