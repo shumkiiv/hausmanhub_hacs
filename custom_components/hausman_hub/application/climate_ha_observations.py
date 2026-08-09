@@ -50,6 +50,12 @@ from ..domain.contours import ContourDefinition, ContourMode
 # keep managed rooms stuck behind the freshness guard. Window safety does not
 # depend on this threshold: it uses the dedicated window entity state.
 MAX_NATIVE_STATE_AGE_MS = 30 * 60 * 1000
+# Passive room sensors also show multi-hour report gaps on healthy devices
+# (observed up to ~84 min in production): Zigbee2MQTT marks a truly dead
+# device unavailable, so the room-level freshness window only needs to cover
+# "alive but quiet" sensors. Safety inputs (heat-load outdoor temperature,
+# physical feedback) keep the shorter native window above.
+MAX_ROOM_SENSOR_STATE_AGE_MS = 3 * 60 * 60 * 1000
 MAX_STATE_LENGTH = 64
 MAX_ATTRIBUTES = 64
 _OBSERVATION_DEVICE_KINDS = {
@@ -286,7 +292,7 @@ def _room_sensor_number(
         value = _number(state.state)
         if value is None:
             continue
-        if _is_fresh(state, observed_at):
+        if _is_room_sensor_fresh(state, observed_at):
             fresh_values.append(value)
         else:
             stale_values.append(value)
@@ -308,6 +314,11 @@ def _median(values: list[float]) -> float:
 def _is_fresh(state: ClimateHaEntityState, observed_at: int) -> bool:
     age = max(0, observed_at - state.last_updated_ms)
     return age <= MAX_NATIVE_STATE_AGE_MS
+
+
+def _is_room_sensor_fresh(state: ClimateHaEntityState, observed_at: int) -> bool:
+    age = max(0, observed_at - state.last_updated_ms)
+    return age <= MAX_ROOM_SENSOR_STATE_AGE_MS
 
 
 def _room_climate_current_temperature(
@@ -336,7 +347,7 @@ def _room_climate_current_temperature(
             continue
         value = _number(state.attributes.get("current_temperature"))
         if value is not None:
-            return value, _is_fresh(state, observed_at)
+            return value, _is_room_sensor_fresh(state, observed_at)
     return None, True
 
 

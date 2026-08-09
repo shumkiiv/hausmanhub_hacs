@@ -7,6 +7,7 @@ import unittest
 
 from custom_components.hausman_hub.application.climate_ha_observations import (
     MAX_NATIVE_STATE_AGE_MS,
+    MAX_ROOM_SENSOR_STATE_AGE_MS,
     ClimateHaEntityState,
     ClimateHaObservationViolation,
     build_native_ha_climate_observation,
@@ -54,6 +55,7 @@ from custom_components.hausman_hub.domain.contours import (
 
 NOW = 1_800_000_000_000
 STALE = NOW - MAX_NATIVE_STATE_AGE_MS - 5 * 60 * 1000
+ROOM_STALE = NOW - MAX_ROOM_SENSOR_STATE_AGE_MS - 5 * 60 * 1000
 
 
 class MemoryStates:
@@ -459,7 +461,7 @@ class NativeHaObservationTest(unittest.TestCase):
     def test_stale_temperature_marks_only_its_room_stale(self) -> None:
         states = full_states()
         states["sensor.living_temperature"] = ha_state(
-            "sensor.living_temperature", "25.5", updated=STALE
+            "sensor.living_temperature", "25.5", updated=ROOM_STALE
         )
 
         observation = self.build(states=states)
@@ -470,6 +472,25 @@ class NativeHaObservationTest(unittest.TestCase):
         self.assertIs(room.data_status, ClimateDataStatus.STALE)
         self.assertEqual(25.5, room.temperature)
         self.assertFalse(room.authority_eligible)
+
+    def test_native_stale_room_sensor_stays_fresh_within_room_window(self) -> None:
+        states = full_states()
+        states["sensor.living_temperature"] = ha_state(
+            "sensor.living_temperature", "25.5", updated=STALE
+        )
+        states["sensor.living_humidity"] = ha_state(
+            "sensor.living_humidity", "41", updated=STALE
+        )
+
+        observation = self.build(states=states)
+        room = observation.room("living")
+
+        self.assertIsNotNone(room)
+        assert room is not None
+        self.assertIs(room.data_status, ClimateDataStatus.FRESH)
+        self.assertEqual(25.5, room.temperature)
+        self.assertEqual(41.0, room.humidity)
+        self.assertTrue(room.authority_eligible)
 
     def test_weather_lockout_first_observation_in_band_fails_closed(self) -> None:
         observation = self.build(
@@ -741,7 +762,7 @@ class NativeHaObservationTest(unittest.TestCase):
             "climate.living_ac",
             "cool",
             {"hvac_action": "cooling", "current_temperature": 26.0},
-            updated=STALE,
+            updated=ROOM_STALE,
         )
 
         observation = self.build(states=states)
@@ -755,7 +776,7 @@ class NativeHaObservationTest(unittest.TestCase):
     def test_stale_humidity_marks_the_room_stale(self) -> None:
         states = full_states()
         states["sensor.living_humidity"] = ha_state(
-            "sensor.living_humidity", "41", updated=STALE
+            "sensor.living_humidity", "41", updated=ROOM_STALE
         )
 
         observation = self.build(states=states)
@@ -885,7 +906,7 @@ class NativeHaObservationTest(unittest.TestCase):
         states = full_states()
         states["sensor.living_humidity"] = ha_state("sensor.living_humidity", "41")
         states["sensor.living_humidity_2"] = ha_state(
-            "sensor.living_humidity_2", "45", updated=STALE
+            "sensor.living_humidity_2", "45", updated=ROOM_STALE
         )
 
         observation = self.build(registry=merged, states=states)
@@ -911,10 +932,10 @@ class NativeHaObservationTest(unittest.TestCase):
         )
         states = full_states()
         states["sensor.living_humidity"] = ha_state(
-            "sensor.living_humidity", "41", updated=STALE
+            "sensor.living_humidity", "41", updated=ROOM_STALE
         )
         states["sensor.living_humidity_2"] = ha_state(
-            "sensor.living_humidity_2", "45", updated=STALE
+            "sensor.living_humidity_2", "45", updated=ROOM_STALE
         )
 
         observation = self.build(registry=merged, states=states)

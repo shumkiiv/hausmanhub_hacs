@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, patch
 
 from tests.climate_bridge_fixture import import_climate_state
 from custom_components.hausman_hub.application.climate_ha_observations import (
-    MAX_NATIVE_STATE_AGE_MS,
+    MAX_ROOM_SENSOR_STATE_AGE_MS,
     ClimateHaEntityState,
 )
 from custom_components.hausman_hub.application.climate_registry import registry_from_payload
@@ -1889,7 +1889,7 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
         payload = source_payload()
         bridge.snapshot = import_climate_state(
             payload,
-            now_ms=payload["generatedAt"] + MAX_NATIVE_STATE_AGE_MS + 1,  # type: ignore[operator]
+            now_ms=payload["generatedAt"] + MAX_ROOM_SENSOR_STATE_AGE_MS + 1,  # type: ignore[operator]
         )
         registry = with_native_observation_bindings(registry)
         state_view = SnapshotStateView(registry, bridge)
@@ -1899,7 +1899,7 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             registry_store=MemoryStore(registry),
             contour_store=MemoryContourStore(contours),
             ha_state_view=state_view,
-            now_ms=lambda: 1784280000000 + MAX_NATIVE_STATE_AGE_MS + 1,
+            now_ms=lambda: 1784280000000 + MAX_ROOM_SENSOR_STATE_AGE_MS + 1,
         )
         await runtime.async_start()
         fetches_after_start = bridge.fetch_count
