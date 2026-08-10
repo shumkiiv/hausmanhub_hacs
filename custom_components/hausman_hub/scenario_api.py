@@ -196,7 +196,7 @@ class ScenariosView(_ScenarioView):
                         for v in error.violations
                     ],
                 },
-                status=HTTPStatus.BAD_REQUEST,
+                status_code=HTTPStatus.BAD_REQUEST,
                 headers=NO_STORE_HEADERS,
             )
         except ScenarioServiceError as error:
@@ -256,7 +256,7 @@ class ScenarioTestView(_ScenarioView):
                         for v in error.violations
                     ],
                 },
-                status=HTTPStatus.BAD_REQUEST,
+                status_code=HTTPStatus.BAD_REQUEST,
                 headers=NO_STORE_HEADERS,
             )
         except ScenarioServiceError as error:
@@ -400,7 +400,7 @@ class ScenarioRunView(_ScenarioView):
         )
         return self.json(
             response,
-            status=HTTPStatus.OK if completed else HTTPStatus.CONFLICT,
+            status_code=HTTPStatus.OK if completed else HTTPStatus.CONFLICT,
             headers=NO_STORE_HEADERS,
         )
 
@@ -445,7 +445,7 @@ class ScenarioActionView(_ScenarioView):
             except ScenarioValidationError as error:
                 return self.json(
                     _validation_error_payload(error),
-                    status=HTTPStatus.BAD_REQUEST,
+                    status_code=HTTPStatus.BAD_REQUEST,
                     headers=NO_STORE_HEADERS,
                 )
             except ScenarioServiceError as error:
@@ -460,7 +460,7 @@ class ScenarioActionView(_ScenarioView):
             except ScenarioValidationError as error:
                 return self.json(
                     _validation_error_payload(error),
-                    status=HTTPStatus.BAD_REQUEST,
+                    status_code=HTTPStatus.BAD_REQUEST,
                     headers=NO_STORE_HEADERS,
                 )
             except ScenarioServiceError as error:
@@ -662,7 +662,7 @@ async def _run_scenario(
     )
     return view.json(
         response,
-        status=HTTPStatus.OK if completed else HTTPStatus.CONFLICT,
+        status_code=HTTPStatus.OK if completed else HTTPStatus.CONFLICT,
         headers=NO_STORE_HEADERS,
     )
 

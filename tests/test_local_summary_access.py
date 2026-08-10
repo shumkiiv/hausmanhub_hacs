@@ -2379,7 +2379,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.59", panel.payload["integration_version"])
+        self.assertEqual("1.52.60", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
@@ -2829,6 +2829,30 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 )
             )
         )
+        executions: list[str] = []
+
+        async def run_scenario(scenario_id: str) -> dict[str, object]:
+            executions.append(scenario_id)
+            return {
+                "run_id": "run-close-curtains",
+                "scenario_id": scenario_id,
+                "status": "completed",
+                "accepted": True,
+                "confirmed": True,
+                "receipts": [],
+            }
+
+        service.async_run_scenario = run_scenario
+        run_action = asyncio.run(
+            views[action_path].post(
+                FakeJsonRequest(
+                    "192.168.1.20",
+                    tablet,
+                    action_path,
+                    {"action": "run_scenario", "scenarioId": "close_curtains"},
+                )
+            )
+        )
 
         self.assertEqual(200, scenarios.status)
         self.assertIn("scenarios", scenarios.payload)
@@ -2845,6 +2869,9 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
         self.assertNotIn("icon", catalog.payload["scenarios"][1])
         self.assertEqual(400, unknown_action.status)
+        self.assertEqual(200, run_action.status)
+        self.assertTrue(run_action.payload["confirmed"])
+        self.assertEqual(["close_curtains"], executions)
 
     def test_public_device_action_route_returns_confirmed_receipt(self) -> None:
         """Tablet and local admin commands cross the HTTP boundary with read-back evidence."""
