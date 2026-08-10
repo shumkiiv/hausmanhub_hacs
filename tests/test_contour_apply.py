@@ -99,6 +99,21 @@ def _native_inputs() -> tuple[
         snapshot,
         observed_at=NOW,
     )
+    observation = replace(
+        observation,
+        home=replace(
+            observation.home,
+            outdoor_temperature=-5.0,
+            air_conditioner_outdoor_guard_configured=True,
+            central_heating_on=True,
+        ),
+        rooms=tuple(
+            replace(room, window=ClimateWindowState.OPEN)
+            if room.room_id == "kids"
+            else room
+            for room in observation.rooms
+        ),
+    )
     return native_registry, contour, observation
 
 
