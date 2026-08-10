@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import sys
 import types
 import unittest
@@ -158,6 +159,71 @@ class CompleteClimateStorageRestartTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             contour_registry_to_payload(contours),
             self.fake_store.backing["hausman_hub.contours.entry_1"],
+        )
+
+    async def test_clean_install_backup_restore_preserves_stable_public_ids(self) -> None:
+        """Exercise the DR sequence without touching a running Home Assistant."""
+
+        snapshot = import_climate_state(source_payload())
+        registry, contours = build_climate_contour_setup(
+            snapshot,
+            room_ids=["living", "kids"],
+            source_ids=[
+                "synthetic-ac-source-living",
+                "synthetic-humidifier-source-kids",
+            ],
+            name="Климат",
+            mode="automatic",
+            target_temperature=25.0,
+            target_humidity=45,
+            strategy="normal",
+        )
+        registry_store, contour_store = self._stores("entry_dr")
+        await registry_store.async_save(registry)
+        await contour_store.async_save(contours)
+        backup = deepcopy(self.fake_store.backing)
+        expected_room_ids = tuple(room.room_id for room in registry.rooms)
+        expected_device_ids = tuple(device.device_id for device in registry.devices)
+
+        self.fake_store.backing.clear()
+        clean_registry_store, clean_contour_store = self._stores("entry_dr")
+        clean_runtime = ClimateRuntime(
+            entry_id="entry_dr",
+            configuration=self._configuration(),
+            registry_store=clean_registry_store,
+            contour_store=clean_contour_store,
+        )
+        await clean_runtime.async_start()
+        self.assertEqual(0, clean_runtime.room_count)
+        self.assertEqual(0, clean_runtime.device_count)
+
+        self.fake_store.backing.update(deepcopy(backup))
+        restored_registry_store, restored_contour_store = self._stores("entry_dr")
+        restored_runtime = ClimateRuntime(
+            entry_id="entry_dr",
+            configuration=self._configuration(),
+            registry_store=restored_registry_store,
+            contour_store=restored_contour_store,
+        )
+        await restored_runtime.async_start()
+        restored_registry = await restored_registry_store.async_load()
+
+        self.assertIsNone(restored_runtime.last_error)
+        self.assertEqual(
+            expected_room_ids,
+            tuple(room.room_id for room in restored_registry.rooms),
+        )
+        self.assertEqual(
+            expected_device_ids,
+            tuple(device.device_id for device in restored_registry.devices),
+        )
+        self.assertEqual(
+            registry_to_payload(registry),
+            await restored_runtime.async_registry_payload(),
+        )
+        self.assertEqual(
+            contour_registry_to_payload(contours),
+            await restored_runtime.async_contour_registry_payload(),
         )
 
     async def test_tablet_operation_ledger_survives_store_reconstruction(self) -> None:
