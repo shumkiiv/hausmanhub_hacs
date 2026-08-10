@@ -1,5 +1,5 @@
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.60";
-import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.60";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.61";
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.61";
 
 const LIGHTING_EXCLUSIONS = [
   "ambilight", "глазок", "домофон", "пульт", "очистител", "аквариум", "aquarium",

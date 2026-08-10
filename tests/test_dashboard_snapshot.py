@@ -12,6 +12,7 @@ from custom_components.hausman_hub.application.dashboard_snapshot import (
     DashboardArea,
     DashboardDevice,
     DashboardEntity,
+    DashboardEvent,
     DashboardScenario,
     build_dashboard_snapshot,
 )
@@ -167,6 +168,37 @@ class DashboardSnapshotTest(unittest.TestCase):
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
         Draft202012Validator.check_schema(schema)
         Draft202012Validator(schema).validate(self.snapshot)
+
+    def test_events_are_newest_first_and_enable_activity_capability(self) -> None:
+        snapshot = build_dashboard_snapshot(
+            areas=(),
+            devices=(),
+            entities=(),
+            events=(
+                DashboardEvent(
+                    event_id="operation-1",
+                    timestamp_ms=100,
+                    title="Сценарий",
+                    message="Операция выполнена.",
+                    kind="scenario",
+                ),
+                DashboardEvent(
+                    event_id="operation-2",
+                    timestamp_ms=200,
+                    title="Климат",
+                    message="Настройки изменены.",
+                    kind="climate",
+                ),
+            ),
+            generated_at_ms=300,
+            local_iso="2026-08-10T19:00:00+03:00",
+        )
+
+        self.assertEqual(
+            ["operation-2", "operation-1"],
+            [event["id"] for event in snapshot["events"]],
+        )
+        self.assertTrue(snapshot["capabilities"]["events"])
 
     def test_multiple_entities_make_one_physical_device_card(self) -> None:
         devices = self.snapshot["devices"]

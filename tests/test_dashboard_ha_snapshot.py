@@ -8,6 +8,9 @@ import unittest
 from unittest.mock import patch
 
 from custom_components.hausman_hub import dashboard_ha_snapshot
+from custom_components.hausman_hub.application.operation_journal import (
+    OperationJournalService,
+)
 
 
 class _States:
@@ -16,6 +19,14 @@ class _States:
 
     def get(self, entity_id: str) -> object | None:
         return self._values.get(entity_id)
+
+
+class _JournalStore:
+    async def async_load(self) -> object | None:
+        return None
+
+    async def async_save(self, payload: dict[str, object]) -> None:
+        self.payload = payload
 
 
 class _ScenarioService:
@@ -57,6 +68,33 @@ class _ScenarioService:
 
 
 class DashboardHaSnapshotTest(unittest.IsolatedAsyncioTestCase):
+    async def test_durable_journal_becomes_redacted_dashboard_activity(self) -> None:
+        journal = OperationJournalService(
+            _JournalStore(),
+            now_ms=lambda: 1_786_379_619_981,
+        )
+        await journal.async_append(
+            {
+                "request_id": "private-run-id",
+                "operation": "scenario_run",
+                "accepted": True,
+                "confirmed": True,
+                "status": "confirmed",
+                "reason": "Сценарий выполнен и подтверждён.",
+            }
+        )
+        hass = SimpleNamespace(
+            data={"hausman_hub": {"operation_journal": journal}}
+        )
+
+        events = dashboard_ha_snapshot._dashboard_operation_events(hass)
+
+        self.assertEqual(1, len(events))
+        self.assertEqual("operation-1", events[0].event_id)
+        self.assertEqual("Сценарий", events[0].title)
+        self.assertEqual("scenario", events[0].kind)
+        self.assertNotIn("private-run-id", repr(events[0]))
+
     async def test_adapter_reads_registries_without_mutating_home_assistant(self) -> None:
         area = SimpleNamespace(id="living", name="Гостиная", icon="mdi:sofa")
         device = SimpleNamespace(

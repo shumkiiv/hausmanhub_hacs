@@ -187,6 +187,18 @@ class DashboardScenario:
     danger: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class DashboardEvent:
+    """One redacted, human-readable activity item for dashboard clients."""
+
+    event_id: str
+    timestamp_ms: int
+    title: str
+    message: str | None = None
+    kind: str | None = None
+    level: str = "info"
+
+
 def _opaque_id(prefix: str, source_id: str) -> str:
     digest = hashlib.sha256(source_id.encode("utf-8")).hexdigest()[:16]
     return f"{prefix}_{digest}"
@@ -668,6 +680,7 @@ def build_dashboard_snapshot(
     devices: Iterable[DashboardDevice],
     entities: Iterable[DashboardEntity],
     scenarios: Iterable[DashboardScenario] = (),
+    events: Iterable[DashboardEvent] = (),
     generated_at_ms: int,
     local_iso: str,
     home_name: str = "Дом",
@@ -678,6 +691,17 @@ def build_dashboard_snapshot(
 ) -> dict[str, object]:
     """Project one immutable, read-only universal dashboard snapshot."""
 
+    event_payloads = [
+        {
+            "id": event.event_id,
+            "ts": event.timestamp_ms,
+            "title": event.title,
+            "message": event.message,
+            "kind": event.kind,
+            "level": event.level,
+        }
+        for event in sorted(events, key=lambda item: item.timestamp_ms, reverse=True)
+    ][:100]
     pinned_ids = frozenset(
         value.strip()
         for value in (pinned_entity_ids or ())
@@ -1198,13 +1222,13 @@ def build_dashboard_snapshot(
         },
         "scenarios": sorted(scenario_payloads, key=lambda item: str(item["title"])),
         "alarms": alarms,
-        "events": [],
+        "events": event_payloads,
         "capabilities": {
             "actions": False,
             "scenarios": bool(scenario_payloads),
             "scenarioEditing": True,
             "alarms": True,
-            "events": False,
+            "events": bool(event_payloads),
             "smartClimate": any(room["hasClimateControl"] for room in room_payloads),
             "physicalDevices": True,
             "dashboardSnapshot": True,

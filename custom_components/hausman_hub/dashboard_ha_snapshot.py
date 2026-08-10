@@ -11,6 +11,7 @@ from .application.dashboard_snapshot import (
     DashboardArea,
     DashboardDevice,
     DashboardEntity,
+    DashboardEvent,
     DashboardScenario,
     build_dashboard_snapshot,
 )
@@ -58,6 +59,69 @@ def _enum_string(value: object) -> str | None:
 
     raw = getattr(value, "value", value)
     return raw if isinstance(raw, str) and raw else None
+
+
+_ACTIVITY_PRESENTATION = {
+    "scenario": ("Сценарий", "scenario"),
+    "climate": ("Климат", "climate"),
+    "voice": ("Голосовая команда", "automation"),
+    "device": ("Устройство", "device"),
+}
+_ACTIVITY_STATUS_MESSAGE = {
+    "confirmed": "Операция выполнена и подтверждена.",
+    "accepted": "Операция принята к выполнению.",
+    "failed": "Операция завершилась ошибкой.",
+}
+_DATA_OPERATION_JOURNAL = "operation_journal"
+
+
+def _dashboard_operation_events(hass: HomeAssistant) -> tuple[DashboardEvent, ...]:
+    """Project the durable redacted journal into the existing dashboard v1 field."""
+
+    from .application.operation_journal import OperationJournalService  # noqa: PLC0415
+    domain_data = getattr(hass, "data", {}).get("hausman_hub", {})
+    journal = domain_data.get(_DATA_OPERATION_JOURNAL)
+    if not isinstance(journal, OperationJournalService):
+        return ()
+    try:
+        records = journal.snapshot(limit=100).get("records", [])
+    except (TypeError, ValueError):
+        return ()
+    events: list[DashboardEvent] = []
+    for record in records:
+        if not isinstance(record, Mapping):
+            continue
+        sequence = record.get("sequence")
+        timestamp_ms = record.get("occurred_at")
+        source = record.get("source")
+        status = record.get("status")
+        if (
+            type(sequence) is not int
+            or sequence < 1
+            or type(timestamp_ms) is not int
+            or timestamp_ms < 0
+            or not isinstance(source, str)
+            or status not in _ACTIVITY_STATUS_MESSAGE
+        ):
+            continue
+        title, kind = _ACTIVITY_PRESENTATION.get(source, ("Операция", source))
+        reason = record.get("reason")
+        message = (
+            reason.strip()
+            if isinstance(reason, str) and reason.strip()
+            else _ACTIVITY_STATUS_MESSAGE[status]
+        )
+        events.append(
+            DashboardEvent(
+                event_id=f"operation-{sequence}",
+                timestamp_ms=timestamp_ms,
+                title=title,
+                message=message,
+                kind=kind,
+                level="bad" if status == "failed" else "info",
+            )
+        )
+    return tuple(events)
 
 
 def _device_integrations(device: object) -> tuple[str, ...]:
@@ -310,6 +374,7 @@ async def async_dashboard_snapshot(
         devices=device_values,
         entities=entity_values,
         scenarios=await _dashboard_scenarios(scenario_service),
+        events=_dashboard_operation_events(hass),
         generated_at_ms=int(local_now.timestamp() * 1000),
         local_iso=local_now.isoformat(),
         home_name=_non_empty_string(getattr(hass.config, "location_name", None))
