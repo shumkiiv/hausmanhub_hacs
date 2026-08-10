@@ -20,7 +20,7 @@ import { renderDevicesOverview } from "./hausman-hub-devices-overview.js?v=1.52.
 import { buildDiagnosticChecks, diagnosticSummaryText, renderDiagnosticDetails } from "./hausman-hub-diagnostics.js?v=1.52.56";
 import { renderRolloutReadiness } from "./hausman-hub-rollout.js?v=1.52.56";
 import { overviewHeroRenderKey } from "./hausman-hub-overview-hero-state.js?v=1.52.56";
-import { renderOverviewContent, renderOverviewHero } from "./hausman-hub-overview.js?v=1.52.56";
+import { formatUpcomingCountdown, renderOverviewContent, renderOverviewHero } from "./hausman-hub-overview.js?v=1.52.56";
 import { renderPhysicalDeviceCard } from "./hausman-hub-device-card.js?v=1.52.56";
 import { recordTechnicalEvent as log, renderTechnicalLogCard } from "./hausman-hub-technical-log.js?v=1.52.56";
 import { applyFeedback } from "./hausman-hub-feedback.js?v=1.52.56";
@@ -52,6 +52,8 @@ const SCENARIOS_CATALOG_API = "hausman_hub/v1/admin/scenarios/catalog";
 const SCENARIOS_TEST_API = "hausman_hub/v1/admin/scenarios/test";
 const SCENARIOS_DELETE_API = "hausman_hub/v1/admin/scenarios/delete";
 const SCENARIOS_RUN_API = "hausman_hub/v1/admin/scenarios/run";
+const SCENARIOS_UPCOMING_API = "hausman_hub/v1/scenarios/upcoming";
+const SCENARIOS_UPCOMING_CANCEL_API = "hausman_hub/v1/scenarios/upcoming/cancel";
 const CONNECTION_SETTINGS_API = "hausman_hub/v1/admin/connection-settings";
 const RESET_API = "hausman_hub/v1/admin/reset";
 const USER_PREFERENCES_KEY = "hausman_hub";
@@ -316,6 +318,8 @@ class HausmanHubPanel extends HTMLElement {
     this._hass = null;
     this._data = null;
     this._homeDashboard = null;
+    this._upcomingEvents = null;
+    this._upcomingTimer = null;
     this._overviewHeroRoomId = null;
     this._settings = { mode: null, home: null, windows: null, setup: null };
     this._assistant = {
@@ -467,6 +471,7 @@ class HausmanHubPanel extends HTMLElement {
   connectedCallback() {
     restoreNavigationFromLocation(this, false, PANEL_SECTIONS, CLIMATE_VIEWS, SETTINGS_VIEWS);
     this._timer = setInterval(() => this._load(), REFRESH_MS);
+    this._upcomingTimer = setInterval(() => this._refreshUpcomingCountdowns(), REFRESH_MS);
     document.addEventListener("visibilitychange", this._onVisible);
     if (typeof document.addEventListener === "function") {
       document.addEventListener("fullscreenchange", this._onFullscreenChange);
@@ -484,6 +489,8 @@ class HausmanHubPanel extends HTMLElement {
     this._persistFirstRunBeforeUnload();
     if (this._timer) clearInterval(this._timer);
     this._timer = null;
+    if (this._upcomingTimer) clearInterval(this._upcomingTimer);
+    this._upcomingTimer = null;
     if (this._daynightTimer && typeof window !== "undefined" && typeof window.clearTimeout === "function") {
       window.clearTimeout(this._daynightTimer);
     }
@@ -668,6 +675,7 @@ class HausmanHubPanel extends HTMLElement {
         this._hass.callApi("GET", DASHBOARD_API).catch(() => null),
         this._hass.callApi("GET", SCENARIOS_CATALOG_API).catch(() => null),
         this._hass.callApi("GET", PANEL_TABLET_PROFILE_API).catch(() => null),
+        this._hass.callApi("GET", SCENARIOS_UPCOMING_API).catch(() => null),
       ]);
       this._data = results[0];
       this._settings = {
@@ -680,6 +688,7 @@ class HausmanHubPanel extends HTMLElement {
       this._homeDashboard = results[6];
       this._scenarios.catalog = results[7];
       if (typeof applyTabletProfile === "function") applyTabletProfile(this, results[8]);
+      this._upcomingEvents = results[9];
       const draftResumed = resumeFirstRunDraft(this);
       const wizardInProgress = draftResumed || (
         this._firstRun.completed !== true && this._firstRun.step !== "instructions"
@@ -714,6 +723,16 @@ class HausmanHubPanel extends HTMLElement {
     if (this._activeSection === "energy" && this._energyHistory === null) {
       loadEnergyHistory(this);
     }
+  }
+
+  _refreshUpcomingCountdowns() {
+    if (this._activeSection !== "overview") return;
+    const root = this._shell && this._shell.summary;
+    if (!root || typeof root.querySelectorAll !== "function") return;
+    root.querySelectorAll("[data-upcoming-run-at]").forEach((node) => {
+      const runAt = typeof node.getAttribute === "function" ? node.getAttribute("data-upcoming-run-at") : "";
+      if (runAt) node.textContent = formatUpcomingCountdown(runAt, Date.now());
+    });
   }
 
   async _loadScenarios() {
@@ -1237,6 +1256,7 @@ class HausmanHubPanel extends HTMLElement {
         el, svgIcon, setAttr,
         renderEnergyOverviewCard: (panel, target) => renderEnergyOverviewCard(panel, target, { el, svgIcon, setAttr }),
         runApi: SCENARIOS_RUN_API,
+        upcomingCancelApi: SCENARIOS_UPCOMING_CANCEL_API,
       });
       return;
     }
