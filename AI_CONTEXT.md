@@ -1,9 +1,22 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-10 (1.52.60: сценарии возвращают квитанцию без ложного HTTP 500).
+Last updated: 2026-08-10 (1.52.61: dashboard снова отдаёт последнюю активность).
 
 ## Current work
 
+- 2026-08-10 (Codex): выпущена и задеплоена `1.52.61`, release commit
+  `82ed32c`, tag и GitHub Release опубликованы. Причина пустой «Последней
+  активности» была в backend: dashboard v1 всегда возвращал `events: []` и
+  capability `events: false`, хотя Android уже корректно читает это поле.
+  Dashboard теперь проецирует до 100 newest-first записей из durable operation
+  journal, не раскрывая correlation ID, HA entity ID и target устройства.
+  Полный release gate: 1275 тестов, 4 пропущены; GitHub Actions
+  `31410771320` зелёный. Production HA Core 2026.8.1: полный backup
+  `d782fb26`, явная установка `v1.52.61`, config check и restart штатные.
+  Installed/latest и 31 cache reference подтверждают `1.52.61`, все 10
+  сущностей доступны, system log чист. Живой dashboard отдаёт две записи
+  `Сценарий` из сохранённого journal и `capabilities.events=true`. Новых
+  физических команд для проверки не отправлялось; Android менять не пришлось.
 - 2026-08-10 (Codex): выпущена и задеплоена `1.52.60`, commit `bc193ca`,
   tag и GitHub Release опубликованы. Исправлена совместимость scenario API с
   Home Assistant Core 2026.8: `HomeAssistantView.json()` получает HTTP-статус
