@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import unittest
 from types import SimpleNamespace
 from typing import Any
@@ -144,6 +145,65 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result["receipts"]), 1)
         self.hass.services.async_call.assert_awaited_once_with(
             "light", "turn_on", {"entity_id": "light.living_room"}, blocking=True
+        )
+
+    async def test_scenario_confirms_multiple_devices_in_one_shared_window(self) -> None:
+        both_readbacks_started = asyncio.Event()
+        started = 0
+
+        async def delayed_readback(
+            entity_id: object, action_id: str, value: object | None
+        ) -> dict[str, object]:
+            nonlocal started
+            self.assertEqual(2, self.hass.services.async_call.await_count)
+            started += 1
+            if started == 2:
+                both_readbacks_started.set()
+            await asyncio.wait_for(both_readbacks_started.wait(), timeout=0.1)
+            return {
+                "attempted": True,
+                "matched": False,
+                "observedAt": None,
+                "observedState": "open",
+                "attempts": 1,
+            }
+
+        self.executor._read_back_device = AsyncMock(side_effect=delayed_readback)
+        definition = _definition(
+            (
+                ScenarioAction(
+                    id="a1",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="device_1",
+                    action_id="turn_on",
+                ),
+                ScenarioAction(
+                    id="a2",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="device_1",
+                    action_id="turn_on",
+                ),
+            )
+        )
+
+        result = await self.executor.async_execute(
+            definition, "run-1", scenario_id="sc-1"
+        )
+
+        self.assertEqual("completed", result["status"])
+        self.assertFalse(result["confirmed"])
+        self.assertEqual(2, self.executor._read_back_device.await_count)
+        self.assertTrue(
+            all(
+                receipt["reason"] == "state_not_confirmed"
+                for receipt in result["receipts"]
+            )
+        )
+        self.assertTrue(
+            all(
+                not any(key.startswith("_readback") for key in receipt)
+                for receipt in result["receipts"]
+            )
         )
 
     async def test_climate_action_uses_temperature_parameter(self) -> None:

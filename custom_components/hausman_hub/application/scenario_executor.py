@@ -400,11 +400,18 @@ class ScenarioExecutor:
 
         for action in definition.actions:
             receipt = await self._execute_action(
-                action, run_id, next_visited, dry_run=dry_run
+                action,
+                run_id,
+                next_visited,
+                dry_run=dry_run,
+                defer_device_readback=True,
             )
             receipts.append(receipt)
             if receipt.get("status") == "failed":
                 break
+
+        if not dry_run:
+            await self._confirm_deferred_device_receipts(receipts)
 
         completed = all(r.get("status") == "completed" for r in receipts)
         confirmed = completed and all(
@@ -432,6 +439,7 @@ class ScenarioExecutor:
         visited: frozenset[str],
         *,
         dry_run: bool = False,
+        defer_device_readback: bool = False,
     ) -> dict[str, Any]:
         base = {
             "action_id": action.id,
@@ -441,7 +449,12 @@ class ScenarioExecutor:
 
         try:
             if action.type == ScenarioActionType.DEVICE_ACTION:
-                return await self._device_action_receipt(action, base, dry_run=dry_run)
+                return await self._device_action_receipt(
+                    action,
+                    base,
+                    dry_run=dry_run,
+                    defer_readback=defer_device_readback,
+                )
             if action.type == ScenarioActionType.DELAY:
                 if not dry_run:
                     await asyncio.sleep(action.delay_seconds)
@@ -456,7 +469,12 @@ class ScenarioExecutor:
         return {**base, "status": "failed", "error": "unknown action type"}
 
     async def _device_action_receipt(
-        self, action: ScenarioAction, base: dict[str, Any], *, dry_run: bool = False
+        self,
+        action: ScenarioAction,
+        base: dict[str, Any],
+        *,
+        dry_run: bool = False,
+        defer_readback: bool = False,
     ) -> dict[str, Any]:
         if action.target_id is None or action.action_id is None:
             return {
@@ -510,6 +528,9 @@ class ScenarioExecutor:
         }
         if dry_run:
             receipt["service_data"] = service_data
+        elif defer_readback:
+            receipt["_readback_action_id"] = action.action_id
+            receipt["_readback_value"] = confirmation_value
         else:
             read_back = await self._read_back_device(
                 device.entity_id, action.action_id, confirmation_value
@@ -520,6 +541,46 @@ class ScenarioExecutor:
                 None if read_back["matched"] is True else "state_not_confirmed"
             )
         return receipt
+
+    async def _confirm_deferred_device_receipts(
+        self, receipts: list[dict[str, Any]]
+    ) -> None:
+        """Confirm scenario device actions inside one shared wall-clock window."""
+
+        pending: list[tuple[dict[str, Any], Awaitable[dict[str, object]]]] = []
+        for receipt in receipts:
+            action_id = receipt.pop("_readback_action_id", None)
+            value = receipt.pop("_readback_value", None)
+            if not isinstance(action_id, str):
+                continue
+            pending.append(
+                (
+                    receipt,
+                    self._read_back_device(receipt.get("entity_id"), action_id, value),
+                )
+            )
+        if not pending:
+            return
+
+        read_backs = await asyncio.gather(
+            *(read_back for _, read_back in pending), return_exceptions=True
+        )
+        for (receipt, _), read_back in zip(pending, read_backs, strict=True):
+            if isinstance(read_back, BaseException):
+                receipt["confirmed"] = False
+                receipt["read_back"] = {
+                    "attempted": True,
+                    "matched": False,
+                    "observedAt": None,
+                    "observedState": None,
+                    "attempts": 0,
+                }
+                receipt["reason"] = "state_not_confirmed"
+                continue
+            confirmed = read_back["matched"] is True
+            receipt["confirmed"] = confirmed
+            receipt["read_back"] = read_back
+            receipt["reason"] = None if confirmed else "state_not_confirmed"
 
     async def _run_scenario_receipt(
         self,
