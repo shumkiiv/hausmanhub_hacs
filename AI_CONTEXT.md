@@ -1,9 +1,29 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-10 (1.52.63: contracts pin согласован с direct Wi-Fi manual mode).
+Last updated: 2026-08-10 (1.52.64: durable-зависимости питания устройств).
 
 ## Current work
 
+- 2026-08-10 (Codex): выпущена и задеплоена `1.52.64`, commit `56fca2d`,
+  tag и GitHub Release опубликованы. Добавлен durable-контур `requires_on`:
+  зависимое устройство получает эффективное состояние `off`, если питающий
+  выключатель выключен, и `unknown` или `unavailable`, если источник ещё не
+  доступен. Прямые и сценарные команды блокируются до вызова Home Assistant,
+  циклические и дублирующиеся связи отклоняются. Admin API:
+  `GET/PUT /api/hausman_hub/v1/admin/device-power-dependencies`, optimistic
+  revision, storage переживает restart. Dashboard сохраняет сырое состояние
+  в `reportedState`, публикует `powerDependency`, убирает недоступные actions
+  и считает `activeLights` по эффективным состояниям. Consumer pin обновлён
+  на contracts `0.23.0` (`da52e3c`). Полный gate: 1293 теста, 4 пропущены;
+  GitHub Actions `31423113622` зелёный. Production HA Core 2026.8.1: полный
+  backup `32c65894` на KeeneticSSD, 814,57 МБ, база включена; явная установка
+  `v1.52.64`, config check и два restart прошли штатно. Для
+  `light.0xa4c138d69d102803` сохранена зависимость от
+  `switch.0x603d61fffe75c334_1`. После restart связь осталась revision 1:
+  raw `off/on`, dashboard люстры `off`, `reportedState=on`,
+  `power_source_off`, actions пусты. Все 9 сущностей интеграции доступны,
+  system log HausmanHub чист; физических команд при настройке и проверке не
+  отправлялось.
 - 2026-08-10 (Codex): выпущена и задеплоена `1.52.63`, commit `2bc0835`.
   Patch-релиз исправляет только канонический consumer pin на
   hausmanhub-contracts `0.22.3` (`4ac4533`); runtime schema и поведение ручного
