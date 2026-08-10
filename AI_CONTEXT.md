@@ -1,9 +1,23 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-10 (1.52.58: единый durable journal операций по correlation ID).
+Last updated: 2026-08-10 (1.52.60: сценарии возвращают квитанцию без ложного HTTP 500).
 
 ## Current work
 
+- 2026-08-10 (Codex): выпущена и задеплоена `1.52.60`, commit `bc193ca`,
+  tag и GitHub Release опубликованы. Исправлена совместимость scenario API с
+  Home Assistant Core 2026.8: `HomeAssistantView.json()` получает HTTP-статус
+  через `status_code`, поэтому выполненная команда больше не заканчивается
+  ложным `HTTP 500`. Предыдущий release `1.52.59` (`282004e`) перенёс read-back
+  нескольких устройств в одно параллельное восьмисекундное окно, сохранив
+  порядок отправки команд и честный признак `confirmed`. Полный release gate
+  обеих версий: 1273 теста, 4 пропущены; GitHub Actions `31407759337` и
+  `31409172442` зелёные. Production HA Core 2026.8.1: полный backup
+  `e8dddcff`, явная установка `v1.52.60`, config check и restart штатные.
+  Installed/latest, API и статика подтверждают `1.52.60`, 10 сущностей
+  доступны, system log чист. Живой запуск «Закрыть шторы» вернул HTTP 200 за
+  0,285 с, обе квитанции `confirmed` со state `closed`; durable journal хранит
+  подтверждённый `scenario_run` с correlation ID.
 - 2026-08-10 (Codex): выпущена и задеплоена `1.52.58`, release commit
   `981bd26`, tag и GitHub Release опубликованы. Добавлен ограниченный 512
   записями durable journal квитанций устройств, климата, сценариев и голоса с
