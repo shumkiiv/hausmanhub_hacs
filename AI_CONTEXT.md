@@ -1,9 +1,29 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-10 (1.52.61: dashboard снова отдаёт последнюю активность).
+Last updated: 2026-08-10 (1.52.62: direct Wi-Fi AC сохраняет ручное выключение).
 
 ## Current work
 
+- 2026-08-10 (Codex): выпущена и задеплоена `1.52.62`, release commit
+  `b8cff61`, tag и GitHub Release опубликованы. Для кондиционеров с
+  `control_channel=direct_wifi` долговечная память фиксирует наблюдаемую фазу
+  и успешное намерение HausmanHub на 5 минут. Переход active -> off без такого
+  намерения переводит комнату в `manual`, поэтому managed-цикл не включает
+  прибор обратно. Недоступность устройства, первый baseline после обновления
+  и штатный OFF от HausmanHub не создают ручной режим. Существующее действие
+  `set_room_mode` подключено к native runtime и сохраняет automatic/manual без
+  физической команды. Home v12 синхронизирован с hausmanhub-contracts 0.22.3
+  (`4ac4533`); старый Android fixture не изменён. Полный release gate: 1283
+  теста, 4 пропущены; GitHub Actions `31414875689` зелёный. Production HA Core
+  2026.8.1: полный backup `e125917d`, явная установка `v1.52.62`, config check
+  и restart штатные. Installed/latest и 31 cache reference подтверждают
+  `1.52.62`, все 10 сущностей доступны, system log HausmanHub чист. Кабинет
+  после restart остался `cool`, комната automatic и рекламирует только
+  `set_room_mode`; кондиционер Алисы остался unavailable, manual не включён.
+  Новых climate-записей в operation journal и физических команд при проверке
+  не было. Следующая безопасная живая проверка: владелец выключает Wi-Fi AC
+  кабинета или Алисы физически, затем runtime должен показать `manual`; Codex
+  сам активный кондиционер для теста не выключал.
 - 2026-08-10 (Codex): выпущена и задеплоена `1.52.61`, release commit
   `82ed32c`, tag и GitHub Release опубликованы. Причина пустой «Последней
   активности» была в backend: dashboard v1 всегда возвращал `events: []` и
