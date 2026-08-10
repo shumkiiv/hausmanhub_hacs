@@ -515,6 +515,7 @@
     "room_action": {
       "enum": [
         "set_room_target",
+        "set_room_mode",
         "turn_room_off"
       ]
     },
@@ -752,7 +753,7 @@
         },
         "actions": {
           "type": "array",
-          "maxItems": 2,
+          "maxItems": 3,
           "uniqueItems": true,
           "items": {
             "$ref": "#/$defs/room_action"
@@ -760,7 +761,7 @@
         },
         "allowed_actions": {
           "type": "array",
-          "maxItems": 2,
+          "maxItems": 3,
           "uniqueItems": true,
           "items": {
             "$ref": "#/$defs/room_action"
@@ -799,16 +800,10 @@
           "then": {
             "properties": {
               "actions": {
-                "const": [
-                  "set_room_target",
-                  "turn_room_off"
-                ]
+                "minItems": 1
               },
               "allowed_actions": {
-                "const": [
-                  "set_room_target",
-                  "turn_room_off"
-                ]
+                "minItems": 1
               },
               "blocked_reasons": {
                 "maxItems": 0

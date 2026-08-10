@@ -1649,15 +1649,15 @@ class LocalSummaryAccessTest(unittest.TestCase):
             home_response.payload["contours"][0]["id"],
         )
         living_control = home_response.payload["rooms"][0]["control"]
-        # The retired typed-action route means no executable room action is
-        # ever advertised, and reasons stay bounded and honest.
-        self.assertFalse(living_control["enabled"])
-        self.assertEqual([], living_control["actions"])
-        self.assertEqual([], living_control["allowed_actions"])
+        # Device commands remain in the managed loop. The only direct room
+        # action changes durable automatic/manual ownership.
+        self.assertTrue(living_control["enabled"])
+        self.assertEqual(["set_room_mode"], living_control["actions"])
+        self.assertEqual(["set_room_mode"], living_control["allowed_actions"])
         self.assertEqual({}, living_control["action_availability"])
         self.assertEqual({}, living_control["action_inputs"])
         self.assertEqual({}, living_control["action_presentations"])
-        self.assertEqual(["actions_unsupported"], living_control["blocked_reasons"])
+        self.assertEqual([], living_control["blocked_reasons"])
         serialized = json.dumps(home_response.payload)
         self.assertNotIn("synthetic-ac-source-living", serialized)
         self.assertNotIn("entity_id", serialized)
@@ -2379,7 +2379,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.61", panel.payload["integration_version"])
+        self.assertEqual("1.52.62", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",

@@ -585,7 +585,7 @@ class NativeReadinessHardeningTest(unittest.TestCase):
 
 
 class NativeControlGateTest(unittest.TestCase):
-    """Direct room actions stay honestly blocked after the route retirement."""
+    """Only durable room ownership is exposed as a direct room action."""
 
     def _android(self, observation, **overrides):
         registry, contours, _ = _setup()
@@ -597,21 +597,21 @@ class NativeControlGateTest(unittest.TestCase):
         arguments.update(overrides)
         return native_android_climate_snapshot(bound, observation, **arguments)
 
-    def test_room_control_reports_no_actions_with_bounded_reasons(self) -> None:
+    def test_room_control_exposes_only_room_mode(self) -> None:
         registry, contours, _ = _setup()
         _, observation = _native_observation(registry, contours)
 
         result = self._android(observation)
         control = result["rooms"][0]["control"]
 
-        self.assertFalse(result["climate"]["commands_enabled"])
-        self.assertFalse(control["enabled"])
-        self.assertEqual([], control["actions"])
-        self.assertEqual([], control["allowed_actions"])
+        self.assertTrue(result["climate"]["commands_enabled"])
+        self.assertTrue(control["enabled"])
+        self.assertEqual(["set_room_mode"], control["actions"])
+        self.assertEqual(["set_room_mode"], control["allowed_actions"])
         self.assertEqual({}, control["action_availability"])
         self.assertEqual({}, control["action_inputs"])
         self.assertEqual({}, control["action_presentations"])
-        self.assertEqual(["actions_unsupported"], control["blocked_reasons"])
+        self.assertEqual([], control["blocked_reasons"])
 
     def test_room_control_reasons_cover_stale_pending_and_missing_data(
         self,

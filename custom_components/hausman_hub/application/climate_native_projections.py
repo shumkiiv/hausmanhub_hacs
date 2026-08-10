@@ -885,12 +885,7 @@ def _native_room_control_projection(
     pending: bool,
     room_id: str,
 ) -> dict[str, object]:
-    """Report per-room direct actions, which the retired canary route owned.
-
-    The legacy typed-action endpoint no longer exists, so the contract keeps
-    its shape but never advertises an executable action; blocked reasons stay
-    bounded and honest so the tablet can show why direct control is absent.
-    """
+    """Expose durable room ownership while device commands stay managed."""
 
     reasons: list[str] = []
     if bridge_mode is ClimateControlMode.DISABLED:
@@ -901,9 +896,6 @@ def _native_room_control_projection(
     observed_room = observation.room(room_id)
     if observed_room is None:
         reasons.append("registry_mismatch")
-    elif not observed_room.authority_eligible:
-        reasons.append("authority_not_ready")
-
     controlled = [
         device
         for device in registry.devices
@@ -912,21 +904,23 @@ def _native_room_control_projection(
         and device.control_owner is ClimateControlOwner.CLIMATE_CORE
         and device.control_scope is not ClimateControlScope.OBSERVED
     ]
-    if len(controlled) == 1:
+    if len(controlled) != 1:
+        reasons.append("registry_mismatch")
+    else:
         observed_device = observation.device(controlled[0].device_id)
         if observed_device is None or observed_device.room_id != room_id:
             reasons.append("registry_mismatch")
         elif observed_device.availability is not ClimateDeviceAvailability.AVAILABLE:
             reasons.append("device_unavailable")
-    reasons.append("actions_unsupported")
     if pending:
         reasons.append("operation_pending")
 
     blocked_reasons = list(dict.fromkeys(reasons))
+    allowed_actions = [] if blocked_reasons else ["set_room_mode"]
     return {
-        "enabled": False,
-        "actions": [],
-        "allowed_actions": [],
+        "enabled": bool(allowed_actions),
+        "actions": allowed_actions,
+        "allowed_actions": allowed_actions,
         "action_availability": {},
         "action_inputs": {},
         "action_presentations": {},

@@ -32,10 +32,15 @@ _REQUEST_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
 _OPERATION_ID = re.compile(r"^[a-f0-9]{32}$")
 _STABLE_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _SUPPORTED_ACTIONS = frozenset(
-    {"set_home_targets", "set_room_target", "clear_room_override"}
+    {
+        "set_home_targets",
+        "set_room_target",
+        "clear_room_override",
+        "set_room_mode",
+    }
 )
 _SUPPORTED_ROOM_ACTIONS = frozenset(
-    {"set_room_target", "clear_room_override"}
+    {"set_room_target", "clear_room_override", "set_room_mode"}
 )
 _ROOM_BLOCK_REASON_MAP = {
     "bridge_disabled": "climate_disabled",
@@ -114,6 +119,8 @@ class ClimateTabletRuntime(Protocol):
     ) -> object: ...
 
     async def async_home_climate_targets(self, payload: object) -> object: ...
+
+    async def async_set_room_mode(self, room_id: object, mode: object) -> object: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -750,6 +757,11 @@ class ClimateTabletService:
                     "confirm": True,
                 }
             )
+        if request.action == "set_room_mode":
+            return await self._runtime.async_set_room_mode(
+                request.room_id,
+                request.parameters.get("mode"),
+            )
         return await self._runtime.async_temporary_temperature(
             {
                 "request_id": request.request_id,
@@ -1099,6 +1111,8 @@ def _request_matches_snapshot(
         )
     if request.action == "clear_room_override":
         return temporary.get("active") is False
+    if request.action == "set_room_mode":
+        return room.get("mode") == request.parameters.get("mode")
     return False
 
 

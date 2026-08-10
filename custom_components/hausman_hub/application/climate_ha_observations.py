@@ -687,6 +687,8 @@ def _device_activity(
         if state.state == "off":
             return ClimateDeviceActivity.STOPPED
         return ClimateDeviceActivity.UNKNOWN
+    if state.state == "off":
+        return ClimateDeviceActivity.STOPPED
     action = state.attributes.get("hvac_action")
     if isinstance(action, str):
         if action == "cooling":
@@ -699,8 +701,6 @@ def _device_activity(
             return ClimateDeviceActivity.STOPPED
         if action in {"fan", "drying"}:
             return ClimateDeviceActivity.RUNNING
-    if state.state == "off":
-        return ClimateDeviceActivity.STOPPED
     if state.state == "cool":
         return ClimateDeviceActivity.COOLING
     if state.state == "heat":

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 import logging
 import time
@@ -31,6 +32,11 @@ from ..domain.climate_policy import ClimatePolicySnapshot
 from ..domain.climate_protection import (
     ClimateProtectionMemory,
     empty_climate_protection_memory,
+)
+from ..domain.climate_manual import (
+    ClimateManualMemory,
+    ClimateManualViolation,
+    empty_climate_manual_memory,
 )
 from ..domain.climate_resolution import ClimateResolutionSnapshot
 from ..domain.climate_stability import ClimateStabilitySnapshot
@@ -87,6 +93,13 @@ from .climate_policy import build_climate_policy_snapshot
 from .climate_protection import (
     reconcile_climate_protection_memory,
     update_climate_protection,
+)
+from .climate_manual import (
+    apply_manual_rooms,
+    reconcile_climate_manual_memory,
+    record_direct_wifi_commands,
+    update_direct_wifi_observation,
+    with_climate_room_mode,
 )
 from .climate_resolutions import build_climate_resolution_snapshot
 from .climate_stability import build_climate_stability_snapshot
@@ -204,6 +217,16 @@ class ClimateProtectionStorage(Protocol):
         """Atomically save one complete protection memory."""
 
 
+class ClimateManualStorage(Protocol):
+    """Minimal persistence boundary for direct Wi-Fi manual ownership."""
+
+    async def async_load(self) -> ClimateManualMemory | None:
+        """Load validated manual-control memory when it exists."""
+
+    async def async_save(self, memory: ClimateManualMemory) -> None:
+        """Atomically save one complete manual-control memory."""
+
+
 class ClimateStrictHaCallExecutor(Protocol):
     """Minimal execution boundary for one permitted strict HA batch."""
 
@@ -219,6 +242,15 @@ _PASSIVE_KINDS = frozenset(
 )
 
 
+@dataclass(frozen=True, slots=True)
+class _ClimateRoomModeReceipt:
+    """Minimal confirmed result consumed by the existing tablet operation layer."""
+
+    status: ContourApplyStatus = ContourApplyStatus.CONFIRMED
+    confirmed_room_count: int = 1
+    accepted_count: int = 1
+
+
 class ClimateRuntime:
     """One loaded HausmanHub entry's climate facade and rollout state."""
 
@@ -230,6 +262,7 @@ class ClimateRuntime:
         registry_store: ClimateRegistryStorage,
         contour_store: ContourStorage | None = None,
         protection_store: ClimateProtectionStorage | None = None,
+        manual_store: ClimateManualStorage | None = None,
         strict_ha_call_executor: ClimateStrictHaCallExecutor | None = None,
         ha_state_view: ClimateHaStateView | None = None,
         ha_area_assignment: ClimateAreaAssignmentPort | None = None,
@@ -243,6 +276,7 @@ class ClimateRuntime:
         self._registry_store = registry_store
         self._contour_store = contour_store
         self._protection_store = protection_store
+        self._manual_store = manual_store
         self._strict_ha_call_executor = strict_ha_call_executor
         self._ha_state_view = ha_state_view
         self._ha_area_assignment = ha_area_assignment
@@ -252,6 +286,7 @@ class ClimateRuntime:
         self._registry = ClimateRegistry()
         self._contours = ContourRegistry()
         self._protection_memory = empty_climate_protection_memory(updated_at=0)
+        self._manual_memory = empty_climate_manual_memory(updated_at=0)
         self._protection_restart_after: int | None = None
         self._weather_heating_lockout: bool | None = None
         self._central_heating_on: bool | None = None
@@ -338,6 +373,22 @@ class ClimateRuntime:
                 )
                 if loaded_protection is None or protection_changed:
                     await self._async_save_protection(self._protection_memory)
+                loaded_manual = (
+                    await self._manual_store.async_load()
+                    if self._manual_store is not None
+                    else None
+                )
+                manual = loaded_manual or empty_climate_manual_memory(
+                    updated_at=now
+                )
+                manual, manual_changed = reconcile_climate_manual_memory(
+                    manual,
+                    self._registry,
+                    now_ms=now,
+                )
+                self._manual_memory = manual
+                if loaded_manual is None or manual_changed:
+                    await self._async_save_manual(self._manual_memory)
                 self.last_error = None
             except Exception as error:
                 # Base HausmanHub remains available; climate endpoints fail closed and
@@ -651,20 +702,25 @@ class ClimateRuntime:
             previous_registry = self._registry
             previous_contours = self._contours
             previous_protection = self._protection_memory
+            previous_manual = self._manual_memory
             registry = ClimateRegistry()
             contours = ContourRegistry()
             await self._async_persist_contour_setup_unlocked(registry, contours)
             protection = empty_climate_protection_memory(updated_at=self._safe_now())
+            manual = empty_climate_manual_memory(updated_at=self._safe_now())
             try:
                 await self._async_save_protection(protection)
+                await self._async_save_manual(manual)
             except Exception:
                 await self._async_persist_contour_setup_unlocked(
                     previous_registry,
                     previous_contours,
                 )
                 self._protection_memory = previous_protection
+                self._manual_memory = previous_manual
                 raise
             self._protection_memory = protection
+            self._manual_memory = manual
             self._protection_restart_after = None
             self._weather_heating_lockout = None
             self._central_heating_on = None
@@ -935,6 +991,32 @@ class ClimateRuntime:
                 desired_state_changes=desired_state_changes,
             )
 
+    async def async_set_room_mode(
+        self,
+        room_id: object,
+        mode: object,
+    ) -> _ClimateRoomModeReceipt:
+        """Persist manual ownership without issuing a physical command."""
+
+        if not isinstance(room_id, str) or mode not in {"automatic", "manual"}:
+            raise ClimateManualViolation("climate room mode request is invalid")
+        async with self._lock:
+            contour = self._climate_contour()
+            if not any(room.room_id == room_id for room in contour.rooms):
+                raise ClimateManualViolation("climate room is not in the contour")
+            updated = with_climate_room_mode(
+                self._manual_memory,
+                self._registry,
+                room_id=room_id,
+                manual=mode == "manual",
+                updated_at=self._safe_now(),
+            )
+            if updated != self._manual_memory:
+                await self._async_save_manual(updated)
+                self._manual_memory = updated
+            self.last_error = None
+            return _ClimateRoomModeReceipt()
+
     async def async_home_climate_targets(self, payload: object) -> ContourApplyReceipt:
         """Save and apply one common temperature and/or humidity target."""
 
@@ -1033,6 +1115,10 @@ class ClimateRuntime:
                 getattr(error, "completed", 0),
                 len(plan.strict_calls),
             )
+            await self._async_record_direct_wifi_commands(
+                plan.strict_calls,
+                executed_count=completed,
+            )
             return self._contour_applications.update(
                 request_id,
                 status=(
@@ -1048,6 +1134,10 @@ class ClimateRuntime:
         accepted_count = _bounded_completed_count(
             accepted_count,
             len(plan.strict_calls),
+        )
+        await self._async_record_direct_wifi_commands(
+            plan.strict_calls,
+            executed_count=accepted_count,
         )
         if accepted_count != len(plan.strict_calls):
             return self._contour_applications.update(
@@ -1520,11 +1610,20 @@ class ClimateRuntime:
             )
         except Exception as error:
             self.last_error = type(error).__name__
+            executed = getattr(error, "completed", 0)
+            await self._async_record_direct_wifi_commands(
+                decision.calls,
+                executed_count=executed,
+            )
             return climate_trial_failure_receipt(
                 decision,
                 reason=ClimateTrialReason.SERVICE_ERROR,
-                executed_count=getattr(error, "completed", 0),
+                executed_count=executed,
             )
+        await self._async_record_direct_wifi_commands(
+            decision.calls,
+            executed_count=executed,
+        )
         if executed != len(decision.calls):
             self.last_error = "ClimateTrialShortExecution"
             return climate_trial_failure_receipt(
@@ -1554,6 +1653,20 @@ class ClimateRuntime:
                 observed_at=observed_at,
             )
         try:
+            reconciled, reconciled_changed = reconcile_climate_manual_memory(
+                self._manual_memory,
+                self._registry,
+                now_ms=observed_at,
+            )
+            updated_manual, observed_changed = update_direct_wifi_observation(
+                reconciled,
+                self._registry,
+                observation,
+            )
+            if reconciled_changed or observed_changed:
+                await self._async_save_manual(updated_manual)
+            self._manual_memory = updated_manual
+            observation = apply_manual_rooms(observation, self._manual_memory)
             update = update_climate_protection(
                 self._protection_memory,
                 self._registry,
@@ -2096,6 +2209,30 @@ class ClimateRuntime:
     ) -> None:
         if self._protection_store is not None:
             await self._protection_store.async_save(memory)
+
+    async def _async_save_manual(
+        self,
+        memory: ClimateManualMemory,
+    ) -> None:
+        if self._manual_store is not None:
+            await self._manual_store.async_save(memory)
+
+    async def _async_record_direct_wifi_commands(
+        self,
+        calls: tuple[ClimateHaServiceCall, ...],
+        *,
+        executed_count: int,
+    ) -> None:
+        updated, changed = record_direct_wifi_commands(
+            self._manual_memory,
+            self._registry,
+            calls,
+            executed_count=executed_count,
+            commanded_at=self._safe_now(),
+        )
+        if changed:
+            await self._async_save_manual(updated)
+            self._manual_memory = updated
 
     def _native_observation_for_registry(
         self,
