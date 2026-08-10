@@ -359,6 +359,55 @@
    }
   },
   {
+   "id": "idle_ac_maintains_near_target",
+   "name": "Кондиционер Midea в режиме cool с бездействующим компрессором продолжает поддержание.",
+   "category": "cooling",
+   "source_reference": {
+    "file": "tests/climate-scenario-matrix.test.mjs",
+    "case": "preemptive_maintain_for_idle_compressor"
+   },
+   "input": {
+    "period": "day",
+    "away": "home",
+    "room_mode": "auto",
+    "target_temperature": 25.5,
+    "target_humidity": 45,
+    "available_devices": [
+     "air_conditioner"
+    ],
+    "observation": {
+     "temperature": 25.7,
+     "humidity": 45,
+     "state_fresh": true,
+     "temperature_quality": "normal",
+     "window": "closed",
+     "air_conditioner": "idle",
+     "current_setpoint": 25,
+     "current_fan_mode": "low",
+     "current_quiet": false,
+     "cooling_evidence_confirmed": false
+    }
+   },
+   "expected": {
+    "policy": "auto",
+    "action": "maintain",
+    "reason": "idle compressor remains in the cooling maintain band",
+    "setpoint": 26,
+    "fan_mode": "low",
+    "quiet": false,
+    "auxiliary_action": "none",
+    "auxiliary_target": null,
+    "planned_intents": [
+     "set_air_conditioner_temperature",
+     "set_air_conditioner_fan"
+    ],
+    "blockers": [],
+    "active_protections": [
+     "shadow_plan_not_executed"
+    ]
+   }
+  },
+  {
    "id": "hard_off_threshold_stops_running_ac",
    "name": "Жёсткий нижний порог останавливает работающий кондиционер.",
    "category": "cooling",
@@ -801,7 +850,7 @@
   },
   {
    "id": "open_window_forces_safe_off",
-   "name": "Открытое окно безопасно останавливает работающий кондиционер.",
+   "name": "Открытое окно не создаёт общей паузы для работающего кондиционера.",
    "category": "priority",
    "source_reference": {
     "file": "tests/climate-scenario-matrix.test.mjs",
@@ -827,23 +876,20 @@
     }
    },
    "expected": {
-    "policy": "safety_lockout",
-    "action": "safe_off",
-    "reason": "safety_lockout",
-    "setpoint": null,
-    "fan_mode": null,
-    "quiet": null,
+    "policy": "auto",
+    "action": "cool",
+    "reason": "open window does not pause room climate",
+    "setpoint": 26,
+    "fan_mode": "low",
+    "quiet": false,
     "auxiliary_action": "none",
     "auxiliary_target": null,
     "planned_intents": [
-     "stop_air_conditioner"
+     "set_air_conditioner_temperature",
+     "set_air_conditioner_fan"
     ],
-    "blockers": [
-     "window"
-    ],
+    "blockers": [],
     "active_protections": [
-     "window",
-     "blocked_policy_non_actuating",
      "shadow_plan_not_executed"
     ]
    }
@@ -1150,6 +1196,8 @@
     "period": "day",
     "away": "home",
     "room_mode": "auto",
+    "season": "winter",
+    "outdoor_temperature": -5,
     "target_temperature": 25,
     "target_humidity": 45,
     "available_devices": [
@@ -1163,13 +1211,14 @@
      "window": "open",
      "air_conditioner": "unknown",
      "cooling_evidence_confirmed": false,
+     "central_heating_on": true,
      "humidifier_on": true
     }
    },
    "expected": {
-    "policy": "safety_lockout",
-    "action": "safe_off",
-    "reason": "safety_lockout",
+    "policy": "auto",
+    "action": "off",
+    "reason": "open window during active cold-weather heating stops only the humidifier",
     "setpoint": null,
     "fan_mode": null,
     "quiet": null,
@@ -1178,12 +1227,9 @@
     "planned_intents": [
      "stop_humidifier"
     ],
-    "blockers": [
-     "window"
-    ],
+    "blockers": [],
     "active_protections": [
      "window",
-     "blocked_policy_non_actuating",
      "shadow_plan_not_executed"
     ]
    }
@@ -1545,7 +1591,7 @@
   },
   {
    "id": "unknown_window_beats_stale_state",
-   "name": "Неизвестное состояние окна важнее устаревшего снимка комнаты.",
+   "name": "Неизвестное состояние окна не блокирует комнату и оставляет приоритет свежести.",
    "category": "priority",
    "source_reference": {
     "file": "tests/climate-core-decisions.test.mjs",
@@ -1571,9 +1617,9 @@
     }
    },
    "expected": {
-    "policy": "safety_lockout",
-    "action": "safe_off",
-    "reason": "safety_lockout",
+    "policy": "freshness_guard",
+    "action": "observe",
+    "reason": "freshness_guard",
     "setpoint": null,
     "fan_mode": null,
     "quiet": null,
@@ -1581,12 +1627,10 @@
     "auxiliary_target": null,
     "planned_intents": [],
     "blockers": [
-     "window"
+     "stale_state"
     ],
     "active_protections": [
-     "window",
-     "blocked_policy_non_actuating",
-     "redundant_off_suppression",
+     "stale_state",
      "shadow_plan_not_executed"
     ]
    }

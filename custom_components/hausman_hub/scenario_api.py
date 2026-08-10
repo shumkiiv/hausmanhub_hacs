@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from http import HTTPStatus
+import re
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.http import HomeAssistantView
@@ -47,6 +48,7 @@ ADMIN_SCENARIOS_CATALOG_PATH = f"{ADMIN_SCENARIOS_PATH}/catalog"
 ADMIN_SCENARIOS_TEST_PATH = f"{ADMIN_SCENARIOS_PATH}/test"
 ADMIN_SCENARIOS_DELETE_PATH = f"{ADMIN_SCENARIOS_PATH}/delete"
 ADMIN_SCENARIOS_RUN_PATH = f"{ADMIN_SCENARIOS_PATH}/run"
+_MDI_ICON = re.compile(r"^mdi:[a-z0-9-]+$")
 
 
 class _ScenarioView(HomeAssistantView):
@@ -109,10 +111,35 @@ class ScenarioCatalogView(_ScenarioView):
             }
             for device in catalog.devices.values()
         ]
+        saved_scenarios = await service.async_list_scenarios()
+        scenarios = [
+            _scenario_catalog_summary(scenario)
+            for scenario in saved_scenarios
+        ]
         return self.json(
-            {"devices": sorted(devices, key=lambda item: item["name"])},
+            {
+                "devices": sorted(devices, key=lambda item: item["name"]),
+                "scenarios": scenarios,
+            },
             headers=NO_STORE_HEADERS,
         )
+
+
+def _scenario_catalog_summary(scenario: object) -> dict[str, str]:
+    """Return the additive scenario metadata approved by catalog contract v1."""
+
+    summary = {
+        "id": str(getattr(scenario, "id")),
+        "title": str(getattr(scenario, "title")),
+    }
+    icon = getattr(scenario, "icon", None)
+    if (
+        isinstance(icon, str)
+        and len(icon) <= 80
+        and _MDI_ICON.fullmatch(icon) is not None
+    ):
+        summary["icon"] = icon
+    return summary
 
 
 class ScenariosView(_ScenarioView):

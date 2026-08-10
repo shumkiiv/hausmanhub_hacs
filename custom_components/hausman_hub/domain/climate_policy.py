@@ -32,7 +32,6 @@ from .climate_observation import (
     ClimateRoomMode,
     ClimateRoomObservation,
     ClimateTemperatureQuality,
-    ClimateWindowState,
     ClimateDeviceActivity,
     ClimateDeviceObservation,
 )
@@ -513,7 +512,11 @@ def _expected_policy_output(
             ClimatePolicyAction.SAFE_OFF,
             ClimatePolicyReason.SAFETY_LOCKOUT,
             (ClimatePolicyBlocker.AIR_CONDITIONER_OUTDOOR_LOCKOUT,),
-            _safe_off_air_conditioners(selected_devices),
+            _outdoor_guard_devices(
+                selected_devices,
+                equipment,
+                stability,
+            ),
         )
 
     safety = _safety_blockers(room)
@@ -598,8 +601,6 @@ def _safety_blockers(
     room: ClimateRoomObservation,
 ) -> tuple[ClimatePolicyBlocker, ...]:
     blockers: list[ClimatePolicyBlocker] = []
-    if room.window in {ClimateWindowState.OPEN, ClimateWindowState.UNKNOWN}:
-        blockers.append(ClimatePolicyBlocker.WINDOW)
     if room.temperature is None:
         blockers.append(ClimatePolicyBlocker.CRITICAL_SENSOR)
     if room.temperature_quality is ClimateTemperatureQuality.SUSPECT:
@@ -865,6 +866,29 @@ def _safe_off_air_conditioners(
             )
         )
     return tuple(result)
+
+
+def _outdoor_guard_devices(
+    selected: tuple[ClimateDeviceObservation, ...],
+    equipment: ClimateRoomEquipmentPlan,
+    stability: ClimateRoomStabilityPlan,
+) -> tuple[ClimateFinalDevicePlan, ...]:
+    """Stop AC units in unsafe cold while preserving other device plans."""
+
+    air_conditioners = tuple(
+        device
+        for device in selected
+        if device.kind is ClimateObservationDeviceKind.AIR_CONDITIONER
+    )
+    other_devices = tuple(
+        device
+        for device in selected
+        if device.kind is not ClimateObservationDeviceKind.AIR_CONDITIONER
+    )
+    return (
+        *_safe_off_air_conditioners(air_conditioners),
+        *_automatic_devices(other_devices, equipment, stability),
+    )
 
 
 def _equipment_action(action: ClimateEquipmentAction) -> ClimateFinalDeviceAction:

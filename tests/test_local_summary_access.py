@@ -2799,6 +2799,21 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 FakeRequest("192.168.1.20", tablet, path=scenarios_path)
             )
         )
+        service = self.hass.data["hausman_hub"]["scenario_service"]
+        service._registry = SimpleNamespace(  # noqa: SLF001
+            scenarios=(
+                SimpleNamespace(
+                    id="close_curtains",
+                    title="Закрыть шторы",
+                    icon="mdi:curtains",
+                ),
+                SimpleNamespace(
+                    id="legacy_icon",
+                    title="Старая иконка",
+                    icon="unsafe-icon",
+                ),
+            )
+        )
         catalog = asyncio.run(
             views[catalog_path].get(
                 FakeRequest("192.168.1.20", tablet, path=catalog_path)
@@ -2819,6 +2834,16 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertIn("scenarios", scenarios.payload)
         self.assertEqual(200, catalog.status)
         self.assertIn("devices", catalog.payload)
+        self.assertIn("scenarios", catalog.payload)
+        self.assertEqual(
+            {
+                "id": "close_curtains",
+                "title": "Закрыть шторы",
+                "icon": "mdi:curtains",
+            },
+            catalog.payload["scenarios"][0],
+        )
+        self.assertNotIn("icon", catalog.payload["scenarios"][1])
         self.assertEqual(400, unknown_action.status)
 
     def test_public_device_action_route_returns_confirmed_receipt(self) -> None:

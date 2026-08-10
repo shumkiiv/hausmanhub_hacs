@@ -136,8 +136,8 @@ class ClimateComparisonBuilderTest(unittest.TestCase):
         self.assertEqual(
             {
                 "room_count": 1,
-                "aligned_room_count": 1,
-                "diverged_room_count": 0,
+                "aligned_room_count": 0,
+                "diverged_room_count": 1,
                 "not_comparable_room_count": 0,
             },
             payload["summary"],
@@ -153,44 +153,51 @@ class ClimateComparisonBuilderTest(unittest.TestCase):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, serialized)
 
-    def test_aligned_room_and_device_report_no_reasons(self) -> None:
+    def test_stopped_module_diverges_when_open_window_does_not_pause_climate(self) -> None:
         payload = source_payload()
         payload["devices"][0]["state"] = "off"  # type: ignore[index]
 
         comparison, isolation = _comparison(payload)
 
         self.assertFalse(comparison.commands_enabled)
-        self.assertEqual(1, comparison.aligned_room_count)
-        self.assertEqual((), comparison.diverged_room_ids)
+        self.assertEqual(0, comparison.aligned_room_count)
+        self.assertEqual(("living",), comparison.diverged_room_ids)
         self.assertEqual((), comparison.not_comparable_room_ids)
         room = comparison.room("living")  # type: ignore[union-attr]
-        self.assertIs(room.status, ClimateComparisonStatus.ALIGNED)
-        self.assertEqual((), room.reasons)
-        self.assertIs(room.planned_policy, ClimateRoomPolicy.SAFETY_LOCKOUT)
-        self.assertIs(room.planned_action, ClimatePolicyAction.SAFE_OFF)
+        self.assertIs(room.status, ClimateComparisonStatus.DIVERGED)
+        self.assertEqual(
+            (
+                ClimateComparisonReason.DEVICE_SETTING_UNOBSERVED,
+                ClimateComparisonReason.DEVICE_ACTIVITY_MISMATCH,
+            ),
+            room.reasons,
+        )
+        self.assertIs(room.planned_policy, ClimateRoomPolicy.AUTO)
+        self.assertIs(room.planned_action, ClimatePolicyAction.COOL)
         self.assertIs(room.observed_mode, ClimateRoomMode.AUTO)
         (device,) = room.devices
-        self.assertIs(device.status, ClimateComparisonStatus.ALIGNED)
-        self.assertIs(device.planned_action, ClimateFinalDeviceAction.OFF)
+        self.assertIs(device.status, ClimateComparisonStatus.DIVERGED)
+        self.assertIs(device.planned_action, ClimateFinalDeviceAction.COOL)
         self.assertIs(device.observed_activity, ClimateDeviceActivity.STOPPED)
         self.assertIs(
             isolation.room("living").status,  # type: ignore[union-attr]
             ClimateRoomIsolationStatus.READY,
         )
 
-    def test_running_module_diverges_from_the_safe_stop_plan(self) -> None:
+    def test_running_module_is_not_comparable_without_observed_settings(self) -> None:
         comparison, _ = _comparison(source_payload())
 
-        self.assertEqual(("living",), comparison.diverged_room_ids)
+        self.assertEqual((), comparison.diverged_room_ids)
+        self.assertEqual(("living",), comparison.not_comparable_room_ids)
         room = comparison.room("living")  # type: ignore[union-attr]
-        self.assertIs(room.status, ClimateComparisonStatus.DIVERGED)
+        self.assertIs(room.status, ClimateComparisonStatus.NOT_COMPARABLE)
         self.assertEqual(
-            (ClimateComparisonReason.DEVICE_ACTIVITY_MISMATCH,),
+            (ClimateComparisonReason.DEVICE_SETTING_UNOBSERVED,),
             room.reasons,
         )
         (device,) = room.devices
-        self.assertIs(device.status, ClimateComparisonStatus.DIVERGED)
-        self.assertIs(device.planned_action, ClimateFinalDeviceAction.SAFE_OFF)
+        self.assertIs(device.status, ClimateComparisonStatus.NOT_COMPARABLE)
+        self.assertIs(device.planned_action, ClimateFinalDeviceAction.COOL)
         self.assertIs(device.observed_activity, ClimateDeviceActivity.COOLING)
 
     def test_unobserved_module_settings_limit_the_comparison(self) -> None:
@@ -362,6 +369,7 @@ _REFERENCE_VERDICTS = {
     "stopped_ac_starts_at_default_gap": ("aligned", ()),
     "stopped_ac_waits_below_default_gap": ("aligned", ()),
     "running_ac_maintains_near_target": ("aligned", ()),
+    "idle_ac_maintains_near_target": ("aligned", ()),
     "hard_off_threshold_stops_running_ac": ("aligned", ()),
     "running_ac_softens_before_stop": ("aligned", ()),
     "weak_cooling_raises_fan_first": ("aligned", ()),

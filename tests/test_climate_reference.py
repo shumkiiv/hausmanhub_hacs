@@ -44,7 +44,7 @@ class ClimateReferenceTest(unittest.TestCase):
             "0bf681c4278f14f1ad7808b5fe0726b199bcdccc",
             source["repository_revision"],  # type: ignore[index]
         )
-        self.assertEqual(30, len(self.suite["cases"]))
+        self.assertEqual(31, len(self.suite["cases"]))
         self.assertEqual(31, len(self.suite["protections"]))
 
     def test_suite_covers_each_algorithm_area_and_fixed_policy_priority(self) -> None:
@@ -77,8 +77,12 @@ class ClimateReferenceTest(unittest.TestCase):
             cases["minimum_off_pause_blocks_restart"]["expected"]["blockers"],
         )
         self.assertEqual(
-            "safe_off",
+            "cool",
             cases["open_window_forces_safe_off"]["expected"]["action"],
+        )
+        self.assertEqual(
+            ("maintain", 26, "low"),
+            self._decision(cases["idle_ac_maintains_near_target"]),
         )
         self.assertEqual(
             "humidifier_on",

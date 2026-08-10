@@ -89,6 +89,7 @@ class ClimateContractSchemasTest(unittest.TestCase):
             "hausmanhub_dashboard_v1/dashboard.json": "v1/dashboard-snapshot.schema.json",
             "hausmanhub_device_actions_v1/request.json": "v1/device-action-request.schema.json",
             "hausmanhub_device_actions_v1/confirmed.json": "v1/device-action-receipt.schema.json",
+            "hausmanhub_scenario_catalog_v1/catalog.json": "v1/scenario-catalog.schema.json",
             "hausmanhub_climate_runtime_v1/climate-action-request.json": "v1/climate-action-request.schema.json",
             "hausmanhub_climate_v1/operation-query.json": "v1/climate-operation-query.schema.json",
             "hausmanhub_climate_runtime_v1/climate-operation-confirmed.json": "v1/climate-operation-receipt.schema.json",

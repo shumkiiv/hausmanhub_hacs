@@ -258,7 +258,7 @@ class ClimateResolutionTest(unittest.TestCase):
             for case in cases
         }
 
-        self.assertEqual(30, len(results))
+        self.assertEqual(31, len(results))
         self.assertIs(
             results["stopped_ac_starts_at_default_gap"].thermal,
             ClimateThermalResolution.COOLING,

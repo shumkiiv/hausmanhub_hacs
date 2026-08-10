@@ -560,7 +560,7 @@ class ClimateEquipmentTest(unittest.TestCase):
             for case in cases
         }
 
-        self.assertEqual(30, len(results))
+        self.assertEqual(31, len(results))
         starts = results["stopped_ac_starts_at_default_gap"].devices[0]
         self.assertIs(starts.action, ClimateEquipmentAction.COOL)
         self.assertEqual(26.0, starts.target_temperature)

@@ -43,7 +43,17 @@ def managed_home() -> dict[str, object]:
     contour["execution"]["settings_apply"]["available"] = True
     contour["execution"]["temporary_temperature"]["available"] = True
     contour["rooms"][0]["temporary_temperature"]["available"] = True
-    payload["rooms"][0]["devices"][0]["control_scope"] = "managed"
+    room = payload["rooms"][0]
+    room["devices"][0]["control_scope"] = "managed"
+    room["control"]["enabled"] = True
+    room["control"]["allowed_actions"] = [
+        "set_room_target",
+        "turn_room_off",
+    ]
+    room["control"]["blocked_reasons"] = []
+    for availability in room["control"]["action_availability"].values():
+        availability["allowed"] = True
+        availability["blocked_reasons"] = []
     return payload
 
 
@@ -173,6 +183,53 @@ class ClimateTabletProjectionTest(unittest.TestCase):
         self.assertFalse(payload["commands_enabled"])
         contract_validator("climate-runtime.schema.json").validate(payload)
 
+    def test_disabled_projection_keeps_durable_active_operation_visible(self) -> None:
+        operation = {
+            "operation_id": "0123456789abcdef0123456789abcdef",
+            "request_id": "tablet.climate.0001",
+            "action": "set_room_target",
+            "room_id": "living",
+            "status": "pending",
+            "updated_at": 1_785_949_200_000,
+        }
+
+        payload = climate_tablet_snapshot(
+            None,
+            climate_mode="disabled",
+            active_operations=(operation,),
+            generated_at=1_785_949_200_000,
+        )
+
+        self.assertEqual([operation], payload["active_operations"])
+        contract_validator("climate-runtime.schema.json").validate(payload)
+
+    def test_room_control_and_range_follow_authoritative_native_runtime(self) -> None:
+        home = managed_home()
+        control = home["rooms"][0]["control"]
+        control["enabled"] = False
+        control["allowed_actions"] = []
+        control["blocked_reasons"] = ["device_unavailable"]
+        target_input = control["action_inputs"]["set_room_target"][
+            "target_temperature"
+        ]
+        target_input.update({"minimum": 19, "maximum": 27, "step": 1})
+
+        payload = climate_tablet_snapshot(home, climate_mode="managed")
+        room = payload["rooms"][0]
+
+        self.assertFalse(room["control"]["enabled"])
+        self.assertEqual([], room["control"]["allowed_actions"])
+        self.assertEqual(
+            ["device_unavailable"],
+            room["control"]["blocked_reasons"],
+        )
+        self.assertEqual(19, room["minimum_temperature"])
+        self.assertEqual(
+            {"minimum": 19, "maximum": 27, "step": 1},
+            room["temperature_range"],
+        )
+        contract_validator("climate-runtime.schema.json").validate(payload)
+
     def test_public_request_rejects_raw_home_assistant_target(self) -> None:
         request = action_request(managed_home()["state_revision"])
         request["entity_id"] = "climate.unsafe"
@@ -294,6 +351,34 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(receipt["final"])
         self.assertEqual([], restarted_runtime.commands)
         contract_validator("climate-operation-receipt.schema.json").validate(receipt)
+
+    async def test_pending_reservation_survives_restart_while_runtime_is_disabled(self) -> None:
+        request = action_request(self.home["state_revision"])
+        completed = await self.service.async_execute(request)
+        pending_store = MemoryOperationStore(self.store.saved[0])
+        restarted_runtime = FakeRuntime(self.home)
+        restarted_runtime.configuration = SimpleNamespace(
+            mode="read-only",
+            climate_bridge_mode=ClimateControlMode.DISABLED,
+        )
+        restarted = ClimateTabletService(
+            restarted_runtime,
+            pending_store,
+            now_ms=lambda: self.now + 30_000,
+        )
+
+        await restarted.async_load()
+        snapshot = await restarted.async_snapshot()
+        duplicate = await restarted.async_execute(request)
+
+        self.assertEqual(
+            completed["operation_id"],
+            snapshot["active_operations"][0]["operation_id"],
+        )
+        self.assertTrue(duplicate["duplicate"])
+        self.assertEqual("pending", duplicate["status"])
+        self.assertEqual([], restarted_runtime.commands)
+        contract_validator("climate-runtime.schema.json").validate(snapshot)
 
     async def test_conflicting_request_id_is_rejected_without_command(self) -> None:
         await self.service.async_execute(action_request(self.home["state_revision"]))

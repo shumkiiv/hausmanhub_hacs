@@ -101,6 +101,7 @@ class ClimateStabilityReason(StrEnum):
     HUMIDITY_HIGH = "humidity_high"
     HUMIDITY_HYSTERESIS = "humidity_hysteresis"
     WINDOW_NOT_CLOSED = "window_not_closed"
+    WINDOW_OPEN_HEATING_PERIOD = "window_open_heating_period"
     OCCUPANCY_NOT_HOME = "occupancy_not_home"
 
 
@@ -649,8 +650,15 @@ def _air_conditioner_output(
             ClimateStabilityProtection.NONE,
             ClimateStabilityReason.UPSTREAM_OBSERVE,
         )
-    running = device.activity in _RUNNING_ACTIVITIES
-    stopped = device.activity in _STOPPED_ACTIVITIES
+    # An AC that remains in HVAC mode ``cool`` commonly reports
+    # ``hvac_action: idle`` after its compressor reaches the device setpoint.
+    # It is still maintaining the room and must not be converted into an off
+    # command by the stopped-device branch below.
+    running = (
+        device.activity in _RUNNING_ACTIVITIES
+        or device.activity is ClimateDeviceActivity.IDLE
+    )
+    stopped = device.activity is ClimateDeviceActivity.STOPPED
     if not running and not stopped:
         return (
             ClimateStabilityAction.OBSERVE,
@@ -879,7 +887,12 @@ def _humidifier_output(
             ClimateStabilityProtection.NONE,
             ClimateStabilityReason.DEVICE_UNAVAILABLE,
         )
-    if room.window is not ClimateWindowState.CLOSED:
+    if (
+        room.window is ClimateWindowState.OPEN
+        and home.central_heating_on is True
+        and home.outdoor_temperature is not None
+        and home.outdoor_temperature <= home.heating_lockout_low
+    ):
         return (
             ClimateStabilityAction.OFF,
             None,
@@ -890,7 +903,7 @@ def _humidifier_output(
             None,
             None,
             ClimateStabilityProtection.WINDOW,
-            ClimateStabilityReason.WINDOW_NOT_CLOSED,
+            ClimateStabilityReason.WINDOW_OPEN_HEATING_PERIOD,
         )
     if home.occupancy in {
         ClimateOccupancyMode.AWAY_SETBACK,

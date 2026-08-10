@@ -401,10 +401,6 @@ class NativeApplyPreviewTest(unittest.TestCase):
 
         self.assertEqual(legacy_result["contract"], result["contract"])
         self.assertEqual(legacy_result["contour_id"], result["contour_id"])
-        # Semantic difference locked by this golden test: the legacy preview
-        # counted bridge sync commands (0, "in_sync"), while the native
-        # preview reports the real strict HA plan for the same inputs (one
-        # hvac-mode call, "ready").
         self.assertEqual("ready", result["status"])
         self.assertTrue(result["ready"])
         self.assertEqual(1, result["room_count"])

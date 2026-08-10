@@ -1,0 +1,29 @@
+{
+  "devices": [
+    {
+      "target_id": "entity_0123456789abcdef",
+      "name": "Свет в гостиной",
+      "entity_id": "light.living_room",
+      "actions": [
+        {
+          "action_id": "turn_on",
+          "title": "Включить",
+          "domain": "light",
+          "service": "turn_on",
+          "allowed_fields": []
+        }
+      ]
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "close_curtains",
+      "title": "Закрыть шторы",
+      "icon": "mdi:curtains"
+    },
+    {
+      "id": "quiet_evening",
+      "title": "Тихий вечер"
+    }
+  ]
+}

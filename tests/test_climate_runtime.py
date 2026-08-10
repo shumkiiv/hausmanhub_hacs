@@ -268,6 +268,29 @@ class SnapshotStateView:
     def entity_state(self, entity_id: str) -> ClimateHaEntityState | None:
         self.reads += 1
         snapshot = self._bridge.snapshot
+        if entity_id in self._registry.home.prioritized_outdoor_temperature_entity_ids:
+            return ClimateHaEntityState(
+                entity_id=entity_id,
+                state="-5.0",
+                attributes={},
+                last_updated_ms=snapshot.generated_at,
+            )
+        if entity_id == self._registry.home.central_heating_entity_id:
+            return ClimateHaEntityState(
+                entity_id=entity_id,
+                state="40.0",
+                attributes={},
+                last_updated_ms=snapshot.generated_at,
+            )
+        if any(
+            room.window_entity_id == entity_id for room in self._registry.rooms
+        ):
+            return ClimateHaEntityState(
+                entity_id=entity_id,
+                state="on",
+                attributes={},
+                last_updated_ms=snapshot.generated_at,
+            )
         for device in self._registry.devices:
             endpoint = next(
                 (item for item in device.endpoints if item.entity_id == entity_id),
@@ -293,7 +316,11 @@ class SnapshotStateView:
                 attributes=(
                     {}
                     if room is None or room.temperature is None
-                    else {"current_temperature": room.temperature}
+                    else {
+                        "current_temperature": room.temperature,
+                        "temperature": 26.0,
+                        "fan_mode": "low",
+                    }
                 ),
                 last_updated_ms=snapshot.generated_at,
             )
@@ -395,6 +422,7 @@ def with_native_observation_bindings(
     registry: ClimateRegistry,
     *,
     keep_unbound: tuple[str, ...] = (),
+    guarded_environment: bool = True,
 ) -> ClimateRegistry:
     devices: list[ClimateDevice] = []
     for device in registry.devices:
@@ -459,7 +487,16 @@ def with_native_observation_bindings(
     return ClimateRegistry(
         rooms=bound_rooms,
         devices=tuple(devices),
-        home=registry.home,
+        home=(
+            replace(
+                registry.home,
+                outdoor_temperature_entity_id="sensor.outdoor_temperature",
+                outdoor_temperature_entity_ids=("sensor.outdoor_temperature",),
+                central_heating_entity_id="sensor.central_heating_temperature",
+            )
+            if guarded_environment
+            else registry.home
+        ),
         version=registry.version,
     )
 
@@ -628,7 +665,12 @@ def native_application_inputs(
     native_registry = ClimateRegistry(
         rooms=rooms,
         devices=devices,
-        home=bound.home,
+        home=replace(
+            bound.home,
+            outdoor_temperature_entity_id="sensor.outdoor_temperature",
+            outdoor_temperature_entity_ids=("sensor.outdoor_temperature",),
+            central_heating_entity_id="sensor.central_heating_temperature",
+        ),
         version=bound.version,
     )
     states: dict[str, ClimateHaEntityState] = {}
@@ -639,6 +681,18 @@ def native_application_inputs(
             attributes={},
             last_updated_ms=1784280005000,
         )
+    states["sensor.outdoor_temperature"] = ClimateHaEntityState(
+        entity_id="sensor.outdoor_temperature",
+        state="-5.0",
+        attributes={},
+        last_updated_ms=1784280005000,
+    )
+    states["sensor.central_heating_temperature"] = ClimateHaEntityState(
+        entity_id="sensor.central_heating_temperature",
+        state="40.0",
+        attributes={},
+        last_updated_ms=1784280005000,
+    )
     for device in native_registry.devices:
         if device.kind is ClimateDeviceKind.TEMPERATURE_SENSOR:
             endpoint = device.endpoint(ClimateEndpointRole.TEMPERATURE)
@@ -655,7 +709,7 @@ def native_application_inputs(
                 states[endpoint.entity_id] = ClimateHaEntityState(
                     entity_id=endpoint.entity_id,
                     state="cool",
-                    attributes={},
+                    attributes={"temperature": 27.0, "fan_mode": "low"},
                     last_updated_ms=1784280005000,
                 )
     return native_registry, ReflectingNativeStateView(states)
@@ -2029,7 +2083,10 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             target_humidity=45,
             strategy="normal",
         )
-        registry = with_native_observation_bindings(registry)
+        registry = with_native_observation_bindings(
+            registry,
+            guarded_environment=False,
+        )
         state_view = SnapshotStateView(registry, bridge)
         runtime = ClimateRuntime(
             entry_id="entry",
@@ -2103,7 +2160,10 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             target_humidity=45,
             strategy="normal",
         )
-        registry = with_native_observation_bindings(registry)
+        registry = with_native_observation_bindings(
+            registry,
+            guarded_environment=False,
+        )
         state_view = SnapshotStateView(registry, bridge)
         runtime = ClimateRuntime(
             entry_id="entry",
@@ -2177,7 +2237,10 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
             target_humidity=45,
             strategy="normal",
         )
-        registry = with_native_observation_bindings(registry)
+        registry = with_native_observation_bindings(
+            registry,
+            guarded_environment=False,
+        )
         state_view = SnapshotStateView(registry, bridge)
         runtime = ClimateRuntime(
             entry_id="entry",
@@ -2972,7 +3035,7 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertIs(managed.status, ClimateTrialStatus.APPLIED)
         self.assertEqual(1, managed.call_count)
         self.assertIn("living", by_room)
-        self.assertEqual(2, len(executor.batches))
+        self.assertEqual(1, len(executor.batches))
         services = [call.service for batch in executor.batches for call in batch]
         self.assertIn(ClimateHaService.HUMIDIFIER_TURN_OFF, services)
         humidifier_calls = [

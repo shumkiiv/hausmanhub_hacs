@@ -138,7 +138,7 @@ class ClimatePolicyTest(unittest.TestCase):
             for case in cases
         }
 
-        self.assertEqual(30, len(results))
+        self.assertEqual(31, len(results))
         self.assertEqual(
             results,
             {
@@ -206,20 +206,19 @@ class ClimatePolicyTest(unittest.TestCase):
         self.assertIs(keep.action, ClimatePolicyAction.OBSERVE)
         self.assertEqual((), keep.devices)
 
-    def test_safe_stop_targets_running_devices_and_suppresses_redundant_off(self) -> None:
+    def test_open_window_does_not_create_a_room_safe_stop(self) -> None:
         running_ac = climate_reference_policy("open_window_forces_safe_off")
         stopped_ac = climate_reference_policy("unknown_window_beats_stale_state")
         humidifier = climate_reference_policy("open_window_stops_humidifier")
 
-        self.assertEqual(
-            ("reference_air_conditioner",),
-            running_ac.safe_stop_device_ids,
-        )
+        self.assertEqual((), running_ac.safe_stop_device_ids)
+        self.assertIs(running_ac.action, ClimatePolicyAction.COOL)
         self.assertEqual((), stopped_ac.safe_stop_device_ids)
-        self.assertIs(stopped_ac.devices[0].action, ClimateFinalDeviceAction.OFF)
-        self.assertEqual(
-            ("reference_humidifier",),
-            humidifier.safe_stop_device_ids,
+        self.assertEqual((), stopped_ac.devices)
+        self.assertEqual((), humidifier.safe_stop_device_ids)
+        self.assertIs(
+            humidifier.devices[0].action,
+            ClimateFinalDeviceAction.OFF,
         )
 
     def test_safety_lockout_beats_stale_data_and_keeps_fixed_blocker_order(self) -> None:
@@ -232,8 +231,11 @@ class ClimatePolicyTest(unittest.TestCase):
         )
         permissions = _with_room(base, blocked_room)
 
-        self.assertIs(unknown_window.policy, ClimateRoomPolicy.SAFETY_LOCKOUT)
-        self.assertEqual((ClimatePolicyBlocker.WINDOW,), unknown_window.blockers)
+        self.assertIs(unknown_window.policy, ClimateRoomPolicy.FRESHNESS_GUARD)
+        self.assertEqual(
+            (ClimatePolicyBlocker.STALE_STATE,),
+            unknown_window.blockers,
+        )
         self.assertEqual(
             (
                 ClimatePolicyBlocker.COOLING_BLOCKED,
@@ -650,6 +652,7 @@ def _force_safe_off_inputs(
         temperature_quality=ClimateTemperatureQuality.NORMAL,
         window=window,
         mode=ClimateRoomMode.AUTO,
+        cooling_allowed=False,
     )
     home = ClimateHomeObservation(
         season=ClimateSeason.SUMMER,

@@ -127,7 +127,7 @@ class ClimateObservationTest(unittest.TestCase):
     def test_every_frozen_case_fits_the_internal_model_without_commands(self) -> None:
         suite = load_climate_reference_suite()
         cases = suite["cases"]
-        self.assertEqual(30, len(cases))  # type: ignore[arg-type]
+        self.assertEqual(31, len(cases))  # type: ignore[arg-type]
 
         for case in cases:  # type: ignore[union-attr]
             with self.subTest(case_id=case["id"]):

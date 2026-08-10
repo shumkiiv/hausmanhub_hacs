@@ -171,6 +171,17 @@ def _close_windows(observation):
     )
 
 
+def _cold_outdoor_guard(observation):
+    return replace(
+        _close_windows(observation),
+        home=replace(
+            observation.home,
+            outdoor_temperature=-5.0,
+            air_conditioner_outdoor_guard_configured=True,
+        ),
+    )
+
+
 def _floor_heating_policy():
     observation = climate_reference_observation("winter_trv_uses_cold_weather_target")
     resolution = ClimateRoomThermalResolution(
@@ -237,7 +248,12 @@ def _floor_heating_policy():
 class ClimateHaAdapterTest(unittest.TestCase):
     def test_safe_stop_translates_to_one_strict_off_call(self) -> None:
         payload, registry, contours = _setup(entity_id="climate.living_ac")
-        isolation = _pipeline(payload, registry, contours)
+        isolation = _pipeline(
+            payload,
+            registry,
+            contours,
+            mutate_observation=_cold_outdoor_guard,
+        )
 
         plan = build_climate_ha_call_plan(registry, isolation)
 
@@ -279,6 +295,59 @@ class ClimateHaAdapterTest(unittest.TestCase):
         self.assertIs(device.calls[2].fan_mode, ClimateFanMode.LOW)
         self.assertTrue(
             all(call.entity_id == "climate.living_ac" for call in device.calls)
+        )
+
+    def test_idle_ac_maintain_plan_never_translates_to_hvac_off(self) -> None:
+        policy = climate_reference_policy("idle_ac_maintains_near_target")
+        registry = ClimateRegistry(
+            rooms=(ClimateRoom(room_id="reference_room", name="Эталон"),),
+            devices=(
+                ClimateDevice(
+                    device_id="reference_air_conditioner",
+                    name="AC",
+                    room_id="reference_room",
+                    kind=ClimateDeviceKind.AIR_CONDITIONER,
+                    source_id="reference-ac-source",
+                    control_scope=ClimateControlScope.MANAGED,
+                    control_owner=ClimateControlOwner.CLIMATE_CORE,
+                    capabilities=AC_CAPABILITIES,
+                    endpoints=(
+                        ClimateEndpoint(
+                            ClimateEndpointRole.CONTROL,
+                            "climate.reference_ac",
+                        ),
+                    ),
+                ),
+            ),
+        )
+        isolation = ClimateIsolationSnapshot(
+            contour_id="climate",
+            contour_mode=ContourMode.AUTOMATIC,
+            observed_at=policy.observed_at,
+            rooms=(
+                ClimateIsolatedRoomResult(
+                    room_id="reference_room",
+                    status=ClimateRoomIsolationStatus.READY,
+                    reasons=(),
+                    failed_device_ids=(),
+                    policy=policy,
+                ),
+            ),
+        )
+
+        plan = build_climate_ha_call_plan(registry, isolation)
+        (device,) = plan.room("reference_room").devices  # type: ignore[union-attr]
+
+        self.assertEqual(
+            (
+                ClimateHaService.CLIMATE_SET_TEMPERATURE,
+                ClimateHaService.CLIMATE_SET_FAN_MODE,
+            ),
+            tuple(call.service for call in device.calls),
+        )
+        self.assertNotIn(
+            ClimateHaHvacMode.OFF,
+            tuple(call.hvac_mode for call in device.calls),
         )
 
     def test_module_managed_device_without_endpoint_stays_call_free(self) -> None:

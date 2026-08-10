@@ -34,6 +34,22 @@ _STABLE_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _SUPPORTED_ACTIONS = frozenset(
     {"set_home_targets", "set_room_target", "clear_room_override"}
 )
+_SUPPORTED_ROOM_ACTIONS = frozenset(
+    {"set_room_target", "clear_room_override"}
+)
+_ROOM_BLOCK_REASON_MAP = {
+    "bridge_disabled": "climate_disabled",
+    "shadow_only": "shadow_only",
+    "room_not_selected": "room_not_in_canary",
+    "state_stale": "state_stale",
+    "registry_mismatch": "registry_mismatch",
+    "authority_not_ready": "authority_not_ready",
+    "device_unavailable": "device_unavailable",
+    "actions_unsupported": "action_unsupported",
+    "evidence_not_ready": "authority_not_ready",
+    "operation_pending": "operation_pending",
+    "needs_reimport": "registry_mismatch",
+}
 _ALL_ACTIONS = frozenset(
     {
         "set_home_targets",
@@ -234,7 +250,7 @@ def climate_tablet_snapshot(
     """Project the strict runtime contract from the existing native home model."""
 
     if climate_mode == "disabled":
-        return _disabled_snapshot(generated_at)
+        return _disabled_snapshot(generated_at, active_operations)
     if climate_mode not in {"shadow", "managed"} or not isinstance(home, Mapping):
         raise ClimateTabletUnavailable("climate runtime is unavailable")
     shadow = climate_mode == "shadow"
@@ -316,20 +332,39 @@ def climate_tablet_snapshot(
             room_reasons.append("state_stale")
         if not reconciliation_matches:
             room_reasons.append("registry_mismatch")
-        if room.get("authority_eligible") is not True:
-            room_reasons.append("authority_not_ready")
         if room_id in pending_rooms:
             room_reasons.append("operation_pending")
+        native_control = room.get("control")
+        native_allowed = (
+            native_control.get("allowed_actions")
+            if isinstance(native_control, Mapping)
+            else None
+        )
+        native_reasons = (
+            native_control.get("blocked_reasons")
+            if isinstance(native_control, Mapping)
+            else None
+        )
+        native_enabled = (
+            isinstance(native_control, Mapping)
+            and native_control.get("enabled") is True
+        )
         allowed_actions: list[str] = []
-        if (
-            not shadow
-            and not room_reasons
-            and isinstance(temporary, Mapping)
-            and temporary.get("available") is True
-        ):
-            allowed_actions.append("set_room_target")
-            if temporary.get("active") is True:
-                allowed_actions.append("clear_room_override")
+        if not shadow and not room_reasons and native_enabled:
+            allowed_actions = [
+                action
+                for action in (native_allowed if isinstance(native_allowed, list) else [])
+                if isinstance(action, str)
+                and action in _SUPPORTED_ROOM_ACTIONS
+            ]
+        if not room_reasons and not allowed_actions and isinstance(native_reasons, list):
+            room_reasons.extend(
+                mapped
+                for reason in native_reasons
+                if isinstance(reason, str)
+                and (mapped := _ROOM_BLOCK_REASON_MAP.get(reason)) is not None
+                and mapped not in room_reasons
+            )
         if not allowed_actions and not room_reasons:
             room_reasons.append("action_unsupported")
         enabled = bool(allowed_actions)
@@ -357,6 +392,12 @@ def climate_tablet_snapshot(
             if isinstance(action_inputs, Mapping)
             else {}
         )
+        temperature_range = _public_range(
+            room_target_input,
+            minimum=18,
+            maximum=28,
+            step=0.5,
+        )
         humidity_input = (
             action_inputs.get("set_room_humidity_target", {}).get(
                 "target_humidity", {}
@@ -373,13 +414,8 @@ def climate_tablet_snapshot(
                 "humidity": room.get("humidity"),
                 "target_temperature": room.get("target_temperature"),
                 "target_humidity": room.get("target_humidity"),
-                "minimum_temperature": 18,
-                "temperature_range": _public_range(
-                    room_target_input,
-                    minimum=18,
-                    maximum=28,
-                    step=0.5,
-                ),
+                "minimum_temperature": temperature_range["minimum"],
+                "temperature_range": temperature_range,
                 "humidity_range": _public_range(
                     humidity_input,
                     minimum=30,
@@ -888,7 +924,10 @@ def _public_range(
     return {"minimum": minimum, "maximum": maximum, "step": step}
 
 
-def _disabled_snapshot(generated_at: int | None) -> dict[str, object]:
+def _disabled_snapshot(
+    generated_at: int | None,
+    active_operations: tuple[dict[str, object], ...] = (),
+) -> dict[str, object]:
     timestamp = generated_at if type(generated_at) is int and generated_at >= 0 else 0
     return {
         "contract": {"name": CLIMATE_RUNTIME_CONTRACT_NAME, "version": 1},
@@ -905,7 +944,7 @@ def _disabled_snapshot(generated_at: int | None) -> dict[str, object]:
             "blocked_reasons": ["climate_disabled"],
         },
         "rooms": [],
-        "active_operations": [],
+        "active_operations": [dict(item) for item in active_operations],
     }
 
 

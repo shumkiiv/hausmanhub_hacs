@@ -38,6 +38,7 @@ from custom_components.hausman_hub.domain.climate import (
     ClimateDeviceKind,
     ClimateEndpoint,
     ClimateEndpointRole,
+    ClimateHomeEnvironment,
     ClimateRegistry,
     ClimateRoom,
 )
@@ -274,6 +275,11 @@ def native_registry(scope: ClimateControlScope) -> ClimateRegistry:
                 ),
             ),
         ),
+        home=ClimateHomeEnvironment(
+            outdoor_temperature_entity_id="sensor.outdoor_temperature",
+            outdoor_temperature_entity_ids=("sensor.outdoor_temperature",),
+            central_heating_entity_id="sensor.central_heating_temperature",
+        ),
     )
 
 
@@ -331,6 +337,7 @@ def two_actuator_registry() -> ClimateRegistry:
                 ),
             ),
         ),
+        home=registry.home,
     )
 
 
@@ -432,9 +439,15 @@ def unrelated_broken_room_contours() -> ContourRegistry:
 
 def healthy_states(ac_state: str = "cool") -> dict[str, ClimateHaEntityState]:
     entries = (
-        ha_state("climate.living_ac", ac_state),
+        ha_state(
+            "climate.living_ac",
+            ac_state,
+            {"temperature": 27.0, "fan_mode": "low"},
+        ),
         ha_state("sensor.living_temperature", "24.0"),
         ha_state("binary_sensor.living_window", "off"),
+        ha_state("sensor.outdoor_temperature", "20.0"),
+        ha_state("sensor.central_heating_temperature", "20.0"),
     )
     return {entry.entity_id: entry for entry in entries}
 
@@ -443,6 +456,11 @@ def safe_stop_states() -> dict[str, ClimateHaEntityState]:
     states = healthy_states()
     window = states["binary_sensor.living_window"]
     states[window.entity_id] = replace(window, state="on")
+    for state in (
+        ha_state("sensor.outdoor_temperature", "-5.0"),
+        ha_state("sensor.central_heating_temperature", "40.0"),
+    ):
+        states[state.entity_id] = state
     return states
 
 
@@ -867,6 +885,7 @@ class NativeApplicationRuntimeTest(unittest.IsolatedAsyncioTestCase):
         registry = ClimateRegistry(
             rooms=(*base_registry.rooms, kids_room),
             devices=(*base_registry.devices, kids_ac, kids_temperature),
+            home=base_registry.home,
         )
         kids_contour_room = ClimateContourRoom(
             room_id="kids",

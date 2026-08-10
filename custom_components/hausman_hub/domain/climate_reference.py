@@ -18,7 +18,7 @@ from typing import Final
 CLIMATE_REFERENCE_CONTRACT: Final = "hausman-hub-climate-reference-suite"
 CLIMATE_REFERENCE_VERSION: Final = 1
 CLIMATE_REFERENCE_SHA256: Final = (
-    "dd06902009dbd055311b850be08f87a22487d4bdf24656fcb5cae68f1c44c3fe"
+    "613cc5cdd1c96fb1c488bce0f00651ace2cfea27d932678a94a1ed06436e2ab0"
 )
 CLIMATE_REFERENCE_PATH: Final = (
     Path(__file__).resolve().parents[1]

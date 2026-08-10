@@ -226,6 +226,26 @@ class ClimateStabilityTest(unittest.TestCase):
             ClimateStabilityReason.SOFTEN_BEFORE_STOP,
         )
 
+    def test_idle_air_conditioner_in_cool_mode_remains_in_maintain(self) -> None:
+        idle = device(
+            ClimateObservationDeviceKind.AIR_CONDITIONER,
+            activity=ClimateDeviceActivity.IDLE,
+        )
+
+        result = stable(
+            idle,
+            room(temperature=25.2),
+            selected_target=target(temperature=25.0),
+        )
+
+        self.assertIs(result.action, ClimateStabilityAction.MAINTAIN)
+        self.assertEqual(26.0, result.target_temperature)
+        self.assertIs(result.fan_mode, ClimateFanMode.LOW)
+        self.assertIs(
+            result.protection,
+            ClimateStabilityProtection.COOLING_HYSTERESIS,
+        )
+
     def test_stability_setpoint_clamps_to_room_maximum(self) -> None:
         running = device(
             ClimateObservationDeviceKind.AIR_CONDITIONER,
@@ -505,7 +525,7 @@ class ClimateStabilityTest(unittest.TestCase):
         with self.assertRaises(ClimateStabilityViolation):
             replace(result, humidity_on_threshold=43)
 
-    def test_humidifier_heat_load_boundary_and_unknown_windows_are_exact(self) -> None:
+    def test_humidifier_heat_load_boundary_and_unconfirmed_windows_are_safe(self) -> None:
         stopped = device(
             ClimateObservationDeviceKind.HUMIDIFIER,
             activity=ClimateDeviceActivity.STOPPED,
@@ -536,25 +556,57 @@ class ClimateStabilityTest(unittest.TestCase):
         ):
             with self.subTest(window=window):
                 result = stable(stopped, room(humidity=30, window=window))
-                self.assertIs(result.action, ClimateStabilityAction.OFF)
-                self.assertIs(
-                    result.protection,
-                    ClimateStabilityProtection.WINDOW,
-                )
+                self.assertIs(result.action, ClimateStabilityAction.HUMIDIFY)
+                self.assertIs(result.protection, ClimateStabilityProtection.NONE)
 
-    def test_unconfirmed_window_stops_humidifier_before_missing_humidity(self) -> None:
+    def test_open_window_stops_humidifier_only_during_cold_active_heating(self) -> None:
         humidifier = device(
             ClimateObservationDeviceKind.HUMIDIFIER,
             activity=ClimateDeviceActivity.HUMIDIFYING,
         )
 
-        result = stable(
+        winter = stable(
             humidifier,
             room(humidity=None, window=ClimateWindowState.OPEN),
+            home=ClimateHomeObservation(
+                outdoor_temperature=16.0,
+                central_heating_on=True,
+            ),
+        )
+        summer = stable(
+            humidifier,
+            room(humidity=30, window=ClimateWindowState.OPEN),
+            home=ClimateHomeObservation(
+                outdoor_temperature=24.0,
+                central_heating_on=True,
+            ),
+        )
+        heating_off = stable(
+            humidifier,
+            room(humidity=30, window=ClimateWindowState.OPEN),
+            home=ClimateHomeObservation(
+                outdoor_temperature=-5.0,
+                central_heating_on=False,
+            ),
+        )
+        closed = stable(
+            humidifier,
+            room(humidity=30, window=ClimateWindowState.CLOSED),
+            home=ClimateHomeObservation(
+                outdoor_temperature=-5.0,
+                central_heating_on=True,
+            ),
         )
 
-        self.assertIs(result.action, ClimateStabilityAction.OFF)
-        self.assertIs(result.protection, ClimateStabilityProtection.WINDOW)
+        self.assertIs(winter.action, ClimateStabilityAction.OFF)
+        self.assertIs(winter.protection, ClimateStabilityProtection.WINDOW)
+        self.assertIs(
+            winter.reason,
+            ClimateStabilityReason.WINDOW_OPEN_HEATING_PERIOD,
+        )
+        self.assertIs(summer.action, ClimateStabilityAction.HOLD)
+        self.assertIs(heating_off.action, ClimateStabilityAction.HOLD)
+        self.assertIs(closed.action, ClimateStabilityAction.HOLD)
 
     def test_snapshot_uses_only_selected_devices_and_contains_no_command(self) -> None:
         registry, contours = setup()
@@ -648,7 +700,7 @@ class ClimateStabilityTest(unittest.TestCase):
             for case in cases
         }
 
-        self.assertEqual(30, len(results))
+        self.assertEqual(31, len(results))
         self.assertEqual(
             results,
             {
@@ -659,6 +711,7 @@ class ClimateStabilityTest(unittest.TestCase):
         starts = results["stopped_ac_starts_at_default_gap"].devices[0]
         waits = results["stopped_ac_waits_below_default_gap"].devices[0]
         maintains = results["running_ac_maintains_near_target"].devices[0]
+        idle_maintains = results["idle_ac_maintains_near_target"].devices[0]
         softens = results["running_ac_softens_before_stop"].devices[0]
         raises_fan = results["weak_cooling_raises_fan_first"].devices[0]
         lowers_target = results["weak_cooling_lowers_setpoint_second"].devices[0]
@@ -673,6 +726,7 @@ class ClimateStabilityTest(unittest.TestCase):
         self.assertIs(starts.action, ClimateStabilityAction.COOL)
         self.assertIs(waits.action, ClimateStabilityAction.OFF)
         self.assertIs(maintains.action, ClimateStabilityAction.MAINTAIN)
+        self.assertIs(idle_maintains.action, ClimateStabilityAction.MAINTAIN)
         self.assertEqual(27.0, softens.target_temperature)
         self.assertIs(raises_fan.fan_mode, ClimateFanMode.MEDIUM)
         self.assertEqual(25.0, lowers_target.target_temperature)
@@ -692,6 +746,7 @@ class ClimateStabilityTest(unittest.TestCase):
             "stopped_ac_starts_at_default_gap",
             "stopped_ac_waits_below_default_gap",
             "running_ac_maintains_near_target",
+            "idle_ac_maintains_near_target",
             "hard_off_threshold_stops_running_ac",
             "running_ac_softens_before_stop",
             "weak_cooling_raises_fan_first",

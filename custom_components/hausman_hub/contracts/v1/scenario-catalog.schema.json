@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/scenario-catalog.schema.json",
+  "title": "HausmanHub scenario editor catalog v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["devices"],
+  "properties": {
+    "devices": {
+      "type": "array",
+      "maxItems": 1024,
+      "items": {"$ref": "#/$defs/device"}
+    },
+    "scenarios": {
+      "type": "array",
+      "maxItems": 512,
+      "items": {"$ref": "#/$defs/scenario"}
+    }
+  },
+  "$defs": {
+    "stable_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "device": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target_id", "name", "entity_id", "actions"],
+      "properties": {
+        "target_id": {"$ref": "#/$defs/stable_id"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 240},
+        "entity_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*\\.[a-z0-9_]+$"
+        },
+        "actions": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {"$ref": "#/$defs/action"}
+        }
+      }
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action_id", "title", "domain", "service", "allowed_fields"],
+      "properties": {
+        "action_id": {"$ref": "#/$defs/stable_id"},
+        "title": {"type": "string", "minLength": 1, "maxLength": 120},
+        "domain": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+        "service": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+        "allowed_fields": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 16,
+          "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}
+        }
+      }
+    },
+    "scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title"],
+      "properties": {
+        "id": {"$ref": "#/$defs/stable_id"},
+        "title": {"type": "string", "minLength": 1, "maxLength": 120},
+        "icon": {
+          "type": "string",
+          "pattern": "^mdi:[a-z0-9-]+$",
+          "maxLength": 80
+        }
+      }
+    }
+  }
+}

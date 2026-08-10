@@ -297,7 +297,7 @@
         "state_fresh": {"type": "boolean"},
         "temperature_quality": {"enum": ["normal", "suspect"]},
         "window": {"enum": ["closed", "open", "unknown", "not_configured"]},
-        "air_conditioner": {"enum": ["running", "stopped", "unknown"]},
+        "air_conditioner": {"enum": ["running", "idle", "stopped", "unknown"]},
         "current_setpoint": {"$ref": "#/$defs/nullable_temperature"},
         "current_fan_mode": {
           "type": ["string", "null"],
