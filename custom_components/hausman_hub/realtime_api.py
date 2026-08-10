@@ -309,31 +309,36 @@ def publish_command_receipt(
 ) -> dict[str, object] | None:
     """Publish one normalized command outcome without exposing HA entity ids."""
 
-    runtime = _current_runtime(hass)
-    if runtime is None:
-        return None
     request_id = receipt.get("requestId") or receipt.get("request_id")
     if not isinstance(request_id, str) or not request_id:
         return None
     accepted = receipt.get("accepted") is True
     confirmed = receipt.get("confirmed") is True
     status = "confirmed" if confirmed else "accepted" if accepted else "failed"
-    target_id = receipt.get("targetId") or receipt.get("target_id")
     reason = receipt.get("message") or receipt.get("reason")
     error = receipt.get("error")
-    return runtime.broker.publish(
-        "command_receipt",
-        {
-            "request_id": request_id,
-            "operation": operation,
-            "accepted": accepted,
-            "confirmed": confirmed,
-            "status": status,
-            "target_id": target_id if isinstance(target_id, str) else None,
-            "reason": reason if isinstance(reason, str) else None,
-            "error_code": error if isinstance(error, str) else None,
-        },
-    )
+    target_id = receipt.get("targetId") or receipt.get("target_id")
+    normalized = {
+        "request_id": request_id,
+        "operation": operation,
+        "accepted": accepted,
+        "confirmed": confirmed,
+        "status": status,
+        "target_id": target_id if isinstance(target_id, str) else None,
+        "reason": reason if isinstance(reason, str) else None,
+        "error_code": error if isinstance(error, str) else None,
+    }
+    from .application.operation_journal import OperationJournalService
+    from .operation_journal_api import DATA_OPERATION_JOURNAL
+
+    journal = hass.data.get(DOMAIN, {}).get(DATA_OPERATION_JOURNAL)
+    schedule = getattr(hass, "async_create_task", None)
+    if isinstance(journal, OperationJournalService) and callable(schedule):
+        schedule(journal.async_append(normalized))
+    runtime = _current_runtime(hass)
+    if runtime is None:
+        return None
+    return runtime.broker.publish("command_receipt", normalized)
 
 
 def _current_runtime(hass: HomeAssistant) -> EventStreamRuntime | None:

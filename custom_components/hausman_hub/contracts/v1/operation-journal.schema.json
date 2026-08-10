@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausmanhub.local/contracts/v1/operation-journal.schema.json",
+  "title": "HausmanHub operation journal",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "generated_at", "sequence", "records"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-operation-journal"},
+        "version": {"const": 1}
+      }
+    },
+    "generated_at": {"type": "integer", "minimum": 0},
+    "sequence": {"type": "integer", "minimum": 0},
+    "records": {
+      "type": "array",
+      "maxItems": 512,
+      "items": {"$ref": "#/$defs/record"}
+    }
+  },
+  "$defs": {
+    "record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sequence",
+        "correlation_id",
+        "source",
+        "operation",
+        "accepted",
+        "confirmed",
+        "status",
+        "occurred_at",
+        "reason",
+        "error_code"
+      ],
+      "properties": {
+        "sequence": {"type": "integer", "minimum": 1},
+        "correlation_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "source": {
+          "enum": ["device", "climate", "scenario", "voice"]
+        },
+        "operation": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9._-]{0,63}$"
+        },
+        "accepted": {"type": "boolean"},
+        "confirmed": {"type": "boolean"},
+        "status": {"enum": ["accepted", "confirmed", "failed"]},
+        "occurred_at": {"type": "integer", "minimum": 0},
+        "reason": {
+          "type": ["string", "null"],
+          "maxLength": 512
+        },
+        "error_code": {
+          "type": ["string", "null"],
+          "maxLength": 128
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "confirmed"}}},
+          "then": {
+            "properties": {
+              "accepted": {"const": true},
+              "confirmed": {"const": true}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"confirmed": {"const": true}}},
+          "then": {"properties": {"status": {"const": "confirmed"}}}
+        }
+      ]
+    }
+  }
+}

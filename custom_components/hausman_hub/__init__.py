@@ -84,6 +84,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     domain_data = hass.data.setdefault(entry.domain, {})
     domain_data["settings_service"] = settings_service
     domain_data["tablet_preferences_service"] = tablet_preferences_service
+    from .application.operation_journal import OperationJournalService
+    from .operation_journal_api import DATA_OPERATION_JOURNAL
+    from .operation_journal_storage import HomeAssistantOperationJournalStore
+
+    operation_journal = OperationJournalService(
+        HomeAssistantOperationJournalStore(hass, entry.entry_id)
+    )
+    await operation_journal.async_load()
+    domain_data[DATA_OPERATION_JOURNAL] = operation_journal
     if configuration.local_summary_enabled:
         register_local_summary_access(hass, entry)
     climate_runtime = ClimateRuntime(
@@ -160,6 +169,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         climate_shadow,
         climate_tablet,
     )
+    from .operation_journal_api import register_operation_journal_api
+
+    register_operation_journal_api(hass)
     from .realtime_api import register_event_stream
 
     register_event_stream(hass, entry.entry_id)
@@ -185,9 +197,11 @@ async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     from .local_summary import clear_local_summary_access
     from .realtime_api import clear_event_stream
     from .voice_api import clear_voice_greeting
+    from .operation_journal_api import clear_operation_journal
 
     clear_event_stream(hass, entry.entry_id)
     clear_voice_greeting(hass, entry.entry_id)
+    clear_operation_journal(hass)
     clear_climate_api(hass, entry.entry_id)
 
     try:
@@ -217,12 +231,14 @@ async def _close_running_duplicate_hausmanhub_entries(
     from .local_summary import clear_local_summary_access
     from .realtime_api import clear_event_stream
     from .voice_api import clear_voice_greeting
+    from .operation_journal_api import clear_operation_journal
 
     loaded_entries = tuple(hass.config_entries.async_loaded_entries(domain))
     for loaded_entry in loaded_entries:
         clear_local_summary_access(hass, loaded_entry)
         clear_event_stream(hass, loaded_entry.entry_id)
         clear_voice_greeting(hass, loaded_entry.entry_id)
+        clear_operation_journal(hass)
         clear_climate_api(hass, loaded_entry.entry_id)
     for loaded_entry in loaded_entries:
         await hass.config_entries.async_unload(loaded_entry.entry_id)
@@ -289,6 +305,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .local_summary import clear_local_summary_access
     from .realtime_api import clear_event_stream
     from .voice_api import clear_voice_greeting
+    from .operation_journal_api import clear_operation_journal
 
     unloaded = await hass.config_entries.async_unload_platforms(
         entry,
@@ -299,6 +316,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         clear_local_summary_access(hass, entry)
         clear_event_stream(hass, entry.entry_id)
         clear_voice_greeting(hass, entry.entry_id)
+        clear_operation_journal(hass)
         clear_climate_api(hass, entry.entry_id)
         from .panel import unregister_hausmanhub_panel
 

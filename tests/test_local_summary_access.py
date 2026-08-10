@@ -2379,7 +2379,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.57", panel.payload["integration_version"])
+        self.assertEqual("1.52.58", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
@@ -3058,7 +3058,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertFalse(hasattr(self.view, method))
 
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
-        self.assertEqual(69, len(self.hass.http.views))
+        self.assertEqual(70, len(self.hass.http.views))
         self.assertEqual(
             1,
             sum(
@@ -3170,10 +3170,27 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertTrue(queue.empty())
 
     def test_command_receipt_is_published_without_private_entity_id(self) -> None:
+        from custom_components.hausman_hub.application.operation_journal import (
+            OperationJournalService,
+        )
         from custom_components.hausman_hub.realtime_api import publish_command_receipt
 
         runtime = self.hass.data["hausman_hub"]["event_stream_runtime"]
         queue = runtime.broker.subscribe()
+
+        class Store:
+            payload = None
+
+            async def async_load(self):
+                return self.payload
+
+            async def async_save(self, payload):
+                self.payload = payload
+
+        journal = OperationJournalService(Store(), now_ms=lambda: 1786375200000)
+        self.hass.data["hausman_hub"]["operation_journal"] = journal
+        pending = []
+        self.hass.async_create_task = pending.append
 
         publish_command_receipt(
             self.hass,
@@ -3186,12 +3203,62 @@ class LocalSummaryAccessTest(unittest.TestCase):
             },
             operation="device_action",
         )
+        asyncio.run(pending[0])
         message = asyncio.run(queue.get())
 
         self.assertEqual("command_receipt", message["type"])
         self.assertEqual("request-1", message["data"]["request_id"])
         self.assertEqual("confirmed", message["data"]["status"])
         self.assertNotIn("entity_id", json.dumps(message, ensure_ascii=False))
+        record = journal.snapshot()["records"][0]
+        self.assertEqual("request-1", record["correlation_id"])
+        self.assertEqual("device", record["source"])
+        self.assertNotIn("target_id", record)
+
+    def test_local_admin_reads_filtered_operation_journal(self) -> None:
+        from custom_components.hausman_hub.application.operation_journal import (
+            OperationJournalService,
+        )
+        from custom_components.hausman_hub.operation_journal_api import (
+            ADMIN_OPERATION_JOURNAL_PATH,
+            OperationJournalView,
+        )
+
+        class Store:
+            async def async_load(self):
+                return None
+
+            async def async_save(self, payload):
+                return None
+
+        journal = OperationJournalService(Store(), now_ms=lambda: 1786375200000)
+        asyncio.run(
+            journal.async_append(
+                {
+                    "request_id": "climate-1",
+                    "operation": "climate.tablet_action",
+                    "accepted": True,
+                    "confirmed": False,
+                    "status": "accepted",
+                    "reason": None,
+                    "error_code": None,
+                }
+            )
+        )
+        self.hass.data["hausman_hub"]["operation_journal"] = journal
+        request = FakeRequest(
+            "192.168.1.20",
+            reader_user(admin=True),
+            path=ADMIN_OPERATION_JOURNAL_PATH,
+            query_string="source=climate&limit=10",
+        )
+        request.query = {"source": "climate", "limit": "10"}
+
+        response = asyncio.run(OperationJournalView(self.hass).get(request))
+
+        self.assertEqual(200, response.status)
+        self.assertEqual("hausman-hub-operation-journal", response.payload["contract"]["name"])
+        self.assertEqual("climate-1", response.payload["records"][0]["correlation_id"])
 
     def test_closed_optional_page_request_does_not_read_the_home(self) -> None:
         """The page request remains closed even with a stale runtime pointer."""
@@ -3439,7 +3506,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             [(closed_entry, ("sensor", "switch"))],
             closed_hass.config_entries.forwarded,
         )
-        self.assertEqual(68, len(closed_hass.http.views))
+        self.assertEqual(69, len(closed_hass.http.views))
         self.assertEqual(
             {
                 "/api/hausman_hub/v1/capabilities",
@@ -3465,6 +3532,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 "/api/hausman_hub/v1/admin/legacy-settings/apply",
                 "/api/hausman_hub/v1/admin/climate-shadow-comparison",
                 "/api/hausman_hub/v1/admin/climate-shadow-window",
+                "/api/hausman_hub/v1/admin/operations",
                 "/api/hausman_hub/v1/admin/climate-drafts",
                 "/api/hausman_hub/v1/admin/climate-drafts/current",
                 "/api/hausman_hub/v1/admin/climate-drafts/validate",

@@ -1,0 +1,55 @@
+{
+  "contract": {"name": "hausman-hub-operation-journal", "version": 1},
+  "generated_at": 1786375200000,
+  "sequence": 4,
+  "records": [
+    {
+      "sequence": 4,
+      "correlation_id": "voice-test-0004",
+      "source": "voice",
+      "operation": "voice.yandex_greeting.test",
+      "accepted": false,
+      "confirmed": false,
+      "status": "failed",
+      "occurred_at": 1786375199000,
+      "reason": "Станция недоступна.",
+      "error_code": "station_unavailable"
+    },
+    {
+      "sequence": 3,
+      "correlation_id": "scenario-run-0003",
+      "source": "scenario",
+      "operation": "scenario_run",
+      "accepted": true,
+      "confirmed": true,
+      "status": "confirmed",
+      "occurred_at": 1786375198000,
+      "reason": "Сценарий выполнен и подтверждён.",
+      "error_code": null
+    },
+    {
+      "sequence": 2,
+      "correlation_id": "climate-action-0002",
+      "source": "climate",
+      "operation": "climate.tablet_action",
+      "accepted": true,
+      "confirmed": false,
+      "status": "accepted",
+      "occurred_at": 1786375197000,
+      "reason": "Команда принята и ожидает подтверждения состояния.",
+      "error_code": null
+    },
+    {
+      "sequence": 1,
+      "correlation_id": "device-action-0001",
+      "source": "device",
+      "operation": "device_action",
+      "accepted": true,
+      "confirmed": true,
+      "status": "confirmed",
+      "occurred_at": 1786375196000,
+      "reason": "Команда подтверждена чтением состояния.",
+      "error_code": null
+    }
+  ]
+}
