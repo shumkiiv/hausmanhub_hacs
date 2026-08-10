@@ -22,7 +22,7 @@
     "weatherIsDay": true,
     "weatherUpdatedAt": 1782225590000,
     "co2": 596,
-    "activeLights": 2,
+    "activeLights": 0,
     "activeClimate": 3,
     "activeAlarms": 0
   },
@@ -40,7 +40,7 @@
       "climateState": "cooling",
       "climateRunning": true,
       "hasClimateControl": true,
-      "deviceIds": ["device_living_ac"],
+      "deviceIds": ["device_living_ac", "device_wall_relay", "device_ceiling_light"],
       "status": "cooling"
     }
   ],
@@ -95,6 +95,51 @@
           "state": "25.8"
         }
       ]
+    },
+    {
+      "id": "device_wall_relay",
+      "entityId": "switch.example_wall_relay",
+      "physicalId": "device_wall_relay",
+      "name": "Настенный выключатель",
+      "roomId": "living",
+      "roomName": "Гостиная",
+      "domain": "switch",
+      "category": "switch",
+      "state": "off",
+      "stateLabel": "выключено",
+      "active": false,
+      "unavailable": false,
+      "tone": "neutral",
+      "source": "home-assistant",
+      "attributes": {},
+      "actions": [],
+      "details": []
+    },
+    {
+      "id": "device_ceiling_light",
+      "entityId": "light.example_ceiling",
+      "physicalId": "device_ceiling_light",
+      "name": "Потолочный свет",
+      "roomId": "living",
+      "roomName": "Гостиная",
+      "domain": "light",
+      "category": "lighting",
+      "state": "off",
+      "reportedState": "on",
+      "stateLabel": "выключено",
+      "active": false,
+      "unavailable": false,
+      "tone": "neutral",
+      "source": "home-assistant",
+      "attributes": {},
+      "actions": [],
+      "details": [],
+      "powerDependency": {
+        "sourceDeviceId": "device_wall_relay",
+        "state": "unpowered",
+        "reason": "power_source_off",
+        "blocksCommands": true
+      }
     }
   ],
   "scenarios": [

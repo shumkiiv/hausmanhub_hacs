@@ -736,6 +736,63 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 )
                 self.assertEqual(403, response.status)
 
+    def test_device_power_dependencies_are_durable_atomic_and_admin_only(self) -> None:
+        path = "/api/hausman_hub/v1/admin/device-power-dependencies"
+        view = next(item for item in self.hass.http.views if item.url == path)
+        admin = reader_user(admin=True)
+        self.hass.states.values["light.synthetic_private_lamp"] = SimpleNamespace(
+            state="on"
+        )
+        self.hass.states.values["switch.synthetic_private_light"] = SimpleNamespace(
+            state="off"
+        )
+        initial = asyncio.run(view.get(FakeRequest("127.0.0.1", admin, path=path)))
+        self.assertEqual(200, initial.status)
+        self.assertEqual(0, initial.payload["revision"])
+        self.assertEqual([], initial.payload["dependencies"])
+        dependencies = [
+            {
+                "dependentEntityId": "light.synthetic_private_lamp",
+                "powerSourceEntityId": "switch.synthetic_private_light",
+                "policy": "requires_on",
+            }
+        ]
+        saved = asyncio.run(
+            view.put(
+                FakeJsonRequest(
+                    "127.0.0.1",
+                    admin,
+                    path,
+                    {"expectedRevision": 0, "dependencies": dependencies},
+                )
+            )
+        )
+        self.assertEqual(200, saved.status)
+        self.assertEqual(1, saved.payload["revision"])
+        self.assertEqual(dependencies, saved.payload["dependencies"])
+        stale = asyncio.run(
+            view.put(
+                FakeJsonRequest(
+                    "127.0.0.1",
+                    admin,
+                    path,
+                    {"expectedRevision": 0, "dependencies": []},
+                )
+            )
+        )
+        self.assertEqual(409, stale.status)
+        forbidden = asyncio.run(
+            view.put(
+                FakeJsonRequest(
+                    "127.0.0.1",
+                    reader_user("system-read-only"),
+                    path,
+                    {"expectedRevision": 1, "dependencies": []},
+                )
+            )
+        )
+        self.assertEqual(403, forbidden.status)
+
     def test_tablet_profile_is_atomic_shared_and_rejects_stale_writes(self) -> None:
         path = "/api/hausman_hub/v1/tablet-profile"
         view = next(item for item in self.hass.http.views if item.url == path)
@@ -2379,7 +2436,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.63", panel.payload["integration_version"])
+        self.assertEqual("1.52.64", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
@@ -3085,7 +3142,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertFalse(hasattr(self.view, method))
 
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
-        self.assertEqual(70, len(self.hass.http.views))
+        self.assertEqual(71, len(self.hass.http.views))
         self.assertEqual(
             1,
             sum(
@@ -3533,7 +3590,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             [(closed_entry, ("sensor", "switch"))],
             closed_hass.config_entries.forwarded,
         )
-        self.assertEqual(69, len(closed_hass.http.views))
+        self.assertEqual(70, len(closed_hass.http.views))
         self.assertEqual(
             {
                 "/api/hausman_hub/v1/capabilities",
@@ -3584,6 +3641,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 "/api/hausman_hub/v1/admin/ai-assistant/refresh",
                 "/api/hausman_hub/v1/admin/connection-settings",
                 "/api/hausman_hub/v1/admin/energy-settings",
+                "/api/hausman_hub/v1/admin/device-power-dependencies",
                 "/api/hausman_hub/v1/admin/reset",
                 "/api/hausman_hub/v1/admin/scenarios",
                 "/api/hausman_hub/v1/admin/scenarios/action",

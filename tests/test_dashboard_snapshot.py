@@ -169,6 +169,49 @@ class DashboardSnapshotTest(unittest.TestCase):
         Draft202012Validator.check_schema(schema)
         Draft202012Validator(schema).validate(self.snapshot)
 
+    def test_unpowered_light_uses_effective_off_state_and_keeps_reported_state(self) -> None:
+        snapshot = build_dashboard_snapshot(
+            areas=(DashboardArea("hall", "Коридор"),),
+            devices=(
+                DashboardDevice("wall-device", "Выключатель", "hall"),
+                DashboardDevice("light-device", "Люстра", "hall"),
+            ),
+            entities=(
+                DashboardEntity(
+                    "switch.wall",
+                    "switch",
+                    "off",
+                    "Выключатель",
+                    device_id="wall-device",
+                    area_id="hall",
+                ),
+                DashboardEntity(
+                    "light.ceiling",
+                    "light",
+                    "on",
+                    "Люстра",
+                    device_id="light-device",
+                    area_id="hall",
+                ),
+            ),
+            generated_at_ms=1,
+            local_iso="2026-08-10T19:00:00+03:00",
+            power_dependencies={"light.ceiling": "switch.wall"},
+        )
+        light = next(device for device in snapshot["devices"] if device["name"] == "Люстра")
+        switch = next(
+            device for device in snapshot["devices"] if device["name"] == "Выключатель"
+        )
+        self.assertEqual("off", light["state"])
+        self.assertEqual("on", light["reportedState"])
+        self.assertEqual("выключено", light["stateLabel"])
+        self.assertFalse(light["active"])
+        self.assertFalse(light["unavailable"])
+        self.assertEqual(0, snapshot["summary"]["activeLights"])
+        self.assertEqual(switch["id"], light["powerDependency"]["sourceDeviceId"])
+        self.assertEqual("unpowered", light["powerDependency"]["state"])
+        self.assertTrue(light["powerDependency"]["blocksCommands"])
+
     def test_events_are_newest_first_and_enable_activity_capability(self) -> None:
         snapshot = build_dashboard_snapshot(
             areas=(),

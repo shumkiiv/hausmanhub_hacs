@@ -1,5 +1,22 @@
 # История версий
 
+## 1.52.64 - 2026-08-10
+
+- Добавлены durable зависимости питания устройств с политикой `requires_on`.
+  Связи хранятся в отдельном Home Assistant Store, используют optimistic
+  locking, поддерживают цепочки и запрещают циклы.
+- Dashboard теперь различает `reportedState` и эффективное состояние. Если
+  питающий выключатель `off`, зависимая люстра показывается выключенной, не
+  входит в `activeLights` и не рекламирует недоступные действия.
+- Direct device actions, scenario actions, conditions и read-back используют
+  тот же граф. При выключенном или недоступном источнике физическая команда не
+  отправляется, а receipt возвращает `power_source_off` либо
+  `power_source_unavailable`.
+- Добавлен local-admin API `GET`/`PUT`
+  `/api/hausman_hub/v1/admin/device-power-dependencies`. Сохранение связи не
+  включает и не выключает устройства.
+- Consumer pin обновлён до `hausmanhub-contracts 0.23.0` (`da52e3c`).
+
 ## 1.52.63 - 2026-08-10
 
 - Канонический consumer pin синхронизирован с `hausmanhub-contracts 0.22.3`

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 import time
 import uuid
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
@@ -19,6 +20,7 @@ from ..domain.scenarios import (
     ScenarioConditionType,
     ScenarioExecutionMode,
 )
+from ..domain.device_power_dependencies import effective_device_state
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -114,6 +116,7 @@ def _evaluate_condition(
     condition: ScenarioCondition,
     catalog: ScenarioCatalog,
     hass: "HomeAssistant",
+    power_dependencies: Mapping[str, str] | None = None,
 ) -> tuple[bool, str | None]:
     if condition.type is ScenarioConditionType.DEVICE_STATE:
         device = catalog.device(condition.target_id) if condition.target_id else None
@@ -125,8 +128,20 @@ def _evaluate_condition(
         state = states.get(device.entity_id)
         if state is None:
             return (False, f"entity {device.entity_id} is not available")
+        dependencies = power_dependencies or {}
+        effective_state, dependency_status = effective_device_state(
+            device.entity_id,
+            dependencies,
+            lambda entity_id: (
+                str(getattr(current, "state", "unknown"))
+                if (current := states.get(entity_id)) is not None
+                else None
+            ),
+        )
         if condition.property == "state":
-            actual = state.state
+            actual = effective_state
+        elif dependency_status is not None and dependency_status.blocks_commands:
+            return (False, dependency_status.reason)
         else:
             actual = getattr(state, "attributes", {}).get(condition.property)
         expected = condition.value
@@ -195,6 +210,7 @@ class ScenarioExecutor:
         notify_target: str = "",
         readback_window_seconds: float = _DEFAULT_DEVICE_READBACK_WINDOW_SECONDS,
         readback_interval_seconds: float = _DEFAULT_DEVICE_READBACK_INTERVAL_SECONDS,
+        power_dependency_resolver: Callable[[], Mapping[str, str]] | None = None,
     ):
         if not 0.01 <= readback_window_seconds <= 30.0:
             raise ValueError("readback window must be between 0.01 and 30 seconds")
@@ -206,6 +222,7 @@ class ScenarioExecutor:
         self._notify_target = notify_target
         self._readback_window_seconds = readback_window_seconds
         self._readback_interval_seconds = readback_interval_seconds
+        self._power_dependency_resolver = power_dependency_resolver
 
     def new_run_id(self) -> str:
         """Generate a unique execution trace id."""
@@ -328,8 +345,26 @@ class ScenarioExecutor:
             state = self._hass.states.get(entity_id)
             if state is not None:
                 observed_at = int(time.time() * 1000)
-                observed_state = str(getattr(state, "state", "unknown"))
-                if _device_action_confirmed(state, action_id, value):
+                dependencies = (
+                    self._power_dependency_resolver()
+                    if self._power_dependency_resolver is not None
+                    else {}
+                )
+                effective_state, dependency_status = effective_device_state(
+                    entity_id,
+                    dependencies,
+                    lambda requested_entity_id: (
+                        str(getattr(current, "state", "unknown"))
+                        if (current := self._hass.states.get(requested_entity_id))
+                        is not None
+                        else None
+                    ),
+                )
+                observed_state = effective_state
+                if (
+                    dependency_status is None
+                    or not dependency_status.blocks_commands
+                ) and _device_action_confirmed(state, action_id, value):
                     matched = True
                     break
             remaining = deadline - loop.time()
@@ -377,7 +412,14 @@ class ScenarioExecutor:
 
         condition_results: list[dict[str, Any]] = []
         for condition in definition.conditions:
-            passed, reason = _evaluate_condition(condition, self._catalog, self._hass)
+            passed, reason = _evaluate_condition(
+                condition,
+                self._catalog,
+                self._hass,
+                self._power_dependency_resolver()
+                if self._power_dependency_resolver is not None
+                else None,
+            )
             condition_results.append(
                 {
                     "condition_id": condition.id,
@@ -496,6 +538,13 @@ class ScenarioExecutor:
                 "status": "failed",
                 "error": f"action {action.action_id} is not available for device {action.target_id}",
             }
+        dependency_error = self._power_dependency_error(device.entity_id)
+        if dependency_error is not None:
+            return {
+                **base,
+                "status": "failed",
+                "error": dependency_error,
+            }
         service_data: dict[str, Any] = {"entity_id": device.entity_id}
         confirmation_value = action.value
         if action.value is not None:
@@ -541,6 +590,25 @@ class ScenarioExecutor:
                 None if read_back["matched"] is True else "state_not_confirmed"
             )
         return receipt
+
+    def _power_dependency_error(self, entity_id: str) -> str | None:
+        """Fail closed when an upstream source does not currently provide power."""
+
+        if self._power_dependency_resolver is None:
+            return None
+        dependencies = self._power_dependency_resolver()
+        if entity_id not in dependencies:
+            return None
+
+        def read_state(requested_entity_id: str) -> str | None:
+            states = getattr(self._hass, "states", None)
+            state = states.get(requested_entity_id) if states is not None else None
+            return None if state is None else str(getattr(state, "state", "unknown"))
+
+        _, status = effective_device_state(entity_id, dependencies, read_state)
+        if status is None or not status.blocks_commands:
+            return None
+        return status.reason
 
     async def _confirm_deferred_device_receipts(
         self, receipts: list[dict[str, Any]]

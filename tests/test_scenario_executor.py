@@ -147,6 +147,49 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             "light", "turn_on", {"entity_id": "light.living_room"}, blocking=True
         )
 
+    async def test_unpowered_device_action_is_blocked_without_service_call(self) -> None:
+        self.hass.states = SimpleNamespace(
+            get=lambda entity_id: {
+                "light.living_room": SimpleNamespace(state="on", attributes={}),
+                "switch.wall": SimpleNamespace(state="off", attributes={}),
+            }.get(entity_id)
+        )
+        executor = ScenarioExecutor(
+            self.hass,
+            self.catalog,
+            self.executor._run_callback,
+            power_dependency_resolver=lambda: {
+                "light.living_room": "switch.wall"
+            },
+        )
+        receipt = await executor.async_execute_device_action("device_1", "turn_on")
+        self.assertFalse(receipt["accepted"])
+        self.assertEqual("failed", receipt["status"])
+        self.assertEqual("power_source_off", receipt["error"])
+        self.hass.services.async_call.assert_not_awaited()
+
+    async def test_powered_device_action_uses_existing_executor_path(self) -> None:
+        self.hass.states = SimpleNamespace(
+            get=lambda entity_id: {
+                "light.living_room": SimpleNamespace(state="on", attributes={}),
+                "switch.wall": SimpleNamespace(state="on", attributes={}),
+            }.get(entity_id)
+        )
+        executor = ScenarioExecutor(
+            self.hass,
+            self.catalog,
+            self.executor._run_callback,
+            readback_window_seconds=0.02,
+            readback_interval_seconds=0.01,
+            power_dependency_resolver=lambda: {
+                "light.living_room": "switch.wall"
+            },
+        )
+        receipt = await executor.async_execute_device_action("device_1", "turn_on")
+        self.assertTrue(receipt["accepted"])
+        self.assertTrue(receipt["confirmed"])
+        self.hass.services.async_call.assert_awaited_once()
+
     async def test_scenario_confirms_multiple_devices_in_one_shared_window(self) -> None:
         both_readbacks_started = asyncio.Event()
         started = 0

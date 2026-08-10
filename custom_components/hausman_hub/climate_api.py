@@ -79,6 +79,10 @@ from .application.tablet_preferences import (
     TabletPreferencesViolation,
     validate_energy_settings,
 )
+from .application.device_power_dependencies import (
+    DevicePowerDependencyService,
+    DevicePowerDependencyServiceViolation,
+)
 from .application.legacy_settings_import import (
     LegacySettingsImportViolation,
     preview_legacy_settings,
@@ -168,6 +172,9 @@ ADMIN_AI_ASSISTANT_SETTINGS_PATH = f"{ADMIN_AI_ASSISTANT_PATH}/settings"
 ADMIN_AI_ASSISTANT_REFRESH_PATH = f"{ADMIN_AI_ASSISTANT_PATH}/refresh"
 ADMIN_CONNECTION_SETTINGS_PATH = "/api/hausman_hub/v1/admin/connection-settings"
 ADMIN_ENERGY_SETTINGS_PATH = "/api/hausman_hub/v1/admin/energy-settings"
+ADMIN_DEVICE_POWER_DEPENDENCIES_PATH = (
+    "/api/hausman_hub/v1/admin/device-power-dependencies"
+)
 ADMIN_RESET_PATH = "/api/hausman_hub/v1/admin/reset"
 NO_STORE_HEADERS = {"Cache-Control": "no-store"}
 MAX_ACTION_BODY_BYTES = 16 * 1024
@@ -214,6 +221,7 @@ def register_climate_api(
             EnergyHistoryView(hass),
             TabletProfileView(hass),
             EnergySettingsView(hass),
+            DevicePowerDependenciesView(hass),
             ClimateHomeView(hass),
             ClimateRuntimeView(hass),
             ClimateActionView(hass),
@@ -573,6 +581,7 @@ class DashboardView(_ClimateView):
         data = self._hass.data.get(DOMAIN, {})
         scenario_service = data.get("scenario_service")
         preferences = data.get("tablet_preferences_service")
+        power_dependency_service = data.get("device_power_dependency_service")
         try:
             target_reader = getattr(runtime, "async_dashboard_climate_targets", None)
             climate_targets = await target_reader() if callable(target_reader) else None
@@ -585,6 +594,9 @@ class DashboardView(_ClimateView):
                 climate_targets,
                 preferences.tablet_pinned_entity_ids
                 if isinstance(preferences, TabletPreferencesService)
+                else None,
+                power_dependency_service.mapping
+                if isinstance(power_dependency_service, DevicePowerDependencyService)
                 else None,
             )
         except Exception:
@@ -646,6 +658,7 @@ class EnergyHistoryView(_ClimateView):
             )
         data = self._hass.data.get(DOMAIN, {})
         preferences = data.get("tablet_preferences_service")
+        power_dependency_service = data.get("device_power_dependency_service")
         try:
             runtime = self._runtime()
             target_reader = getattr(runtime, "async_dashboard_climate_targets", None)
@@ -659,6 +672,9 @@ class EnergyHistoryView(_ClimateView):
                 climate_targets,
                 preferences.tablet_pinned_entity_ids
                 if isinstance(preferences, TabletPreferencesService)
+                else None,
+                power_dependency_service.mapping
+                if isinstance(power_dependency_service, DevicePowerDependencyService)
                 else None,
             )
             payload = await async_energy_history(
@@ -779,6 +795,69 @@ class EnergySettingsView(_PublicPreferencesView):
         except ValueError:
             return self.json_message(
                 "Настройки энергии заполнены неверно.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        return self.json(result, headers=NO_STORE_HEADERS)
+
+
+class DevicePowerDependenciesView(_ClimateView):
+    """Read or atomically replace the durable device power graph."""
+
+    url = ADMIN_DEVICE_POWER_DEPENDENCIES_PATH
+    name = "api:hausman_hub:device_power_dependencies"
+
+    def _service(self) -> DevicePowerDependencyService | None:
+        if self._runtime() is None:
+            return None
+        service = self._hass.data.get(DOMAIN, {}).get(
+            "device_power_dependency_service"
+        )
+        return service if isinstance(service, DevicePowerDependencyService) else None
+
+    async def get(self, request: Any) -> Any:
+        if not _is_exact_request(request, self.url):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        service = self._service()
+        if service is None:
+            return self._unavailable()
+        return self.json(service.document, headers=NO_STORE_HEADERS)
+
+    async def put(self, request: Any) -> Any:
+        if not _is_exact_request(request, self.url):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        service = self._service()
+        if service is None:
+            return self._unavailable()
+        try:
+            payload = await _request_json(request, maximum_bytes=MAX_ACTION_BODY_BYTES)
+            if not isinstance(payload, Mapping) or set(payload) != {
+                "expectedRevision",
+                "dependencies",
+            }:
+                raise DevicePowerDependencyServiceViolation(
+                    "device power dependency body is invalid"
+                )
+            result = await service.async_replace(
+                payload["expectedRevision"], payload["dependencies"]
+            )
+        except DevicePowerDependencyServiceViolation as error:
+            return self.json_message(
+                (
+                    "Зависимости уже изменились на другом клиенте. Обновите данные."
+                    if error.stale
+                    else "Зависимости питания заполнены неверно."
+                ),
+                HTTPStatus.CONFLICT if error.stale else HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        except ValueError:
+            return self.json_message(
+                "Зависимости питания заполнены неверно.",
                 HTTPStatus.BAD_REQUEST,
                 headers=NO_STORE_HEADERS,
             )

@@ -174,6 +174,7 @@
         "category": { "type": "string" },
         "icon": { "type": ["string", "null"] },
         "state": { "type": "string" },
+        "reportedState": { "type": ["string", "null"] },
         "stateLabel": { "type": ["string", "null"] },
         "active": { "type": "boolean" },
         "unavailable": { "type": "boolean" },
@@ -201,9 +202,28 @@
             { "$ref": "#/$defs/energyMeasurements" },
             { "type": "null" }
           ]
+        },
+        "powerDependency": {
+          "anyOf": [
+            { "$ref": "#/$defs/powerDependency" },
+            { "type": "null" }
+          ]
         }
       },
       "additionalProperties": true
+    },
+    "powerDependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceDeviceId", "state", "reason", "blocksCommands"],
+      "properties": {
+        "sourceDeviceId": { "type": "string", "minLength": 1 },
+        "state": { "enum": ["powered", "unpowered", "unavailable"] },
+        "reason": {
+          "enum": ["power_source_on", "power_source_off", "power_source_unavailable"]
+        },
+        "blocksCommands": { "type": "boolean" }
+      }
     },
     "inventory": {
       "type": "object",

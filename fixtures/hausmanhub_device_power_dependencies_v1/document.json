@@ -1,0 +1,15 @@
+{
+  "contract": {
+    "name": "hausman-hub-device-power-dependencies",
+    "version": 1
+  },
+  "revision": 3,
+  "updatedAt": "2026-08-10T19:00:00Z",
+  "dependencies": [
+    {
+      "dependentEntityId": "light.example_ceiling",
+      "powerSourceEntityId": "switch.example_wall_relay",
+      "policy": "requires_on"
+    }
+  ]
+}

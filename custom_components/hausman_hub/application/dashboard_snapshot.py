@@ -4,11 +4,15 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import hashlib
 from typing import Any
 
 from ..domain.hub_settings import HausmanHubSettings
+from ..domain.device_power_dependencies import (
+    PowerDependencyStatus,
+    effective_device_state,
+)
 from ..domain.contours import (
     CLIMATE_TARGET_HUMIDITY_DEFAULT,
     CLIMATE_TARGET_TEMPERATURE_DEFAULT,
@@ -411,6 +415,33 @@ def _safe_attributes(entity: DashboardEntity) -> dict[str, object]:
     return result
 
 
+def _apply_power_dependencies(
+    entities: tuple[DashboardEntity, ...], dependencies: Mapping[str, str]
+) -> tuple[tuple[DashboardEntity, ...], dict[str, PowerDependencyStatus]]:
+    """Replace stale child states with their effective powered states."""
+
+    reported_by_id = {entity.entity_id: entity for entity in entities}
+
+    def read_state(entity_id: str) -> str | None:
+        entity = reported_by_id.get(entity_id)
+        return entity.state if entity is not None else None
+
+    effective_entities: list[DashboardEntity] = []
+    statuses: dict[str, PowerDependencyStatus] = {}
+    for entity in entities:
+        effective_state, status = effective_device_state(
+            entity.entity_id, dependencies, read_state
+        )
+        effective_entities.append(
+            replace(entity, state=effective_state)
+            if effective_state != entity.state
+            else entity
+        )
+        if status is not None:
+            statuses[entity.entity_id] = status
+    return tuple(effective_entities), statuses
+
+
 def _sensor_value(
     entities: Iterable[DashboardEntity], device_class: str
 ) -> float | None:
@@ -688,6 +719,7 @@ def build_dashboard_snapshot(
     energy_settings: HausmanHubSettings | None = None,
     climate_targets: Mapping[str, tuple[float, int]] | None = None,
     pinned_entity_ids: Iterable[str] | None = None,
+    power_dependencies: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     """Project one immutable, read-only universal dashboard snapshot."""
 
@@ -710,7 +742,12 @@ def build_dashboard_snapshot(
 
     area_by_id = {area.area_id: area for area in areas}
     device_by_id = {device.device_id: device for device in devices}
-    all_entities = tuple(entities)
+    reported_entities = tuple(entities)
+    dependency_mapping = dict(power_dependencies or {})
+    reported_by_id = {entity.entity_id: entity for entity in reported_entities}
+    all_entities, dependency_statuses = _apply_power_dependencies(
+        reported_entities, dependency_mapping
+    )
     grouped: dict[str, list[DashboardEntity]] = defaultdict(list)
     group_sources: dict[str, str | None] = {}
 
@@ -928,6 +965,23 @@ def build_dashboard_snapshot(
         has_energy = _is_energy_source(members, electrical)
         energy_available = _energy_source_available(members, electrical)
         energy_powered = _energy_source_powered(members)
+        dependency_status = dependency_statuses.get(primary.entity_id)
+        reported_primary = reported_by_id.get(primary.entity_id)
+        dependency_payload = None
+        if dependency_status is not None:
+            source_entity = reported_by_id.get(dependency_status.source_entity_id)
+            if source_entity is not None and source_entity.device_id in source_to_public:
+                source_public_id = source_to_public[source_entity.device_id]
+            else:
+                source_public_id = _opaque_id(
+                    "device", f"entity:{dependency_status.source_entity_id}"
+                )
+            dependency_payload = {
+                "sourceDeviceId": source_public_id,
+                "state": dependency_status.state,
+                "reason": dependency_status.reason,
+                "blocksCommands": dependency_status.blocks_commands,
+            }
         device_payloads.append(
             {
                 "id": public_id,
@@ -942,6 +996,12 @@ def build_dashboard_snapshot(
                 if isinstance(primary.attributes.get("icon"), str)
                 else None,
                 "state": primary.state,
+                "reportedState": (
+                    reported_primary.state
+                    if reported_primary is not None
+                    and reported_primary.state != primary.state
+                    else None
+                ),
                 "stateLabel": _state_label(primary),
                 "active": active,
                 "unavailable": unavailable,
@@ -957,6 +1017,7 @@ def build_dashboard_snapshot(
                 "actions": [],
                 "details": details,
                 "energy": electrical if has_energy else None,
+                "powerDependency": dependency_payload,
             }
         )
         if has_energy:
@@ -1092,8 +1153,7 @@ def build_dashboard_snapshot(
             if _device_class(entity) == "carbon_dioxide"
         ),
         "activeLights": sum(
-            entity.domain == "light" and entity.state == "on"
-            for entity in all_entities
+            entity.domain == "light" and entity.state == "on" for entity in all_entities
         ),
         "activeClimate": sum(
             entity.domain == "climate" and entity.state in _ACTIVE_STATES

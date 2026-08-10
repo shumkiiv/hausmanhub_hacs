@@ -59,6 +59,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .application.tablet_preferences import TabletPreferencesService
     from .settings_storage import HomeAssistantSettingsStore
     from .tablet_preferences_storage import HomeAssistantTabletPreferencesStore
+    from .application.device_power_dependencies import DevicePowerDependencyService
+    from .device_power_dependency_storage import (
+        HomeAssistantDevicePowerDependencyStore,
+    )
     from .local_summary import register_local_summary_access
 
     await hass.config_entries.async_forward_entry_setups(
@@ -82,9 +86,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         HomeAssistantTabletPreferencesStore(hass, entry.entry_id)
     )
     await tablet_preferences_service.async_load(settings_service.current)
+    device_power_dependency_service = DevicePowerDependencyService(
+        HomeAssistantDevicePowerDependencyStore(hass, entry.entry_id),
+        entity_pair_validator=lambda dependent, source: (
+            hass.states.get(dependent) is not None and hass.states.get(source) is not None
+        ),
+    )
+    await device_power_dependency_service.async_load()
     domain_data = hass.data.setdefault(entry.domain, {})
     domain_data["settings_service"] = settings_service
     domain_data["tablet_preferences_service"] = tablet_preferences_service
+    domain_data["device_power_dependency_service"] = (
+        device_power_dependency_service
+    )
     from .application.operation_journal import OperationJournalService
     from .operation_journal_api import DATA_OPERATION_JOURNAL
     from .operation_journal_storage import HomeAssistantOperationJournalStore
@@ -157,7 +171,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     await scenario_service.async_load()
     scenario_executor = ScenarioExecutor(
-        hass, scenario_catalog, scenario_service.async_run_scenario
+        hass,
+        scenario_catalog,
+        scenario_service.async_run_scenario,
+        power_dependency_resolver=lambda: device_power_dependency_service.mapping,
     )
     scenario_service.set_executor(scenario_executor)
     await async_start_scenario_schedule(hass, entry, scenario_service)

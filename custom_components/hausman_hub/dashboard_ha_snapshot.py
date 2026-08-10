@@ -234,6 +234,10 @@ def _attach_catalog_actions(
     }
     action_count = 0
     for device_payload in payload.get("devices", []):
+        dependency = device_payload.get("powerDependency")
+        if isinstance(dependency, dict) and dependency.get("blocksCommands") is True:
+            device_payload["actions"] = []
+            continue
         entity_ids = [
             detail.get("entityId")
             for detail in device_payload.get("details", [])
@@ -304,6 +308,7 @@ async def async_dashboard_snapshot(
     energy_settings: HausmanHubSettings | None = None,
     climate_targets: Mapping[str, tuple[float, int]] | None = None,
     pinned_entity_ids: frozenset[str] | None = None,
+    power_dependencies: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     """Collect current HA registries and project one side-effect-free payload."""
 
@@ -382,6 +387,7 @@ async def async_dashboard_snapshot(
         energy_settings=energy_settings,
         climate_targets=climate_targets,
         pinned_entity_ids=pinned_entity_ids,
+        power_dependencies=power_dependencies,
     )
     weather_entity = next(
         (entity for entity in entity_values if entity.domain == "weather"), None
