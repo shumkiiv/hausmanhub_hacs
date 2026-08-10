@@ -51,6 +51,42 @@ function timeLabel(timestamp) {
   return new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 }
 
+export function upcomingTriggerLabel(triggerType) {
+  return ({ time: "время", sunrise: "рассвет", sunset: "закат" })[String(triggerType || "")] || "время";
+}
+
+export function formatUpcomingRunTime(runAt) {
+  const date = new Date(runAt);
+  if (!Number.isFinite(date.getTime())) return "Время уточняется";
+  return new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit" }).format(date);
+}
+
+export function formatUpcomingCountdown(runAt, now) {
+  const date = new Date(runAt);
+  if (!Number.isFinite(date.getTime())) return "Время уточняется";
+  const nowMs = Number.isFinite(Number(now)) ? Number(now) : Date.now();
+  const diffMs = date.getTime() - nowMs;
+  if (diffMs <= 0) return "запуск сейчас";
+  const minutes = Math.floor(diffMs / 60000);
+  if (minutes < 1) return "менее чем через минуту";
+  if (minutes < 60) return `через ${minutes} мин`;
+  const hours = Math.floor(minutes / 60);
+  const restMinutes = minutes % 60;
+  if (hours < 24) return restMinutes ? `через ${hours} ч ${restMinutes} мин` : `через ${hours} ч`;
+  const days = Math.floor(hours / 24);
+  const restHours = hours % 24;
+  return restHours ? `через ${days} д ${restHours} ч` : `через ${days} д`;
+}
+
+export function upcomingEventsSorted(payload, limit = 5) {
+  const events = payload && Array.isArray(payload.events) ? payload.events : [];
+  const sorted = events
+    .filter((event) => event && Number.isFinite(new Date(event.runAt).getTime()))
+    .slice()
+    .sort((left, right) => new Date(left.runAt) - new Date(right.runAt));
+  return { visible: sorted.slice(0, limit), remaining: Math.max(0, sorted.length - limit) };
+}
+
 function cardButton(deps, className, target, panel) {
   const card = deps.el("button", className);
   card.type = "button";
@@ -210,6 +246,51 @@ function renderFavorites(panel, container, dashboard, deps) {
   section.appendChild(list); container.appendChild(section);
 }
 
+export function renderUpcomingEvents(panel, container, deps) {
+  const { el, svgIcon, setAttr } = deps;
+  const { visible, remaining } = upcomingEventsSorted(panel._upcomingEvents);
+  const section = el("section", "overview-canon-upcoming");
+  const head = el("div", "overview-canon-section-head");
+  head.appendChild(el("h2", null, "Ближайшие события"));
+  const all = el("button", "overview-canon-link", "Все сценарии");
+  all.type = "button"; all.addEventListener("click", () => panel._activateSection("scenarios")); head.appendChild(all);
+  section.appendChild(head);
+  if (!visible.length) {
+    section.appendChild(el("div", "card empty-state muted", "Нет запланированных событий"));
+    container.appendChild(section);
+    return;
+  }
+  const list = el("div", "overview-canon-upcoming-list");
+  visible.forEach((event) => {
+    const row = el("div", "overview-canon-upcoming-event");
+    const icon = el("span", "overview-canon-favorite-icon"); icon.appendChild(svgIcon("play")); row.appendChild(icon);
+    const copy = el("span", "overview-canon-upcoming-copy");
+    copy.appendChild(el("strong", null, event.scenarioTitle || "Сценарий"));
+    copy.appendChild(el("small", null, upcomingTriggerLabel(event.triggerType)));
+    row.appendChild(copy);
+    const timing = el("span", "overview-canon-upcoming-time");
+    timing.appendChild(el("strong", null, formatUpcomingRunTime(event.runAt)));
+    const countdown = el("small", "overview-canon-upcoming-countdown", formatUpcomingCountdown(event.runAt, Date.now()));
+    setAttr(countdown, "data-upcoming-run-at", event.runAt || "");
+    timing.appendChild(countdown);
+    row.appendChild(timing);
+    if (event.cancellable === true) {
+      const cancel = el("button", "overview-canon-upcoming-cancel", "Пропустить");
+      cancel.type = "button";
+      cancel.disabled = panel._busy === true;
+      setAttr(cancel, "aria-label", `Пропустить запуск сценария «${event.scenarioTitle || "Сценарий"}»`);
+      cancel.addEventListener("click", () => panel._post(deps.upcomingCancelApi,
+        { scenarioId: event.scenarioId, triggerId: event.triggerId, runAt: event.runAt },
+        `Пропустить запуск «${event.scenarioTitle || "Сценарий"}» ${formatUpcomingRunTime(event.runAt)}?`));
+      row.appendChild(cancel);
+    }
+    list.appendChild(row);
+  });
+  section.appendChild(list);
+  if (remaining > 0) section.appendChild(el("div", "overview-canon-upcoming-more", `и ещё ${remaining}`));
+  container.appendChild(section);
+}
+
 function renderLowerGrid(panel, container, dashboard, deps) {
   const grid = deps.el("div", "overview-canon-lower-grid");
   const main = deps.el("div", "overview-canon-lower-main");
@@ -249,5 +330,6 @@ export function renderOverviewContent(panel, container, deps) {
   const dashboard = panel._homeDashboard || {};
   renderPrimaryCards(panel, container, dashboard, deps);
   renderFavorites(panel, container, dashboard, deps);
+  renderUpcomingEvents(panel, container, deps);
   renderLowerGrid(panel, container, dashboard, deps);
 }

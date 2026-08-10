@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import os
 from pathlib import Path
 import subprocess
 from types import ModuleType, SimpleNamespace
@@ -142,7 +143,9 @@ class PanelJavaScriptContractTest(unittest.TestCase):
 
         self.assertLessEqual(len(content.encode("utf-8")), MAX_PANEL_JS_BYTES)
         self.assertLessEqual(len(rollout.encode("utf-8")), 8 * 1024)
-        self.assertLessEqual(len(overview.encode("utf-8")), 16 * 1024)
+        # Лимит поднят с 16 до 20 КиБ: блок «Ближайшие события» (renderUpcomingEvents
+        # и чистые функции форматирования) добавил в модуль около 4,4 КиБ.
+        self.assertLessEqual(len(overview.encode("utf-8")), 20 * 1024)
         self.assertLessEqual(len(room_icons.encode("utf-8")), 12 * 1024)
         self.assertIn('hausman-hub-rollout.js?v=1.52.56', content)
         self.assertLessEqual(len(weather_sources.encode("utf-8")), 24 * 1024)
@@ -780,6 +783,88 @@ class PanelJavaScriptContractTest(unittest.TestCase):
 
         self.assertEqual(0, completed.returncode, completed.stderr)
 
+    def test_overview_upcoming_events_block(self) -> None:
+        content = PANEL_JS.read_text(encoding="utf-8")
+        overview = OVERVIEW_JS.read_text(encoding="utf-8")
+        styles = OVERVIEW_CSS.read_text(encoding="utf-8")
+
+        self.assertIn('"hausman_hub/v1/scenarios/upcoming"', content)
+        self.assertIn('"hausman_hub/v1/scenarios/upcoming/cancel"', content)
+        self.assertIn("this._upcomingEvents = results[9];", content)
+        self.assertIn("upcomingCancelApi: SCENARIOS_UPCOMING_CANCEL_API", content)
+        self.assertIn("_refreshUpcomingCountdowns()", content)
+        self.assertIn("[data-upcoming-run-at]", content)
+        self.assertIn("Ближайшие события", overview)
+        self.assertIn("Нет запланированных событий", overview)
+        self.assertIn("Пропустить", overview)
+        self.assertIn("Пропустить запуск «", overview)
+        self.assertIn("overview-canon-upcoming-event", overview)
+        self.assertIn("и ещё ", overview)
+        self.assertIn("export function upcomingTriggerLabel", overview)
+        self.assertIn("export function formatUpcomingRunTime", overview)
+        self.assertIn("export function formatUpcomingCountdown", overview)
+        self.assertIn("export function upcomingEventsSorted", overview)
+        self.assertIn("renderUpcomingEvents(panel, container, deps)", overview)
+        self.assertIn(".overview-canon-upcoming-event", styles)
+        self.assertIn(".overview-canon-upcoming-cancel", styles)
+
+        script = f"""
+          const vm = require("vm");
+          const fs = require("fs");
+          vm.runInThisContext(
+            fs.readFileSync({str(OVERVIEW_JS)!r}, "utf8")
+              .replace(/^import[^\\n]*\\n/gm, "")
+              .replace(/^export function /gm, "function ")
+          );
+          if (upcomingTriggerLabel("time") !== "время"
+              || upcomingTriggerLabel("sunrise") !== "рассвет"
+              || upcomingTriggerLabel("sunset") !== "закат"
+              || upcomingTriggerLabel("unknown") !== "время") {{
+            throw new Error("trigger labels are invalid");
+          }}
+          if (formatUpcomingRunTime("2026-08-10T20:50:59.649054+06:00") !== "20:50") {{
+            throw new Error("run time label is invalid");
+          }}
+          const now = Date.parse("2026-08-10T18:00:00+06:00");
+          const countdownCases = [
+            ["2026-08-10T20:15:00+06:00", "через 2 ч 15 мин"],
+            ["2026-08-10T18:40:00+06:00", "через 40 мин"],
+            ["2026-08-10T18:00:30+06:00", "менее чем через минуту"],
+            ["2026-08-10T20:00:00+06:00", "через 2 ч"],
+            ["2026-08-10T17:59:00+06:00", "запуск сейчас"],
+            ["2026-08-12T21:00:00+06:00", "через 2 д 3 ч"],
+          ];
+          for (const [runAt, expected] of countdownCases) {{
+            const actual = formatUpcomingCountdown(runAt, now);
+            if (actual !== expected) throw new Error(`${{runAt}}: ${{actual}} !== ${{expected}}`);
+          }}
+          const events = {{ events: [6, 1, 4, 2, 5, 3, 0].map((hour) => ({{
+            scenarioId: `s${{hour}}`, triggerId: `t${{hour}}`,
+            runAt: `2026-08-10T${{String(10 + hour).padStart(2, "0")}}:00:00+06:00`,
+          }})) }};
+          const sorted = upcomingEventsSorted(events);
+          if (sorted.visible.length !== 5 || sorted.remaining !== 2) {{
+            throw new Error("upcoming events are not limited to five");
+          }}
+          if (sorted.visible[0].scenarioId !== "s0"
+              || sorted.visible[4].scenarioId !== "s4") {{
+            throw new Error("upcoming events are not sorted by runAt");
+          }}
+          const empty = upcomingEventsSorted(null);
+          if (empty.visible.length !== 0 || empty.remaining !== 0) {{
+            throw new Error("missing payload must produce an empty list");
+          }}
+        """
+        completed = subprocess.run(
+            ("node", "--input-type=commonjs", "--eval", script),
+            check=False,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "TZ": "Asia/Omsk"},
+        )
+
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_panel_script_uses_only_relative_local_api_paths(self) -> None:
         content = PANEL_JS.read_text(encoding="utf-8")
 
@@ -820,6 +905,8 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             '"hausman_hub/v1/admin/connection-settings"',
             '"hausman_hub/v1/admin/reset"',
             '"hausman_hub/v1/admin/device-area-assignments"',
+            '"hausman_hub/v1/scenarios/upcoming"',
+            '"hausman_hub/v1/scenarios/upcoming/cancel"',
         ):
             with self.subTest(approved=approved):
                 self.assertIn(approved, content)

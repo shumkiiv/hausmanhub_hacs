@@ -65,6 +65,19 @@
 .overview-canon-event strong, .overview-canon-event small { display:block; overflow-wrap:anywhere; }
 .overview-canon-event strong { font-size:13px; }
 .overview-canon-event small, .overview-canon-event time { margin-top:3px; color:var(--hmh-text-secondary); font-size:12px; }
+.overview-canon-upcoming { margin-top:16px; padding:18px 20px; border:1px solid var(--hmh-border-default); border-radius:16px; background:var(--hmh-surface-card); }
+.overview-canon-upcoming-list { display:grid; gap:10px; margin-top:14px; }
+.overview-canon-upcoming-event { display:grid; grid-template-columns:38px minmax(0,1fr) auto auto; align-items:center; gap:11px; min-height:56px; padding:10px; border:1px solid var(--hmh-border-default); border-radius:12px; background:var(--hmh-surface-raised); }
+.overview-canon-upcoming-copy { min-width:0; }
+.overview-canon-upcoming-copy strong, .overview-canon-upcoming-copy small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.overview-canon-upcoming-copy strong { font-size:14px; }
+.overview-canon-upcoming-copy small { margin-top:4px; color:var(--hmh-text-secondary); font-size:12px; }
+.overview-canon-upcoming-time { min-width:96px; text-align:right; }
+.overview-canon-upcoming-time strong { display:block; font-size:15px; }
+.overview-canon-upcoming-time small { display:block; margin-top:3px; color:var(--hmh-text-secondary); font-size:12px; }
+.overview-canon-upcoming-cancel { min-height:36px; margin:0; padding:7px 12px; color:var(--hmh-text-secondary); background:transparent; box-shadow:none; }
+.overview-canon-upcoming-more { margin-top:10px; color:var(--hmh-text-secondary); font-size:13px; }
+.overview-canon-upcoming .empty-state { margin-top:14px; }
 @media (max-width:1200px) { .overview-canon-favorite-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .overview-canon-lower-grid { grid-template-columns:minmax(0,1fr); } }
 @media (max-width:800px) { .overview-canon-primary-grid, .overview-canon-lower-main { grid-template-columns:minmax(0,1fr); } .overview-canon-hero-copy { width:78%; } }
 @media (max-width:640px) { .overview-canon-hero { min-height:430px; } .overview-canon-hero-copy { width:100%; } .overview-canon-hero-overlay { min-height:376px; padding:24px; } .overview-canon-state { display:none; } .overview-canon-favorite-grid { grid-template-columns:minmax(0,1fr); } }
