@@ -1,9 +1,23 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-10 (1.52.57: климатические правила, icon каталога сценариев, durable ledger и панель ближайших событий).
+Last updated: 2026-08-10 (1.52.58: единый durable journal операций по correlation ID).
 
 ## Current work
 
+- 2026-08-10 (Codex): выпущена и задеплоена `1.52.58`, release commit
+  `981bd26`, tag и GitHub Release опубликованы. Добавлен ограниченный 512
+  записями durable journal квитанций устройств, климата, сценариев и голоса с
+  единым `correlation_id`; storage переживает restart, а local-admin endpoint
+  `GET /api/hausman_hub/v1/admin/operations` поддерживает фильтры `limit`,
+  `source`, `correlation_id` и не сохраняет приватные target/entity IDs.
+  Интеграция закреплена на contracts `0.22.0` (`9d7a84b`). Полный release
+  gate: 1271 тест, 4 пропущены; GitHub Actions run `31404286660` зелёный.
+  Production HA Core 2026.8.1: перед установкой создан полный автоматический
+  backup `21369a49`, `update.install` с явной версией `v1.52.58`, config check
+  и restart прошли штатно. Installed/latest и статика подтверждают `1.52.58`,
+  10 сущностей доступны, новый journal отвечает contract v1, после первого
+  запуска sequence 0 и records пусты. Команды устройствам при проверке не
+  отправлялись.
 - 2026-08-10 (Codex): выпущена и задеплоена `1.52.57`, release commit
   `63b8557`, tag и GitHub Release опубликованы. В состав вошли: трактовка
   `hvac_action: idle` кондиционера как поддержания без команды off; отдельное
