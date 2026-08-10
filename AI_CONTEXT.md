@@ -1,9 +1,21 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-10 (1.52.62: direct Wi-Fi AC сохраняет ручное выключение).
+Last updated: 2026-08-10 (1.52.63: contracts pin согласован с direct Wi-Fi manual mode).
 
 ## Current work
 
+- 2026-08-10 (Codex): выпущена и задеплоена `1.52.63`, commit `2bc0835`.
+  Patch-релиз исправляет только канонический consumer pin на
+  hausmanhub-contracts `0.22.3` (`4ac4533`); runtime schema и поведение ручного
+  режима уже вошли в 1.52.62. Полный gate повторён: 1283 теста, 4 пропущены;
+  HACS source parity зелёный, GitHub Actions `31416519754` завершён успешно.
+  Перед установкой создан новый полный automatic backup, завершённый
+  `2026-08-11T00:02:23.740857+06:00`. Явная установка `v1.52.63`, config check
+  без ошибок и restart прошли штатно. Installed/latest, backend API и cache
+  references подтверждают 1.52.63; все 10 сущностей доступны, HausmanHub
+  system log чист. Кабинет остался automatic с доступным `set_room_mode`,
+  Алиса automatic с blocker `device_unavailable`; operation journal содержит
+  6 прежних записей и ни одной climate-записи.
 - 2026-08-10 (Codex): выпущена и задеплоена `1.52.62`, release commit
   `b8cff61`, tag и GitHub Release опубликованы. Для кондиционеров с
   `control_channel=direct_wifi` долговечная память фиксирует наблюдаемую фазу
