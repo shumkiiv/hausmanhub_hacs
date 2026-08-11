@@ -245,16 +245,17 @@ def _native_contour_status(
         hour=local_now.hour,
         minute=local_now.minute,
     )
-    schedule_ready = (
-        contour.mode is ContourMode.AUTOMATIC
-        and contour.schedule.enabled
-        and contour.schedule.last_applied_profile is schedule_profile
-        and all(room.active_profile is schedule_profile for room in contour.rooms)
+    target_control_ready = contour.mode is ContourMode.AUTOMATIC and (
+        not contour.schedule.enabled
+        or (
+            contour.schedule.last_applied_profile is schedule_profile
+            and all(room.active_profile is schedule_profile for room in contour.rooms)
+        )
     )
     fresh = observation is not None and native_runtime_fresh(observation)
     temporary_temperature_available_by_room = {
         room.room_id: (
-            schedule_ready
+            target_control_ready
             and settings_apply_enabled
             and fresh
             and observation is not None
@@ -453,9 +454,10 @@ def _native_room_status(
                 else assignment.temporary_override.target_temperature
             ),
             "ends": (
-                None
-                if assignment.temporary_override is None
-                else "next_schedule_change"
+                "next_schedule_change"
+                if assignment.temporary_override is not None
+                and next_schedule_change_at is not None
+                else None
             ),
             "ends_at": (
                 None

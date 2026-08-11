@@ -333,10 +333,10 @@ class ContourDefinition:
         if self.schedule.enabled and self.mode is not ContourMode.AUTOMATIC:
             raise ContourViolation("climate schedule requires automatic mode")
         if any(room.temporary_override is not None for room in self.rooms) and (
-            not self.schedule.enabled or self.mode is not ContourMode.AUTOMATIC
+            self.mode is not ContourMode.AUTOMATIC
         ):
             raise ContourViolation(
-                "temporary climate override requires an automatic schedule"
+                "temporary climate override requires automatic climate control"
             )
         _unique((room.room_id for room in self.rooms), "contour room ids")
         _unique(

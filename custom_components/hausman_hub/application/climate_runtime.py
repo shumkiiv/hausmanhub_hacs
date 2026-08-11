@@ -872,14 +872,17 @@ class ClimateRuntime:
             self._require_native_contour_apply_mode()
             contour = self._climate_contour()
             selected = contour.schedule.profile_at(hour=now.hour, minute=now.minute)
-            if (
-                contour.mode is not ContourMode.AUTOMATIC
-                or not contour.schedule.enabled
-                or contour.schedule.last_applied_profile is not selected
-                or any(room.active_profile is not selected for room in contour.rooms)
+            if contour.mode is not ContourMode.AUTOMATIC or (
+                contour.schedule.enabled
+                and (
+                    contour.schedule.last_applied_profile is not selected
+                    or any(
+                        room.active_profile is not selected for room in contour.rooms
+                    )
+                )
             ):
                 raise ContourApplyViolation(
-                    "climate schedule is not ready for a temporary temperature"
+                    "climate target control is not ready"
                 )
             if self._contour_store is None:
                 raise ClimateRuntimeUnavailable("contour storage is unavailable")

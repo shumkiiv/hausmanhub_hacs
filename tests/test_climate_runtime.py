@@ -1050,7 +1050,7 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(1, len(executor.batches))
         self.assertEqual([], bridge.executed)
 
-    async def test_disabled_schedule_and_matching_period_send_no_commands(self) -> None:
+    async def test_disabled_schedule_allows_explicit_room_target_only(self) -> None:
         bridge = MemoryBridge()
         registry, contours = build_climate_contour_setup(
             bridge.snapshot,
@@ -1065,31 +1065,66 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
                 "living": {"min_temperature": 23.0, "max_temperature": 26.0}
             },
         )
+        registry, state_view = native_application_inputs(registry)
+        executor = ReflectingStrictExecutor(state_view)
+        contour_store = MemoryContourStore(contours)
         runtime = ClimateRuntime(
             entry_id="entry",
             configuration=configuration(ClimateControlMode.MANAGED),
             registry_store=MemoryStore(registry),
-            contour_store=MemoryContourStore(contours),
+            contour_store=contour_store,
+            strict_ha_call_executor=executor,
+            ha_state_view=state_view,
+            operation_id_factory=iter(("2" * 32, "3" * 32)).__next__,
+            now_ms=lambda: 1784280005000,
         )
         await runtime.async_start()
 
         result = await runtime.async_run_climate_schedule(
             datetime(2026, 7, 19, 23, 0)
         )
-        with self.assertRaisesRegex(ContourApplyViolation, "schedule is not ready"):
-            await runtime.async_temporary_temperature(
-                {
-                    "request_id": "temporary-without-schedule",
-                    "contour_id": "climate",
-                    "room_id": "living",
-                    "action": "set",
-                    "target_temperature": 23.5,
-                    "confirm": True,
-                },
-                datetime(2026, 7, 19, 23, 0),
-            )
+        receipt = await runtime.async_temporary_temperature(
+            {
+                "request_id": "temporary-without-schedule",
+                "contour_id": "climate",
+                "room_id": "living",
+                "action": "set",
+                "target_temperature": 23.5,
+                "confirm": True,
+            },
+            datetime(2026, 7, 19, 23, 0),
+        )
+        public = await runtime.async_contours_snapshot()
 
         self.assertIsNone(result)
+        self.assertEqual("confirmed", receipt.status.value)
+        self.assertEqual(1, receipt.command_count)
+        self.assertEqual(1, len(executor.batches))
+        room = contour_store.registry.contour("climate").rooms[0]  # type: ignore[union-attr]
+        self.assertEqual(23.5, room.target_temperature)
+        temporary = public["contours"][0]["rooms"][0][  # type: ignore[index]
+            "temporary_temperature"
+        ]
+        self.assertTrue(temporary["active"])
+        self.assertIsNone(temporary["ends"])
+        self.assertIsNone(temporary["ends_at"])
+        cleared = await runtime.async_temporary_temperature(
+            {
+                "request_id": "temporary-without-schedule-clear",
+                "contour_id": "climate",
+                "room_id": "living",
+                "action": "clear",
+                "target_temperature": None,
+                "confirm": True,
+            },
+            datetime(2026, 7, 19, 23, 5),
+        )
+        self.assertEqual("confirmed", cleared.status.value)
+        self.assertEqual(0, cleared.command_count)
+        self.assertEqual(1, len(executor.batches))
+        room = contour_store.registry.contour("climate").rooms[0]  # type: ignore[union-attr]
+        self.assertIsNone(room.temporary_override)
+        self.assertEqual(25.0, room.target_temperature)
         self.assertEqual([], bridge.executed)
 
     async def test_new_schedule_applies_current_period_once_even_if_profile_matches(

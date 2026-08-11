@@ -838,13 +838,9 @@ def with_climate_temporary_temperature(
     """Set one room temperature without changing its saved day/night profile."""
 
     contour = registry.contour(CLIMATE_CONTOUR_ID)
-    if (
-        contour is None
-        or contour.mode is not ContourMode.AUTOMATIC
-        or not contour.schedule.enabled
-    ):
+    if contour is None or contour.mode is not ContourMode.AUTOMATIC:
         raise ContourRegistryViolation(
-            "temporary temperature requires an automatic climate schedule"
+            "temporary temperature requires automatic climate control"
         )
     if not isinstance(room_id, str):
         raise ContourRegistryViolation("temporary temperature room is invalid")
@@ -894,13 +890,9 @@ def without_climate_temporary_temperature(
     """Return one room to its saved active profile before the next boundary."""
 
     contour = registry.contour(CLIMATE_CONTOUR_ID)
-    if (
-        contour is None
-        or contour.mode is not ContourMode.AUTOMATIC
-        or not contour.schedule.enabled
-    ):
+    if contour is None or contour.mode is not ContourMode.AUTOMATIC:
         raise ContourRegistryViolation(
-            "temporary temperature requires an automatic climate schedule"
+            "temporary temperature requires automatic climate control"
         )
     if not isinstance(room_id, str):
         raise ContourRegistryViolation("temporary temperature room is invalid")
@@ -1100,15 +1092,16 @@ def _contour_status(
 ) -> dict[str, object]:
     schedule = _public_schedule(contour.schedule, local_now)
     schedule_profile = contour.schedule.last_applied_profile
-    schedule_ready = (
-        contour.mode is ContourMode.AUTOMATIC
-        and contour.schedule.enabled
-        and schedule_profile is not None
-        and all(room.active_profile is schedule_profile for room in contour.rooms)
+    target_control_ready = contour.mode is ContourMode.AUTOMATIC and (
+        not contour.schedule.enabled
+        or (
+            schedule_profile is not None
+            and all(room.active_profile is schedule_profile for room in contour.rooms)
+        )
     )
     temporary_temperature_available_by_room = {
         room.room_id: (
-            schedule_ready
+            target_control_ready
             and settings_apply_enabled
             and snapshot is not None
             and snapshot.runtime_fresh
@@ -1295,9 +1288,10 @@ def _room_status(
                 else assignment.temporary_override.target_temperature
             ),
             "ends": (
-                None
-                if assignment.temporary_override is None
-                else "next_schedule_change"
+                "next_schedule_change"
+                if assignment.temporary_override is not None
+                and next_schedule_change_at is not None
+                else None
             ),
             "ends_at": (
                 None

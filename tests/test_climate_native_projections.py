@@ -660,7 +660,7 @@ class NativeControlGateTest(unittest.TestCase):
         )
         self.assertEqual([], control["blocked_reasons"])
 
-    def test_target_stays_hidden_when_schedule_is_not_ready(self) -> None:
+    def test_target_is_available_without_automatic_schedule(self) -> None:
         registry, contours, _ = _setup()
         _, observation = _native_observation(registry, contours)
 
@@ -670,12 +670,35 @@ class NativeControlGateTest(unittest.TestCase):
         )["rooms"][0]["control"]
 
         self.assertTrue(control["enabled"])
-        self.assertEqual(["set_room_mode"], control["actions"])
+        self.assertEqual(["set_room_target", "set_room_mode"], control["actions"])
+        self.assertEqual(
+            ["set_room_target", "set_room_mode"], control["allowed_actions"]
+        )
+        self.assertTrue(control["action_availability"]["set_room_target"]["allowed"])
+        self.assertIn("set_room_target", control["action_inputs"])
+        self.assertIn("set_room_target", control["action_presentations"])
+        self.assertEqual([], control["blocked_reasons"])
+
+    def test_target_stays_hidden_when_enabled_schedule_is_not_applied(self) -> None:
+        registry, contours, _ = _setup()
+        scheduled = with_climate_schedule(
+            contours,
+            enabled=True,
+            day_start="07:00",
+            night_start="23:00",
+        )
+        _, observation = _native_observation(registry, scheduled)
+
+        control = self._android(
+            observation,
+            contours=scheduled,
+            local_now=datetime(2026, 8, 11, 12, 0, tzinfo=timezone.utc),
+        )["rooms"][0]["control"]
+
         self.assertEqual(["set_room_mode"], control["allowed_actions"])
         self.assertEqual({}, control["action_availability"])
         self.assertEqual({}, control["action_inputs"])
         self.assertEqual({}, control["action_presentations"])
-        self.assertEqual([], control["blocked_reasons"])
 
     def test_target_stays_hidden_without_room_authority(self) -> None:
         registry, contours, _ = _setup()
