@@ -1,4 +1,5 @@
 import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.65";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.65";
 import { canonicalRoomMdiIcon, ROOM_TYPE_OPTIONS, roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.65";
 
 function roomNormalized(value) {
@@ -139,6 +140,7 @@ function openRoomOverview(panel, container, room, devices, deps) {
     if (event.target === backdrop) closeRoomOverview(panel, container);
   });
   container.appendChild(backdrop);
+  enhanceAppendedModal(backdrop, sheet, () => closeRoomOverview(panel, container));
 }
 
 function renderRoomsHero(panel, container, rooms, devices, deps) {

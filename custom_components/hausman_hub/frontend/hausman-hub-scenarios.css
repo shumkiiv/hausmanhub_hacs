@@ -36,7 +36,7 @@
 .scenario-more { position:relative; }
 .scenario-more > summary { display:grid; place-items:center; width:40px; height:38px; border:1px solid var(--hmh-border,#2F3845); border-radius:11px; cursor:pointer; list-style:none; color:var(--hmh-muted,#AAB4C2); font-size:15px; font-weight:800; }
 .scenario-more > summary::-webkit-details-marker { display:none; }
-.scenario-more-menu { position:absolute; z-index:8; top:44px; right:0; display:grid; min-width:180px; padding:6px; border:1px solid var(--hmh-border,#2F3845); border-radius:13px; background:var(--hmh-raised,#181E26); box-shadow:0 18px 38px rgba(0,0,0,.25); }
+.scenario-more-menu { position:absolute; z-index:8; top:44px; right:0; display:grid; min-width:180px; padding:6px; border:1px solid var(--hmh-modal-border); border-radius:13px; background:var(--hmh-modal-raised); box-shadow:var(--hmh-modal-shadow); }
 .scenario-more-menu button { justify-content:flex-start; width:100%; border:0; background:transparent; box-shadow:none; text-align:left; }
 .scenario-more-menu button.is-danger { color:var(--hmh-danger,#EF6A6A); }
 .scenario-run { position:absolute; top:50%; right:18px; display:grid; place-items:center; width:50px; min-width:50px; height:50px; min-height:50px; padding:0!important; border:1px solid color-mix(in srgb,var(--hmh-accent,#4D8DFF) 36%,var(--hmh-border,#2F3845)); border-radius:50%; color:var(--hmh-text,#E7ECF3); background:color-mix(in srgb,var(--hmh-accent,#4D8DFF) 13%,var(--hmh-raised,#181E26)); box-shadow:none; transform:translateY(-50%); }
@@ -51,8 +51,8 @@
 .scenario-empty p { max-width:560px; color:var(--hmh-muted,#AAB4C2); }
 .scenario-empty-icon { display:grid; place-items:center; width:58px; height:58px; border-radius:17px; color:var(--hmh-accent,#4D8DFF); background:color-mix(in srgb,var(--hmh-accent,#4D8DFF) 14%,transparent); }
 .scenario-empty-icon .icon { width:28px; height:28px; }
-.scenario-editor-overlay { position:fixed; z-index:1020; inset:0; display:grid; place-items:center; padding:28px; background:rgba(4,7,10,.72); backdrop-filter:blur(18px); }
-.scenario-editor-dialog { display:grid; grid-template-rows:auto minmax(0,1fr) auto; width:min(1240px,100%); max-height:calc(100vh - 56px); overflow:hidden; border:1px solid var(--hmh-border,#2F3845); border-radius:22px; background:var(--hmh-raised,#181E26); box-shadow:0 28px 80px rgba(0,0,0,.42); }
+.scenario-editor-overlay { position:fixed; z-index:1020; inset:0; display:grid; place-items:center; padding:28px; background:var(--hmh-modal-backdrop); backdrop-filter:blur(18px); }
+.scenario-editor-dialog { display:grid; grid-template-rows:auto minmax(0,1fr) auto; width:min(1240px,100%); max-height:calc(100vh - 56px); overflow:hidden; border:1px solid var(--hmh-modal-border); border-radius:22px; background:var(--hmh-modal-raised); box-shadow:var(--hmh-modal-shadow); }
 .scenario-editor-header { display:flex; align-items:flex-start; justify-content:space-between; gap:24px; padding:24px 28px 20px; border-bottom:1px solid var(--hmh-border,#2F3845); }
 .scenario-editor-header h2 { margin:3px 0 4px; font-size:clamp(26px,2.4vw,34px); }
 .scenario-editor-header p { margin:0; color:var(--hmh-muted,#AAB4C2); font-size:15px; }

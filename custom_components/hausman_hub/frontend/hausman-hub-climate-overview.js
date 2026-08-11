@@ -1,6 +1,7 @@
 /* Climate control surface shared with the tablet information architecture. */
 
 import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.65";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.65";
 import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.65";
 
 const CATEGORY_DEFINITIONS = [
@@ -210,6 +211,7 @@ function openClimateSheet(panel, container, title, devices, deps) {
   };
   close.addEventListener("click", dismiss);
   backdrop.addEventListener("click", (event) => { if (event.target === backdrop) dismiss(); });
+  enhanceAppendedModal(backdrop, sheet, dismiss);
   sheet.appendChild(close);
   const body = el("div", "climate-sheet-body");
   sheet.appendChild(body);

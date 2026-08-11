@@ -1,5 +1,7 @@
 /* Canonical physical-device card shared by all tablet-style HACS sections. */
 
+import { enhanceDetailsModal } from "./hausman-hub-modal.js?v=1.52.65";
+
 const STATE_LABELS = {
   on: "Включено",
   off: "Выключено",
@@ -210,5 +212,6 @@ export function renderPhysicalDeviceCard(owner, device, deps) {
     if (event.target === backdrop) closeCard(owner, card, key);
   });
   card.appendChild(backdrop);
+  enhanceDetailsModal(card, sheet, () => closeCard(owner, card, key));
   return card;
 }

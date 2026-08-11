@@ -1,4 +1,5 @@
 import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.65";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.65";
 import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.65";
 
 function mediaOverviewNormalized(value) { return String(value || "").trim().toLocaleLowerCase("ru"); }
@@ -55,6 +56,7 @@ function renderMediaZoneSheet(panel, container, title, devices, deps) {
   };
   close.addEventListener("click", dismiss);
   backdrop.addEventListener("click", (event) => { if (event.target === backdrop) dismiss(); });
+  enhanceAppendedModal(backdrop, sheet, dismiss);
   sheet.appendChild(close);
   const heading = el("div", "media-zone-sheet-heading");
   heading.appendChild(el("h3", null, title));

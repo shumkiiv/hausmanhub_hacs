@@ -8,6 +8,8 @@ import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } 
 import { closeFirstRunAreaCreator, createFirstRunArea, openFirstRunAreaCreator, renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.52.65";
 import { createKioskButton, createKioskDock, handleKioskPointerUp, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, resolveIntercomQuickAction, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.52.65";
 import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.52.65";
+import { loadEnergyMeter } from "./hausman-hub-energy-meter.js?v=1.52.65";
+import { redrawEnergyChartsForTheme } from "./hausman-hub-energy-chart.js?v=1.52.65";
 import { applyHomeSignalSelection, AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, homeEnvironmentSaveError, homeEnvironmentSourcePayload, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.52.65";
 import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.52.65";
 import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.52.65";
@@ -338,6 +340,15 @@ class HausmanHubPanel extends HTMLElement {
     this._energyDraft = null;
     this._energySettingsOpen = false;
     this._energySelectedDeviceId = null;
+    this._energyDetailsOpen = false;
+    this._energyModalView = "overview";
+    this._energyModalJustOpened = false;
+    this._energyMeter = null;
+    this._energyMeterDraft = null;
+    this._energyMeterLoading = false;
+    this._energyMeterSaving = false;
+    this._energyMeterError = null;
+    this._energyMeterNotice = "";
     this._energyHistory = null;
     this._energyTodayKwh = null;
     this._energyHistoryLoading = false;
@@ -552,6 +563,7 @@ class HausmanHubPanel extends HTMLElement {
     if (this.classList && typeof this.classList.toggle === "function") {
       this.classList.toggle("theme-light", effective === "light");
     }
+    redrawEnergyChartsForTheme(this);
     this._updateThemeSwitcher();
     this._applyLocalPreferences();
     this._scheduleDaynightTimer();
@@ -720,6 +732,7 @@ class HausmanHubPanel extends HTMLElement {
     }
     this._loadingPanel = false;
     this._render();
+    if (this._energyMeter === null) loadEnergyMeter(this);
     if (this._activeSection === "energy" && this._energyHistory === null) {
       loadEnergyHistory(this);
     }
@@ -1150,7 +1163,10 @@ class HausmanHubPanel extends HTMLElement {
       this._renderSettings(this._shell.settings);
       if (!this._settingsDirty && !this._settingsBaseline.home_assistant_url) this._loadSettings();
     }
-    if (section === "energy") loadEnergyHistory(this);
+    if (section === "energy") {
+      loadEnergyHistory(this);
+      loadEnergyMeter(this);
+    }
     if (this._shell.homeSections && this._shell.homeSections[section]) {
       this._renderHomeSection(section, this._shell.homeSections[section]);
     }
@@ -5557,8 +5573,12 @@ class HausmanHubPanel extends HTMLElement {
     const key = JSON.stringify({
       dashboard,
       sectionId,
+      meterStatus: this._energyMeter && this._energyMeter.submission
+        ? [this._energyMeter.submission.status, this._energyMeter.submission.nextDate] : null,
       energy: sectionId === "energy" ? this._energyHistory : null,
-      energyUi: sectionId === "energy" ? [this._energySettingsOpen, this._energySelectedDeviceId, this._energyDraft] : null,
+      energyUi: sectionId === "energy" ? [this._energySettingsOpen, this._energySelectedDeviceId, this._energyDraft,
+        this._energyDetailsOpen, this._energyModalView, this._energyFilter, this._energyMeter,
+        this._energyMeterNotice, this._energyMeterError, this._energyMeterLoading, this._energyMeterSaving] : null,
       securityUi: sectionId === "security" ? this._securityTypeFilter : null,
       devicesUi: sectionId === "devices" ? this._deviceCategoryFilter : null,
     });

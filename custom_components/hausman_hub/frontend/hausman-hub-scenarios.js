@@ -1,5 +1,6 @@
 /* Scenario library and editor shared with the HausmanHub tablet contract. */
 
+import { activeElementWithin, trapModalTabKey } from "./hausman-hub-modal.js?v=1.52.65";
 import { scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.65";
 import { scenarioEditorIssues, scenarioField, scenarioIconField, scenarioSelectField, scenarioToggle } from "./hausman-hub-scenario-fields.js?v=1.52.65";
 import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.65";
@@ -91,6 +92,7 @@ function openScenarioEditor(panel, source) {
   panel._scenarioEditor = normalizedScenario(source);
   panel._scenarioEditorOriginal = JSON.stringify(scenarioPayload(panel._scenarioEditor));
   panel._scenarioEditorStep = "about";
+  panel._scenarioEditorRestoreFocus = activeElementWithin(panel);
   panel._scenarioEditorJustOpened = true;
   panel._scenarioEditorFocusBody = false;
   updateScenarioEditor(panel);
@@ -108,7 +110,12 @@ function closeScenarioEditor(panel) {
   panel._scenarioEditorStep = null;
   panel._scenarioEditorJustOpened = false;
   panel._scenarioEditorFocusBody = false;
+  const restore = panel._scenarioEditorRestoreFocus;
+  panel._scenarioEditorRestoreFocus = null;
   updateScenarioEditor(panel);
+  if (restore && typeof restore.focus === "function" && restore.isConnected !== false) {
+    try { restore.focus(); } catch (error) { /* opener may be gone after a re-render */ }
+  }
   return true;
 }
 
@@ -498,7 +505,9 @@ function renderScenarioEditor(panel, container, deps) {
     if (event.key === "Escape") {
       event.preventDefault();
       closeScenarioEditor(panel);
+      return;
     }
+    trapModalTabKey(event, dialog);
   });
   container.appendChild(overlay);
   const shouldFocusClose = panel._scenarioEditorJustOpened === true;

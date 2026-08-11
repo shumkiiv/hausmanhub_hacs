@@ -1,4 +1,5 @@
 import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.65";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.65";
 import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.65";
 
 const LIGHTING_EXCLUSIONS = [
@@ -106,6 +107,7 @@ function openRoomSheet(panel, container, roomName, devices, deps) {
     if (event.target === backdrop) closeSheet(panel, container);
   });
   container.appendChild(backdrop);
+  enhanceAppendedModal(backdrop, sheet, () => closeSheet(panel, container));
 }
 
 function renderLightingRooms(panel, container, rooms, devices, deps) {

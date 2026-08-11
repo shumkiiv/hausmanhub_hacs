@@ -41,6 +41,8 @@ KIOSK_CSS = PANEL_JS.with_name("hausman-hub-kiosk.css")
 ENERGY_JS = PANEL_JS.with_name("hausman-hub-energy.js")
 ENERGY_CSS = PANEL_JS.with_name("hausman-hub-energy.css")
 ENERGY_CHART_JS = PANEL_JS.with_name("hausman-hub-energy-chart.js")
+MODAL_JS = PANEL_JS.with_name("hausman-hub-modal.js")
+ENERGY_METER_JS = PANEL_JS.with_name("hausman-hub-energy-meter.js")
 ENERGY_CHART_CSS = PANEL_JS.with_name("hausman-hub-energy-chart.css")
 WEATHER_SOURCES_JS = PANEL_JS.with_name("hausman-hub-weather-sources.js")
 MEDIA_DEVICE_JS = PANEL_JS.with_name("hausman-hub-media-device.js")
@@ -79,7 +81,7 @@ CATALOG_CSS = PANEL_JS.with_name("hausman-hub-catalog.css")
 DEVICE_MAINTENANCE_CSS = PANEL_JS.with_name("hausman-hub-device-maintenance.css")
 DEVICES_OVERVIEW_CSS = PANEL_JS.with_name("hausman-hub-devices-overview.css")
 ROOMS_CSS = PANEL_JS.with_name("hausman-hub-rooms.css")
-MAX_PANEL_JS_BYTES = 280 * 1024
+MAX_PANEL_JS_BYTES = 282 * 1024
 MAX_HOME_SECTIONS_JS_BYTES = 16 * 1024
 MAX_ROOM_SETUP_JS_BYTES = 24 * 1024
 MAX_ROOM_DEVICE_GROUPS_JS_BYTES = 12 * 1024
@@ -529,7 +531,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertLessEqual(len(kiosk_styles.encode("utf-8")), 12 * 1024)
         self.assertLessEqual(len(wizard_validation_styles.encode("utf-8")), 8 * 1024)
         self.assertLessEqual(len(catalog_styles.encode("utf-8")), 8 * 1024)
-        self.assertLessEqual(len(energy_styles.encode("utf-8")), 18 * 1024)
+        self.assertLessEqual(len(energy_styles.encode("utf-8")), 22 * 1024)
         self.assertLessEqual(len(energy_chart_styles.encode("utf-8")), 8 * 1024)
         self.assertLessEqual(len(button_styles.encode("utf-8")), 8 * 1024)
         self.assertIn('hausman-hub-buttons.css?v=1.52.65', styles)
@@ -1020,7 +1022,19 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             {{ filename: {str(ENERGY_JS)!r} }}
           );
           vm.runInThisContext(
-            fs.readFileSync({str(DEVICE_CARD_JS)!r}, "utf8").replace(/export /g, ""),
+            fs.readFileSync({str(ENERGY_CHART_JS)!r}, "utf8").replace(/export /g, ""),
+            {{ filename: {str(ENERGY_CHART_JS)!r} }}
+          );
+          vm.runInThisContext(
+            fs.readFileSync({str(ENERGY_METER_JS)!r}, "utf8").replace(/export /g, ""),
+            {{ filename: {str(ENERGY_METER_JS)!r} }}
+          );
+          vm.runInThisContext(
+            fs.readFileSync({str(MODAL_JS)!r}, "utf8").replace(/export /g, ""),
+            {{ filename: {str(MODAL_JS)!r} }}
+          );
+          vm.runInThisContext(
+            fs.readFileSync({str(DEVICE_CARD_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
             {{ filename: {str(DEVICE_CARD_JS)!r} }}
           );
           vm.runInThisContext(
@@ -1205,7 +1219,19 @@ THEME_TEST_HARNESS = """
     { filename: __ENERGY_JS__ }
   );
   vm.runInThisContext(
-    fs.readFileSync(__DEVICE_CARD_JS__, "utf8").replace(/export /g, ""),
+    fs.readFileSync(__ENERGY_CHART_JS__, "utf8").replace(/export /g, ""),
+    { filename: __ENERGY_CHART_JS__ }
+  );
+  vm.runInThisContext(
+    fs.readFileSync(__ENERGY_METER_JS__, "utf8").replace(/export /g, ""),
+    { filename: __ENERGY_METER_JS__ }
+  );
+  vm.runInThisContext(
+    fs.readFileSync(__MODAL_JS__, "utf8").replace(/export /g, ""),
+    { filename: __MODAL_JS__ }
+  );
+  vm.runInThisContext(
+    fs.readFileSync(__DEVICE_CARD_JS__, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
     { filename: __DEVICE_CARD_JS__ }
   );
   vm.runInThisContext(
@@ -1252,6 +1278,9 @@ class PanelThemeSwitcherTest(unittest.TestCase):
             .replace("__FIRST_RUN_DRAFT_JS__", repr(str(FIRST_RUN_DRAFT_JS)))) + body
         script = script.replace("__NAVIGATION_JS__", repr(str(NAVIGATION_JS)))
         script = script.replace("__ENERGY_JS__", repr(str(ENERGY_JS)))
+        script = script.replace("__ENERGY_CHART_JS__", repr(str(ENERGY_CHART_JS)))
+        script = script.replace("__ENERGY_METER_JS__", repr(str(ENERGY_METER_JS)))
+        script = script.replace("__MODAL_JS__", repr(str(MODAL_JS)))
         script = script.replace("__DEVICE_CARD_JS__", repr(str(DEVICE_CARD_JS)))
         script = script.replace("__MEDIA_DEVICE_JS__", repr(str(MEDIA_DEVICE_JS)))
         script = script.replace("__SCENARIO_ICONS_JS__", repr(str(SCENARIO_ICONS_JS)))

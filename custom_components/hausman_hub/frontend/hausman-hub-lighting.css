@@ -31,9 +31,9 @@
 .lighting-device-room-title { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:12px; }
 .lighting-device-room-title h4 { margin:0; font-size:19px; }
 .lighting-device-room-title span { color:var(--hmh-text-dim,#9AA7B4); font-size:13px; }
-.lighting-room-sheet-backdrop { position:fixed; z-index:1010; inset:0; display:grid; place-items:center; padding:28px; background:rgba(4,8,13,.7); backdrop-filter:blur(14px); }
-.lighting-room-sheet { position:relative; width:min(980px,calc(100vw - 56px)); max-height:min(820px,calc(100vh - 56px)); overflow:auto; border:1px solid var(--hmh-border,#2F3845); border-radius:24px; color:var(--hmh-text,#E7ECF3); background:var(--hmh-surface,#12171D); box-shadow:0 32px 90px rgba(0,0,0,.5); }
-.lighting-room-sheet-close { position:sticky; z-index:2; top:16px; float:right; width:46px; height:46px; min-height:46px; margin:16px 16px 0 0; padding:0; border:1px solid var(--hmh-border,#2F3845); border-radius:50%; color:var(--hmh-text,#E7ECF3); font-size:28px; background:var(--hmh-raised,#181E26); }
+.lighting-room-sheet-backdrop { position:fixed; z-index:1010; inset:0; display:grid; place-items:center; padding:28px; background:var(--hmh-modal-backdrop); backdrop-filter:blur(14px); }
+.lighting-room-sheet { position:relative; width:min(980px,calc(100vw - 56px)); max-height:min(820px,calc(100vh - 56px)); overflow:auto; border:1px solid var(--hmh-modal-border); border-radius:24px; color:var(--hmh-text); background:var(--hmh-modal-surface); box-shadow:var(--hmh-modal-shadow); }
+.lighting-room-sheet-close { position:sticky; z-index:2; top:16px; float:right; width:46px; height:46px; min-height:46px; margin:16px 16px 0 0; padding:0; border:1px solid var(--hmh-modal-border); border-radius:50%; color:var(--hmh-text); font-size:28px; background:var(--hmh-modal-raised); }
 .lighting-room-sheet-body { clear:both; padding:2px 26px 28px; }
 .lighting-room-sheet-eyebrow { color:#FFB72E; font-size:12px; font-weight:750; letter-spacing:.1em; }
 .lighting-room-sheet h2 { margin:7px 0 5px; font-size:32px; }

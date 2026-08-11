@@ -35,8 +35,10 @@ DEVICE_BINDINGS_JS = PANEL_JS.with_name("hausman-hub-device-bindings.js")
 AREA_BINDING_JS = PANEL_JS.with_name("hausman-hub-area-binding.js")
 FIRST_RUN_DRAFT_JS = PANEL_JS.with_name("hausman-hub-first-run-draft.js")
 NAVIGATION_JS = PANEL_JS.with_name("hausman-hub-navigation.js")
+MODAL_JS = PANEL_JS.with_name("hausman-hub-modal.js")
 ENERGY_JS = PANEL_JS.with_name("hausman-hub-energy.js")
 ENERGY_CHART_JS = PANEL_JS.with_name("hausman-hub-energy-chart.js")
+ENERGY_METER_JS = PANEL_JS.with_name("hausman-hub-energy-meter.js")
 WEATHER_SOURCES_JS = PANEL_JS.with_name("hausman-hub-weather-sources.js")
 MEDIA_DEVICE_JS = PANEL_JS.with_name("hausman-hub-media-device.js")
 DEVICE_CARD_JS = PANEL_JS.with_name("hausman-hub-device-card.js")
@@ -511,6 +513,10 @@ def panel_script(
         {{ filename: {str(HOME_SECTIONS_JS)!r} }}
       );
       vm.runInThisContext(
+        fs.readFileSync({str(MODAL_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(MODAL_JS)!r} }}
+      );
+      vm.runInThisContext(
         fs.readFileSync({str(CLIMATE_OVERVIEW_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(CLIMATE_OVERVIEW_JS)!r} }}
       );
@@ -567,6 +573,10 @@ def panel_script(
         {{ filename: {str(ENERGY_CHART_JS)!r} }}
       );
       vm.runInThisContext(
+        fs.readFileSync({str(ENERGY_METER_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
+        {{ filename: {str(ENERGY_METER_JS)!r} }}
+      );
+      vm.runInThisContext(
         fs.readFileSync({str(ENERGY_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(ENERGY_JS)!r} }}
       );
@@ -575,7 +585,7 @@ def panel_script(
         {{ filename: {str(WEATHER_SOURCES_JS)!r} }}
       );
       vm.runInThisContext(
-        fs.readFileSync({str(DEVICE_CARD_JS)!r}, "utf8").replace(/export /g, ""),
+        fs.readFileSync({str(DEVICE_CARD_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(DEVICE_CARD_JS)!r} }}
       );
       vm.runInThisContext(
@@ -1405,10 +1415,22 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         panel._shell.tabs.energy.fire("click");
         await tick();
         let text = textOf(panel._shell.homeSections.energy);
-        if (!text.includes("Энергия сейчас") || !text.includes("850") || !text.includes("230,1") || !text.includes("0,42 кВт·ч") || !text.includes("Торшер") || !text.includes("Выключен") || !text.includes("питание отключено") || !text.includes("Устройства энергии") || !text.includes("Карточка на главной") || text.includes("Единый источник истины")) {
-          throw new Error("energy summary is incomplete: " + text);
+        if (!text.includes("Энергия дома") || !text.includes("850") || !text.includes("230,1") || !text.includes("0,42 кВт·ч") || !text.includes("Источники") || !text.includes("Все детали") || text.includes("Устройства энергии") || text.includes("Карточка на главной") || text.includes("Единый источник истины")) {
+          throw new Error("energy main page must stay compact: " + text);
         }
-        const rows = findAll(panel._shell.homeSections.energy, (node) =>
+        const summaryCard = findAll(panel._shell.homeSections.energy, (node) =>
+          String(node.className).split(" ").includes("energy-summary-card"))[0];
+        if (!summaryCard) throw new Error("energy summary card is missing");
+        summaryCard.fire("click");
+        await tick(10);
+        const modal = () => findAll(panel._shell.homeSections.energy, (node) =>
+          String(node.className).split(" ").includes("energy-modal"))[0];
+        if (!modal()) throw new Error("energy details modal did not open");
+        text = textOf(panel._shell.homeSections.energy);
+        if (!text.includes("Торшер") || !text.includes("Выключен") || !text.includes("питание отключено") || !text.includes("Устройства энергии") || !text.includes("Карточка на главной")) {
+          throw new Error("energy modal is incomplete: " + text);
+        }
+        const rows = findAll(modal(), (node) =>
           String(node.className).split(" ").includes("energy-device-card"));
         if (rows.length !== 2 || !findAll(rows[0], (node) => node.tagName === "IMG").length) {
           throw new Error("energy sources must use one tablet row and product image per physical device");

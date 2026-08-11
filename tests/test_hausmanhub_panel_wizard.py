@@ -24,7 +24,10 @@ DEVICE_BINDINGS_JS = PANEL_JS.with_name("hausman-hub-device-bindings.js")
 AREA_BINDING_JS = PANEL_JS.with_name("hausman-hub-area-binding.js")
 FIRST_RUN_DRAFT_JS = PANEL_JS.with_name("hausman-hub-first-run-draft.js")
 NAVIGATION_JS = PANEL_JS.with_name("hausman-hub-navigation.js")
+MODAL_JS = PANEL_JS.with_name("hausman-hub-modal.js")
 ENERGY_JS = PANEL_JS.with_name("hausman-hub-energy.js")
+ENERGY_CHART_JS = PANEL_JS.with_name("hausman-hub-energy-chart.js")
+ENERGY_METER_JS = PANEL_JS.with_name("hausman-hub-energy-meter.js")
 WEATHER_SOURCES_JS = PANEL_JS.with_name("hausman-hub-weather-sources.js")
 SCENARIOS_JS = PANEL_JS.with_name("hausman-hub-scenarios.js")
 SCENARIO_ICONS_JS = PANEL_JS.with_name("hausman-hub-scenario-icons.js")
@@ -351,6 +354,19 @@ def panel_script(get_table: dict, post_table: dict, assertions: str) -> str:
       vm.runInThisContext(
         fs.readFileSync({str(NAVIGATION_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(NAVIGATION_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(MODAL_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(MODAL_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(ENERGY_CHART_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(ENERGY_CHART_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(ENERGY_METER_JS)!r}, "utf8")
+          .replace(/^import .*;\\s*/gm, "").replace(/export /g, ""),
+        {{ filename: {str(ENERGY_METER_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(ENERGY_JS)!r}, "utf8")
