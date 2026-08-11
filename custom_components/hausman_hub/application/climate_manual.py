@@ -31,6 +31,7 @@ from ..domain.climate_observation import (
     ClimateObservationSnapshot,
     ClimateRoomMode,
 )
+from ..domain.contours import ContourDefinition
 
 
 _ACTIVE_ACTIVITIES = frozenset(
@@ -69,6 +70,11 @@ def reconcile_climate_manual_memory(
     manual_room_ids = tuple(
         room.room_id for room in registry.rooms if room.room_id in memory.manual_room_ids
     )
+    manual_device_ids = tuple(
+        device.device_id
+        for device in registry.devices
+        if device.device_id in memory.manual_device_ids
+    )
     devices = tuple(
         state
         for device in registry.devices
@@ -82,6 +88,7 @@ def reconcile_climate_manual_memory(
     updated = ClimateManualMemory(
         updated_at=memory.updated_at,
         manual_room_ids=manual_room_ids,
+        manual_device_ids=manual_device_ids,
         devices=devices,
     )
     if updated == memory:
@@ -107,7 +114,7 @@ def update_direct_wifi_observation(
             "manual-control memory cannot be newer than the observation"
         )
 
-    manual = set(memory.manual_room_ids)
+    manual_devices = set(memory.manual_device_ids)
     states: list[ClimateDirectWifiState] = []
     for configured in registry.devices:
         if (
@@ -146,7 +153,7 @@ def update_direct_wifi_observation(
             and phase is ClimateDirectWifiPhase.INACTIVE
             and not own_off
         ):
-            manual.add(configured.room_id)
+            manual_devices.add(configured.device_id)
         phase_changed = previous is None or previous.observed_phase is not phase
         states.append(
             ClimateDirectWifiState(
@@ -170,15 +177,19 @@ def update_direct_wifi_observation(
                 ),
             )
         )
-    ordered_manual = tuple(
-        room.room_id for room in registry.rooms if room.room_id in manual
+    ordered_manual_devices = tuple(
+        device.device_id
+        for device in registry.devices
+        if device.device_id in manual_devices
     )
     content_changed = (
-        ordered_manual != memory.manual_room_ids or tuple(states) != memory.devices
+        ordered_manual_devices != memory.manual_device_ids
+        or tuple(states) != memory.devices
     )
     updated = ClimateManualMemory(
         updated_at=observation.observed_at if content_changed else memory.updated_at,
-        manual_room_ids=ordered_manual,
+        manual_room_ids=memory.manual_room_ids,
+        manual_device_ids=ordered_manual_devices,
         devices=tuple(states),
     )
     return updated, updated != memory
@@ -230,6 +241,7 @@ def record_direct_wifi_commands(
     updated = ClimateManualMemory(
         updated_at=max(memory.updated_at, commanded_at),
         manual_room_ids=memory.manual_room_ids,
+        manual_device_ids=memory.manual_device_ids,
         devices=states,
     )
     return updated, updated != memory
@@ -258,17 +270,96 @@ def with_climate_room_mode(
         manual_room_ids=tuple(
             room.room_id for room in registry.rooms if room.room_id in selected
         ),
+        manual_device_ids=memory.manual_device_ids,
         devices=memory.devices,
+    )
+
+
+def with_climate_device_mode(
+    memory: ClimateManualMemory,
+    registry: ClimateRegistry,
+    *,
+    room_id: str,
+    device_id: str,
+    manual: bool,
+    updated_at: int,
+) -> ClimateManualMemory:
+    """Persist an explicit manual/automatic choice for one climate device."""
+
+    _timestamp(updated_at, "manual-control update time")
+    device = registry.device(device_id)
+    if device is None or device.room_id != room_id:
+        raise ClimateManualViolation("manual-control device is not in the room")
+    selected = set(memory.manual_device_ids)
+    if manual:
+        selected.add(device_id)
+    else:
+        selected.discard(device_id)
+    return ClimateManualMemory(
+        updated_at=max(memory.updated_at, updated_at),
+        manual_room_ids=memory.manual_room_ids,
+        manual_device_ids=tuple(
+            item.device_id for item in registry.devices if item.device_id in selected
+        ),
+        devices=memory.devices,
+    )
+
+
+def effective_manual_room_ids(
+    memory: ClimateManualMemory,
+    registry: ClimateRegistry,
+) -> tuple[str, ...]:
+    """Return explicit rooms plus rooms made unsafe by excluded primary sensors."""
+
+    manual = set(memory.manual_room_ids)
+    critical_kinds = {
+        ClimateDeviceKind.TEMPERATURE_SENSOR,
+        ClimateDeviceKind.HUMIDITY_SENSOR,
+    }
+    manual.update(
+        device.room_id
+        for device in registry.devices
+        if device.device_id in memory.manual_device_ids
+        and device.kind in critical_kinds
+    )
+    return tuple(room.room_id for room in registry.rooms if room.room_id in manual)
+
+
+def contour_without_manual_devices(
+    contour: ContourDefinition,
+    memory: ClimateManualMemory,
+) -> ContourDefinition:
+    """Remove explicitly excluded devices from one immutable execution contour."""
+
+    excluded = set(memory.manual_device_ids)
+    if not excluded:
+        return contour
+    return replace(
+        contour,
+        rooms=tuple(
+            replace(
+                room,
+                device_ids=tuple(
+                    device_id for device_id in room.device_ids if device_id not in excluded
+                ),
+            )
+            for room in contour.rooms
+        ),
     )
 
 
 def apply_manual_rooms(
     observation: ClimateObservationSnapshot,
     memory: ClimateManualMemory,
+    registry: ClimateRegistry | None = None,
 ) -> ClimateObservationSnapshot:
     """Overlay durable manual ownership without changing physical facts."""
 
-    manual = set(memory.manual_room_ids)
+    manual = set(
+        memory.manual_room_ids
+        if registry is None
+        else effective_manual_room_ids(memory, registry)
+    )
     return replace(
         observation,
         rooms=tuple(
@@ -293,6 +384,7 @@ def climate_manual_to_payload(memory: ClimateManualMemory) -> dict[str, object]:
         "version": memory.version,
         "updated_at": memory.updated_at,
         "manual_room_ids": list(memory.manual_room_ids),
+        "manual_device_ids": list(memory.manual_device_ids),
         "devices": [
             {
                 "device_id": state.device_id,
@@ -313,19 +405,17 @@ def climate_manual_from_payload(payload: object) -> ClimateManualMemory:
     """Parse only the exact supported manual-control storage shape."""
 
     root = _mapping(payload, "manual-control memory")
-    _exact_keys(
-        root,
-        {"version", "updated_at", "manual_room_ids", "devices"},
-        "manual-control memory",
-    )
-    if (
-        type(root["version"]) is not int
-        or root["version"] != CLIMATE_MANUAL_MEMORY_VERSION
-    ):
+    version = root.get("version")
+    expected_keys = {"version", "updated_at", "manual_room_ids", "devices"}
+    if version == CLIMATE_MANUAL_MEMORY_VERSION:
+        expected_keys.add("manual_device_ids")
+    _exact_keys(root, expected_keys, "manual-control memory")
+    if type(version) is not int or version not in {1, CLIMATE_MANUAL_MEMORY_VERSION}:
         raise ClimateManualViolation(
             "stored manual-control memory version is unsupported"
         )
     room_ids = _sequence(root["manual_room_ids"], "manual room ids")
+    device_ids = _sequence(root.get("manual_device_ids", ()), "manual device ids")
     devices = _sequence(root["devices"], "manual-control devices")
     parsed: list[ClimateDirectWifiState] = []
     for raw in devices:
@@ -366,6 +456,7 @@ def climate_manual_from_payload(payload: object) -> ClimateManualMemory:
     return ClimateManualMemory(
         updated_at=root["updated_at"],  # type: ignore[arg-type]
         manual_room_ids=tuple(room_ids),  # type: ignore[arg-type]
+        manual_device_ids=tuple(device_ids),  # type: ignore[arg-type]
         devices=tuple(parsed),
     )
 

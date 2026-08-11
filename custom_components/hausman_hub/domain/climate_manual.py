@@ -11,7 +11,7 @@ from enum import StrEnum
 import re
 
 
-CLIMATE_MANUAL_MEMORY_VERSION = 1
+CLIMATE_MANUAL_MEMORY_VERSION = 2
 _STABLE_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 
 
@@ -61,6 +61,7 @@ class ClimateManualMemory:
 
     updated_at: int
     manual_room_ids: tuple[str, ...]
+    manual_device_ids: tuple[str, ...]
     devices: tuple[ClimateDirectWifiState, ...]
     version: int = CLIMATE_MANUAL_MEMORY_VERSION
 
@@ -72,6 +73,12 @@ class ClimateManualMemory:
             _stable_id(room_id, "manual room id")
         if len(self.manual_room_ids) != len(set(self.manual_room_ids)):
             raise ClimateManualViolation("manual room ids must be unique")
+        if type(self.manual_device_ids) is not tuple:
+            raise ClimateManualViolation("manual device ids must be immutable")
+        for device_id in self.manual_device_ids:
+            _stable_id(device_id, "manual device id")
+        if len(self.manual_device_ids) != len(set(self.manual_device_ids)):
+            raise ClimateManualViolation("manual device ids must be unique")
         if type(self.devices) is not tuple or any(
             not isinstance(device, ClimateDirectWifiState)
             for device in self.devices
@@ -107,6 +114,7 @@ def empty_climate_manual_memory(*, updated_at: int) -> ClimateManualMemory:
     return ClimateManualMemory(
         updated_at=updated_at,
         manual_room_ids=(),
+        manual_device_ids=(),
         devices=(),
     )
 

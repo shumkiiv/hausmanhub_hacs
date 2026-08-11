@@ -1,8 +1,43 @@
 /* Climate control surface shared with the tablet information architecture. */
 
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.70";
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.70";
-import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.70";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.71";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.71";
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.71";
+
+const CLIMATE_ACTION_API = "hausman_hub/v1/climate/actions";
+
+export async function setClimateManualMode(panel, roomId, deviceId, manual) {
+  if (panel._busy || !panel._climateRuntime) return false;
+  panel._busy = true;
+  panel._climateModePendingKey = `${roomId}:${deviceId || "room"}`;
+  panel._notice = manual ? "Переводим в ручной режим..." : "Возвращаем в автоматику...";
+  panel._render();
+  try {
+    const receipt = await panel._hass.callApi("POST", CLIMATE_ACTION_API, {
+      contract: { name: "hausman-hub-climate-action-request", version: 1 },
+      request_id: `hacs.climate.${Date.now().toString(36)}`,
+      expected_state_revision: panel._climateRuntime.state_revision,
+      action: deviceId ? "set_device_mode" : "set_room_mode",
+      room_id: roomId,
+      parameters: deviceId
+        ? { device_id: deviceId, mode: manual ? "manual" : "automatic" }
+        : { mode: manual ? "manual" : "automatic" },
+    });
+    if (!receipt || receipt.confirmed !== true) throw new Error("climate mode was not confirmed");
+    panel._notice = manual ? "Ручной режим включён." : "Автоматическое управление восстановлено.";
+    panel._error = false;
+    await panel._load();
+    return true;
+  } catch (error) {
+    panel._notice = "Режим не изменён. Обновите состояние и повторите действие.";
+    panel._error = true;
+    return false;
+  } finally {
+    panel._busy = false;
+    panel._climateModePendingKey = null;
+    panel._render();
+  }
+}
 
 const CATEGORY_DEFINITIONS = [
   { id: "conditioner", title: "Кондиционеры", icon: "snow", pattern: /кондиционер|air.?condition|smartir|\bac\b/ },
@@ -283,6 +318,28 @@ function targetSummary(room) {
   return values.length ? values.join(" · ") : "Цель не задана";
 }
 
+function runtimeRoom(panel, roomId) {
+  const rooms = panel._climateRuntime && Array.isArray(panel._climateRuntime.rooms)
+    ? panel._climateRuntime.rooms : [];
+  return rooms.find((room) => room.id === roomId) || null;
+}
+
+function roomHasManualControl(panel, room) {
+  const runtime = runtimeRoom(panel, room.id);
+  return Boolean(runtime && (
+    runtime.mode === "manual"
+    || (Array.isArray(runtime.devices) && runtime.devices.some((device) => device.mode === "manual"))
+  ));
+}
+
+function climateDeviceKindLabel(kind) {
+  return ({
+    air_conditioner: "Кондиционер", radiator_thermostat: "Термоголовка",
+    humidifier: "Увлажнитель", floor_heating: "Тёплый пол",
+    temperature_sensor: "Датчик температуры", humidity_sensor: "Датчик влажности",
+  })[kind] || "Устройство климата";
+}
+
 function renderRooms(panel, container, rooms, devices, deps) {
   const { el, svgIcon, setAttr } = deps;
   const section = el("section", "climate-rooms-section");
@@ -297,8 +354,34 @@ function renderRooms(panel, container, rooms, devices, deps) {
     container.appendChild(section);
     return;
   }
-  if (!panel._climateRoomUi) panel._climateRoomUi = { roomId: null };
-  const selectedRoom = rooms.find((room) => room.id === panel._climateRoomUi.roomId) || rooms[0];
+  if (!panel._climateRoomUi) panel._climateRoomUi = { roomId: null, filter: "all" };
+  const filter = panel._climateRoomUi.filter || "all";
+  const visibleRooms = rooms.filter((room) => {
+    const manual = roomHasManualControl(panel, room);
+    return filter === "manual" ? manual : filter === "automatic" ? !manual : true;
+  });
+  const selectedRoom = visibleRooms.find((room) => room.id === panel._climateRoomUi.roomId) || visibleRooms[0];
+  const modeTabs = el("div", "climate-mode-tabs");
+  setAttr(modeTabs, "role", "tablist");
+  setAttr(modeTabs, "aria-label", "Режим климатического контура");
+  [["all", "Все"], ["automatic", "Автоматически"], ["manual", "Ручной режим"]].forEach(([id, label]) => {
+    const button = el("button", `climate-mode-tab${filter === id ? " is-active" : ""}`, label);
+    button.type = "button";
+    setAttr(button, "role", "tab");
+    setAttr(button, "aria-selected", filter === id ? "true" : "false");
+    button.addEventListener("click", () => {
+      panel._climateRoomUi.filter = id;
+      panel._climateRoomUi.roomId = null;
+      refreshClimateOverlay(panel);
+    });
+    modeTabs.appendChild(button);
+  });
+  section.appendChild(modeTabs);
+  if (!selectedRoom) {
+    section.appendChild(el("div", "climate-sheet-empty", "В этой вкладке пока нет комнат."));
+    container.appendChild(section);
+    return;
+  }
   panel._climateRoomUi.roomId = selectedRoom.id;
   const tabs = el("div", "climate-room-tabs");
   setAttr(tabs, "role", "tablist");
@@ -307,16 +390,19 @@ function renderRooms(panel, container, rooms, devices, deps) {
   const renderFocus = (room) => {
     focus.innerHTML = "";
     const matches = roomDevices(room, devices);
-    const card = el("button", "climate-room-card is-focus");
-    card.type = "button";
-    setAttr(card, "aria-label", `Открыть климат комнаты ${room.name}`);
+    const managedRoom = runtimeRoom(panel, room.id);
+    const manual = managedRoom && managedRoom.mode === "manual";
+    const contourDevices = managedRoom && Array.isArray(managedRoom.devices) ? managedRoom.devices : [];
+    const criticalSensorExcluded = contourDevices.some((device) =>
+      device.mode === "manual" && ["temperature_sensor", "humidity_sensor"].includes(device.kind));
+    const card = el("div", `climate-room-card is-focus${manual ? " is-manual" : ""}`);
     const title = el("span", "climate-room-title");
     const roomIcon = el("span", "climate-room-icon");
     roomIcon.appendChild(roomSvgIcon(roomIconName(room)));
     title.appendChild(roomIcon);
     const roomCopy = el("span");
     roomCopy.appendChild(el("strong", null, room.name || "Комната"));
-    roomCopy.appendChild(el("small", null, matches.some(deviceIsActive) ? "Климат работает" : "Поддержание комфорта"));
+    roomCopy.appendChild(el("small", null, manual ? "Полный ручной режим" : (matches.some(deviceIsActive) ? "Климат работает" : "Поддержание комфорта")));
     title.appendChild(roomCopy);
     title.appendChild(el("b", null, temperature(room.temp)));
     card.appendChild(title);
@@ -328,12 +414,67 @@ function renderRooms(panel, container, rooms, devices, deps) {
       facts.appendChild(fact);
     });
     card.appendChild(facts);
-    card.appendChild(el("span", "climate-room-open", "Открыть устройства ›"));
+    const actions = el("div", "climate-room-actions");
+    const open = el("button", "climate-room-open", "Открыть устройства ›");
+    open.type = "button";
+    open.addEventListener("click", (event) => {
+      event.stopPropagation?.();
+      requestClimateSheet(panel, room.name || "Комната", matches);
+    });
+    actions.appendChild(open);
+    if (managedRoom && managedRoom.control && Array.isArray(managedRoom.control.allowed_actions)
+      && managedRoom.control.allowed_actions.includes("set_room_mode")) {
+      const roomMode = el("button", `climate-manual-toggle${manual ? " is-manual" : ""}`,
+        panel._climateModePendingKey === `${room.id}:room` ? "Сохраняем..."
+          : criticalSensorExcluded ? "Сначала верните датчик"
+            : (manual ? "Вернуть автоматику" : "Вся комната вручную"));
+      roomMode.type = "button";
+      roomMode.disabled = Boolean(panel._climateModePendingKey) || criticalSensorExcluded;
+      roomMode.addEventListener("click", (event) => {
+        event.stopPropagation?.();
+        panel._setClimateManual(room.id, null, !manual);
+      });
+      actions.appendChild(roomMode);
+    }
+    card.appendChild(actions);
+    if (criticalSensorExcluded) {
+      card.appendChild(el("p", "climate-manual-warning",
+        "Комната исключена из автоматики: критический датчик работает в ручном режиме."));
+    }
+    if (contourDevices.length) {
+      const list = el("div", "climate-contour-devices");
+      contourDevices.forEach((device) => {
+        const deviceManual = device.mode === "manual";
+        const row = el("div", `climate-contour-device${deviceManual ? " is-manual" : ""}`);
+        const copy = el("span");
+        copy.appendChild(el("strong", null, device.name || climateDeviceKindLabel(device.kind)));
+        copy.appendChild(el("small", null, `${climateDeviceKindLabel(device.kind)} · ${deviceManual ? "ручной режим" : "автоматика"}`));
+        row.appendChild(copy);
+        const control = device.control;
+        if (control && Array.isArray(control.allowed_actions) && control.allowed_actions.includes("set_device_mode")) {
+          const toggle = el("button", `climate-device-mode${deviceManual ? " is-manual" : ""}`,
+            panel._climateModePendingKey === `${room.id}:${device.id}` ? "Сохраняем..." : (deviceManual ? "Вернуть" : "Исключить"));
+          toggle.type = "button";
+          toggle.disabled = Boolean(panel._climateModePendingKey);
+          toggle.addEventListener("click", (event) => {
+            event.stopPropagation?.();
+            const critical = ["temperature_sensor", "humidity_sensor"].includes(device.kind);
+            if (critical && !deviceManual && !window.confirm(
+              `Исключить «${device.name}»? Комната «${room.name}» полностью перейдёт в ручной режим до возврата датчика.`
+            )) return;
+            panel._setClimateManual(room.id, device.id, !deviceManual);
+          });
+          row.appendChild(toggle);
+        }
+        list.appendChild(row);
+      });
+      card.appendChild(list);
+    }
     card.addEventListener("click", () => requestClimateSheet(panel, room.name || "Комната", matches));
     focus.appendChild(card);
   };
   const chips = [];
-  rooms.forEach((room) => {
+  visibleRooms.forEach((room) => {
     const active = room.id === selectedRoom.id;
     const chip = el("button", `climate-room-tab${active ? " is-active" : ""}`);
     chip.type = "button";

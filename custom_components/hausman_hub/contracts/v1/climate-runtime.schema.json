@@ -140,6 +140,7 @@
         "set_room_target",
         "clear_room_override",
         "set_room_mode",
+        "set_device_mode",
         "set_room_humidity_target",
         "set_room_min_target",
         "set_room_target_strategy",
@@ -238,6 +239,8 @@
         "control_scope": {"enum": ["observed", "canary", "managed"]},
         "available": {"type": "boolean"},
         "state": {"enum": ["working", "idle", "off", "unavailable", "unknown"]},
+        "mode": {"enum": ["automatic", "manual", "unknown"]},
+        "control": {"$ref": "#/$defs/control"},
         "cooldown": {"oneOf": [{"$ref": "#/$defs/cooldown"}, {"type": "null"}]},
         "last_confirmed_operation": {
           "oneOf": [

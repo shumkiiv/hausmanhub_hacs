@@ -33,6 +33,7 @@ from ..domain.climate_observation import (
     ClimateDeviceAvailability,
     ClimateDeviceObservation,
     ClimateObservationSnapshot,
+    ClimateRoomMode,
     ClimateRoomObservation,
 )
 from ..domain.contours import (
@@ -739,6 +740,7 @@ def native_android_climate_snapshot(
     contours: ContourRegistry | None = None,
     bridge_mode: ClimateControlMode,
     pending_room_ids: Collection[str] = (),
+    manual_device_ids: Collection[str] = (),
     local_now: datetime | None = None,
 ) -> dict[str, object]:
     """Build the fixed tablet contract from the native observation only."""
@@ -746,8 +748,11 @@ def native_android_climate_snapshot(
     if not isinstance(bridge_mode, ClimateControlMode):
         raise ValueError("climate bridge mode must be approved")
     pending = frozenset(pending_room_ids)
+    manual_devices = frozenset(manual_device_ids)
     if any(registry.room(room_id) is None for room_id in pending):
         raise ValueError("pending climate rooms must be registered")
+    if any(registry.device(device_id) is None for device_id in manual_devices):
+        raise ValueError("manual climate devices must be registered")
     reconciliation = native_climate_reconciliation(registry, observation)
     fresh = native_runtime_fresh(observation)
     devices_by_room: dict[str, list[dict[str, object]]] = {
@@ -756,6 +761,11 @@ def native_android_climate_snapshot(
     for device in registry.devices:
         observed = observation.device(device.device_id)
         available = _native_device_available(device, observed)
+        device_mode_allowed = (
+            bridge_mode is ClimateControlMode.MANAGED
+            and fresh
+            and device.room_id not in pending
+        )
         devices_by_room[device.room_id].append(
             {
                 "id": device.device_id,
@@ -768,6 +778,21 @@ def native_android_climate_snapshot(
                     _legacy_device_state(device, observed),
                     available=available,
                 ),
+                "mode": (
+                    "manual" if device.device_id in manual_devices else "automatic"
+                ),
+                "control": {
+                    "enabled": device_mode_allowed,
+                    "actions": ["set_device_mode"] if device_mode_allowed else [],
+                    "allowed_actions": ["set_device_mode"] if device_mode_allowed else [],
+                    "blocked_reasons": [] if device_mode_allowed else [
+                        "operation_pending"
+                        if device.room_id in pending
+                        else "state_stale"
+                        if not fresh
+                        else "bridge_disabled"
+                    ],
+                },
             }
         )
 
@@ -791,7 +816,11 @@ def native_android_climate_snapshot(
     }
 
     rooms: list[dict[str, object]] = []
-    room_control_enabled = False
+    room_control_enabled = any(
+        device["control"]["enabled"] is True
+        for devices in devices_by_room.values()
+        for device in devices
+    )
     for room in registry.rooms:
         observed_room = observation.room(room.room_id)
         public_mode = public_room_mode(_legacy_room_mode(observed_room))
@@ -801,6 +830,7 @@ def native_android_climate_snapshot(
             bridge_mode=bridge_mode,
             pending=room.room_id in pending,
             room_id=room.room_id,
+            manual_device_ids=manual_devices,
             temporary_temperature_available=(
                 temporary_temperature_available_by_room.get(room.room_id, False)
             ),
@@ -903,19 +933,26 @@ def _native_room_control_projection(
     bridge_mode: ClimateControlMode,
     pending: bool,
     room_id: str,
+    manual_device_ids: Collection[str],
     temporary_temperature_available: bool,
 ) -> dict[str, object]:
     """Expose room intents while individual device commands stay managed."""
 
-    reasons: list[str] = []
+    mode_reasons: list[str] = []
+    target_reasons: list[str] = []
     if bridge_mode is ClimateControlMode.DISABLED:
-        reasons.append("bridge_disabled")
+        mode_reasons.append("bridge_disabled")
+        target_reasons.append("bridge_disabled")
 
     if not native_runtime_fresh(observation):
-        reasons.append("state_stale")
+        mode_reasons.append("state_stale")
+        target_reasons.append("state_stale")
     observed_room = observation.room(room_id)
     if observed_room is None:
-        reasons.append("registry_mismatch")
+        mode_reasons.append("registry_mismatch")
+        target_reasons.append("registry_mismatch")
+    elif observed_room.mode is ClimateRoomMode.MANUAL:
+        target_reasons.append("authority_not_ready")
     controlled = [
         device
         for device in registry.devices
@@ -925,22 +962,27 @@ def _native_room_control_projection(
         and device.control_scope is not ClimateControlScope.OBSERVED
     ]
     if len(controlled) != 1:
-        reasons.append("registry_mismatch")
+        target_reasons.append("registry_mismatch")
     else:
+        if controlled[0].device_id in manual_device_ids:
+            target_reasons.append("authority_not_ready")
         observed_device = observation.device(controlled[0].device_id)
         if observed_device is None or observed_device.room_id != room_id:
-            reasons.append("registry_mismatch")
+            target_reasons.append("registry_mismatch")
         elif observed_device.availability is not ClimateDeviceAvailability.AVAILABLE:
-            reasons.append("device_unavailable")
+            target_reasons.append("device_unavailable")
     if pending:
-        reasons.append("operation_pending")
+        mode_reasons.append("operation_pending")
+        target_reasons.append("operation_pending")
 
-    blocked_reasons = list(dict.fromkeys(reasons))
     allowed_actions: list[str] = []
-    if not blocked_reasons:
-        if temporary_temperature_available:
-            allowed_actions.append("set_room_target")
+    if not target_reasons and temporary_temperature_available:
+        allowed_actions.append("set_room_target")
+    if not mode_reasons:
         allowed_actions.append("set_room_mode")
+    blocked_reasons = [] if allowed_actions else list(
+        dict.fromkeys((*mode_reasons, *target_reasons))
+    )
     advertised_target_actions = [
         action
         for action in allowed_actions

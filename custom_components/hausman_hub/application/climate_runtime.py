@@ -96,9 +96,12 @@ from .climate_protection import (
 )
 from .climate_manual import (
     apply_manual_rooms,
+    contour_without_manual_devices,
+    effective_manual_room_ids,
     reconcile_climate_manual_memory,
     record_direct_wifi_commands,
     update_direct_wifi_observation,
+    with_climate_device_mode,
     with_climate_room_mode,
 )
 from .climate_resolutions import build_climate_resolution_snapshot
@@ -434,6 +437,7 @@ class ClimateRuntime:
                     contours=self._contours,
                     bridge_mode=self.configuration.climate_bridge_mode,
                     pending_room_ids=(),
+                    manual_device_ids=self._manual_memory.manual_device_ids,
                     local_now=self._local_now(),
                 )
             raise ClimateSnapshotUnavailable("climate bridge is disabled")
@@ -1020,6 +1024,42 @@ class ClimateRuntime:
             self.last_error = None
             return _ClimateRoomModeReceipt()
 
+    async def async_set_device_mode(
+        self,
+        room_id: object,
+        device_id: object,
+        mode: object,
+    ) -> _ClimateRoomModeReceipt:
+        """Persist one device exclusion without issuing a physical command."""
+
+        if (
+            not isinstance(room_id, str)
+            or not isinstance(device_id, str)
+            or mode not in {"automatic", "manual"}
+        ):
+            raise ClimateManualViolation("climate device mode request is invalid")
+        async with self._lock:
+            contour = self._climate_contour()
+            assignment = next(
+                (room for room in contour.rooms if room.room_id == room_id),
+                None,
+            )
+            if assignment is None or device_id not in assignment.device_ids:
+                raise ClimateManualViolation("climate device is not in the contour")
+            updated = with_climate_device_mode(
+                self._manual_memory,
+                self._registry,
+                room_id=room_id,
+                device_id=device_id,
+                manual=mode == "manual",
+                updated_at=self._safe_now(),
+            )
+            if updated != self._manual_memory:
+                await self._async_save_manual(updated)
+                self._manual_memory = updated
+            self.last_error = None
+            return _ClimateRoomModeReceipt()
+
     async def async_home_climate_targets(self, payload: object) -> ContourApplyReceipt:
         """Save and apply one common temperature and/or humidity target."""
 
@@ -1063,7 +1103,9 @@ class ClimateRuntime:
         desired_state_changes: ClimateDesiredStateChanges,
     ) -> ContourApplyReceipt:
         self._require_native_contour_apply_mode()
-        contour = self._climate_contour()
+        contour = contour_without_manual_devices(
+            self._climate_contour(), self._manual_memory
+        )
         if contour.contour_id != contour_id:
             raise ContourApplyViolation("climate contour is not configured")
         fingerprint = contour_fingerprint(contour, room_ids=room_ids)
@@ -1184,7 +1226,7 @@ class ClimateRuntime:
             )
             return prior.receipt
         verified = build_contour_apply_plan(
-            contour,
+            contour_without_manual_devices(contour, self._manual_memory),
             self._registry,
             self.configuration.climate_bridge_mode,
             observation,
@@ -1240,7 +1282,9 @@ class ClimateRuntime:
                     reasons=("verification_unavailable",),
                 ).receipt
             verified = build_contour_apply_plan(
-                self._climate_contour(),
+                contour_without_manual_devices(
+                    self._climate_contour(), self._manual_memory
+                ),
                 self._registry,
                 self.configuration.climate_bridge_mode,
                 observation,
@@ -1450,6 +1494,7 @@ class ClimateRuntime:
             trial_room_id = self._trial_room_id(contour)
             if contour is None or trial_room_id is None:
                 return None
+            contour = contour_without_manual_devices(contour, self._manual_memory)
             observation = await self._async_native_climate_observation_unlocked()
             isolation = build_isolated_climate_policy_snapshot(contour, observation)
             comparison = build_climate_comparison_snapshot(isolation, observation)
@@ -1478,6 +1523,7 @@ class ClimateRuntime:
             contour = self._contours.contour(CLIMATE_CONTOUR_ID)
             if contour is None:
                 return ()
+            contour = contour_without_manual_devices(contour, self._manual_memory)
             managed_room_ids = self._managed_room_ids(contour)
             if not managed_room_ids:
                 return ()
@@ -1559,12 +1605,18 @@ class ClimateRuntime:
 
         if contour is None:
             return None
+        excluded_devices = set(self._manual_memory.manual_device_ids)
+        manual_rooms = set(
+            effective_manual_room_ids(self._manual_memory, self._registry)
+        )
         trial_rooms = {
             room.room_id
             for room in contour.rooms
+            if room.room_id not in manual_rooms
             if any(
                 device.control_scope is ClimateControlScope.CANARY
                 and device.kind not in _PASSIVE_KINDS
+                and device.device_id not in excluded_devices
                 for device in self._registry.devices
                 if device.device_id in set(room.device_ids)
             )
@@ -1575,9 +1627,12 @@ class ClimateRuntime:
 
     def _managed_room_ids(self, contour) -> tuple[str, ...]:
         trial_room_id = self._trial_room_id(contour)
+        manual_rooms = set(
+            effective_manual_room_ids(self._manual_memory, self._registry)
+        )
         result: list[str] = []
         for room in contour.rooms:
-            if room.room_id == trial_room_id:
+            if room.room_id == trial_room_id or room.room_id in manual_rooms:
                 continue
             actuators = tuple(
                 device
@@ -1669,7 +1724,9 @@ class ClimateRuntime:
             if reconciled_changed or observed_changed:
                 await self._async_save_manual(updated_manual)
             self._manual_memory = updated_manual
-            observation = apply_manual_rooms(observation, self._manual_memory)
+            observation = apply_manual_rooms(
+                observation, self._manual_memory, self._registry
+            )
             update = update_climate_protection(
                 self._protection_memory,
                 self._registry,

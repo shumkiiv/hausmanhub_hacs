@@ -42,6 +42,7 @@
         "set_room_target",
         "clear_room_override",
         "set_room_mode",
+        "set_device_mode",
         "set_room_humidity_target",
         "set_room_min_target",
         "set_room_target_strategy",

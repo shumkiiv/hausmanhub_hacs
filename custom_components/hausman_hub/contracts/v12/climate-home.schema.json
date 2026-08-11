@@ -509,6 +509,20 @@
             "unavailable",
             "unknown"
           ]
+        },
+        "mode": {
+          "enum": ["automatic", "manual", "unknown"]
+        },
+        "control": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "actions", "allowed_actions", "blocked_reasons"],
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "actions": {"type": "array", "items": {"const": "set_device_mode"}, "uniqueItems": true, "maxItems": 1},
+            "allowed_actions": {"type": "array", "items": {"const": "set_device_mode"}, "uniqueItems": true, "maxItems": 1},
+            "blocked_reasons": {"type": "array", "items": {"$ref": "#/$defs/blocked_reason"}, "uniqueItems": true, "maxItems": 16}
+          }
         }
       }
     },

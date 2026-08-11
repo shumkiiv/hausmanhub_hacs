@@ -439,7 +439,7 @@ class ClimateRuntimeView(_ClimateView):
     async def get(self, request: Any) -> Any:
         if not _is_exact_request(request, CLIMATE_RUNTIME_PATH):
             return _not_found(self)
-        if not _is_local_tablet_request(request):
+        if not _is_local_climate_control_request(request):
             return _forbidden(self)
         service = self._climate_tablet()
         if service is None:
@@ -472,7 +472,7 @@ class ClimateActionView(_ClimateView):
     async def post(self, request: Any) -> Any:
         if not _is_exact_request(request, CLIMATE_ACTION_PATH):
             return _not_found(self)
-        if not _is_local_tablet_request(request):
+        if not _is_local_climate_control_request(request):
             return _forbidden(self)
         service = self._climate_tablet()
         if service is None:
@@ -2965,6 +2965,12 @@ def _is_local_tablet_request(request: Any) -> bool:
 
 def _is_local_dashboard_request(request: Any) -> bool:
     """Allow the side-effect-free dashboard to a local tablet or local admin."""
+
+    return _is_local_tablet_request(request) or _is_local_admin_request(request)
+
+
+def _is_local_climate_control_request(request: Any) -> bool:
+    """Allow the shared typed climate surface to tablet and local admin."""
 
     return _is_local_tablet_request(request) or _is_local_admin_request(request)
 

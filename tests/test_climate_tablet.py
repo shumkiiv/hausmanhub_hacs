@@ -127,6 +127,19 @@ class FakeRuntime:
             accepted_count=1,
         )
 
+    async def async_set_device_mode(
+        self, room_id: object, device_id: object, mode: object
+    ) -> object:
+        self.commands.append(
+            {"room_id": room_id, "device_id": device_id, "mode": mode}
+        )
+        self.home["rooms"][0]["devices"][0]["mode"] = mode
+        return SimpleNamespace(
+            status=self.result_status,
+            confirmed_room_count=1,
+            accepted_count=1,
+        )
+
 
 class ClimateTabletProjectionTest(unittest.TestCase):
     def test_managed_projection_exposes_only_currently_executable_actions(self) -> None:
@@ -320,6 +333,43 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("confirmed", receipt["status"])
         self.assertEqual(
             {"room_id": "living", "mode": "manual"},
+            self.runtime.commands[0],
+        )
+        contract_validator("climate-operation-receipt.schema.json").validate(receipt)
+
+    async def test_set_device_mode_dispatches_durable_manual_exclusion(self) -> None:
+        device = self.runtime.home["rooms"][0]["devices"][0]
+        device["mode"] = "automatic"
+        device["control"] = {
+            "enabled": True,
+            "allowed_actions": ["set_device_mode"],
+            "actions": ["set_device_mode"],
+            "blocked_reasons": [],
+        }
+        request = {
+            "contract": {
+                "name": "hausman-hub-climate-action-request",
+                "version": 1,
+            },
+            "request_id": "tablet.climate.device-mode.1",
+            "expected_state_revision": self.home["state_revision"],
+            "action": "set_device_mode",
+            "room_id": "living",
+            "parameters": {
+                "device_id": device["id"],
+                "mode": "manual",
+            },
+        }
+
+        receipt = await self.service.async_execute(request)
+
+        self.assertEqual("confirmed", receipt["status"])
+        self.assertEqual(
+            {
+                "room_id": "living",
+                "device_id": device["id"],
+                "mode": "manual",
+            },
             self.runtime.commands[0],
         )
         contract_validator("climate-operation-receipt.schema.json").validate(receipt)

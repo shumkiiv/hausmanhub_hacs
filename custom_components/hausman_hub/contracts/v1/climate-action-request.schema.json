@@ -23,6 +23,7 @@
         "set_room_target",
         "clear_room_override",
         "set_room_mode",
+        "set_device_mode",
         "set_room_humidity_target",
         "set_room_min_target",
         "set_room_target_strategy",
@@ -40,6 +41,7 @@
     {"if": {"properties": {"action": {"const": "set_room_target"}}, "required": ["action"]}, "then": {"properties": {"room_id": {"$ref": "#/$defs/room_id"}, "parameters": {"$ref": "#/$defs/room_target"}}}},
     {"if": {"properties": {"action": {"const": "clear_room_override"}}, "required": ["action"]}, "then": {"properties": {"room_id": {"$ref": "#/$defs/room_id"}, "parameters": {"$ref": "#/$defs/empty"}}}},
     {"if": {"properties": {"action": {"const": "set_room_mode"}}, "required": ["action"]}, "then": {"properties": {"room_id": {"$ref": "#/$defs/room_id"}, "parameters": {"$ref": "#/$defs/room_mode"}}}},
+    {"if": {"properties": {"action": {"const": "set_device_mode"}}, "required": ["action"]}, "then": {"properties": {"room_id": {"$ref": "#/$defs/room_id"}, "parameters": {"$ref": "#/$defs/device_mode"}}}},
     {"if": {"properties": {"action": {"const": "set_room_humidity_target"}}, "required": ["action"]}, "then": {"properties": {"room_id": {"$ref": "#/$defs/room_id"}, "parameters": {"$ref": "#/$defs/humidity_target"}}}},
     {"if": {"properties": {"action": {"const": "set_room_min_target"}}, "required": ["action"]}, "then": {"properties": {"room_id": {"$ref": "#/$defs/room_id"}, "parameters": {"$ref": "#/$defs/min_target"}}}},
     {"if": {"properties": {"action": {"const": "set_room_target_strategy"}}, "required": ["action"]}, "then": {"properties": {"room_id": {"$ref": "#/$defs/room_id"}, "parameters": {"$ref": "#/$defs/target_strategy"}}}},
@@ -69,6 +71,15 @@
       "additionalProperties": false,
       "required": ["mode"],
       "properties": {"mode": {"enum": ["automatic", "manual"]}}
+    },
+    "device_mode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["device_id", "mode"],
+      "properties": {
+        "device_id": {"$ref": "#/$defs/room_id"},
+        "mode": {"enum": ["automatic", "manual"]}
+      }
     },
     "humidity_target": {
       "type": "object",

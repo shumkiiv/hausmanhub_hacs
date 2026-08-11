@@ -2003,6 +2003,85 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
+    def test_climate_overview_excludes_one_device_through_typed_action(self) -> None:
+        payloads = dict(GET_PATHS)
+        payloads["hausman_hub/v1/dashboard"] = {
+            "rooms": [
+                {
+                    "id": "living", "name": "Гостиная", "temp": 24.5,
+                    "humidity": 45, "targetTemp": 24.0,
+                }
+            ],
+            "devices": [],
+            "alarms": [],
+        }
+        payloads["hausman_hub/v1/climate/runtime"] = {
+            "state_revision": 44,
+            "rooms": [
+                {
+                    "id": "living", "mode": "automatic",
+                    "control": {
+                        "enabled": True,
+                        "allowed_actions": ["set_room_mode"],
+                        "blocked_reasons": [],
+                    },
+                    "devices": [
+                        {
+                            "id": "living_ac", "name": "Кондиционер",
+                            "kind": "air_conditioner", "mode": "automatic",
+                            "control": {
+                                "enabled": True,
+                                "allowed_actions": ["set_device_mode"],
+                                "blocked_reasons": [],
+                            },
+                        },
+                        {
+                            "id": "living_temperature", "name": "Датчик температуры",
+                            "kind": "temperature_sensor", "mode": "automatic",
+                            "control": {
+                                "enabled": True,
+                                "allowed_actions": ["set_device_mode"],
+                                "blocked_reasons": [],
+                            },
+                        },
+                    ],
+                }
+            ],
+        }
+        script = panel_script(
+            payloads,
+            {
+                "hausman_hub/v1/climate/actions": {
+                    "status": "confirmed", "confirmed": True,
+                }
+            },
+            """
+        await tick();
+        panel._shell.tabs.climate.fire("click");
+        const climate = panel._shell.climateOverview;
+        const toggles = findAll(climate, (node) =>
+          String(node.className).split(" ").includes("climate-device-mode"));
+        if (toggles.length !== 2) throw new Error("device mode actions are missing");
+        toggles[1].fire("click");
+        await tick(8);
+        const post = calls.find((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/climate/actions");
+        if (!post) throw new Error("typed climate action was not sent");
+        if (post.payload.action !== "set_device_mode"
+          || post.payload.room_id !== "living"
+          || post.payload.expected_state_revision !== 44
+          || post.payload.parameters.device_id !== "living_temperature"
+          || post.payload.parameters.mode !== "manual") {
+          throw new Error("device exclusion payload mismatch: " + JSON.stringify(post));
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+        source = CLIMATE_OVERVIEW_JS.read_text(encoding="utf-8")
+        self.assertIn("Комната «${room.name}» полностью перейдёт", source)
+        self.assertIn("Сначала верните датчик", source)
+
     def test_television_card_uses_tablet_presentation_not_entity_dump(self) -> None:
         payloads = dict(GET_PATHS)
         payloads["hausman_hub/v1/dashboard"] = {
@@ -3592,7 +3671,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.70")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.71")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

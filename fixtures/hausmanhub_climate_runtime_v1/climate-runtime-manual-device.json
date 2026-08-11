@@ -1,0 +1,58 @@
+{
+  "contract": {"name": "hausman-hub-climate-runtime", "version": 1},
+  "generated_at": 1786467600000,
+  "state_revision": 44,
+  "phase": "managed",
+  "authority": "hausman_hub",
+  "fresh": true,
+  "commands_enabled": true,
+  "blocked_reasons": [],
+  "home_control": {"enabled": false, "allowed_actions": [], "blocked_reasons": ["action_unsupported"]},
+  "rooms": [
+    {
+      "id": "living",
+      "name": "Гостиная",
+      "temperature": 24.5,
+      "humidity": 45,
+      "target_temperature": 24,
+      "target_humidity": 45,
+      "minimum_temperature": 18,
+      "temperature_range": {"minimum": 18, "maximum": 28, "step": 0.5},
+      "humidity_range": {"minimum": 30, "maximum": 70, "step": 1},
+      "mode": "manual",
+      "target_strategy": "normal",
+      "active_profile": "day",
+      "temporary_override": {"active": false, "target_temperature": null, "ends_at": null},
+      "authority": "hausman_hub",
+      "control": {"enabled": true, "allowed_actions": ["set_room_mode"], "blocked_reasons": []},
+      "devices": [
+        {
+          "id": "living_ac",
+          "name": "Кондиционер в гостиной",
+          "kind": "air_conditioner",
+          "control_scope": "managed",
+          "available": true,
+          "state": "idle",
+          "mode": "automatic",
+          "control": {"enabled": true, "allowed_actions": ["set_device_mode"], "blocked_reasons": []},
+          "cooldown": null,
+          "last_confirmed_operation": null
+        },
+        {
+          "id": "living_temperature",
+          "name": "Датчик температуры в гостиной",
+          "kind": "temperature_sensor",
+          "control_scope": "observed",
+          "available": true,
+          "state": "idle",
+          "mode": "manual",
+          "control": {"enabled": true, "allowed_actions": ["set_device_mode"], "blocked_reasons": []},
+          "cooldown": null,
+          "last_confirmed_operation": null
+        }
+      ]
+    }
+  ],
+  "active_operations": []
+}
+

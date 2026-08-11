@@ -11,8 +11,10 @@ from custom_components.hausman_hub.application.climate_manual import (
     apply_manual_rooms,
     climate_manual_from_payload,
     climate_manual_to_payload,
+    effective_manual_room_ids,
     record_direct_wifi_commands,
     update_direct_wifi_observation,
+    with_climate_device_mode,
     with_climate_room_mode,
 )
 from custom_components.hausman_hub.application.climate_observations import (
@@ -118,13 +120,13 @@ class ClimateManualTest(unittest.TestCase):
             registry,
             stopped,
         )
-        projected = apply_manual_rooms(stopped, manual)
+        projected = apply_manual_rooms(stopped, manual, registry)
 
         self.assertTrue(changed)
         self.assertTrue(changed_again)
-        self.assertEqual(("living",), manual.manual_room_ids)
-        self.assertIs(projected.room("living").mode, ClimateRoomMode.MANUAL)  # type: ignore[union-attr]
-        self.assertFalse(projected.room("living").authority_eligible)  # type: ignore[union-attr]
+        self.assertEqual((), manual.manual_room_ids)
+        self.assertEqual(("living_air_conditioner",), manual.manual_device_ids)
+        self.assertIs(projected.room("living").mode, ClimateRoomMode.AUTO)  # type: ignore[union-attr]
 
     def test_successful_hausmanhub_off_does_not_enter_manual_mode(self) -> None:
         registry, observation = _inputs()
@@ -163,6 +165,7 @@ class ClimateManualTest(unittest.TestCase):
 
         self.assertTrue(command_changed)
         self.assertEqual((), updated.manual_room_ids)
+        self.assertEqual((), updated.manual_device_ids)
         self.assertIsNone(
             updated.device("living_air_conditioner").commanded_phase  # type: ignore[union-attr]
         )
@@ -203,7 +206,7 @@ class ClimateManualTest(unittest.TestCase):
             stopped,
         )
 
-        self.assertEqual(("living",), updated.manual_room_ids)
+        self.assertEqual(("living_air_conditioner",), updated.manual_device_ids)
 
     def test_ir_and_unavailable_devices_do_not_enter_manual_mode(self) -> None:
         registry, observation = _inputs()
@@ -267,6 +270,7 @@ class ClimateManualTest(unittest.TestCase):
         manual = ClimateManualMemory(
             updated_at=NOW,
             manual_room_ids=("living",),
+            manual_device_ids=(),
             devices=(),
         )
 
@@ -279,6 +283,19 @@ class ClimateManualTest(unittest.TestCase):
         )
 
         self.assertEqual((), automatic.manual_room_ids)
+
+    def test_excluding_primary_sensor_makes_room_effectively_manual(self) -> None:
+        registry = native_registry(ClimateControlScope.MANAGED)
+        memory = with_climate_device_mode(
+            empty_climate_manual_memory(updated_at=NOW - 1),
+            registry,
+            room_id="living",
+            device_id="living_temperature",
+            manual=True,
+            updated_at=NOW,
+        )
+
+        self.assertEqual(("living",), effective_manual_room_ids(memory, registry))
 
     def test_storage_round_trip_is_strict_and_private_free(self) -> None:
         registry, observation = _inputs()
@@ -364,17 +381,36 @@ class ClimateManualRuntimeTest(unittest.IsolatedAsyncioTestCase):
         manual = await runtime.async_public_snapshot()
 
         self.assertEqual([], executor.calls)
-        self.assertEqual("manual", manual["rooms"][0]["mode"])
-        self.assertEqual(("living",), store.memory.manual_room_ids)  # type: ignore[union-attr]
+        self.assertEqual("automatic", manual["rooms"][0]["mode"])
+        self.assertEqual("manual", manual["rooms"][0]["devices"][0]["mode"])
+        self.assertEqual(("living_ac",), store.memory.manual_device_ids)  # type: ignore[union-attr]
 
         restarted = build_runtime()
         await restarted.async_start()
         after_restart = await restarted.async_public_snapshot()
-        self.assertEqual("manual", after_restart["rooms"][0]["mode"])
+        self.assertEqual("manual", after_restart["rooms"][0]["devices"][0]["mode"])
 
-        await restarted.async_set_room_mode("living", "automatic")
+        await restarted.async_set_device_mode(
+            "living", "living_ac", "automatic"
+        )
         automatic = await restarted.async_public_snapshot()
-        self.assertEqual("automatic", automatic["rooms"][0]["mode"])
+        self.assertEqual("automatic", automatic["rooms"][0]["devices"][0]["mode"])
+
+        await restarted.async_set_device_mode(
+            "living", "living_temperature", "manual"
+        )
+        critical_sensor_manual = await restarted.async_public_snapshot()
+        self.assertEqual("manual", critical_sensor_manual["rooms"][0]["mode"])
+        sensor = next(
+            device
+            for device in critical_sensor_manual["rooms"][0]["devices"]
+            if device["id"] == "living_temperature"
+        )
+        self.assertEqual("manual", sensor["mode"])
+        self.assertEqual(
+            ["set_room_mode"],
+            critical_sensor_manual["rooms"][0]["control"]["allowed_actions"],
+        )
 
 
 if __name__ == "__main__":

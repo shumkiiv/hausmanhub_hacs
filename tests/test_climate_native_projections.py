@@ -721,6 +721,66 @@ class NativeControlGateTest(unittest.TestCase):
         )
         self.assertTrue(control["action_availability"]["set_room_target"]["allowed"])
 
+    def test_unavailable_air_conditioner_still_allows_manual_ownership(self) -> None:
+        registry, contours, _ = _setup()
+        _, observation = _native_observation(registry, contours)
+        observation = replace(
+            observation,
+            devices=tuple(
+                replace(
+                    device,
+                    availability=ClimateDeviceAvailability.UNAVAILABLE,
+                    activity=ClimateDeviceActivity.UNKNOWN,
+                    current_target_temperature=None,
+                    fan_mode=None,
+                    physical_feedback=ClimatePhysicalFeedback.UNKNOWN,
+                )
+                if device.device_id == "living_air_conditioner"
+                else device
+                for device in observation.devices
+            ),
+        )
+
+        control = self._android(observation)["rooms"][0]["control"]
+
+        self.assertTrue(control["enabled"])
+        self.assertEqual(["set_room_mode"], control["actions"])
+        self.assertEqual(["set_room_mode"], control["allowed_actions"])
+        self.assertEqual([], control["blocked_reasons"])
+
+    def test_excluded_air_conditioner_blocks_target_but_can_return_to_automatic(self) -> None:
+        registry, contours, _ = _setup()
+        scheduled = with_climate_schedule(
+            contours,
+            enabled=True,
+            day_start="07:00",
+            night_start="23:00",
+        )
+        scheduled = with_applied_climate_schedule_profile(
+            scheduled,
+            ClimateProfile.DAY,
+        )
+        _, observation = _native_observation(registry, scheduled)
+
+        result = self._android(
+            observation,
+            contours=scheduled,
+            manual_device_ids=("living_air_conditioner",),
+            local_now=datetime(2026, 8, 11, 12, 0, tzinfo=timezone.utc),
+        )
+        room = result["rooms"][0]
+        conditioner = next(
+            device
+            for device in room["devices"]
+            if device["id"] == "living_air_conditioner"
+        )
+
+        self.assertEqual(["set_room_mode"], room["control"]["allowed_actions"])
+        self.assertEqual("manual", conditioner["mode"])
+        self.assertEqual(
+            ["set_device_mode"], conditioner["control"]["allowed_actions"]
+        )
+
     def test_target_stays_hidden_when_enabled_schedule_is_not_applied(self) -> None:
         registry, contours, _ = _setup()
         scheduled = with_climate_schedule(
@@ -806,8 +866,9 @@ class NativeControlGateTest(unittest.TestCase):
             ),
         )
         missing = self._android(missing_device)["rooms"][0]["control"]
-        self.assertFalse(missing["enabled"])
-        self.assertIn("registry_mismatch", missing["blocked_reasons"])
+        self.assertTrue(missing["enabled"])
+        self.assertEqual(["set_room_mode"], missing["allowed_actions"])
+        self.assertEqual([], missing["blocked_reasons"])
 
 
 class NativeGoldenContractTest(unittest.TestCase):

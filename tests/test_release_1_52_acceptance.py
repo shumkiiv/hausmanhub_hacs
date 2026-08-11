@@ -32,7 +32,7 @@ class Release152AcceptanceTest(unittest.TestCase):
             / "hausman-hub-panel.js"
         ).read_text(encoding="utf-8")
 
-        self.assertEqual("1.52.70", manifest["version"])
+        self.assertEqual("1.52.71", manifest["version"])
         self.assertIn('CONNECTION_MODE_DEFAULT = "home_assistant"', configuration)
         self.assertNotIn('title: "Совместимый внешний API"', panel)
         self.assertNotIn('"Адрес совместимого API"', panel)

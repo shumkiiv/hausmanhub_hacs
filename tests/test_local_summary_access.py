@@ -1200,7 +1200,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             self.assertNotIn(forbidden_value, serialized)
 
     def test_disabled_climate_routes_separate_tablet_and_admin_roles(self) -> None:
-        """A normal tablet cannot administer, and an admin cannot impersonate it."""
+        """Tablet and admin share typed climate control, not other role surfaces."""
 
         views = {view.url: view for view in self.hass.http.views}
         tablet = reader_user("system-users")
@@ -1280,6 +1280,13 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertEqual(200, runtime_response.status)
         self.assertEqual("disabled", runtime_response.payload["phase"])
         self.assertFalse(runtime_response.payload["commands_enabled"])
+        admin_runtime_response = asyncio.run(
+            views[runtime_path].get(
+                FakeRequest("127.0.0.1", admin, path=runtime_path)
+            )
+        )
+        self.assertEqual(200, admin_runtime_response.status)
+        self.assertEqual("disabled", admin_runtime_response.payload["phase"])
 
         action_path = "/api/hausman_hub/v1/climate/actions"
         disabled_action = {
@@ -1305,6 +1312,18 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
         self.assertEqual(409, action_response.status)
         self.assertEqual("climate_disabled", action_response.payload["code"])
+        admin_action_response = asyncio.run(
+            views[action_path].post(
+                FakeJsonRequest(
+                    "127.0.0.1",
+                    admin,
+                    action_path,
+                    {**disabled_action, "request_id": "admin-disabled-climate-action-1"},
+                )
+            )
+        )
+        self.assertEqual(409, admin_action_response.status)
+        self.assertEqual("climate_disabled", admin_action_response.payload["code"])
 
         operation_template = (
             "/api/hausman_hub/v1/climate/operations/{operation_id}"
@@ -2620,7 +2639,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.70", panel.payload["integration_version"])
+        self.assertEqual("1.52.71", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
