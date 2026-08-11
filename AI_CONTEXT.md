@@ -1,8 +1,22 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-11 (1.52.67: уведомления о новых устройствах в панели; 1.52.66: темы вложенных окон и компактная энергия).
+Last updated: 2026-08-11 (1.52.68: исполнимая комнатная установка целевой температуры и production deploy).
 
 ## Current work
+
+- 2026-08-11 (Codex): выпущена и установлена HACS `1.52.68`, commit
+  `14a2204`, tag и GitHub Release `v1.52.68`. Native room control объявляет
+  `set_room_target` только когда durable temporary-temperature executor
+  действительно готов: runtime свежий, registry согласован, нет pending
+  operation, текущий профиль расписания применён и room authority eligible.
+  `set_room_mode` остаётся независимо доступен. Повторный независимый review
+  одобрил финальный diff; полный gate: 1333 теста, 4 пропущены; GitHub Actions
+  `31508446141` зелёный. Production HA Core 2026.8.1: полный backup
+  `a4f9c305` с базой, явный `update.install`, config check и restart прошли.
+  Installed/latest и cache marker показывают `1.52.68`, 10 служебных сущностей
+  доступны, system log HausmanHub чист. Live contour сейчас имеет
+  `schedule.enabled=false`, поэтому `set_room_target` закономерно не
+  рекламируется и физическая климатическая команда при deploy не отправлялась.
 
 - 2026-08-11 (Kimi): выпущены frontend-релизы `1.52.66` (commit `c37cce2`,
   tag и GitHub Release `v1.52.66`, GitHub Actions `31467651111` зелёный) и
