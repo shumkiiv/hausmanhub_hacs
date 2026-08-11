@@ -793,6 +793,145 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
         self.assertEqual(403, forbidden.status)
 
+    def test_energy_meter_api_resets_cycle_without_resetting_ha_source(self) -> None:
+        path = "/api/hausman_hub/v1/energy/meter"
+        view = next(item for item in self.hass.http.views if item.url == path)
+
+        async def dashboard_snapshot(*_args: object) -> dict[str, object]:
+            return {"energy": {"totalKwh": 276.46}}
+
+        globals_ = view.get.__func__.__globals__
+        original = globals_["async_dashboard_snapshot"]
+        globals_["async_dashboard_snapshot"] = dashboard_snapshot
+        tablet = reader_user("system-users")
+        try:
+            initial = asyncio.run(view.get(FakeRequest("127.0.0.1", tablet, path=path)))
+            self.assertEqual(200, initial.status)
+            configured = asyncio.run(
+                view.post(
+                    FakeJsonRequest(
+                        "127.0.0.1",
+                        tablet,
+                        path,
+                        {
+                            "expectedRevision": 0,
+                            "action": "configure",
+                            "settings": {
+                                "enabled": True,
+                                "submissionDayOfMonth": 25,
+                                "reminderDaysBefore": 3,
+                            },
+                        },
+                    )
+                )
+            )
+            self.assertEqual(200, configured.status)
+            submitted = asyncio.run(
+                view.post(
+                    FakeJsonRequest(
+                        "127.0.0.1",
+                        tablet,
+                        path,
+                        {"expectedRevision": 1, "action": "submit", "readingKwh": 18342.4},
+                    )
+                )
+            )
+            self.assertEqual(0.0, submitted.payload["cycle"]["consumptionKwh"])
+            self.assertEqual(276.46, submitted.payload["source"]["currentTotalKwh"])
+            stale = asyncio.run(
+                view.post(
+                    FakeJsonRequest(
+                        "127.0.0.1",
+                        tablet,
+                        path,
+                        {"expectedRevision": 1, "action": "correct", "readingKwh": 1},
+                    )
+                )
+            )
+            self.assertEqual(409, stale.status)
+            forbidden = asyncio.run(
+                view.get(FakeRequest("203.0.113.7", tablet, path=path))
+            )
+            self.assertEqual(403, forbidden.status)
+        finally:
+            globals_["async_dashboard_snapshot"] = original
+
+    def test_device_discovery_api_baselines_then_adds_energy_source(self) -> None:
+        from custom_components.hausman_hub.application.device_discovery import (
+            DiscoveredDevice,
+            DiscoveryArea,
+        )
+
+        path = "/api/hausman_hub/v1/device-discovery"
+        view = next(item for item in self.hass.http.views if item.url == path)
+        devices = [
+            DiscoveredDevice(
+                private_device_id="private-existing",
+                device_id="device_0000000000000001",
+                title="Старое устройство",
+                room_id="office",
+                room_name="Кабинет",
+                kind="physical",
+                status="available",
+                domains=("sensor",),
+                manufacturer=None,
+                model=None,
+            )
+        ]
+
+        def snapshot(*_args: object, **_kwargs: object) -> tuple[object, object]:
+            return tuple(devices), (DiscoveryArea("office", "Кабинет"),)
+
+        globals_ = view.get.__func__.__globals__
+        original = globals_["device_discovery_snapshot"]
+        globals_["device_discovery_snapshot"] = snapshot
+        tablet = reader_user("system-users")
+        try:
+            baseline = asyncio.run(view.get(FakeRequest("127.0.0.1", tablet, path=path)))
+            self.assertEqual(0, baseline.payload["pendingCount"])
+            devices.append(
+                DiscoveredDevice(
+                    private_device_id="private-new",
+                    device_id="device_0000000000000002",
+                    title="Новый счётчик",
+                    room_id=None,
+                    room_name=None,
+                    kind="physical",
+                    status="available",
+                    domains=("sensor",),
+                    manufacturer="Example",
+                    model="EM-1",
+                    energy_eligible=True,
+                )
+            )
+            discovered = asyncio.run(view.get(FakeRequest("127.0.0.1", tablet, path=path)))
+            self.assertEqual(1, discovered.payload["pendingCount"])
+            notice = discovered.payload["notifications"][0]
+            self.assertNotIn("privateDeviceId", notice)
+            saved = asyncio.run(
+                view.post(
+                    FakeJsonRequest(
+                        "127.0.0.1",
+                        tablet,
+                        path,
+                        {
+                            "expectedRevision": discovered.payload["revision"],
+                            "action": "add_to_energy",
+                            "notificationId": notice["id"],
+                        },
+                    )
+                )
+            )
+            self.assertEqual(200, saved.status)
+            self.assertEqual(0, saved.payload["pendingCount"])
+            preferences = self.hass.data["hausman_hub"]["tablet_preferences_service"]
+            self.assertEqual(
+                ["device_0000000000000002"],
+                preferences.energy["settings"]["selectedDeviceIds"],
+            )
+        finally:
+            globals_["device_discovery_snapshot"] = original
+
     def test_tablet_profile_is_atomic_shared_and_rejects_stale_writes(self) -> None:
         path = "/api/hausman_hub/v1/tablet-profile"
         view = next(item for item in self.hass.http.views if item.url == path)
@@ -2436,7 +2575,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.64", panel.payload["integration_version"])
+        self.assertEqual("1.52.65", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
@@ -3142,7 +3281,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertFalse(hasattr(self.view, method))
 
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
-        self.assertEqual(71, len(self.hass.http.views))
+        self.assertEqual(73, len(self.hass.http.views))
         self.assertEqual(
             1,
             sum(
@@ -3590,7 +3729,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             [(closed_entry, ("sensor", "switch"))],
             closed_hass.config_entries.forwarded,
         )
-        self.assertEqual(70, len(closed_hass.http.views))
+        self.assertEqual(72, len(closed_hass.http.views))
         self.assertEqual(
             {
                 "/api/hausman_hub/v1/capabilities",
@@ -3598,7 +3737,9 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 "/api/hausman_hub/v1/events",
                 "/api/hausman_hub/v1/device-actions",
                 "/api/hausman_hub/v1/energy/history",
+                "/api/hausman_hub/v1/energy/meter",
                 "/api/hausman_hub/v1/energy-settings",
+                "/api/hausman_hub/v1/device-discovery",
                 "/api/hausman_hub/v1/tablet-profile",
                 "/api/hausman_hub/v1/home",
                 "/api/hausman_hub/v1/climate/runtime",

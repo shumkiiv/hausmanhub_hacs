@@ -220,6 +220,16 @@ class TabletPreferencesService:
         return energy_as_hub_settings(self._document("energy")["settings"])
 
     @property
+    def energy_selected_device_ids(self) -> frozenset[str]:
+        settings = self._document("energy")["settings"]
+        return frozenset(settings["selectedDeviceIds"])
+
+    @property
+    def dashboard_visible_device_ids(self) -> frozenset[str]:
+        settings = self._document("tablet")["settings"]
+        return frozenset(settings["dashboard"]["visibleDeviceIds"])
+
+    @property
     def tablet_pinned_entity_ids(self) -> frozenset[str]:
         """Entity ids explicitly chosen in the tablet profile.
 
@@ -248,6 +258,51 @@ class TabletPreferencesService:
         return await self._replace(
             "energy", expected_revision, validate_energy_settings(settings)
         )
+
+    async def async_include_energy_device(self, device_id: str) -> None:
+        if not _DEVICE_ID.fullmatch(device_id):
+            raise TabletPreferencesViolation("energy device id is invalid")
+        async with self._lock:
+            state = deepcopy(self._required_state())
+            current = deepcopy(self._document("energy"))
+            settings = current["settings"]
+            selected = list(settings["selectedDeviceIds"])
+            if device_id in selected:
+                return
+            if len(selected) >= 128:
+                raise TabletPreferencesViolation("energy device limit reached")
+            selected.append(device_id)
+            settings["selectedDeviceIds"] = selected
+            settings["useAllDevices"] = False
+            state["energy"] = _document(
+                int(current["revision"]) + 1,
+                self._timestamp(),
+                validate_energy_settings(settings),
+            )
+            await self._store.async_save(state)
+            self._state = state
+
+    async def async_include_dashboard_device(self, device_id: str) -> None:
+        if not _DEVICE_ID.fullmatch(device_id):
+            raise TabletPreferencesViolation("dashboard device id is invalid")
+        async with self._lock:
+            state = deepcopy(self._required_state())
+            current = deepcopy(self._document("tablet"))
+            settings = current["settings"]
+            visible = list(settings["dashboard"]["visibleDeviceIds"])
+            if device_id in visible:
+                return
+            if len(visible) >= 128:
+                raise TabletPreferencesViolation("dashboard device limit reached")
+            visible.append(device_id)
+            settings["dashboard"]["visibleDeviceIds"] = visible
+            state["tablet"] = _document(
+                int(current["revision"]) + 1,
+                self._timestamp(),
+                validate_tablet_settings(settings),
+            )
+            await self._store.async_save(state)
+            self._state = state
 
     async def async_reset(self) -> None:
         timestamp = self._timestamp()

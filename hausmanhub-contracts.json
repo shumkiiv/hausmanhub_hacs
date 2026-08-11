@@ -1,7 +1,7 @@
 {
   "repository": "shumkiiv/hausmanhub-contracts",
-  "version": "0.23.0",
-  "commit": "da52e3c",
+  "version": "0.24.1",
+  "commit": "65eff46",
   "canonical": true,
   "role": "runtime-consumer"
 }

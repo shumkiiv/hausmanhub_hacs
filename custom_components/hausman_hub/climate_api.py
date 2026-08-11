@@ -23,7 +23,9 @@ from .application.api_capabilities import (
     CONTOUR_APPLY_PATH,
     CONTOUR_APPLY_PREVIEW_PATH,
     DASHBOARD_PATH,
+    DEVICE_DISCOVERY_PATH,
     ENERGY_HISTORY_PATH,
+    ENERGY_METER_PATH,
     ENERGY_SETTINGS_PATH,
     HOME_PATH,
     HOME_CLIMATE_TARGETS_PATH,
@@ -83,6 +85,11 @@ from .application.device_power_dependencies import (
     DevicePowerDependencyService,
     DevicePowerDependencyServiceViolation,
 )
+from .application.energy_meter import EnergyMeterService, EnergyMeterViolation
+from .application.device_discovery import (
+    DeviceDiscoveryService,
+    DeviceDiscoveryViolation,
+)
 from .application.legacy_settings_import import (
     LegacySettingsImportViolation,
     preview_legacy_settings,
@@ -103,6 +110,7 @@ from .device_maintenance_ha import (
     DeviceMaintenanceViolation,
     HomeAssistantDeviceMaintenanceService,
 )
+from .device_discovery_ha import assign_device_area, device_discovery_snapshot
 from .realtime_api import publish_command_receipt
 
 if TYPE_CHECKING:
@@ -219,6 +227,8 @@ def register_climate_api(
             ClimateCapabilitiesView(hass),
             DashboardView(hass),
             EnergyHistoryView(hass),
+            EnergyMeterView(hass),
+            DeviceDiscoveryView(hass),
             TabletProfileView(hass),
             EnergySettingsView(hass),
             DevicePowerDependenciesView(hass),
@@ -294,6 +304,8 @@ def clear_climate_api(hass: HomeAssistant, entry_id: str) -> None:
         data.pop("ir_code_service", None)
         data.pop("settings_service", None)
         data.pop("tablet_preferences_service", None)
+        data.pop("energy_meter_service", None)
+        data.pop("device_discovery_service", None)
         data.pop(DATA_CLIMATE_SHADOW, None)
         data.pop(DATA_CLIMATE_TABLET, None)
 
@@ -688,6 +700,232 @@ class EnergyHistoryView(_ClimateView):
         except Exception:
             return self._unavailable()
         return self.json(payload, headers=NO_STORE_HEADERS)
+
+
+async def _current_energy_source(
+    hass: HomeAssistant,
+) -> tuple[float | None, str | None]:
+    """Read the same configured aggregate total used by the dashboard."""
+
+    data = hass.data.get(DOMAIN, {})
+    preferences = data.get("tablet_preferences_service")
+    dependencies = data.get("device_power_dependency_service")
+    dashboard = await async_dashboard_snapshot(
+        hass,
+        data.get("scenario_service"),
+        preferences.energy_for_dashboard
+        if isinstance(preferences, TabletPreferencesService)
+        else None,
+        None,
+        preferences.tablet_pinned_entity_ids
+        if isinstance(preferences, TabletPreferencesService)
+        else None,
+        dependencies.mapping
+        if isinstance(dependencies, DevicePowerDependencyService)
+        else None,
+    )
+    energy = dashboard.get("energy")
+    total = energy.get("totalKwh") if isinstance(energy, Mapping) else None
+    if isinstance(total, bool) or not isinstance(total, (int, float)):
+        return None, None
+    settings = (
+        preferences.energy_for_dashboard
+        if isinstance(preferences, TabletPreferencesService)
+        else None
+    )
+    sources = energy.get("sources") if isinstance(energy, Mapping) else None
+    included: list[str] = []
+    if isinstance(sources, list):
+        selected = set(settings.energy_selected_device_ids) if settings else set()
+        use_all = settings.energy_use_all_devices if settings else False
+        included = sorted(
+            str(source["id"])
+            for source in sources
+            if isinstance(source, Mapping)
+            and isinstance(source.get("id"), str)
+            and isinstance(source.get("totalKwh"), (int, float))
+            and not isinstance(source.get("totalKwh"), bool)
+            and (use_all or source["id"] in selected)
+        )
+    return float(total), "|".join(included)
+
+
+class EnergyMeterView(_ClimateView):
+    """Read and mutate the durable manual utility-meter projection."""
+
+    url = ENERGY_METER_PATH
+    name = "api:hausman_hub:energy_meter"
+
+    def _service(self) -> EnergyMeterService | None:
+        if self._runtime() is None:
+            return None
+        service = self._hass.data.get(DOMAIN, {}).get("energy_meter_service")
+        return service if isinstance(service, EnergyMeterService) else None
+
+    async def get(self, request: Any) -> Any:
+        if not _is_exact_request(request, self.url):
+            return _not_found(self)
+        if not _is_local_dashboard_request(request):
+            return _forbidden(self)
+        service = self._service()
+        if service is None:
+            return self._unavailable()
+        try:
+            total, signature = await _current_energy_source(self._hass)
+            result = service.document(total, signature)
+        except (EnergyMeterViolation, ValueError):
+            return self._unavailable()
+        return self.json(result, headers=NO_STORE_HEADERS)
+
+    async def post(self, request: Any) -> Any:
+        if not _is_exact_request(request, self.url):
+            return _not_found(self)
+        if not _is_local_dashboard_request(request):
+            return _forbidden(self)
+        service = self._service()
+        if service is None:
+            return self._unavailable()
+        try:
+            payload = await _request_json(request, maximum_bytes=MAX_ACTION_BODY_BYTES)
+            total, signature = await _current_energy_source(self._hass)
+            result = await service.async_action(payload, total, signature)
+        except EnergyMeterViolation as error:
+            return self.json_message(
+                "Показания уже изменились на другом клиенте. Обновите данные."
+                if error.stale
+                else "Параметры показаний электроэнергии заполнены неверно.",
+                HTTPStatus.CONFLICT if error.stale else HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        except (ValueError, json.JSONDecodeError):
+            return self.json_message(
+                "Параметры показаний электроэнергии заполнены неверно.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        return self.json(result, headers=NO_STORE_HEADERS)
+
+
+class DeviceDiscoveryView(_ClimateView):
+    """Notify about devices registered after the durable first-run baseline."""
+
+    url = DEVICE_DISCOVERY_PATH
+    name = "api:hausman_hub:device_discovery"
+
+    def _services(
+        self,
+    ) -> tuple[DeviceDiscoveryService | None, TabletPreferencesService | None]:
+        if self._runtime() is None:
+            return None, None
+        data = self._hass.data.get(DOMAIN, {})
+        discovery = data.get("device_discovery_service")
+        preferences = data.get("tablet_preferences_service")
+        return (
+            discovery if isinstance(discovery, DeviceDiscoveryService) else None,
+            preferences if isinstance(preferences, TabletPreferencesService) else None,
+        )
+
+    async def _snapshot(
+        self,
+        service: DeviceDiscoveryService,
+        preferences: TabletPreferencesService,
+    ) -> tuple[dict[str, object], tuple[object, ...]]:
+        devices, areas = device_discovery_snapshot(
+            self._hass,
+            energy_selected=preferences.energy_selected_device_ids,
+            dashboard_visible=preferences.dashboard_visible_device_ids,
+        )
+        await service.async_reconcile(devices)
+        return service.document(areas), areas
+
+    async def get(self, request: Any) -> Any:
+        if not _is_exact_request(request, self.url):
+            return _not_found(self)
+        if not _is_local_dashboard_request(request):
+            return _forbidden(self)
+        service, preferences = self._services()
+        if service is None or preferences is None:
+            return self._unavailable()
+        try:
+            result, _areas = await self._snapshot(service, preferences)
+        except (DeviceDiscoveryViolation, ValueError):
+            return self._unavailable()
+        return self.json(result, headers=NO_STORE_HEADERS)
+
+    async def post(self, request: Any) -> Any:
+        if not _is_exact_request(request, self.url):
+            return _not_found(self)
+        if not _is_local_dashboard_request(request):
+            return _forbidden(self)
+        service, preferences = self._services()
+        if service is None or preferences is None:
+            return self._unavailable()
+        try:
+            payload = await _request_json(request, maximum_bytes=MAX_ACTION_BODY_BYTES)
+            if not isinstance(payload, Mapping):
+                raise DeviceDiscoveryViolation("device discovery action is invalid")
+            action = payload.get("action")
+            expected_fields = {
+                "expectedRevision", "action", "notificationId",
+                *(("areaId",) if action == "assign_area" else ()),
+            }
+            if (
+                set(payload) != expected_fields
+                or action not in {"acknowledge", "assign_area", "add_to_energy", "show_on_dashboard"}
+                or type(payload.get("expectedRevision")) is not int
+                or payload["expectedRevision"] < 0
+            ):
+                raise DeviceDiscoveryViolation("device discovery action fields are invalid")
+            current, areas = await self._snapshot(service, preferences)
+            if payload["expectedRevision"] != current["revision"]:
+                raise DeviceDiscoveryViolation(
+                    "device discovery revision is stale", code="revision_conflict"
+                )
+            notification_id = payload["notificationId"]
+            if not service.action_supported(notification_id, action):
+                raise DeviceDiscoveryViolation("device discovery action is not supported")
+            if action == "assign_area":
+                if not _is_local_admin_request(request):
+                    return _forbidden(self)
+                area_id = payload.get("areaId")
+                if not isinstance(area_id, str) or not area_id:
+                    raise DeviceDiscoveryViolation("device discovery area is invalid")
+                assign_device_area(
+                    self._hass,
+                    service.private_device_id(notification_id),
+                    area_id,
+                )
+            elif action == "add_to_energy":
+                await preferences.async_include_energy_device(
+                    service.public_device_id(notification_id)
+                )
+            elif action == "show_on_dashboard":
+                await preferences.async_include_dashboard_device(
+                    service.public_device_id(notification_id)
+                )
+            await service.async_complete(
+                payload["expectedRevision"], notification_id
+            )
+            result = service.document(areas)
+        except DeviceDiscoveryViolation as error:
+            status = {
+                "revision_conflict": HTTPStatus.CONFLICT,
+                "not_found": HTTPStatus.NOT_FOUND,
+            }.get(error.code, HTTPStatus.BAD_REQUEST)
+            return self.json_message(
+                "Уведомление уже изменилось. Обновите данные."
+                if error.code == "revision_conflict"
+                else "Действие с новым устройством выполнить не удалось.",
+                status,
+                headers=NO_STORE_HEADERS,
+            )
+        except (TabletPreferencesViolation, ValueError, json.JSONDecodeError):
+            return self.json_message(
+                "Действие с новым устройством выполнить не удалось.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        return self.json(result, headers=NO_STORE_HEADERS)
 
 
 class _PublicPreferencesView(_ClimateView):

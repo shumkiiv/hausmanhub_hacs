@@ -1,0 +1,52 @@
+{
+  "contract": { "name": "hausman-hub-device-discovery", "version": 1 },
+  "revision": 7,
+  "updatedAt": "2026-08-11T00:05:00Z",
+  "initialized": true,
+  "pendingCount": 1,
+  "notifications": [
+    {
+      "id": "notice_0123456789abcdef",
+      "deviceId": "device_fedcba9876543210",
+      "firstSeenAt": "2026-08-11T00:04:00Z",
+      "title": "Новый датчик температуры",
+      "roomId": null,
+      "roomName": null,
+      "kind": "physical",
+      "status": "available",
+      "domains": ["sensor"],
+      "manufacturer": "Example",
+      "model": "TH-1",
+      "suggestedPlacements": [
+        {
+          "kind": "assign_area",
+          "section": "rooms",
+          "title": "Выбрать комнату",
+          "reason": "Устройство ещё не назначено комнате Home Assistant.",
+          "recommended": true,
+          "actionable": true
+        },
+        {
+          "kind": "open_settings",
+          "section": "climate",
+          "title": "Использовать в климате",
+          "reason": "Температурный датчик можно выбрать источником комнаты.",
+          "recommended": true,
+          "actionable": false
+        },
+        {
+          "kind": "show_on_dashboard",
+          "section": "dashboard",
+          "title": "Показать на главной",
+          "reason": "Устройство можно закрепить среди видимых устройств.",
+          "recommended": false,
+          "actionable": true
+        }
+      ],
+      "areaOptions": [
+        { "id": "living_room", "name": "Гостиная", "current": false, "recommended": false },
+        { "id": "office", "name": "Кабинет", "current": false, "recommended": false }
+      ]
+    }
+  ]
+}

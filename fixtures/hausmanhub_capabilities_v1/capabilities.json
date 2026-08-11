@@ -94,6 +94,31 @@
         "version": 1
       }
     },
+    "climate_runtime": {
+      "available": false,
+      "phase": "unavailable",
+      "commands_enabled": false,
+      "read_path": "/api/hausman_hub/v1/climate/runtime",
+      "action_path": "/api/hausman_hub/v1/climate/actions",
+      "operation_path_template": "/api/hausman_hub/v1/climate/operations/{operation_id}",
+      "read_method": "GET",
+      "action_method": "POST",
+      "operation_method": "GET",
+      "durable_idempotency": true,
+      "receipt_events": true,
+      "read_contract": {
+        "name": "hausman-hub-climate-runtime",
+        "version": 1
+      },
+      "request_contract": {
+        "name": "hausman-hub-climate-action-request",
+        "version": 1
+      },
+      "receipt_contract": {
+        "name": "hausman-hub-climate-operation",
+        "version": 1
+      }
+    },
     "tablet_profile": {
       "available": true,
       "path": "/api/hausman_hub/v1/tablet-profile",
@@ -130,6 +155,32 @@
         "version": 1
       }
     },
+    "energy_meter": {
+      "available": true,
+      "path": "/api/hausman_hub/v1/energy/meter",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "optimistic_locking": true,
+      "response_contract": {
+        "name": "hausman-hub-energy-meter",
+        "version": 1
+      }
+    },
+    "device_discovery": {
+      "available": true,
+      "path": "/api/hausman_hub/v1/device-discovery",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "optimistic_locking": true,
+      "response_contract": {
+        "name": "hausman-hub-device-discovery",
+        "version": 1
+      }
+    },
     "event_stream": {
       "available": true,
       "path": "/api/hausman_hub/v1/events",
@@ -162,22 +213,6 @@
         "upcoming": "/api/hausman_hub/v1/scenarios/upcoming",
         "upcomingCancel": "/api/hausman_hub/v1/scenarios/upcoming/cancel"
       }
-    },
-    "climate_runtime": {
-      "available": false,
-      "phase": "unavailable",
-      "commands_enabled": false,
-      "read_path": "/api/hausman_hub/v1/climate/runtime",
-      "action_path": "/api/hausman_hub/v1/climate/actions",
-      "operation_path_template": "/api/hausman_hub/v1/climate/operations/{operation_id}",
-      "read_method": "GET",
-      "action_method": "POST",
-      "operation_method": "GET",
-      "durable_idempotency": true,
-      "receipt_events": true,
-      "read_contract": {"name": "hausman-hub-climate-runtime", "version": 1},
-      "request_contract": {"name": "hausman-hub-climate-action-request", "version": 1},
-      "receipt_contract": {"name": "hausman-hub-climate-operation", "version": 1}
     },
     "voice_greeting": {
       "available": false,

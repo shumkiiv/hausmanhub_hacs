@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/device-discovery.schema.json",
+  "title": "HausmanHub new-device discovery notifications v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "revision", "updatedAt", "initialized", "pendingCount", "notifications"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "hausman-hub-device-discovery" },
+        "version": { "const": 1 }
+      }
+    },
+    "revision": { "type": "integer", "minimum": 0 },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "initialized": { "type": "boolean" },
+    "pendingCount": { "type": "integer", "minimum": 0, "maximum": 128 },
+    "notifications": {
+      "type": "array",
+      "maxItems": 128,
+      "items": { "$ref": "#/$defs/notification" }
+    }
+  },
+  "$defs": {
+    "notification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "deviceId", "firstSeenAt", "title", "roomId", "roomName",
+        "kind", "status", "domains", "manufacturer", "model",
+        "suggestedPlacements", "areaOptions"
+      ],
+      "properties": {
+        "id": { "type": "string", "pattern": "^notice_[0-9a-f]{16}$" },
+        "deviceId": { "type": "string", "pattern": "^device_[0-9a-f]{16}$" },
+        "firstSeenAt": { "type": "string", "format": "date-time" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "roomId": { "type": ["string", "null"], "maxLength": 128 },
+        "roomName": { "type": ["string", "null"], "maxLength": 160 },
+        "kind": { "enum": ["physical", "virtual", "entity_only"] },
+        "status": { "enum": ["available", "unavailable", "empty"] },
+        "domains": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
+        },
+        "manufacturer": { "type": ["string", "null"], "maxLength": 160 },
+        "model": { "type": ["string", "null"], "maxLength": 160 },
+        "suggestedPlacements": {
+          "type": "array",
+          "maxItems": 12,
+          "items": { "$ref": "#/$defs/placement" }
+        },
+        "areaOptions": {
+          "type": "array",
+          "maxItems": 128,
+          "items": { "$ref": "#/$defs/area" }
+        }
+      }
+    },
+    "placement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "section", "title", "reason", "recommended", "actionable"],
+      "properties": {
+        "kind": { "enum": ["automatic_section", "assign_area", "add_to_energy", "show_on_dashboard", "open_settings"] },
+        "section": { "enum": ["devices", "rooms", "lighting", "climate", "energy", "security", "media", "dashboard"] },
+        "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "recommended": { "type": "boolean" },
+        "actionable": { "type": "boolean" }
+      }
+    },
+    "area": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "current", "recommended"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "current": { "type": "boolean" },
+        "recommended": { "type": "boolean" }
+      }
+    },
+    "actionRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["expectedRevision", "action", "notificationId"],
+      "properties": {
+        "expectedRevision": { "type": "integer", "minimum": 0 },
+        "action": { "enum": ["acknowledge", "assign_area", "add_to_energy", "show_on_dashboard"] },
+        "notificationId": { "type": "string", "pattern": "^notice_[0-9a-f]{16}$" },
+        "areaId": { "type": "string", "minLength": 1, "maxLength": 128 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "action": { "const": "assign_area" } }, "required": ["action"] },
+          "then": { "required": ["areaId"] },
+          "else": { "not": { "required": ["areaId"] } }
+        }
+      ]
+    }
+  }
+}

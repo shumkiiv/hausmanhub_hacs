@@ -30,6 +30,8 @@ DASHBOARD_PATH = f"{API_BASE_PATH}/dashboard"
 TABLET_PROFILE_PATH = f"{API_BASE_PATH}/tablet-profile"
 ENERGY_SETTINGS_PATH = f"{API_BASE_PATH}/energy-settings"
 ENERGY_HISTORY_PATH = f"{API_BASE_PATH}/energy/history"
+ENERGY_METER_PATH = f"{API_BASE_PATH}/energy/meter"
+DEVICE_DISCOVERY_PATH = f"{API_BASE_PATH}/device-discovery"
 EVENT_STREAM_PATH = f"{API_BASE_PATH}/events"
 DEVICE_ACTIONS_PATH = f"{API_BASE_PATH}/device-actions"
 CONTOURS_PATH = f"{API_BASE_PATH}/contours"
@@ -210,6 +212,26 @@ def api_capabilities_snapshot(
                 "read_only": True,
                 "response_contract": {
                     "name": "hausman-hub-energy-history",
+                    "version": 1,
+                },
+            },
+            "energy_meter": {
+                "available": True,
+                "path": ENERGY_METER_PATH,
+                "methods": ["GET", "POST"],
+                "optimistic_locking": True,
+                "response_contract": {
+                    "name": "hausman-hub-energy-meter",
+                    "version": 1,
+                },
+            },
+            "device_discovery": {
+                "available": True,
+                "path": DEVICE_DISCOVERY_PATH,
+                "methods": ["GET", "POST"],
+                "optimistic_locking": True,
+                "response_contract": {
+                    "name": "hausman-hub-device-discovery",
                     "version": 1,
                 },
             },

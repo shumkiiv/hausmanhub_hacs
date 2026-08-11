@@ -63,6 +63,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .device_power_dependency_storage import (
         HomeAssistantDevicePowerDependencyStore,
     )
+    from .application.energy_meter import EnergyMeterService
+    from .energy_meter_storage import HomeAssistantEnergyMeterStore
+    from .application.device_discovery import DeviceDiscoveryService
+    from .device_discovery_storage import HomeAssistantDeviceDiscoveryStore
     from .local_summary import register_local_summary_access
 
     await hass.config_entries.async_forward_entry_setups(
@@ -93,12 +97,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ),
     )
     await device_power_dependency_service.async_load()
+    energy_meter_service = EnergyMeterService(
+        HomeAssistantEnergyMeterStore(hass, entry.entry_id),
+        local_today=lambda: dt_util.now().date(),
+    )
+    await energy_meter_service.async_load()
+    device_discovery_service = DeviceDiscoveryService(
+        HomeAssistantDeviceDiscoveryStore(hass, entry.entry_id)
+    )
+    await device_discovery_service.async_load()
     domain_data = hass.data.setdefault(entry.domain, {})
     domain_data["settings_service"] = settings_service
     domain_data["tablet_preferences_service"] = tablet_preferences_service
     domain_data["device_power_dependency_service"] = (
         device_power_dependency_service
     )
+    domain_data["energy_meter_service"] = energy_meter_service
+    domain_data["device_discovery_service"] = device_discovery_service
     from .application.operation_journal import OperationJournalService
     from .operation_journal_api import DATA_OPERATION_JOURNAL
     from .operation_journal_storage import HomeAssistantOperationJournalStore

@@ -416,6 +416,42 @@
             }
           }
         },
+        "energy_meter": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["available", "path", "methods", "optimistic_locking", "response_contract"],
+          "properties": {
+            "available": { "type": "boolean" },
+            "path": { "const": "/api/hausman_hub/v1/energy/meter" },
+            "methods": {
+              "type": "array",
+              "prefixItems": [{ "const": "GET" }, { "const": "POST" }],
+              "items": false,
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "optimistic_locking": { "const": true },
+            "response_contract": { "$ref": "#/$defs/energy_meter_contract" }
+          }
+        },
+        "device_discovery": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["available", "path", "methods", "optimistic_locking", "response_contract"],
+          "properties": {
+            "available": { "type": "boolean" },
+            "path": { "const": "/api/hausman_hub/v1/device-discovery" },
+            "methods": {
+              "type": "array",
+              "prefixItems": [{ "const": "GET" }, { "const": "POST" }],
+              "items": false,
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "optimistic_locking": { "const": true },
+            "response_contract": { "$ref": "#/$defs/device_discovery_contract" }
+          }
+        },
         "event_stream": {
           "type": "object",
           "additionalProperties": false,
@@ -692,6 +728,24 @@
     }
   },
   "$defs": {
+    "energy_meter_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "hausman-hub-energy-meter" },
+        "version": { "const": 1 }
+      }
+    },
+    "device_discovery_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "hausman-hub-device-discovery" },
+        "version": { "const": 1 }
+      }
+    },
     "voice_station": {
       "type": "object",
       "additionalProperties": false,
