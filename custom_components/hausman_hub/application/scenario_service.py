@@ -21,8 +21,10 @@ from .scenarios import (
 )
 from ..domain.scenarios import (
     Scenario,
+    ScenarioComparison,
     ScenarioDefinition,
     ScenarioRegistry,
+    ScenarioTriggerType,
     ScenarioViolation,
 )
 
@@ -169,6 +171,43 @@ class ScenarioService:
                     items.append(
                         (scenario.id, trigger.id, trigger.type.value, trigger.value)
                     )
+        return tuple(items)
+
+    def state_trigger_items(
+        self,
+    ) -> tuple[tuple[str, str, str, str, ScenarioComparison, object | None], ...]:
+        """Return enabled device-state triggers resolved to HA entity ids.
+
+        The event adapter deliberately receives only this compact, immutable
+        projection. It cannot accidentally run a disabled scenario or address
+        an entity that is absent from the allowlisted scenario catalog.
+        """
+
+        registry = self._ensure_loaded()
+        items: list[tuple[str, str, str, str, ScenarioComparison, object | None]] = []
+        for scenario in registry.scenarios:
+            if not scenario.enabled:
+                continue
+            for trigger in scenario.definition.triggers:
+                if trigger.type is not ScenarioTriggerType.DEVICE_STATE:
+                    continue
+                device = self._catalog.device(trigger.target_id or "")
+                if (
+                    device is None
+                    or not trigger.property
+                    or trigger.comparison is None
+                ):
+                    continue
+                items.append(
+                    (
+                        scenario.id,
+                        trigger.id,
+                        device.entity_id,
+                        trigger.property,
+                        trigger.comparison,
+                        trigger.value,
+                    )
+                )
         return tuple(items)
 
     def _upcoming_runs(self) -> list[ScheduledRun]:

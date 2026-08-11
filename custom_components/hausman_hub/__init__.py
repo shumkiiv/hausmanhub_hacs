@@ -193,6 +193,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     scenario_service.set_executor(scenario_executor)
     await async_start_scenario_schedule(hass, entry, scenario_service)
+    from .scenario_events import async_start_scenario_events
+
+    await async_start_scenario_events(hass, entry, scenario_service)
 
     register_climate_api(
         hass,
