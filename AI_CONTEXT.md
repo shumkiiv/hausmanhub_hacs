@@ -1,8 +1,30 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-10 (1.52.64: durable-зависимости питания устройств).
+Last updated: 2026-08-11 (1.52.65: показания энергии и discovery устройств).
 
 ## Current work
+
+- 2026-08-11 (Codex): выпущена и задеплоена `1.52.65`, commit `b78d4c3`,
+  tag и GitHub Release опубликованы. Добавлен durable API
+  `GET/POST /api/hausman_hub/v1/energy/meter`: ежемесячная дата и напоминание,
+  ручная передача показаний, корректировка текущего anchor, история до 60
+  операций. Передача начинает новый расчётный цикл без сброса физических
+  накопительных HA-сенсоров; корректировка сохраняет начало цикла. Падение
+  накопительного источника или смена состава выбранных energy sources даёт
+  `reset_detected` и блокирует выдуманный расход до нового anchor. Добавлен
+  durable `GET/POST /api/hausman_hub/v1/device-discovery`: первый запуск
+  создаёт baseline без старых уведомлений, новые физические HA-устройства
+  получают bounded уведомления, варианты комнат и рекомендации использования.
+  Raw HA device/entity ID не выходят в публичный документ; assign area требует
+  local admin, добавление в энергию или на главную меняет только HA-owned
+  preferences. Consumer pin: contracts `0.24.1` (`65eff46`). Полный gate:
+  1305 тестов, 4 пропущены; GitHub Actions `31459385921` зелёный. Production HA
+  Core 2026.8.1: полный automatic backup `e178bdf7` с базой, явная установка
+  `v1.52.65`, config check и два restart прошли штатно. Installed/latest и
+  admin panel подтверждают 1.52.65; 10 сущностей интеграции доступны, error log
+  HausmanHub чист. Live energy revision 0 оставлен disabled без выдуманных даты
+  и показания, источник available с `278.05 kWh`; discovery после второго
+  restart сохранил revision 1, initialized true и pendingCount 0.
 
 - 2026-08-10 (Codex): выпущена и задеплоена `1.52.64`, commit `56fca2d`,
   tag и GitHub Release опубликованы. Добавлен durable-контур `requires_on`:
