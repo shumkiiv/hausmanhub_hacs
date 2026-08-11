@@ -1,8 +1,24 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-11 (1.52.68: исполнимая комнатная установка целевой температуры и production deploy).
+Last updated: 2026-08-11 (1.52.70: комнатная цель без расписания и без зависимости от посторонних устройств).
 
 ## Current work
+
+- 2026-08-11 (Codex): выпущена и установлена HACS `1.52.70`, release commit
+  `6334594`, tag и GitHub Release `v1.52.70`, Actions `31514091755` зелёный.
+  Явный `set_room_target` теперь доступен в automatic contour при выключенном
+  расписании: target хранится как durable override до явной очистки, а
+  фоновое расписание не включается. Temperature preflight и строгий plan
+  проверяют только управляемый кондиционер, поэтому недоступный увлажнитель
+  комнаты Игоря больше не скрывает и не блокирует команду. Fail-closed
+  сохранён для самого кондиционера, stale state, room authority и pending
+  operation. Полный gate: 1336 тестов, 4 пропущены. Production обновлён после
+  полного backup `b132eafd` с базой; config check и restart штатные,
+  installed/latest и cache marker равны 1.52.70, 10 служебных сущностей
+  доступны, system log HausmanHub чист. Live Home и climate runtime объявляют
+  `set_room_target` для комнаты Игоря, спальни и кухни; кабинет и комната
+  Алисы закрыты по `device_unavailable`. Физическая климатическая команда при
+  deploy не отправлялась.
 
 - 2026-08-11 (Codex): выпущена и установлена HACS `1.52.68`, commit
   `14a2204`, tag и GitHub Release `v1.52.68`. Native room control объявляет
