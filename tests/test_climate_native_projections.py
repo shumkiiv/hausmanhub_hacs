@@ -13,6 +13,8 @@ integral floats to ints and checks ``state_revision`` separately.
 
 from __future__ import annotations
 
+from dataclasses import replace
+from datetime import datetime, timezone
 import unittest
 
 from custom_components.hausman_hub.application.climate_ha_observations import (
@@ -35,11 +37,14 @@ from custom_components.hausman_hub.application.contour_apply import (
 )
 from custom_components.hausman_hub.application.contours import (
     build_climate_contour_setup,
+    with_applied_climate_schedule_profile,
+    with_climate_schedule,
 )
 from custom_components.hausman_hub.domain.climate_bridge import ClimateControlMode
 from custom_components.hausman_hub.domain.climate_observation import (
     ClimateDataStatus,
 )
+from custom_components.hausman_hub.domain.contours import ClimateProfile
 from custom_components.hausman_hub.domain.climate_protection import (
     empty_climate_protection_memory,
 )
@@ -585,7 +590,7 @@ class NativeReadinessHardeningTest(unittest.TestCase):
 
 
 class NativeControlGateTest(unittest.TestCase):
-    """Only durable room ownership is exposed as a direct room action."""
+    """Only room-level intents are exposed as direct climate actions."""
 
     def _android(self, observation, **overrides):
         registry, contours, _ = _setup()
@@ -597,14 +602,105 @@ class NativeControlGateTest(unittest.TestCase):
         arguments.update(overrides)
         return native_android_climate_snapshot(bound, observation, **arguments)
 
-    def test_room_control_exposes_only_room_mode(self) -> None:
+    def test_room_control_exposes_target_and_mode_intents(self) -> None:
         registry, contours, _ = _setup()
-        _, observation = _native_observation(registry, contours)
+        scheduled = with_climate_schedule(
+            contours,
+            enabled=True,
+            day_start="07:00",
+            night_start="23:00",
+        )
+        scheduled = with_applied_climate_schedule_profile(
+            scheduled,
+            ClimateProfile.DAY,
+        )
+        _, observation = _native_observation(registry, scheduled)
 
-        result = self._android(observation)
+        result = self._android(
+            observation,
+            contours=scheduled,
+            local_now=datetime(2026, 8, 11, 12, 0, tzinfo=timezone.utc),
+        )
         control = result["rooms"][0]["control"]
 
         self.assertTrue(result["climate"]["commands_enabled"])
+        self.assertTrue(control["enabled"])
+        self.assertEqual(
+            ["set_room_target", "set_room_mode"], control["actions"]
+        )
+        self.assertEqual(
+            ["set_room_target", "set_room_mode"],
+            control["allowed_actions"],
+        )
+        self.assertEqual(
+            {
+                "set_room_target": {
+                    "allowed": True,
+                    "blocked_reasons": [],
+                }
+            },
+            control["action_availability"],
+        )
+        self.assertEqual(
+            {
+                "type": "number",
+                "required": True,
+                "minimum": 18,
+                "maximum": 28,
+                "step": 0.5,
+                "unit": "°C",
+            },
+            control["action_inputs"]["set_room_target"][
+                "target_temperature"
+            ],
+        )
+        self.assertEqual(
+            "Установить температуру",
+            control["action_presentations"]["set_room_target"]["title"],
+        )
+        self.assertEqual([], control["blocked_reasons"])
+
+    def test_target_stays_hidden_when_schedule_is_not_ready(self) -> None:
+        registry, contours, _ = _setup()
+        _, observation = _native_observation(registry, contours)
+
+        control = self._android(
+            observation,
+            local_now=datetime(2026, 8, 11, 12, 0, tzinfo=timezone.utc),
+        )["rooms"][0]["control"]
+
+        self.assertTrue(control["enabled"])
+        self.assertEqual(["set_room_mode"], control["actions"])
+        self.assertEqual(["set_room_mode"], control["allowed_actions"])
+        self.assertEqual({}, control["action_availability"])
+        self.assertEqual({}, control["action_inputs"])
+        self.assertEqual({}, control["action_presentations"])
+        self.assertEqual([], control["blocked_reasons"])
+
+    def test_target_stays_hidden_without_room_authority(self) -> None:
+        registry, contours, _ = _setup()
+        scheduled = with_climate_schedule(
+            contours,
+            enabled=True,
+            day_start="07:00",
+            night_start="23:00",
+        )
+        scheduled = with_applied_climate_schedule_profile(
+            scheduled,
+            ClimateProfile.DAY,
+        )
+        _, observation = _native_observation(registry, scheduled)
+        observation = replace(
+            observation,
+            rooms=(replace(observation.rooms[0], authority_eligible=False),),
+        )
+
+        control = self._android(
+            observation,
+            contours=scheduled,
+            local_now=datetime(2026, 8, 11, 12, 0, tzinfo=timezone.utc),
+        )["rooms"][0]["control"]
+
         self.assertTrue(control["enabled"])
         self.assertEqual(["set_room_mode"], control["actions"])
         self.assertEqual(["set_room_mode"], control["allowed_actions"])

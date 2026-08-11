@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
-from datetime import datetime
+from datetime import datetime, timezone
 import importlib
 import json
 from pathlib import Path
@@ -1759,9 +1759,12 @@ class LocalSummaryAccessTest(unittest.TestCase):
         from custom_components.hausman_hub.application.climate_runtime import ClimateRuntime
         from custom_components.hausman_hub.application.contours import (
             build_climate_contour_setup,
+            with_applied_climate_schedule_profile,
+            with_climate_schedule,
         )
         from custom_components.hausman_hub.domain.climate_bridge import ClimateControlMode
         from custom_components.hausman_hub.domain.configuration import SafeConfiguration
+        from custom_components.hausman_hub.domain.contours import ClimateProfile
         from tests.test_climate_import import source_payload
         from tests.test_climate_runtime import (
             SnapshotStateView,
@@ -1778,6 +1781,16 @@ class LocalSummaryAccessTest(unittest.TestCase):
             target_temperature=25.0,
             target_humidity=45,
             strategy="normal",
+        )
+        contours = with_climate_schedule(
+            contours,
+            enabled=True,
+            day_start="07:00",
+            night_start="23:00",
+        )
+        contours = with_applied_climate_schedule_profile(
+            contours,
+            ClimateProfile.DAY,
         )
         selected_registry = with_native_observation_bindings(selected_registry)
 
@@ -1818,6 +1831,14 @@ class LocalSummaryAccessTest(unittest.TestCase):
             contour_store=ContourStore(),
             ha_state_view=SnapshotStateView(selected_registry, bridge),
             now_ms=lambda: 1784280005000,
+            local_now=lambda: datetime(
+                2026,
+                8,
+                11,
+                12,
+                0,
+                tzinfo=timezone.utc,
+            ),
         )
         asyncio.run(runtime.async_start())
         self.hass.data["hausman_hub"]["climate_runtime"] = runtime
@@ -1845,14 +1866,38 @@ class LocalSummaryAccessTest(unittest.TestCase):
             home_response.payload["contours"][0]["id"],
         )
         living_control = home_response.payload["rooms"][0]["control"]
-        # Device commands remain in the managed loop. The only direct room
-        # action changes durable automatic/manual ownership.
+        # Device commands remain in the managed loop. Public actions express
+        # only room-level temperature and automatic/manual intents.
         self.assertTrue(living_control["enabled"])
-        self.assertEqual(["set_room_mode"], living_control["actions"])
-        self.assertEqual(["set_room_mode"], living_control["allowed_actions"])
-        self.assertEqual({}, living_control["action_availability"])
-        self.assertEqual({}, living_control["action_inputs"])
-        self.assertEqual({}, living_control["action_presentations"])
+        self.assertEqual(
+            ["set_room_target", "set_room_mode"],
+            living_control["actions"],
+        )
+        self.assertEqual(
+            ["set_room_target", "set_room_mode"],
+            living_control["allowed_actions"],
+        )
+        self.assertEqual(
+            {
+                "set_room_target": {
+                    "allowed": True,
+                    "blocked_reasons": [],
+                }
+            },
+            living_control["action_availability"],
+        )
+        self.assertEqual(
+            0.5,
+            living_control["action_inputs"]["set_room_target"][
+                "target_temperature"
+            ]["step"],
+        )
+        self.assertEqual(
+            "Установить температуру",
+            living_control["action_presentations"]["set_room_target"][
+                "title"
+            ],
+        )
         self.assertEqual([], living_control["blocked_reasons"])
         serialized = json.dumps(home_response.payload)
         self.assertNotIn("synthetic-ac-source-living", serialized)
@@ -2575,7 +2620,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.67", panel.payload["integration_version"])
+        self.assertEqual("1.52.68", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",

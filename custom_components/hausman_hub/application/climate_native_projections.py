@@ -241,11 +241,14 @@ def _native_contour_status(
     local_now: datetime,
 ) -> dict[str, object]:
     schedule = _public_schedule(contour.schedule, local_now)
-    schedule_profile = contour.schedule.last_applied_profile
+    schedule_profile = contour.schedule.profile_at(
+        hour=local_now.hour,
+        minute=local_now.minute,
+    )
     schedule_ready = (
         contour.mode is ContourMode.AUTOMATIC
         and contour.schedule.enabled
-        and schedule_profile is not None
+        and contour.schedule.last_applied_profile is schedule_profile
         and all(room.active_profile is schedule_profile for room in contour.rooms)
     )
     fresh = observation is not None and native_runtime_fresh(observation)
@@ -773,6 +776,16 @@ def native_android_climate_snapshot(
         local_now=local_now,
     )["contours"]
     room_saved_profiles = saved_profiles_by_room(public_contours)
+    temporary_temperature_available_by_room = {
+        contour_room["id"]: (
+            isinstance(contour_room.get("temporary_temperature"), dict)
+            and contour_room["temporary_temperature"].get("available") is True
+        )
+        for contour in public_contours
+        if isinstance(contour, dict) and isinstance(contour.get("rooms"), list)
+        for contour_room in contour["rooms"]
+        if isinstance(contour_room, dict) and isinstance(contour_room.get("id"), str)
+    }
 
     rooms: list[dict[str, object]] = []
     room_control_enabled = False
@@ -785,6 +798,9 @@ def native_android_climate_snapshot(
             bridge_mode=bridge_mode,
             pending=room.room_id in pending,
             room_id=room.room_id,
+            temporary_temperature_available=(
+                temporary_temperature_available_by_room.get(room.room_id, False)
+            ),
         )
         room_control_enabled = room_control_enabled or control["enabled"] is True
         rooms.append(
@@ -884,8 +900,9 @@ def _native_room_control_projection(
     bridge_mode: ClimateControlMode,
     pending: bool,
     room_id: str,
+    temporary_temperature_available: bool,
 ) -> dict[str, object]:
-    """Expose durable room ownership while device commands stay managed."""
+    """Expose room intents while individual device commands stay managed."""
 
     reasons: list[str] = []
     if bridge_mode is ClimateControlMode.DISABLED:
@@ -916,14 +933,29 @@ def _native_room_control_projection(
         reasons.append("operation_pending")
 
     blocked_reasons = list(dict.fromkeys(reasons))
-    allowed_actions = [] if blocked_reasons else ["set_room_mode"]
+    allowed_actions: list[str] = []
+    if not blocked_reasons:
+        if temporary_temperature_available:
+            allowed_actions.append("set_room_target")
+        allowed_actions.append("set_room_mode")
+    advertised_target_actions = [
+        action
+        for action in allowed_actions
+        if action in ANDROID_ROOM_CONTROL_ACTIONS
+    ]
     return {
         "enabled": bool(allowed_actions),
         "actions": allowed_actions,
         "allowed_actions": allowed_actions,
-        "action_availability": {},
-        "action_inputs": {},
-        "action_presentations": {},
+        "action_availability": room_action_availability(
+            advertised_target_actions,
+            allowed_actions,
+            blocked_reasons,
+        ),
+        "action_inputs": room_action_inputs(advertised_target_actions),
+        "action_presentations": room_action_presentations(
+            advertised_target_actions
+        ),
         "blocked_reasons": blocked_reasons,
     }
 
