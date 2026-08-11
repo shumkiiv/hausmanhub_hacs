@@ -1690,7 +1690,9 @@ class NativeApplicationRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(2, len(contour_store.saved))
         self.assertEqual(2, len(executor.calls))
 
-    async def test_duplicate_clear_partial_reobserves_without_a_second_batch(self) -> None:
+    async def test_duplicate_temperature_clear_reobserves_without_second_batch(
+        self,
+    ) -> None:
         view = MutableStateView(two_actuator_states())
         executor = ReflectingStrictExecutor(view)
         contour_store = MemoryStore(temporary_two_actuator_contours())
@@ -1742,8 +1744,8 @@ class NativeApplicationRuntimeTest(unittest.IsolatedAsyncioTestCase):
             datetime(2026, 7, 19, 12, 6),
         )
 
-        self.assertIs(first.status, ContourApplyStatus.PARTIAL)
-        self.assertIs(duplicate.status, ContourApplyStatus.PARTIAL)
+        self.assertIs(first.status, ContourApplyStatus.PENDING)
+        self.assertIs(duplicate.status, ContourApplyStatus.PENDING)
         self.assertEqual(2, len(contour_store.saved))
         self.assertEqual(2, len(executor.calls))
 

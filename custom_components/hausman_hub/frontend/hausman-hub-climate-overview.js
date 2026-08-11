@@ -1,8 +1,8 @@
 /* Climate control surface shared with the tablet information architecture. */
 
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.69";
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.69";
-import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.69";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.70";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.70";
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.70";
 
 const CATEGORY_DEFINITIONS = [
   { id: "conditioner", title: "Кондиционеры", icon: "snow", pattern: /кондиционер|air.?condition|smartir|\bac\b/ },

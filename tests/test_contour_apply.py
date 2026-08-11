@@ -17,6 +17,7 @@ from custom_components.hausman_hub.application.contour_apply import (
     ClimateControlContext,
     ContourApplyViolation,
     _ContourApplyLedger,
+    _temperature_only_application_contour,
     build_contour_apply_plan,
     local_desired_state_changes,
     parse_contour_apply_request,
@@ -431,6 +432,41 @@ class NativeClimateApplicationPlannerTest(unittest.TestCase):
         self.assertIs(record, ledger.existing("native-1", plan.fingerprint, context))
         with self.assertRaises(ContourApplyViolation):
             ledger.existing("native-1", "e" * 64, context)
+
+    def test_temperature_plan_excludes_an_unrelated_humidifier(self) -> None:
+        registry, contour, _ = _native_inputs()
+        living = next(room for room in contour.rooms if room.room_id == "living")
+        humidifier = next(
+            device
+            for device in registry.devices
+            if device.kind is ClimateDeviceKind.HUMIDIFIER
+        )
+        moved_humidifier = replace(humidifier, room_id="living")
+        registry = ClimateRegistry(
+            rooms=registry.rooms,
+            devices=tuple(
+                moved_humidifier if device.device_id == humidifier.device_id else device
+                for device in registry.devices
+            ),
+        )
+        contour = replace(
+            contour,
+            rooms=(
+                replace(
+                    living,
+                    device_ids=(*living.device_ids, humidifier.device_id),
+                ),
+            ),
+        )
+
+        scoped = _temperature_only_application_contour(
+            contour,
+            registry,
+            target_room_ids=("living",),
+            desired_state_changes=ClimateDesiredStateChanges(1, 0, 0),
+        )
+
+        self.assertEqual(living.device_ids, scoped.rooms[0].device_ids)
 
 
 class ContourApplyRequestTest(unittest.TestCase):

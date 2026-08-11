@@ -8,7 +8,7 @@ import json
 import re
 import secrets
 import time
-from ..domain.climate import ClimateRegistry
+from ..domain.climate import ClimateDeviceKind, ClimateRegistry
 from ..domain.climate_bridge import ClimateControlMode
 from ..domain.climate_observation import ClimateObservationSnapshot
 from ..domain.contours import (
@@ -476,9 +476,15 @@ def build_contour_apply_plan(
     desired_state_changes: ClimateDesiredStateChanges,
 ) -> ContourApplyPlan:
     assignments = _selected_assignments(contour, room_ids)
+    application_contour = _temperature_only_application_contour(
+        contour,
+        registry,
+        target_room_ids=tuple(assignment.room_id for assignment in assignments),
+        desired_state_changes=desired_state_changes,
+    )
     try:
         native_plan = build_climate_application_plan(
-            contour,
+            application_contour,
             registry,
             bridge_mode,
             observation,
@@ -491,6 +497,43 @@ def build_contour_apply_plan(
     if len(native_plan.strict_calls) > MAX_CONTOUR_APPLY_COMMANDS:
         raise ContourApplyViolation("contour apply has too many strict calls")
     return ContourApplyPlan(native_plan=native_plan)
+
+
+def _temperature_only_application_contour(
+    contour: ContourDefinition,
+    registry: ClimateRegistry,
+    *,
+    target_room_ids: tuple[str, ...],
+    desired_state_changes: ClimateDesiredStateChanges,
+) -> ContourDefinition:
+    """Limit an explicit temperature operation to its actual actuator."""
+
+    if (
+        desired_state_changes.temperature <= 0
+        or desired_state_changes.strategy != 0
+        or desired_state_changes.automatic_mode != 0
+    ):
+        return contour
+    targeted = frozenset(target_room_ids)
+    return replace(
+        contour,
+        rooms=tuple(
+            replace(
+                room,
+                device_ids=tuple(
+                    device_id
+                    for device_id in room.device_ids
+                    if (
+                        (device := registry.device(device_id)) is not None
+                        and device.kind is ClimateDeviceKind.AIR_CONDITIONER
+                    )
+                ),
+            )
+            if room.room_id in targeted
+            else room
+            for room in contour.rooms
+        ),
+    )
 
 
 def local_desired_state_changes(

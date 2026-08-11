@@ -493,20 +493,21 @@ def _native_room_settings_apply_available(
     controlled_air_conditioners = []
     for device_id in assignment.device_ids:
         device = climate_registry.device(device_id)
-        observed = None if device is None else observation.device(device.device_id)
         if (
-            device is None
-            or not _native_device_available(device, observed)
-        ):
-            return False
-        if (
-            device.kind is ClimateDeviceKind.AIR_CONDITIONER
+            device is not None
+            and device.kind is ClimateDeviceKind.AIR_CONDITIONER
             and device.control_owner is ClimateControlOwner.CLIMATE_CORE
             and device.control_scope is ClimateControlScope.MANAGED
             and "climate.set_temperature" in native_device_command_types(device)
         ):
             controlled_air_conditioners.append(device)
-    return len(controlled_air_conditioners) == 1
+    if len(controlled_air_conditioners) != 1:
+        return False
+    air_conditioner = controlled_air_conditioners[0]
+    return _native_device_available(
+        air_conditioner,
+        observation.device(air_conditioner.device_id),
+    )
 
 
 def native_contour_apply_preview(

@@ -43,6 +43,9 @@ from custom_components.hausman_hub.application.contours import (
 from custom_components.hausman_hub.domain.climate_bridge import ClimateControlMode
 from custom_components.hausman_hub.domain.climate_observation import (
     ClimateDataStatus,
+    ClimateDeviceActivity,
+    ClimateDeviceAvailability,
+    ClimatePhysicalFeedback,
 )
 from custom_components.hausman_hub.domain.contours import ClimateProfile
 from custom_components.hausman_hub.domain.climate_protection import (
@@ -674,10 +677,49 @@ class NativeControlGateTest(unittest.TestCase):
         self.assertEqual(
             ["set_room_target", "set_room_mode"], control["allowed_actions"]
         )
-        self.assertTrue(control["action_availability"]["set_room_target"]["allowed"])
+        self.assertTrue(
+            control["action_availability"]["set_room_target"]["allowed"]
+        )
         self.assertIn("set_room_target", control["action_inputs"])
         self.assertIn("set_room_target", control["action_presentations"])
         self.assertEqual([], control["blocked_reasons"])
+
+    def test_unavailable_non_target_device_does_not_hide_temperature(self) -> None:
+        registry, contours, _ = _setup()
+        _, observation = _native_observation(registry, contours)
+        observation = replace(
+            observation,
+            devices=tuple(
+                replace(
+                    device,
+                    availability=ClimateDeviceAvailability.UNAVAILABLE,
+                    activity=ClimateDeviceActivity.UNKNOWN,
+                    current_target_temperature=None,
+                    current_target_humidity=None,
+                    fan_mode=None,
+                    quiet=None,
+                    physical_feedback=ClimatePhysicalFeedback.UNKNOWN,
+                    last_started_at=None,
+                    last_stopped_at=None,
+                    cooling_evidence_confirmed=False,
+                    cooling_rate_per_hour=None,
+                    confirmed_short_cycle_count=None,
+                )
+                if device.device_id == "living_humidity_observation"
+                else device
+                for device in observation.devices
+            ),
+        )
+
+        control = self._android(
+            observation,
+            local_now=datetime(2026, 8, 11, 12, 0, tzinfo=timezone.utc),
+        )["rooms"][0]["control"]
+
+        self.assertEqual(
+            ["set_room_target", "set_room_mode"], control["allowed_actions"]
+        )
+        self.assertTrue(control["action_availability"]["set_room_target"]["allowed"])
 
     def test_target_stays_hidden_when_enabled_schedule_is_not_applied(self) -> None:
         registry, contours, _ = _setup()
