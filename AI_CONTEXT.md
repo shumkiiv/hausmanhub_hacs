@@ -1,8 +1,36 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-11 (frontend: темы вложенных окон и компактная энергия с модальным окном, ветка `kimi/nested-windows-energy-2026-08-11`).
+Last updated: 2026-08-11 (1.52.67: уведомления о новых устройствах в панели; 1.52.66: темы вложенных окон и компактная энергия).
 
 ## Current work
+
+- 2026-08-11 (Kimi): выпущены frontend-релизы `1.52.66` (commit `c37cce2`,
+  tag и GitHub Release `v1.52.66`, GitHub Actions `31467651111` зелёный) и
+  `1.52.67` (commit `e71e89b`, tag и Release `v1.52.67`, Actions зелёный).
+  Работа по handoff `KIMI_HACS_NESTED_WINDOWS_THEME_ENERGY_HANDOFF_2026-08-11.md`
+  и HACS-части `KIMI_ENERGY_METER_DEVICE_DISCOVERY_HANDOFF_2026-08-11.md`
+  (worktree `worktrees/kimi-hacs-theme-energy`, ветка
+  `kimi/nested-windows-energy-2026-08-11`, влита в main fast-forward).
+  1.52.66: общие токены `--hmh-modal-*` для всех вложенных окон обеих тем,
+  модуль `hausman-hub-modal.js` (Escape только верхнее окно, focus trap,
+  возврат фокуса), тематизированный canvas графика энергии с перерисовкой
+  без пересоздания DOM, компактная главная энергии (hero + напоминание +
+  сводка без внутренних прокруток), модальное окно деталей с
+  `hausman-hub-energy-meter.js` (расписание, передача, корректировка,
+  expectedRevision, 409 -> повторный GET, reset_detected без нуля).
+  1.52.67: модуль `hausman-hub-device-discovery.js` - GET при старте и
+  каждом фоновом обновлении, badge на табе «Устройства», карточки новых
+  устройств с причинами рекомендаций, действия acknowledge/assign_area/
+  add_to_energy/show_on_dashboard с per-action pending и явными текстами
+  403/404/409 без общего зелёного fallback. Полный gate: 1328 тестов,
+  4 пропущены. Визуальные проверки harness в headless Chrome (обе темы,
+  1440/1024): `artifacts/hacs-nested-windows-2026-08-11/`, POST-команд
+  устройств не отправлялось. Deploy в production не выполнялся: production
+  остаётся на 1.52.65, установка 1.52.67 за релизным процессом Codex.
+  Android-часть handoff выпущена отдельно как Android 1.0.111 (см.
+  AI_CONTEXT Android-репозитория); совместимая комбинация обновлена в
+  `docs/COMPATIBILITY.md` workspace.
+
 
 - 2026-08-11 (Kimi): frontend панели по handoff
   `docs/migration/KIMI_HACS_NESTED_WINDOWS_THEME_ENERGY_HANDOFF_2026-08-11.md`,
