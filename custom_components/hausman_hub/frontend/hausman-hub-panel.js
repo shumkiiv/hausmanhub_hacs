@@ -9,6 +9,7 @@ import { closeFirstRunAreaCreator, createFirstRunArea, openFirstRunAreaCreator, 
 import { createKioskButton, createKioskDock, handleKioskPointerUp, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, resolveIntercomQuickAction, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.52.66";
 import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.52.66";
 import { loadEnergyMeter } from "./hausman-hub-energy-meter.js?v=1.52.66";
+import { loadDeviceDiscovery, updateDeviceDiscoveryBadge } from "./hausman-hub-device-discovery.js?v=1.52.66";
 import { redrawEnergyChartsForTheme } from "./hausman-hub-energy-chart.js?v=1.52.66";
 import { applyHomeSignalSelection, AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, homeEnvironmentSaveError, homeEnvironmentSourcePayload, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.52.66";
 import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.52.66";
@@ -349,6 +350,14 @@ class HausmanHubPanel extends HTMLElement {
     this._energyMeterSaving = false;
     this._energyMeterError = null;
     this._energyMeterNotice = "";
+    this._deviceDiscovery = null;
+    this._deviceDiscoveryLoading = false;
+    this._deviceDiscoveryError = null;
+    this._deviceDiscoveryPending = null;
+    this._deviceDiscoveryMessages = {};
+    this._deviceDiscoveryNotice = "";
+    this._deviceDiscoveryAreaDrafts = {};
+    this._deviceDiscoveryBadgeNode = null;
     this._energyHistory = null;
     this._energyTodayKwh = null;
     this._energyHistoryLoading = false;
@@ -733,6 +742,7 @@ class HausmanHubPanel extends HTMLElement {
     this._loadingPanel = false;
     this._render();
     if (this._energyMeter === null) loadEnergyMeter(this);
+    loadDeviceDiscovery(this);
     if (this._activeSection === "energy" && this._energyHistory === null) {
       loadEnergyHistory(this);
     }
@@ -1237,6 +1247,7 @@ class HausmanHubPanel extends HTMLElement {
       tab.className = `tab${dirty ? " is-dirty" : ""}`;
       tab.title = dirty ? "Есть несохранённые изменения" : "";
     });
+    updateDeviceDiscoveryBadge(this, { el, setAttr });
     this._syncClimateVisibility();
   }
 
@@ -5581,6 +5592,9 @@ class HausmanHubPanel extends HTMLElement {
         this._energyMeterNotice, this._energyMeterError, this._energyMeterLoading, this._energyMeterSaving] : null,
       securityUi: sectionId === "security" ? this._securityTypeFilter : null,
       devicesUi: sectionId === "devices" ? this._deviceCategoryFilter : null,
+      discoveryUi: sectionId === "devices" ? [this._deviceDiscovery, this._deviceDiscoveryPending,
+        this._deviceDiscoveryMessages, this._deviceDiscoveryNotice, this._deviceDiscoveryError,
+        this._deviceDiscoveryLoading, this._deviceDiscoveryAreaDrafts] : null,
     });
     if (container.childNodes && container.childNodes.length && this._sectionRenderKeys[sectionId] === key) return;
     this._sectionRenderKeys[sectionId] = key;

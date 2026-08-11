@@ -28,6 +28,7 @@ MODAL_JS = PANEL_JS.with_name("hausman-hub-modal.js")
 ENERGY_JS = PANEL_JS.with_name("hausman-hub-energy.js")
 ENERGY_CHART_JS = PANEL_JS.with_name("hausman-hub-energy-chart.js")
 ENERGY_METER_JS = PANEL_JS.with_name("hausman-hub-energy-meter.js")
+DEVICE_DISCOVERY_JS = PANEL_JS.with_name("hausman-hub-device-discovery.js")
 WEATHER_SOURCES_JS = PANEL_JS.with_name("hausman-hub-weather-sources.js")
 SCENARIOS_JS = PANEL_JS.with_name("hausman-hub-scenarios.js")
 SCENARIO_ICONS_JS = PANEL_JS.with_name("hausman-hub-scenario-icons.js")
@@ -367,6 +368,10 @@ def panel_script(get_table: dict, post_table: dict, assertions: str) -> str:
         fs.readFileSync({str(ENERGY_METER_JS)!r}, "utf8")
           .replace(/^import .*;\\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(ENERGY_METER_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(DEVICE_DISCOVERY_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(DEVICE_DISCOVERY_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(ENERGY_JS)!r}, "utf8")

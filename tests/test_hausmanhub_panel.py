@@ -43,6 +43,7 @@ ENERGY_CSS = PANEL_JS.with_name("hausman-hub-energy.css")
 ENERGY_CHART_JS = PANEL_JS.with_name("hausman-hub-energy-chart.js")
 MODAL_JS = PANEL_JS.with_name("hausman-hub-modal.js")
 ENERGY_METER_JS = PANEL_JS.with_name("hausman-hub-energy-meter.js")
+DEVICE_DISCOVERY_JS = PANEL_JS.with_name("hausman-hub-device-discovery.js")
 ENERGY_CHART_CSS = PANEL_JS.with_name("hausman-hub-energy-chart.css")
 WEATHER_SOURCES_JS = PANEL_JS.with_name("hausman-hub-weather-sources.js")
 MEDIA_DEVICE_JS = PANEL_JS.with_name("hausman-hub-media-device.js")
@@ -1030,6 +1031,10 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             {{ filename: {str(ENERGY_METER_JS)!r} }}
           );
           vm.runInThisContext(
+            fs.readFileSync({str(DEVICE_DISCOVERY_JS)!r}, "utf8").replace(/export /g, ""),
+            {{ filename: {str(DEVICE_DISCOVERY_JS)!r} }}
+          );
+          vm.runInThisContext(
             fs.readFileSync({str(MODAL_JS)!r}, "utf8").replace(/export /g, ""),
             {{ filename: {str(MODAL_JS)!r} }}
           );
@@ -1227,6 +1232,10 @@ THEME_TEST_HARNESS = """
     { filename: __ENERGY_METER_JS__ }
   );
   vm.runInThisContext(
+    fs.readFileSync(__DEVICE_DISCOVERY_JS__, "utf8").replace(/export /g, ""),
+    { filename: __DEVICE_DISCOVERY_JS__ }
+  );
+  vm.runInThisContext(
     fs.readFileSync(__MODAL_JS__, "utf8").replace(/export /g, ""),
     { filename: __MODAL_JS__ }
   );
@@ -1280,6 +1289,7 @@ class PanelThemeSwitcherTest(unittest.TestCase):
         script = script.replace("__ENERGY_JS__", repr(str(ENERGY_JS)))
         script = script.replace("__ENERGY_CHART_JS__", repr(str(ENERGY_CHART_JS)))
         script = script.replace("__ENERGY_METER_JS__", repr(str(ENERGY_METER_JS)))
+        script = script.replace("__DEVICE_DISCOVERY_JS__", repr(str(DEVICE_DISCOVERY_JS)))
         script = script.replace("__MODAL_JS__", repr(str(MODAL_JS)))
         script = script.replace("__DEVICE_CARD_JS__", repr(str(DEVICE_CARD_JS)))
         script = script.replace("__MEDIA_DEVICE_JS__", repr(str(MEDIA_DEVICE_JS)))

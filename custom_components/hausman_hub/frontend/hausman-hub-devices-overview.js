@@ -1,6 +1,7 @@
 /* Canonical physical-device catalog shared with the tablet information hierarchy. */
 
 import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.66";
+import { renderDeviceDiscovery } from "./hausman-hub-device-discovery.js?v=1.52.66";
 
 const DEVICE_CATEGORY_META = {
   lighting: { label: "Освещение", icon: "lightbulb" },
@@ -216,6 +217,7 @@ function renderDevicesAside(panel, devices, deps) {
 
 export function renderDevicesOverview(panel, container, deps) {
   container.innerHTML = "";
+  renderDeviceDiscovery(panel, container, deps);
   if (!panel._homeDashboard) {
     const empty = deps.el("section", "card empty-state devices-canon-empty-state");
     empty.appendChild(deps.el("h2", null, "Устройства"));
