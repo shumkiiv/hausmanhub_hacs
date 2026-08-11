@@ -1,8 +1,34 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-11 (1.52.65: показания энергии и discovery устройств).
+Last updated: 2026-08-11 (frontend: темы вложенных окон и компактная энергия с модальным окном, ветка `kimi/nested-windows-energy-2026-08-11`).
 
 ## Current work
+
+- 2026-08-11 (Kimi): frontend панели по handoff
+  `docs/migration/KIMI_HACS_NESTED_WINDOWS_THEME_ENERGY_HANDOFF_2026-08-11.md`,
+  commit `51d96f9` в ветке `kimi/nested-windows-energy-2026-08-11` (worktree
+  `worktrees/kimi-hacs-theme-energy`), без bump версии и без deploy. Добавлены
+  общие токены `--hmh-modal-*` (backdrop, surface, raised, border, shadow) в
+  `hausman-hub-tokens.css` для обеих тем; все 9 вложенных окон (device,
+  climate, lighting, rooms, media, scenarios, energy) переведены на токены,
+  жёсткие тёмные цвета вне tokens.css удалены. Новый модуль
+  `hausman-hub-modal.js`: Escape закрывает только верхнее окно, клик по
+  backdrop, focus trap и возврат фокуса на открывшую карточку. График энергии
+  читает палитру из theme-токенов и перерисовывается при смене темы без
+  пересоздания DOM. Главная страница энергии компактная: hero, напоминание о
+  передаче показаний и сводная карточка без внутренних прокруток; графики,
+  источники, счётчик, история и управление питанием перенесены в модальное
+  окно деталей (role=dialog, aria-modal) с видами overview/device. Новый
+  модуль `hausman-hub-energy-meter.js`: карточка счётчика с расписанием,
+  передачей и корректировкой показаний, expectedRevision и обработкой 409
+  через повторный GET. Harness получил stubs meter API; node-harness тестов
+  грузят новые модули; добавлен `tests/test_hausmanhub_modal_theme.py`.
+  Полный gate: 1319 тестов, 4 пропущены. Визуальная проверка на harness в
+  headless Chrome (обе темы, 1440 и 1024): скриншоты в
+  `artifacts/hacs-nested-windows-2026-08-11/`, POST-команд устройств не
+  отправлялось. Следующий шаг: релизный процесс Codex поднимает версию
+  (ожидается 1.52.66) и деплоит; Kimi живую панель не обновлял.
+
 
 - 2026-08-11 (Codex): выпущена и задеплоена `1.52.65`, commit `b78d4c3`,
   tag и GitHub Release опубликованы. Добавлен durable API
