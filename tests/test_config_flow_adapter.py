@@ -1115,6 +1115,7 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
                 climate_store.registry, BridgeView(bridge)
             ),
             now_ms=lambda: 1784280005000,
+            local_now=lambda: datetime(2026, 7, 17, 12, 20, 5).astimezone(),
         )
         await runtime.async_start()
         options_flow = self.config_flow.HausmanHubOptionsFlow()
