@@ -527,14 +527,25 @@ def climate_tablet_snapshot(
     settings_apply = (
         execution.get("settings_apply") if isinstance(execution, Mapping) else None
     )
-    home_allowed = bool(
+    home_base_allowed = bool(
         not shadow
         and fresh
         and reconciliation_matches
-        and isinstance(settings_apply, Mapping)
-        and settings_apply.get("available") is True
+        and phase == "managed"
+        and isinstance(contour, Mapping)
+        and contour.get("mode") == "automatic"
         and not active_operations
     )
+    home_targets_allowed = bool(
+        home_base_allowed
+        and isinstance(settings_apply, Mapping)
+        and settings_apply.get("available") is True
+    )
+    home_actions = [
+        *(["set_home_targets"] if home_targets_allowed else []),
+        *(["synchronize_home"] if home_base_allowed else []),
+    ]
+    home_allowed = bool(home_actions)
     if home_allowed:
         home_reasons = []
     elif shadow:
@@ -569,11 +580,7 @@ def climate_tablet_snapshot(
         "blocked_reasons": blocked_reasons,
         "home_control": {
             "enabled": home_allowed,
-            "allowed_actions": (
-                ["set_home_targets", "synchronize_home"]
-                if home_allowed
-                else []
-            ),
+            "allowed_actions": home_actions,
             "blocked_reasons": home_reasons,
         },
         "rooms": projected_rooms,
