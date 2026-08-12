@@ -49,6 +49,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .climate_ha_state_view import HomeAssistantClimateStateView
     from .climate_protection_storage import HomeAssistantClimateProtectionStore
     from .climate_manual_storage import HomeAssistantClimateManualStore
+    from .climate_command_guard_storage import HomeAssistantClimateCommandGuardStore
     from .climate_storage import HomeAssistantClimateRegistryStore
     from .contour_storage import HomeAssistantContourStore
     from .application.ir_code_service import IRCodeService
@@ -132,6 +133,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         contour_store=contour_store,
         protection_store=HomeAssistantClimateProtectionStore(hass, entry.entry_id),
         manual_store=HomeAssistantClimateManualStore(hass, entry.entry_id),
+        command_guard_store=HomeAssistantClimateCommandGuardStore(
+            hass, entry.entry_id
+        ),
         strict_ha_call_executor=HomeAssistantClimateCallExecutor(hass),
         ha_state_view=HomeAssistantClimateStateView(hass),
         ha_area_assignment=HomeAssistantAreaAssignmentService(hass),
@@ -157,11 +161,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         climate_tablet = None
     from .ai_assistant_setup import async_start_ai_assistant
     from .climate_schedule import async_start_climate_schedule
+    from .climate_synchronization import async_start_climate_synchronization
     from .climate_shadow import async_start_climate_shadow
     from .climate_trial import async_start_climate_trial
 
     ai_assistant = await async_start_ai_assistant(hass, entry, climate_runtime)
     await async_start_climate_schedule(hass, entry, climate_runtime)
+    await async_start_climate_synchronization(hass, entry, climate_runtime)
     climate_shadow = await async_start_climate_shadow(hass, entry, climate_runtime)
     await async_start_climate_trial(hass, entry, climate_runtime)
 

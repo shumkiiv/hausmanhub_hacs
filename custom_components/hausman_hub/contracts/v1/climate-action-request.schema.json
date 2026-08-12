@@ -20,6 +20,7 @@
     "action": {
       "enum": [
         "set_home_targets",
+        "synchronize_home",
         "set_room_target",
         "clear_room_override",
         "set_room_mode",
@@ -38,6 +39,7 @@
   },
   "allOf": [
     {"if": {"properties": {"action": {"const": "set_home_targets"}}, "required": ["action"]}, "then": {"properties": {"room_id": {"const": null}, "parameters": {"$ref": "#/$defs/home_targets"}}}},
+    {"if": {"properties": {"action": {"const": "synchronize_home"}}, "required": ["action"]}, "then": {"properties": {"room_id": {"const": null}, "parameters": {"$ref": "#/$defs/empty"}}}},
     {"if": {"properties": {"action": {"const": "set_room_target"}}, "required": ["action"]}, "then": {"properties": {"room_id": {"$ref": "#/$defs/room_id"}, "parameters": {"$ref": "#/$defs/room_target"}}}},
     {"if": {"properties": {"action": {"const": "clear_room_override"}}, "required": ["action"]}, "then": {"properties": {"room_id": {"$ref": "#/$defs/room_id"}, "parameters": {"$ref": "#/$defs/empty"}}}},
     {"if": {"properties": {"action": {"const": "set_room_mode"}}, "required": ["action"]}, "then": {"properties": {"room_id": {"$ref": "#/$defs/room_id"}, "parameters": {"$ref": "#/$defs/room_mode"}}}},

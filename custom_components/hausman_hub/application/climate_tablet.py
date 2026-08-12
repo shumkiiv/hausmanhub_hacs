@@ -34,6 +34,7 @@ _STABLE_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _SUPPORTED_ACTIONS = frozenset(
     {
         "set_home_targets",
+        "synchronize_home",
         "set_room_target",
         "set_room_humidity_target",
         "clear_room_override",
@@ -66,6 +67,7 @@ _ROOM_BLOCK_REASON_MAP = {
 _ALL_ACTIONS = frozenset(
     {
         "set_home_targets",
+        "synchronize_home",
         "set_room_target",
         "clear_room_override",
         "set_room_mode",
@@ -128,6 +130,8 @@ class ClimateTabletRuntime(Protocol):
     ) -> object: ...
 
     async def async_home_climate_targets(self, payload: object) -> object: ...
+
+    async def async_synchronize_climate(self) -> object: ...
 
     async def async_room_humidity_target(
         self, *, request_id: str, room_id: str, target_humidity: int
@@ -222,6 +226,9 @@ def parse_climate_tablet_action(payload: object) -> ClimateTabletActionRequest:
             _validate_temperature(normalized["target_temperature"])
         if "target_humidity" in normalized:
             _validate_humidity(normalized["target_humidity"])
+    elif action == "synchronize_home":
+        if room_id is not None or normalized:
+            raise ClimateTabletViolation("home climate synchronization is invalid")
     elif action == "set_room_target":
         _require_room(room_id)
         if set(normalized) != {"target_temperature"}:
@@ -562,7 +569,11 @@ def climate_tablet_snapshot(
         "blocked_reasons": blocked_reasons,
         "home_control": {
             "enabled": home_allowed,
-            "allowed_actions": ["set_home_targets"] if home_allowed else [],
+            "allowed_actions": (
+                ["set_home_targets", "synchronize_home"]
+                if home_allowed
+                else []
+            ),
             "blocked_reasons": home_reasons,
         },
         "rooms": projected_rooms,
@@ -797,6 +808,8 @@ class ClimateTabletService:
                     "confirm": True,
                 }
             )
+        if request.action == "synchronize_home":
+            return await self._runtime.async_synchronize_climate()
         if request.action == "set_room_mode":
             return await self._runtime.async_set_room_mode(
                 request.room_id,
@@ -1061,7 +1074,7 @@ def _require_action_allowed(
         raise ClimateTabletViolation(
             "climate action is not available", code="climate_action_unsupported"
         )
-    if request.action == "set_home_targets":
+    if request.action in {"set_home_targets", "synchronize_home"}:
         control = snapshot.get("home_control")
     else:
         rooms = snapshot.get("rooms")
@@ -1179,6 +1192,8 @@ def _request_matches_snapshot(
             ):
                 return False
         return True
+    if request.action == "synchronize_home":
+        return snapshot.get("fresh") is True
     room = next(
         (
             item

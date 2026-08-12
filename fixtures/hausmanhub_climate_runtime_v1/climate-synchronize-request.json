@@ -1,0 +1,8 @@
+{
+  "contract": {"name": "hausman-hub-climate-action-request", "version": 1},
+  "request_id": "tablet.climate.sync.0001",
+  "expected_state_revision": 43,
+  "action": "synchronize_home",
+  "room_id": null,
+  "parameters": {}
+}

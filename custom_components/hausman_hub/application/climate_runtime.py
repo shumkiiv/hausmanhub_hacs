@@ -16,6 +16,7 @@ from ..domain.climate import (
     ClimateEndpointRole,
     ClimateRegistry,
 )
+from ..domain.climate_command_guard import ClimateCommandGuardMemory
 from ..domain.ai_assistant_json import AiJsonObject
 from ..domain.climate_comparison import ClimateComparisonSnapshot
 from ..domain.climate_demand import ClimateDemandSnapshot
@@ -47,6 +48,17 @@ from ..domain.contours import ContourDefinition, ContourMode, ContourRegistry
 from ..domain.native_climate import NativeClimatePolicy, preview_native_climate
 from ..domain.climate_targets import ClimateTargetSnapshot
 from .climate_application import ClimateDesiredStateChanges
+from .climate_command_guard import (
+    GuardedDeviceCalls,
+    climate_call_is_satisfied,
+    clear_aligned_climate_commands,
+    empty_climate_command_guard,
+    full_climate_synchronization_plan,
+    guard_diverged_climate_calls,
+    reconcile_climate_command_guard,
+    reserve_guarded_commands,
+    reserve_scheduled_synchronization,
+)
 from .climate_area_assignment import (
     ClimateAreaAssignmentPort,
     climate_area_assignment_targets,
@@ -231,6 +243,16 @@ class ClimateManualStorage(Protocol):
         """Atomically save one complete manual-control memory."""
 
 
+class ClimateCommandGuardStorage(Protocol):
+    """Minimal persistence boundary for repeated-command suppression."""
+
+    async def async_load(self) -> ClimateCommandGuardMemory | None:
+        """Load validated command guard memory when it exists."""
+
+    async def async_save(self, memory: ClimateCommandGuardMemory) -> None:
+        """Atomically save one complete command guard memory."""
+
+
 class ClimateStrictHaCallExecutor(Protocol):
     """Minimal execution boundary for one permitted strict HA batch."""
 
@@ -255,6 +277,15 @@ class _ClimateRoomModeReceipt:
     accepted_count: int = 1
 
 
+@dataclass(frozen=True, slots=True)
+class _ClimateSynchronizationResult:
+    """Minimal typed result consumed by the tablet operation layer."""
+
+    status: ContourApplyStatus
+    confirmed_room_count: int
+    accepted_count: int
+
+
 class ClimateRuntime:
     """One loaded HausmanHub entry's climate facade and rollout state."""
 
@@ -267,6 +298,7 @@ class ClimateRuntime:
         contour_store: ContourStorage | None = None,
         protection_store: ClimateProtectionStorage | None = None,
         manual_store: ClimateManualStorage | None = None,
+        command_guard_store: ClimateCommandGuardStorage | None = None,
         strict_ha_call_executor: ClimateStrictHaCallExecutor | None = None,
         ha_state_view: ClimateHaStateView | None = None,
         ha_area_assignment: ClimateAreaAssignmentPort | None = None,
@@ -281,6 +313,7 @@ class ClimateRuntime:
         self._contour_store = contour_store
         self._protection_store = protection_store
         self._manual_store = manual_store
+        self._command_guard_store = command_guard_store
         self._strict_ha_call_executor = strict_ha_call_executor
         self._ha_state_view = ha_state_view
         self._ha_area_assignment = ha_area_assignment
@@ -291,6 +324,7 @@ class ClimateRuntime:
         self._contours = ContourRegistry()
         self._protection_memory = empty_climate_protection_memory(updated_at=0)
         self._manual_memory = empty_climate_manual_memory(updated_at=0)
+        self._command_guard_memory = empty_climate_command_guard(updated_at=0)
         self._protection_restart_after: int | None = None
         self._weather_heating_lockout: bool | None = None
         self._central_heating_on: bool | None = None
@@ -393,6 +427,24 @@ class ClimateRuntime:
                 self._manual_memory = manual
                 if loaded_manual is None or manual_changed:
                     await self._async_save_manual(self._manual_memory)
+                loaded_command_guard = (
+                    await self._command_guard_store.async_load()
+                    if self._command_guard_store is not None
+                    else None
+                )
+                command_guard = loaded_command_guard or empty_climate_command_guard(
+                    updated_at=now
+                )
+                command_guard, command_guard_changed = (
+                    reconcile_climate_command_guard(
+                        command_guard,
+                        self._registry,
+                        now_ms=now,
+                    )
+                )
+                self._command_guard_memory = command_guard
+                if loaded_command_guard is None or command_guard_changed:
+                    await self._async_save_command_guard(command_guard)
                 self.last_error = None
             except Exception as error:
                 # Base HausmanHub remains available; climate endpoints fail closed and
@@ -1534,16 +1586,23 @@ class ClimateRuntime:
                 isolation,
                 ir_code_service=self._ir_code_service,
             )
+            await self._async_rearm_command_guard(comparison)
+            guarded = self._guard_diverged_calls(call_plan, comparison)
             decision = plan_climate_trial(
                 trial_room_id,
                 bridge_mode=self.configuration.climate_bridge_mode,
                 contour_mode=contour.mode,
                 isolation=isolation,
                 comparison=comparison,
-                call_plan=call_plan,
+                call_plan=guarded.call_plan,
                 registry=self._registry,
             )
-            return await self._async_apply_trial_decision(decision)
+            devices = tuple(
+                device
+                for device in guarded.devices
+                if device.room_id == trial_room_id
+            )
+            return await self._async_apply_trial_decision(decision, devices)
 
     async def async_run_climate_managed(
         self,
@@ -1566,6 +1625,8 @@ class ClimateRuntime:
                 isolation,
                 ir_code_service=self._ir_code_service,
             )
+            await self._async_rearm_command_guard(comparison)
+            guarded = self._guard_diverged_calls(call_plan, comparison)
             receipts: list[ClimateTrialReceipt] = []
             for room_id in managed_room_ids:
                 decision = plan_climate_trial(
@@ -1574,15 +1635,149 @@ class ClimateRuntime:
                     contour_mode=contour.mode,
                     isolation=isolation,
                     comparison=comparison,
-                    call_plan=call_plan,
+                    call_plan=guarded.call_plan,
                     registry=self._registry,
                     required_scope=ClimateControlScope.MANAGED,
                     allowed_bridge_modes=frozenset(
                         {ClimateControlMode.MANAGED}
                     ),
                 )
-                receipts.append(await self._async_apply_trial_decision(decision))
+                devices = tuple(
+                    device
+                    for device in guarded.devices
+                    if device.room_id == room_id
+                )
+                receipts.append(
+                    await self._async_apply_trial_decision(decision, devices)
+                )
             return tuple(receipts)
+
+    async def async_synchronize_climate(self) -> _ClimateSynchronizationResult:
+        """Explicitly send every saved active setting to automatic devices."""
+
+        async with self._lock:
+            return await self._async_synchronize_climate_unlocked()
+
+    async def async_run_scheduled_climate_synchronization(
+        self,
+        now: datetime,
+    ) -> _ClimateSynchronizationResult | None:
+        """Run one restart-safe local 10:00 or 22:00 synchronization slot."""
+
+        if not isinstance(now, datetime):
+            raise ClimateRuntimeUnavailable(
+                "climate synchronization requires local datetime"
+            )
+        if now.hour not in {10, 22} or now.minute != 0:
+            return None
+        slot = f"{now:%Y-%m-%dT%H}:00"
+        async with self._lock:
+            reserved, changed = reserve_scheduled_synchronization(
+                self._command_guard_memory,
+                slot=slot,
+                reserved_at=self._safe_now(),
+            )
+            if not changed:
+                return None
+            await self._async_save_command_guard(reserved)
+            self._command_guard_memory = reserved
+            return await self._async_synchronize_climate_unlocked()
+
+    async def _async_synchronize_climate_unlocked(
+        self,
+    ) -> _ClimateSynchronizationResult:
+        self._require_native_contour_apply_mode()
+        contour = contour_without_manual_devices(
+            self._climate_contour(), self._manual_memory
+        )
+        if contour.mode is not ContourMode.AUTOMATIC:
+            raise ClimateRuntimeUnavailable(
+                "climate synchronization requires automatic contour mode"
+            )
+        room_ids = self._managed_room_ids(contour)
+        if not room_ids:
+            return _ClimateSynchronizationResult(
+                status=ContourApplyStatus.CONFIRMED,
+                confirmed_room_count=0,
+                accepted_count=0,
+            )
+        observation = await self._async_native_climate_observation_unlocked()
+        isolation = build_isolated_climate_policy_snapshot(contour, observation)
+        call_plan = build_climate_ha_call_plan(
+            self._registry,
+            isolation,
+            ir_code_service=self._ir_code_service,
+        )
+        synchronization = full_climate_synchronization_plan(
+            call_plan,
+            room_ids=room_ids,
+        )
+        calls = tuple(
+            call
+            for device in synchronization.devices
+            for call in device.calls
+        )
+        if not calls:
+            return _ClimateSynchronizationResult(
+                status=ContourApplyStatus.UNAVAILABLE,
+                confirmed_room_count=0,
+                accepted_count=0,
+            )
+        if self._strict_ha_call_executor is None:
+            return _ClimateSynchronizationResult(
+                status=ContourApplyStatus.UNAVAILABLE,
+                confirmed_room_count=0,
+                accepted_count=0,
+            )
+        await self._async_reserve_guarded_commands(synchronization.devices)
+        try:
+            executed = await self._strict_ha_call_executor.async_execute(calls)
+        except Exception as error:
+            self.last_error = type(error).__name__
+            executed = _bounded_completed_count(
+                getattr(error, "completed", 0),
+                len(calls),
+            )
+            await self._async_record_direct_wifi_commands(
+                calls,
+                executed_count=executed,
+            )
+            return _ClimateSynchronizationResult(
+                status=(
+                    ContourApplyStatus.PARTIAL
+                    if executed
+                    else ContourApplyStatus.UNAVAILABLE
+                ),
+                confirmed_room_count=0,
+                accepted_count=executed,
+            )
+        executed = _bounded_completed_count(executed, len(calls))
+        await self._async_record_direct_wifi_commands(
+            calls,
+            executed_count=executed,
+        )
+        if executed != len(calls):
+            return _ClimateSynchronizationResult(
+                status=(
+                    ContourApplyStatus.PARTIAL
+                    if executed
+                    else ContourApplyStatus.UNAVAILABLE
+                ),
+                confirmed_room_count=0,
+                accepted_count=executed,
+            )
+        confirmed_rooms = self._confirmed_synchronization_rooms(
+            synchronization.devices
+        )
+        return _ClimateSynchronizationResult(
+            status=(
+                ContourApplyStatus.CONFIRMED
+                if confirmed_rooms == len(room_ids)
+                else ContourApplyStatus.PARTIAL
+            ),
+            confirmed_room_count=confirmed_rooms,
+            accepted_count=executed,
+        )
 
     async def async_climate_promote_room(
         self,
@@ -1684,6 +1879,7 @@ class ClimateRuntime:
     async def _async_apply_trial_decision(
         self,
         decision,
+        devices: tuple[GuardedDeviceCalls, ...],
     ) -> ClimateTrialReceipt:
         if not decision.permitted:
             return climate_trial_skip_receipt(decision)
@@ -1691,6 +1887,15 @@ class ClimateRuntime:
             return climate_trial_failure_receipt(
                 decision,
                 reason=ClimateTrialReason.EXECUTOR_UNAVAILABLE,
+                executed_count=0,
+            )
+        try:
+            await self._async_reserve_guarded_commands(devices)
+        except Exception as error:
+            self.last_error = type(error).__name__
+            return climate_trial_failure_receipt(
+                decision,
+                reason=ClimateTrialReason.SERVICE_ERROR,
                 executed_count=0,
             )
         try:
@@ -2307,6 +2512,76 @@ class ClimateRuntime:
     ) -> None:
         if self._manual_store is not None:
             await self._manual_store.async_save(memory)
+
+    async def _async_save_command_guard(
+        self,
+        memory: ClimateCommandGuardMemory,
+    ) -> None:
+        if self._command_guard_store is not None:
+            await self._command_guard_store.async_save(memory)
+
+    async def _async_rearm_command_guard(
+        self,
+        comparison: ClimateComparisonSnapshot,
+    ) -> None:
+        updated, changed = clear_aligned_climate_commands(
+            self._command_guard_memory,
+            comparison,
+            now_ms=self._safe_now(),
+        )
+        if changed:
+            await self._async_save_command_guard(updated)
+            self._command_guard_memory = updated
+
+    def _guard_diverged_calls(
+        self,
+        call_plan: ClimateHaCallPlanSnapshot,
+        comparison: ClimateComparisonSnapshot,
+    ):
+        view = self._ha_state_view
+        return guard_diverged_climate_calls(
+            call_plan,
+            comparison,
+            state_lookup=(
+                (lambda _entity_id: None)
+                if view is None
+                else view.entity_state
+            ),
+            memory=self._command_guard_memory,
+        )
+
+    async def _async_reserve_guarded_commands(
+        self,
+        devices: tuple[GuardedDeviceCalls, ...],
+    ) -> None:
+        if not devices:
+            return
+        reserved = reserve_guarded_commands(
+            self._command_guard_memory,
+            devices,
+            attempted_at=self._safe_now(),
+        )
+        await self._async_save_command_guard(reserved)
+        self._command_guard_memory = reserved
+
+    def _confirmed_synchronization_rooms(
+        self,
+        devices: tuple[GuardedDeviceCalls, ...],
+    ) -> int:
+        view = self._ha_state_view
+        if view is None:
+            return 0
+        by_room: dict[str, list[GuardedDeviceCalls]] = {}
+        for device in devices:
+            by_room.setdefault(device.room_id, []).append(device)
+        return sum(
+            all(
+                climate_call_is_satisfied(call, view.entity_state)
+                for device in room_devices
+                for call in device.calls
+            )
+            for room_devices in by_room.values()
+        )
 
     async def _async_record_direct_wifi_commands(
         self,

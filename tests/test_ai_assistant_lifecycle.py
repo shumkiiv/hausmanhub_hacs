@@ -56,6 +56,9 @@ class AiAssistantLifecycleTest(unittest.TestCase):
         cls.schedule = importlib.import_module(
             "custom_components.hausman_hub.ai_assistant_schedule"
         )
+        cls.climate_synchronization = importlib.import_module(
+            "custom_components.hausman_hub.climate_synchronization"
+        )
         cls.setup = importlib.import_module("custom_components.hausman_hub.ai_assistant_setup")
 
     @classmethod
@@ -86,6 +89,36 @@ class AiAssistantLifecycleTest(unittest.TestCase):
             )
 
         self.assertEqual(timedelta(hours=2), calls[0][1])
+        self.assertEqual(1, len(entry.unload_callbacks))
+        entry.process_unload_callbacks()
+        self.assertEqual([True], cancelled)
+
+    def test_climate_synchronization_registers_two_exact_local_slots(self) -> None:
+        hass = FakeHomeAssistant()
+        entry = FakeEntry({}, {})
+        calls: list[dict[str, object]] = []
+        cancelled: list[bool] = []
+
+        def track_time_change(_, action, **time_match):
+            calls.append({"action": action, **time_match})
+            return lambda: cancelled.append(True)
+
+        with patch.object(
+            self.climate_synchronization,
+            "async_track_time_change",
+            track_time_change,
+        ):
+            asyncio.run(
+                self.climate_synchronization.async_start_climate_synchronization(
+                    hass,
+                    entry,
+                    object(),
+                )
+            )
+
+        self.assertEqual((10, 22), calls[0]["hour"])
+        self.assertEqual(0, calls[0]["minute"])
+        self.assertEqual(0, calls[0]["second"])
         self.assertEqual(1, len(entry.unload_callbacks))
         entry.process_unload_callbacks()
         self.assertEqual([True], cancelled)

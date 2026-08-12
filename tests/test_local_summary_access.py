@@ -394,6 +394,18 @@ def fake_home_assistant_modules() -> dict[str, ModuleType]:
         return lambda: None
 
     event.async_track_time_interval = async_track_time_interval  # type: ignore[attr-defined]
+
+    def async_track_time_change(
+        hass: object,
+        action: object,
+        **time_match: object,
+    ) -> object:
+        """Record no clock activity while returning the normal cancel callback."""
+
+        del hass, action, time_match
+        return lambda: None
+
+    event.async_track_time_change = async_track_time_change  # type: ignore[attr-defined]
     start = ModuleType("homeassistant.helpers.start")
 
     def async_at_started(hass: object, startup_callback: object) -> None:
@@ -2639,7 +2651,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.76", panel.payload["integration_version"])
+        self.assertEqual("1.52.77", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
