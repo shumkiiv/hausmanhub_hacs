@@ -1,8 +1,22 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-12 (1.52.80: HACS home dashboard parity with Android).
+Last updated: 2026-08-12 (1.52.81: сценарный event-триггер в HACS-редакторе).
 
 ## Current work
+
+- 2026-08-12 (Codex): HACS `1.52.81` выпущен из commit `2536c73` и
+  опубликован как GitHub Release `v1.52.81`. Редактор сценариев получил тип
+  «Внешнее событие» для уже существующего backend-триггера `event`: точный
+  custom event type и необязательный JSON-фильтр до 12 scalar-полей. UI
+  повторяет fail-closed правила backend, поэтому системные HA events,
+  вложенные, невалидные и чрезмерные фильтры не сохраняются. Full release
+  gate: 1367 тестов, 4 пропущены, package, Android compatibility и safety
+  зелёные. Production HA 2026.8.1 обновлён после автоматического backup:
+  config check вызван, restart завершён, installed/latest `v1.52.81`, cache
+  marker сценариев `1.52.81`, unavailable сущностей нет. Автоматическое
+  закрытие воды не создано и не включено: физическое направление реле и
+  получатель уведомлений ещё не подтверждены. Сценарии, климатические команды
+  и автомат 233 при релизе не запускались.
 
 - 2026-08-12 (Codex): HACS `1.52.80` выпущен из commit `1ffb24e` и
   опубликован как GitHub Release `v1.52.80`. Главная панель собрана в том же
