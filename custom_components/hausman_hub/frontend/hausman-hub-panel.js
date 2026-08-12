@@ -28,6 +28,7 @@ import { renderKiosk } from "./hausman-hub-kiosk.js?v=1.52.56";
 import { captureRoomValidation, clearFirstRunDraft, persistFirstRunDraft, reconcileRoomValidation, restoreFirstRunDraft, resumeFirstRunDraft } from "./hausman-hub-first-run-draft.js?v=1.52.56";
 import { applyTabletProfile, isIntercomQuickAccessVisible, renderAppearanceSettings, renderIntercomSettings, syncIntercomQuickAccess } from "./hausman-hub-settings-profile.js?v=1.52.56";
 import { renderSettingsRooms, saveRoomType } from "./hausman-hub-settings-rooms.js?v=1.52.56";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.56";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
 const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css?v=1.52.56";
@@ -6105,11 +6106,17 @@ class HausmanHubPanel extends HTMLElement {
   _renderSettings(container) {
     container.innerHTML = "";
     const activeView = SETTINGS_VIEWS.find((view) => view.id === this._activeSettingsView) || SETTINGS_VIEWS[0];
-    const heading = el("div", "settings-heading");
-    heading.appendChild(el("div", "settings-heading-eyebrow", "Настройки HausmanHub"));
-    heading.appendChild(el("h2", null, activeView.label));
-    heading.appendChild(el("div", "section-intro", activeView.description));
-    container.appendChild(heading);
+    container.appendChild(createLibraryHero(this, {
+      eyebrow: "ПАРАМЕТРЫ СИСТЕМЫ",
+      title: activeView.label,
+      subtitle: activeView.description,
+      statusLabel: this._tabletProfile ? "Профиль загружен" : "Профиль проверяется",
+      facts: [
+        { label: "РАЗДЕЛ", value: activeView.label },
+        { label: "ПРОФИЛЬ", value: this._tabletProfile ? "Готов" : "Загрузка" },
+        { label: "ИСТОЧНИК", value: "Home Assistant" },
+      ],
+    }, { el }));
     const nav = el("nav", "settings-subnav");
     setAttr(nav, "aria-label", "Разделы настроек");
     SETTINGS_VIEWS.forEach((view) => {

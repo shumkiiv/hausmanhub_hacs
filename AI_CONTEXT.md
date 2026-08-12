@@ -1,8 +1,18 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-09 (1.52.56: движок расписаний сценариев time/sunrise/sunset, API ближайших событий, домофон из панели, тема день/ночь панели).
+Last updated: 2026-08-12 (не выпущенная UI-синхронизация Devices и Section Header).
 
 ## Current work
+
+- 2026-08-12 (Codex, прямое поручение владельца): HACS UI синхронизирован с
+  новым Figma Devices canon `HMH II:1027:142`. `createLibraryHero()` получил
+  semantic status-pill, Settings переведены на этот hero. Physical device card
+  показывает «На связи» или «Нет связи» в компактном pill и открывается всей
+  карточкой в существующий detail sheet. Offline не показывает ложную команду.
+  Стили карточки изолированы в `hausman-hub-device-card.css`, чтобы не
+  превышать лимит panel CSS. API, backend, contracts, storage и выполнение
+  команд не менялись. `git diff --check`, Node syntax checks и целевые pytest
+  пройдены. Версия не менялась, release и deploy не выполнялись.
 
 - 2026-08-09 (Kimi): выпущена и задеплоена `1.52.56` — движок расписаний
   сценариев (триггеры time/sunrise/sunset, `scenario_schedule.py`, contract
