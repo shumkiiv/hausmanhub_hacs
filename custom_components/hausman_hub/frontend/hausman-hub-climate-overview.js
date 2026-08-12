@@ -39,6 +39,37 @@ export async function setClimateManualMode(panel, roomId, deviceId, manual) {
   }
 }
 
+export async function setClimateRoomTarget(panel, roomId, action, parameter, value) {
+  if (panel._busy || !panel._climateRuntime || !Number.isFinite(value)) return false;
+  panel._busy = true;
+  panel._climateModePendingKey = `${roomId}:${action}`;
+  panel._notice = "Сохраняем климатическую цель...";
+  panel._render();
+  try {
+    const receipt = await panel._hass.callApi("POST", CLIMATE_ACTION_API, {
+      contract: { name: "hausman-hub-climate-action-request", version: 1 },
+      request_id: `hacs.climate.${Date.now().toString(36)}`,
+      expected_state_revision: panel._climateRuntime.state_revision,
+      action,
+      room_id: roomId,
+      parameters: { [parameter]: value },
+    });
+    if (!receipt || receipt.confirmed !== true) throw new Error("climate target was not confirmed");
+    panel._notice = action === "set_room_target" ? "Целевая температура подтверждена." : "Целевая влажность подтверждена.";
+    panel._error = false;
+    await panel._load();
+    return true;
+  } catch (error) {
+    panel._notice = "Цель не изменена. Обновите состояние и повторите действие.";
+    panel._error = true;
+    return false;
+  } finally {
+    panel._busy = false;
+    panel._climateModePendingKey = null;
+    panel._render();
+  }
+}
+
 const CATEGORY_DEFINITIONS = [
   { id: "conditioner", title: "Кондиционеры", icon: "snow", pattern: /кондиционер|air.?condition|smartir|\bac\b/ },
   { id: "trv", title: "Термоголовки", icon: "thermometer", pattern: /термоголов|радиатор|radiator|thermostatic|\btrv\b/ },
@@ -414,6 +445,42 @@ function renderRooms(panel, container, rooms, devices, deps) {
       facts.appendChild(fact);
     });
     card.appendChild(facts);
+    const targetControls = managedRoom && managedRoom.control;
+    const allowedTargets = targetControls && Array.isArray(targetControls.allowed_actions)
+      ? targetControls.allowed_actions : [];
+    const inputs = targetControls && targetControls.action_inputs || {};
+    const addTargetControl = (action, parameter, label, current, fallback) => {
+      if (!allowedTargets.includes(action)) return;
+      const spec = inputs[action] && inputs[action][parameter];
+      if (!spec || typeof current !== "number") return;
+      const field = el("label", "climate-target-field", label);
+      const input = el("input");
+      input.type = "number";
+      input.value = String(current);
+      input.min = String(spec.minimum);
+      input.max = String(spec.maximum);
+      input.step = String(spec.step);
+      input.disabled = Boolean(panel._climateModePendingKey);
+      field.appendChild(input);
+      const save = el("button", "secondary", panel._climateModePendingKey === `${room.id}:${action}` ? "Сохраняем..." : "Установить");
+      save.type = "button";
+      save.disabled = Boolean(panel._climateModePendingKey);
+      save.addEventListener("click", (event) => {
+        event.stopPropagation?.();
+        const next = Number(input.value);
+        if (!Number.isFinite(next) || next < spec.minimum || next > spec.maximum || ((next - spec.minimum) / spec.step) % 1 !== 0) {
+          panel._notice = `Введите ${label.toLocaleLowerCase("ru")} от ${spec.minimum} до ${spec.maximum}${fallback}.`;
+          panel._error = true;
+          panel._render();
+          return;
+        }
+        setClimateRoomTarget(panel, room.id, action, parameter, next);
+      });
+      field.appendChild(save);
+      card.appendChild(field);
+    };
+    addTargetControl("set_room_target", "target_temperature", "Целевая температура, °C", managedRoom.target_temperature, " °C");
+    addTargetControl("set_room_humidity_target", "target_humidity", "Целевая влажность, %", managedRoom.target_humidity, " %");
     const actions = el("div", "climate-room-actions");
     const open = el("button", "climate-room-open", "Открыть устройства ›");
     open.type = "button";

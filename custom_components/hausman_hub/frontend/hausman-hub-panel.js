@@ -5592,6 +5592,7 @@ class HausmanHubPanel extends HTMLElement {
     const dashboard = this._homeDashboard || null;
     const key = JSON.stringify({
       dashboard,
+      climateRuntime: sectionId === "climate" ? this._climateRuntime : null,
       sectionId,
       meterStatus: this._energyMeter && this._energyMeter.submission
         ? [this._energyMeter.submission.status, this._energyMeter.submission.nextDate] : null,

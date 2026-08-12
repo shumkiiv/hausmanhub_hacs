@@ -12,6 +12,9 @@ import hashlib
 import json
 
 from ..domain.contours import (
+    CLIMATE_TARGET_HUMIDITY_MAXIMUM,
+    CLIMATE_TARGET_HUMIDITY_MINIMUM,
+    CLIMATE_TARGET_HUMIDITY_STEP,
     CLIMATE_TARGET_TEMPERATURE_MAXIMUM as CLIMATE_TEMPERATURE_MAXIMUM,
     CLIMATE_TARGET_TEMPERATURE_MINIMUM as CLIMATE_TEMPERATURE_MINIMUM,
     CLIMATE_TARGET_TEMPERATURE_STEP as CLIMATE_TEMPERATURE_STEP,
@@ -22,10 +25,12 @@ ANDROID_CLIMATE_CONTRACT_VERSION = 12
 ANDROID_STATE_REVISION_MAXIMUM = 9_007_199_254_740_991
 ANDROID_ROOM_CONTROL_ACTIONS = (
     "set_room_target",
+    "set_room_humidity_target",
     "turn_room_off",
 )
 ROOM_ACTION_COMMAND_TYPES = {
     "set_room_target": "climate.set_temperature",
+    "set_room_humidity_target": "humidifier.set_humidity",
     "turn_room_off": "climate.turn_off",
 }
 
@@ -101,10 +106,9 @@ def room_action_availability(
 def room_action_inputs(actions: Collection[str]) -> dict[str, object]:
     """Describe only the typed values accepted by the advertised actions."""
 
-    if "set_room_target" not in actions:
-        return {}
-    return {
-        "set_room_target": {
+    result: dict[str, object] = {}
+    if "set_room_target" in actions:
+        result["set_room_target"] = {
             "target_temperature": {
                 "type": "number",
                 "required": True,
@@ -114,7 +118,18 @@ def room_action_inputs(actions: Collection[str]) -> dict[str, object]:
                 "unit": "°C",
             }
         }
-    }
+    if "set_room_humidity_target" in actions:
+        result["set_room_humidity_target"] = {
+            "target_humidity": {
+                "type": "integer",
+                "required": True,
+                "minimum": CLIMATE_TARGET_HUMIDITY_MINIMUM,
+                "maximum": CLIMATE_TARGET_HUMIDITY_MAXIMUM,
+                "step": CLIMATE_TARGET_HUMIDITY_STEP,
+                "unit": "%",
+            }
+        }
+    return result
 
 
 def room_action_presentations(actions: Collection[str]) -> dict[str, object]:
@@ -132,6 +147,18 @@ def room_action_presentations(actions: Collection[str]) -> dict[str, object]:
                     "description": (
                         "Значение, которое должен поддерживать климатический контур."
                     ),
+                }
+            },
+        }
+    if "set_room_humidity_target" in actions:
+        presentations["set_room_humidity_target"] = {
+            "title": "Установить влажность",
+            "description": "Изменить желаемую влажность в комнате.",
+            "confirmation_required": False,
+            "fields": {
+                "target_humidity": {
+                    "title": "Желаемая влажность",
+                    "description": "Значение, которое должен поддерживать климатический контур.",
                 }
             },
         }

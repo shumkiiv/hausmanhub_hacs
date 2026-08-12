@@ -940,19 +940,24 @@ def _native_room_control_projection(
 
     mode_reasons: list[str] = []
     target_reasons: list[str] = []
+    humidity_reasons: list[str] = []
     if bridge_mode is ClimateControlMode.DISABLED:
         mode_reasons.append("bridge_disabled")
         target_reasons.append("bridge_disabled")
+        humidity_reasons.append("bridge_disabled")
 
     if not native_runtime_fresh(observation):
         mode_reasons.append("state_stale")
         target_reasons.append("state_stale")
+        humidity_reasons.append("state_stale")
     observed_room = observation.room(room_id)
     if observed_room is None:
         mode_reasons.append("registry_mismatch")
         target_reasons.append("registry_mismatch")
+        humidity_reasons.append("registry_mismatch")
     elif observed_room.mode is ClimateRoomMode.MANUAL:
         target_reasons.append("authority_not_ready")
+        humidity_reasons.append("authority_not_ready")
     controlled = [
         device
         for device in registry.devices
@@ -971,18 +976,37 @@ def _native_room_control_projection(
             target_reasons.append("registry_mismatch")
         elif observed_device.availability is not ClimateDeviceAvailability.AVAILABLE:
             target_reasons.append("device_unavailable")
+    humidifiers = [
+        device
+        for device in registry.devices
+        if device.room_id == room_id
+        and device.kind is ClimateDeviceKind.HUMIDIFIER
+        and device.control_owner is ClimateControlOwner.CLIMATE_CORE
+        and device.control_scope is not ClimateControlScope.OBSERVED
+    ]
+    if len(humidifiers) != 1:
+        humidity_reasons.append("registry_mismatch")
+    else:
+        if humidifiers[0].device_id in manual_device_ids:
+            humidity_reasons.append("authority_not_ready")
+        observed_humidifier = observation.device(humidifiers[0].device_id)
+        if observed_humidifier is None or observed_humidifier.room_id != room_id:
+            humidity_reasons.append("registry_mismatch")
+        elif observed_humidifier.availability is not ClimateDeviceAvailability.AVAILABLE:
+            humidity_reasons.append("device_unavailable")
     if pending:
         mode_reasons.append("operation_pending")
         target_reasons.append("operation_pending")
+        humidity_reasons.append("operation_pending")
 
     allowed_actions: list[str] = []
     if not target_reasons and temporary_temperature_available:
         allowed_actions.append("set_room_target")
+    if not humidity_reasons:
+        allowed_actions.append("set_room_humidity_target")
     if not mode_reasons:
         allowed_actions.append("set_room_mode")
-    blocked_reasons = [] if allowed_actions else list(
-        dict.fromkeys((*mode_reasons, *target_reasons))
-    )
+    blocked_reasons = [] if allowed_actions else list(dict.fromkeys((*mode_reasons, *target_reasons, *humidity_reasons)))
     advertised_target_actions = [
         action
         for action in allowed_actions

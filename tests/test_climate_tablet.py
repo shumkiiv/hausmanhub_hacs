@@ -118,6 +118,23 @@ class FakeRuntime:
             accepted_count=1,
         )
 
+    async def async_room_humidity_target(
+        self, *, request_id: object, room_id: object, target_humidity: object
+    ) -> object:
+        self.commands.append(
+            {
+                "request_id": request_id,
+                "room_id": room_id,
+                "target_humidity": target_humidity,
+            }
+        )
+        self.home["rooms"][0]["target_humidity"] = target_humidity
+        return SimpleNamespace(
+            status=self.result_status,
+            confirmed_room_count=1,
+            accepted_count=1,
+        )
+
     async def async_set_room_mode(self, room_id: object, mode: object) -> object:
         self.commands.append({"room_id": room_id, "mode": mode})
         self.home["rooms"][0]["mode"] = mode
@@ -333,6 +350,35 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("confirmed", receipt["status"])
         self.assertEqual(
             {"room_id": "living", "mode": "manual"},
+            self.runtime.commands[0],
+        )
+        contract_validator("climate-operation-receipt.schema.json").validate(receipt)
+
+    async def test_set_room_humidity_target_dispatches_typed_room_intent(self) -> None:
+        self.runtime.home["rooms"][0]["control"]["allowed_actions"].append(
+            "set_room_humidity_target"
+        )
+        request = {
+            "contract": {
+                "name": "hausman-hub-climate-action-request",
+                "version": 1,
+            },
+            "request_id": "tablet.climate.humidity.1",
+            "expected_state_revision": self.home["state_revision"],
+            "action": "set_room_humidity_target",
+            "room_id": "living",
+            "parameters": {"target_humidity": 50},
+        }
+
+        receipt = await self.service.async_execute(request)
+
+        self.assertEqual("confirmed", receipt["status"])
+        self.assertEqual(
+            {
+                "request_id": "tablet.climate.humidity.1",
+                "room_id": "living",
+                "target_humidity": 50,
+            },
             self.runtime.commands[0],
         )
         contract_validator("climate-operation-receipt.schema.json").validate(receipt)
