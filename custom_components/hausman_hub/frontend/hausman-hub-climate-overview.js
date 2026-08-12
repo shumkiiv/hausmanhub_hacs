@@ -1,10 +1,45 @@
 /* Climate control surface shared with the tablet information architecture. */
 
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.78";
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.78";
-import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.78";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.79";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.79";
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.79";
 
 const CLIMATE_ACTION_API = "hausman_hub/v1/climate/actions";
+
+export async function synchronizeClimate(panel) {
+  const homeControl = panel._climateRuntime && panel._climateRuntime.home_control;
+  const allowed = homeControl && Array.isArray(homeControl.allowed_actions)
+    && homeControl.allowed_actions.includes("synchronize_home");
+  if (panel._busy || !allowed) return false;
+  panel._busy = true;
+  panel._climateSyncPending = true;
+  panel._notice = "Синхронизируем климат...";
+  panel._error = false;
+  panel._render();
+  try {
+    const receipt = await panel._hass.callApi("POST", CLIMATE_ACTION_API, {
+      contract: { name: "hausman-hub-climate-action-request", version: 1 },
+      request_id: `hacs.climate.sync.${Date.now().toString(36)}`,
+      expected_state_revision: panel._climateRuntime.state_revision,
+      action: "synchronize_home",
+      room_id: null,
+      parameters: {},
+    });
+    if (!receipt || receipt.confirmed !== true) throw new Error("climate synchronization was not confirmed");
+    panel._notice = "Климат синхронизирован.";
+    panel._error = false;
+    await panel._load();
+    return true;
+  } catch (error) {
+    panel._notice = "Синхронизация не подтверждена. Обновите состояние перед повтором.";
+    panel._error = true;
+    return false;
+  } finally {
+    panel._busy = false;
+    panel._climateSyncPending = false;
+    panel._render();
+  }
+}
 
 export async function setClimateManualMode(panel, roomId, deviceId, manual) {
   if (panel._busy || !panel._climateRuntime) return false;
@@ -82,6 +117,7 @@ const CATEGORY_DEFINITIONS = [
 const CATEGORY_ICON_PATHS = {
   snow: "M11 2h2v3.17l2.83-1.63 1 1.73L14 6.9l2.75 1.58 2.75-1.58 1 1.73-2.75 1.59v3.56l2.75 1.59-1 1.73-2.75-1.58L14 17.1l2.83 1.63-1 1.73L13 18.83V22h-2v-3.17l-2.83 1.63-1-1.73L10 17.1l-2.75-1.58-2.75 1.58-1-1.73 2.75-1.59v-3.56L3.5 8.63l1-1.73 2.75 1.58L10 6.9 7.17 5.27l1-1.73L11 5.17z",
   air: "M4 10h10.5a2.5 2.5 0 1 0-2.45-3H10a4.5 4.5 0 1 1 4.5 5H4zm0 4h13.5a4.5 4.5 0 1 1-4.5 4.5h2a2.5 2.5 0 1 0 2.5-2.5H4zm0-8h4v2H4z",
+  sync: "M12 4V1L8 5l4 4V6a6 6 0 0 1 5.65 4h2.1A8 8 0 0 0 12 4zm-5.65 6H4.25A8 8 0 0 0 12 20v3l4-4-4-4v3a6 6 0 0 1-5.65-8z",
 };
 
 function climateIcon(name, deps) {
@@ -615,6 +651,32 @@ function renderRooms(panel, container, rooms, devices, deps) {
   container.appendChild(section);
 }
 
+function renderClimateSynchronization(panel, container, deps) {
+  const control = panel._climateRuntime && panel._climateRuntime.home_control;
+  const allowed = control && Array.isArray(control.allowed_actions)
+    && control.allowed_actions.includes("synchronize_home");
+  if (!allowed) return;
+  const { el, setAttr } = deps;
+  const section = el("section", "climate-sync-action");
+  const icon = el("span", "climate-sync-icon");
+  icon.appendChild(climateIcon("sync", deps));
+  section.appendChild(icon);
+  const copy = el("span", "climate-sync-copy");
+  copy.appendChild(el("strong", null, panel._climateSyncPending
+    ? "Синхронизируем климат..." : "Синхронизировать климат"));
+  copy.appendChild(el("small", null,
+    "Отправить сохранённые цели всем устройствам в автоматическом контуре"));
+  section.appendChild(copy);
+  const button = el("button", "climate-sync-button", panel._climateSyncPending
+    ? "Выполняется..." : "Синхронизировать");
+  button.type = "button";
+  button.disabled = Boolean(panel._busy || panel._climateSyncPending);
+  setAttr(button, "aria-label", "Синхронизировать климат со стандартными целями");
+  button.addEventListener("click", () => synchronizeClimate(panel));
+  section.appendChild(button);
+  container.appendChild(section);
+}
+
 export function renderClimateOverview(panel, container, deps) {
   container.innerHTML = "";
   const dashboard = panel._homeDashboard;
@@ -630,6 +692,7 @@ export function renderClimateOverview(panel, container, deps) {
   }) : [];
   const page = deps.el("div", "climate-dashboard");
   page.appendChild(createHero(panel, rooms, devices, deps));
+  renderClimateSynchronization(panel, page, deps);
   renderCategories(panel, page, devices, deps);
   renderRooms(panel, page, rooms, devices, deps);
   if (panel._climateOverlay) {

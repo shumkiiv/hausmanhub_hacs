@@ -2096,6 +2096,72 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         panel_source = PANEL_JS.read_text(encoding="utf-8")
         self.assertIn('manual: "M9 11V5', panel_source)
 
+    def test_climate_overview_synchronizes_once_through_capability_gated_action(self) -> None:
+        payloads = dict(GET_PATHS)
+        payloads["hausman_hub/v1/dashboard"] = {
+            "rooms": [{"id": "living", "name": "Гостиная", "temp": 24.5, "humidity": 45}],
+            "devices": [],
+            "alarms": [],
+        }
+        payloads["hausman_hub/v1/climate/runtime"] = {
+            "state_revision": 78,
+            "home_control": {
+                "enabled": True,
+                "allowed_actions": ["synchronize_home"],
+                "blocked_reasons": [],
+            },
+            "rooms": [],
+        }
+        script = panel_script(
+            payloads,
+            {
+                "hausman_hub/v1/climate/actions": {
+                    "status": "confirmed", "confirmed": True,
+                }
+            },
+            """
+        await tick();
+        panel._shell.tabs.climate.fire("click");
+        const climate = panel._shell.climateOverview;
+        const buttons = findAll(climate, (node) =>
+          String(node.className).split(" ").includes("climate-sync-button"));
+        if (buttons.length !== 1) throw new Error("climate synchronization button is missing");
+        if (!textOf(climate).includes("Отправить сохранённые цели всем устройствам в автоматическом контуре")) {
+          throw new Error("climate synchronization explanation is missing");
+        }
+        buttons[0].fire("click");
+        buttons[0].fire("click");
+        await tick(8);
+        const posts = calls.filter((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/climate/actions");
+        if (posts.length !== 1) throw new Error("duplicate climate synchronization sent: " + posts.length);
+        const post = posts[0];
+        if (post.payload.action !== "synchronize_home"
+          || post.payload.room_id !== null
+          || post.payload.expected_state_revision !== 78
+          || Object.keys(post.payload.parameters).length !== 0
+          || !String(post.payload.request_id).startsWith("hacs.climate.sync.")) {
+          throw new Error("climate synchronization payload mismatch: " + JSON.stringify(post));
+        }
+        if (panel._notice !== "Климат синхронизирован.") {
+          throw new Error("confirmed synchronization notice mismatch: " + panel._notice);
+        }
+        panel._climateRuntime.home_control.allowed_actions = [];
+        panel._sectionRenderKeys.climate = null;
+        panel._render();
+        if (findAll(climate, (node) =>
+          String(node.className).split(" ").includes("climate-sync-button")).length !== 0) {
+          throw new Error("button stayed visible without synchronize_home capability");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+        css = CLIMATE_OVERVIEW_JS.with_suffix(".css").read_text(encoding="utf-8")
+        self.assertIn("var(--hmh-accent", css)
+        self.assertIn("var(--hmh-surface", css)
+        self.assertIn("button.climate-sync-button:focus-visible", css)
+
     def test_television_card_uses_tablet_presentation_not_entity_dump(self) -> None:
         payloads = dict(GET_PATHS)
         payloads["hausman_hub/v1/dashboard"] = {
@@ -3685,7 +3751,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.78")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.79")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;
