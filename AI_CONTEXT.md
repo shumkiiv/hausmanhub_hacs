@@ -1,8 +1,21 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-11 (1.52.72: runtime-триггеры сценариев по состоянию).
+Last updated: 2026-08-12 (1.52.76: event triggers и единые device cards).
 
 ## Current work
+
+- 2026-08-12 (Codex): выпущена HACS `1.52.76`, commit `bac4105`, tag и
+  GitHub Release `v1.52.76`, Actions `31610789045` зелёный. Contracts
+  consumer поднят до `0.26.0`; сценарии поддерживают bounded custom Home
+  Assistant events с точным scalar matching, а state triggers сохраняют
+  защиту от повторного входа. Финальный self-review исправил совместимость с
+  read-only `Mapping` и использует официальный `MATCH_ALL` для event bus.
+  Frontend получил единые hero/status-pill и карточки устройств с честной
+  индикацией связи. Полный local gate: 1354 теста, 4 пропущены; package,
+  contract boundary и file safety зелёные. Production deploy не выполнялся.
+  По постоянному решению владельца финальный review выполняет Codex по
+  окончательному staged diff, профильным тестам и full local release gate;
+  ожидание review Kimi удалено из release policy и frozen test.
 
 - 2026-08-11 (Codex): подготовлена HACS `1.52.72`: сохранённые сценарии с
   триггером `device_state` подписываются на события Home Assistant. Равенство
