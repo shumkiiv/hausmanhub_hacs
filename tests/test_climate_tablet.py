@@ -179,6 +179,7 @@ class ClimateTabletProjectionTest(unittest.TestCase):
         )
         room = payload["rooms"][0]
         self.assertEqual(["set_room_target"], room["control"]["allowed_actions"])
+
         self.assertEqual("air_conditioner", room["devices"][0]["kind"])
         self.assertEqual("managed", room["devices"][0]["control_scope"])
         self.assertEqual("working", room["devices"][0]["state"])
@@ -189,6 +190,19 @@ class ClimateTabletProjectionTest(unittest.TestCase):
         )
         self.assertEqual("day", room["active_profile"])
         self.assertFalse(room["temporary_override"]["active"])
+        contract_validator("climate-runtime.schema.json").validate(payload)
+
+    def test_sync_stays_available_when_home_target_editing_is_blocked(self) -> None:
+        home = managed_home()
+        home["contours"][0]["execution"]["settings_apply"]["available"] = False
+
+        payload = climate_tablet_snapshot(home, climate_mode="managed")
+
+        self.assertEqual(
+            ["synchronize_home"],
+            payload["home_control"]["allowed_actions"],
+        )
+        self.assertTrue(payload["home_control"]["enabled"])
         contract_validator("climate-runtime.schema.json").validate(payload)
 
     def test_stale_projection_keeps_manual_exclusion_available(self) -> None:
