@@ -724,6 +724,58 @@ def with_home_climate_targets(
         raise ContourRegistryViolation(str(error)) from error
 
 
+def with_room_climate_humidity(
+    registry: ContourRegistry,
+    *,
+    room_id: str,
+    target_humidity: int,
+) -> ContourRegistry:
+    """Set humidity only in one room's active saved profile."""
+
+    contour = registry.contour(CLIMATE_CONTOUR_ID)
+    if contour is None:
+        raise ContourRegistryViolation("climate contour is not configured")
+    try:
+        rooms = []
+        found = False
+        for room in contour.rooms:
+            if room.room_id != room_id:
+                rooms.append(room)
+                continue
+            found = True
+            selected = ClimateComfortSettings(
+                target_temperature=room.profile_settings.target_temperature,
+                target_humidity=target_humidity,
+                strategy=room.profile_settings.strategy,
+            )
+            rooms.append(
+                replace(
+                    room,
+                    day_profile=(
+                        selected
+                        if room.active_profile is ClimateProfile.DAY
+                        else room.day_profile
+                    ),
+                    night_profile=(
+                        selected
+                        if room.active_profile is ClimateProfile.NIGHT
+                        else room.night_profile
+                    ),
+                )
+            )
+        if not found:
+            raise ContourRegistryViolation("climate room is not configured")
+        updated = replace(contour, rooms=tuple(rooms))
+        return ContourRegistry(
+            contours=tuple(
+                updated if item.contour_id == CLIMATE_CONTOUR_ID else item
+                for item in registry.contours
+            )
+        )
+    except (ContourViolation, TypeError, ValueError) as error:
+        raise ContourRegistryViolation(str(error)) from error
+
+
 def with_climate_schedule(
     registry: ContourRegistry,
     *,

@@ -7,6 +7,7 @@ import unittest
 from custom_components.hausman_hub.application.contours import (
     build_climate_contour_setup,
     with_home_climate_targets,
+    with_room_climate_humidity,
 )
 from custom_components.hausman_hub.application.home_climate_targets import (
     HomeClimateTargetsViolation,
@@ -64,6 +65,26 @@ class HomeClimateTargetsTest(unittest.TestCase):
         self.assertEqual(24.5, room.target_temperature)
         self.assertEqual(50, room.target_humidity)
         self.assertIsNone(room.temporary_override)
+
+    def test_room_humidity_updates_only_the_selected_active_profile(self) -> None:
+        _, contours = build_climate_contour_setup(
+            import_climate_state(source_payload()),
+            room_ids=["living"],
+            source_ids=["synthetic-ac-source-living"],
+            name="Климат",
+            mode="automatic",
+            target_temperature=25.0,
+            target_humidity=45,
+            strategy="normal",
+        )
+
+        updated = with_room_climate_humidity(
+            contours, room_id="living", target_humidity=50
+        )
+
+        room = updated.contour("climate").rooms[0]  # type: ignore[union-attr]
+        self.assertEqual(25.0, room.target_temperature)
+        self.assertEqual(50, room.target_humidity)
 
 
 if __name__ == "__main__":

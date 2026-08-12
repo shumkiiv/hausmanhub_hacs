@@ -149,6 +149,7 @@ from .contours import (
     with_active_climate_profile,
     with_applied_climate_schedule_profile,
     with_home_climate_targets,
+    with_room_climate_humidity,
     with_climate_temporary_temperature,
     without_climate_temporary_temperature,
 )
@@ -1090,6 +1091,36 @@ class ClimateRuntime:
                 context=ClimateControlContext(
                     action=ClimateControlAction.APPLY_SAVED_SETTINGS,
                 ),
+                desired_state_changes=desired_state_changes,
+            )
+
+    async def async_room_humidity_target(
+        self, *, request_id: str, room_id: str, target_humidity: int
+    ) -> ContourApplyReceipt:
+        """Persist and apply one room's desired humidity through the contour."""
+
+        async with self._lock:
+            self._require_native_contour_apply_mode()
+            if self._contour_store is None:
+                raise ClimateRuntimeUnavailable("contour storage is unavailable")
+            contour = self._climate_contour()
+            try:
+                updated = with_room_climate_humidity(
+                    self._contours, room_id=room_id, target_humidity=target_humidity
+                )
+            except ContourRegistryViolation as error:
+                raise HomeClimateTargetsViolation(str(error)) from error
+            updated_contour = self._require_climate_contour(updated)
+            desired_state_changes = local_desired_state_changes(contour, updated_contour)
+            await self._contour_store.async_save(updated)
+            self._contours = updated
+            return await self._async_apply_native_contour_unlocked(
+                request_id,
+                CLIMATE_CONTOUR_ID,
+                context=ClimateControlContext(
+                    action=ClimateControlAction.APPLY_SAVED_SETTINGS,
+                ),
+                room_ids=(room_id,),
                 desired_state_changes=desired_state_changes,
             )
 

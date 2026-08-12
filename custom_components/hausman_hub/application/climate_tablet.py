@@ -35,13 +35,20 @@ _SUPPORTED_ACTIONS = frozenset(
     {
         "set_home_targets",
         "set_room_target",
+        "set_room_humidity_target",
         "clear_room_override",
         "set_room_mode",
         "set_device_mode",
     }
 )
 _SUPPORTED_ROOM_ACTIONS = frozenset(
-    {"set_room_target", "clear_room_override", "set_room_mode", "set_device_mode"}
+    {
+        "set_room_target",
+        "set_room_humidity_target",
+        "clear_room_override",
+        "set_room_mode",
+        "set_device_mode",
+    }
 )
 _ROOM_BLOCK_REASON_MAP = {
     "bridge_disabled": "climate_disabled",
@@ -121,6 +128,10 @@ class ClimateTabletRuntime(Protocol):
     ) -> object: ...
 
     async def async_home_climate_targets(self, payload: object) -> object: ...
+
+    async def async_room_humidity_target(
+        self, *, request_id: str, room_id: str, target_humidity: int
+    ) -> object: ...
 
     async def async_set_room_mode(self, room_id: object, mode: object) -> object: ...
 
@@ -783,6 +794,12 @@ class ClimateTabletService:
                 request.parameters.get("device_id"),
                 request.parameters.get("mode"),
             )
+        if request.action == "set_room_humidity_target":
+            return await self._runtime.async_room_humidity_target(
+                request_id=request.request_id,
+                room_id=request.room_id,
+                target_humidity=request.parameters.get("target_humidity"),
+            )
         return await self._runtime.async_temporary_temperature(
             {
                 "request_id": request.request_id,
@@ -1169,6 +1186,8 @@ def _request_matches_snapshot(
             and room.get("target_temperature")
             == request.parameters.get("target_temperature")
         )
+    if request.action == "set_room_humidity_target":
+        return room.get("target_humidity") == request.parameters.get("target_humidity")
     if request.action == "clear_room_override":
         return temporary.get("active") is False
     if request.action == "set_room_mode":
