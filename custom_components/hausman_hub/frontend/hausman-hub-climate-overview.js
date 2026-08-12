@@ -1,8 +1,8 @@
 /* Climate control surface shared with the tablet information architecture. */
 
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.79";
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.79";
-import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.79";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.80";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.80";
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.80";
 
 const CLIMATE_ACTION_API = "hausman_hub/v1/climate/actions";
 
@@ -103,6 +103,76 @@ export async function setClimateRoomTarget(panel, roomId, action, parameter, val
     panel._climateModePendingKey = null;
     panel._render();
   }
+}
+
+export async function setClimateHomeTarget(panel, targetTemperature) {
+  const homeControl = panel._climateRuntime && panel._climateRuntime.home_control;
+  const allowed = homeControl && Array.isArray(homeControl.allowed_actions)
+    && homeControl.allowed_actions.includes("set_home_targets");
+  if (panel._busy || !allowed || !Number.isFinite(targetTemperature)) return false;
+  panel._busy = true;
+  panel._climateModePendingKey = "home:set_home_targets";
+  panel._notice = "Сохраняем общую цель климата...";
+  panel._error = false;
+  panel._render();
+  try {
+    const receipt = await panel._hass.callApi("POST", CLIMATE_ACTION_API, {
+      contract: { name: "hausman-hub-climate-action-request", version: 1 },
+      request_id: `hacs.climate.home.${Date.now().toString(36)}`,
+      expected_state_revision: panel._climateRuntime.state_revision,
+      action: "set_home_targets",
+      room_id: null,
+      parameters: { target_temperature: targetTemperature },
+    });
+    if (!receipt || receipt.confirmed !== true) throw new Error("home climate target was not confirmed");
+    panel._notice = "Общая климатическая цель подтверждена.";
+    await panel._load();
+    return true;
+  } catch (error) {
+    panel._notice = "Общая цель не изменена. Обновите состояние и повторите действие.";
+    panel._error = true;
+    return false;
+  } finally {
+    panel._busy = false;
+    panel._climateModePendingKey = null;
+    panel._render();
+  }
+}
+
+export function renderHomeTargetCard(panel, dashboard, deps) {
+  const control = panel._climateRuntime?.home_control || {};
+  const allowed = Array.isArray(control.allowed_actions) ? control.allowed_actions : [];
+  const raw = dashboard.summary && dashboard.summary.targetTemp;
+  const target = raw !== null && raw !== undefined && raw !== "" && Number.isFinite(Number(raw))
+    ? Number(raw) : null;
+  const card = deps.el("section", "overview-canon-primary-card is-target");
+  card.appendChild(deps.el("span", "overview-canon-label", "Цель климата"));
+  card.appendChild(deps.el("strong", "overview-canon-value", target === null
+    ? "Нет данных" : `${target.toFixed(1).replace(".0", "").replace(".", ",")} °C`));
+  const controls = deps.el("div", "overview-canon-target-controls");
+  [["−", -0.5, "Понизить общую цель на 0,5 °C"], ["+", 0.5, "Повысить общую цель на 0,5 °C"]].forEach(([label, delta, aria]) => {
+    const button = deps.el("button", "overview-canon-target-step", label);
+    button.type = "button";
+    button.disabled = panel._busy || !allowed.includes("set_home_targets") || target === null;
+    deps.setAttr(button, "aria-label", aria);
+    button.addEventListener("click", () => target !== null && setClimateHomeTarget(panel, Math.round((target + delta) * 2) / 2));
+    controls.appendChild(button);
+  });
+  card.appendChild(controls);
+  const footer = deps.el("div", "overview-canon-target-footer");
+  const details = deps.el("button", "overview-canon-link", "Настроить");
+  details.type = "button";
+  details.addEventListener("click", () => panel._activateSection("climate"));
+  footer.appendChild(details);
+  if (allowed.includes("synchronize_home")) {
+    const sync = deps.el("button", "overview-canon-link", panel._climateSyncPending ? "Синхронизация..." : "Синхронизировать");
+    sync.type = "button";
+    sync.disabled = panel._busy;
+    sync.addEventListener("click", () => synchronizeClimate(panel));
+    footer.appendChild(sync);
+  }
+  card.appendChild(footer);
+  return card;
 }
 
 const CATEGORY_DEFINITIONS = [

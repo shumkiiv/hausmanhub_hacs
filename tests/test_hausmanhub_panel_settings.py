@@ -1604,7 +1604,8 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const text = textOf(overview);
         for (const label of [
           "Дом", "Гостиная", "Спальня", "Кабинет", "Климат", "Цель климата",
-          "Комфорт в доме", "Избранные сценарии", "Доброе утро", "Погода",
+          "Освещение", "Безопасность", "Комфорт в доме", "Внимание",
+          "Избранные сценарии", "Доброе утро", "Погода",
         ]) {
           if (!text.includes(label)) throw new Error("overview text missing: " + label);
         }
@@ -1621,8 +1622,8 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         if (!activeValue || activeValue.textContent !== "2") {
           throw new Error("numeric sensors were counted as active devices: " + JSON.stringify(heroFacts.map(textOf)));
         }
-        if (byClass("overview-canon-primary-card").length !== 3) {
-          throw new Error("canonical first row must contain three cards");
+        if (byClass("overview-canon-primary-card").length !== 4) {
+          throw new Error("canonical first row must contain four Android-parity cards");
         }
         const stableHero = byClass("overview-canon-hero")[0];
         const stableMedia = byClass("overview-canon-hero-media")[0];
@@ -2099,6 +2100,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
     def test_climate_overview_synchronizes_once_through_capability_gated_action(self) -> None:
         payloads = dict(GET_PATHS)
         payloads["hausman_hub/v1/dashboard"] = {
+            "summary": {"targetTemp": 25},
             "rooms": [{"id": "living", "name": "Гостиная", "temp": 24.5, "humidity": 45}],
             "devices": [],
             "alarms": [],
@@ -2107,7 +2109,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
             "state_revision": 78,
             "home_control": {
                 "enabled": True,
-                "allowed_actions": ["synchronize_home"],
+                "allowed_actions": ["set_home_targets", "synchronize_home"],
                 "blocked_reasons": [],
             },
             "rooms": [],
@@ -2119,8 +2121,22 @@ class PanelSettingsSectionsTest(unittest.TestCase):
                     "status": "confirmed", "confirmed": True,
                 }
             },
-            """
+        """
         await tick();
+        const overview = panel._shell.sectionNodes.overview;
+        const targetSteps = findAll(overview, (node) =>
+          String(node.className).split(" ").includes("overview-canon-target-step"));
+        if (targetSteps.length !== 2) throw new Error("home target quick controls are missing");
+        targetSteps[1].fire("click");
+        await tick(8);
+        const homeTarget = calls.find((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/climate/actions"
+          && call.payload.action === "set_home_targets");
+        if (!homeTarget || homeTarget.payload.room_id !== null
+          || homeTarget.payload.expected_state_revision !== 78
+          || homeTarget.payload.parameters.target_temperature !== 25.5) {
+          throw new Error("home target quick action payload mismatch: " + JSON.stringify(homeTarget));
+        }
         panel._shell.tabs.climate.fire("click");
         const climate = panel._shell.climateOverview;
         const buttons = findAll(climate, (node) =>
@@ -2134,8 +2150,9 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         await tick(8);
         const posts = calls.filter((call) => call.method === "POST"
           && call.path === "hausman_hub/v1/climate/actions");
-        if (posts.length !== 1) throw new Error("duplicate climate synchronization sent: " + posts.length);
-        const post = posts[0];
+        const syncPosts = posts.filter((call) => call.payload.action === "synchronize_home");
+        if (syncPosts.length !== 1) throw new Error("duplicate climate synchronization sent: " + syncPosts.length);
+        const post = syncPosts[0];
         if (post.payload.action !== "synchronize_home"
           || post.payload.room_id !== null
           || post.payload.expected_state_revision !== 78
@@ -3162,7 +3179,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         self.assertIn("container-name:hausmanhub-panel", panel_css)
         self.assertIn("@container hausmanhub-panel (min-width:1050px)", panel_css)
         self.assertIn(
-            ".overview-canon-primary-card, .overview-canon-light-card, .overview-canon-side-card",
+            ".overview-canon-primary-card, .overview-canon-bottom-card, .overview-canon-side-card",
             overview_css,
         )
         self.assertIn("flex-direction:column; white-space:normal", overview_css)
@@ -3751,7 +3768,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.79")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.80")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

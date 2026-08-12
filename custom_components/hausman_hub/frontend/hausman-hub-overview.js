@@ -1,5 +1,6 @@
-import { createHeroRoomNavigation } from "./hausman-hub-hero-room-navigation.js?v=1.52.79";
-import { overviewHeroRenderKey, stableOverviewHeroImage } from "./hausman-hub-overview-hero-state.js?v=1.52.79";
+import { createHeroRoomNavigation } from "./hausman-hub-hero-room-navigation.js?v=1.52.80";
+import { overviewHeroRenderKey, stableOverviewHeroImage } from "./hausman-hub-overview-hero-state.js?v=1.52.80";
+import { renderHomeTargetCard } from "./hausman-hub-climate-overview.js?v=1.52.80";
 
 const CLIMATE_DOMAINS = new Set(["climate", "humidifier", "fan"]);
 
@@ -18,14 +19,6 @@ function validNumber(value) {
 function average(values) {
   const valid = validNumbers(values);
   return valid.length ? valid.reduce((sum, value) => sum + value, 0) / valid.length : null;
-}
-
-function range(values, suffix, fraction = 1) {
-  const valid = [...new Set(validNumbers(values).map((value) => value.toFixed(fraction)))];
-  if (!valid.length) return "Нет данных";
-  if (valid.length === 1) return `${valid[0].replace(".", ",")}${suffix}`;
-  const sorted = valid.map(Number).sort((left, right) => left - right);
-  return `${sorted[0].toFixed(fraction).replace(".", ",")}–${sorted.at(-1).toFixed(fraction).replace(".", ",")}${suffix}`;
 }
 
 function physicalDeviceCount(devices) {
@@ -200,18 +193,16 @@ function renderPrimaryCards(panel, container, dashboard, deps) {
   appendMetric(deps, climateCard, "Климат", panel._temp(average(rooms.map((room) => room.temp))),
     `${panel._humidity(average(rooms.map((room) => room.humidity)))} · ${activeCount(climate)} систем работает`);
   row.appendChild(climateCard);
-  const targetCard = cardButton(deps, "overview-canon-primary-card is-target", "climate", panel);
-  const humidityTarget = range(rooms.map((room) => room.targetHumidity), "%", 0);
-  appendMetric(deps, targetCard, "Цель климата", range(rooms.map((room) => room.targetTemp), "°"),
-    `${humidityTarget === "Нет данных" ? "Влажность — в деталях" : humidityTarget} · ${rooms.length} ${panel._roomCountWord(rooms.length)}`);
-  row.appendChild(targetCard);
-  const comfortCard = cardButton(deps, "overview-canon-primary-card is-comfort", "climate", panel);
-  const deviations = rooms.map((room) => validNumber(room.temp) && validNumber(room.targetTemp)
-    ? Math.abs(Number(room.temp) - Number(room.targetTemp)) : null).filter(Number.isFinite);
-  const stable = deviations.length && Math.max(...deviations) <= 1.5;
-  appendMetric(deps, comfortCard, "Комфорт в доме", stable ? "В порядке" : (deviations.length ? "Выравнивается" : "Нет данных"),
-    stable ? "Температура близка к целям комнат" : "Откройте климат для подробностей");
-  row.appendChild(comfortCard);
+  row.appendChild(renderHomeTargetCard(panel, dashboard, deps));
+  const lights = devices.filter((device) => device.domain === "light" || device.category === "lighting");
+  const lightingCard = cardButton(deps, "overview-canon-primary-card", "lighting", panel);
+  appendMetric(deps, lightingCard, "Освещение", String(activeCount(lights)), `${physicalDeviceCount(lights)} физических устройств`);
+  row.appendChild(lightingCard);
+  const alarms = Array.isArray(dashboard.alarms) ? dashboard.alarms.filter((alarm) => alarm.active) : [];
+  const securityCard = cardButton(deps, `overview-canon-primary-card${alarms.length ? " is-alert" : ""}`, "security", panel);
+  appendMetric(deps, securityCard, "Безопасность", alarms.length ? `${alarms.length} тревог` : "Спокойно",
+    alarms.length ? "Требуется внимание" : "Активных тревог нет");
+  row.appendChild(securityCard);
   container.appendChild(row);
 }
 
@@ -296,10 +287,19 @@ function renderLowerGrid(panel, container, dashboard, deps) {
   const main = deps.el("div", "overview-canon-lower-main");
   deps.renderEnergyOverviewCard(panel, main);
   const devices = Array.isArray(dashboard.devices) ? dashboard.devices : [];
-  const lights = devices.filter((device) => device.domain === "light" || device.category === "lighting");
-  const lightCard = cardButton(deps, "overview-canon-light-card", "lighting", panel);
-  appendMetric(deps, lightCard, "Освещение", String(activeCount(lights)), `${physicalDeviceCount(lights)} физических устройств`);
-  main.appendChild(lightCard); grid.appendChild(main);
+  const rooms = Array.isArray(dashboard.rooms) ? dashboard.rooms : [];
+  const deviations = rooms.map((room) => validNumber(room.temp) && validNumber(room.targetTemp)
+    ? Math.abs(Number(room.temp) - Number(room.targetTemp)) : null).filter(Number.isFinite);
+  const stable = deviations.length && Math.max(...deviations) <= 1.5;
+  const comfortCard = cardButton(deps, "overview-canon-bottom-card is-comfort", "climate", panel);
+  appendMetric(deps, comfortCard, "Комфорт в доме", stable ? "В порядке" : (deviations.length ? "Выравнивается" : "Нет данных"),
+    stable ? "Температура близка к целям комнат" : "Откройте климат для подробностей");
+  main.appendChild(comfortCard);
+  const attentionCount = devices.filter((device) => device.unavailable === true || device.state === "unavailable").length;
+  const attentionCard = cardButton(deps, `overview-canon-bottom-card${attentionCount ? " is-alert" : ""}`, "security", panel);
+  appendMetric(deps, attentionCard, "Внимание", attentionCount ? `${attentionCount} без связи` : "Всё в порядке",
+    attentionCount ? "Откройте безопасность" : "Устройства на связи");
+  main.appendChild(attentionCard); grid.appendChild(main);
   const sidebar = deps.el("aside", "overview-canon-side");
   const weather = dashboard.weather || {};
   const weatherCard = deps.el("button", "overview-canon-side-card overview-canon-weather");
