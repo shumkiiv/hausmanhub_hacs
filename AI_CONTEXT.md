@@ -1,8 +1,20 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-12 (1.52.78: climate command guard и synchronization).
+Last updated: 2026-08-12 (1.52.79: climate synchronization UI).
 
 ## Current work
+
+- 2026-08-12 (Codex): HACS `1.52.79` опубликован и установлен в production,
+  release merge `30d8a32`, GitHub Release `v1.52.79`. Climate overview получил
+  capability-gated действие `synchronize_home`; pending блокирует повторный
+  POST, confirmed/failed отражаются в notice. Карточка использует semantic
+  theme tokens, responsive layout и focus-visible. Полный gate: 1366 тестов,
+  4 пропущены; CI, package и repository safety зелёные. Перед deploy создан
+  автоматический backup, config check и restart прошли; installed/latest
+  `v1.52.79`, runtime fresh, action опубликован, pending operation отсутствует,
+  unavailable сущностей HausmanHub нет. Новая физическая sync-команда при
+  проверке UI не отправлялась, чтобы не создавать лишние вызовы устройств;
+  автомат 233 не затрагивался.
 
 - 2026-08-12 (Codex): выпущена и установлена HACS `1.52.78`, merge
   `f2e56b4`, tag и GitHub Release `v1.52.78`, Actions `31621133966` зелёный;
