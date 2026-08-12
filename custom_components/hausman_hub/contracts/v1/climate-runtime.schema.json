@@ -60,22 +60,34 @@
         "properties": {
           "phase": {"enum": ["canary", "managed"]},
           "authority": {"const": "hausman_hub"},
-          "fresh": {"const": true},
           "blocked_reasons": {"maxItems": 0}
         },
-        "anyOf": [
+        "allOf": [
           {
-            "properties": {
-              "home_control": {
-                "type": "object",
-                "required": ["enabled"],
-                "properties": {"enabled": {"const": true}}
+            "if": {"properties": {"fresh": {"const": true}}, "required": ["fresh"]},
+            "then": {
+              "anyOf": [
+                {
+                  "properties": {
+                    "home_control": {
+                      "type": "object",
+                      "required": ["enabled"],
+                      "properties": {"enabled": {"const": true}}
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "rooms": {"contains": {"$ref": "#/$defs/enabled_room"}, "minContains": 1}
+                  }
+                }
+              ]
+            },
+            "else": {
+              "properties": {
+                "home_control": {"$ref": "#/$defs/disabled_control"},
+                "rooms": {"contains": {"$ref": "#/$defs/manual_exclusion_room"}, "minContains": 1}
               }
-            }
-          },
-          {
-            "properties": {
-              "rooms": {"contains": {"$ref": "#/$defs/enabled_room"}, "minContains": 1}
             }
           }
         ]
@@ -308,6 +320,25 @@
           "type": "object",
           "required": ["enabled", "allowed_actions"],
           "properties": {"enabled": {"const": true}, "allowed_actions": {"minItems": 1}}
+        }
+      }
+    },
+    "manual_exclusion_room": {
+      "type": "object",
+      "required": ["authority", "control"],
+      "properties": {
+        "authority": {"const": "hausman_hub"},
+        "control": {
+          "type": "object",
+          "required": ["enabled", "allowed_actions"],
+          "properties": {
+            "enabled": {"const": true},
+            "allowed_actions": {
+              "type": "array",
+              "contains": {"const": "set_room_mode"},
+              "minContains": 1
+            }
+          }
         }
       }
     },
