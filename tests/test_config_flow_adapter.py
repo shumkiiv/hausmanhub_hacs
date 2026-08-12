@@ -1415,6 +1415,7 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         await runtime.async_run_climate_schedule(runtime._local_now())
         self.assertGreater(state_view.read_count, reads_before_schedule)
         self.assertEqual(1, len(executor.batches))
+        self.config_flow.dt_util.now = runtime._local_now
         temporary_flow = self.config_flow.HausmanHubOptionsFlow()
         temporary_flow.config_entry = schedule_flow.config_entry
         temporary_flow.hass = options_flow.hass
