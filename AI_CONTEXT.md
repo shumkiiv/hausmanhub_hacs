@@ -1,8 +1,22 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-12 (1.52.76: event triggers и единые device cards).
+Last updated: 2026-08-12 (1.52.78: climate command guard и synchronization).
 
 ## Current work
+
+- 2026-08-12 (Codex): выпущена и установлена HACS `1.52.78`, merge
+  `f2e56b4`, tag и GitHub Release `v1.52.78`, Actions `31621133966` зелёный;
+  consumer contracts `0.27.0`. Managed tick применяет только расходящиеся
+  устройства и поля. Restart-safe desired fingerprint запрещает повтор
+  одинакового полного call batch до полного выравнивания либо изменения
+  цели, даже при нестабильном feedback. Добавлены `synchronize_home` и exact
+  local schedule 10:00/22:00 с durable slot latch; ручные комнаты и устройства
+  исключаются. Полный gate: 1365 тестов, 4 пропущены. Production HA 2026.8.1
+  обновлён после backup `d5feba04`, config check/restart штатные,
+  installed/latest `v1.52.78`, 10 служебных сущностей доступны. Live sync
+  получил `confirmed`, затем 130 секунд дали 0 climate/humidifier/remote/button
+  calls. Node-RED climate execution и morning resync выключены, pending 0,
+  authority-гейты legacy оставлены закрытыми. Автомат 233 не затрагивался.
 
 - 2026-08-12 (Codex): выпущена HACS `1.52.76`, commit `bac4105`, tag и
   GitHub Release `v1.52.76`, Actions `31610789045` зелёный. Contracts
