@@ -1,6 +1,6 @@
 /* Canonical physical-device card shared by all tablet-style HACS sections. */
 
-import { enhanceDetailsModal } from "./hausman-hub-modal.js?v=1.52.81";
+import { enhanceDetailsModal } from "./hausman-hub-modal.js?v=1.52.82";
 
 const STATE_LABELS = {
   on: "Включено",
@@ -80,6 +80,30 @@ export function localizedDeviceState(device) {
     || (device && device.stateLabel) || "Состояние неизвестно";
 }
 
+function actionObjectName(target, device) {
+  return String(target && target.name || device && device.name || "устройство")
+    .trim() || "устройство";
+}
+
+/**
+ * Action titles from Home Assistant are intentionally generic so they can be
+ * reused in automations. A person touching a device card needs the missing
+ * object back in the label: "Закрыть шторы", not merely "Закрыть".
+ */
+export function contextualDeviceActionLabel(action, target, device) {
+  const title = String(action && action.title || action && action.action_id || "Команда").trim();
+  const object = actionObjectName(target, device);
+  const contextual = {
+    "Включить": "Включить",
+    "Выключить": "Выключить",
+    "Переключить": "Переключить",
+    "Открыть": "Открыть",
+    "Закрыть": "Закрыть",
+    "Позиция": "Положение",
+  }[title];
+  return contextual ? `${contextual} ${object}` : title;
+}
+
 function localizedDetailLabel(detail) {
   const raw = normalized(detail && detail.label);
   const entity = normalized(detail && detail.entityId).split(".").pop() || "";
@@ -149,10 +173,12 @@ export function renderPhysicalDeviceCard(owner, device, deps) {
   });
 
   const summary = el("summary", "inventory-device-summary");
+  setAttr(summary, "aria-label", `Открыть подробности устройства ${device.name || "Устройство"}. Состояние: ${state}.`);
   appendDeviceVisual(summary, device, iconName, deps, "inventory-device-visual");
   const copy = el("span", "inventory-device-copy");
   copy.appendChild(el("strong", null, device.name || "Устройство"));
-  copy.appendChild(el("small", null, `${device.roomName || "Без комнаты"} · ${state}`));
+  copy.appendChild(el("small", null, `${device.roomName || "Без комнаты"} · ${owner._deviceCategoryName(device)}`));
+  copy.appendChild(el("span", "inventory-device-state", state));
   summary.appendChild(copy);
   const connection = el("span", `inventory-device-status ${device.unavailable ? "is-unavailable" : ""}`);
   connection.appendChild(el("span", `device-state-dot ${device.unavailable ? "bad" : (device.tone || "good")}`));

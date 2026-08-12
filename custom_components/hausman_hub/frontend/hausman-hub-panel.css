@@ -1,35 +1,35 @@
-@import url("./hausman-hub-tokens.css?v=1.52.81");
-@import url("./hausman-hub-overview.css?v=1.52.81");
-@import url("./hausman-hub-library-hero.css?v=1.52.81");
-@import url("./hausman-hub-settings.css?v=1.52.81");
-@import url("./hausman-hub-diagnostics.css?v=1.52.81");
-@import url("./hausman-hub-switch.css?v=1.52.81");
-@import url("./hausman-hub-notice.css?v=1.52.81");
-@import url("./hausman-hub-device-maintenance.css?v=1.52.81");
-@import url("./hausman-hub-device-bindings.css?v=1.52.81");
-@import url("./hausman-hub-energy.css?v=1.52.81");
-@import url("./hausman-hub-energy-chart.css?v=1.52.81");
-@import url("./hausman-hub-control-channel.css?v=1.52.81");
-@import url("./hausman-hub-weather-sources.css?v=1.52.81");
-@import url("./hausman-hub-wizard-validation.css?v=1.52.81");
-@import url("./hausman-hub-catalog.css?v=1.52.81");
-@import url("./hausman-hub-media-device.css?v=1.52.81");
-@import url("./hausman-hub-device-card.css?v=1.52.81");
-@import url("./hausman-hub-scenarios.css?v=1.52.81");
-@import url("./hausman-hub-climate-overview.css?v=1.52.81");
-@import url("./hausman-hub-lighting.css?v=1.52.81");
-@import url("./hausman-hub-rooms.css?v=1.52.81");
-@import url("./hausman-hub-media-overview.css?v=1.52.81");
-@import url("./hausman-hub-security-overview.css?v=1.52.81");
-@import url("./hausman-hub-devices-overview.css?v=1.52.81");
-@import url("./hausman-hub-device-discovery.css?v=1.52.81");
-@import url("./hausman-hub-navigation.css?v=1.52.81");
-@import url("./hausman-hub-rollout.css?v=1.52.81");
-@import url("./hausman-hub-technical-log.css?v=1.52.81");
-@import url("./hausman-hub-kiosk.css?v=1.52.81");
-@import url("./hausman-hub-area-binding.css?v=1.52.81");
-@import url("./hausman-hub-intercom.css?v=1.52.81");
-@import url("./hausman-hub-buttons.css?v=1.52.81");
+@import url("./hausman-hub-tokens.css?v=1.52.82");
+@import url("./hausman-hub-overview.css?v=1.52.82");
+@import url("./hausman-hub-library-hero.css?v=1.52.82");
+@import url("./hausman-hub-settings.css?v=1.52.82");
+@import url("./hausman-hub-diagnostics.css?v=1.52.82");
+@import url("./hausman-hub-switch.css?v=1.52.82");
+@import url("./hausman-hub-notice.css?v=1.52.82");
+@import url("./hausman-hub-device-maintenance.css?v=1.52.82");
+@import url("./hausman-hub-device-bindings.css?v=1.52.82");
+@import url("./hausman-hub-energy.css?v=1.52.82");
+@import url("./hausman-hub-energy-chart.css?v=1.52.82");
+@import url("./hausman-hub-control-channel.css?v=1.52.82");
+@import url("./hausman-hub-weather-sources.css?v=1.52.82");
+@import url("./hausman-hub-wizard-validation.css?v=1.52.82");
+@import url("./hausman-hub-catalog.css?v=1.52.82");
+@import url("./hausman-hub-media-device.css?v=1.52.82");
+@import url("./hausman-hub-device-card.css?v=1.52.82");
+@import url("./hausman-hub-scenarios.css?v=1.52.82");
+@import url("./hausman-hub-climate-overview.css?v=1.52.82");
+@import url("./hausman-hub-lighting.css?v=1.52.82");
+@import url("./hausman-hub-rooms.css?v=1.52.82");
+@import url("./hausman-hub-media-overview.css?v=1.52.82");
+@import url("./hausman-hub-security-overview.css?v=1.52.82");
+@import url("./hausman-hub-devices-overview.css?v=1.52.82");
+@import url("./hausman-hub-device-discovery.css?v=1.52.82");
+@import url("./hausman-hub-navigation.css?v=1.52.82");
+@import url("./hausman-hub-rollout.css?v=1.52.82");
+@import url("./hausman-hub-technical-log.css?v=1.52.82");
+@import url("./hausman-hub-kiosk.css?v=1.52.82");
+@import url("./hausman-hub-area-binding.css?v=1.52.82");
+@import url("./hausman-hub-intercom.css?v=1.52.82");
+@import url("./hausman-hub-buttons.css?v=1.52.82");
 
 :host { display:block; box-sizing:border-box; width:100%; min-height:100%; overflow-x:hidden;
   container-name:hausmanhub-panel; container-type:inline-size;
@@ -174,14 +174,14 @@ section { min-width:0; }
   background:var(--hmh-raised,#181E26); box-shadow:0 6px 20px rgba(0,0,0,.18); }
 .inventory-device-card[open] { border-color:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 45%,var(--hmh-border,#2F3845)); }
 .inventory-device-card.is-unavailable { border-color:color-mix(in srgb,#F1B84B 42%,var(--hmh-border,#2F3845)); }
-.inventory-device-summary { display:flex; align-items:center; gap:14px; min-height:88px; padding:14px 16px; cursor:pointer; list-style:none; }
+.inventory-device-summary { display:flex; align-items:center; gap:14px; min-height:96px; padding:16px 18px; cursor:pointer; list-style:none; }
 .inventory-device-summary::-webkit-details-marker, .room-inventory-summary::-webkit-details-marker { display:none; }
 .inventory-device-summary::after { content:none; }
 .inventory-device-icon { width:54px; height:54px; border-radius:14px; }
 .inventory-device-icon .icon { display:block; width:27px; height:27px; margin:0; vertical-align:unset; }
 .inventory-device-copy { display:flex; flex:1 1 auto; flex-direction:column; gap:5px; min-width:0; }
-.inventory-device-copy strong { overflow:hidden; color:var(--hmh-text,#E7ECF3); font-size:16px; text-overflow:ellipsis; white-space:nowrap; }
-.inventory-device-copy small { overflow:hidden; color:var(--hmh-text-dim,#9AA7B4); font-size:13px; text-overflow:ellipsis; white-space:nowrap; }
+.inventory-device-copy strong { overflow:hidden; color:var(--hmh-text,#E7ECF3); font-size:18px; text-overflow:ellipsis; white-space:nowrap; }
+.inventory-device-copy small { overflow:hidden; color:var(--hmh-text-dim,#9AA7B4); font-size:14px; text-overflow:ellipsis; white-space:nowrap; }
 .device-state-dot { flex:0 0 9px; width:9px; height:9px; border-radius:50%; background:var(--hmh-text-dim,#9AA7B4); }
 .device-state-dot.good { background:var(--success-color,#4CAF6E); }
 .device-state-dot.bad { background:var(--error-color,#E5534B); }
@@ -192,18 +192,18 @@ section { min-width:0; }
 .device-detail-row dd { margin:0; color:var(--hmh-text,#E7ECF3); font-size:14px; font-weight:650; text-align:right; }
 .device-target-controls { padding-top:14px; }
 .device-target-controls + .device-target-controls { margin-top:12px; border-top:1px solid var(--hmh-border,#2F3845); }
-.device-target-name { display:block; margin-bottom:8px; font-size:14px; }
+.device-target-name { display:block; margin-bottom:8px; font-size:16px; }
 .device-action-list { display:flex; flex-wrap:wrap; gap:8px; }
-.device-action-list button { min-height:38px; margin:0; }
+.device-action-list button { min-height:48px; margin:0; font-size:16px; }
 .device-value-action { display:grid; grid-template-columns:minmax(80px,1fr) minmax(100px,1.5fr) auto; align-items:center; gap:9px; width:100%; margin:4px 0; }
-.device-value-action input { width:100%; min-height:38px; }
+.device-value-action input { width:100%; min-height:48px; font-size:16px; }
 .room-inventory-grid { display:grid; gap:16px; }
 .room-inventory-card { padding:0; overflow:hidden; }
 .room-inventory-summary { display:flex; align-items:center; gap:14px; min-height:92px; padding:18px 20px; cursor:pointer; list-style:none; }
 .room-inventory-copy { display:flex; flex:1 1 auto; flex-direction:column; gap:5px; min-width:0; }
 .room-inventory-copy strong { font-size:19px; }
 .room-inventory-copy small { color:var(--hmh-text-dim,#9AA7B4); font-size:14px; }
-.room-inventory-open { color:var(--hmh-accent,#4F8CFF); font-size:13px; font-weight:650; }
+.room-inventory-open { color:var(--hmh-accent,#4F8CFF); font-size:14px; font-weight:700; }
 .room-inventory-body { padding:0 20px 20px; }
 .security-summary { display:flex; align-items:center; gap:16px; margin:0 0 22px; padding:18px 20px;
   border:1px solid var(--hmh-border,#2F3845); border-radius:16px; background:var(--hmh-surface,#12171D); }
