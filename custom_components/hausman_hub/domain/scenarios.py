@@ -10,6 +10,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 import re
+from types import MappingProxyType
 
 
 SCENARIO_REGISTRY_VERSION = 1
@@ -30,6 +31,14 @@ _TIME_WINDOW = re.compile(
     r"^(?:[01][0-9]|2[0-3]):[0-5][0-9][\-\u2013](?:[01][0-9]|2[0-3]):[0-5][0-9]$"
 )
 _WEEKDAY = re.compile(r"^(?:пн|вт|ср|чт|пт|сб|вс)(?:, (?:пн|вт|ср|чт|пт|сб|вс))*$")
+_EVENT_TYPE = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
+_SYSTEM_EVENT_TRIGGERS = frozenset({
+    "state_changed",
+    "call_service",
+    "service_executed",
+    "homeassistant_start",
+    "homeassistant_stop",
+})
 
 
 class ScenarioViolation(ValueError):
@@ -53,6 +62,7 @@ class ScenarioTriggerType(StrEnum):
     SUNRISE = "sunrise"
     SUNSET = "sunset"
     PRESENCE = "presence"
+    EVENT = "event"
 
 
 class ScenarioConditionType(StrEnum):
@@ -95,9 +105,13 @@ class ScenarioTrigger:
     property: str | None = None
     comparison: ScenarioComparison | None = None
     value: str | float | int | None = None
+    event_type: str | None = None
+    event_data: Mapping[str, str | float | int | bool] | None = None
 
     def __post_init__(self) -> None:
         _stable_id(self.id, "trigger id")
+        if self.event_data is not None:
+            object.__setattr__(self, "event_data", MappingProxyType(dict(self.event_data)))
         if not isinstance(self.type, ScenarioTriggerType):
             raise ScenarioViolation("trigger type must be approved")
         # Android always emits `comparison`; ignore it for non-device_state triggers.
@@ -139,6 +153,13 @@ class ScenarioTrigger:
             _none(self.target_id, "trigger target_id", "presence trigger")
             _none(self.property, "trigger property", "presence trigger")
             _presence_value(self.value, "presence trigger")
+        elif self.type is ScenarioTriggerType.EVENT:
+            _none(self.target_id, "trigger target_id", "event trigger")
+            _none(self.property, "trigger property", "event trigger")
+            _none(self.comparison, "trigger comparison", "event trigger")
+            _none(self.value, "trigger value", "event trigger")
+            _event_type(self.event_type, "event trigger")
+            _event_data(self.event_data, "event trigger")
 
 
 @dataclass(frozen=True, slots=True)
@@ -660,6 +681,8 @@ def _trigger_from_payload(payload: object, label: str) -> ScenarioTrigger:
         property=_optional_str(root.get("property")),
         comparison=_optional_enum(root.get("comparison"), ScenarioComparison),
         value=root.get("value"),
+        event_type=_optional_str(root.get("eventType")),
+        event_data=_optional_mapping(root.get("eventData"), f"{label} eventData"),
     )
 
 
@@ -678,6 +701,10 @@ def _trigger_to_payload(trigger: ScenarioTrigger) -> dict[str, object]:
         payload["comparison"] = trigger.comparison.value
     if trigger.value is not None:
         payload["value"] = trigger.value
+    if trigger.event_type is not None:
+        payload["eventType"] = trigger.event_type
+    if trigger.event_data:
+        payload["eventData"] = dict(trigger.event_data)
     return payload
 
 
@@ -785,6 +812,31 @@ def _optional_int(value: object) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int):
         raise ScenarioViolation("expected integer or null")
     return value
+
+
+def _optional_mapping(value: object, label: str) -> Mapping[str, object] | None:
+    if value is None:
+        return None
+    return _mapping(value, label)
+
+
+def _event_type(value: object, label: str) -> None:
+    if not isinstance(value, str) or not _EVENT_TYPE.fullmatch(value):
+        raise ScenarioViolation(f"{label} eventType is invalid")
+    if value in _SYSTEM_EVENT_TRIGGERS:
+        raise ScenarioViolation(f"{label} eventType is not allowed")
+
+
+def _event_data(value: object, label: str) -> None:
+    if value is None:
+        return
+    if not isinstance(value, Mapping) or len(value) > 12:
+        raise ScenarioViolation(f"{label} eventData is invalid")
+    for key, item in value.items():
+        if not isinstance(key, str) or not _STABLE_ID.fullmatch(key):
+            raise ScenarioViolation(f"{label} eventData key is invalid")
+        if not isinstance(item, (str, int, float, bool)):
+            raise ScenarioViolation(f"{label} eventData values must be scalar")
 
 
 def _optional_enum(value: object, enum_cls: type[StrEnum]) -> StrEnum | None:

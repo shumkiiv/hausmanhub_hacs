@@ -147,6 +147,25 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.store._data)
         self.assertEqual(self.store._data.version, 1)
 
+    async def test_event_trigger_projection_contains_only_enabled_filter(self) -> None:
+        payload = _valid_payload("event_button")
+        payload["definition"]["triggers"] = [{
+            "id": "event-1",
+            "type": "event",
+            "eventType": "zha_event",
+            "eventData": {"device_id": "kids-button", "command": "single"},
+        }]
+        await self.service.async_update_scenario(payload)
+        self.assertEqual(
+            self.service.event_trigger_items(),
+            ((
+                "event_button",
+                "event-1",
+                "zha_event",
+                {"device_id": "kids-button", "command": "single"},
+            ),),
+        )
+
     async def test_update_overwrites_existing(self) -> None:
         await self.service.async_update_scenario(_valid_payload())
         payload = _valid_payload()

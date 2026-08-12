@@ -61,7 +61,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         self.assertEqual("hausman_hub", manifest["domain"])
         self.assertTrue(manifest["config_flow"])
         self.assertTrue(manifest["single_config_entry"])
-        self.assertEqual("1.52.75", manifest["version"])
+        self.assertEqual("1.52.76", manifest["version"])
 
     def test_current_manifest_version_has_a_plain_change_note(self) -> None:
         manifest = json.loads((INTEGRATION / "manifest.json").read_text(encoding="utf-8"))
@@ -108,8 +108,8 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             " ".join(skeleton_access_rule.split()),
         )
 
-    def test_review_policy_allows_permitted_work_without_publishing(self) -> None:
-        """A temporary reviewer may support all safe work, never publication."""
+    def test_review_policy_requires_codex_final_self_review(self) -> None:
+        """Codex must review the final diff and run the release gates."""
 
         standards = (ROOT / "docs" / "engineering-standards.md").read_text(
             encoding="utf-8"
@@ -127,26 +127,17 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         )
         context = (ROOT / "AI_CONTEXT.md").read_text(encoding="utf-8")
         english_policy = (
-            "Every code change needs independent review.",
-            "Kimi must review the final current diff before the change is considered "
-            "complete or before a commit, push, release, deployment, or publication.",
-            "another independent review may support every change permitted by the HausmanHub "
-            "boundaries, including code, tests, documentation, and local checks or fixes.",
-            "It does not authorize a commit, push, release, deployment, publication, or "
-            "new authority.",
-            "Documentation-only edits do not require Kimi only when the change contains no "
-            "code; the final Kimi gate applies to a mixed diff.",
+            "Every code change requires a final Codex self-review.",
+            "Codex reviews the final current diff before commit, push, release, deployment, "
+            "or publication.",
+            "The self-review includes the staged diff, relevant tests, and the full local "
+            "release gate.",
+            "Review findings must be addressed or explicitly documented.",
         )
         russian_policy = (
-            "Kimi должен проверить окончательный текущий набор изменений до того, как "
-            "изменение будет считаться завершённым или будут выполнены коммит, отправка, "
-            "выпуск, развёртывание или публикация.",
-            "Он позволяет продолжать любые изменения внутри границ HausmanHub: код, тесты, "
-            "документацию, местные проверки и исправления.",
-            "Он не разрешает коммит, отправку, выпуск, развёртывание, публикацию или новые "
-            "права.",
-            "Исключение для изменения только документации действует лишь когда в наборе нет "
-            "кода; в смешанном наборе действует финальная проверка Kimi.",
+            "Codex выполняет финальный self-review окончательного текущего набора изменений.",
+            "Перед коммитом, отправкой, выпуском, развёртыванием или публикацией проверяются "
+            "staged diff, профильные тесты и полный local release gate.",
         )
         normalized_documents = {
             "engineering standards": " ".join(standards.split()),
@@ -165,26 +156,6 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             with self.subTest(document=document_name):
                 for policy_sentence in english_policy:
                     self.assertIn(policy_sentence, normalized_documents[document_name])
-
-        self.assertIn(
-            "For every code change, Kimi must review the final current diff before it is "
-            "considered complete or before a commit, push, release, deployment, or "
-            "publication.",
-            normalized_documents["engineering standards"],
-        )
-        self.assertIn(
-            "This alternative review lets every change already permitted by the HausmanHub "
-            "boundaries continue safely, including code, tests, documentation, and "
-            "local checks or fixes. It does not authorize a commit, push, release, "
-            "deployment, publication, or new authority.",
-            normalized_documents["engineering standards"],
-        )
-        self.assertIn(
-            "Documentation-only edits that are not part of a code change do not require "
-            "Kimi review. This narrow exception never applies to a mixed diff: when code "
-            "is present, the final Kimi gate above applies to the entire diff.",
-            normalized_documents["engineering standards"],
-        )
 
         for document_name in (
             "README",

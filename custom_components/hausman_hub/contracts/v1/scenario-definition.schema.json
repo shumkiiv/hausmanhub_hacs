@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/scenario-definition.schema.json",
+  "title": "HausmanHub scenario definition v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "executionMode", "triggers", "conditions", "actions"],
+  "properties": {
+    "version": {"const": 1},
+    "executionMode": {"enum": ["single", "restart", "queued"]},
+    "triggers": {"type": "array", "minItems": 1, "maxItems": 16, "items": {"$ref": "#/$defs/trigger"}},
+    "conditions": {"type": "array", "maxItems": 32, "items": {"$ref": "#/$defs/condition"}},
+    "actions": {"type": "array", "minItems": 1, "maxItems": 64, "items": {"$ref": "#/$defs/action"}}
+  },
+  "$defs": {
+    "stable_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+    "scalar": {"type": ["string", "number", "boolean"]},
+    "event_type": {"type": "string", "pattern": "^[a-z][a-z0-9_]{1,63}$", "not": {"enum": ["state_changed", "call_service", "service_executed", "homeassistant_start", "homeassistant_stop"]}},
+    "event_data": {"type": "object", "maxProperties": 12, "propertyNames": {"pattern": "^[a-z][a-z0-9_-]{0,63}$"}, "additionalProperties": {"$ref": "#/$defs/scalar"}},
+    "trigger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type"],
+      "properties": {
+        "id": {"$ref": "#/$defs/stable_id"},
+        "type": {"enum": ["manual", "time", "device_state", "sunrise", "sunset", "presence", "event"]},
+        "targetId": {"$ref": "#/$defs/stable_id"},
+        "targetName": {"type": "string", "minLength": 1, "maxLength": 120},
+        "property": {"type": "string", "minLength": 1, "maxLength": 120},
+        "comparison": {"enum": ["equals", "not_equals", "above", "below", "changed"]},
+        "value": {"$ref": "#/$defs/scalar"},
+        "eventType": {"$ref": "#/$defs/event_type"},
+        "eventData": {"$ref": "#/$defs/event_data"}
+      },
+      "allOf": [{"if": {"properties": {"type": {"const": "event"}}, "required": ["type"]}, "then": {"required": ["eventType"], "not": {"anyOf": [{"required": ["targetId"]}, {"required": ["property"]}, {"required": ["comparison"]}, {"required": ["value"]}]}}}]
+    },
+    "condition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type"],
+      "properties": {
+        "id": {"$ref": "#/$defs/stable_id"},
+        "type": {"enum": ["device_state", "time_window", "presence", "weekday"]},
+        "targetId": {"$ref": "#/$defs/stable_id"},
+        "targetName": {"type": "string", "minLength": 1, "maxLength": 120},
+        "property": {"type": "string", "minLength": 1, "maxLength": 120},
+        "comparison": {"enum": ["equals", "not_equals", "above", "below"]},
+        "value": {"$ref": "#/$defs/scalar"}
+      }
+    },
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domain", "service", "entity_id"],
+      "properties": {
+        "domain": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+        "service": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+        "entity_id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*\\.[a-z0-9_]+$"}
+      }
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type"],
+      "properties": {
+        "id": {"$ref": "#/$defs/stable_id"},
+        "type": {"enum": ["device_action", "delay", "run_scenario", "notification", "existing_action"]},
+        "targetId": {"$ref": "#/$defs/stable_id"},
+        "targetName": {"type": "string", "minLength": 1, "maxLength": 120},
+        "actionId": {"$ref": "#/$defs/stable_id"},
+        "actionTitle": {"type": "string", "minLength": 1, "maxLength": 120},
+        "value": {"$ref": "#/$defs/scalar"},
+        "command": {"$ref": "#/$defs/command"},
+        "delaySeconds": {"type": "integer", "minimum": 1, "maximum": 86400},
+        "scenarioId": {"$ref": "#/$defs/stable_id"},
+        "message": {"type": "string", "minLength": 1, "maxLength": 500}
+      }
+    }
+  }
+}

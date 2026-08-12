@@ -27,27 +27,14 @@ These standards apply to every future HausmanHub code change.
   physical-device domain, or general execution may be added without another
   explicit owner decision and a device-specific rollback plan.
 
-## Code review: Kimi and a temporary alternative
+## Code review: Codex final self-review
 
-Every code change requires an independent review. For every code change, Kimi
-must review the final current diff before it is considered complete or before a
-commit, push, release, deployment, or publication. The reviewer must receive
-the intended scope, relevant architecture and safety constraints, changed
-files, and local test results.
+Every code change requires a final Codex self-review. Codex reviews the final
+current diff before commit, push, release, deployment, or publication. The
+self-review includes the staged diff, relevant tests, and the full local
+release gate.
 
-If Kimi is temporarily unavailable, for example because of a provider error or
-a quota limit, use a different independent reviewer for the final local diff.
-Record who reviewed it, what was checked, and whether findings remain. This
-alternative review lets every change already permitted by the HausmanHub boundaries
-continue safely, including code, tests, documentation, and local checks or
-fixes. It does not authorize a commit, push, release, deployment, publication,
-or new authority.
-
-Address review findings with code or an explicit, documented reason. Record in
-the final change report which review was completed and whether any findings
-remain. Neither type of review grants authority for proxy, device execution,
-runtime access, or any scope excluded by the repository boundaries.
-
-Documentation-only edits that are not part of a code change do not require
-Kimi review. This narrow exception never applies to a mixed diff: when code is
-present, the final Kimi gate above applies to the entire diff.
+Review findings must be addressed or explicitly documented. Record the scope,
+checks and remaining risks in the final report. Self-review does not grant new
+runtime authority and does not relax proxy, device execution or repository
+boundaries.

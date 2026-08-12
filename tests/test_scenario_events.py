@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import unittest
+from types import MappingProxyType
 from types import SimpleNamespace
 
 from custom_components.hausman_hub.domain.scenarios import ScenarioComparison
-from custom_components.hausman_hub.scenario_events import state_trigger_matches
+from custom_components.hausman_hub.scenario_events import (
+    event_trigger_matches,
+    state_trigger_matches,
+)
 
 
 def _state(value: object, **attributes: object) -> SimpleNamespace:
@@ -58,5 +62,29 @@ class StateTriggerMatchesTest(unittest.TestCase):
         self.assertFalse(
             state_trigger_matches(
                 _state("off"), None, "state", ScenarioComparison.EQUALS, "on"
+            )
+        )
+
+
+class EventTriggerMatchesTest(unittest.TestCase):
+    def test_matches_exact_scalar_filter(self) -> None:
+        self.assertTrue(
+            event_trigger_matches(
+                {"device_id": "button-kids", "action": "single"},
+                {"device_id": "button-kids", "action": "single"},
+            )
+        )
+
+    def test_rejects_missing_nested_and_type_coerced_fields(self) -> None:
+        expected = {"button": 1}
+        self.assertFalse(event_trigger_matches({}, expected))
+        self.assertFalse(event_trigger_matches({"button": "1"}, expected))
+        self.assertFalse(event_trigger_matches({"button": {"id": 1}}, expected))
+
+    def test_accepts_read_only_mapping_from_home_assistant(self) -> None:
+        self.assertTrue(
+            event_trigger_matches(
+                MappingProxyType({"device_id": "button-kids"}),
+                {"device_id": "button-kids"},
             )
         )

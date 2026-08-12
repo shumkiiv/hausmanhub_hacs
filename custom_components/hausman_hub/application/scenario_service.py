@@ -210,6 +210,34 @@ class ScenarioService:
                 )
         return tuple(items)
 
+    def event_trigger_items(
+        self,
+    ) -> tuple[tuple[str, str, str, dict[str, str | float | int | bool]], ...]:
+        """Return enabled custom-event triggers without exposing scenario actions.
+
+        Event data is limited by the domain model to a small scalar matcher.
+        The Home Assistant adapter never receives arbitrary commands or raw
+        scenario definitions from this projection.
+        """
+
+        registry = self._ensure_loaded()
+        items: list[tuple[str, str, str, dict[str, str | float | int | bool]]] = []
+        for scenario in registry.scenarios:
+            if not scenario.enabled:
+                continue
+            for trigger in scenario.definition.triggers:
+                if trigger.type is not ScenarioTriggerType.EVENT or not trigger.event_type:
+                    continue
+                items.append(
+                    (
+                        scenario.id,
+                        trigger.id,
+                        trigger.event_type,
+                        dict(trigger.event_data or {}),
+                    )
+                )
+        return tuple(items)
+
     def _upcoming_runs(self) -> list[ScheduledRun]:
         registry = self._ensure_loaded()
         now = self._now_local()

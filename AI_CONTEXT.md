@@ -2545,16 +2545,10 @@ Last updated: 2026-08-11 (1.52.72: runtime-триггеры сценариев �
   signoff. The virtual-helper canary is not a physical authority transfer.
 - Do not commit secrets, live identifiers, flow snapshots, device-specific
   service paths, physical command payloads, or deployment scripts.
-- Every code change needs independent review. It follows Clean Code and Clean
-  Architecture. Kimi must review the final current diff before the
-  change is considered complete or before a commit, push, release, deployment,
-  or publication. If Kimi is temporarily unavailable, another
-  independent review may support every change permitted by the HausmanHub boundaries,
-  including code, tests, documentation, and local checks or fixes. It must be
-  recorded. It does not authorize a commit, push, release, deployment,
-  publication, or new authority. Documentation-only edits do not require Kimi
-  only when the change contains no code; the final Kimi gate applies to a mixed
-  diff.
+- Every code change requires a final Codex self-review. Codex reviews the final
+  current diff before commit, push, release, deployment, or publication. The
+  self-review includes the staged diff, relevant tests, and the full local
+  release gate. Review findings must be addressed or explicitly documented.
 - The owner approved a public GitHub repository on 2026-07-14 because HACS
   cannot use a private GitHub repository. This permits only the minimal root
   `hacs.json` and manual HACS custom-repository installation. It does not

@@ -1,6 +1,6 @@
 /* Canonical physical-device card shared by all tablet-style HACS sections. */
 
-import { enhanceDetailsModal } from "./hausman-hub-modal.js?v=1.52.75";
+import { enhanceDetailsModal } from "./hausman-hub-modal.js?v=1.52.76";
 
 const STATE_LABELS = {
   on: "Включено",
@@ -154,7 +154,10 @@ export function renderPhysicalDeviceCard(owner, device, deps) {
   copy.appendChild(el("strong", null, device.name || "Устройство"));
   copy.appendChild(el("small", null, `${device.roomName || "Без комнаты"} · ${state}`));
   summary.appendChild(copy);
-  summary.appendChild(el("span", `device-state-dot ${device.unavailable ? "bad" : (device.tone || "neutral")}`));
+  const connection = el("span", `inventory-device-status ${device.unavailable ? "is-unavailable" : ""}`);
+  connection.appendChild(el("span", `device-state-dot ${device.unavailable ? "bad" : (device.tone || "good")}`));
+  connection.appendChild(el("span", null, device.unavailable ? "Нет связи" : "На связи"));
+  summary.appendChild(connection);
   summary.appendChild(el("span", "inventory-device-chevron", "›"));
   card.appendChild(summary);
 

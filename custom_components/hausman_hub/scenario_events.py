@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -64,6 +65,26 @@ def state_trigger_matches(
     return False
 
 
+def event_trigger_matches(
+    actual: object,
+    expected: Mapping[str, str | float | int | bool],
+) -> bool:
+    """Match only a complete scalar event-data filter.
+
+    Missing, nested or type-coerced fields never count as a match. This keeps
+    custom HA events from accidentally starting an automation because a
+    similarly named payload field happened to be present.
+    """
+
+    if not isinstance(actual, Mapping):
+        return False
+    for key, expected_value in expected.items():
+        value = actual.get(key)
+        if type(value) is not type(expected_value) or value != expected_value:
+            return False
+    return True
+
+
 async def async_start_scenario_events(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -97,9 +118,31 @@ async def async_start_scenario_events(
                     exc_info=True,
                 )
 
+    async def _async_handle_custom_event(event: Any) -> None:
+        event_type = getattr(event, "event_type", None)
+        data = getattr(event, "data", {})
+        if not isinstance(event_type, str) or event_type == _EVENT_STATE_CHANGED:
+            return
+        for scenario_id, trigger_id, expected_type, expected_data in service.event_trigger_items():
+            if event_type != expected_type or not event_trigger_matches(data, expected_data):
+                continue
+            try:
+                await service.async_run_scenario(scenario_id)
+            except Exception:  # noqa: BLE001
+                _LOGGER.warning(
+                    "event trigger %s of scenario %s failed",
+                    trigger_id,
+                    scenario_id,
+                    exc_info=True,
+                )
+
     bus = getattr(hass, "bus", None)
     if bus is None:
         _LOGGER.debug("Home Assistant event bus is unavailable; scenario events are not started")
         return
     unsubscribe = bus.async_listen(_EVENT_STATE_CHANGED, _async_handle)
     entry.async_on_unload(unsubscribe)
+    from homeassistant.const import MATCH_ALL  # noqa: PLC0415
+
+    unsubscribe_all = bus.async_listen(MATCH_ALL, _async_handle_custom_event)
+    entry.async_on_unload(unsubscribe_all)

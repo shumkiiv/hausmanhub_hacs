@@ -187,6 +187,12 @@ def _validate_trigger_semantics(
             _require_presence_value(trigger.value, f"{path}.value")
         elif trigger.type is ScenarioTriggerType.TIME:
             _require_clock_time(trigger.value, f"{path}.value")
+        elif trigger.type is ScenarioTriggerType.EVENT:
+            if not trigger.event_type:
+                raise ScenarioDefinitionViolation(
+                    "event trigger needs eventType",
+                    path=f"{path}.eventType",
+                )
 
 
 def _validate_condition_semantics(

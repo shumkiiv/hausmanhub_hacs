@@ -284,6 +284,47 @@ class ScenarioDomainTest(unittest.TestCase):
         )
         self.assertEqual(trigger.target_id, "motion_living")
 
+    def test_event_trigger_round_trips_exact_scalar_filter(self) -> None:
+        definition = valid_definition(
+            triggers=(
+                ScenarioTrigger(
+                    id="t1",
+                    type=ScenarioTriggerType.EVENT,
+                    event_type="zha_event",
+                    event_data={"device_id": "button-kids", "command": "single"},
+                ),
+            )
+        )
+        restored = ScenarioDefinition.from_payload(definition.to_payload())
+        self.assertEqual(restored.triggers[0].event_type, "zha_event")
+        self.assertEqual(
+            dict(restored.triggers[0].event_data or {}),
+            {"device_id": "button-kids", "command": "single"},
+        )
+
+    def test_event_trigger_rejects_system_event_and_nested_filter(self) -> None:
+        with self.assertRaises(ScenarioViolation):
+            ScenarioTrigger(
+                id="t1", type=ScenarioTriggerType.EVENT, event_type="state_changed"
+            )
+        with self.assertRaises(ScenarioViolation):
+            ScenarioTrigger(
+                id="t1",
+                type=ScenarioTriggerType.EVENT,
+                event_type="zha_event",
+                event_data={"payload": {"nested": True}},
+            )
+
+    def test_event_trigger_accepts_boolean_filter_value(self) -> None:
+        trigger = ScenarioTrigger(
+            id="t1",
+            type=ScenarioTriggerType.EVENT,
+            event_type="zha_event",
+            event_data={"pressed": True},
+        )
+
+        self.assertEqual(dict(trigger.event_data or {}), {"pressed": True})
+
     def test_sunrise_offset_optional(self) -> None:
         trigger = ScenarioTrigger(id="t1", type=ScenarioTriggerType.SUNRISE)
         self.assertIsNone(trigger.value)
