@@ -1,8 +1,8 @@
 /* Climate control surface shared with the tablet information architecture. */
 
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.73";
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.73";
-import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.73";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.74";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.74";
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.74";
 
 const CLIMATE_ACTION_API = "hausman_hub/v1/climate/actions";
 
@@ -479,8 +479,8 @@ function renderRooms(panel, container, rooms, devices, deps) {
       field.appendChild(save);
       card.appendChild(field);
     };
-    addTargetControl("set_room_target", "target_temperature", "Целевая температура, °C", managedRoom.target_temperature, " °C");
-    addTargetControl("set_room_humidity_target", "target_humidity", "Целевая влажность, %", managedRoom.target_humidity, " %");
+    addTargetControl("set_room_target", "target_temperature", "Целевая температура, °C", managedRoom?.target_temperature, " °C");
+    addTargetControl("set_room_humidity_target", "target_humidity", "Целевая влажность, %", managedRoom?.target_humidity, " %");
     const actions = el("div", "climate-room-actions");
     const open = el("button", "climate-room-open", "Открыть устройства ›");
     open.type = "button";

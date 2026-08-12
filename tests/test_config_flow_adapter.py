@@ -1115,6 +1115,7 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
                 climate_store.registry, BridgeView(bridge)
             ),
             now_ms=lambda: 1784280005000,
+            local_now=lambda: datetime(2026, 7, 17, 12, 20, 5).astimezone(),
         )
         await runtime.async_start()
         options_flow = self.config_flow.HausmanHubOptionsFlow()
@@ -1412,9 +1413,10 @@ class ConfigFlowAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(1, len(executor.batches))
 
         reads_before_schedule = state_view.read_count
-        await runtime.async_run_climate_schedule(datetime(2026, 7, 19, 12, 0))
+        await runtime.async_run_climate_schedule(runtime._local_now())
         self.assertGreater(state_view.read_count, reads_before_schedule)
         self.assertEqual(1, len(executor.batches))
+        self.config_flow.dt_util.now = runtime._local_now
         temporary_flow = self.config_flow.HausmanHubOptionsFlow()
         temporary_flow.config_entry = schedule_flow.config_entry
         temporary_flow.hass = options_flow.hass
