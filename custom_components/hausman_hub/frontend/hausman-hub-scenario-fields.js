@@ -1,6 +1,6 @@
 /* Focused form controls for the guided scenario editor. */
 
-import { SCENARIO_ICON_GROUPS, scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.80";
+import { SCENARIO_ICON_GROUPS, scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.81";
 
 export function scenarioField(deps, label, value, onChange, options = {}) {
   const { el, setAttr } = deps;
@@ -15,6 +15,20 @@ export function scenarioField(deps, label, value, onChange, options = {}) {
   wrapper.appendChild(input);
   if (options.help) wrapper.appendChild(el("small", null, options.help));
   return wrapper;
+}
+
+export function scenarioEventFields(deps, rule, onChange) {
+  const fragment = deps.el("div", "scenario-rule-fields");
+  fragment.appendChild(scenarioField(deps, "Тип события", rule.eventType || "", (eventType) => onChange({ ...rule, eventType }), {
+    placeholder: "например zha_event", maxlength: 64,
+    help: "Только точный custom event. Системные события Home Assistant недоступны.",
+  }));
+  const filter = rule.eventDataText ?? (rule.eventData && Object.keys(rule.eventData).length ? JSON.stringify(rule.eventData, null, 2) : "");
+  fragment.appendChild(scenarioField(deps, "Фильтр данных (необязательно)", filter, (eventDataText) => onChange({ ...rule, eventDataText }), {
+    multiline: true, wide: true, maxlength: 1200, placeholder: '{"device_id":"button-kids","action":"single"}',
+    help: "JSON-объект: до 12 строковых, числовых или логических значений. Пустое поле принимает любое событие этого типа.",
+  }));
+  return fragment;
 }
 
 export function scenarioSelectField(deps, label, value, options, onChange, help = "") {
@@ -109,6 +123,15 @@ export function scenarioEditorIssues(scenario) {
     if (trigger.type === "time" && !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(trigger.value || ""))) add("trigger_time_invalid", "triggers", "Укажите корректное время запуска.");
     if (trigger.type === "device_state" && (!trigger.targetId || !trigger.property || !trigger.comparison)) add("trigger_device_incomplete", "triggers", "Для триггера выберите устройство, показатель и сравнение.");
     if (trigger.type === "device_state" && trigger.comparison !== "changed" && String(trigger.value ?? "").trim() === "") add("trigger_value_required", "triggers", "Укажите значение, которое запустит сценарий.");
+    if (trigger.type === "event") {
+      const eventType = String(trigger.eventType || "").trim();
+      if (!/^[a-z][a-z0-9_]{1,63}$/.test(eventType)
+          || ["state_changed", "call_service", "service_executed", "homeassistant_start", "homeassistant_stop"].includes(eventType)) {
+        add("trigger_event_type_invalid", "triggers", "Укажите разрешённый тип внешнего события.");
+      }
+      const filter = eventDataFromDraft(trigger);
+      if (filter.error) add("trigger_event_filter_invalid", "triggers", filter.error);
+    }
   });
   scenario.definition.conditions.forEach((condition) => {
     if (condition.type === "time_window" && !/^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/.test(String(condition.value || ""))) add("condition_window_invalid", "conditions", "Укажите временной промежуток в формате 22:00-07:00.");
@@ -123,4 +146,21 @@ export function scenarioEditorIssues(scenario) {
     if (action.type === "delay" && (!Number.isFinite(Number(action.delaySeconds)) || Number(action.delaySeconds) < 1)) add("delay_invalid", "actions", "Пауза должна быть не меньше одной секунды.");
   });
   return [...new Map(issues.map((issue) => [issue.code, issue])).values()];
+}
+
+export function eventDataFromDraft(trigger) {
+  const raw = String(trigger.eventDataText ?? "").trim();
+  if (!raw) return { value: trigger.eventData || {} };
+  try {
+    const value = JSON.parse(raw);
+    if (!value || Array.isArray(value) || typeof value !== "object" || Object.keys(value).length > 12) throw new Error();
+    for (const [key, item] of Object.entries(value)) {
+      if (!/^[a-z][a-z0-9_-]{0,63}$/.test(key)
+          || !["string", "number", "boolean"].includes(typeof item)
+          || (typeof item === "number" && !Number.isFinite(item))) throw new Error();
+    }
+    return { value };
+  } catch (error) {
+    return { error: "Фильтр события должен быть JSON-объектом максимум с 12 простыми значениями." };
+  }
 }

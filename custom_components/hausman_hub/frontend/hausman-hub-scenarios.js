@@ -1,14 +1,15 @@
 /* Scenario library and editor shared with the HausmanHub tablet contract. */
 
-import { activeElementWithin, trapModalTabKey } from "./hausman-hub-modal.js?v=1.52.80";
-import { scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.80";
-import { scenarioEditorIssues, scenarioField, scenarioIconField, scenarioSelectField, scenarioToggle } from "./hausman-hub-scenario-fields.js?v=1.52.80";
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.80";
+import { activeElementWithin, trapModalTabKey } from "./hausman-hub-modal.js?v=1.52.81";
+import { scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.81";
+import { eventDataFromDraft, scenarioEditorIssues, scenarioEventFields, scenarioField, scenarioIconField, scenarioSelectField, scenarioToggle } from "./hausman-hub-scenario-fields.js?v=1.52.81";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.81";
 
 const TRIGGER_TYPES = [
   ["manual", "Ручной запуск"], ["time", "По времени"],
   ["sunrise", "Восход солнца"], ["sunset", "Закат солнца"],
   ["presence", "Присутствие дома"], ["device_state", "Изменение устройства"],
+  ["event", "Внешнее событие"],
 ];
 const CONDITION_TYPES = [
   ["device_state", "Состояние устройства"], ["time_window", "Промежуток времени"],
@@ -226,6 +227,7 @@ function scenarioRuleCard(panel, kind, rule, index, rules, deps) {
     if (["sunrise", "sunset"].includes(rule.type)) card.appendChild(scenarioField(deps, "Смещение, минут", rule.value ?? 0, (value) => change({ ...rule, value: Number(value) || 0 }), { type: "number" }));
     if (rule.type === "presence") card.appendChild(scenarioSelectField(deps, "Событие", rule.value || "home", [["home", "Кто-то пришёл домой"], ["away", "Все ушли"]], (value) => change({ ...rule, value })));
     if (rule.type === "device_state") card.appendChild(scenarioDeviceFields(panel, rule, deps, change));
+    if (rule.type === "event") card.appendChild(scenarioEventFields(deps, rule, change));
   } else if (kind === "condition") {
     card.appendChild(scenarioSelectField(deps, "Тип условия", rule.type, CONDITION_TYPES, (type) => {
       const value = type === "time_window" ? "22:00-07:00" : type === "presence" ? "home" : type === "weekday" ? "пн, вт, ср, чт, пт" : null;
@@ -316,6 +318,12 @@ function scenarioPayload(scenario) {
   result.triggerDescription = scenarioSummary(result).split(" · ")[0];
   result.conditionDescription = result.definition.conditions.length ? `${result.definition.conditions.length} условий` : "Без дополнительных условий";
   result.actionDescription = `${result.definition.actions.length} действий`;
+  result.definition.triggers.forEach((trigger) => {
+    if (trigger.type !== "event") return;
+    const filter = eventDataFromDraft(trigger);
+    if (!filter.error) trigger.eventData = filter.value;
+    delete trigger.eventDataText;
+  });
   delete result.updatedAt;
   delete result.requires_confirmation;
   return result;

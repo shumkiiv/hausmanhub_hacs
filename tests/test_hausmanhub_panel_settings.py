@@ -2913,6 +2913,68 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
+    def test_scenario_editor_creates_event_trigger_with_scalar_filter(self) -> None:
+        payloads = dict(GET_PATHS)
+        payloads["hausman_hub/v1/admin/scenarios"] = {"scenarios": []}
+        payloads["hausman_hub/v1/admin/scenarios/catalog"] = {
+            "devices": [
+                {
+                    "target_id": "light.living",
+                    "name": "Свет гостиной",
+                    "entity_id": "light.living",
+                    "properties": [],
+                    "actions": [{"action_id": "turn_on", "title": "Включить"}],
+                }
+            ]
+        }
+        script = panel_script(
+            payloads,
+            {"hausman_hub/v1/admin/scenarios": {"ok": True, "status": "success"}},
+            """
+        panel._shell.tabs.scenarios.fire("click");
+        await tick();
+        const screen = panel._shell.scenarios;
+        findAll(screen, (node) => node.tagName === "BUTTON")
+          .find((node) => node.textContent === "+ Новый сценарий" || node.textContent === "Создать сценарий")
+          .fire("click");
+        const field = (label) => {
+          const wrapper = findAll(screen, (node) => String(node.className).split(" ").includes("scenario-editor-field"))
+            .find((node) => node.children[0] && node.children[0].textContent === label);
+          if (!wrapper) throw new Error("scenario field missing: " + label);
+          return wrapper.children.find((node) => ["INPUT", "TEXTAREA", "SELECT"].includes(node.tagName));
+        };
+        field("Название").value = "Кнопка детской";
+        field("Название").fire("input");
+        findAll(screen, (node) => String(node.className).split(" ").includes("scenario-editor-step"))
+          .find((node) => textOf(node).includes("Когда")).fire("click");
+        const triggerType = field("Тип триггера");
+        triggerType.value = "event";
+        triggerType.fire("change");
+        field("Тип события").value = "zha_event";
+        field("Тип события").fire("input");
+        const filter = field("Фильтр данных (необязательно)");
+        filter.value = '{"device_id":"button-kids","action":"single","pressed":true}';
+        filter.fire("input");
+        panel._scenarioEditor.definition.actions = [{
+          id: "action-1", type: "device_action", targetId: "light.living", actionId: "turn_on",
+        }];
+        panel._renderScenarios(screen);
+        findAll(screen, (node) => node.tagName === "BUTTON" && node.textContent === "Сохранить")[0].fire("click");
+        await tick();
+        await tick();
+        const request = calls.find((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/admin/scenarios");
+        const trigger = request && request.payload.definition.triggers[0];
+        if (!trigger || trigger.type !== "event" || trigger.eventType !== "zha_event"
+            || JSON.stringify(trigger.eventData) !== JSON.stringify({device_id: "button-kids", action: "single", pressed: true})
+            || Object.hasOwn(trigger, "eventDataText")) {
+          throw new Error("event trigger payload mismatch: " + JSON.stringify(request && request.payload));
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_scenario_editor_has_five_clear_steps_switches_and_safe_escape(self) -> None:
         payloads = dict(GET_PATHS)
         payloads["hausman_hub/v1/admin/scenarios"] = {"scenarios": []}
@@ -3768,7 +3830,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.80")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.81")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;
