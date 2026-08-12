@@ -1,8 +1,21 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-12 (1.52.79: climate synchronization UI).
+Last updated: 2026-08-12 (1.52.80: HACS home dashboard parity with Android).
 
 ## Current work
+
+- 2026-08-12 (Codex): HACS `1.52.80` выпущен из commit `1ffb24e` и
+  опубликован как GitHub Release `v1.52.80`. Главная панель собрана в том же
+  функциональном порядке, что и Android: климат, цель климата, освещение,
+  безопасность, избранные сценарии, энергия, комфорт, внимание, погода,
+  состояние дома и активность. В карточке цели добавлены capability-gated
+  шаги `±0,5 °C`, переход к деталям и синхронизация, повторные действия
+  блокируются pending receipt. Полный local release gate: 1366 тестов,
+  4 пропущены, совместимость Android, пакет и безопасность файлов зелёные.
+  Production HA 2026.8.1 установлен штатно после автоматического backup:
+  config check вызван, restart завершён, installed/latest `v1.52.80`, cache
+  marker панели `1.52.80`, unavailable сущностей HausmanHub нет. Физические
+  климатические команды и автомат 233 не затрагивались.
 
 - 2026-08-12 (Codex): HACS `1.52.79` опубликован и установлен в production,
   release merge `30d8a32`, GitHub Release `v1.52.79`. Climate overview получил
