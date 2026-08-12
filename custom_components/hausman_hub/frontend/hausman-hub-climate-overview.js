@@ -1,8 +1,8 @@
 /* Climate control surface shared with the tablet information architecture. */
 
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.74";
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.74";
-import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.74";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.75";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.75";
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.75";
 
 const CLIMATE_ACTION_API = "hausman_hub/v1/climate/actions";
 
@@ -408,6 +408,45 @@ function renderRooms(panel, container, rooms, devices, deps) {
     modeTabs.appendChild(button);
   });
   section.appendChild(modeTabs);
+  const manualDevices = (panel._climateRuntime?.rooms || []).flatMap((runtimeRoom) =>
+    Array.isArray(runtimeRoom?.devices)
+      ? runtimeRoom.devices.filter((device) => device?.mode === "manual").map((device) => ({
+        room: runtimeRoom,
+        device,
+      }))
+      : []
+  );
+  if (manualDevices.length) {
+    const manualList = el("section", "climate-manual-list");
+    const manualHead = el("div", "climate-manual-list-heading");
+    const manualTitle = el("div");
+    const manualIcon = el("span", "climate-manual-list-icon");
+    manualIcon.appendChild(svgIcon("manual"));
+    manualTitle.appendChild(manualIcon);
+    manualTitle.appendChild(el("strong", null, "Исключено из климатического контура"));
+    manualHead.appendChild(manualTitle);
+    manualHead.appendChild(el("span", "climate-manual-count", String(manualDevices.length)));
+    manualList.appendChild(manualHead);
+    manualDevices.forEach(({ room, device }) => {
+      const row = el("div", "climate-manual-list-item");
+      const itemCopy = el("span");
+      itemCopy.appendChild(el("strong", null, device.name || climateDeviceKindLabel(device.kind)));
+      itemCopy.appendChild(el("small", null, `${room.name || "Комната"} · ${climateDeviceKindLabel(device.kind)}`));
+      row.appendChild(itemCopy);
+      const allowed = device.control && Array.isArray(device.control.allowed_actions)
+        && device.control.allowed_actions.includes("set_device_mode");
+      const restore = el("button", "climate-manual-restore", "Вернуть в контур");
+      restore.type = "button";
+      restore.disabled = !allowed || Boolean(panel._climateModePendingKey);
+      restore.addEventListener("click", (event) => {
+        event.stopPropagation?.();
+        panel._setClimateManual(room.id, device.id, false);
+      });
+      row.appendChild(restore);
+      manualList.appendChild(row);
+    });
+    section.appendChild(manualList);
+  }
   if (!selectedRoom) {
     section.appendChild(el("div", "climate-sheet-empty", "В этой вкладке пока нет комнат."));
     container.appendChild(section);
@@ -424,6 +463,8 @@ function renderRooms(panel, container, rooms, devices, deps) {
     const managedRoom = runtimeRoom(panel, room.id);
     const manual = managedRoom && managedRoom.mode === "manual";
     const contourDevices = managedRoom && Array.isArray(managedRoom.devices) ? managedRoom.devices : [];
+    const hasManualDevice = contourDevices.some((device) => device.mode === "manual");
+    const manualState = manual || hasManualDevice;
     const criticalSensorExcluded = contourDevices.some((device) =>
       device.mode === "manual" && ["temperature_sensor", "humidity_sensor"].includes(device.kind));
     const card = el("div", `climate-room-card is-focus${manual ? " is-manual" : ""}`);
@@ -435,6 +476,13 @@ function renderRooms(panel, container, rooms, devices, deps) {
     roomCopy.appendChild(el("strong", null, room.name || "Комната"));
     roomCopy.appendChild(el("small", null, manual ? "Полный ручной режим" : (matches.some(deviceIsActive) ? "Климат работает" : "Поддержание комфорта")));
     title.appendChild(roomCopy);
+    if (manualState) {
+      const modeBadge = el("span", "climate-manual-indicator");
+      modeBadge.appendChild(svgIcon("manual"));
+      modeBadge.appendChild(el("span", null, manual ? "Ручной режим" : "Есть ручное устройство"));
+      setAttr(modeBadge, "aria-label", manual ? "Комната в ручном режиме" : "В комнате есть исключённое из автоматики устройство");
+      title.appendChild(modeBadge);
+    }
     title.appendChild(el("b", null, temperature(room.temp)));
     card.appendChild(title);
     const facts = el("span", "climate-room-facts");

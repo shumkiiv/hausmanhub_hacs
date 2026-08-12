@@ -182,16 +182,19 @@ class ClimateTabletProjectionTest(unittest.TestCase):
         self.assertFalse(room["temporary_override"]["active"])
         contract_validator("climate-runtime.schema.json").validate(payload)
 
-    def test_stale_projection_remains_visible_and_disables_every_action(self) -> None:
+    def test_stale_projection_keeps_manual_exclusion_available(self) -> None:
         home = managed_home()
         home["climate"]["fresh"] = False
+        home["rooms"][0]["control"]["allowed_actions"].append("set_room_mode")
 
         payload = climate_tablet_snapshot(home, climate_mode="managed")
 
-        self.assertFalse(payload["commands_enabled"])
-        self.assertEqual(["state_stale"], payload["blocked_reasons"])
+        self.assertTrue(payload["commands_enabled"])
+        self.assertEqual([], payload["blocked_reasons"])
         self.assertEqual([], payload["home_control"]["allowed_actions"])
-        self.assertEqual([], payload["rooms"][0]["control"]["allowed_actions"])
+        self.assertEqual(
+            ["set_room_mode"], payload["rooms"][0]["control"]["allowed_actions"]
+        )
         contract_validator("climate-runtime.schema.json").validate(payload)
 
     def test_shadow_projection_keeps_observations_and_disables_every_action(self) -> None:

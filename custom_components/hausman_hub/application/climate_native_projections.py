@@ -763,7 +763,6 @@ def native_android_climate_snapshot(
         available = _native_device_available(device, observed)
         device_mode_allowed = (
             bridge_mode is ClimateControlMode.MANAGED
-            and fresh
             and device.room_id not in pending
         )
         devices_by_room[device.room_id].append(
@@ -947,12 +946,10 @@ def _native_room_control_projection(
         humidity_reasons.append("bridge_disabled")
 
     if not native_runtime_fresh(observation):
-        mode_reasons.append("state_stale")
         target_reasons.append("state_stale")
         humidity_reasons.append("state_stale")
     observed_room = observation.room(room_id)
     if observed_room is None:
-        mode_reasons.append("registry_mismatch")
         target_reasons.append("registry_mismatch")
         humidity_reasons.append("registry_mismatch")
     elif observed_room.mode is ClimateRoomMode.MANUAL:

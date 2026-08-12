@@ -390,6 +390,20 @@ def climate_tablet_snapshot(
                 if isinstance(action, str)
                 and action in _SUPPORTED_ROOM_ACTIONS
             ]
+        # Manual exclusions only change restart-safe HausmanHub ownership.
+        # They do not call a physical device service, so they remain available
+        # when freshness or readiness blocks active climate control.  This is
+        # also the recovery path for an unavailable contour device.
+        if (
+            not shadow
+            and room_id not in pending_rooms
+            and isinstance(native_allowed, list)
+            and "set_room_mode" in native_allowed
+            and "set_room_mode" not in allowed_actions
+        ):
+            allowed_actions.append("set_room_mode")
+        if allowed_actions:
+            room_reasons = []
         if not room_reasons and not allowed_actions and isinstance(native_reasons, list):
             room_reasons.extend(
                 mapped

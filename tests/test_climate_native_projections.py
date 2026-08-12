@@ -468,7 +468,7 @@ class NativeFailClosedTest(unittest.TestCase):
         )
         self.assertEqual((), native_device_command_types(temperature_sensor))
 
-    def test_stale_observation_blocks_control_and_marks_contour_stale(self) -> None:
+    def test_stale_observation_blocks_active_control_and_keeps_manual_exclusion(self) -> None:
         registry, contours, legacy = _setup()
         bound, observation = _native_observation(registry, contours)
         stale = _with_data_status(observation, ClimateDataStatus.STALE)
@@ -488,10 +488,13 @@ class NativeFailClosedTest(unittest.TestCase):
 
         self.assertFalse(android["climate"]["fresh"])
         self.assertEqual("stale", android["rooms"][0]["actual"]["data_status"])
-        self.assertIn(
-            "state_stale", android["rooms"][0]["control"]["blocked_reasons"]
+        self.assertEqual(
+            ["set_room_mode"], android["rooms"][0]["control"]["allowed_actions"]
         )
-        self.assertEqual([], android["rooms"][0]["control"]["allowed_actions"])
+        self.assertEqual(
+            ["set_device_mode"],
+            android["rooms"][0]["devices"][0]["control"]["allowed_actions"],
+        )
         self.assertEqual("stale", contour_result["contours"][0]["status"])
         self.assertFalse(
             contour_result["contours"][0]["execution"]["settings_apply"]["available"]
@@ -843,8 +846,9 @@ class NativeControlGateTest(unittest.TestCase):
         stale = self._android(
             _with_data_status(observation, ClimateDataStatus.STALE)
         )["rooms"][0]["control"]
-        self.assertFalse(stale["enabled"])
-        self.assertIn("state_stale", stale["blocked_reasons"])
+        self.assertTrue(stale["enabled"])
+        self.assertEqual(["set_room_mode"], stale["allowed_actions"])
+        self.assertEqual([], stale["blocked_reasons"])
 
         pending = self._android(observation, pending_room_ids=("living",))[
             "rooms"

@@ -2037,7 +2037,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
                         },
                         {
                             "id": "living_temperature", "name": "Датчик температуры",
-                            "kind": "temperature_sensor", "mode": "automatic",
+                            "kind": "temperature_sensor", "mode": "manual",
                             "control": {
                                 "enabled": True,
                                 "allowed_actions": ["set_device_mode"],
@@ -2062,7 +2062,15 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const toggles = findAll(climate, (node) =>
           String(node.className).split(" ").includes("climate-device-mode"));
         if (toggles.length !== 2) throw new Error("device mode actions are missing");
-        toggles[1].fire("click");
+        const manualList = findAll(climate, (node) =>
+          String(node.className).split(" ").includes("climate-manual-list"))[0];
+        if (!manualList || !textOf(manualList).includes("Исключено из климатического контура")
+          || !textOf(manualList).includes("Датчик температуры")) {
+          throw new Error("manual exclusion list is missing");
+        }
+        const restore = findAll(manualList, (node) =>
+          String(node.className).split(" ").includes("climate-manual-restore"))[0];
+        restore.fire("click");
         await tick(8);
         const post = calls.find((call) => call.method === "POST"
           && call.path === "hausman_hub/v1/climate/actions");
@@ -2071,8 +2079,8 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           || post.payload.room_id !== "living"
           || post.payload.expected_state_revision !== 44
           || post.payload.parameters.device_id !== "living_temperature"
-          || post.payload.parameters.mode !== "manual") {
-          throw new Error("device exclusion payload mismatch: " + JSON.stringify(post));
+          || post.payload.parameters.mode !== "automatic") {
+          throw new Error("device return payload mismatch: " + JSON.stringify(post));
         }
             """,
         )
@@ -2081,6 +2089,12 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         source = CLIMATE_OVERVIEW_JS.read_text(encoding="utf-8")
         self.assertIn("Комната «${room.name}» полностью перейдёт", source)
         self.assertIn("Сначала верните датчик", source)
+        self.assertIn('svgIcon("manual")', source)
+        self.assertIn("Есть ручное устройство", source)
+        self.assertIn("Исключено из климатического контура", source)
+        self.assertIn("Вернуть в контур", source)
+        panel_source = PANEL_JS.read_text(encoding="utf-8")
+        self.assertIn('manual: "M9 11V5', panel_source)
 
     def test_television_card_uses_tablet_presentation_not_entity_dump(self) -> None:
         payloads = dict(GET_PATHS)
@@ -3671,7 +3685,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.74")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.75")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;
