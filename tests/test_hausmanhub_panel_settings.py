@@ -1833,7 +1833,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         cards[0].open = true;
         cards[0].fire("toggle");
         const on = findAll(lighting, (node) =>
-          node.tagName === "BUTTON" && node.textContent === "Включить")[0];
+          node.tagName === "BUTTON" && String(node.textContent).startsWith("Включить "))[0];
         if (!on) throw new Error("device action control missing");
         on.fire("click", { preventDefault() {} });
         await tick(10);
@@ -2332,8 +2332,9 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const security = panel._shell.homeSections.security;
         const text = textOf(security);
         if (!text.includes("Безопасность дома") || !text.includes("Контуры безопасности")
-          || !text.includes("Датчики и доступ") || !text.includes("Тамбур · Закрыт")
-          || !text.includes("Тамбур · Без охраны") || !text.includes("Тамбур · Сухо")) {
+          || !text.includes("Датчики и доступ") || !text.includes("Тамбур · Безопасность")
+          || !text.includes("Тамбур · Датчик протечки") || !text.includes("Закрыт")
+          || !text.includes("Без охраны") || !text.includes("Сухо")) {
           throw new Error("security state is not semantic Russian copy: " + text);
         }
         if (text.includes("locked") || text.includes("disarmed") || text.includes("Устройство ·")) {
@@ -3830,7 +3831,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.82")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.83")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

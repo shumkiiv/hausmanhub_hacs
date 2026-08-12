@@ -1,21 +1,12 @@
-import { roomHeroImage } from "./hausman-hub-room-icons.js?v=1.52.82";
-
 /**
- * Canonical compact Hero for tablet-style library pages.
+ * Canonical information header for tablet-style library pages.
  *
  * The dashboard keeps its larger interactive Hero. Every other primary section
- * uses this component so typography, image treatment and facts cannot drift.
+ * uses this component so typography, information hierarchy and facts cannot drift.
  */
 export function createLibraryHero(panel, options, deps) {
   const { el } = deps;
-  const dashboard = panel && panel._homeDashboard || {};
-  const room = options.room || null;
   const hero = el("section", `hmh-library-hero${options.warning ? " has-warning" : ""}`);
-  const media = el("div", "hmh-library-hero-media");
-  media.style.backgroundImage = `url("${roomHeroImage(room, dashboard.summary || {}, dashboard.localIso || "")}")`;
-  hero.appendChild(media);
-
-  const overlay = el("div", "hmh-library-hero-overlay");
   const copy = el("div", "hmh-library-hero-copy");
   const heading = el("div", "hmh-library-hero-heading");
   const identity = el("div", "hmh-library-hero-identity");
@@ -39,7 +30,6 @@ export function createLibraryHero(panel, options, deps) {
     facts.appendChild(fact);
   });
   copy.appendChild(facts);
-  overlay.appendChild(copy);
-  hero.appendChild(overlay);
+  hero.appendChild(copy);
   return hero;
 }
