@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
 
 _LOGGER = logging.getLogger(__name__)
+_EVENT_STATE_CHANGED = "state_changed"
 
 
 def _state_value(state: object | None, property_name: str) -> object | None:
@@ -70,8 +71,6 @@ async def async_start_scenario_events(
 ) -> None:
     """Subscribe enabled device-state scenario triggers to HA state events."""
 
-    from homeassistant.const import EVENT_STATE_CHANGED  # noqa: PLC0415
-
     async def _async_handle(event: Any) -> None:
         data = getattr(event, "data", {})
         entity_id = data.get("entity_id") if isinstance(data, dict) else None
@@ -98,5 +97,9 @@ async def async_start_scenario_events(
                     exc_info=True,
                 )
 
-    unsubscribe = hass.bus.async_listen(EVENT_STATE_CHANGED, _async_handle)
+    bus = getattr(hass, "bus", None)
+    if bus is None:
+        _LOGGER.debug("Home Assistant event bus is unavailable; scenario events are not started")
+        return
+    unsubscribe = bus.async_listen(_EVENT_STATE_CHANGED, _async_handle)
     entry.async_on_unload(unsubscribe)
