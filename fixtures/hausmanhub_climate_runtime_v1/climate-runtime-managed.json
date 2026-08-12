@@ -7,7 +7,7 @@
   "fresh": true,
   "commands_enabled": true,
   "blocked_reasons": [],
-  "home_control": {"enabled": true, "allowed_actions": ["set_home_targets"], "blocked_reasons": []},
+  "home_control": {"enabled": true, "allowed_actions": ["set_home_targets", "synchronize_home"], "blocked_reasons": []},
   "rooms": [
     {
       "id": "living",

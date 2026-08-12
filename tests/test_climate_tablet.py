@@ -118,6 +118,14 @@ class FakeRuntime:
             accepted_count=1,
         )
 
+    async def async_synchronize_climate(self) -> object:
+        self.commands.append({"action": "synchronize_home"})
+        return SimpleNamespace(
+            status=self.result_status,
+            confirmed_room_count=1,
+            accepted_count=3,
+        )
+
     async def async_room_humidity_target(
         self, *, request_id: object, room_id: object, target_humidity: object
     ) -> object:
@@ -166,7 +174,8 @@ class ClimateTabletProjectionTest(unittest.TestCase):
         self.assertEqual("hausman_hub", payload["authority"])
         self.assertTrue(payload["commands_enabled"])
         self.assertEqual(
-            ["set_home_targets"], payload["home_control"]["allowed_actions"]
+            ["set_home_targets", "synchronize_home"],
+            payload["home_control"]["allowed_actions"],
         )
         room = payload["rooms"][0]
         self.assertEqual(["set_room_target"], room["control"]["allowed_actions"])
@@ -331,6 +340,31 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
             ],
         )
         contract_validator("climate-operation-receipt.schema.json").validate(receipt)
+
+    async def test_synchronize_home_dispatches_bounded_explicit_action(self) -> None:
+        request = {
+            "contract": {
+                "name": "hausman-hub-climate-action-request",
+                "version": 1,
+            },
+            "request_id": "tablet.climate.sync.1",
+            "expected_state_revision": self.home["state_revision"],
+            "action": "synchronize_home",
+            "room_id": None,
+            "parameters": {},
+        }
+
+        receipt = await self.service.async_execute(request)
+
+        self.assertEqual("confirmed", receipt["status"])
+        self.assertEqual([{"action": "synchronize_home"}], self.runtime.commands)
+        contract_validator("climate-operation-receipt.schema.json").validate(receipt)
+
+        unsafe = copy.deepcopy(request)
+        unsafe["request_id"] = "tablet.climate.sync.2"
+        unsafe["parameters"] = {"force": True}
+        with self.assertRaises(ClimateTabletViolation):
+            await self.service.async_execute(unsafe)
 
     async def test_set_room_mode_dispatches_existing_contract_action(self) -> None:
         self.runtime.home["rooms"][0]["control"]["allowed_actions"].append(

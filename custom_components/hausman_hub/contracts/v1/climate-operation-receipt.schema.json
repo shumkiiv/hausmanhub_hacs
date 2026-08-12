@@ -39,6 +39,7 @@
     "action": {
       "enum": [
         "set_home_targets",
+        "synchronize_home",
         "set_room_target",
         "clear_room_override",
         "set_room_mode",

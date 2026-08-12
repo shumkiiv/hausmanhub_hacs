@@ -151,6 +151,10 @@ class RecordingTrialExecutor:
         return len(calls)
 
 
+class MemoryCommandGuardStore(MemoryStore):
+    pass
+
+
 class MutableStateView(CountingStateView):
     def __init__(self, states: dict[str, ClimateHaEntityState]) -> None:
         super().__init__(states)
@@ -741,6 +745,182 @@ class NativeObservationRuntimeTest(unittest.IsolatedAsyncioTestCase):
 
 
 class NativeApplicationRuntimeTest(unittest.IsolatedAsyncioTestCase):
+    async def test_managed_tick_never_repeats_identical_unconfirmed_intent(self) -> None:
+        registry = ClimateRegistry(
+            rooms=(
+                ClimateRoom(
+                    "living",
+                    "Living room",
+                    window_entity_id="binary_sensor.living_window",
+                ),
+            ),
+            devices=(
+                ClimateDevice(
+                    device_id="living_humidifier",
+                    name="Living humidifier",
+                    room_id="living",
+                    kind=ClimateDeviceKind.HUMIDIFIER,
+                    source_id="synthetic-humidifier-source-living",
+                    control_scope=ClimateControlScope.MANAGED,
+                    control_owner=ClimateControlOwner.CLIMATE_CORE,
+                    capabilities=(
+                        ClimateCapability.POWER,
+                        ClimateCapability.TARGET_HUMIDITY,
+                    ),
+                    endpoints=(
+                        ClimateEndpoint(
+                            ClimateEndpointRole.CONTROL,
+                            "humidifier.living",
+                        ),
+                    ),
+                ),
+                ClimateDevice(
+                    device_id="living_temperature",
+                    name="Living temperature",
+                    room_id="living",
+                    kind=ClimateDeviceKind.TEMPERATURE_SENSOR,
+                    source_id="synthetic-temperature-source-living",
+                    control_scope=ClimateControlScope.OBSERVED,
+                    control_owner=ClimateControlOwner.OBSERVED,
+                    capabilities=(),
+                    endpoints=(
+                        ClimateEndpoint(
+                            ClimateEndpointRole.TEMPERATURE,
+                            "sensor.living_temperature",
+                        ),
+                    ),
+                ),
+                ClimateDevice(
+                    device_id="living_humidity",
+                    name="Living humidity",
+                    room_id="living",
+                    kind=ClimateDeviceKind.HUMIDITY_SENSOR,
+                    source_id="synthetic-humidity-source-living",
+                    control_scope=ClimateControlScope.OBSERVED,
+                    control_owner=ClimateControlOwner.OBSERVED,
+                    capabilities=(),
+                    endpoints=(
+                        ClimateEndpoint(
+                            ClimateEndpointRole.HUMIDITY,
+                            "sensor.living_humidity",
+                        ),
+                    ),
+                ),
+            ),
+        )
+        settings = ClimateComfortSettings(
+            target_temperature=24.0,
+            target_humidity=45,
+            strategy=ClimateStrategy.NORMAL,
+        )
+        contours = ContourRegistry(
+            contours=(
+                ContourDefinition(
+                    contour_id="climate",
+                    name="Климат",
+                    kind=ContourKind.CLIMATE,
+                    mode=ContourMode.AUTOMATIC,
+                    engine=ContourEngine.EXISTING_CLIMATE_CORE,
+                    rooms=(
+                        ClimateContourRoom(
+                            room_id="living",
+                            device_ids=(
+                                "living_humidifier",
+                                "living_temperature",
+                                "living_humidity",
+                            ),
+                            day_profile=settings,
+                            night_profile=settings,
+                            active_profile=ClimateProfile.DAY,
+                        ),
+                    ),
+                ),
+            ),
+        )
+        entries = (
+            ha_state("humidifier.living", "on"),
+            ha_state("sensor.living_temperature", "24.0"),
+            ha_state("sensor.living_humidity", "50"),
+            ha_state("binary_sensor.living_window", "off"),
+        )
+        view = MutableStateView({entry.entity_id: entry for entry in entries})
+        executor = RecordingTrialExecutor()
+        guard_store = MemoryCommandGuardStore(None)
+        instance = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateControlMode.MANAGED),
+            registry_store=MemoryStore(registry),
+            contour_store=MemoryStore(contours),
+            command_guard_store=guard_store,
+            strict_ha_call_executor=executor,
+            ha_state_view=view,
+            now_ms=lambda: NOW,
+        )
+        await instance.async_start()
+
+        first = await instance.async_run_climate_managed()
+        second = await instance.async_run_climate_managed()
+
+        self.assertEqual(1, len(executor.calls))
+        self.assertEqual(1, first[0].executed_count)
+        self.assertEqual(0, second[0].executed_count)
+        self.assertGreaterEqual(len(guard_store.saved), 2)
+
+        restarted = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateControlMode.MANAGED),
+            registry_store=MemoryStore(registry),
+            contour_store=MemoryStore(contours),
+            command_guard_store=guard_store,
+            strict_ha_call_executor=executor,
+            ha_state_view=view,
+            now_ms=lambda: NOW + 60_000,
+        )
+        await restarted.async_start()
+        await restarted.async_run_climate_managed()
+        self.assertEqual(1, len(executor.calls))
+
+    async def test_explicit_and_twice_daily_synchronization_send_full_plan_once(self) -> None:
+        view = MutableStateView(healthy_states())
+        executor = RecordingTrialExecutor()
+        guard_store = MemoryCommandGuardStore(None)
+        instance = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateControlMode.MANAGED),
+            registry_store=MemoryStore(
+                native_registry(ClimateControlScope.MANAGED)
+            ),
+            contour_store=MemoryStore(native_contours()),
+            command_guard_store=guard_store,
+            strict_ha_call_executor=executor,
+            ha_state_view=view,
+            now_ms=lambda: NOW,
+        )
+        await instance.async_start()
+
+        explicit = await instance.async_synchronize_climate()
+        morning = await instance.async_run_scheduled_climate_synchronization(
+            datetime(2026, 8, 12, 10, 0)
+        )
+        duplicate_morning = await instance.async_run_scheduled_climate_synchronization(
+            datetime(2026, 8, 12, 10, 0)
+        )
+        evening = await instance.async_run_scheduled_climate_synchronization(
+            datetime(2026, 8, 12, 22, 0)
+        )
+        regular_tick = await instance.async_run_climate_managed()
+
+        self.assertGreater(explicit.accepted_count, 0)
+        self.assertIsNotNone(morning)
+        self.assertIsNone(duplicate_morning)
+        self.assertIsNotNone(evening)
+        self.assertEqual(3, len(executor.calls))
+        self.assertEqual(0, regular_tick[0].executed_count)
+        self.assertEqual(
+            "2026-08-12T22:00",
+            guard_store.value.last_scheduled_slot,
+        )
+
     async def test_apply_works_without_a_bridge_client(self) -> None:
         view = MutableStateView(safe_stop_states())
         executor = ReflectingStrictExecutor(view)
