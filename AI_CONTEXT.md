@@ -1,8 +1,23 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-13 (HACS 1.52.87 concise device actions).
+Last updated: 2026-08-13 (HACS 1.52.89 Russian numeric ranges).
 
 ## Current work
+
+- 2026-08-13 (Codex): HACS `1.52.88` added bounded numeric device controls,
+  safe `number.set_value` execution with range, step and read-back validation,
+  plus Russian labels for the known live device capabilities. Contract pin is
+  `hausmanhub-contracts 0.29.0` (`f3565fc`). Release commit `2109501`, tag and
+  GitHub Release were published; Actions `31731204933` passed. Production was
+  backed up as `3b21195e`, checked, installed and restarted. A live user-view
+  audit then found nine remaining English numeric labels, so the closure was
+  released as HACS `1.52.89`, commit `eba7c8a`, Actions `31732638754` success.
+  Production installed/latest and panel marker are `1.52.89`; Dashboard API
+  returns 13 rooms, 79 currently projected devices and 37 range controls with
+  valid bounds, step, opaque target and `set_value`. All 19 live range label
+  types are Russian and the system log contains no HausmanHub entries. Full
+  release gate: 1381 tests passed, 4 skipped. No physical device command was
+  sent during deployment or verification.
 
 - 2026-08-13 (Codex): HACS `1.52.87` синхронизирует подписи в открытой
   карточке устройства с Android 1.0.122. Имя физического устройства остаётся
