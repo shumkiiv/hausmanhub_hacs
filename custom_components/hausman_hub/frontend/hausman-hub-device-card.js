@@ -1,6 +1,6 @@
 /* Canonical physical-device card shared by all tablet-style HACS sections. */
 
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.86";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.87";
 
 const STATE_LABELS = {
   on: "Включено",
@@ -102,6 +102,40 @@ export function contextualDeviceActionLabel(action, target, device) {
     "Позиция": "Положение",
   }[title];
   return contextual ? `${contextual} ${object}` : title;
+}
+
+const DETAIL_ACTION_GENERIC_SEGMENTS = new Set([
+  "humidifier", "увлажнитель", "switch", "выключатель", "light", "свет",
+  "fan", "вентилятор", "climate", "климат", "cover", "шторы", "device", "устройство",
+]);
+const DETAIL_ACTION_VERBS = new Set([
+  "включить", "выключить", "переключить", "открыть", "закрыть", "запустить",
+  "остановить", "сбросить", "turn on", "turn off", "toggle", "open", "close", "start", "stop", "reset",
+]);
+
+/** Keep the device identity in the sheet header and expose only capability + command below it. */
+export function conciseDeviceActionLabel(action, target, device) {
+  const title = String(action && (action.title || action.action_id) || "Команда").trim();
+  const names = [device && device.name, target && target.name]
+    .map((value) => String(value || "").trim()).filter(Boolean);
+  const parts = title.split(/\s*[·•|]\s*/).map((part) => part.trim()).filter(Boolean)
+    .map((part) => {
+      let concise = part;
+      names.forEach((name) => {
+        if (normalized(concise) === normalized(name)) concise = "";
+        else if (normalized(concise).startsWith(`${normalized(name)} `)) {
+          concise = concise.slice(name.length).replace(/^[\s:_·-]+/, "");
+        }
+      });
+      return concise;
+    })
+    .filter(Boolean)
+    .filter((part) => !DETAIL_ACTION_GENERIC_SEGMENTS.has(normalized(part)))
+    .filter((part, index, values) => values.findIndex((item) => normalized(item) === normalized(part)) === index);
+  if (!parts.length) return title.split("·").pop().trim() || "Команда";
+  if (parts.length === 1) return parts[0];
+  const command = parts.pop();
+  return `${parts.join(" · ")}: ${DETAIL_ACTION_VERBS.has(normalized(command)) ? normalized(command) : command}`;
 }
 
 function localizedDetailLabel(detail) {

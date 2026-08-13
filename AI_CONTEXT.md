@@ -1,8 +1,15 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-13 (HACS 1.52.86 released and deployed).
+Last updated: 2026-08-13 (HACS 1.52.87 concise device actions).
 
 ## Current work
+
+- 2026-08-13 (Codex): HACS `1.52.87` синхронизирует подписи в открытой
+  карточке устройства с Android 1.0.122. Имя физического устройства остаётся
+  в заголовке и не повторяется перед каждой командой; дочерняя возможность
+  сохраняет собственное имя, полная подпись остаётся в aria-label. API,
+  storage и command payload не менялись. Full pytest: 1374 теста, 4 skipped,
+  922 subtests; local release gate зелёный.
 
 - 2026-08-13 (Codex): HACS `1.52.86`, release commit `64aedec`, tag и GitHub
   Release опубликованы, production обновлён. Главная повторяет композицию

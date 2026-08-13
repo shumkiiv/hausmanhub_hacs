@@ -1,40 +1,40 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.52.86";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.52.86";
-import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.52.86";
-import { resolveControlChannelTest, summarizeControlChannelReceipts } from "./hausman-hub-control-channel.js?v=1.52.86";
-import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.52.86";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.52.86";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.52.86";
-import { closeFirstRunAreaCreator, createFirstRunArea, openFirstRunAreaCreator, renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.52.86";
-import { createKioskButton, createKioskDock, handleKioskPointerUp, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, resolveIntercomQuickAction, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.52.86";
-import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.52.86";
-import { loadEnergyMeter } from "./hausman-hub-energy-meter.js?v=1.52.86";
-import { loadDeviceDiscovery, updateDeviceDiscoveryBadge } from "./hausman-hub-device-discovery.js?v=1.52.86";
-import { redrawEnergyChartsForTheme } from "./hausman-hub-energy-chart.js?v=1.52.86";
-import { applyHomeSignalSelection, AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, homeEnvironmentSaveError, homeEnvironmentSourcePayload, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.52.86";
-import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.52.86";
-import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.52.86";
-import { renderClimateOverview, setClimateManualMode } from "./hausman-hub-climate-overview.js?v=1.52.86";
-import { renderLightingOverview } from "./hausman-hub-lighting.js?v=1.52.86";
-import { renderRoomsOverview } from "./hausman-hub-rooms.js?v=1.52.86";
-import { renderMediaOverview } from "./hausman-hub-media-overview.js?v=1.52.86";
-import { renderSecurityOverview } from "./hausman-hub-security-overview.js?v=1.52.86";
-import { renderDevicesOverview } from "./hausman-hub-devices-overview.js?v=1.52.86";
-import { buildDiagnosticChecks, diagnosticSummaryText, renderDiagnosticDetails } from "./hausman-hub-diagnostics.js?v=1.52.86";
-import { renderRolloutReadiness } from "./hausman-hub-rollout.js?v=1.52.86";
-import { overviewHeroRenderKey } from "./hausman-hub-overview-hero-state.js?v=1.52.86";
-import { formatUpcomingCountdown, renderOverviewContent, renderOverviewHero } from "./hausman-hub-overview.js?v=1.52.86";
-import { contextualDeviceActionLabel, renderPhysicalDeviceCard } from "./hausman-hub-device-card.js?v=1.52.86";
-import { recordTechnicalEvent as log, renderTechnicalLogCard } from "./hausman-hub-technical-log.js?v=1.52.86";
-import { applyFeedback } from "./hausman-hub-feedback.js?v=1.52.86";
-import { renderKiosk } from "./hausman-hub-kiosk.js?v=1.52.86";
-import { captureRoomValidation, clearFirstRunDraft, persistFirstRunDraft, reconcileRoomValidation, restoreFirstRunDraft, resumeFirstRunDraft } from "./hausman-hub-first-run-draft.js?v=1.52.86";
-import { applyTabletProfile, isIntercomQuickAccessVisible, renderAppearanceSettings, renderIntercomSettings, syncIntercomQuickAccess } from "./hausman-hub-settings-profile.js?v=1.52.86";
-import { renderSettingsRooms, saveRoomType } from "./hausman-hub-settings-rooms.js?v=1.52.86";
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.86";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.52.87";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.52.87";
+import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.52.87";
+import { resolveControlChannelTest, summarizeControlChannelReceipts } from "./hausman-hub-control-channel.js?v=1.52.87";
+import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.52.87";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.52.87";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.52.87";
+import { closeFirstRunAreaCreator, createFirstRunArea, openFirstRunAreaCreator, renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.52.87";
+import { createKioskButton, createKioskDock, handleKioskPointerUp, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, resolveIntercomQuickAction, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.52.87";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.52.87";
+import { loadEnergyMeter } from "./hausman-hub-energy-meter.js?v=1.52.87";
+import { loadDeviceDiscovery, updateDeviceDiscoveryBadge } from "./hausman-hub-device-discovery.js?v=1.52.87";
+import { redrawEnergyChartsForTheme } from "./hausman-hub-energy-chart.js?v=1.52.87";
+import { applyHomeSignalSelection, AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, homeEnvironmentSaveError, homeEnvironmentSourcePayload, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.52.87";
+import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.52.87";
+import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.52.87";
+import { renderClimateOverview, setClimateManualMode } from "./hausman-hub-climate-overview.js?v=1.52.87";
+import { renderLightingOverview } from "./hausman-hub-lighting.js?v=1.52.87";
+import { renderRoomsOverview } from "./hausman-hub-rooms.js?v=1.52.87";
+import { renderMediaOverview } from "./hausman-hub-media-overview.js?v=1.52.87";
+import { renderSecurityOverview } from "./hausman-hub-security-overview.js?v=1.52.87";
+import { renderDevicesOverview } from "./hausman-hub-devices-overview.js?v=1.52.87";
+import { buildDiagnosticChecks, diagnosticSummaryText, renderDiagnosticDetails } from "./hausman-hub-diagnostics.js?v=1.52.87";
+import { renderRolloutReadiness } from "./hausman-hub-rollout.js?v=1.52.87";
+import { overviewHeroRenderKey } from "./hausman-hub-overview-hero-state.js?v=1.52.87";
+import { formatUpcomingCountdown, renderOverviewContent, renderOverviewHero } from "./hausman-hub-overview.js?v=1.52.87";
+import { conciseDeviceActionLabel, renderPhysicalDeviceCard } from "./hausman-hub-device-card.js?v=1.52.87";
+import { recordTechnicalEvent as log, renderTechnicalLogCard } from "./hausman-hub-technical-log.js?v=1.52.87";
+import { applyFeedback } from "./hausman-hub-feedback.js?v=1.52.87";
+import { renderKiosk } from "./hausman-hub-kiosk.js?v=1.52.87";
+import { captureRoomValidation, clearFirstRunDraft, persistFirstRunDraft, reconcileRoomValidation, restoreFirstRunDraft, resumeFirstRunDraft } from "./hausman-hub-first-run-draft.js?v=1.52.87";
+import { applyTabletProfile, isIntercomQuickAccessVisible, renderAppearanceSettings, renderIntercomSettings, syncIntercomQuickAccess } from "./hausman-hub-settings-profile.js?v=1.52.87";
+import { renderSettingsRooms, saveRoomType } from "./hausman-hub-settings-rooms.js?v=1.52.87";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.87";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
-const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css?v=1.52.86";
+const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css?v=1.52.87";
 const DASHBOARD_API = "hausman_hub/v1/dashboard";
 const CLIMATE_RUNTIME_API = "hausman_hub/v1/climate/runtime";
 const DEVICE_ACTIONS_API = "hausman_hub/v1/device-actions";
@@ -5762,10 +5762,11 @@ class HausmanHubPanel extends HTMLElement {
     (target.actions || []).forEach((action) => {
       const fields = Array.isArray(action.allowed_fields) ? action.allowed_fields : [];
       if (!fields.includes("value")) {
-        const label=contextualDeviceActionLabel(action, target, device);
+        const label=conciseDeviceActionLabel(action, target, device);
+        const accessibleLabel=`${label}, ${device.name || target.name || "устройство"}`;
         const button = el("button", "secondary device-action", label);
         button.type = "button";
-        setAttr(button, "aria-label", label);
+        setAttr(button, "aria-label", accessibleLabel);
         button.disabled = this._busy;
         button.addEventListener("click", (event) => {
           event.preventDefault();
@@ -5775,7 +5776,7 @@ class HausmanHubPanel extends HTMLElement {
         return;
       }
       const valueRow = el("label", "device-value-action");
-      valueRow.appendChild(el("span", null, contextualDeviceActionLabel(action, target, device)));
+      valueRow.appendChild(el("span", null, conciseDeviceActionLabel(action, target, device)));
       const input = el("input");
       const numericAction = ["set_temperature", "set_brightness", "set_position"]
         .includes(action.action_id);

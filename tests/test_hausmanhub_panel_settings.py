@@ -1845,7 +1845,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("device action did not use current brightness");
         }
         const on = findAll(deviceDialog, (node) =>
-          node.tagName === "BUTTON" && String(node.textContent).startsWith("Включить "))[0];
+          node.tagName === "BUTTON" && node.textContent === "Включить")[0];
         if (!on) throw new Error("device action control missing");
         on.fire("click", { preventDefault() {} });
         await tick(10);
@@ -3974,7 +3974,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.86")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.87")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;
