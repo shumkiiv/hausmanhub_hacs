@@ -17,4 +17,11 @@
 - Полный pytest: 1374 теста пройдено, 4 пропущено, 922 subtests пройдено.
 - `tools/check_local_release.py`: 1372 теста пройдено, 4 пропущено; fixtures,
   Android compatibility, HACS package, naming и file safety зелёные.
+- Release commit `ae89b23`, tag и GitHub Release `v1.52.87` опубликованы;
+  Actions `31717482272` завершён успешно.
+- Перед production-установкой завершён automatic backup и принят config
+  check. Явный `update.install v1.52.87` и restart прошли штатно.
+- После restart installed/latest и panel marker равны `1.52.87`, все 10
+  сущностей HausmanHub доступны. Dashboard вернул 13 комнат и 82 устройства;
+  runtime fresh, active operations и blocked reasons 0.
 - Физические команды устройствам не отправлялись.

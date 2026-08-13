@@ -9,7 +9,11 @@ Last updated: 2026-08-13 (HACS 1.52.87 concise device actions).
   в заголовке и не повторяется перед каждой командой; дочерняя возможность
   сохраняет собственное имя, полная подпись остаётся в aria-label. API,
   storage и command payload не менялись. Full pytest: 1374 теста, 4 skipped,
-  922 subtests; local release gate зелёный.
+  922 subtests; local release gate и Actions `31717482272` зелёные. Release
+  commit `ae89b23`, tag и GitHub Release опубликованы. Production обновлён
+  после automatic backup и config check: installed/latest и panel marker равны
+  `1.52.87`, 10 сущностей доступны, runtime fresh, active operations и blocked
+  reasons 0.
 
 - 2026-08-13 (Codex): HACS `1.52.86`, release commit `64aedec`, tag и GitHub
   Release опубликованы, production обновлён. Главная повторяет композицию
