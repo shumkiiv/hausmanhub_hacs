@@ -12,6 +12,35 @@
 .energy-overview-copy > small.energy-overview-reminder { color:var(--hmh-status-warning,#9A5F0B); font-weight:650; }
 .energy-overview-chevron { flex:0 0 auto; color:var(--hmh-accent); font-size:28px; font-weight:300; }
 
+.energy-meter-reading-strip { display:grid; width:100%; min-height:116px; margin:16px 0; padding:16px 18px; grid-template-columns:56px minmax(0,1.25fr) minmax(0,1fr) auto; align-items:center; gap:18px; border:1px solid var(--hmh-border); border-radius:20px; color:var(--hmh-text); text-align:left; white-space:normal; background:var(--hmh-surface); box-shadow:0 8px 24px rgba(24,39,61,.08); }
+.energy-meter-reading-strip:hover { border-color:color-mix(in srgb,var(--hmh-accent) 52%,var(--hmh-border)); }
+.energy-meter-reading-icon { display:grid; place-items:center; width:56px; height:56px; border-radius:16px; color:var(--hmh-accent); background:color-mix(in srgb,var(--hmh-accent) 11%,var(--hmh-raised)); }
+.energy-meter-reading-icon .icon { width:28px; height:28px; }
+.energy-meter-reading-primary,.energy-meter-reading-secondary,.energy-meter-reading-more { display:flex; min-width:0; flex-direction:column; gap:3px; }
+.energy-meter-reading-primary small,.energy-meter-reading-secondary small,.energy-meter-reading-more small { color:var(--hmh-text-dim); font-size:13px; }
+.energy-meter-reading-primary strong,.energy-meter-reading-secondary strong { overflow:hidden; color:var(--hmh-text); font-size:26px; line-height:1.15; text-overflow:ellipsis; white-space:nowrap; }
+.energy-meter-reading-primary.is-empty strong { color:var(--hmh-text-dim); }
+.energy-meter-reading-primary span,.energy-meter-reading-secondary span { color:var(--hmh-text-dim); font-size:13px; }
+.energy-meter-reading-more { position:relative; min-width:186px; padding:13px 38px 13px 16px; border:1px solid var(--hmh-border); border-radius:14px; background:var(--hmh-raised); }
+.energy-meter-reading-more strong { font-size:15px; }
+.energy-meter-reading-more b { position:absolute; right:15px; top:50%; color:var(--hmh-accent); font-size:25px; transform:translateY(-50%); }
+
+.energy-history-card { margin:0 0 16px; padding:18px; }
+.energy-history-layout { display:grid; grid-template-columns:minmax(0,3fr) minmax(220px,1fr); gap:14px; margin-top:14px; }
+.energy-history-layout > .energy-history { min-height:260px; }
+.energy-current-sources { min-width:0; padding:15px; border:1px solid var(--hmh-border); border-radius:16px; background:var(--hmh-raised); }
+.energy-current-sources h4 { margin:0 0 10px; color:var(--hmh-text); font-size:15px; text-transform:none; letter-spacing:0; }
+.energy-current-source { display:flex; width:100%; min-height:70px; align-items:center; justify-content:space-between; gap:12px; margin:0; padding:12px 0; border:0; border-top:1px solid var(--hmh-border); border-radius:0; color:var(--hmh-text); text-align:left; white-space:normal; background:transparent; box-shadow:none; }
+.energy-current-source span,.energy-current-source strong,.energy-current-source small,.energy-current-source b { display:block; min-width:0; }
+.energy-current-source strong { font-size:14px; }
+.energy-current-source small { margin-top:4px; color:var(--hmh-text-dim); font-size:12px; }
+.energy-current-source b { flex:0 0 auto; color:var(--hmh-accent); font-size:16px; }
+.energy-sources-empty { display:grid; min-height:120px; place-items:center; color:var(--hmh-text-dim); font-size:14px; }
+.energy-history-controls { display:flex; align-items:center; gap:9px; }
+.energy-periods { display:flex; gap:5px; }
+.energy-periods button { min-height:38px; margin:0; padding:7px 12px; border:1px solid transparent; border-radius:11px; color:var(--hmh-text-dim); background:var(--hmh-raised); box-shadow:none; }
+.energy-periods button.is-selected { border-color:var(--hmh-accent); color:var(--hmh-text); background:color-mix(in srgb,var(--hmh-accent) 8%,var(--hmh-raised)); }
+
 .energy-card-head { display:flex; align-items:center; justify-content:space-between; gap:16px; }
 .energy-card-head h3 { margin:0; font-size:20px; line-height:1.15; }
 .energy-card-title { min-width:0; }
@@ -233,6 +262,9 @@
   .energy-device-live { grid-area:live; min-width:104px; text-align:right; }
   .energy-device-accumulated, .energy-device-status { display:none; }
   .energy-device-card > .energy-overview-chevron { grid-area:chevron; }
+  .energy-meter-reading-strip { grid-template-columns:56px minmax(0,1fr) auto; }
+  .energy-meter-reading-secondary { display:none; }
+  .energy-history-layout { grid-template-columns:1fr; }
 }
 @media (max-width:620px) {
   .energy-card-head { align-items:flex-start; flex-direction:column; }
@@ -254,4 +286,9 @@
   .energy-device-head h2 { font-size:25px; }
   .energy-detail-status { margin-left:76px; }
   .energy-detail-sidebar { display:flex; }
+  .energy-meter-reading-strip { grid-template-columns:48px minmax(0,1fr); gap:12px; }
+  .energy-meter-reading-icon { width:48px; height:48px; }
+  .energy-meter-reading-more { grid-column:1/-1; width:100%; }
+  .energy-history-controls { align-items:stretch; flex-direction:column; }
+  .energy-periods { width:100%; overflow-x:auto; }
 }

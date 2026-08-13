@@ -1,7 +1,7 @@
 /* Canonical physical-device catalog shared with the tablet information hierarchy. */
 
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.85";
-import { renderDeviceDiscovery } from "./hausman-hub-device-discovery.js?v=1.52.85";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.86";
+import { renderDeviceDiscovery } from "./hausman-hub-device-discovery.js?v=1.52.86";
 
 const DEVICE_CATEGORY_META = {
   lighting: { label: "Освещение", icon: "lightbulb" },
@@ -104,8 +104,7 @@ function renderDeviceCategoryFilters(panel, container, devices, selected, select
     title.appendChild(el("strong", null, meta.label));
     title.appendChild(el("b", null, String(items.length)));
     card.appendChild(title);
-    card.appendChild(el("span", offline ? "warn" : "ok", offline ? `${offline} без связи` : "Все на связи"));
-    card.appendChild(el("small", null, `${items.length} ${deviceWord(items.length)} · ${active} активны`));
+    card.appendChild(el("span", offline ? "warn" : "ok", offline ? `${offline} без связи` : `${active} активны`));
     grid.appendChild(card);
   });
   section.appendChild(grid);
@@ -172,53 +171,10 @@ function renderDevicesCatalog(panel, container, devices, selected, deps) {
   container.appendChild(section);
 }
 
-function renderDevicesAside(panel, devices, deps) {
-  const { el } = deps;
-  const aside = el("aside", "devices-canon-aside");
-  const summary = el("section", "devices-canon-side-card");
-  summary.appendChild(el("h3", null, "Сводка"));
-  [
-    ["Всего", devices.length],
-    ["Активны", devices.filter(deviceCatalogActive).length],
-    ["Без связи", devices.filter(deviceCatalogUnavailable).length],
-    ["Комнаты", new Set(devices.map((device) => device.roomId).filter(Boolean)).size],
-  ].forEach(([label, value]) => {
-    const row = el("div", "devices-canon-side-row");
-    row.appendChild(el("span", null, label));
-    row.appendChild(el("strong", null, String(value)));
-    summary.appendChild(row);
-  });
-  aside.appendChild(summary);
-  const attention = el("section", "devices-canon-side-card");
-  attention.appendChild(el("h3", null, "Требуют проверки"));
-  const offline = devices.filter(deviceCatalogUnavailable);
-  if (!offline.length) attention.appendChild(el("p", "devices-canon-empty", "Все физические устройства доступны."));
-  offline.slice(0, 6).forEach((device) => {
-    const item = el("button", "devices-canon-attention");
-    item.type = "button";
-    item.appendChild(el("strong", null, device.name || "Устройство"));
-    item.appendChild(el("span", null, `${device.roomName || "Без комнаты"} · нет связи`));
-    item.addEventListener("click", () => {
-      panel._deviceCategoryFilter = deviceCatalogCategory(device);
-      const key = String(device.id || device.physicalId || device.entityId || "");
-      if (key) panel._openHomeCards.add(`device:${key}`);
-      panel._renderHomeSection("devices", panel._shell.homeSections.devices);
-    });
-    attention.appendChild(item);
-  });
-  aside.appendChild(attention);
-  const source = el("section", "devices-canon-side-card devices-canon-source");
-  source.appendChild(el("h3", null, "Источник данных"));
-  source.appendChild(el("strong", null, "HausmanHub"));
-  source.appendChild(el("p", null, "Home Assistant остаётся единым источником комнат, состояний и управления устройствами."));
-  aside.appendChild(source);
-  return aside;
-}
-
 export function renderDevicesOverview(panel, container, deps) {
   container.innerHTML = "";
-  renderDeviceDiscovery(panel, container, deps);
   if (!panel._homeDashboard) {
+    renderDeviceDiscovery(panel, container, deps);
     const empty = deps.el("section", "card empty-state devices-canon-empty-state");
     empty.appendChild(deps.el("h2", null, "Устройства"));
     empty.appendChild(deps.el("p", null, "Каталог устройств пока недоступен. Проверьте подключение HausmanHub."));
@@ -228,17 +184,15 @@ export function renderDevicesOverview(panel, container, deps) {
   const devices = physicalDevices(panel);
   if (panel._deviceCategoryFilter === undefined) panel._deviceCategoryFilter = null;
   renderDevicesHero(panel, container, devices, deps);
-  const layout = deps.el("div", "devices-canon-layout");
-  const main = deps.el("div", "devices-canon-main");
+  const workspace = deps.el("section", "devices-canon-workspace");
+  renderDeviceDiscovery(panel, workspace, deps);
   const select = (value) => {
     panel._deviceCategoryFilter = value;
     panel._renderHomeSection("devices", panel._shell.homeSections.devices);
   };
-  renderDeviceCategoryFilters(panel, main, devices, panel._deviceCategoryFilter, select, deps);
-  renderDevicesCatalog(panel, main, devices, panel._deviceCategoryFilter, deps);
-  layout.appendChild(main);
-  layout.appendChild(renderDevicesAside(panel, devices, deps));
-  container.appendChild(layout);
+  renderDeviceCategoryFilters(panel, workspace, devices, panel._deviceCategoryFilter, select, deps);
+  renderDevicesCatalog(panel, workspace, devices, panel._deviceCategoryFilter, deps);
+  container.appendChild(workspace);
 }
 
 renderDevicesOverview.physicalDevices = physicalDevices;

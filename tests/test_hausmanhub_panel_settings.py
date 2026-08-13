@@ -594,7 +594,7 @@ def panel_script(
         {{ filename: {str(DEVICE_CARD_JS)!r} }}
       );
       vm.runInThisContext(
-        fs.readFileSync({str(MEDIA_DEVICE_JS)!r}, "utf8").replace(/export /g, ""),
+        fs.readFileSync({str(MEDIA_DEVICE_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(MEDIA_DEVICE_JS)!r} }}
       );
       vm.runInThisContext(
@@ -1269,19 +1269,24 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           controls: [],
         };
         const card = panel._deviceInventoryCard(device);
-        const images = findAll(card, (node) => node.tagName === "IMG");
+        findAll(card, (node) => node.tagName === "BUTTON"
+          && String(node.className).includes("inventory-device-summary"))[0].fire("click");
+        const images = [
+          ...findAll(card, (node) => node.tagName === "IMG"),
+          ...findAll(panel.shadowRoot, (node) => node.tagName === "IMG"),
+        ];
         if (images.length !== 2 || !images.every((node) => node.src.includes("TRVZB.png"))) {
           throw new Error("Zigbee2MQTT image was not preferred in summary and detail");
         }
-        const dialogs = findAll(card, (node) => node.role === "dialog");
+        const dialogs = findAll(panel.shadowRoot, (node) => node.role === "dialog");
         if (dialogs.length !== 1 || dialogs[0]["aria-label"] !== "Термоголовка Sonoff") {
           throw new Error("one fixed device dialog was not created");
         }
-        const text = textOf(card);
+        const text = textOf(card) + textOf(dialogs[0]);
         if (!text.includes("Обогрев") || text.includes("heat")) {
           throw new Error("device state was not localized: " + text);
         }
-        const factLabels = findAll(card, (node) => node.tagName === "DT")
+        const factLabels = findAll(dialogs[0], (node) => node.tagName === "DT")
           .map((node) => node.textContent);
         if (JSON.stringify(factLabels) !== JSON.stringify(["Температура", "Заряд"])) {
           throw new Error("device facts were not deduplicated: " + JSON.stringify(factLabels));
@@ -1312,7 +1317,8 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           ],
         };
         const card = panel._deviceInventoryCard(device);
-        const summary = findAll(card, (node) => node.tagName === "SUMMARY")[0];
+        const summary = findAll(card, (node) => node.tagName === "BUTTON"
+          && String(node.className).includes("inventory-device-summary"))[0];
         const text = textOf(summary);
         if (!text.includes("20,5 °C") || text.includes("20.5")) {
           throw new Error("numeric primary state is not localized with its unit: " + text);
@@ -1807,8 +1813,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("one physical device rendered as " + cards.length + " cards");
         }
         const text = textOf(lighting);
-        if (!text.includes("Выключатель гостиная") || !text.includes("Основной свет")
-          || !text.includes("Мощность") || !text.includes("12 Вт")) {
+        if (!text.includes("Выключатель гостиная") || !text.includes("Включён")) {
           throw new Error("device or its function missing from lighting section");
         }
         if (text.includes("Умная розетка")) {
@@ -1826,13 +1831,20 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const closeSheet = findAll(sheet, (node) =>
           String(node.className).split(" ").includes("lighting-room-sheet-close"))[0];
         closeSheet.fire("click");
-        const valueInput = findAll(lighting, (node) => node.tagName === "INPUT" && node.type !== "search")[0];
+        const summary = findAll(cards[0], (node) => node.tagName === "BUTTON"
+          && String(node.className).includes("inventory-device-summary"))[0];
+        summary.fire("click");
+        const deviceDialog = findAll(panel.shadowRoot, (node) => node.role === "dialog"
+          && node["aria-label"] === "Выключатель гостиная")[0];
+        if (!deviceDialog || !textOf(deviceDialog).includes("Основной свет")
+          || !textOf(deviceDialog).includes("Мощность") || !textOf(deviceDialog).includes("12 Вт")) {
+          throw new Error("device details are missing from the dialog");
+        }
+        const valueInput = findAll(deviceDialog, (node) => node.tagName === "INPUT" && node.type !== "search")[0];
         if (!valueInput || valueInput.value !== "178") {
           throw new Error("device action did not use current brightness");
         }
-        cards[0].open = true;
-        cards[0].fire("toggle");
-        const on = findAll(lighting, (node) =>
+        const on = findAll(deviceDialog, (node) =>
           node.tagName === "BUTTON" && String(node.textContent).startsWith("Включить "))[0];
         if (!on) throw new Error("device action control missing");
         on.fire("click", { preventDefault() {} });
@@ -1846,11 +1858,13 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const refreshedLighting = panel._shell.homeSections.lighting;
         const refreshedCard = findAll(refreshedLighting, (node) =>
           String(node.className).split(" ").includes("inventory-device-card"))[0];
-        if (!refreshedCard || refreshedCard.open !== true) {
-          throw new Error("expanded device card collapsed after confirmed action");
-        }
-        const refreshedInput = findAll(refreshedLighting, (node) => node.tagName === "INPUT" && node.type !== "search")[0];
-        const apply = findAll(refreshedLighting, (node) =>
+        if (!refreshedCard) throw new Error("device card disappeared after confirmed action");
+        findAll(refreshedCard, (node) => node.tagName === "BUTTON"
+          && String(node.className).includes("inventory-device-summary"))[0].fire("click");
+        const refreshedDialog = findAll(panel.shadowRoot, (node) => node.role === "dialog"
+          && node["aria-label"] === "Выключатель гостиная")[0];
+        const refreshedInput = findAll(refreshedDialog, (node) => node.tagName === "INPUT" && node.type !== "search")[0];
+        const apply = findAll(refreshedDialog, (node) =>
           node.tagName === "BUTTON" && node.textContent === "Применить")[0];
         if (!refreshedInput || !apply || apply.disabled) {
           throw new Error("current value action is not available");
@@ -1942,7 +1956,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           + ", dashboard=" + JSON.stringify(panel._homeDashboard)
           + ", key=" + panel._sectionRenderKeys.climate);
         for (const label of [
-          "Климат по комнатам", "Обзор климата", "Комнаты и цели",
+          "Климат по комнатам", "Комнаты и цели",
           "Кондиционеры", "Термоголовки", "Тёплый пол", "Увлажнители",
           "Очистители", "Вытяжки", "Гостиная", "Детская", "24.5 °C", "46 %",
           "Кабинет",
@@ -2394,7 +2408,11 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           || text.includes("Android TV") || text.includes("Philips TV")) {
           throw new Error("technical HA entities leaked into TV card: " + text);
         }
-        const buttons = findAll(cards[0], (node) => node.tagName === "BUTTON"
+        findAll(cards[0], (node) => node.tagName === "BUTTON"
+          && String(node.className).includes("inventory-device-summary"))[0].fire("click");
+        const mediaDialog = findAll(panel.shadowRoot, (node) => node.role === "dialog"
+          && String(node.className).includes("media-device-sheet"))[0];
+        const buttons = findAll(mediaDialog, (node) => node.tagName === "BUTTON"
           && !String(node.className).split(" ").includes("device-sheet-close"));
         if (buttons.length !== 3 || !buttons.some((node) => node.textContent === "Играть")
           || !buttons.some((node) => node.textContent === "Пауза")
@@ -2535,8 +2553,8 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const devices = panel._shell.homeSections.devices;
         const text = textOf(devices);
         if (!text.includes("ФИЗИЧЕСКИЕ УСТРОЙСТВА ДОМА")
-          || !text.includes("Категории устройств") || !text.includes("Источник данных")
-          || !text.includes("HausmanHub") || text.includes("Smart Home Center")) {
+          || !text.includes("Категории устройств")
+          || text.includes("Источник данных") || text.includes("Smart Home Center")) {
           throw new Error("canonical devices hierarchy is incomplete: " + text);
         }
         let cards = findAll(devices, (node) =>
@@ -3371,7 +3389,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
             overview_css,
         )
         self.assertIn("flex-direction:column; white-space:normal", overview_css)
-        self.assertIn("grid-template-columns:1.25fr 1.5fr 1fr 1fr", overview_css)
+        self.assertIn(".overview-canon-primary-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr))", overview_css)
         self.assertIn("flex-direction:column", security_css)
         self.assertIn("white-space:normal", security_css)
         self.assertIn("flex-direction:column", devices_css)
@@ -3956,7 +3974,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.85")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.86")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

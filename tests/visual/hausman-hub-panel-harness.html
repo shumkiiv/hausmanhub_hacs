@@ -510,6 +510,16 @@
       panel._render();
       panel.shadowRoot.querySelector("link").href =
         "../../custom_components/hausman_hub/frontend/hausman-hub-panel.css?v=1.52.72";
+      const deviceName = params.get("openDevice");
+      if (deviceName) {
+        requestAnimationFrame(() => {
+          const cards = [...panel.shadowRoot.querySelectorAll(".inventory-device-card")];
+          const match = cards.find((card) => card.textContent.toLocaleLowerCase("ru")
+            .includes(deviceName.toLocaleLowerCase("ru")));
+          const open = match && match.querySelector(".inventory-device-summary");
+          if (open) open.click();
+        });
+      }
       if (screen === "assistant") {
         panel._assistant = {
           loaded: true,

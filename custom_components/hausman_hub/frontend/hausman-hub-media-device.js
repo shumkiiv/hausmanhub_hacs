@@ -1,3 +1,5 @@
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.86";
+
 const TV_IDENTITY = /(?:\btv\b|телевиз|television|smart[ _-]?tv|pus\d|oled|qled)/i;
 
 function appendDeviceVisual(container, device, iconName, { el, svgIcon }, className) {
@@ -72,36 +74,14 @@ function actionButton(owner, target, actionId, label, className, el) {
   return button;
 }
 
-export function renderMediaDeviceCard(owner, device, deps) {
-  if (!isMediaDevice(device)) return null;
+function openMediaDeviceSheet(owner, device, deps) {
   const { el, svgIcon } = deps;
   const television = isTelevision(device);
   const state = mediaState(device);
   const target = canonicalMediaTarget(owner, device);
-  const card = el("details", `inventory-device-card media-device-card${device.unavailable ? " is-unavailable" : ""}`);
   const openKey = `device:${device.id || device.physicalId || device.entityId}`;
-  card.open = owner._openHomeCards.has(openKey);
-  card.addEventListener("toggle", () => {
-    if (card.open) owner._openHomeCards.add(openKey);
-    else owner._openHomeCards.delete(openKey);
-  });
-
-  const summary = el("summary", "inventory-device-summary media-device-summary");
-  appendDeviceVisual(summary, device, "media", deps, "inventory-device-visual media-device-icon");
-  const copy = el("span", "inventory-device-copy");
-  copy.appendChild(el("strong", null, television ? "Телевизор" : (device.name || "Медиоустройство")));
-  const identity = [device.roomName, television ? device.name : device.model]
-    .filter(Boolean).filter((value, index, values) => values.indexOf(value) === index);
-  copy.appendChild(el("small", null, identity.join(" · ") || "Медиа дома"));
-  summary.appendChild(copy);
-  const summaryState = el("span", `media-device-summary-state${device.unavailable ? " is-unavailable" : ""}`);
-  summaryState.appendChild(el("strong", null, state.title));
-  summaryState.appendChild(el("small", null, state.detail));
-  summary.appendChild(summaryState);
-  summary.appendChild(el("span", "inventory-device-chevron", "›"));
-  card.appendChild(summary);
-
-  const backdrop = el("div", "device-sheet-backdrop inventory-device-body media-device-body");
+  if (typeof owner._activeDeviceModalClose === "function") owner._activeDeviceModalClose();
+  const backdrop = el("div", "device-sheet-backdrop media-device-body");
   const body = el("section", "device-sheet media-device-sheet");
   deps.setAttr(body, "role", "dialog");
   deps.setAttr(body, "aria-modal", "true");
@@ -109,13 +89,13 @@ export function renderMediaDeviceCard(owner, device, deps) {
   const close = el("button", "device-sheet-close", "×");
   close.type = "button";
   deps.setAttr(close, "aria-label", "Закрыть");
+  let finish = () => {};
   const dismiss = (event) => {
     if (event) {
       event.preventDefault();
       event.stopPropagation && event.stopPropagation();
     }
-    card.open = false;
-    owner._openHomeCards.delete(openKey);
+    finish();
   };
   close.addEventListener("click", dismiss);
   body.appendChild(close);
@@ -158,6 +138,49 @@ export function renderMediaDeviceCard(owner, device, deps) {
   body.appendChild(control);
   backdrop.appendChild(body);
   backdrop.addEventListener("click", (event) => { if (event.target === backdrop) dismiss(event); });
-  card.appendChild(backdrop);
+  const modalRoot = owner.shadowRoot || owner._shell?.container;
+  if (!modalRoot) return;
+  modalRoot.appendChild(backdrop);
+  owner._activeDeviceModalKey = openKey;
+  finish = enhanceAppendedModal(backdrop, body, () => {
+    if (backdrop.remove) backdrop.remove();
+    if (owner._activeDeviceModalKey === openKey) {
+      owner._activeDeviceModalKey = null;
+      owner._activeDeviceModalClose = null;
+    }
+  }, { initialFocus: close });
+  owner._activeDeviceModalClose = finish;
+}
+
+export function renderMediaDeviceCard(owner, device, deps) {
+  if (!isMediaDevice(device)) return null;
+  const { el } = deps;
+  const television = isTelevision(device);
+  const state = mediaState(device);
+  const card = el("article", `inventory-device-card physical-device-card media-device-card${device.unavailable ? " is-unavailable" : ""}`);
+  const summary = el("button", "inventory-device-summary media-device-summary");
+  summary.type = "button";
+  deps.setAttr(summary, "aria-label", `Открыть ${television ? "телевизор" : "медиоустройство"} ${device.name || ""}. Состояние: ${state.title}.`);
+  summary.addEventListener("click", () => openMediaDeviceSheet(owner, device, deps));
+  appendDeviceVisual(summary, device, "media", deps, "inventory-device-visual media-device-icon");
+  const copy = el("span", "inventory-device-copy");
+  copy.appendChild(el("strong", null, television ? "Телевизор" : (device.name || "Медиоустройство")));
+  const identity = [device.roomName, television ? device.name : device.model]
+    .filter(Boolean).filter((value, index, values) => values.indexOf(value) === index);
+  copy.appendChild(el("small", null, identity.join(" · ") || "Медиа дома"));
+  summary.appendChild(copy);
+  summary.appendChild(el("span", "inventory-device-chevron", "›"));
+  const footer = el("span", "inventory-device-footer");
+  const summaryState = el("span", `media-device-summary-state${device.unavailable ? " is-unavailable" : ""}`);
+  summaryState.appendChild(el("small", null, "Состояние"));
+  summaryState.appendChild(el("strong", null, state.title));
+  summaryState.appendChild(el("span", null, state.detail));
+  footer.appendChild(summaryState);
+  const connection = el("span", `inventory-device-status ${device.unavailable ? "is-unavailable" : ""}`);
+  connection.appendChild(el("span", `device-state-dot ${device.unavailable ? "bad" : "good"}`));
+  connection.appendChild(el("span", null, device.unavailable ? "Нет связи" : "На связи"));
+  footer.appendChild(connection);
+  summary.appendChild(footer);
+  card.appendChild(summary);
   return card;
 }

@@ -1,7 +1,7 @@
-import { renderEnergyHistoryChart } from "./hausman-hub-energy-chart.js?v=1.52.85";
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.85";
-import { formatMeterDate, loadEnergyMeter, meterConfigured, meterNumber, meterReminderText, meterStatusMeta, renderEnergyMeterCard } from "./hausman-hub-energy-meter.js?v=1.52.85";
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.85";
+import { renderEnergyHistoryChart } from "./hausman-hub-energy-chart.js?v=1.52.86";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.86";
+import { loadEnergyMeter, meterConfigured, meterNumber, meterReminderText, renderEnergyMeterCard } from "./hausman-hub-energy-meter.js?v=1.52.86";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.86";
 
 const number = (value, digits = 1) => Number.isFinite(Number(value))
   ? new Intl.NumberFormat("ru-RU", { maximumFractionDigits: digits }).format(Number(value))
@@ -474,11 +474,13 @@ function renderEnergyModal(panel, container, energy, deps) {
   const sheet = el("section", "energy-modal");
   setAttr(sheet, "role", "dialog");
   setAttr(sheet, "aria-modal", "true");
-  setAttr(sheet, "aria-label", "Энергия дома: детали, счётчик и устройства");
+  setAttr(sheet, "aria-label", "Энергия дома: управление и настройки");
   const head = el("div", "energy-modal-head");
   const title = el("div", "energy-modal-title");
-  title.appendChild(el("h2", null, "Энергия дома"));
-  title.appendChild(el("p", null, "Графики, источники, показания счётчика и управление питанием"));
+  title.appendChild(el("h2", null, panel._energyModalView === "device" ? "Устройство энергии" : "Счётчик и настройки"));
+  title.appendChild(el("p", null, panel._energyModalView === "device"
+    ? "Подробные показатели и подтверждаемое управление питанием"
+    : "Передача показаний, история счётчика и состав источников"));
   head.appendChild(title);
   const close = el("button", "energy-modal-close", "×");
   close.type = "button";
@@ -494,7 +496,6 @@ function renderEnergyModal(panel, container, energy, deps) {
   } else {
     if (panel._energyModalView === "device") panel._energyModalView = "overview";
     body.appendChild(renderEnergyMeterCard(panel, deps));
-    body.appendChild(renderEnergyHistory(panel, energy, selectedSources(energy), deps));
     body.appendChild(renderEnergyDevices(panel, container, energy.sources, deps));
     body.appendChild(compactEnergySettings(panel, container, energy, deps));
   }
@@ -508,48 +509,40 @@ function renderEnergyModal(panel, container, energy, deps) {
   panel._energyModalJustOpened = false;
 }
 
-function renderEnergySummary(panel, energy, deps) {
+function renderMeterReadingStrip(panel, energy, deps) {
   const { el, setAttr } = deps;
   const meter = panel._energyMeter;
-  const selected = selectedSources(energy);
-  const unavailable = energy.sources.filter((source) => !source.available).length;
-  const card = el("button", "energy-summary-card");
+  const card = el("button", "energy-summary-card energy-meter-reading-strip");
   card.type = "button";
-  setAttr(card, "aria-label", "Открыть детали энергии");
+  setAttr(card, "aria-label", "Открыть счётчик, передачу показаний и настройки энергии");
   card.addEventListener("click", () => openEnergyDetails(panel));
-  const grid = el("div", "energy-summary-grid");
-  const item = (label, value, caption = "", tone = "") => {
-    const cell = el("span", `energy-summary-item${tone ? ` ${tone}` : ""}`);
-    cell.appendChild(el("span", "energy-summary-label", label));
-    cell.appendChild(el("strong", null, value));
-    if (caption) cell.appendChild(el("small", null, caption));
-    grid.appendChild(cell);
-  };
-  item("Мощность", primaryEnergyValue(energy), "Сейчас · выбранные источники", "is-accent");
-  item("Сегодня", sourceMetric(energy, "todayKwh", "кВт·ч", 2), "Расход за текущие сутки", "is-success");
-  item("Источники", `${selected.length} из ${energy.sources.length}`, unavailable ? `${unavailable} без связи` : "Все на связи", unavailable ? "is-warning" : "");
+  const icon = el("span", "energy-meter-reading-icon");
+  icon.appendChild(deps.svgIcon("energy"));
+  card.appendChild(icon);
   if (meterConfigured(meter)) {
-    const status = meterStatusMeta(meter);
-    item("Показание счётчика", `${meterNumber(meter.reading.currentKwh)} кВт·ч`,
-      meter.reading.estimated ? "Расчётное значение" : "Переданное значение");
-    item("С последней передачи", meter.cycle && meter.cycle.consumptionKwh !== null && meter.cycle.consumptionKwh !== undefined
-      ? `${meterNumber(meter.cycle.consumptionKwh)} кВт·ч` : "—",
-      meter.source && meter.source.state === "reset_detected" ? "Требуется передача или корректировка" : "Месячный цикл",
-      meter.source && meter.source.state === "reset_detected" ? "is-warning" : "");
-    item("Следующая передача", formatMeterDate(meter.submission && meter.submission.nextDate), status.label, status.tone);
+    const reading = el("span", "energy-meter-reading-primary");
+    reading.appendChild(el("small", null, "Показание счётчика"));
+    reading.appendChild(el("strong", null, `${meterNumber(meter.reading.currentKwh)} кВт·ч`));
+    reading.appendChild(el("span", null, meter.reading.estimated ? "Расчётное значение" : "Переданное значение"));
+    card.appendChild(reading);
+    const cycle = el("span", "energy-meter-reading-secondary");
+    cycle.appendChild(el("small", null, "Расход цикла"));
+    cycle.appendChild(el("strong", null, meter.cycle && meter.cycle.consumptionKwh !== null && meter.cycle.consumptionKwh !== undefined
+      ? `${meterNumber(meter.cycle.consumptionKwh)} кВт·ч` : "—"));
+    cycle.appendChild(el("span", null, "С последней передачи"));
+    card.appendChild(cycle);
   } else {
-    const setup = el("span", "energy-summary-item energy-meter-setup");
-    setup.appendChild(el("span", "energy-summary-label", "Счётчик"));
-    setup.appendChild(el("strong", null, "Настройте дату и текущее показание"));
-    setup.appendChild(el("small", null, panel._energyMeterError
-      ? "Показания временно недоступны" : "Откройте детали, чтобы задать расписание передачи"));
-    grid.appendChild(setup);
+    const reading = el("span", "energy-meter-reading-primary is-empty");
+    reading.appendChild(el("small", null, "Показание счётчика"));
+    reading.appendChild(el("strong", null, "Нет показаний"));
+    reading.appendChild(el("span", null, panel._energyMeterError ? "Временно недоступно" : "Откройте, чтобы настроить"));
+    card.appendChild(reading);
   }
-  card.appendChild(grid);
-  const foot = el("span", "energy-summary-foot");
-  foot.appendChild(el("span", null, "Графики, источники, счётчик и управление питанием"));
-  foot.appendChild(el("span", "energy-summary-more", "Все детали ›"));
-  card.appendChild(foot);
+  const more = el("span", "energy-meter-reading-more");
+  more.appendChild(el("strong", null, "Все детали"));
+  more.appendChild(el("small", null, "Счётчики и устройства"));
+  more.appendChild(el("b", null, "›"));
+  card.appendChild(more);
   return card;
 }
 
@@ -577,17 +570,9 @@ export function renderEnergySection(panel, container, deps) {
       { label: "Сегодня", value: sourceMetric(energy, "todayKwh", "кВт·ч", 2) },
     ],
   }, deps));
-  const reminder = meterReminderText(panel._energyMeter);
-  if (reminder) {
-    const banner = el("div", "energy-meter-reminder");
-    banner.appendChild(el("span", null, reminder));
-    const open = el("button", "secondary", "Открыть детали");
-    open.type = "button";
-    open.addEventListener("click", () => openEnergyDetails(panel));
-    banner.appendChild(open);
-    container.appendChild(banner);
-  }
-  container.appendChild(renderEnergySummary(panel, energy, deps));
+  container.appendChild(renderMeterReadingStrip(panel, energy, deps));
+  const selected = selectedSources(energy);
+  container.appendChild(renderEnergyHistory(panel, energy, selected, deps));
   if (panel._energyDetailsOpen) renderEnergyModal(panel, container, energy, deps);
 }
 

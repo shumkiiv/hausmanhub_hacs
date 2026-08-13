@@ -1,7 +1,7 @@
 """Theme and accessibility contract for nested HACS panel windows.
 
 Covers the 2026-08-11 handoff: shared modal tokens, themed backdrops and
-shadows, themed energy chart, compact energy main page with a modal details
+    shadows, themed energy chart, readable energy main page with a meter modal
 window, and Escape/focus behaviour of every nested surface.
 """
 
@@ -121,9 +121,14 @@ class ModalTokensTest(unittest.TestCase):
 
 
 class ModalBehaviourTest(unittest.TestCase):
+    def test_modal_focus_does_not_scroll_the_panel_away(self) -> None:
+        js = read(MODAL_JS)
+        self.assertIn('focus({ preventScroll: true })', js)
+
     def test_modal_helper_is_wired_into_every_nested_window(self) -> None:
         expectations = {
-            "hausman-hub-device-card.js": "enhanceDetailsModal(card, sheet, () => closeCard(owner, card, key))",
+            "hausman-hub-device-card.js": "enhanceAppendedModal(backdrop, sheet, () =>",
+            "hausman-hub-media-device.js": "enhanceAppendedModal(backdrop, body, () =>",
             "hausman-hub-climate-overview.js": "enhanceAppendedModal(backdrop, sheet, dismiss)",
             "hausman-hub-lighting.js": "enhanceAppendedModal(backdrop, sheet, () => closeSheet(panel, container))",
             "hausman-hub-rooms.js": "enhanceAppendedModal(backdrop, sheet, () => closeRoomOverview(panel, container))",
@@ -251,15 +256,17 @@ class EnergyLayoutTest(unittest.TestCase):
         js = read(ENERGY_JS)
         self.assertNotIn("renderEnergySidebar", js)
         self.assertNotIn("energy-page-layout", js)
-        self.assertIn("renderEnergySummary(panel, energy, deps)", js)
+        self.assertIn("renderMeterReadingStrip(panel, energy, deps)", js)
+        self.assertIn("renderEnergyHistory(panel, energy, selected, deps)", js)
+        self.assertIn("renderEnergyDevices(panel, container, energy.sources, deps)", js)
 
     def test_main_energy_summary_shows_key_values(self) -> None:
         js = read(ENERGY_JS)
         for snippet in (
             '"Мощность"', '"Сегодня"', '"Источники"',
-            '"Показание счётчика"', '"С последней передачи"', '"Следующая передача"',
-            '"Настройте дату и текущее показание"',
-            "energy-summary-card",
+            '"Показание счётчика"', '"С последней передачи"',
+            '"Нет показаний"',
+            "energy-meter-reading-strip",
             "openEnergyDetails(panel)",
         ):
             self.assertIn(snippet, js)
@@ -271,9 +278,10 @@ class EnergyLayoutTest(unittest.TestCase):
         self.assertIn("energy-modal-backdrop", js)
         self.assertIn("if (event.target === backdrop) closeEnergyDetails(panel);", js)
         self.assertIn("renderEnergyMeterCard(panel, deps)", js)
-        self.assertIn("renderEnergyHistory(panel, energy, selectedSources(energy), deps)", js)
-        self.assertIn("renderEnergyDevices(panel, container, energy.sources, deps)", js)
         self.assertIn("compactEnergySettings(panel, container, energy, deps)", js)
+        modal_body = js.split("function renderEnergyModal", 1)[1].split("function renderMeterReadingStrip", 1)[0]
+        self.assertNotIn("renderEnergyHistory(", modal_body)
+        self.assertIn("renderEnergyDevices(panel, container, energy.sources, deps)", modal_body)
         self.assertIn('"← К списку энергии"', js)
         self.assertIn("panel._energyModalView = sourceId ? \"device\" : \"overview\";", js)
         css = read(ENERGY_CSS)
@@ -297,7 +305,7 @@ class EnergyLayoutTest(unittest.TestCase):
         ):
             self.assertIn(snippet, js)
         main = read(ENERGY_JS)
-        self.assertIn("energy-meter-reminder", main)
+        self.assertIn("energy-meter-reading-strip", main)
         self.assertIn("energy-overview-reminder", main)
 
     def test_meter_loading_is_wired_into_panel(self) -> None:

@@ -24,7 +24,13 @@ export function focusInitialModalElement(sheet, preferred) {
   const target = preferred
     || (sheet.querySelector ? sheet.querySelector("[data-modal-initial]") : null)
     || modalFocusableItems(sheet)[0];
-  if (target && typeof target.focus === "function") target.focus();
+  if (target && typeof target.focus === "function") {
+    try {
+      target.focus({ preventScroll: true });
+    } catch (error) {
+      target.focus();
+    }
+  }
   return target || null;
 }
 
@@ -51,9 +57,13 @@ function restoreFocusTo(element) {
   if (!element || typeof element.focus !== "function") return;
   if (element.isConnected === false) return;
   try {
-    element.focus();
+    element.focus({ preventScroll: true });
   } catch (error) {
-    /* the original card may already be gone after a re-render */
+    try {
+      element.focus();
+    } catch (fallbackError) {
+      /* the original card may already be gone after a re-render */
+    }
   }
 }
 

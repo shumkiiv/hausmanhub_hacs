@@ -1,8 +1,8 @@
 /* Climate control surface shared with the tablet information architecture. */
 
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.85";
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.85";
-import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.85";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.86";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.86";
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.86";
 
 const CLIMATE_ACTION_API = "hausman_hub/v1/climate/actions";
 
@@ -276,6 +276,7 @@ function deviceIsActive(device) {
 
 function createHero(panel, rooms, devices, deps) {
   const unavailable = devices.filter((device) => device.unavailable).length;
+  const categories = renderCategories(panel, devices, deps);
   return createLibraryHero(panel, {
     eyebrow: "КЛИМАТ ДОМА",
     title: "Климат по комнатам",
@@ -287,6 +288,7 @@ function createHero(panel, rooms, devices, deps) {
       { label: "Работает", value: `${devices.filter(deviceIsActive).length} из ${devices.length}` },
       { label: "Без связи", value: unavailable, warning: unavailable > 0 },
     ],
+    extra: categories,
   }, deps);
 }
 
@@ -418,16 +420,10 @@ function openClimateSheet(panel, container, title, devices, deps) {
   }
 }
 
-function renderCategories(panel, container, devices, deps) {
+function renderCategories(panel, devices, deps) {
   const { el, svgIcon, setAttr } = deps;
-  const section = el("section", "climate-category-section");
-  const heading = el("div", "climate-section-heading");
-  const copy = el("div");
-  copy.appendChild(el("h3", null, "Обзор климата"));
-  copy.appendChild(el("p", null, "Откройте группу, затем выберите конкретное устройство"));
-  heading.appendChild(copy);
-  section.appendChild(heading);
   const grid = el("div", "climate-category-grid");
+  setAttr(grid, "aria-label", "Оборудование климата");
   CATEGORY_DEFINITIONS.forEach((category) => {
     const matches = devices.filter((device) => climateCategory(device) === category.id);
     const card = el("button", "climate-category-card");
@@ -439,15 +435,13 @@ function renderCategories(panel, container, devices, deps) {
     const cardCopy = el("span", "climate-category-copy");
     cardCopy.appendChild(el("strong", null, category.title));
     cardCopy.appendChild(el("small", null, matches.length
-      ? `${matches.length} ${panel._deviceCountWord(matches.length)}${matches.some((device) => device.unavailable) ? " · есть без связи" : ""}`
-      : "Нет устройств"));
+      ? `${matches.length}${matches.some((device) => device.unavailable) ? " · нет связи" : ""}`
+      : "0"));
     card.appendChild(cardCopy);
-    card.appendChild(el("span", "climate-category-chevron", "›"));
     card.addEventListener("click", () => requestClimateSheet(panel, category.title, matches));
     grid.appendChild(card);
   });
-  section.appendChild(grid);
-  container.appendChild(section);
+  return grid;
 }
 
 function roomDevices(room, devices) {
@@ -773,7 +767,6 @@ export function renderClimateOverview(panel, container, deps) {
   const page = deps.el("div", "climate-dashboard");
   page.appendChild(createHero(panel, rooms, devices, deps));
   renderClimateSynchronization(panel, page, deps);
-  renderCategories(panel, page, devices, deps);
   renderRooms(panel, page, rooms, devices, deps);
   if (panel._climateOverlay) {
     const keys = new Set(panel._climateOverlay.deviceKeys || []);

@@ -1,6 +1,6 @@
 /* Canonical physical-device card shared by all tablet-style HACS sections. */
 
-import { enhanceDetailsModal } from "./hausman-hub-modal.js?v=1.52.85";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.86";
 
 const STATE_LABELS = {
   on: "Включено",
@@ -143,11 +143,6 @@ function deviceKey(device) {
   return String(device && (device.id || device.physicalId || device.deviceId || device.entityId || device.name) || "");
 }
 
-function closeCard(owner, card, key) {
-  card.open = false;
-  owner._openHomeCards.delete(key);
-}
-
 function conciseDetails(device) {
   const seen = new Set();
   return (Array.isArray(device && device.details) ? device.details : []).filter((detail) => {
@@ -160,34 +155,12 @@ function conciseDetails(device) {
   }).slice(0, 6);
 }
 
-export function renderPhysicalDeviceCard(owner, device, deps) {
+function openDeviceSheet(owner, device, deps) {
   const { el, setAttr } = deps;
   const iconName = owner._deviceIcon(device);
-  const key = `device:${deviceKey(device)}`;
   const state = localizedDeviceState(device);
-  const card = el("details", `inventory-device-card physical-device-card${device.unavailable ? " is-unavailable" : ""}`);
-  card.open = owner._openHomeCards.has(key);
-  card.addEventListener("toggle", () => {
-    if (card.open) owner._openHomeCards.add(key);
-    else owner._openHomeCards.delete(key);
-  });
-
-  const summary = el("summary", "inventory-device-summary");
-  setAttr(summary, "aria-label", `Открыть подробности устройства ${device.name || "Устройство"}. Состояние: ${state}.`);
-  appendDeviceVisual(summary, device, iconName, deps, "inventory-device-visual");
-  const copy = el("span", "inventory-device-copy");
-  copy.appendChild(el("strong", null, device.name || "Устройство"));
-  copy.appendChild(el("small", null, `${device.roomName || "Без комнаты"} · ${owner._deviceCategoryName(device)}`));
-  copy.appendChild(el("span", "inventory-device-state", state));
-  summary.appendChild(copy);
-  const connection = el("span", `inventory-device-status ${device.unavailable ? "is-unavailable" : ""}`);
-  connection.appendChild(el("span", `device-state-dot ${device.unavailable ? "bad" : (device.tone || "good")}`));
-  connection.appendChild(el("span", null, device.unavailable ? "Нет связи" : "На связи"));
-  summary.appendChild(connection);
-  summary.appendChild(el("span", "inventory-device-chevron", "›"));
-  card.appendChild(summary);
-
-  const backdrop = el("div", "device-sheet-backdrop inventory-device-body");
+  if (typeof owner._activeDeviceModalClose === "function") owner._activeDeviceModalClose();
+  const backdrop = el("div", "device-sheet-backdrop");
   const sheet = el("section", "device-sheet");
   setAttr(sheet, "role", "dialog");
   setAttr(sheet, "aria-modal", "true");
@@ -195,10 +168,11 @@ export function renderPhysicalDeviceCard(owner, device, deps) {
   const close = el("button", "device-sheet-close", "×");
   close.type = "button";
   setAttr(close, "aria-label", "Закрыть");
+  let finish = () => {};
   close.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation && event.stopPropagation();
-    closeCard(owner, card, key);
+    finish();
   });
   sheet.appendChild(close);
 
@@ -238,9 +212,47 @@ export function renderPhysicalDeviceCard(owner, device, deps) {
   sheet.appendChild(controls);
   backdrop.appendChild(sheet);
   backdrop.addEventListener("click", (event) => {
-    if (event.target === backdrop) closeCard(owner, card, key);
+    if (event.target === backdrop) finish();
   });
-  card.appendChild(backdrop);
-  enhanceDetailsModal(card, sheet, () => closeCard(owner, card, key));
+  const modalRoot = owner.shadowRoot || owner._shell?.container;
+  if (!modalRoot) return;
+  modalRoot.appendChild(backdrop);
+  owner._activeDeviceModalKey = `device:${deviceKey(device)}`;
+  finish = enhanceAppendedModal(backdrop, sheet, () => {
+    if (backdrop.remove) backdrop.remove();
+    if (owner._activeDeviceModalKey === `device:${deviceKey(device)}`) {
+      owner._activeDeviceModalKey = null;
+      owner._activeDeviceModalClose = null;
+    }
+  }, { initialFocus: close });
+  owner._activeDeviceModalClose = finish;
+}
+
+export function renderPhysicalDeviceCard(owner, device, deps) {
+  const { el, setAttr } = deps;
+  const iconName = owner._deviceIcon(device);
+  const state = localizedDeviceState(device);
+  const card = el("article", `inventory-device-card physical-device-card${device.unavailable ? " is-unavailable" : ""}`);
+  const summary = el("button", "inventory-device-summary");
+  summary.type = "button";
+  setAttr(summary, "aria-label", `Открыть подробности устройства ${device.name || "Устройство"}. Состояние: ${state}.`);
+  summary.addEventListener("click", () => openDeviceSheet(owner, device, deps));
+  appendDeviceVisual(summary, device, iconName, deps, "inventory-device-visual");
+  const copy = el("span", "inventory-device-copy");
+  copy.appendChild(el("strong", null, device.name || "Устройство"));
+  copy.appendChild(el("small", null, `${device.roomName || "Без комнаты"} · ${owner._deviceCategoryName(device)}`));
+  summary.appendChild(copy);
+  summary.appendChild(el("span", "inventory-device-chevron", "›"));
+  const footer = el("span", "inventory-device-footer");
+  const measurement = el("span", "inventory-device-measurement");
+  measurement.appendChild(el("small", null, "Состояние"));
+  measurement.appendChild(el("strong", "inventory-device-state", state));
+  footer.appendChild(measurement);
+  const connection = el("span", `inventory-device-status ${device.unavailable ? "is-unavailable" : ""}`);
+  connection.appendChild(el("span", `device-state-dot ${device.unavailable ? "bad" : (device.tone || "good")}`));
+  connection.appendChild(el("span", null, device.unavailable ? "Нет связи" : "На связи"));
+  footer.appendChild(connection);
+  summary.appendChild(footer);
+  card.appendChild(summary);
   return card;
 }

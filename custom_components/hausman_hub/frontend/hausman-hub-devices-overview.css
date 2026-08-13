@@ -1,15 +1,78 @@
-.devices-canon-hero{position:relative;min-height:285px;margin:0 0 20px;padding:34px;border:1px solid var(--hmh-border);border-radius:var(--hmh-radius-section);overflow:hidden;color:#f4f7fb;background:linear-gradient(90deg,rgba(20,14,9,.9) 0%,rgba(20,14,9,.72) 43%,rgba(20,14,9,.08) 100%),url("./assets/dashboard-hero-living-room-day.png") center 58%/cover no-repeat;box-shadow:var(--hmh-raised)}
-.devices-canon-hero-copy{position:relative;z-index:1;display:flex;flex-direction:column;align-items:flex-start;height:100%;max-width:680px}.devices-canon-eyebrow{font-size:12px;font-weight:750;letter-spacing:.12em;color:#d6c5ac}.devices-canon-hero h2{margin:12px 0 8px;font-size:39px;line-height:1.08;letter-spacing:-.035em}.devices-canon-hero p{margin:0;color:#e0d8cd;font-size:17px}
-.devices-canon-metrics{display:flex;gap:38px;margin-top:auto;padding-top:54px}.devices-canon-metric{display:flex;align-items:center;gap:11px;min-width:120px}.devices-canon-metric>svg{width:24px;height:24px;color:#e1a72f}.devices-canon-metric span,.devices-canon-metric strong,.devices-canon-metric small{display:block}.devices-canon-metric strong{font-size:27px;line-height:1}.devices-canon-metric small{margin-top:5px;color:#d2c9bc;font-size:13px}
-.devices-canon-layout{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:18px;align-items:start}.devices-canon-main{display:grid;gap:18px}.devices-canon-section,.devices-canon-side-card{border:1px solid var(--hmh-border);border-radius:var(--hmh-radius-section);background:var(--hmh-surface);box-shadow:var(--hmh-raised)}.devices-canon-section{padding:22px}.devices-canon-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:17px}.devices-canon-heading h3,.devices-canon-side-card h3{margin:0;font-size:21px}.devices-canon-reset{min-height:38px;padding:0 15px;border:1px solid var(--hmh-border);border-radius:999px;color:var(--primary-text-color);background:transparent;font:inherit;font-weight:650;cursor:pointer}.devices-canon-reset.is-active{border-color:var(--hmh-accent);background:color-mix(in srgb,var(--hmh-accent) 10%,transparent)}
-.devices-canon-category-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr));gap:12px}.devices-canon-category{display:flex;align-items:stretch;justify-content:flex-start;flex-direction:column;min-width:0;min-height:132px;padding:17px;border:1px solid var(--hmh-border);border-radius:16px;text-align:left;white-space:normal;color:var(--primary-text-color);background:color-mix(in srgb,var(--hmh-surface) 88%,var(--hmh-border));cursor:pointer;transition:border-color .18s ease,transform .18s ease}.devices-canon-category:hover{transform:translateY(-1px);border-color:color-mix(in srgb,var(--hmh-accent) 45%,var(--hmh-border))}.devices-canon-category.is-selected{border-color:var(--hmh-accent);background:color-mix(in srgb,var(--hmh-accent) 8%,var(--hmh-surface))}.devices-canon-category.has-offline{border-color:color-mix(in srgb,#d79823 68%,var(--hmh-border))}.devices-canon-category-title{display:grid;width:100%;grid-template-columns:24px minmax(0,1fr) auto;align-items:center;gap:10px}.devices-canon-category-title svg{width:22px;height:22px;color:var(--hmh-accent)}.devices-canon-category-title strong{min-width:0;overflow-wrap:anywhere;font-size:16px;line-height:1.25}.devices-canon-category-title b{font-size:20px}.devices-canon-category>.ok,.devices-canon-category>.warn,.devices-canon-category>small{display:block;width:100%}.devices-canon-category>.ok,.devices-canon-category>.warn{margin-top:auto;padding-top:22px;font-size:14px;font-weight:700}.devices-canon-category>.ok{color:var(--hmh-status-success)}.devices-canon-category>.warn{color:#c78a16}.devices-canon-category>small{margin-top:7px;color:var(--hmh-text-dim);font-size:12px;line-height:1.35}
-.devices-canon-catalog-heading{align-items:flex-end}.devices-canon-search{width:min(340px,100%);min-height:42px;padding:0 14px;border:1px solid var(--hmh-border);border-radius:13px;color:var(--primary-text-color);background:color-mix(in srgb,var(--hmh-surface) 92%,var(--hmh-border));font:inherit}.devices-canon-search:focus{outline:2px solid color-mix(in srgb,var(--hmh-accent) 45%,transparent);outline-offset:1px}.devices-canon-device-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.devices-canon-empty{margin:0;color:var(--hmh-text-dim);font-size:14px;line-height:1.5}
-.devices-canon-aside{display:grid;gap:14px;position:sticky;top:16px}.devices-canon-side-card{padding:20px}.devices-canon-side-card h3{margin-bottom:16px}.devices-canon-side-row{display:flex;justify-content:space-between;gap:16px;padding:11px 0;border-top:1px solid var(--hmh-border)}.devices-canon-side-row span{color:var(--hmh-text-dim)}.devices-canon-side-row strong{font-size:14px}.devices-canon-attention{display:block;width:100%;padding:12px 0;border:0;border-top:1px solid var(--hmh-border);text-align:left;color:var(--primary-text-color);background:transparent;cursor:pointer}.devices-canon-attention strong,.devices-canon-attention span{display:block}.devices-canon-attention strong{font-size:13px}.devices-canon-attention span{margin-top:5px;color:#bd7f12;font-size:12px}.devices-canon-source>strong{display:block;font-size:16px}.devices-canon-source>p{margin:9px 0 0;color:var(--hmh-text-dim);font-size:13px;line-height:1.5}
-@media(max-width:1120px){.devices-canon-layout{grid-template-columns:1fr}.devices-canon-aside{position:static;grid-template-columns:repeat(3,minmax(0,1fr))}.devices-canon-category-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:720px){.devices-canon-hero{min-height:325px;padding:25px}.devices-canon-hero h2{font-size:31px}.devices-canon-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;padding-top:38px}.devices-canon-category-grid,.devices-canon-device-grid,.devices-canon-aside{grid-template-columns:1fr}.devices-canon-section{padding:16px}.devices-canon-catalog-heading{align-items:stretch;flex-direction:column}.devices-canon-search{width:100%}}
-
-.devices-canon-room{display:grid;gap:10px;margin-top:6px}
-.devices-canon-room-heading{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
-.devices-canon-room-heading h4{margin:0;font-size:16px}
-.devices-canon-room-heading span{color:var(--hmh-text-dim);font-size:12px;white-space:nowrap}
-.devices-canon-attention strong,.devices-canon-attention span{overflow:hidden;max-width:100%;text-overflow:ellipsis;white-space:nowrap}
+.devices-canon-workspace {
+  margin-top:16px;
+  overflow:hidden;
+  border:1px solid var(--hmh-border);
+  border-radius:var(--hmh-radius-section);
+  background:var(--hmh-surface);
+  box-shadow:0 8px 24px rgba(24,39,61,.08);
+}
+.devices-canon-section { padding:20px; }
+.devices-canon-section + .devices-canon-section { border-top:1px solid var(--hmh-border); }
+.devices-canon-heading { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:16px; }
+.devices-canon-heading h3 { margin:0; font-size:22px; }
+.devices-canon-reset {
+  min-height:40px;
+  padding:0 15px;
+  border:1px solid var(--hmh-border);
+  border-radius:999px;
+  color:var(--primary-text-color);
+  background:transparent;
+  font:inherit;
+  font-weight:650;
+  cursor:pointer;
+}
+.devices-canon-reset.is-active { border-color:var(--hmh-accent); color:var(--hmh-accent); background:color-mix(in srgb,var(--hmh-accent) 8%,transparent); }
+.devices-canon-category-grid { display:flex; gap:9px; overflow-x:auto; padding:2px 2px 5px; scrollbar-width:thin; }
+.devices-canon-category {
+  display:grid;
+  flex:0 0 auto;
+  min-width:166px;
+  min-height:74px;
+  padding:13px 14px;
+  gap:9px;
+  border:1px solid var(--hmh-border);
+  border-radius:14px;
+  color:var(--primary-text-color);
+  text-align:left;
+  white-space:normal;
+  background:var(--hmh-raised);
+  box-shadow:none;
+  cursor:pointer;
+  transition:border-color .18s ease,background .18s ease;
+}
+.devices-canon-category:hover { border-color:color-mix(in srgb,var(--hmh-accent) 45%,var(--hmh-border)); }
+.devices-canon-category.is-selected { border-color:var(--hmh-accent); background:color-mix(in srgb,var(--hmh-accent) 8%,var(--hmh-surface)); }
+.devices-canon-category.has-offline { border-color:color-mix(in srgb,var(--hmh-status-warning) 58%,var(--hmh-border)); }
+.devices-canon-category-title { display:grid; grid-template-columns:22px minmax(0,1fr) auto; align-items:center; gap:8px; }
+.devices-canon-category-title svg { width:20px; height:20px; color:var(--hmh-accent); }
+.devices-canon-category-title strong { min-width:0; font-size:14px; line-height:1.25; overflow-wrap:anywhere; }
+.devices-canon-category-title b { font-size:17px; }
+.devices-canon-category > .ok,.devices-canon-category > .warn { font-size:12px; font-weight:700; }
+.devices-canon-category > .ok { color:var(--hmh-status-success); }
+.devices-canon-category > .warn { color:var(--hmh-status-warning); }
+.devices-canon-catalog-heading { align-items:flex-end; }
+.devices-canon-search {
+  width:min(360px,100%);
+  min-height:44px;
+  padding:0 15px;
+  border:1px solid var(--hmh-border);
+  border-radius:13px;
+  color:var(--primary-text-color);
+  background:var(--hmh-raised);
+  font:inherit;
+}
+.devices-canon-search:focus { outline:2px solid color-mix(in srgb,var(--hmh-accent) 45%,transparent); outline-offset:1px; }
+.devices-canon-device-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
+.devices-canon-empty { margin:0; color:var(--hmh-text-dim); font-size:15px; line-height:1.5; }
+.devices-canon-room { display:grid; gap:11px; margin-top:18px; }
+.devices-canon-room:first-of-type { margin-top:3px; }
+.devices-canon-room-heading { display:flex; align-items:baseline; justify-content:space-between; gap:12px; }
+.devices-canon-room-heading h4 { margin:0; color:var(--hmh-text); font-size:18px; text-transform:none; letter-spacing:0; }
+.devices-canon-room-heading span { color:var(--hmh-text-dim); font-size:13px; white-space:nowrap; }
+@media(max-width:1260px) { .devices-canon-device-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(max-width:760px) {
+  .devices-canon-section { padding:16px; }
+  .devices-canon-catalog-heading { align-items:stretch; flex-direction:column; }
+  .devices-canon-search { width:100%; }
+  .devices-canon-device-grid { grid-template-columns:1fr; }
+}

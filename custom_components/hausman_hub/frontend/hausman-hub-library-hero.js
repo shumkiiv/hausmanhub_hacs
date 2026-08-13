@@ -30,6 +30,7 @@ export function createLibraryHero(panel, options, deps) {
     facts.appendChild(fact);
   });
   copy.appendChild(facts);
+  if (options.extra) copy.appendChild(options.extra);
   hero.appendChild(copy);
   return hero;
 }
