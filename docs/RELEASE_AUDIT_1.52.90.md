@@ -43,14 +43,15 @@
 - Перед установкой создан полный backup `b01ebb1c`, размер 830,3 MB. Локальная
   и внешняя копии доступны со статусом `Backed Up`.
 - `homeassistant.check_config` принят. HACS показывает installed/latest
-  `v1.52.90`, конфигурационная запись HausmanHub перезагружена, admin panel API
-  и frontend cache marker равны `1.52.90`.
+  `v1.52.90`; после перезапуска admin panel API и frontend cache marker равны
+  `1.52.90`.
 - Production отдаёт новый JavaScript и CSS диапазонов. Live Dashboard API
   вернул 13 комнат, 82 устройства и 37 диапазонов; невалидных диапазонов и
   английских подписей нет.
 - В системном журнале Home Assistant нет записей HausmanHub.
-- Полный restart не потребовался: новый пакет и runtime активированы штатной
-  перезагрузкой config entry. Backup manager сохранил копию, но внешний агент
-  KeeneticSSD ещё не закрыл служебный callback `upload_to_agents`; это не
-  влияет на доступность локальной и внешней копии.
+- Перезапуск Home Assistant завершён штатно. Он активировал чистый runtime и
+  освободил служебный callback внешнего backup-агента; backup manager вернулся
+  в `idle`, копия `b01ebb1c` сохранила статус `Backed Up`.
+- После перезапуска Live Dashboard API снова вернул 13 комнат, 82 устройства и
+  37 диапазонов; невалидных диапазонов и английских подписей нет.
 - Физические команды устройствам не отправлялись.

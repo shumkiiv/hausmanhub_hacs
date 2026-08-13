@@ -14,11 +14,10 @@ Last updated: 2026-08-13 (HACS 1.52.90 device sheet ranges).
   `31737373543` success; full gate 1382 passed, 4 skipped. Light and dark real
   Chromium checks passed without overflow. Production was backed up as
   `b01ebb1c` (830.3 MB), config check passed, HACS installed/latest, admin panel
-  and cache marker are `1.52.90`; config entry reload activated runtime without
-  a full restart. Live API has 13 rooms, 82 devices and 37 valid Russian range
-  controls; system log is clean. The local and external backup are available,
-  while the KeeneticSSD agent still reports its closing `upload_to_agents`
-  callback. No physical device command was sent.
+  and cache marker are `1.52.90`; a full restart completed normally. Live API
+  has 13 rooms, 82 devices and 37 valid Russian range controls; system log is
+  clean. The local and external backup are available and backup manager is
+  idle. No physical device command was sent.
 
 - 2026-08-13 (Codex): HACS `1.52.88` added bounded numeric device controls,
   safe `number.set_value` execution with range, step and read-back validation,
