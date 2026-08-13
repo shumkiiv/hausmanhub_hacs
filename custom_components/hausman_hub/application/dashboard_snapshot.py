@@ -150,6 +150,8 @@ _DETAIL_LABEL_TRANSLATIONS = {
     "countdown": "Таймер отключения",
     "custom the-tank-filed": "Бак установлен",
     "custom water-shortage-fault": "Недостаточно воды",
+    "frost protection temperature": "Температура защиты от замерзания",
+    "humidity calibration": "Коррекция влажности",
     "humidifier fan level": "Скорость увлажнения",
     "identify": "Идентификация",
     "illumination": "Уровень освещённости",
@@ -159,6 +161,7 @@ _DETAIL_LABEL_TRANSLATIONS = {
     "mode switch": "Режим выключателя",
     "motor fault": "Неисправность мотора",
     "occupancy sensitivity": "Чувствительность присутствия",
+    "occupancy timeout": "Тайм-аут присутствия",
     "over current breaker": "Защита от превышения тока",
     "over current threshold": "Порог отключения по току",
     "over voltage breaker": "Защита от превышения напряжения",
@@ -169,10 +172,16 @@ _DETAIL_LABEL_TRANSLATIONS = {
     "reverse direction": "Обратное направление",
     "right": "Правая клавиша",
     "temperature breaker": "Защита от перегрева",
+    "temperature accuracy": "Точность поддержания температуры",
+    "temperature calibration": "Коррекция температуры",
     "temperature threshold": "Порог отключения по температуре",
+    "temporary mode duration": "Длительность временного режима",
     "time format": "Формат времени",
+    "timer mode target temp": "Целевая температура таймера",
     "under voltage breaker": "Защита от низкого напряжения",
     "under voltage threshold": "Нижний порог напряжения",
+    "valve closing degree": "Степень закрытия клапана",
+    "valve opening degree": "Степень открытия клапана",
 }
 
 _STATE_TRANSLATIONS = {

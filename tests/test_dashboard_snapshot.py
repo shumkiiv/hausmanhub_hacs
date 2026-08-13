@@ -343,6 +343,42 @@ class DashboardSnapshotTest(unittest.TestCase):
 
         self.assertNotIn("control", snapshot["devices"][0]["details"][0])
 
+    def test_current_numeric_device_labels_are_fully_localized(self) -> None:
+        translations = {
+            "Frost protection temperature": "Температура защиты от замерзания",
+            "Humidity calibration": "Коррекция влажности",
+            "Occupancy timeout": "Тайм-аут присутствия",
+            "Temperature accuracy": "Точность поддержания температуры",
+            "Temperature calibration": "Коррекция температуры",
+            "Temporary mode duration": "Длительность временного режима",
+            "Timer mode target temp": "Целевая температура таймера",
+            "Valve closing degree": "Степень закрытия клапана",
+            "Valve opening degree": "Степень открытия клапана",
+        }
+        snapshot = build_dashboard_snapshot(
+            areas=(DashboardArea("room", "Комната"),),
+            devices=(DashboardDevice("thermostat", "Термоголовка", "room"),),
+            entities=tuple(
+                DashboardEntity(
+                    f"number.setting_{index}",
+                    "number",
+                    "1",
+                    source,
+                    {"min": 0, "max": 10, "step": 1},
+                    "thermostat",
+                    "room",
+                )
+                for index, source in enumerate(translations)
+            ),
+            generated_at_ms=1,
+            local_iso="2026-08-13T12:00:00+03:00",
+        )
+
+        self.assertEqual(
+            set(translations.values()),
+            {detail["label"] for detail in snapshot["devices"][0]["details"]},
+        )
+
     def test_duplicate_technical_labels_remain_russian(self) -> None:
         snapshot = build_dashboard_snapshot(
             areas=(DashboardArea("panel", "Электрощит"),),
