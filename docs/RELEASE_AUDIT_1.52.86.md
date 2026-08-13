@@ -33,4 +33,14 @@ Backend, API v1, contracts, storage и исполнение физических
   проверки безопасности опубликованных и staged-файлов прошли.
 - Целевой UI-набор: 114 тестов и 82 subtests пройдены.
 
-Production-проверка дополняется после установки выпуска.
+## Выпуск и production
+
+- Release commit `64aedec`, tag и GitHub Release `v1.52.86` опубликованы.
+- GitHub Actions `31709902798` завершился успешно.
+- Перед установкой создан automatic backup. Затем выполнены config check,
+  явная установка `v1.52.86` и restart Home Assistant.
+- После restart installed/latest и marker панели равны `1.52.86`. Все 10
+  сущностей HausmanHub доступны, runtime fresh, active operations и blocked
+  reasons равны 0. Dashboard вернул 13 комнат и 82 устройства, журнал
+  HausmanHub чист.
+- Физические команды, климатические цели и сценарии при deploy не запускались.

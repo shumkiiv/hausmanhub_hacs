@@ -1,8 +1,21 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-13 (HACS 1.52.85 released and deployed).
+Last updated: 2026-08-13 (HACS 1.52.86 released and deployed).
 
 ## Current work
+
+- 2026-08-13 (Codex): HACS `1.52.86`, release commit `64aedec`, tag и GitHub
+  Release опубликованы, production обновлён. Главная повторяет композицию
+  Android-планшета, устройства собраны в одной рабочей области, физические и
+  медиа-карточки получили общий читаемый шаблон. Исправлена прокрутка панели к
+  пустому экрану при открытии устройства. Основная энергия оставляет значения,
+  график и источники, а счётчики, полный список и настройки открывает в окне
+  деталей. Климатическая шапка объединяет сводку и группы оборудования. Full
+  local release gate: 1371 тест, 4 skipped; Actions `31709902798` success.
+  После automatic backup, config check, install и restart installed/latest и
+  panel marker равны `1.52.86`; 10 сущностей доступны, runtime fresh, pending
+  и blocked reasons 0, system log HausmanHub чист. Физические команды и
+  климатические цели при deploy не отправлялись.
 
 - 2026-08-13 (Kimi implementation, Codex review): HACS `1.52.85`, commit
   `e44e9c6`, tag и GitHub Release `v1.52.85` опубликованы. Карточка общей климатической
