@@ -19,6 +19,7 @@ from ..domain.contours import (
     CLIMATE_TARGET_TEMPERATURE_MAXIMUM,
     CLIMATE_TARGET_TEMPERATURE_MINIMUM,
 )
+from .dashboard_comfort import build_dashboard_comfort
 
 
 DASHBOARD_CONTRACT_NAME = "universal-home"
@@ -1161,6 +1162,7 @@ def build_dashboard_snapshot(
         ),
         "activeAlarms": sum(bool(alarm["active"]) for alarm in alarms),
     }
+    comfort = build_dashboard_comfort(room_payloads, co2=summary["co2"])
     scenario_payloads = [
         {
             "id": scenario.scenario_id,
@@ -1273,6 +1275,7 @@ def build_dashboard_snapshot(
         "stateRevision": state_revision,
         "localIso": local_iso,
         "summary": summary,
+        "comfort": comfort,
         "rooms": sorted(room_payloads, key=lambda item: str(item["name"])),
         "devices": sorted(device_payloads, key=lambda item: str(item["name"])),
         "energy": energy_payload,

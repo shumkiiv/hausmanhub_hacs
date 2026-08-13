@@ -26,6 +26,12 @@
     "activeClimate": 3,
     "activeAlarms": 0
   },
+  "comfort": {
+    "available": true,
+    "score": 93,
+    "statusLabel": "Отлично",
+    "dataQuality": "fresh"
+  },
   "rooms": [
     {
       "id": "living",

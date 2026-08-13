@@ -168,6 +168,9 @@ class DashboardSnapshotTest(unittest.TestCase):
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
         Draft202012Validator.check_schema(schema)
         Draft202012Validator(schema).validate(self.snapshot)
+        self.assertTrue(self.snapshot["comfort"]["available"])
+        self.assertIsInstance(self.snapshot["comfort"]["score"], int)
+        self.assertEqual("limited", self.snapshot["comfort"]["dataQuality"])
 
     def test_unpowered_light_uses_effective_off_state_and_keeps_reported_state(self) -> None:
         snapshot = build_dashboard_snapshot(

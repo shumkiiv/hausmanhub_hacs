@@ -41,6 +41,7 @@
       },
       "additionalProperties": true
     },
+    "comfort": { "$ref": "#/$defs/comfort" },
     "rooms": {
       "type": "array",
       "items": { "$ref": "#/$defs/room" }
@@ -76,6 +77,37 @@
     }
   },
   "$defs": {
+    "comfort": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["available", "score", "statusLabel", "dataQuality"],
+      "properties": {
+        "available": { "type": "boolean" },
+        "score": { "type": ["integer", "null"], "minimum": 0, "maximum": 100 },
+        "statusLabel": { "type": ["string", "null"], "minLength": 1, "maxLength": 48 },
+        "dataQuality": { "enum": ["fresh", "stale", "limited"] }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "available": { "const": true } },
+            "required": ["available"]
+          },
+          "then": {
+            "properties": {
+              "score": { "type": "integer" },
+              "statusLabel": { "type": "string", "minLength": 1 }
+            }
+          },
+          "else": {
+            "properties": {
+              "score": { "type": "null" },
+              "statusLabel": { "type": "null" }
+            }
+          }
+        }
+      ]
+    },
     "weather": {
       "type": "object",
       "additionalProperties": false,
