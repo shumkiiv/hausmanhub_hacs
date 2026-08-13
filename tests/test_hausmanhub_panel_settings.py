@@ -2179,6 +2179,131 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         self.assertIn("var(--hmh-surface", css)
         self.assertIn("button.climate-sync-button:focus-visible", css)
 
+    def test_overview_home_target_card_is_a_full_climate_control(self) -> None:
+        payloads = dict(GET_PATHS)
+        payloads["hausman_hub/v1/dashboard"] = {
+            "summary": {"targetTemp": 22.5},
+            "rooms": [{"id": "living", "name": "Гостиная", "temp": 24.5, "humidity": 45}],
+            "devices": [],
+            "alarms": [],
+        }
+        payloads["hausman_hub/v1/climate/runtime"] = {
+            "state_revision": 91,
+            "home_control": {
+                "enabled": True,
+                "allowed_actions": ["set_home_targets", "synchronize_home"],
+                "blocked_reasons": [],
+            },
+            "rooms": [],
+        }
+        script = panel_script(
+            payloads,
+            {
+                "hausman_hub/v1/climate/actions": {
+                    "status": "confirmed", "confirmed": True,
+                }
+            },
+        """
+        await tick();
+        const overview = panel._shell.sectionNodes.overview;
+        const byClass = (root, name) => findAll(root, (node) =>
+          String(node.className).split(" ").includes(name));
+        const cards = byClass(overview, "is-target");
+        if (cards.length !== 1 || cards[0].tagName !== "SECTION") {
+          throw new Error("home target control card is missing");
+        }
+        const card = cards[0];
+        if (byClass(card, "overview-canon-target-dial").length !== 1) {
+          throw new Error("target dial layout is missing");
+        }
+        const values = byClass(card, "overview-canon-target-value");
+        if (values.length !== 1 || values[0].tagName !== "STRONG"
+          || values[0].textContent !== "22,5 °C") {
+          throw new Error("dominant target value mismatch: " + textOf(card));
+        }
+        const steps = byClass(card, "overview-canon-target-step");
+        if (steps.length !== 2) throw new Error("target step buttons are missing");
+        if (steps[0].textContent !== "−0,5" || steps[1].textContent !== "+0,5") {
+          throw new Error("explicit step labels mismatch: "
+            + steps.map((step) => step.textContent).join("|"));
+        }
+        if (steps[0]["aria-label"] !== "Понизить общую цель на 0,5 °C"
+          || steps[1]["aria-label"] !== "Повысить общую цель на 0,5 °C") {
+          throw new Error("step aria labels mismatch");
+        }
+        const targetPosts = () => calls.filter((entry) => entry.method === "POST"
+          && entry.path === "hausman_hub/v1/climate/actions"
+          && entry.payload.action === "set_home_targets");
+        steps[0].fire("click");
+        await tick(8);
+        if (targetPosts().length !== 1) throw new Error("decrease step did not send the action");
+        const post = targetPosts()[0];
+        if (post.payload.room_id !== null || post.payload.expected_state_revision !== 91
+          || post.payload.parameters.target_temperature !== 22
+          || Object.keys(post.payload.parameters).length !== 1) {
+          throw new Error("decrease payload mismatch: " + JSON.stringify(post));
+        }
+        if (post.payload.contract.name !== "hausman-hub-climate-action-request"
+          || post.payload.contract.version !== 1
+          || !String(post.payload.request_id).startsWith("hacs.climate.home.")) {
+          throw new Error("typed action envelope mismatch: " + JSON.stringify(post));
+        }
+        const links = byClass(card, "overview-canon-link");
+        const tertiary = links.filter((node) =>
+          String(node.className).split(" ").includes("is-tertiary"));
+        if (tertiary.length !== 1 || tertiary[0].textContent !== "Синхронизировать") {
+          throw new Error("tertiary synchronization link is missing");
+        }
+        const secondary = links.filter((node) =>
+          !String(node.className).split(" ").includes("is-tertiary"));
+        if (secondary.length !== 1 || secondary[0].textContent !== "Настроить") {
+          throw new Error("secondary details link is missing");
+        }
+        panel._climateRuntime.home_control.allowed_actions = ["set_home_targets"];
+        panel._render();
+        const withoutSync = byClass(overview, "is-target")[0];
+        if (byClass(withoutSync, "overview-canon-link").length !== 1) {
+          throw new Error("synchronization stayed visible without synchronize_home capability");
+        }
+        panel._climateRuntime.home_control.allowed_actions = [];
+        panel._render();
+        const disabledCard = byClass(overview, "is-target")[0];
+        const disabledSteps = byClass(disabledCard, "overview-canon-target-step");
+        if (disabledSteps.length !== 2 || !disabledSteps.every((node) => node.disabled)) {
+          throw new Error("steps are not disabled without set_home_targets capability");
+        }
+        disabledSteps[1].fire("click");
+        await tick(8);
+        if (targetPosts().length !== 1) throw new Error("disabled step sent an action");
+        panel._climateRuntime.home_control.allowed_actions = ["set_home_targets"];
+        panel._busy = true;
+        panel._render();
+        const busySteps = byClass(byClass(overview, "is-target")[0], "overview-canon-target-step");
+        if (!busySteps.every((node) => node.disabled)) {
+          throw new Error("steps are not disabled while busy");
+        }
+        busySteps[1].fire("click");
+        await tick(8);
+        if (targetPosts().length !== 1) throw new Error("busy step sent an action");
+        panel._busy = false;
+        panel._render();
+        const finalLinks = byClass(byClass(overview, "is-target")[0], "overview-canon-link");
+        finalLinks.find((node) => node.textContent === "Настроить").fire("click");
+        if (panel._activeSection !== "climate") {
+          throw new Error("secondary details link did not open the climate section");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+        css = OVERVIEW_CSS.read_text(encoding="utf-8")
+        self.assertIn(".overview-canon-target-dial", css)
+        self.assertIn("grid-template-columns:48px minmax(0,1fr) 48px", css)
+        self.assertIn("min-width:48px; height:48px; min-height:48px", css)
+        self.assertIn(".overview-canon-target-value", css)
+        self.assertIn(".overview-canon-link.is-tertiary", css)
+        self.assertIn("var(--hmh-text-disabled)", css)
+
     def test_television_card_uses_tablet_presentation_not_entity_dump(self) -> None:
         payloads = dict(GET_PATHS)
         payloads["hausman_hub/v1/dashboard"] = {
@@ -3246,7 +3371,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
             overview_css,
         )
         self.assertIn("flex-direction:column; white-space:normal", overview_css)
-        self.assertIn("repeat(auto-fit,minmax(min(100%,240px),1fr))", overview_css)
+        self.assertIn("grid-template-columns:1.25fr 1.5fr 1fr 1fr", overview_css)
         self.assertIn("flex-direction:column", security_css)
         self.assertIn("white-space:normal", security_css)
         self.assertIn("flex-direction:column", devices_css)
@@ -3831,7 +3956,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.84")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.85")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

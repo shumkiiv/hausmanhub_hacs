@@ -1,8 +1,8 @@
 /* Climate control surface shared with the tablet information architecture. */
 
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.84";
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.84";
-import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.84";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.85";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.85";
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.85";
 
 const CLIMATE_ACTION_API = "hausman_hub/v1/climate/actions";
 
@@ -142,33 +142,43 @@ export async function setClimateHomeTarget(panel, targetTemperature) {
 export function renderHomeTargetCard(panel, dashboard, deps) {
   const control = panel._climateRuntime?.home_control || {};
   const allowed = Array.isArray(control.allowed_actions) ? control.allowed_actions : [];
+  const canSetTargets = allowed.includes("set_home_targets");
   const raw = dashboard.summary && dashboard.summary.targetTemp;
   const target = raw !== null && raw !== undefined && raw !== "" && Number.isFinite(Number(raw))
     ? Number(raw) : null;
-  const card = deps.el("section", "overview-canon-primary-card is-target");
+  const card = deps.el("section", `overview-canon-primary-card is-target${target === null ? " is-empty" : ""}`);
   card.appendChild(deps.el("span", "overview-canon-label", "Цель климата"));
-  card.appendChild(deps.el("strong", "overview-canon-value", target === null
-    ? "Нет данных" : `${target.toFixed(1).replace(".0", "").replace(".", ",")} °C`));
-  const controls = deps.el("div", "overview-canon-target-controls");
-  [["−", -0.5, "Понизить общую цель на 0,5 °C"], ["+", 0.5, "Повысить общую цель на 0,5 °C"]].forEach(([label, delta, aria]) => {
+  const dial = deps.el("div", "overview-canon-target-dial");
+  const stepButton = (label, delta, aria) => {
     const button = deps.el("button", "overview-canon-target-step", label);
     button.type = "button";
-    button.disabled = panel._busy || !allowed.includes("set_home_targets") || target === null;
+    button.disabled = panel._busy || !canSetTargets || target === null;
     deps.setAttr(button, "aria-label", aria);
-    button.addEventListener("click", () => target !== null && setClimateHomeTarget(panel, Math.round((target + delta) * 2) / 2));
-    controls.appendChild(button);
-  });
-  card.appendChild(controls);
+    button.addEventListener("click", () => {
+      if (button.disabled || target === null) return;
+      setClimateHomeTarget(panel, Math.round((target + delta) * 2) / 2);
+    });
+    return button;
+  };
+  dial.appendChild(stepButton("−0,5", -0.5, "Понизить общую цель на 0,5 °C"));
+  dial.appendChild(deps.el("strong", "overview-canon-target-value", target === null
+    ? "Нет данных" : `${target.toFixed(1).replace(".0", "").replace(".", ",")} °C`));
+  dial.appendChild(stepButton("+0,5", 0.5, "Повысить общую цель на 0,5 °C"));
+  card.appendChild(dial);
   const footer = deps.el("div", "overview-canon-target-footer");
   const details = deps.el("button", "overview-canon-link", "Настроить");
   details.type = "button";
   details.addEventListener("click", () => panel._activateSection("climate"));
   footer.appendChild(details);
   if (allowed.includes("synchronize_home")) {
-    const sync = deps.el("button", "overview-canon-link", panel._climateSyncPending ? "Синхронизация..." : "Синхронизировать");
+    const sync = deps.el("button", "overview-canon-link is-tertiary",
+      panel._climateSyncPending ? "Синхронизация..." : "Синхронизировать");
     sync.type = "button";
-    sync.disabled = panel._busy;
-    sync.addEventListener("click", () => synchronizeClimate(panel));
+    sync.disabled = Boolean(panel._busy || panel._climateSyncPending);
+    deps.setAttr(sync, "aria-label", "Синхронизировать климатические цели дома");
+    sync.addEventListener("click", () => {
+      if (!sync.disabled) synchronizeClimate(panel);
+    });
     footer.appendChild(sync);
   }
   card.appendChild(footer);

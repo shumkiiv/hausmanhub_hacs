@@ -1,8 +1,19 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-13 (dashboard comfort 1.52.84 released and deployed).
+Last updated: 2026-08-13 (UI candidate 1.52.85 prepared locally).
 
 ## Current work
+
+- 2026-08-13 (Kimi implementation, Codex review): подготовлен локальный HACS
+  `1.52.85` в ветке `kimi/ui-rework-2026-08-13`. Карточка общей климатической
+  цели стала полноценным контролом: значение по центру, шаги `−0,5` и `+0,5`
+  по 48 px, capability gate, disabled guard, optimistic revision и receipt
+  сохранены. Главная стала компактнее, получила асимметричный верхний ряд,
+  единый ритм нижних карточек и отдельную высоту empty-state. Codex self-review
+  добавил `align-self:start` для пустых grid-карточек. Full local release gate:
+  1370 тестов, 4 skipped, package, Android compatibility и file safety
+  зелёные. Browser screenshots, release, production deploy и физические
+  команды не выполнялись.
 
 - 2026-08-13 (Codex): HACS `1.52.84`, commit `f5e072d`, опубликован и
   установлен в production с consumer pin contracts `0.28.0` (`f007cfd`).

@@ -1,6 +1,6 @@
-import { createHeroRoomNavigation } from "./hausman-hub-hero-room-navigation.js?v=1.52.84";
-import { overviewHeroRenderKey, stableOverviewHeroImage } from "./hausman-hub-overview-hero-state.js?v=1.52.84";
-import { renderHomeTargetCard } from "./hausman-hub-climate-overview.js?v=1.52.84";
+import { createHeroRoomNavigation } from "./hausman-hub-hero-room-navigation.js?v=1.52.85";
+import { overviewHeroRenderKey, stableOverviewHeroImage } from "./hausman-hub-overview-hero-state.js?v=1.52.85";
+import { renderHomeTargetCard } from "./hausman-hub-climate-overview.js?v=1.52.85";
 
 const CLIMATE_DOMAINS = new Set(["climate", "humidifier", "fan"]);
 
@@ -88,6 +88,7 @@ function cardButton(deps, className, target, panel) {
 }
 
 function appendMetric(deps, card, label, value, supporting) {
+  if (value === "Нет данных") card.classList.add("is-empty");
   card.appendChild(deps.el("span", "overview-canon-label", label));
   card.appendChild(deps.el("strong", "overview-canon-value", value));
   card.appendChild(deps.el("span", "overview-canon-supporting", supporting));
