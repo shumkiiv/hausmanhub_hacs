@@ -1,19 +1,24 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-13 (UI candidate 1.52.85 prepared locally).
+Last updated: 2026-08-13 (HACS 1.52.85 released and deployed).
 
 ## Current work
 
-- 2026-08-13 (Kimi implementation, Codex review): подготовлен локальный HACS
-  `1.52.85` в ветке `kimi/ui-rework-2026-08-13`. Карточка общей климатической
+- 2026-08-13 (Kimi implementation, Codex review): HACS `1.52.85`, commit
+  `e44e9c6`, tag и GitHub Release `v1.52.85` опубликованы. Карточка общей климатической
   цели стала полноценным контролом: значение по центру, шаги `−0,5` и `+0,5`
   по 48 px, capability gate, disabled guard, optimistic revision и receipt
   сохранены. Главная стала компактнее, получила асимметричный верхний ряд,
   единый ритм нижних карточек и отдельную высоту empty-state. Codex self-review
   добавил `align-self:start` для пустых grid-карточек. Full local release gate:
   1370 тестов, 4 skipped, package, Android compatibility и file safety
-  зелёные. Browser screenshots, release, production deploy и физические
-  команды не выполнялись.
+  зелёные; Actions `31682272937` завершился успешно. Production HA 2026.8.1
+  обновлён после automatic backup, config check и restart. Live installed и
+  latest равны `v1.52.85`, panel marker `1.52.85`, 10 сущностей HausmanHub
+  доступны, runtime fresh, pending операций нет. Dashboard вернул 13 комнат,
+  82 устройства и comfort 88 со статусом «Хорошо». Системный журнал не содержит
+  записей HausmanHub. Физические команды, климатические цели и автомат 233 не
+  затрагивались.
 
 - 2026-08-13 (Codex): HACS `1.52.84`, commit `f5e072d`, опубликован и
   установлен в production с consumer pin contracts `0.28.0` (`f007cfd`).
