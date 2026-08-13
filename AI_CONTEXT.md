@@ -1,8 +1,24 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-13 (HACS 1.52.89 Russian numeric ranges).
+Last updated: 2026-08-13 (HACS 1.52.90 device sheet ranges).
 
 ## Current work
+
+- 2026-08-13 (Kimi implementation, Codex review): HACS `1.52.90` renders
+  contract range controls directly in the opened device sheet. The Russian UI
+  has a large current value, slider, 48 px step buttons, min/max/step labels
+  and explicit Apply. Slider and step buttons only edit a draft; only Apply
+  calls the fixed `set_value` action. Invalid bounds, action or opaque target
+  fail closed, unavailable and busy devices are disabled, and range values are
+  not duplicated as ordinary facts. Release commit `98e724e`; Actions
+  `31737373543` success; full gate 1382 passed, 4 skipped. Light and dark real
+  Chromium checks passed without overflow. Production was backed up as
+  `b01ebb1c` (830.3 MB), config check passed, HACS installed/latest, admin panel
+  and cache marker are `1.52.90`; config entry reload activated runtime without
+  a full restart. Live API has 13 rooms, 82 devices and 37 valid Russian range
+  controls; system log is clean. The local and external backup are available,
+  while the KeeneticSSD agent still reports its closing `upload_to_agents`
+  callback. No physical device command was sent.
 
 - 2026-08-13 (Codex): HACS `1.52.88` added bounded numeric device controls,
   safe `number.set_value` execution with range, step and read-back validation,
