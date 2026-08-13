@@ -1,8 +1,17 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-12 (1.52.83: единые информационные шапки HACS и Android).
+Last updated: 2026-08-13 (dashboard comfort 1.52.84 released and deployed).
 
 ## Current work
+
+- 2026-08-13 (Codex): HACS `1.52.84`, commit `f5e072d`, опубликован и
+  установлен в production с consumer pin contracts `0.28.0` (`f007cfd`).
+  Dashboard API v1 теперь публикует server-side `comfort` 0-100, статус и
+  качество данных. Full pytest: 1370 passed, 4 skipped, 921 subtests; release
+  gate: 1368 tests, 4 skipped. После automatic backup, config check и restart
+  installed/latest `1.52.84`, unavailable 0, pending 0. Android 1.0.117 live
+  показывает `89 из 100`, `Хорошо`. Физические команды и автомат 233 не
+  затрагивались. UI-доработки переданы Kimi в workspace handoff.
 
 - 2026-08-12 (Codex): подготовлена HACS `1.52.83` с единым паттерном
   физических карточек. В карточке крупно видны имя и подтверждённое состояние,
