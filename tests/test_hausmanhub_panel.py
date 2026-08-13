@@ -113,7 +113,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertNotIn(".hmh-library-hero-overlay", styles)
         self.assertIn("min-height:176px", styles)
         self.assertIn(".hmh-library-hero-facts", styles)
-        self.assertIn("hausman-hub-library-hero.css?v=1.52.89", panel_styles)
+        self.assertIn("hausman-hub-library-hero.css?v=1.52.90", panel_styles)
         for consumer in LIBRARY_HERO_CONSUMERS:
             source = consumer.read_text(encoding="utf-8")
             self.assertIn("createLibraryHero", source, consumer.name)
@@ -158,7 +158,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         # Главная повторяет планшетную иерархию: Hero, боковая сводка и панели.
         self.assertLessEqual(len(overview.encode("utf-8")), 24 * 1024)
         self.assertLessEqual(len(room_icons.encode("utf-8")), 12 * 1024)
-        self.assertIn('hausman-hub-rollout.js?v=1.52.89', content)
+        self.assertIn('hausman-hub-rollout.js?v=1.52.90', content)
         self.assertLessEqual(len(weather_sources.encode("utf-8")), 24 * 1024)
         self.assertLessEqual(
             len(home_sections.encode("utf-8")), MAX_HOME_SECTIONS_JS_BYTES
@@ -179,7 +179,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             len(device_inventory.encode("utf-8")), MAX_DEVICE_INVENTORY_JS_BYTES
         )
         self.assertLessEqual(len(inventory_duplicates.encode("utf-8")), 8 * 1024)
-        self.assertIn("hausman-hub-inventory-duplicates.js?v=1.52.89", device_inventory)
+        self.assertIn("hausman-hub-inventory-duplicates.js?v=1.52.90", device_inventory)
         self.assertLessEqual(
             len(device_bindings.encode("utf-8")), MAX_DEVICE_BINDINGS_JS_BYTES
         )
@@ -191,16 +191,16 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertLessEqual(len(navigation.encode("utf-8")), MAX_NAVIGATION_JS_BYTES)
         self.assertLessEqual(len(energy.encode("utf-8")), MAX_ENERGY_JS_BYTES)
         self.assertLessEqual(len(energy_chart.encode("utf-8")), 16 * 1024)
-        self.assertIn('hausman-hub-energy-chart.js?v=1.52.89', energy)
+        self.assertIn('hausman-hub-energy-chart.js?v=1.52.90', energy)
         self.assertLessEqual(
             len(media_device.encode("utf-8")), MAX_MEDIA_DEVICE_JS_BYTES
         )
-        self.assertLessEqual(len(device_card.encode("utf-8")), 16 * 1024)
+        self.assertLessEqual(len(device_card.encode("utf-8")), 24 * 1024)
         self.assertLessEqual(len(device_card_css.encode("utf-8")), 14 * 1024)
         self.assertLessEqual(len(scenarios.encode("utf-8")), MAX_SCENARIOS_JS_BYTES)
         self.assertLessEqual(len(scenario_icons.encode("utf-8")), 12 * 1024)
         self.assertLessEqual(len(scenario_fields.encode("utf-8")), 12 * 1024)
-        self.assertIn('hausman-hub-scenario-fields.js?v=1.52.89', scenarios)
+        self.assertIn('hausman-hub-scenario-fields.js?v=1.52.90', scenarios)
         self.assertIn('["on", "Включено"]', scenarios)
         self.assertIn('["off", "Выключено"]', scenarios)
         self.assertIn('placeholder: "например 23"', scenarios)
@@ -288,6 +288,184 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             ["Включить", "Выключить", "Целевая влажность", "Звук уведомления: включить"],
             json.loads(result.stdout),
         )
+
+    def test_device_range_control_drafts_and_applies_in_russian(self) -> None:
+        script = r"""
+          import fs from "node:fs";
+          const path = process.argv[1];
+          const source = fs.readFileSync(path, "utf8").replace(/^import .*$/m, "");
+          const moduleUrl = `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`;
+          const { appendDeviceRangeControls, validRangeControl, conciseDetails } = await import(moduleUrl);
+
+          const makeNode = (tag, className, text) => ({
+            tagName: String(tag).toUpperCase(),
+            className: className || "",
+            textContent: text === undefined || text === null ? "" : String(text),
+            children: [],
+            listeners: {},
+            attributes: {},
+            disabled: false,
+            appendChild(child) { this.children.push(child); return child; },
+            addEventListener(type, handler) { (this.listeners[type] = this.listeners[type] || []).push(handler); },
+            setAttribute(name, value) { this.attributes[name] = String(value); },
+            dispatch(type) { (this.listeners[type] || []).forEach((handler) => handler({ preventDefault() {} })); },
+          });
+          const deps = { el: makeNode, setAttr: (node, name, value) => node.setAttribute(name, value) };
+          const walk = (node, out = []) => { out.push(node); node.children.forEach((child) => walk(child, out)); return out; };
+          const fail = (message) => { throw new Error(message); };
+
+          const calls = [];
+          const owner = {
+            _busy: false,
+            _executeDeviceAction: (targetId, actionId, value) => calls.push({ targetId, actionId, value }),
+          };
+          const rangeDetail = {
+            label: "Термостат гостиная · Целевая температура",
+            state: "21.25",
+            control: { kind: "range", minimum: 16, maximum: 30, step: 0.5, unit: "°C", targetId: "entity_0123456789abcdef", actionId: "set_value" },
+          };
+          const device = {
+            name: "Термостат гостиная",
+            unavailable: false,
+            details: [rangeDetail, { label: "Влажность", value: "45 %" }],
+          };
+
+          const sheet = makeNode("section");
+          appendDeviceRangeControls(sheet, device, owner, deps);
+          if (sheet.children.length !== 1) fail(`expected one range card, got ${sheet.children.length}`);
+          const nodes = walk(sheet);
+          const texts = nodes.map((node) => node.textContent);
+          if (!texts.includes("Целевая температура")) fail("russian range label is missing");
+          const valueEl = nodes.find((node) => node.className === "device-range-value");
+          if (!valueEl || valueEl.textContent !== "21,5 °C") fail(`initial draft mismatch: ${valueEl && valueEl.textContent}`);
+          for (const expected of ["От 16 °C", "Шаг 0,5 °C", "До 30 °C", "Применить"]) {
+            if (!texts.includes(expected)) fail(`missing russian caption: ${expected}`);
+          }
+          const slider = nodes.find((node) => node.className === "device-range-slider");
+          if (!slider || slider.type !== "range" || slider.min !== "16" || slider.max !== "30" || slider.step !== "0.5") {
+            fail("slider bounds are wrong");
+          }
+          if (slider.attributes["aria-label"] !== "Целевая температура") fail("slider aria-label is missing");
+          const decrease = nodes.find((node) => node.attributes["aria-label"] === "Уменьшить: Целевая температура");
+          const increase = nodes.find((node) => node.attributes["aria-label"] === "Увеличить: Целевая температура");
+          const apply = nodes.find((node) => node.attributes["aria-label"] === "Применить: Целевая температура");
+          if (!decrease || !increase || !apply || apply.textContent !== "Применить") fail("russian control labels are missing");
+          if (decrease.disabled || increase.disabled || slider.disabled || apply.disabled) {
+            fail("available device must stay enabled");
+          }
+
+          slider.value = "24";
+          slider.dispatch("input");
+          if (calls.length) fail("slider drag issued a command");
+          if (valueEl.textContent !== "24 °C") fail(`drag did not update the draft: ${valueEl.textContent}`);
+          increase.dispatch("click");
+          increase.dispatch("click");
+          increase.dispatch("click");
+          if (calls.length) fail("stepper click issued a command");
+          if (valueEl.textContent !== "25,5 °C") fail(`fractional step accumulated error: ${valueEl.textContent}`);
+          decrease.dispatch("click");
+          if (valueEl.textContent !== "25 °C") fail(`decrease did not step down: ${valueEl.textContent}`);
+          apply.dispatch("click");
+          if (calls.length !== 1) fail("apply did not issue exactly one command");
+          const payload = calls[0];
+          if (payload.targetId !== "entity_0123456789abcdef" || payload.actionId !== "set_value" || payload.value !== 25) {
+            fail(`unexpected payload: ${JSON.stringify(payload)}`);
+          }
+
+          const facts = conciseDetails(device);
+          if (facts.length !== 1 || facts[0].label !== "Влажность") fail("range detail leaked into the fact grid");
+
+          const busyCalls = [];
+          const busyOwner = { _busy: true, _executeDeviceAction: (...args) => busyCalls.push(args) };
+          const busySheet = makeNode("section");
+          appendDeviceRangeControls(busySheet, { ...device, details: [rangeDetail] }, busyOwner, deps);
+          walk(busySheet).filter((node) => node.tagName === "BUTTON" || node.tagName === "INPUT").forEach((node) => {
+            if (!node.disabled) fail(`busy owner left ${node.className} enabled`);
+          });
+          walk(busySheet).find((node) => node.textContent === "Применить").dispatch("click");
+          if (busyCalls.length) fail("disabled apply issued a command");
+
+          const offlineSheet = makeNode("section");
+          appendDeviceRangeControls(offlineSheet, { ...device, unavailable: true, details: [rangeDetail] }, owner, deps);
+          walk(offlineSheet).filter((node) => node.tagName === "BUTTON" || node.tagName === "INPUT").forEach((node) => {
+            if (!node.disabled) fail(`unavailable device left ${node.className} enabled`);
+          });
+
+          const broken = {
+            label: "Мощность",
+            control: { kind: "range", minimum: 0, maximum: 10, step: 0, targetId: "", actionId: "set_value" },
+          };
+          if (validRangeControl(broken) !== null) fail("invalid range control passed validation");
+          const brokenSheet = makeNode("section");
+          appendDeviceRangeControls(brokenSheet, { ...device, details: [broken] }, owner, deps);
+          if (brokenSheet.children.length) fail("invalid range control was rendered");
+          if (calls.length !== 1) fail("invalid control issued a command");
+
+          const foreignAction = { ...rangeDetail, control: { ...rangeDetail.control, actionId: "turn_on" } };
+          if (validRangeControl(foreignAction) !== null) fail("foreign action passed validation");
+          const rawTarget = { ...rangeDetail, control: { ...rangeDetail.control, targetId: "climate.living" } };
+          if (validRangeControl(rawTarget) !== null) fail("raw entity id passed validation");
+          const shortTarget = { ...rangeDetail, control: { ...rangeDetail.control, targetId: "entity_0123abcd" } };
+          if (validRangeControl(shortTarget) !== null) fail("short opaque target passed validation");
+          const upperTarget = { ...rangeDetail, control: { ...rangeDetail.control, targetId: "entity_0123456789ABCDEF" } };
+          if (validRangeControl(upperTarget) !== null) fail("uppercase opaque target passed validation");
+          const rejectedSheet = makeNode("section");
+          appendDeviceRangeControls(rejectedSheet, { ...device, details: [foreignAction, rawTarget] }, owner, deps);
+          if (rejectedSheet.children.length) fail("rejected controls were rendered");
+          if (calls.length !== 1) fail("rejected controls issued a command");
+
+          const stringMin = { ...rangeDetail, control: { ...rangeDetail.control, minimum: "16" } };
+          if (validRangeControl(stringMin) !== null) fail("string minimum passed validation");
+          const prefixMin = { ...rangeDetail, control: { ...rangeDetail.control, minimum: "16abc" } };
+          if (validRangeControl(prefixMin) !== null) fail("numeric-prefix minimum passed validation");
+          const boolStep = { ...rangeDetail, control: { ...rangeDetail.control, step: true } };
+          if (validRangeControl(boolStep) !== null) fail("boolean step passed validation");
+          const nanMax = { ...rangeDetail, control: { ...rangeDetail.control, maximum: NaN } };
+          if (validRangeControl(nanMax) !== null) fail("NaN maximum passed validation");
+          const infMax = { ...rangeDetail, control: { ...rangeDetail.control, maximum: Infinity } };
+          if (validRangeControl(infMax) !== null) fail("infinite maximum passed validation");
+          const wideStep = { ...rangeDetail, control: { ...rangeDetail.control, step: 15 } };
+          if (validRangeControl(wideStep) !== null) fail("step wider than span passed validation");
+          const spanStep = { ...rangeDetail, control: { ...rangeDetail.control, step: 14 } };
+          if (validRangeControl(spanStep) === null) fail("step equal to span was rejected");
+
+          const unevenDetail = {
+            label: "Предел мощности",
+            state: "1",
+            control: { kind: "range", minimum: 0, maximum: 1, step: 0.6, targetId: "entity_0123456789abcdef", actionId: "set_value" },
+          };
+          const unevenSheet = makeNode("section");
+          const unevenCount = appendDeviceRangeControls(unevenSheet, { ...device, details: [unevenDetail] }, owner, deps);
+          if (unevenCount !== 1) fail(`expected one uneven range card, got ${unevenCount}`);
+          const unevenValue = walk(unevenSheet).find((node) => node.className === "device-range-value");
+          if (!unevenValue || unevenValue.textContent !== "0,6") {
+            fail(`quantization exceeded maximum: ${unevenValue && unevenValue.textContent}`);
+          }
+          walk(unevenSheet).find((node) => node.attributes["aria-label"] === "Увеличить: Предел мощности").dispatch("click");
+          if (unevenValue.textContent !== "0,6") {
+            fail(`stepper exceeded maximum: ${unevenValue.textContent}`);
+          }
+        """
+        completed = subprocess.run(
+            ["node", "--input-type=module", "-e", script, str(DEVICE_CARD_JS)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(0, completed.returncode, completed.stderr)
+        device_card_js = DEVICE_CARD_JS.read_text(encoding="utf-8")
+        self.assertIn("owner._executeDeviceAction(range.targetId, range.actionId, draft)", device_card_js)
+        self.assertIn('if (actionId !== "set_value") return null;', device_card_js)
+        self.assertIn("if (step > maximum - minimum) return null;", device_card_js)
+        self.assertIn("/^entity_[0-9a-f]{16}$/", device_card_js)
+        self.assertIn("Math.floor((range.maximum - range.minimum) / range.step", device_card_js)
+        self.assertIn("const rangeCount = appendDeviceRangeControls(sheet, device, owner, deps);", device_card_js)
+        self.assertIn("} else if (!rangeCount) {", device_card_js)
+        device_card_css = DEVICE_CARD_CSS.read_text(encoding="utf-8")
+        self.assertIn(".device-range-card {", device_card_css)
+        self.assertIn("min-height:48px", device_card_css)
+        self.assertIn("accent-color:var(--hmh-accent", device_card_css)
 
     def test_success_notice_auto_dismisses_and_stays_hidden_on_rerender(self) -> None:
         script = f"""
@@ -392,7 +570,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         ):
             self.assertIn(f"  {icon_name}:", room_icons)
         self.assertIn(
-            './hausman-hub-room-icons.js?v=1.52.89',
+            './hausman-hub-room-icons.js?v=1.52.90',
             OVERVIEW_HERO_STATE_JS.read_text(encoding="utf-8"),
         )
         overview = OVERVIEW_JS.read_text(encoding="utf-8")
@@ -629,43 +807,43 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertLessEqual(len(energy_styles.encode("utf-8")), 26 * 1024)
         self.assertLessEqual(len(energy_chart_styles.encode("utf-8")), 8 * 1024)
         self.assertLessEqual(len(button_styles.encode("utf-8")), 8 * 1024)
-        self.assertIn('hausman-hub-buttons.css?v=1.52.89', styles)
-        self.assertIn('hausman-hub-energy-chart.css?v=1.52.89', styles)
+        self.assertIn('hausman-hub-buttons.css?v=1.52.90', styles)
+        self.assertIn('hausman-hub-energy-chart.css?v=1.52.90', styles)
         self.assertLessEqual(len(rollout_styles.encode("utf-8")), 4 * 1024)
-        self.assertIn('"/api/hausman_hub/panel/hausman-hub-panel.css?v=1.52.89"', content)
-        self.assertIn('hausman-hub-settings.css?v=1.52.89', styles)
-        self.assertIn('hausman-hub-diagnostics.css?v=1.52.89', styles)
-        self.assertIn('hausman-hub-switch.css?v=1.52.89', styles)
-        self.assertIn('hausman-hub-notice.css?v=1.52.89', styles)
+        self.assertIn('"/api/hausman_hub/panel/hausman-hub-panel.css?v=1.52.90"', content)
+        self.assertIn('hausman-hub-settings.css?v=1.52.90', styles)
+        self.assertIn('hausman-hub-diagnostics.css?v=1.52.90', styles)
+        self.assertIn('hausman-hub-switch.css?v=1.52.90', styles)
+        self.assertIn('hausman-hub-notice.css?v=1.52.90', styles)
         self.assertIn(".notice { position:fixed", notice_styles)
         self.assertIn(".notice { position:fixed; z-index:1040", notice_styles)
         self.assertIn(".notice.is-error", notice_styles)
-        self.assertIn('hausman-hub-device-maintenance.css?v=1.52.89', styles)
-        self.assertIn('hausman-hub-control-channel.css?v=1.52.89', styles)
+        self.assertIn('hausman-hub-device-maintenance.css?v=1.52.90', styles)
+        self.assertIn('hausman-hub-control-channel.css?v=1.52.90', styles)
         self.assertIn(".entity-group.device-card { container-type:inline-size; }", control_channel_styles)
         self.assertIn("grid-template-columns:minmax(0,.75fr) minmax(0,1.25fr)", control_channel_styles)
         self.assertIn(".device-channel-field select { width:100%; min-width:0; max-width:100%", control_channel_styles)
         self.assertIn("@container (max-width:520px)", control_channel_styles)
-        self.assertIn('hausman-hub-weather-sources.css?v=1.52.89', styles)
-        self.assertIn('hausman-hub-wizard-validation.css?v=1.52.89', styles)
-        self.assertIn('hausman-hub-catalog.css?v=1.52.89', styles)
-        self.assertIn('hausman-hub-media-device.css?v=1.52.89', styles)
-        self.assertIn('hausman-hub-device-card.css?v=1.52.89', styles)
+        self.assertIn('hausman-hub-weather-sources.css?v=1.52.90', styles)
+        self.assertIn('hausman-hub-wizard-validation.css?v=1.52.90', styles)
+        self.assertIn('hausman-hub-catalog.css?v=1.52.90', styles)
+        self.assertIn('hausman-hub-media-device.css?v=1.52.90', styles)
+        self.assertIn('hausman-hub-device-card.css?v=1.52.90', styles)
         self.assertIn(".device-sheet-backdrop {", device_card_css)
         self.assertIn("position:fixed", device_card_css)
         self.assertIn("z-index:1200", device_card_css)
         self.assertNotIn(".inventory-device-card:not([open])", device_card_css)
         self.assertIn(".device-sheet {", device_card_css)
-        self.assertIn('hausman-hub-scenarios.css?v=1.52.89', styles)
+        self.assertIn('hausman-hub-scenarios.css?v=1.52.90', styles)
         self.assertIn('.scenario-editor-workspace { display:grid; grid-template-columns:286px minmax(0,1fr);', scenario_styles)
         self.assertIn('.scenario-editor-switch-track { position:relative; display:block!important;', scenario_styles)
         self.assertIn('.scenario-editor-overlay { position:fixed; z-index:1020;', scenario_styles)
-        self.assertIn('hausman-hub-climate-overview.css?v=1.52.89', styles)
-        self.assertIn('hausman-hub-navigation.css?v=1.52.89', styles)
-        self.assertIn('hausman-hub-kiosk.css?v=1.52.89', styles)
+        self.assertIn('hausman-hub-climate-overview.css?v=1.52.90', styles)
+        self.assertIn('hausman-hub-navigation.css?v=1.52.90', styles)
+        self.assertIn('hausman-hub-kiosk.css?v=1.52.90', styles)
         self.assertIn(".kiosk-panorama-metrics", kiosk_styles)
         self.assertIn(".kiosk-panorama-intercom", kiosk_styles)
-        self.assertIn('hausman-hub-rollout.css?v=1.52.89', styles)
+        self.assertIn('hausman-hub-rollout.css?v=1.52.90', styles)
         self.assertIn(":host(.kiosk-mode) .kiosk-dock", navigation_styles)
         self.assertIn(".banner { position:fixed", navigation_styles)
         self.assertIn(".banner { position:fixed; z-index:1041", navigation_styles)
@@ -761,6 +939,21 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn("cloneHarnessValue(panel._homeDashboard)", harness)
         self.assertIn('get("figmaCapture") === "1"', harness)
         self.assertNotIn('<script src="https://mcp.figma.com/', harness)
+
+        self.assertIn('label: "Порог отключения по температуре"', harness)
+        self.assertIn('label: "Верхний порог напряжения"', harness)
+        self.assertIn(
+            'control: { kind: "range", minimum: 40, maximum: 100, step: 1, unit: "°C", '
+            'targetId: "entity_9f3c2a7b41d5e608", actionId: "set_value" }',
+            harness,
+        )
+        self.assertIn(
+            'control: { kind: "range", minimum: 90, maximum: 265, step: 1, unit: "V", '
+            'targetId: "entity_5b8e1c4f7a20d936", actionId: "set_value" }',
+            harness,
+        )
+        self.assertNotIn("Temperature shutdown threshold", harness)
+        self.assertNotIn("Upper voltage threshold", harness)
 
     def test_quick_scenario_actions_keep_cards_visible_and_render_notices(self) -> None:
         scenarios = SCENARIOS_JS.read_text(encoding="utf-8")
@@ -1590,7 +1783,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "HausmanHub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.52.89",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.52.90",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },

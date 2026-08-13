@@ -181,6 +181,39 @@
 .device-sheet-fact dt { color:var(--hmh-text-dim); font-size:13px; text-transform:uppercase; letter-spacing:.045em; }
 .device-sheet-fact dd { margin:8px 0 0; color:var(--hmh-text); font-size:19px; font-weight:700; line-height:1.3; }
 .device-sheet-controls { margin-top:22px; padding-top:6px; border-top:1px solid var(--hmh-modal-border); }
+.device-range-card {
+  margin:22px 0 0;
+  padding:22px;
+  border:1px solid var(--hmh-modal-border);
+  border-radius:20px;
+  background:var(--hmh-modal-raised);
+}
+.device-range-head { display:flex; align-items:baseline; justify-content:space-between; gap:18px; }
+.device-range-label { color:var(--hmh-text-dim); font-size:15px; font-weight:650; line-height:1.35; overflow-wrap:anywhere; }
+.device-range-value {
+  flex:0 0 auto;
+  color:var(--hmh-text);
+  font-size:34px;
+  font-weight:760;
+  line-height:1.1;
+  letter-spacing:-.01em;
+  white-space:nowrap;
+}
+.device-range-slider-row { display:grid; grid-template-columns:48px minmax(0,1fr) 48px; gap:14px; align-items:center; margin-top:18px; }
+.device-range-step {
+  width:48px;
+  height:48px;
+  min-height:48px;
+  margin:0;
+  padding:0;
+  border-radius:15px;
+  font-size:24px;
+  font-weight:600;
+}
+.device-range-slider { width:100%; min-width:0; height:48px; margin:0; accent-color:var(--hmh-accent,#2688EA); cursor:pointer; }
+.device-range-slider:disabled { cursor:not-allowed; }
+.device-range-scale { display:flex; justify-content:space-between; gap:12px; margin-top:6px; color:var(--hmh-text-dim); font-size:13px; line-height:1.3; }
+.device-range-apply { min-height:48px; margin:18px 0 0; padding:12px 26px; border-radius:15px; }
 .device-sheet-note { margin:16px 0 0; color:var(--hmh-text-dim); font-size:15px; line-height:1.5; }
 .device-sheet-controls .device-target-controls { padding:16px 0 0; }
 .device-sheet-controls .device-target-name { font-size:16px; }
@@ -193,6 +226,9 @@
   .device-sheet-product { width:112px; height:112px; border-radius:16px; }
   .device-sheet-identity h3 { font-size:24px; }
   .device-sheet-facts { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .device-range-card { padding:17px; }
+  .device-range-value { font-size:27px; }
+  .device-range-head { flex-direction:column; align-items:flex-start; gap:5px; }
 }
 @container (max-width:360px) {
   .physical-device-card .inventory-device-summary { grid-template-columns:58px minmax(0,1fr) 18px; padding:15px; }

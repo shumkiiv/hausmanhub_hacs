@@ -1,6 +1,6 @@
 /* Canonical physical-device card shared by all tablet-style HACS sections. */
 
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.89";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.90";
 
 const STATE_LABELS = {
   on: "Включено",
@@ -145,6 +145,139 @@ function localizedDetailLabel(detail) {
   return key ? DETAIL_LABELS[key] : (detail && detail.label || "Показатель");
 }
 
+function parseRangeNumber(value) {
+  const match = String(value == null ? "" : value).trim().match(/^-?\d+(?:[.,]\d+)?/);
+  if (!match) return null;
+  const numeric = Number(match[0].replace(",", "."));
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function rangeStepDecimals(step) {
+  const text = String(step);
+  const dot = text.indexOf(".");
+  return dot === -1 ? 0 : text.length - dot - 1;
+}
+
+/** Contract fields must be finite JSON numbers; strings, booleans and NaN/Infinity fail closed. */
+function controlRangeNumber(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/** Fail-closed gate: only the fixed set_value action on an opaque hub target may render. */
+export function validRangeControl(detail) {
+  const control = detail && detail.control;
+  if (!control || control.kind !== "range") return null;
+  const minimum = controlRangeNumber(control.minimum);
+  const maximum = controlRangeNumber(control.maximum);
+  const step = controlRangeNumber(control.step);
+  if (minimum === null || maximum === null || step === null) return null;
+  if (!(maximum > minimum) || !(step > 0)) return null;
+  if (step > maximum - minimum) return null;
+  const targetId = String(control.targetId || "").trim();
+  const actionId = String(control.actionId || "").trim();
+  if (actionId !== "set_value") return null;
+  if (!/^entity_[0-9a-f]{16}$/.test(targetId)) return null;
+  return { minimum, maximum, step, targetId, actionId, unit: String(control.unit || "").trim() };
+}
+
+/** Snap to the step grid by counting whole steps, so fractional steps never accumulate error. */
+function quantizeRangeValue(value, range) {
+  const span = Math.floor((range.maximum - range.minimum) / range.step + 1e-9);
+  const steps = Math.min(Math.max(Math.round((value - range.minimum) / range.step), 0), span);
+  return Number((range.minimum + steps * range.step).toFixed(rangeStepDecimals(range.step)));
+}
+
+function initialRangeDraft(detail, range) {
+  const state = parseRangeNumber(detail && detail.state);
+  if (state !== null) return quantizeRangeValue(state, range);
+  const value = parseRangeNumber(detail && detail.value);
+  if (value !== null) return quantizeRangeValue(value, range);
+  return quantizeRangeValue(range.minimum, range);
+}
+
+function formatRangeValue(value, unit) {
+  const formatted = Number(value).toLocaleString("ru-RU", { maximumFractionDigits: 3 });
+  return unit ? `${formatted} ${unit}` : formatted;
+}
+
+/** Range cards live in the device sheet; dragging only edits a local draft until «Применить». */
+export function appendDeviceRangeControls(container, device, owner, deps) {
+  const { el, setAttr } = deps;
+  const disabled = Boolean((device && device.unavailable) || (owner && owner._busy));
+  const details = Array.isArray(device && device.details) ? device.details : [];
+  let rendered = 0;
+  details.forEach((detail) => {
+    const range = validRangeControl(detail);
+    if (!range) return;
+    const label = detail && detail.label
+      ? conciseDeviceActionLabel({ title: detail.label }, null, device)
+      : localizedDetailLabel(detail);
+    let draft = initialRangeDraft(detail, range);
+    const card = el("section", "device-range-card");
+    const head = el("div", "device-range-head");
+    head.appendChild(el("span", "device-range-label", label));
+    const valueEl = el("span", "device-range-value", formatRangeValue(draft, range.unit));
+    head.appendChild(valueEl);
+    card.appendChild(head);
+
+    const decrease = el("button", "secondary device-range-step", "−");
+    decrease.type = "button";
+    setAttr(decrease, "aria-label", `Уменьшить: ${label}`);
+    decrease.disabled = disabled;
+    const slider = el("input", "device-range-slider");
+    slider.type = "range";
+    slider.min = String(range.minimum);
+    slider.max = String(range.maximum);
+    slider.step = String(range.step);
+    slider.value = String(draft);
+    setAttr(slider, "aria-label", label);
+    slider.disabled = disabled;
+    const increase = el("button", "secondary device-range-step", "+");
+    increase.type = "button";
+    setAttr(increase, "aria-label", `Увеличить: ${label}`);
+    increase.disabled = disabled;
+    const syncDraft = (next) => {
+      draft = quantizeRangeValue(next, range);
+      slider.value = String(draft);
+      valueEl.textContent = formatRangeValue(draft, range.unit);
+    };
+    slider.addEventListener("input", () => syncDraft(Number(slider.value)));
+    decrease.addEventListener("click", (event) => {
+      event.preventDefault();
+      syncDraft(draft - range.step);
+    });
+    increase.addEventListener("click", (event) => {
+      event.preventDefault();
+      syncDraft(draft + range.step);
+    });
+    const sliderRow = el("div", "device-range-slider-row");
+    sliderRow.appendChild(decrease);
+    sliderRow.appendChild(slider);
+    sliderRow.appendChild(increase);
+    card.appendChild(sliderRow);
+
+    const scale = el("div", "device-range-scale");
+    scale.appendChild(el("span", null, `От ${formatRangeValue(range.minimum, range.unit)}`));
+    scale.appendChild(el("span", null, `Шаг ${formatRangeValue(range.step, range.unit)}`));
+    scale.appendChild(el("span", null, `До ${formatRangeValue(range.maximum, range.unit)}`));
+    card.appendChild(scale);
+
+    const apply = el("button", "device-range-apply", "Применить");
+    apply.type = "button";
+    setAttr(apply, "aria-label", `Применить: ${label}`);
+    apply.disabled = disabled;
+    apply.addEventListener("click", (event) => {
+      event.preventDefault();
+      if (apply.disabled || !owner || typeof owner._executeDeviceAction !== "function") return;
+      owner._executeDeviceAction(range.targetId, range.actionId, draft);
+    });
+    card.appendChild(apply);
+    container.appendChild(card);
+    rendered += 1;
+  });
+  return rendered;
+}
+
 function safeImageUrl(value) {
   const url = String(value || "").trim();
   return url && !/^(?:javascript|data:text\/html)/i.test(url) ? url : "";
@@ -177,9 +310,10 @@ function deviceKey(device) {
   return String(device && (device.id || device.physicalId || device.deviceId || device.entityId || device.name) || "");
 }
 
-function conciseDetails(device) {
+export function conciseDetails(device) {
   const seen = new Set();
   return (Array.isArray(device && device.details) ? device.details : []).filter((detail) => {
+    if (validRangeControl(detail)) return false;
     const label = localizedDetailLabel(detail);
     const value = String(detail && (detail.value ?? detail.state) || "").trim();
     const signature = `${normalized(label)}:${normalized(value)}`;
@@ -234,16 +368,20 @@ function openDeviceSheet(owner, device, deps) {
     sheet.appendChild(detailGrid);
   }
 
-  const controls = el("div", "device-sheet-controls");
+  const rangeCount = appendDeviceRangeControls(sheet, device, owner, deps);
+
   const targets = owner._catalogTargets(device);
-  if (!targets.length) {
+  if (targets.length) {
+    const controls = el("div", "device-sheet-controls");
+    targets.forEach((target) => controls.appendChild(owner._deviceTargetControls(target, device)));
+    sheet.appendChild(controls);
+  } else if (!rangeCount) {
+    const controls = el("div", "device-sheet-controls");
     controls.appendChild(el("p", "device-sheet-note", device.unavailable
       ? "Устройство сейчас недоступно. Управление появится после восстановления связи."
       : "Для этого устройства доступны просмотр состояния и диагностические показатели."));
-  } else {
-    targets.forEach((target) => controls.appendChild(owner._deviceTargetControls(target, device)));
+    sheet.appendChild(controls);
   }
-  sheet.appendChild(controls);
   backdrop.appendChild(sheet);
   backdrop.addEventListener("click", (event) => {
     if (event.target === backdrop) finish();
