@@ -103,6 +103,42 @@
       ]
     },
     {
+      "id": "device_breaker",
+      "entityId": "switch.example_breaker",
+      "physicalId": "device_breaker",
+      "name": "Автомат защиты",
+      "roomId": "living",
+      "roomName": "Гостиная",
+      "domain": "switch",
+      "category": "switch",
+      "state": "on",
+      "stateLabel": "включено",
+      "active": true,
+      "unavailable": false,
+      "tone": "good",
+      "source": "home-assistant",
+      "attributes": {},
+      "actions": [],
+      "details": [
+        {
+          "label": "Порог отключения по температуре",
+          "value": "80 °C",
+          "entityId": "number.example_temperature_threshold",
+          "domain": "number",
+          "state": "80",
+          "control": {
+            "kind": "range",
+            "minimum": 40,
+            "maximum": 100,
+            "step": 1,
+            "unit": "°C",
+            "targetId": "entity_0123456789abcdef",
+            "actionId": "set_value"
+          }
+        }
+      ]
+    },
+    {
       "id": "device_wall_relay",
       "entityId": "switch.example_wall_relay",
       "physicalId": "device_wall_relay",

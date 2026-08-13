@@ -60,6 +60,9 @@ class ScenarioDeviceEntry:
     name: str
     entity_id: str
     actions: tuple[ScenarioDeviceAction, ...]
+    range_minimum: float | None = None
+    range_maximum: float | None = None
+    range_step: float | None = None
 
     def action(self, action_id: str) -> ScenarioDeviceAction | None:
         """Return one allowed action by id."""

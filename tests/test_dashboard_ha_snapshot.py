@@ -245,6 +245,17 @@ class DashboardHaSnapshotTest(unittest.IsolatedAsyncioTestCase):
                     "unit_of_measurement": "%",
                 },
             ),
+            "number.living_voltage_threshold": SimpleNamespace(
+                entity_id="number.living_voltage_threshold",
+                state="250",
+                attributes={
+                    "friendly_name": "Over voltage threshold",
+                    "min": 230,
+                    "max": 280,
+                    "step": 1,
+                    "unit_of_measurement": "V",
+                },
+            ),
         }
         entries = {
             "switch.living_left": entry("switch.living_left"),
@@ -259,6 +270,9 @@ class DashboardHaSnapshotTest(unittest.IsolatedAsyncioTestCase):
             ),
             "sensor.living_battery": entry(
                 "sensor.living_battery", category="diagnostic"
+            ),
+            "number.living_voltage_threshold": entry(
+                "number.living_voltage_threshold", category="config"
             ),
         }
         hass = SimpleNamespace(
@@ -287,10 +301,32 @@ class DashboardHaSnapshotTest(unittest.IsolatedAsyncioTestCase):
             card["imageUrl"],
         )
         self.assertEqual(
-            {"switch.living_left", "sensor.living_battery"},
+            {
+                "switch.living_left",
+                "sensor.living_battery",
+                "number.living_voltage_threshold",
+            },
             {detail["entityId"] for detail in card["details"]},
         )
-        self.assertEqual(2, payload["inventory"]["devices"][0]["entityCount"])
+        threshold = next(
+            detail
+            for detail in card["details"]
+            if detail["entityId"] == "number.living_voltage_threshold"
+        )
+        self.assertEqual("Верхний порог напряжения", threshold["label"])
+        self.assertEqual(
+            {
+                "kind": "range",
+                "minimum": 230.0,
+                "maximum": 280.0,
+                "step": 1.0,
+                "unit": "V",
+                "targetId": threshold["control"]["targetId"],
+                "actionId": "set_value",
+            },
+            threshold["control"],
+        )
+        self.assertEqual(3, payload["inventory"]["devices"][0]["entityCount"])
 
 
 class _RefreshingScenarioService:

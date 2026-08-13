@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import math
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from .scenarios import ScenarioCatalog, ScenarioDeviceAction, ScenarioDeviceEntry
@@ -21,6 +23,7 @@ SCENARIO_CATALOG_DOMAINS = frozenset(
         "light",
         "lock",
         "media_player",
+        "number",
         "switch",
         "vacuum",
         "valve",
@@ -85,6 +88,16 @@ def _domain_actions(domain: str) -> tuple[ScenarioDeviceAction, ...]:
                 domain="switch",
                 service="toggle",
                 allowed_fields=frozenset(),
+            ),
+        )
+    if domain == "number":
+        return (
+            ScenarioDeviceAction(
+                action_id="set_value",
+                title="Установить значение",
+                domain="number",
+                service="set_value",
+                allowed_fields=frozenset({"value"}),
             ),
         )
     if domain == "fan":
@@ -354,6 +367,25 @@ def _friendly_name(state: object) -> str:
     return name if isinstance(name, str) else getattr(state, "entity_id", "")
 
 
+def _number_range(state: object) -> tuple[float, float, float] | None:
+    attributes = getattr(state, "attributes", {})
+    if not isinstance(attributes, Mapping):
+        return None
+    values: list[float] = []
+    for key in ("min", "max", "step"):
+        value = attributes.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        numeric = float(value)
+        if not math.isfinite(numeric):
+            return None
+        values.append(numeric)
+    minimum, maximum, step = values
+    if minimum >= maximum or step <= 0 or step > maximum - minimum:
+        return None
+    return minimum, maximum, step
+
+
 def _registry_entry(registry: object, key: str, collection_name: str) -> object | None:
     collection = getattr(registry, collection_name, None)
     if collection is None:
@@ -385,6 +417,9 @@ async def async_build_scenario_catalog(hass: HomeAssistant) -> ScenarioCatalog:
         actions = _domain_actions(domain)
         if not actions:
             continue
+        number_range = _number_range(state) if domain == "number" else None
+        if domain == "number" and number_range is None:
+            continue
 
         target_id = _stable_target_id_from_entity(entity_id)
         name = _friendly_name(state)
@@ -414,6 +449,9 @@ async def async_build_scenario_catalog(hass: HomeAssistant) -> ScenarioCatalog:
             name=name,
             entity_id=entity_id,
             actions=actions,
+            range_minimum=number_range[0] if number_range is not None else None,
+            range_maximum=number_range[1] if number_range is not None else None,
+            range_step=number_range[2] if number_range is not None else None,
         )
 
     return ScenarioCatalog(devices=devices, scenarios={})

@@ -455,9 +455,29 @@
         "value": { "type": "string" },
         "entityId": { "type": ["string", "null"] },
         "domain": { "type": ["string", "null"] },
-        "state": { "type": ["string", "null"] }
+        "state": { "type": ["string", "null"] },
+        "control": {
+          "anyOf": [
+            { "$ref": "#/$defs/deviceRangeControl" },
+            { "type": "null" }
+          ]
+        }
       },
       "additionalProperties": false
+    },
+    "deviceRangeControl": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "minimum", "maximum", "step", "targetId", "actionId"],
+      "properties": {
+        "kind": { "const": "range" },
+        "minimum": { "type": "number" },
+        "maximum": { "type": "number" },
+        "step": { "type": "number", "exclusiveMinimum": 0 },
+        "unit": { "type": ["string", "null"], "maxLength": 32 },
+        "targetId": { "type": "string", "pattern": "^entity_[0-9a-f]{16}$" },
+        "actionId": { "const": "set_value" }
+      }
     }
   },
   "additionalProperties": true

@@ -6,6 +6,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 import hashlib
+import math
 from typing import Any
 
 from ..domain.hub_settings import HausmanHubSettings
@@ -140,6 +141,53 @@ _ENERGY_USAGE_DEVICE_CLASSES = frozenset({"power", "current", "energy"})
 _ENERGY_CONTROL_DOMAINS = frozenset({"switch"})
 _MINIMUM_MAINS_VOLTAGE = 80.0
 
+_DETAIL_LABEL_TRANSLATIONS = {
+    "audio volume": "Громкость звука",
+    "battery charging state": "Состояние зарядки",
+    "black toner_s/n_:crum-201111a3c97": "Чёрный тонер",
+    "center": "Средняя клавиша",
+    "clean 清扫模式": "Режим уборки",
+    "countdown": "Таймер отключения",
+    "custom the-tank-filed": "Бак установлен",
+    "custom water-shortage-fault": "Недостаточно воды",
+    "humidifier fan level": "Скорость увлажнения",
+    "identify": "Идентификация",
+    "illumination": "Уровень освещённости",
+    "illuminance interval": "Интервал измерения освещённости",
+    "ir emitter": "ИК-передатчик",
+    "left": "Левая клавиша",
+    "mode switch": "Режим выключателя",
+    "motor fault": "Неисправность мотора",
+    "occupancy sensitivity": "Чувствительность присутствия",
+    "over current breaker": "Защита от превышения тока",
+    "over current threshold": "Порог отключения по току",
+    "over voltage breaker": "Защита от превышения напряжения",
+    "over voltage threshold": "Верхний порог напряжения",
+    "power breaker": "Защита от превышения мощности",
+    "power threshold": "Порог отключения по мощности",
+    "restart": "Перезапуск",
+    "reverse direction": "Обратное направление",
+    "right": "Правая клавиша",
+    "temperature breaker": "Защита от перегрева",
+    "temperature threshold": "Порог отключения по температуре",
+    "time format": "Формат времени",
+    "under voltage breaker": "Защита от низкого напряжения",
+    "under voltage threshold": "Нижний порог напряжения",
+}
+
+_STATE_TRANSLATIONS = {
+    "anti_flicker_mode": "защита от мерцания",
+    "back": "обратное",
+    "bright": "ярко",
+    "charging": "заряжается",
+    "level1": "уровень 1",
+    "level2": "уровень 2",
+    "level3": "уровень 3",
+    "medium": "средняя",
+    "stopped": "остановлен",
+    "强力": "мощный",
+}
+
 
 @dataclass(frozen=True, slots=True)
 class DashboardArea:
@@ -219,10 +267,12 @@ def _number(value: object) -> float | None:
     if isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
-        return float(value)
+        numeric = float(value)
+        return numeric if math.isfinite(numeric) else None
     if isinstance(value, str):
         try:
-            return float(value.replace(",", "."))
+            numeric = float(value.replace(",", "."))
+            return numeric if math.isfinite(numeric) else None
         except ValueError:
             return None
     return None
@@ -324,7 +374,10 @@ def _state_label(entity: DashboardEntity) -> str:
         "unavailable": "нет связи",
         "unknown": "состояние неизвестно",
     }
-    return labels.get(entity.state, entity.state)
+    return labels.get(
+        entity.state,
+        _STATE_TRANSLATIONS.get(entity.state.casefold(), entity.state),
+    )
 
 
 def _detail_label(entity: DashboardEntity) -> str:
@@ -357,13 +410,48 @@ def _detail_label(entity: DashboardEntity) -> str:
         "camera": "Камера",
         "alarm_control_panel": "Охрана",
     }
-    return domains.get(entity.domain, entity.name)
+    translated_label = _DETAIL_LABEL_TRANSLATIONS.get(entity.name.casefold())
+    if translated_label is not None:
+        return translated_label
+    domain_label = domains.get(entity.domain)
+    if domain_label is not None:
+        return domain_label
+    return entity.name
 
 
 def _detail_value(entity: DashboardEntity) -> str:
     unit = entity.attributes.get("unit_of_measurement")
     suffix = f" {unit}" if isinstance(unit, str) and unit else ""
     return f"{entity.state}{suffix}" if suffix else _state_label(entity)
+
+
+def _range_control(entity: DashboardEntity) -> dict[str, object] | None:
+    """Return an advertised numeric control only with complete HA bounds."""
+
+    if entity.domain != "number":
+        return None
+    minimum = _number(entity.attributes.get("min"))
+    maximum = _number(entity.attributes.get("max"))
+    step = _number(entity.attributes.get("step"))
+    if (
+        minimum is None
+        or maximum is None
+        or step is None
+        or minimum >= maximum
+        or step <= 0
+        or step > maximum - minimum
+    ):
+        return None
+    unit = entity.attributes.get("unit_of_measurement")
+    return {
+        "kind": "range",
+        "minimum": minimum,
+        "maximum": maximum,
+        "step": step,
+        "unit": unit if isinstance(unit, str) and len(unit) <= 32 else None,
+        "targetId": _opaque_id("entity", entity.entity_id),
+        "actionId": "set_value",
+    }
 
 
 def _category(domain: str, entity: DashboardEntity) -> str:
@@ -599,18 +687,25 @@ def _device_details(
     }
     details: list[dict[str, object]] = []
     for member, base_label in zip(members, base_labels, strict=True):
-        label = member.name if base_label in duplicate_labels else base_label
+        label = (
+            _DETAIL_LABEL_TRANSLATIONS.get(member.name.casefold(), member.name)
+            if base_label in duplicate_labels
+            else base_label
+        )
         if label.casefold().startswith(f"{device_name} ".casefold()):
             label = label[len(device_name) :].strip()
-        details.append(
-            {
-                "label": label or base_label,
-                "value": _detail_value(member),
-                "entityId": member.entity_id,
-                "domain": member.domain,
-                "state": member.state,
-            }
-        )
+        label = _DETAIL_LABEL_TRANSLATIONS.get(label.casefold(), label)
+        detail = {
+            "label": label or base_label,
+            "value": _detail_value(member),
+            "entityId": member.entity_id,
+            "domain": member.domain,
+            "state": member.state,
+        }
+        control = _range_control(member)
+        if control is not None:
+            detail["control"] = control
+        details.append(detail)
     return details
 
 

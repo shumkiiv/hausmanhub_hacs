@@ -12,6 +12,7 @@ from custom_components.hausman_hub.application.scenario_executor import (
     ScenarioExecutor,
     _device_action_confirmed,
     _normalize_action_value,
+    _number_range_error,
     _value_parameter_name,
 )
 from custom_components.hausman_hub.application.scenarios import (
@@ -37,6 +38,9 @@ class _FakeHass:
                 "light.living_room": SimpleNamespace(state="on", attributes={}),
                 "climate.living_room": SimpleNamespace(
                     state="cool", attributes={"temperature": 22}
+                ),
+                "number.breaker_temperature_threshold": SimpleNamespace(
+                    state="80", attributes={}
                 ),
             }.get(entity_id)
         )
@@ -86,6 +90,23 @@ class _FakeCatalog:
                         allowed_fields=frozenset({"value"}),
                     ),
                 ),
+            ),
+            "number_1": ScenarioDeviceEntry(
+                target_id="number_1",
+                name="Порог отключения по температуре",
+                entity_id="number.breaker_temperature_threshold",
+                actions=(
+                    ScenarioDeviceAction(
+                        action_id="set_value",
+                        title="Установить значение",
+                        domain="number",
+                        service="set_value",
+                        allowed_fields=frozenset({"value"}),
+                    ),
+                ),
+                range_minimum=40.0,
+                range_maximum=100.0,
+                range_step=1.0,
             ),
         }
 
@@ -264,6 +285,38 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             "climate", "set_temperature", {"entity_id": "climate.living_room", "temperature": 22}, blocking=True
         )
 
+    async def test_number_action_uses_selected_value_and_confirms_read_back(self) -> None:
+        receipt = await self.executor.async_execute_device_action(
+            "number_1", "set_value", 80
+        )
+
+        self.assertTrue(receipt["accepted"])
+        self.assertEqual("confirmed", receipt["status"])
+        self.assertTrue(receipt["confirmed"])
+        self.hass.services.async_call.assert_awaited_once_with(
+            "number",
+            "set_value",
+            {
+                "entity_id": "number.breaker_temperature_threshold",
+                "value": 80.0,
+            },
+            blocking=True,
+        )
+
+    async def test_number_action_rejects_missing_or_out_of_range_value(self) -> None:
+        missing = await self.executor.async_execute_device_action(
+            "number_1", "set_value"
+        )
+        outside = await self.executor.async_execute_device_action(
+            "number_1", "set_value", 101
+        )
+
+        self.assertEqual("failed", missing["status"])
+        self.assertEqual("value is required for a numeric control", missing["error"])
+        self.assertEqual("failed", outside["status"])
+        self.assertEqual("value is outside the allowed range", outside["error"])
+        self.hass.services.async_call.assert_not_awaited()
+
     async def test_action_with_value_uses_brightness_parameter(self) -> None:
         definition = _definition((
             ScenarioAction(
@@ -420,6 +473,28 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             _value_parameter_name("set_position", "valve", "set_valve_position"),
         )
         self.assertEqual(45, _normalize_action_value("humidity", "45%"))
+        self.assertEqual(
+            "value",
+            _value_parameter_name("set_value", "number", "set_value"),
+        )
+        self.assertEqual(80.0, _normalize_action_value("value", "80"))
+
+    def test_number_action_rejects_out_of_range_and_off_step_values(self) -> None:
+        device = SimpleNamespace(
+            range_minimum=40.0,
+            range_maximum=100.0,
+            range_step=1.0,
+        )
+        self.assertIsNone(_number_range_error(device, 80.0))
+        self.assertEqual(
+            "value is outside the allowed range",
+            _number_range_error(device, 101.0),
+        )
+        device.range_step = 0.5
+        self.assertEqual(
+            "value does not match the allowed step",
+            _number_range_error(device, 80.25),
+        )
 
     def test_extended_actions_have_explicit_read_back_rules(self) -> None:
         self.assertTrue(
@@ -435,6 +510,11 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(
             _device_action_confirmed(
                 SimpleNamespace(state="open", attributes={}), "open_valve", None
+            )
+        )
+        self.assertTrue(
+            _device_action_confirmed(
+                SimpleNamespace(state="80", attributes={}), "set_value", 80.0
             )
         )
 

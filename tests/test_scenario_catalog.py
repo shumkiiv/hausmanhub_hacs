@@ -7,6 +7,7 @@ import unittest
 from custom_components.hausman_hub.application.scenario_catalog import (
     SCENARIO_CATALOG_DOMAINS,
     _domain_actions,
+    _number_range,
     _stable_target_id_from_entity,
 )
 
@@ -26,6 +27,7 @@ class ScenarioCatalogPureTest(unittest.TestCase):
                 "light",
                 "lock",
                 "media_player",
+                "number",
                 "switch",
                 "vacuum",
                 "valve",
@@ -46,6 +48,30 @@ class ScenarioCatalogPureTest(unittest.TestCase):
         actions = _domain_actions("switch")
         for action in actions:
             self.assertNotIn("value", action.allowed_fields)
+
+    def test_number_action_accepts_only_bounded_value(self) -> None:
+        actions = _domain_actions("number")
+        self.assertEqual(1, len(actions))
+        self.assertEqual("set_value", actions[0].action_id)
+        self.assertEqual("set_value", actions[0].service)
+        self.assertEqual(frozenset({"value"}), actions[0].allowed_fields)
+        state = type(
+            "State",
+            (),
+            {"attributes": {"min": 40, "max": 100, "step": 1}},
+        )()
+        self.assertEqual((40.0, 100.0, 1.0), _number_range(state))
+
+    def test_number_range_rejects_missing_or_invalid_bounds(self) -> None:
+        for attributes in (
+            {},
+            {"min": 40, "max": 40, "step": 1},
+            {"min": 40, "max": 100, "step": 0},
+            {"min": 40, "max": 100, "step": 100},
+        ):
+            with self.subTest(attributes=attributes):
+                state = type("State", (), {"attributes": attributes})()
+                self.assertIsNone(_number_range(state))
 
     def test_cover_position_accepts_value(self) -> None:
         actions = _domain_actions("cover")

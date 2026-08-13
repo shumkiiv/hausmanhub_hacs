@@ -162,7 +162,9 @@ def _entity_is_public(entry: object, attributes: dict[str, Any]) -> bool:
     if getattr(entry, "hidden_by", None) is not None:
         return False
     category = _enum_string(getattr(entry, "entity_category", None))
-    if category == "config":
+    entity_id = getattr(entry, "entity_id", "")
+    domain = entity_id.split(".", 1)[0] if isinstance(entity_id, str) else ""
+    if category == "config" and domain != "number":
         return False
     if category != "diagnostic":
         return True
@@ -250,6 +252,10 @@ def _attach_catalog_actions(
             if catalog_device is None:
                 continue
             for action in catalog_device.actions:
+                if action.action_id == "set_value":
+                    # Numeric capabilities use the bounded detail.control UI,
+                    # never a generic action without a selected value.
+                    continue
                 actions.append(
                     {
                         "id": f"{catalog_device.target_id}:{action.action_id}",

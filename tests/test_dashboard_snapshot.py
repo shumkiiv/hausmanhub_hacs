@@ -267,6 +267,115 @@ class DashboardSnapshotTest(unittest.TestCase):
             {device["entityId"] for device in devices},
         )
 
+    def test_numeric_device_detail_is_russian_and_advertises_bounded_control(self) -> None:
+        snapshot = build_dashboard_snapshot(
+            areas=(DashboardArea("panel", "Электрощит"),),
+            devices=(
+                DashboardDevice("breaker", "Автомат защиты", "panel"),
+            ),
+            entities=(
+                DashboardEntity(
+                    "switch.breaker_temperature",
+                    "switch",
+                    "on",
+                    "Temperature breaker",
+                    {},
+                    "breaker",
+                    "panel",
+                ),
+                DashboardEntity(
+                    "number.breaker_temperature_threshold",
+                    "number",
+                    "80",
+                    "Temperature threshold",
+                    {
+                        "min": 40,
+                        "max": 100,
+                        "step": 1,
+                        "unit_of_measurement": "°C",
+                    },
+                    "breaker",
+                    "panel",
+                ),
+            ),
+            generated_at_ms=1,
+            local_iso="2026-08-13T12:00:00+03:00",
+        )
+
+        card = snapshot["devices"][0]
+        breaker, threshold = card["details"]
+        self.assertEqual("Защита от перегрева", breaker["label"])
+        self.assertEqual("включено", breaker["value"])
+        self.assertEqual("Порог отключения по температуре", threshold["label"])
+        self.assertEqual("80 °C", threshold["value"])
+        self.assertEqual(
+            {
+                "kind": "range",
+                "minimum": 40.0,
+                "maximum": 100.0,
+                "step": 1.0,
+                "unit": "°C",
+                "targetId": threshold["control"]["targetId"],
+                "actionId": "set_value",
+            },
+            threshold["control"],
+        )
+        self.assertRegex(threshold["control"]["targetId"], r"^entity_[0-9a-f]{16}$")
+
+    def test_numeric_device_detail_hides_control_without_safe_range(self) -> None:
+        snapshot = build_dashboard_snapshot(
+            areas=(DashboardArea("panel", "Электрощит"),),
+            devices=(DashboardDevice("breaker", "Автомат защиты", "panel"),),
+            entities=(
+                DashboardEntity(
+                    "number.breaker_temperature_threshold",
+                    "number",
+                    "80",
+                    "Temperature threshold",
+                    {"min": float("nan"), "max": 100, "step": 1},
+                    "breaker",
+                    "panel",
+                ),
+            ),
+            generated_at_ms=1,
+            local_iso="2026-08-13T12:00:00+03:00",
+        )
+
+        self.assertNotIn("control", snapshot["devices"][0]["details"][0])
+
+    def test_duplicate_technical_labels_remain_russian(self) -> None:
+        snapshot = build_dashboard_snapshot(
+            areas=(DashboardArea("panel", "Электрощит"),),
+            devices=(DashboardDevice("breaker", "Автомат защиты", "panel"),),
+            entities=(
+                DashboardEntity(
+                    "switch.breaker_over_voltage",
+                    "switch",
+                    "on",
+                    "Over voltage breaker",
+                    {},
+                    "breaker",
+                    "panel",
+                ),
+                DashboardEntity(
+                    "switch.breaker_over_voltage_backup",
+                    "switch",
+                    "off",
+                    "Over voltage breaker",
+                    {},
+                    "breaker",
+                    "panel",
+                ),
+            ),
+            generated_at_ms=1,
+            local_iso="2026-08-13T12:00:00+03:00",
+        )
+
+        self.assertEqual(
+            ["Защита от превышения напряжения"] * 2,
+            [detail["label"] for detail in snapshot["devices"][0]["details"]],
+        )
+
     def test_cards_use_physical_purpose_instead_of_diagnostics_or_services(self) -> None:
         snapshot = build_dashboard_snapshot(
             areas=(DashboardArea("kitchen", "Кухня"),),

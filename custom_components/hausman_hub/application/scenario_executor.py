@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
+import math
 import time
 import uuid
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
@@ -49,6 +50,8 @@ def _value_parameter_name(action_id: str, domain: str, service: str) -> str | No
             return "fan_mode"
     if domain == "humidifier" and service == "set_humidity" and action_id == "set_humidity":
         return "humidity"
+    if domain == "number" and service == "set_value" and action_id == "set_value":
+        return "value"
     if domain == "water_heater":
         if service == "set_temperature" and action_id == "set_temperature":
             return "temperature"
@@ -81,16 +84,16 @@ def _normalize_action_value(param: str, value: object) -> object:
         if numeric > maximum:
             numeric = maximum
         return numeric
-    if param == "temperature":
+    if param in ("temperature", "value"):
         if isinstance(value, str):
             value = value.strip()
             try:
                 return float(value)
             except ValueError as error:
-                raise ValueError("temperature must be a number") from error
+                raise ValueError(f"{param} must be a number") from error
         if isinstance(value, (int, float)) and not isinstance(value, bool):
             return float(value)
-        raise ValueError("temperature must be a number")
+        raise ValueError(f"{param} must be a number")
     if param in ("hvac_mode", "fan_mode", "operation_mode"):
         if not isinstance(value, str):
             raise ValueError(f"{param} must be a string")
@@ -547,6 +550,12 @@ class ScenarioExecutor:
             }
         service_data: dict[str, Any] = {"entity_id": device.entity_id}
         confirmation_value = action.value
+        if allowed.domain == "number" and action.value is None:
+            return {
+                **base,
+                "status": "failed",
+                "error": "value is required for a numeric control",
+            }
         if action.value is not None:
             param = _value_parameter_name(action.action_id, allowed.domain, allowed.service)
             if param is None:
@@ -563,6 +572,10 @@ class ScenarioExecutor:
                     "status": "failed",
                     "error": str(error),
                 }
+            if allowed.domain == "number":
+                error = _number_range_error(device, normalized)
+                if error is not None:
+                    return {**base, "status": "failed", "error": error}
             service_data[param] = normalized
             confirmation_value = normalized
         if not dry_run:
@@ -740,6 +753,11 @@ def _device_action_confirmed(state: object, action_id: str, value: object | None
         return state_value in {"idle", "off", "docked"}
     if action_id == "return_home":
         return state_value in {"returning", "docked"}
+    if action_id == "set_value":
+        try:
+            return abs(float(state_value) - float(value)) <= 1e-6
+        except (TypeError, ValueError):
+            return False
     if action_id == "open_valve":
         return state_value in {"open", "opening"}
     if action_id == "close_valve":
@@ -759,3 +777,32 @@ def _device_action_confirmed(state: object, action_id: str, value: object | None
     if isinstance(actual, (int, float)) and isinstance(value, (int, float)):
         return abs(float(actual) - float(value)) <= 0.1
     return str(actual) == str(value)
+
+
+def _number_range_error(device: object, value: object) -> str | None:
+    """Reject a number value outside the advertised HA bounds or step."""
+
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return "value must be a number"
+    minimum = getattr(device, "range_minimum", None)
+    maximum = getattr(device, "range_maximum", None)
+    step = getattr(device, "range_step", None)
+    if not all(
+        isinstance(item, (int, float)) and not isinstance(item, bool)
+        for item in (minimum, maximum, step)
+    ):
+        return "number range is unavailable"
+    numeric = float(value)
+    if not all(
+        math.isfinite(item)
+        for item in (numeric, float(minimum), float(maximum), float(step))
+    ):
+        return "number range is unavailable"
+    if float(minimum) >= float(maximum) or float(step) <= 0:
+        return "number range is unavailable"
+    if numeric < float(minimum) or numeric > float(maximum):
+        return "value is outside the allowed range"
+    steps = (numeric - float(minimum)) / float(step)
+    if abs(steps - round(steps)) > 1e-6:
+        return "value does not match the allowed step"
+    return None
