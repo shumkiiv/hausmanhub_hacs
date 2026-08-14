@@ -65,6 +65,35 @@ class EventStreamBrokerTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(expected, [await queue.get() for _ in expected])
 
+    async def test_reconnect_replays_final_command_receipt(self) -> None:
+        broker = EventStreamBroker()
+        last_seen = broker.publish(
+            "command_receipt",
+            {
+                "request_id": "climate-accepted",
+                "operation": "climate.tablet_action",
+                "accepted": True,
+                "confirmed": False,
+                "status": "accepted",
+            },
+        )
+        final = broker.publish(
+            "command_receipt",
+            {
+                "request_id": "climate-accepted",
+                "operation": "climate.tablet_action",
+                "accepted": True,
+                "confirmed": True,
+                "status": "confirmed",
+            },
+        )
+
+        queue, resumable = broker.subscribe_with_resume(last_seen["id"])
+
+        self.assertTrue(resumable)
+        self.assertEqual(final, await queue.get())
+        self.assertTrue(queue.empty())
+
     async def test_reconnect_fails_closed_when_gap_exceeds_client_queue(self) -> None:
         broker = EventStreamBroker()
         first = broker.publish("snapshot_invalidated", {"reason": "state_changed"})
