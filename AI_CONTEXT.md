@@ -1,8 +1,21 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-14 (HACS 1.52.96 manual AC shutdown ownership).
+Last updated: 2026-08-15 (HACS 1.52.97 curtain recovery guard).
 
 ## Current work
+
+- 2026-08-15 (Codex): HACS `1.52.97` stops false curtain runs caused by
+  Home Assistant device recovery. A state transition with a missing,
+  `unknown` or `unavailable` side no longer matches scenario state triggers,
+  while a real `off -> on` transition still does. Cover actions also skip the
+  service call when the cover is already `closed` or `closing`. Full gate:
+  1409 passed, 4 skipped; Actions `31843302664` success. Release commit
+  `57f65dc`, tag and GitHub Release are published. Production backup
+  `b5b1c72e` completed, config checks and one restart passed;
+  installed/latest and 35 frontend cache markers are `v1.52.97`, all 10
+  entities are available and the integration system log is clean. The three
+  curtain scenarios remain disabled by the owner. No scenario or physical
+  device command was sent. Details: `docs/RELEASE_AUDIT_1.52.97.md`.
 
 - 2026-08-14 (Codex): HACS `1.52.96` makes an explicit device-card
   `turn_off` for a configured air conditioner persist device-level manual
