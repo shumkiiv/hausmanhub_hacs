@@ -22,7 +22,7 @@ _EVENT_STATE_CHANGED = "state_changed"
 def _state_value(state: object | None, property_name: str) -> object | None:
     if state is None:
         return None
-    if property_name == "state":
+    if property_name in {"state", "Состояние"}:
         return getattr(state, "state", None)
     attributes = getattr(state, "attributes", {})
     return attributes.get(property_name) if isinstance(attributes, dict) else None

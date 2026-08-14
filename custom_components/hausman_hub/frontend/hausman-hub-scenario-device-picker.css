@@ -1,0 +1,27 @@
+.scenario-device-select-button { display:grid; gap:4px; width:100%; min-height:58px; margin:0; padding:10px 14px; border:1px solid var(--hmh-border,#D8E0EA); border-radius:12px; color:var(--hmh-text,#172033); background:var(--hmh-raised,#FFFFFF); box-shadow:none; text-align:left; }
+.scenario-device-select-button:hover { border-color:color-mix(in srgb,var(--hmh-accent,#2F6DCC) 48%,var(--hmh-border,#D8E0EA)); background:color-mix(in srgb,var(--hmh-accent,#2F6DCC) 4%,var(--hmh-raised,#FFFFFF)); }
+.scenario-device-select-button strong { overflow:hidden; font-size:15px; text-overflow:ellipsis; white-space:nowrap; }
+.scenario-device-select-button small { color:var(--hmh-muted,#667085); font-size:12px; font-weight:500; }
+.scenario-device-picker-overlay { position:fixed; z-index:1060; inset:0; display:grid; place-items:center; padding:24px; background:var(--hmh-modal-backdrop); backdrop-filter:blur(16px); }
+.scenario-device-picker-dialog { display:grid; grid-template-rows:auto auto auto minmax(0,1fr); width:min(980px,100%); max-height:min(820px,calc(100vh - 48px)); overflow:hidden; border:1px solid var(--hmh-modal-border); border-radius:22px; color:var(--hmh-text,#172033); background:var(--hmh-modal-raised,#FFFFFF); box-shadow:var(--hmh-modal-shadow); }
+.scenario-device-picker-head { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; padding:22px 24px 16px; border-bottom:1px solid var(--hmh-border,#D8E0EA); }
+.scenario-device-picker-head h3 { margin:3px 0 5px; font-size:26px; }
+.scenario-device-picker-head p { margin:0; color:var(--hmh-muted,#667085); font-size:14px; }
+.scenario-device-picker-close { display:grid; place-items:center; min-width:44px; width:44px; height:44px; margin:0; padding:0; border-radius:50%; font-size:27px; line-height:1; }
+.scenario-device-picker-search { width:auto; min-height:48px; margin:16px 24px 8px; padding:10px 14px; border:1px solid var(--hmh-border,#D8E0EA); border-radius:12px; color:var(--hmh-text,#172033); background:var(--hmh-raised,#FFFFFF); font-size:15px; }
+.scenario-device-picker-filters { display:grid; gap:7px; padding:3px 24px 7px; }
+.scenario-device-filter-row { display:grid; grid-template-columns:82px minmax(0,1fr); align-items:center; gap:9px; min-width:0; }
+.scenario-device-filter-row > strong { color:var(--hmh-muted,#667085); font-size:12px; }
+.scenario-device-filter-choices { display:flex; gap:6px; min-width:0; overflow-x:auto; padding:2px 1px 5px; scrollbar-width:thin; }
+.scenario-device-filter-chip { min-height:34px; margin:0; padding:6px 12px; flex:0 0 auto; border:1px solid var(--hmh-border,#D8E0EA); border-radius:999px; color:var(--hmh-muted,#667085); background:var(--hmh-surface,#F7F9FC); box-shadow:none; font-size:12px; }
+.scenario-device-filter-chip:hover,.scenario-device-filter-chip.is-active { border-color:var(--hmh-accent,#2F6DCC); color:var(--hmh-text,#172033); background:color-mix(in srgb,var(--hmh-accent,#2F6DCC) 10%,var(--hmh-raised,#FFFFFF)); }
+.scenario-device-picker-content { min-height:180px; overflow:auto; padding:10px 24px 24px; }
+.scenario-device-picker-room { margin:14px 0 8px; font-size:20px; }
+.scenario-device-picker-type { margin:12px 0 7px; color:var(--hmh-muted,#667085); font-size:13px; letter-spacing:.04em; text-transform:uppercase; }
+.scenario-device-picker-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+.scenario-device-picker-card { display:grid; align-content:center; gap:5px; min-height:82px; margin:0; padding:14px; border:1px solid var(--hmh-border,#D8E0EA); border-radius:14px; color:var(--hmh-text,#172033); background:var(--hmh-surface,#F7F9FC); box-shadow:none; text-align:left; }
+.scenario-device-picker-card:hover,.scenario-device-picker-card.is-selected { border-color:color-mix(in srgb,var(--hmh-accent,#2F6DCC) 55%,var(--hmh-border,#D8E0EA)); background:color-mix(in srgb,var(--hmh-accent,#2F6DCC) 8%,var(--hmh-surface,#F7F9FC)); }
+.scenario-device-picker-card strong { overflow:hidden; font-size:15px; text-overflow:ellipsis; white-space:nowrap; }
+.scenario-device-picker-card span { color:var(--hmh-muted,#667085); font-size:12px; }
+.scenario-device-picker-empty { margin:34px 0; color:var(--hmh-muted,#667085); text-align:center; }
+@media (max-width:820px) { .scenario-device-picker-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }

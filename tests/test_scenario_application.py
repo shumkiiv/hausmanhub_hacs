@@ -10,6 +10,8 @@ from custom_components.hausman_hub.application.scenarios import (
     ScenarioDefinitionViolation,
     ScenarioDeviceAction,
     ScenarioDeviceEntry,
+    ScenarioDeviceProperty,
+    ScenarioPropertyOption,
     validate_scenario_definition,
 )
 from custom_components.hausman_hub.domain.scenarios import (
@@ -63,6 +65,79 @@ class ScenarioApplicationValidationTest(unittest.TestCase):
     def test_valid_definition_passes(self) -> None:
         catalog = _catalog()
         definition = _valid_definition()
+        validate_scenario_definition(definition, catalog)
+
+    def test_motion_trigger_rejects_state_from_another_device_kind(self) -> None:
+        catalog = _catalog(
+            devices={
+                "motion": ScenarioDeviceEntry(
+                    target_id="motion",
+                    name="Датчик движения",
+                    entity_id="binary_sensor.motion",
+                    actions=(),
+                    properties=(
+                        ScenarioDeviceProperty(
+                            property_id="state",
+                            label="Движение",
+                            value_type="enum",
+                            comparisons=("equals", "not_equals", "changed"),
+                            options=(
+                                ScenarioPropertyOption("on", "Движение"),
+                                ScenarioPropertyOption("off", "Нет движения"),
+                            ),
+                        ),
+                    ),
+                )
+            }
+        )
+        definition = _valid_definition(
+            triggers=(
+                ScenarioTrigger(
+                    id="t1",
+                    type=ScenarioTriggerType.DEVICE_STATE,
+                    target_id="motion",
+                    property="state",
+                    comparison=ScenarioComparison.EQUALS,
+                    value="locked",
+                ),
+            )
+        )
+        with self.assertRaises(ScenarioDefinitionViolation) as raised:
+            validate_scenario_definition(definition, catalog)
+        self.assertEqual(raised.exception.path, "definition.triggers[0].value")
+
+    def test_legacy_russian_state_property_remains_compatible(self) -> None:
+        catalog = _catalog(
+            devices={
+                "motion": ScenarioDeviceEntry(
+                    target_id="motion",
+                    name="Датчик движения",
+                    entity_id="binary_sensor.motion",
+                    actions=(),
+                    properties=(
+                        ScenarioDeviceProperty(
+                            property_id="state",
+                            label="Движение",
+                            value_type="enum",
+                            comparisons=("equals", "not_equals", "changed"),
+                            options=(ScenarioPropertyOption("on", "Движение"),),
+                        ),
+                    ),
+                )
+            }
+        )
+        definition = _valid_definition(
+            triggers=(
+                ScenarioTrigger(
+                    id="t1",
+                    type=ScenarioTriggerType.DEVICE_STATE,
+                    target_id="motion",
+                    property="Состояние",
+                    comparison=ScenarioComparison.EQUALS,
+                    value="on",
+                ),
+            )
+        )
         validate_scenario_definition(definition, catalog)
 
     def test_device_action_resolved_against_catalog(self) -> None:

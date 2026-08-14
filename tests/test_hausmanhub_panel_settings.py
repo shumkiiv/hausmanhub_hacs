@@ -44,6 +44,7 @@ WEATHER_SOURCES_JS = PANEL_JS.with_name("hausman-hub-weather-sources.js")
 MEDIA_DEVICE_JS = PANEL_JS.with_name("hausman-hub-media-device.js")
 DEVICE_CARD_JS = PANEL_JS.with_name("hausman-hub-device-card.js")
 SCENARIOS_JS = PANEL_JS.with_name("hausman-hub-scenarios.js")
+SCENARIO_DEVICE_PICKER_JS = PANEL_JS.with_name("hausman-hub-scenario-device-picker.js")
 SCENARIO_ICONS_JS = PANEL_JS.with_name("hausman-hub-scenario-icons.js")
 SCENARIO_FIELDS_JS = PANEL_JS.with_name("hausman-hub-scenario-fields.js")
 SETTINGS_CSS = PANEL_JS.with_name("hausman-hub-settings.css")
@@ -604,6 +605,10 @@ def panel_script(
       vm.runInThisContext(
         fs.readFileSync({str(SCENARIO_FIELDS_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(SCENARIO_FIELDS_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(SCENARIO_DEVICE_PICKER_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
+        {{ filename: {str(SCENARIO_DEVICE_PICKER_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(SCENARIOS_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, "").replace(/export /g, ""),
@@ -2905,6 +2910,11 @@ class PanelSettingsSectionsTest(unittest.TestCase):
                     "target_id": "light.living",
                     "name": "Основной свет · Гостиная",
                     "entity_id": "light.living",
+                    "physical_id": "device-living-light",
+                    "physical_name": "Люстра",
+                    "room_name": "Гостиная",
+                    "device_type_name": "Освещение",
+                    "capability_name": "Основной свет",
                     "actions": [
                         {
                             "action_id": "turn_on",
@@ -2963,9 +2973,13 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           .find((node) => node.textContent === "+ Добавить действие");
         addAction.fire("click");
 
-        let device = labelledControl("Устройство");
-        device.value = "light.living";
-        device.fire("change");
+        const deviceButton = findAll(screen, (node) => String(node.className).split(" ").includes("scenario-device-select-button"))[0];
+        if (!deviceButton) throw new Error("physical device picker button missing");
+        deviceButton.fire("click");
+        const deviceCard = findAll(screen, (node) => String(node.className).split(" ").includes("scenario-device-picker-card"))
+          .find((node) => textOf(node).includes("Люстра"));
+        if (!deviceCard) throw new Error("physical device card missing");
+        deviceCard.fire("click");
         const command = labelledControl("Команда устройства");
         command.value = "turn_on";
         command.fire("change");
@@ -2991,18 +3005,58 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
-    def test_scenario_state_selector_localizes_labels_and_saves_raw_ha_value(self) -> None:
+    def test_scenario_picker_groups_physical_devices_and_uses_motion_states(self) -> None:
         payloads = dict(GET_PATHS)
         payloads["hausman_hub/v1/admin/scenarios"] = {"scenarios": []}
         payloads["hausman_hub/v1/admin/scenarios/catalog"] = {
             "devices": [
                 {
-                    "target_id": "switch.living",
-                    "name": "Свет гостиной",
-                    "entity_id": "switch.living",
-                    "properties": [],
+                    "target_id": "entity_motion",
+                    "name": "Датчик движения малый коридор · Занятость",
+                    "entity_id": "binary_sensor.corridor_occupancy",
+                    "physical_id": "device-corridor-motion",
+                    "physical_name": "Датчик движения малый коридор",
+                    "room_name": "Малый коридор",
+                    "device_type_name": "Датчики",
+                    "capability_name": "Движение",
+                    "properties": [
+                        {
+                            "property_id": "state",
+                            "label": "Движение",
+                            "value_type": "enum",
+                            "comparisons": ["equals", "not_equals", "changed"],
+                            "options": [
+                                {"value": "on", "label": "Движение"},
+                                {"value": "off", "label": "Нет движения"},
+                            ],
+                        }
+                    ],
+                    "actions": [],
+                },
+                {
+                    "target_id": "entity_chandelier_light",
+                    "name": "Люстра малый коридор · Люстра малый коридор",
+                    "entity_id": "light.corridor",
+                    "physical_id": "device-corridor-chandelier",
+                    "physical_name": "Люстра малый коридор",
+                    "room_name": "Малый коридор",
+                    "device_type_name": "Освещение",
+                    "capability_name": "Освещение",
+                    "properties": [{"property_id": "state", "label": "Освещение", "value_type": "enum", "comparisons": ["equals", "not_equals", "changed"], "options": [{"value": "on", "label": "Включено"}, {"value": "off", "label": "Выключено"}]}],
                     "actions": [{"action_id": "turn_on", "title": "Включить"}],
-                }
+                },
+                {
+                    "target_id": "entity_chandelier_dnd",
+                    "name": "Люстра малый коридор · Do not disturb",
+                    "entity_id": "switch.corridor_dnd",
+                    "physical_id": "device-corridor-chandelier",
+                    "physical_name": "Люстра малый коридор",
+                    "room_name": "Малый коридор",
+                    "device_type_name": "Освещение",
+                    "capability_name": "Не беспокоить",
+                    "properties": [{"property_id": "state", "label": "Не беспокоить", "value_type": "enum", "comparisons": ["equals", "not_equals", "changed"], "options": [{"value": "on", "label": "Включено"}, {"value": "off", "label": "Выключено"}]}],
+                    "actions": [{"action_id": "turn_on", "title": "Включить"}],
+                },
             ]
         }
         script = panel_script(
@@ -3022,19 +3076,35 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           return wrapper.children.find((node) => ["INPUT", "TEXTAREA", "SELECT"].includes(node.tagName));
         };
         const title = field("Название");
-        title.value = "Проверка света";
+        title.value = "Свет по движению";
         title.fire("input");
         findAll(screen, (node) => String(node.className).split(" ").includes("scenario-editor-step"))
           .find((node) => textOf(node).includes("Когда")).fire("click");
         let triggerType = field("Тип триггера");
         triggerType.value = "device_state";
         triggerType.fire("change");
-        let device = field("Устройство");
-        device.value = "switch.living";
-        device.fire("change");
-        const state = field("Состояние");
+        const deviceButton = findAll(screen, (node) => String(node.className).split(" ").includes("scenario-device-select-button"))[0];
+        if (!deviceButton) throw new Error("physical device picker button missing");
+        deviceButton.fire("click");
+        const filterChips = () => findAll(screen, (node) => String(node.className).split(" ").includes("scenario-device-filter-chip"));
+        if (!filterChips().some((node) => node.textContent === "Все комнаты")
+            || !filterChips().some((node) => node.textContent === "Все типы")) {
+          throw new Error("quick room and device type filters are missing");
+        }
+        filterChips().find((node) => node.textContent === "Датчики").fire("click");
+        if (findAll(screen, (node) => String(node.className).split(" ").includes("scenario-device-picker-card")).length !== 1) {
+          throw new Error("device type quick filter did not narrow physical cards");
+        }
+        filterChips().find((node) => node.textContent === "Все типы").fire("click");
+        const pickerCards = findAll(screen, (node) => String(node.className).split(" ").includes("scenario-device-picker-card"));
+        if (pickerCards.length !== 2) throw new Error("entity duplicates were not grouped into two physical devices");
+        const deviceCard = pickerCards.find((node) => textOf(node).includes("Датчик движения малый коридор"));
+        if (!deviceCard) throw new Error("physical device card missing");
+        deviceCard.fire("click");
+        const state = field("Движение");
         const enabledOption = state.children.find((option) => option.value === "on");
-        if (!enabledOption || enabledOption.textContent !== "Включено") {
+        if (!enabledOption || enabledOption.textContent !== "Движение"
+            || state.children.some((option) => option.textContent === "Заблокировано" || option.textContent === "Воспроизводится")) {
           throw new Error("localized state option does not preserve raw HA value");
         }
         state.value = "on";
@@ -3043,7 +3113,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("localized selector stored a translated value");
         }
         panel._scenarioEditor.definition.actions = [{
-          id: "action-1", type: "device_action", targetId: "switch.living", actionId: "turn_on",
+          id: "action-1", type: "device_action", targetId: "entity_chandelier_light", actionId: "turn_on",
         }];
         panel._renderScenarios(screen);
         findAll(screen, (node) => node.tagName === "BUTTON" && node.textContent === "Сохранить")[0].fire("click");
@@ -3977,7 +4047,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.92")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.93")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

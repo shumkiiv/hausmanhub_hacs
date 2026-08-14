@@ -8,7 +8,10 @@ from custom_components.hausman_hub.application.scenario_catalog import (
     SCENARIO_CATALOG_DOMAINS,
     _domain_actions,
     _number_range,
+    _relative_capability_name,
+    _stable_physical_id,
     _stable_target_id_from_entity,
+    _state_property,
 )
 
 
@@ -20,6 +23,7 @@ class ScenarioCatalogPureTest(unittest.TestCase):
             SCENARIO_CATALOG_DOMAINS,
             {
                 "button",
+                "binary_sensor",
                 "climate",
                 "cover",
                 "fan",
@@ -28,6 +32,8 @@ class ScenarioCatalogPureTest(unittest.TestCase):
                 "lock",
                 "media_player",
                 "number",
+                "select",
+                "sensor",
                 "switch",
                 "vacuum",
                 "valve",
@@ -110,6 +116,54 @@ class ScenarioCatalogPureTest(unittest.TestCase):
         self.assertNotEqual(
             _stable_target_id_from_entity("light.living_room"),
             _stable_target_id_from_entity("switch.kitchen"),
+        )
+
+    def test_physical_id_groups_entities_of_one_ha_device(self) -> None:
+        self.assertEqual(
+            _stable_physical_id("registry-device-1", "light.corridor"),
+            _stable_physical_id("registry-device-1", "switch.corridor_dnd"),
+        )
+        self.assertNotEqual(
+            _stable_physical_id(None, "light.corridor"),
+            _stable_physical_id(None, "switch.corridor_dnd"),
+        )
+
+    def test_motion_sensor_has_only_associative_states(self) -> None:
+        state = type(
+            "State",
+            (),
+            {
+                "state": "off",
+                "attributes": {"device_class": "motion"},
+            },
+        )()
+        prop = _state_property(state, "binary_sensor", "motion", "Движение")
+        self.assertEqual("state", prop.property_id)
+        self.assertEqual("Движение", prop.label)
+        self.assertEqual(
+            [("on", "Движение"), ("off", "Нет движения")],
+            [(option.value, option.label) for option in prop.options],
+        )
+        self.assertEqual(("equals", "not_equals", "changed"), prop.comparisons)
+
+    def test_repeated_device_name_becomes_concise_capability(self) -> None:
+        self.assertEqual(
+            "Освещение",
+            _relative_capability_name(
+                "Люстра малый коридор Люстра малый коридор",
+                "Люстра малый коридор",
+                "light",
+                "",
+            ),
+        )
+        self.assertEqual(
+            "Не беспокоить",
+            _relative_capability_name(
+                "Люстра малый коридор Do not disturb",
+                "Люстра малый коридор",
+                "switch",
+                "",
+            ),
         )
 
 

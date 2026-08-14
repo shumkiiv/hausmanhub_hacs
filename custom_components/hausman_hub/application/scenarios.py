@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from http import HTTPStatus
@@ -53,6 +54,26 @@ class ScenarioDeviceAction:
 
 
 @dataclass(frozen=True, slots=True)
+class ScenarioPropertyOption:
+    """One raw Home Assistant value with a localized editor label."""
+
+    value: str | float | int | bool
+    label: str
+
+
+@dataclass(frozen=True, slots=True)
+class ScenarioDeviceProperty:
+    """One observable entity property approved for scenario rules."""
+
+    property_id: str
+    label: str
+    value_type: str
+    comparisons: tuple[str, ...]
+    options: tuple[ScenarioPropertyOption, ...] = ()
+    unit: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class ScenarioDeviceEntry:
     """One device known to the scenario catalog."""
 
@@ -60,6 +81,14 @@ class ScenarioDeviceEntry:
     name: str
     entity_id: str
     actions: tuple[ScenarioDeviceAction, ...]
+    physical_id: str | None = None
+    physical_name: str | None = None
+    room_id: str | None = None
+    room_name: str | None = None
+    device_type: str | None = None
+    device_type_name: str | None = None
+    capability_name: str | None = None
+    properties: tuple[ScenarioDeviceProperty, ...] = ()
     range_minimum: float | None = None
     range_maximum: float | None = None
     range_step: float | None = None
@@ -69,6 +98,15 @@ class ScenarioDeviceEntry:
 
         return next(
             (action for action in self.actions if action.action_id == action_id),
+            None,
+        )
+
+    def property(self, property_id: str) -> ScenarioDeviceProperty | None:
+        """Return one approved property, accepting the legacy Russian state id."""
+
+        normalized = "state" if property_id == "Состояние" else property_id
+        return next(
+            (item for item in self.properties if item.property_id == normalized),
             None,
         )
 
@@ -181,10 +219,17 @@ def _validate_trigger_semantics(
     for index, trigger in enumerate(definition.triggers):
         path = f"definition.triggers[{index}]"
         if trigger.type is ScenarioTriggerType.DEVICE_STATE:
-            _require_device(
+            device = _require_device(
                 catalog,
                 trigger.target_id,
                 f"{path}.targetId",
+            )
+            _validate_device_property(
+                device,
+                trigger.property,
+                trigger.comparison,
+                trigger.value,
+                path,
             )
         elif trigger.type is ScenarioTriggerType.PRESENCE:
             _require_presence_value(trigger.value, f"{path}.value")
@@ -204,10 +249,17 @@ def _validate_condition_semantics(
     for index, condition in enumerate(definition.conditions):
         path = f"definition.conditions[{index}]"
         if condition.type is ScenarioConditionType.DEVICE_STATE:
-            _require_device(
+            device = _require_device(
                 catalog,
                 condition.target_id,
                 f"{path}.targetId",
+            )
+            _validate_device_property(
+                device,
+                condition.property,
+                condition.comparison,
+                condition.value,
+                path,
             )
             if condition.comparison is ScenarioComparison.CHANGED:
                 raise ScenarioDefinitionViolation(
@@ -380,18 +432,65 @@ def _require_device(
     catalog: ScenarioCatalog,
     target_id: str | None,
     path: str,
-) -> None:
+) -> ScenarioDeviceEntry:
     if not target_id:
         raise ScenarioDefinitionViolation(
             "targetId is required",
             path=path,
         )
-    if catalog.device(target_id) is None:
+    device = catalog.device(target_id)
+    if device is None:
         raise ScenarioDefinitionViolation(
             f"device {target_id} is not available",
             path=path,
             status=HTTPStatus.NOT_FOUND,
         )
+    return device
+
+
+def _validate_device_property(
+    device: ScenarioDeviceEntry,
+    property_id: str | None,
+    comparison: ScenarioComparison | None,
+    value: object,
+    path: str,
+) -> None:
+    """Reject states that do not belong to the selected HA capability."""
+
+    if not device.properties:
+        return
+    prop = device.property(property_id or "")
+    if prop is None:
+        raise ScenarioDefinitionViolation(
+            "property is not available for the selected device capability",
+            path=f"{path}.property",
+        )
+    comparison_value = comparison.value if comparison is not None else None
+    if comparison_value not in prop.comparisons:
+        raise ScenarioDefinitionViolation(
+            "comparison is not available for the selected property",
+            path=f"{path}.comparison",
+        )
+    if comparison is ScenarioComparison.CHANGED:
+        return
+    if prop.options and not any(str(option.value) == str(value) for option in prop.options):
+        raise ScenarioDefinitionViolation(
+            "state is not available for the selected device capability",
+            path=f"{path}.value",
+        )
+    if prop.value_type == "number":
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError) as error:
+            raise ScenarioDefinitionViolation(
+                "numeric property needs a numeric value",
+                path=f"{path}.value",
+            ) from error
+        if not math.isfinite(numeric):
+            raise ScenarioDefinitionViolation(
+                "numeric property needs a finite value",
+                path=f"{path}.value",
+            )
 
 
 def _require_presence_value(value: object, path: str) -> None:

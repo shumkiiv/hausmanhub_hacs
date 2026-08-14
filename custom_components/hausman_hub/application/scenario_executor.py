@@ -141,7 +141,7 @@ def _evaluate_condition(
                 else None
             ),
         )
-        if condition.property == "state":
+        if condition.property in {"state", "Состояние"}:
             actual = effective_state
         elif dependency_status is not None and dependency_status.blocks_commands:
             return (False, dependency_status.reason)

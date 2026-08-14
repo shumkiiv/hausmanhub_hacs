@@ -1,9 +1,10 @@
 /* Scenario library and editor shared with the HausmanHub tablet contract. */
 
-import { activeElementWithin, trapModalTabKey } from "./hausman-hub-modal.js?v=1.52.92";
-import { scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.92";
-import { eventDataFromDraft, scenarioEditorIssues, scenarioEventFields, scenarioField, scenarioIconField, scenarioSelectField, scenarioToggle } from "./hausman-hub-scenario-fields.js?v=1.52.92";
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.92";
+import { activeElementWithin, trapModalTabKey } from "./hausman-hub-modal.js?v=1.52.93";
+import { scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.93";
+import { eventDataFromDraft, scenarioEditorIssues, scenarioEventFields, scenarioField, scenarioIconField, scenarioSelectField, scenarioToggle } from "./hausman-hub-scenario-fields.js?v=1.52.93";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.93";
+import { scenarioCapabilityLabel, scenarioDeviceButton, scenarioDeviceFields, scenarioGroupForTarget, scenarioPhysicalGroups } from "./hausman-hub-scenario-device-picker.js?v=1.52.93";
 
 const TRIGGER_TYPES = [
   ["manual", "Ручной запуск"], ["time", "По времени"],
@@ -18,19 +19,6 @@ const CONDITION_TYPES = [
 const ACTION_TYPES = [
   ["device_action", "Управление устройством"], ["delay", "Пауза"],
   ["run_scenario", "Запустить сценарий"], ["notification", "Уведомление"],
-];
-const COMPARISONS = [
-  ["equals", "равно"], ["not_equals", "не равно"], ["above", "выше"],
-  ["below", "ниже"], ["changed", "изменилось"],
-];
-const SCENARIO_STATE_OPTIONS = [
-  ["", "Выберите состояние"],
-  ["on", "Включено"], ["off", "Выключено"],
-  ["open", "Открыто"], ["closed", "Закрыто"],
-  ["locked", "Заблокировано"], ["unlocked", "Разблокировано"],
-  ["home", "Кто-то дома"], ["not_home", "Никого нет дома"],
-  ["available", "Доступно"], ["unavailable", "Недоступно"],
-  ["playing", "Воспроизводится"], ["paused", "Пауза"], ["idle", "Ожидание"],
 ];
 const EDITOR_STEPS = [
   ["about", "Основное", "Название, иконка и режим выполнения"],
@@ -136,53 +124,6 @@ function updateScenarioEditor(panel) {
   panel._renderScenarios(panel._shell.scenarios);
 }
 
-function scenarioDeviceFields(panel, rule, deps, onChange, includeComparison = true) {
-  const devices = scenarioDevices(panel);
-  const targetOptions = [["", "Выберите устройство"]].concat(devices.map((device) => [
-    device.target_id, device.name || device.entity_id || device.target_id,
-  ]));
-  const selected = devices.find((device) => device.target_id === rule.targetId);
-  const fragment = deps.el("div", "scenario-rule-fields");
-  fragment.appendChild(scenarioSelectField(deps, "Устройство", rule.targetId || "", targetOptions, (value) => {
-    const device = devices.find((item) => item.target_id === value);
-    onChange({
-      ...rule,
-      targetId: value || null,
-      targetName: device && device.name || null,
-      property: rule.property || "Состояние",
-      ...(includeComparison ? { comparison: rule.comparison || "equals" } : {}),
-    });
-  }, "Выберите физическое устройство, состояние которого нужно учитывать."));
-  const properties = ["Состояние"];
-  if (selected && Array.isArray(selected.properties)) selected.properties.forEach((item) => properties.push(item));
-  fragment.appendChild(scenarioSelectField(deps, "Показатель", rule.property || "Состояние", properties.map((item) => [item, item]), (value) => onChange({ ...rule, property: value })));
-  if (includeComparison) {
-    fragment.appendChild(scenarioSelectField(deps, "Сравнение", rule.comparison || "equals", COMPARISONS, (value) => onChange({ ...rule, comparison: value })));
-  }
-  if (rule.comparison !== "changed") {
-    const property = rule.property || "Состояние";
-    const comparison = rule.comparison || "equals";
-    if (property === "Состояние" && ["equals", "not_equals"].includes(comparison)) {
-      const stateOptions = SCENARIO_STATE_OPTIONS.slice();
-      const currentValue = String(rule.value || "");
-      if (currentValue && !stateOptions.some(([value]) => value === currentValue)) {
-        stateOptions.push([currentValue, `Другое состояние: ${currentValue}`]);
-      }
-      fragment.appendChild(scenarioSelectField(
-        deps,
-        "Состояние",
-        currentValue,
-        stateOptions,
-        (value) => onChange({ ...rule, value }),
-        "В интерфейсе показано понятное название, а сценарий сохраняет исходное состояние Home Assistant.",
-      ));
-    } else {
-      fragment.appendChild(scenarioField(deps, "Значение", rule.value || "", (value) => onChange({ ...rule, value }), { placeholder: "например 23" }));
-    }
-  }
-  return fragment;
-}
-
 function scenarioRuleCard(panel, kind, rule, index, rules, deps) {
   const { el } = deps;
   const card = el("article", "scenario-rule-card");
@@ -236,17 +177,30 @@ function scenarioRuleCard(panel, kind, rule, index, rules, deps) {
     if (rule.type === "presence") card.appendChild(scenarioSelectField(deps, "Состояние дома", rule.value || "home", [["home", "Кто-то дома"], ["away", "Никого нет дома"]], (value) => change({ ...rule, value })));
     if (rule.type === "time_window") card.appendChild(scenarioField(deps, "Промежуток", rule.value || "", (value) => change({ ...rule, value }), { placeholder: "22:00-07:00" }));
     if (rule.type === "weekday") card.appendChild(scenarioField(deps, "Дни недели", rule.value || "", (value) => change({ ...rule, value }), { placeholder: "пн, вт, ср, чт, пт" }));
-    if (rule.type === "device_state") card.appendChild(scenarioDeviceFields(panel, rule, deps, change));
+    if (rule.type === "device_state") card.appendChild(scenarioDeviceFields(panel, rule, deps, change, true, false));
   } else {
     const availableTypes = rule.type === "existing_action" ? ACTION_TYPES.concat([["existing_action", "Действие центра"]]) : ACTION_TYPES;
     card.appendChild(scenarioSelectField(deps, "Тип шага", rule.type, availableTypes, (type) => change({ id: rule.id, type, ...(type === "delay" ? { delaySeconds: 5 } : {}) })));
     if (rule.type === "device_action") {
       const devices = scenarioDevices(panel);
       const selected = devices.find((device) => device.target_id === rule.targetId);
-      card.appendChild(scenarioSelectField(deps, "Устройство", rule.targetId || "", [["", "Выберите устройство"]].concat(devices.map((device) => [device.target_id, device.name || device.entity_id])), (value) => {
-        const device = devices.find((item) => item.target_id === value);
-        change({ ...rule, targetId: value || null, targetName: device && device.name || null, actionId: null, actionTitle: null });
+      const groups = scenarioPhysicalGroups(devices, true);
+      const selectedGroup = scenarioGroupForTarget(groups, rule.targetId);
+      card.appendChild(scenarioDeviceButton(panel, rule, deps, devices, true, (device) => {
+        change({ ...rule, targetId: device.target_id, targetName: device.physical_name || device.name || null, actionId: null, actionTitle: null });
       }));
+      if (selectedGroup && selectedGroup.entries.length > 1) {
+        card.appendChild(scenarioSelectField(
+          deps,
+          "Возможность устройства",
+          selected && selected.target_id || "",
+          selectedGroup.entries.map((device) => [device.target_id, scenarioCapabilityLabel(device)]),
+          (value) => {
+            change({ ...rule, targetId: value, targetName: selectedGroup.name, actionId: null, actionTitle: null });
+          },
+          "Команды относятся только к выбранному каналу или функции.",
+        ));
+      }
       const actions = selected && Array.isArray(selected.actions) ? selected.actions : [];
       card.appendChild(scenarioSelectField(deps, "Команда устройства", rule.actionId || "", [["", selected ? "Выберите команду" : "Сначала выберите устройство"]].concat(actions.map((action) => [action.action_id, action.title || action.action_id])), (value) => {
         const action = actions.find((item) => item.action_id === value);

@@ -7,7 +7,13 @@ import math
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
-from .scenarios import ScenarioCatalog, ScenarioDeviceAction, ScenarioDeviceEntry
+from .scenarios import (
+    ScenarioCatalog,
+    ScenarioDeviceAction,
+    ScenarioDeviceEntry,
+    ScenarioDeviceProperty,
+    ScenarioPropertyOption,
+)
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -16,6 +22,7 @@ if TYPE_CHECKING:
 SCENARIO_CATALOG_DOMAINS = frozenset(
     {
         "button",
+        "binary_sensor",
         "climate",
         "cover",
         "fan",
@@ -24,12 +31,100 @@ SCENARIO_CATALOG_DOMAINS = frozenset(
         "lock",
         "media_player",
         "number",
+        "select",
+        "sensor",
         "switch",
         "vacuum",
         "valve",
         "water_heater",
     }
 )
+
+_TYPE_NAMES = {
+    "binary_sensor": "Датчики",
+    "button": "Кнопки",
+    "climate": "Кондиционеры",
+    "cover": "Шторы и ворота",
+    "fan": "Вентиляция",
+    "humidifier": "Увлажнители",
+    "light": "Освещение",
+    "lock": "Замки",
+    "media_player": "Медиа",
+    "number": "Настройки",
+    "select": "Режимы",
+    "sensor": "Датчики",
+    "switch": "Выключатели",
+    "vacuum": "Пылесосы",
+    "valve": "Клапаны",
+    "water_heater": "Нагрев воды",
+}
+
+_ON_OFF_DEVICE_CLASSES = {
+    "battery_charging": ("Заряжается", "Не заряжается"),
+    "cold": ("Холодно", "Норма"),
+    "connectivity": ("Подключено", "Нет связи"),
+    "door": ("Открыто", "Закрыто"),
+    "garage_door": ("Открыто", "Закрыто"),
+    "gas": ("Обнаружен газ", "Газа нет"),
+    "heat": ("Перегрев", "Норма"),
+    "light": ("Обнаружен свет", "Свет не обнаружен"),
+    "lock": ("Разблокировано", "Заблокировано"),
+    "moisture": ("Обнаружена вода", "Сухо"),
+    "motion": ("Движение", "Нет движения"),
+    "occupancy": ("Движение", "Нет движения"),
+    "opening": ("Открыто", "Закрыто"),
+    "plug": ("Подключено", "Отключено"),
+    "power": ("Питание есть", "Питания нет"),
+    "presence": ("Присутствие", "Нет присутствия"),
+    "problem": ("Есть проблема", "В норме"),
+    "running": ("Работает", "Не работает"),
+    "safety": ("Небезопасно", "Безопасно"),
+    "smoke": ("Обнаружен дым", "Дыма нет"),
+    "sound": ("Обнаружен звук", "Звука нет"),
+    "tamper": ("Вскрытие", "В норме"),
+    "vibration": ("Вибрация", "Нет вибрации"),
+    "window": ("Открыто", "Закрыто"),
+}
+
+_STATE_LABELS = {
+    "auto": "Автоматически",
+    "cleaning": "Уборка",
+    "closed": "Закрыто",
+    "closing": "Закрывается",
+    "cool": "Охлаждение",
+    "docked": "На базе",
+    "dry": "Осушение",
+    "fan_only": "Вентиляция",
+    "heat": "Обогрев",
+    "heat_cool": "Автоматический климат",
+    "idle": "Ожидание",
+    "locked": "Заблокировано",
+    "off": "Выключено",
+    "on": "Включено",
+    "open": "Открыто",
+    "opening": "Открывается",
+    "paused": "Пауза",
+    "playing": "Воспроизводится",
+    "returning": "Возвращается на базу",
+    "unlocked": "Разблокировано",
+}
+
+_CAPABILITY_TRANSLATIONS = {
+    "do not disturb": "Не беспокоить",
+    "illumination": "Освещённость",
+    "led indicator": "Индикатор",
+    "motion": "Движение",
+    "motion timeout": "Тайм-аут движения",
+    "occupancy": "Присутствие",
+    "operation mode 1": "Режим работы",
+    "power-on behavior 1": "Поведение после включения",
+    "power type": "Тип питания",
+    "temperature": "Температура",
+    "humidity": "Влажность",
+    "power": "Питание",
+    "energy": "Энергия",
+    "brightness": "Яркость",
+}
 
 
 def _domain_actions(domain: str) -> tuple[ScenarioDeviceAction, ...]:
@@ -367,6 +462,147 @@ def _friendly_name(state: object) -> str:
     return name if isinstance(name, str) else getattr(state, "entity_id", "")
 
 
+def _stable_physical_id(device_id: str | None, entity_id: str) -> str:
+    source = f"device:{device_id}" if device_id else f"entity:{entity_id}"
+    digest = hashlib.sha256(source.encode("utf-8")).hexdigest()[:16]
+    return f"device_{digest}"
+
+
+def _relative_capability_name(
+    friendly_name: str,
+    physical_name: str,
+    domain: str,
+    device_class: str,
+) -> str:
+    """Remove repeated device prefixes and localize a concise capability."""
+
+    value = friendly_name.strip()
+    prefix = physical_name.strip()
+    while prefix and value.casefold().startswith(prefix.casefold()):
+        value = value[len(prefix):].strip(" ·:-_/|")
+    if device_class in {"motion", "occupancy"}:
+        return "Движение"
+    if not value:
+        return _TYPE_NAMES.get(domain, "Состояние")
+    translated = _CAPABILITY_TRANSLATIONS.get(value.casefold())
+    return translated or value
+
+
+def _localized_state_label(value: object) -> str:
+    raw = str(value)
+    return _STATE_LABELS.get(raw.casefold(), raw.replace("_", " ").capitalize())
+
+
+def _state_options(
+    domain: str,
+    device_class: str,
+    attributes: Mapping[str, object],
+) -> tuple[ScenarioPropertyOption, ...]:
+    if domain == "binary_sensor":
+        on_label, off_label = _ON_OFF_DEVICE_CLASSES.get(
+            device_class, ("Сработал", "Не сработал")
+        )
+        return (
+            ScenarioPropertyOption("on", on_label),
+            ScenarioPropertyOption("off", off_label),
+        )
+    if domain in {"light", "switch", "fan", "humidifier", "water_heater"}:
+        return (
+            ScenarioPropertyOption("on", "Включено"),
+            ScenarioPropertyOption("off", "Выключено"),
+        )
+    if domain == "lock":
+        return (
+            ScenarioPropertyOption("locked", "Заблокировано"),
+            ScenarioPropertyOption("unlocked", "Разблокировано"),
+        )
+    if domain in {"cover", "valve"}:
+        return tuple(
+            ScenarioPropertyOption(value, _localized_state_label(value))
+            for value in ("open", "closed", "opening", "closing")
+        )
+    option_keys = {
+        "climate": "hvac_modes",
+        "select": "options",
+        "sensor": "options",
+    }
+    raw_options = attributes.get(option_keys.get(domain, ""))
+    if isinstance(raw_options, (list, tuple)):
+        values = [item for item in raw_options if isinstance(item, (str, int, float))]
+        if values:
+            return tuple(
+                ScenarioPropertyOption(item, _localized_state_label(item))
+                for item in values[:64]
+            )
+    if domain == "media_player":
+        values = ("playing", "paused", "idle", "off", "on")
+        return tuple(
+            ScenarioPropertyOption(value, _localized_state_label(value))
+            for value in values
+        )
+    if domain == "vacuum":
+        values = ("cleaning", "docked", "returning", "paused", "idle")
+        return tuple(
+            ScenarioPropertyOption(value, _localized_state_label(value))
+            for value in values
+        )
+    return ()
+
+
+def _state_property(
+    state: object,
+    domain: str,
+    device_class: str,
+    capability_name: str,
+) -> ScenarioDeviceProperty:
+    attributes = getattr(state, "attributes", {})
+    if not isinstance(attributes, Mapping):
+        attributes = {}
+    options = _state_options(domain, device_class, attributes)
+    raw_state = getattr(state, "state", None)
+    unit = attributes.get("unit_of_measurement")
+    numeric = domain == "number"
+    if isinstance(raw_state, str) and raw_state not in {"unknown", "unavailable", ""}:
+        try:
+            numeric = math.isfinite(float(raw_state))
+        except ValueError:
+            pass
+    if options:
+        value_type = "enum"
+        comparisons = ("equals", "not_equals", "changed")
+    elif numeric:
+        value_type = "number"
+        comparisons = ("equals", "not_equals", "above", "below", "changed")
+    else:
+        value_type = "text"
+        comparisons = ("equals", "not_equals", "changed")
+    return ScenarioDeviceProperty(
+        property_id="state",
+        label=capability_name,
+        value_type=value_type,
+        comparisons=comparisons,
+        options=options,
+        unit=unit if isinstance(unit, str) and unit else None,
+    )
+
+
+def _registries(hass: HomeAssistant) -> tuple[object | None, object | None, object | None]:
+    """Read official HA registries with lightweight test doubles as fallback."""
+
+    try:
+        from homeassistant.helpers import area_registry as ar  # noqa: PLC0415
+        from homeassistant.helpers import device_registry as dr  # noqa: PLC0415
+        from homeassistant.helpers import entity_registry as er  # noqa: PLC0415
+
+        return dr.async_get(hass), er.async_get(hass), ar.async_get(hass)
+    except (ImportError, AttributeError, KeyError, TypeError):
+        return (
+            hass.data.get("device_registry"),
+            hass.data.get("entity_registry"),
+            hass.data.get("area_registry"),
+        )
+
+
 def _number_range(state: object) -> tuple[float, float, float] | None:
     attributes = getattr(state, "attributes", {})
     if not isinstance(attributes, Mapping):
@@ -396,13 +632,11 @@ def _registry_entry(registry: object, key: str, collection_name: str) -> object 
 async def async_build_scenario_catalog(hass: HomeAssistant) -> ScenarioCatalog:
     """Build a live catalog of controllable devices for the scenario editor.
 
-    Each controllable entity becomes its own target. This keeps multi-channel
-    switches and multi-entity devices predictable: every entity has a stable
-    targetId and its own entity_id for command resolution.
+    Each observable entity keeps its own stable target for execution, while
+    physical metadata lets clients present one device and its capabilities.
     """
 
-    device_registry = hass.data.get("device_registry")
-    entity_registry = hass.data.get("entity_registry")
+    device_registry, entity_registry, area_registry = _registries(hass)
     devices: dict[str, ScenarioDeviceEntry] = {}
 
     states_async_all = getattr(hass.states, "async_all", None)
@@ -415,14 +649,13 @@ async def async_build_scenario_catalog(hass: HomeAssistant) -> ScenarioCatalog:
         if domain not in SCENARIO_CATALOG_DOMAINS:
             continue
         actions = _domain_actions(domain)
-        if not actions:
-            continue
         number_range = _number_range(state) if domain == "number" else None
         if domain == "number" and number_range is None:
             continue
 
         target_id = _stable_target_id_from_entity(entity_id)
-        name = _friendly_name(state)
+        entity_name = _friendly_name(state)
+        name = entity_name
 
         registry_entry = None
         if entity_registry is not None:
@@ -430,8 +663,11 @@ async def async_build_scenario_catalog(hass: HomeAssistant) -> ScenarioCatalog:
                 entity_registry, entity_id, "entities"
             )
         device_id: str | None = None
+        area_id: str | None = None
         if registry_entry is not None:
             device_id = getattr(registry_entry, "device_id", None)
+            area_id = getattr(registry_entry, "area_id", None)
+        device_name: str | None = None
         if device_id is not None and device_registry is not None:
             device_entry = _registry_entry(device_registry, device_id, "devices")
             if device_entry is not None:
@@ -439,16 +675,45 @@ async def async_build_scenario_catalog(hass: HomeAssistant) -> ScenarioCatalog:
                     device_entry, "name", None
                 )
                 if isinstance(device_name, str) and device_name:
-                    if name and name != device_name:
-                        name = f"{device_name} · {name}"
+                    if entity_name and entity_name != device_name:
+                        name = f"{device_name} · {entity_name}"
                     else:
                         name = device_name
+                area_id = area_id or getattr(device_entry, "area_id", None)
+        if not isinstance(device_name, str) or not device_name:
+            device_name = entity_name
+        room_name: str | None = None
+        if isinstance(area_id, str) and area_id and area_registry is not None:
+            area_entry = _registry_entry(area_registry, area_id, "areas")
+            candidate = getattr(area_entry, "name", None) if area_entry else None
+            room_name = candidate if isinstance(candidate, str) and candidate else None
+        attributes = getattr(state, "attributes", {})
+        device_class_value = (
+            attributes.get("device_class") if isinstance(attributes, Mapping) else None
+        )
+        device_class = (
+            device_class_value if isinstance(device_class_value, str) else ""
+        )
+        capability_name = _relative_capability_name(
+            entity_name, device_name, domain, device_class
+        )
+        state_property = _state_property(
+            state, domain, device_class, capability_name
+        )
 
         devices[target_id] = ScenarioDeviceEntry(
             target_id=target_id,
             name=name,
             entity_id=entity_id,
             actions=actions,
+            physical_id=_stable_physical_id(device_id, entity_id),
+            physical_name=device_name,
+            room_id=area_id if isinstance(area_id, str) and area_id else None,
+            room_name=room_name,
+            device_type=device_class or domain,
+            device_type_name=_TYPE_NAMES.get(domain, "Устройства"),
+            capability_name=capability_name,
+            properties=(state_property,),
             range_minimum=number_range[0] if number_range is not None else None,
             range_maximum=number_range[1] if number_range is not None else None,
             range_step=number_range[2] if number_range is not None else None,

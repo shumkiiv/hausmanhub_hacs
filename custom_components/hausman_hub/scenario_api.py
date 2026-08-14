@@ -93,11 +93,32 @@ class ScenarioCatalogView(_ScenarioView):
         if service is None:
             return self._unavailable()
         catalog = await service.async_refresh_catalog()
-        devices = [
-            {
+        devices = []
+        for device in catalog.devices.values():
+            item = {
                 "target_id": device.target_id,
                 "name": device.name,
                 "entity_id": device.entity_id,
+                "properties": [
+                    {
+                        "property_id": prop.property_id,
+                        "label": prop.label,
+                        "value_type": prop.value_type,
+                        "comparisons": list(prop.comparisons),
+                        **({"unit": prop.unit} if prop.unit is not None else {}),
+                        **(
+                            {
+                                "options": [
+                                    {"value": option.value, "label": option.label}
+                                    for option in prop.options
+                                ]
+                            }
+                            if prop.options
+                            else {}
+                        ),
+                    }
+                    for prop in device.properties
+                ],
                 "actions": [
                     {
                         "action_id": action.action_id,
@@ -109,8 +130,19 @@ class ScenarioCatalogView(_ScenarioView):
                     for action in device.actions
                 ],
             }
-            for device in catalog.devices.values()
-        ]
+            for key in (
+                "physical_id",
+                "physical_name",
+                "room_id",
+                "room_name",
+                "device_type",
+                "device_type_name",
+                "capability_name",
+            ):
+                value = getattr(device, key)
+                if value is not None:
+                    item[key] = value
+            devices.append(item)
         saved_scenarios = await service.async_list_scenarios()
         scenarios = [
             _scenario_catalog_summary(scenario)
