@@ -1,8 +1,18 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-13 (HACS 1.52.90 device sheet ranges).
+Last updated: 2026-08-14 (HACS 1.52.91 compact energy surfaces).
 
 ## Current work
+
+- 2026-08-14 (Codex): HACS `1.52.91` replaces the large dashboard energy card
+  with compact readings and a separate settings action. Meter and source
+  settings live in a dedicated modal; the shorter full-width chart is followed
+  by the enlarged device list. The right source column, duplicate summary and
+  all-online card no longer consume space. Release commit `0b48307`; Actions
+  `31784075602` success; full gate 1382 passed, 4 skipped. Production was backed
+  up as `68484589` (825.3 MB), checked, installed and restarted. Installed,
+  latest, admin panel and cache marker are `1.52.91`; 10 entities are available
+  and the HausmanHub system log is clean. No physical command was sent.
 
 - 2026-08-13 (Kimi implementation, Codex review): HACS `1.52.90` renders
   contract range controls directly in the opened device sheet. The Russian UI
