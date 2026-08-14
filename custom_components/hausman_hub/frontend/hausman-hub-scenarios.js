@@ -1,9 +1,9 @@
 /* Scenario library and editor shared with the HausmanHub tablet contract. */
 
-import { activeElementWithin, trapModalTabKey } from "./hausman-hub-modal.js?v=1.52.91";
-import { scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.91";
-import { eventDataFromDraft, scenarioEditorIssues, scenarioEventFields, scenarioField, scenarioIconField, scenarioSelectField, scenarioToggle } from "./hausman-hub-scenario-fields.js?v=1.52.91";
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.91";
+import { activeElementWithin, trapModalTabKey } from "./hausman-hub-modal.js?v=1.52.92";
+import { scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.92";
+import { eventDataFromDraft, scenarioEditorIssues, scenarioEventFields, scenarioField, scenarioIconField, scenarioSelectField, scenarioToggle } from "./hausman-hub-scenario-fields.js?v=1.52.92";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.92";
 
 const TRIGGER_TYPES = [
   ["manual", "Ручной запуск"], ["time", "По времени"],

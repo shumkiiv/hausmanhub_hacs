@@ -59,11 +59,45 @@ function meterDraft(panel, meter) {
       enabled: meter && meter.settings ? meter.settings.enabled !== false : true,
       submissionDayOfMonth: meter && meter.settings && meter.settings.submissionDayOfMonth || 25,
       reminderDaysBefore: meter && meter.settings ? Number(meter.settings.reminderDaysBefore) || 0 : 3,
+      sourceDeviceId: meter && meter.settings ? meter.settings.sourceDeviceId || "" : "",
       submit: "",
       correct: "",
     };
   }
   return panel._energyMeterDraft;
+}
+
+function meterSources(panel) {
+  const energy = panel._homeDashboard && panel._homeDashboard.energy;
+  return energy && Array.isArray(energy.sources) ? energy.sources : [];
+}
+
+function meterSourceName(sourceDeviceId, sources, fallback = "") {
+  const source = sources.find((item) => item.id === sourceDeviceId || item.deviceId === sourceDeviceId);
+  return source && source.name || fallback || (sourceDeviceId ? "Источник энергии" : "Источник не выбран");
+}
+
+function renderMeterHistory(deps, meter, sources) {
+  const { el } = deps;
+  const history = Array.isArray(meter.history) ? meter.history : [];
+  const list = el("div", "energy-meter-history");
+  list.appendChild(el("span", "energy-settings-label", "История показаний"));
+  if (!history.length) {
+    list.appendChild(el("p", "energy-meter-history-empty", "История пока пуста"));
+    return list;
+  }
+  history.slice(0, 10).forEach((entry) => {
+    const row = el("div", "energy-meter-history-row");
+    row.appendChild(el("span", `energy-meter-history-kind ${entry.kind === "correction" ? "is-correction" : "is-submission"}`,
+      entry.kind === "correction" ? "Корректировка" : "Передача"));
+    const reading = el("div", "energy-meter-history-reading");
+    reading.appendChild(el("strong", null, `${meterNumber(entry.readingKwh)} кВт·ч`));
+    reading.appendChild(el("small", null, meterSourceName(entry.sourceDeviceId, sources)));
+    row.appendChild(reading);
+    row.appendChild(el("small", null, formatMeterDateTime(entry.recordedAt)));
+    list.appendChild(row);
+  });
+  return list;
 }
 
 function meterNumberInput(deps, value, ariaLabel, onInput) {
@@ -136,6 +170,56 @@ export function renderEnergyMeterCard(panel, deps) {
   if (panel._energyMeterNotice) card.appendChild(el("p", "energy-meter-notice", panel._energyMeterNotice));
 
   const draft = meterDraft(panel, meter);
+  const sources = meterSources(panel);
+  const sourceReady = !!(meter.settings && meter.settings.sourceDeviceId
+    && draft.sourceDeviceId === meter.settings.sourceDeviceId);
+  const sourceCard = el("div", "energy-meter-source-picker");
+  sourceCard.appendChild(el("span", "energy-settings-label", "Источник показаний"));
+  sourceCard.appendChild(el("p", "energy-meter-source-help",
+    "Выберите автомат или источник, к накопительному значению которого относятся показания."));
+  const sourceOptions = el("div", "energy-meter-source-options");
+  sources.forEach((source) => {
+    const option = el("label", `energy-meter-source-option${draft.sourceDeviceId === source.id ? " is-selected" : ""}`);
+    const radio = el("input");
+    radio.type = "radio";
+    radio.name = "energy-meter-source";
+    radio.value = source.id;
+    radio.checked = draft.sourceDeviceId === source.id;
+    radio.addEventListener("change", () => {
+      draft.sourceDeviceId = source.id;
+      panel._render();
+    });
+    option.appendChild(radio);
+    const copy = el("span", "energy-meter-source-copy");
+    copy.appendChild(el("strong", null, source.name || "Источник энергии"));
+    copy.appendChild(el("small", null, [source.roomName, Number.isFinite(Number(source.totalKwh))
+      ? `${meterNumber(source.totalKwh, 2)} кВт·ч` : ""].filter(Boolean).join(" · ")));
+    option.appendChild(copy);
+    if (meter.settings && meter.settings.sourceDeviceId === source.id) {
+      option.appendChild(el("b", null, "Привязан"));
+    }
+    sourceOptions.appendChild(option);
+  });
+  if (!sources.length) sourceOptions.appendChild(el("p", "energy-meter-source-empty", "Подходящие источники энергии не найдены"));
+  sourceCard.appendChild(sourceOptions);
+  if (!sourceReady) {
+    const sourceSave = el("button", "secondary energy-meter-source-save", "Сохранить источник");
+    sourceSave.type = "button";
+    sourceSave.disabled = panel._energyMeterSaving || !draft.sourceDeviceId;
+    sourceSave.addEventListener("click", () => postEnergyMeterAction(panel, {
+      action: "configure",
+      settings: {
+        enabled: draft.enabled !== false,
+        submissionDayOfMonth: draft.submissionDayOfMonth,
+        reminderDaysBefore: draft.reminderDaysBefore,
+        sourceDeviceId: draft.sourceDeviceId || null,
+      },
+    }, "Источник показаний сохранён."));
+    sourceCard.appendChild(sourceSave);
+  }
+  card.appendChild(sourceCard);
+  card.appendChild(renderMeterHistory(deps, meter, sources));
+
   const configure = el("div", "energy-meter-form");
   configure.appendChild(el("span", "energy-settings-label", "Расписание передачи"));
   const configureGrid = el("div", "energy-meter-form-grid");
@@ -169,6 +253,7 @@ export function renderEnergyMeterCard(panel, deps) {
       enabled: draft.enabled !== false,
       submissionDayOfMonth: draft.submissionDayOfMonth,
       reminderDaysBefore: draft.reminderDaysBefore,
+      sourceDeviceId: draft.sourceDeviceId || null,
     },
   }, "Расписание передачи сохранено."));
   configure.appendChild(configureSave);
@@ -179,14 +264,14 @@ export function renderEnergyMeterCard(panel, deps) {
   submitBox.appendChild(el("span", "energy-settings-label", "Передать показания"));
   const submitButton = el("button", "energy-meter-submit", "Передать показания");
   submitButton.type = "button";
-  submitButton.disabled = panel._energyMeterSaving || !String(draft.submit).trim();
+  submitButton.disabled = panel._energyMeterSaving || !sourceReady || !String(draft.submit).trim();
   submitButton.addEventListener("click", () => postEnergyMeterAction(panel, {
     action: "submit",
     readingKwh: Number(String(draft.submit).replace(",", ".")),
   }, "Показания переданы. Начался новый месячный цикл."));
   submitBox.appendChild(meterNumberInput(deps, draft.submit, "Новое показание счётчика, кВт·ч", (value) => {
     draft.submit = value;
-    submitButton.disabled = panel._energyMeterSaving || !String(value).trim();
+    submitButton.disabled = panel._energyMeterSaving || !sourceReady || !String(value).trim();
   }));
   submitBox.appendChild(submitButton);
   actions.appendChild(submitBox);
@@ -194,33 +279,20 @@ export function renderEnergyMeterCard(panel, deps) {
   correctBox.appendChild(el("span", "energy-settings-label", "Скорректировать текущее значение"));
   const correctButton = el("button", "secondary", "Скорректировать");
   correctButton.type = "button";
-  correctButton.disabled = panel._energyMeterSaving || !String(draft.correct).trim();
+  correctButton.disabled = panel._energyMeterSaving || !sourceReady || !String(draft.correct).trim();
   correctButton.addEventListener("click", () => postEnergyMeterAction(panel, {
     action: "correct",
     readingKwh: Number(String(draft.correct).replace(",", ".")),
   }, "Текущее показание скорректировано."));
   correctBox.appendChild(meterNumberInput(deps, draft.correct, "Скорректированное показание, кВт·ч", (value) => {
     draft.correct = value;
-    correctButton.disabled = panel._energyMeterSaving || !String(value).trim();
+    correctButton.disabled = panel._energyMeterSaving || !sourceReady || !String(value).trim();
   }));
   correctBox.appendChild(correctButton);
   actions.appendChild(correctBox);
+  if (!sourceReady) actions.appendChild(el("p", "energy-meter-source-required",
+    "Сначала выберите и сохраните источник показаний."));
   card.appendChild(actions);
-
-  const history = Array.isArray(meter.history) ? meter.history : [];
-  if (history.length) {
-    const list = el("div", "energy-meter-history");
-    list.appendChild(el("span", "energy-settings-label", "История передач и корректировок"));
-    history.slice(0, 10).forEach((entry) => {
-      const row = el("div", "energy-meter-history-row");
-      row.appendChild(el("span", `energy-meter-history-kind ${entry.kind === "correction" ? "is-correction" : "is-submission"}`,
-        entry.kind === "correction" ? "Корректировка" : "Передача"));
-      row.appendChild(el("strong", null, `${meterNumber(entry.readingKwh)} кВт·ч`));
-      row.appendChild(el("small", null, formatMeterDateTime(entry.recordedAt)));
-      list.appendChild(row);
-    });
-    card.appendChild(list);
-  }
   return card;
 }
 

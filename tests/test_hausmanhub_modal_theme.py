@@ -303,6 +303,11 @@ class EnergyLayoutTest(unittest.TestCase):
             '"расчётное"',
             "meter.history",
             '"Корректировка" : "Передача"',
+            '"Источник показаний"',
+            '"История показаний"',
+            '"История пока пуста"',
+            "sourceDeviceId: draft.sourceDeviceId || null",
+            "!sourceReady",
             '"energy-meter-reminder"' if False else "meterReminderText",
         ):
             self.assertIn(snippet, js)

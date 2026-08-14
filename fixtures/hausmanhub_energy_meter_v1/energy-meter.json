@@ -5,9 +5,12 @@
   "settings": {
     "enabled": true,
     "submissionDayOfMonth": 25,
-    "reminderDaysBefore": 3
+    "reminderDaysBefore": 3,
+    "sourceDeviceId": "device_0123456789abcdef"
   },
   "source": {
+    "deviceId": "device_0123456789abcdef",
+    "name": "Вводной автомат",
     "available": true,
     "currentTotalKwh": 276.46,
     "state": "available"
@@ -34,6 +37,7 @@
       "kind": "correction",
       "readingKwh": 18290.15,
       "sourceTotalKwh": 223.9,
+      "sourceDeviceId": "device_0123456789abcdef",
       "recordedAt": "2026-08-05T18:00:00Z"
     },
     {
@@ -41,6 +45,7 @@
       "kind": "submission",
       "readingKwh": 18123.4,
       "sourceTotalKwh": 57.15,
+      "sourceDeviceId": "device_0123456789abcdef",
       "recordedAt": "2026-07-25T18:00:00Z"
     }
   ]

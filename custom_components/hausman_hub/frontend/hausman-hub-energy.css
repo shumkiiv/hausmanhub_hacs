@@ -132,11 +132,25 @@
 .energy-meter-field.energy-meter-enabled > span { color:var(--hmh-text); font-size:13px; }
 .energy-meter-input { width:100%; min-height:38px; padding:7px 11px; border-radius:10px; }
 .energy-meter-form > button { min-height:38px; margin:10px 0 0; }
+.energy-meter-source-picker,.energy-meter-history { margin-top:14px; padding:14px; border:1px solid var(--hmh-border); border-radius:14px; background:var(--hmh-raised); }
+.energy-meter-source-help,.energy-meter-history-empty,.energy-meter-source-empty { margin:6px 0 0; color:var(--hmh-text-dim); font-size:13px; line-height:1.4; }
+.energy-meter-source-options { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:10px; }
+.energy-meter-source-option { display:flex; min-height:52px; align-items:center; gap:9px; padding:8px 10px; border:1px solid var(--hmh-border); border-radius:11px; background:var(--hmh-surface); }
+.energy-meter-source-option.is-selected { border-color:var(--hmh-accent); background:color-mix(in srgb,var(--hmh-accent) 9%,var(--hmh-surface)); }
+.energy-meter-source-option input { flex:0 0 auto; accent-color:var(--hmh-accent); }
+.energy-meter-source-copy { display:flex; min-width:0; flex:1; flex-direction:column; }
+.energy-meter-source-copy strong,.energy-meter-source-copy small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.energy-meter-source-copy strong { font-size:14px; }
+.energy-meter-source-copy small { color:var(--hmh-text-dim); font-size:12px; }
+.energy-meter-source-option > b { color:var(--hmh-status-success); font-size:11px; }
+.energy-meter-source-save { width:100%; margin:10px 0 0; }
+.energy-meter-source-required { grid-column:1/-1; margin:0; color:var(--hmh-status-warning,#9A5F0B); font-size:13px; }
 .energy-meter-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-top:14px;
   padding-top:12px; border-top:1px solid var(--hmh-border); }
 .energy-meter-action { display:grid; gap:7px; align-content:start; }
 .energy-meter-action > button { min-height:42px; margin:0; }
-.energy-meter-history { margin-top:14px; padding-top:12px; border-top:1px solid var(--hmh-border); }
+.energy-meter-history-reading { display:flex; flex-direction:column; }
+.energy-meter-history-reading small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .energy-meter-history-row { display:grid; grid-template-columns:130px minmax(0,1fr) auto; align-items:center; gap:12px;
   padding:8px 0; border-bottom:1px solid var(--hmh-border); }
 .energy-meter-history-row:last-of-type { border-bottom:0; }
@@ -253,7 +267,7 @@
 @media (max-width:900px) {
   .energy-metric-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .energy-summary-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
-  .energy-meter-form-grid, .energy-meter-actions { grid-template-columns:1fr; }
+  .energy-meter-form-grid, .energy-meter-actions, .energy-meter-source-options { grid-template-columns:1fr; }
   .energy-devices-toolbar { align-items:flex-start; flex-direction:column; }
   .energy-device-controls { width:100%; flex-wrap:wrap; }
   .energy-device-search { flex:1 1 150px; }

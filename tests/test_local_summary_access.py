@@ -868,6 +868,92 @@ class LocalSummaryAccessTest(unittest.TestCase):
         finally:
             globals_["async_dashboard_snapshot"] = original
 
+    def test_energy_meter_api_binds_projection_to_one_energy_device(self) -> None:
+        path = "/api/hausman_hub/v1/energy/meter"
+        view = next(item for item in self.hass.http.views if item.url == path)
+        source_id = "device_0123456789abcdef"
+
+        async def dashboard_snapshot(*_args: object) -> dict[str, object]:
+            return {
+                "energy": {
+                    "totalKwh": 366.65,
+                    "sources": [
+                        {
+                            "id": source_id,
+                            "name": "Вводной автомат",
+                            "totalKwh": 51.03,
+                        },
+                        {
+                            "id": "device_fedcba9876543210",
+                            "name": "Резервный автомат",
+                            "totalKwh": 315.62,
+                        },
+                    ],
+                }
+            }
+
+        globals_ = view.get.__func__.__globals__
+        original = globals_["async_dashboard_snapshot"]
+        globals_["async_dashboard_snapshot"] = dashboard_snapshot
+        tablet = reader_user("system-users")
+        try:
+            unknown = asyncio.run(
+                view.post(
+                    FakeJsonRequest(
+                        "127.0.0.1",
+                        tablet,
+                        path,
+                        {
+                            "expectedRevision": 0,
+                            "action": "configure",
+                            "settings": {
+                                "enabled": True,
+                                "submissionDayOfMonth": 25,
+                                "reminderDaysBefore": 3,
+                                "sourceDeviceId": "device_aaaaaaaaaaaaaaaa",
+                            },
+                        },
+                    )
+                )
+            )
+            self.assertEqual(400, unknown.status)
+            configured = asyncio.run(
+                view.post(
+                    FakeJsonRequest(
+                        "127.0.0.1",
+                        tablet,
+                        path,
+                        {
+                            "expectedRevision": 0,
+                            "action": "configure",
+                            "settings": {
+                                "enabled": True,
+                                "submissionDayOfMonth": 25,
+                                "reminderDaysBefore": 3,
+                                "sourceDeviceId": source_id,
+                            },
+                        },
+                    )
+                )
+            )
+            self.assertEqual(200, configured.status)
+            self.assertEqual(source_id, configured.payload["source"]["deviceId"])
+            self.assertEqual("Вводной автомат", configured.payload["source"]["name"])
+            self.assertEqual(51.03, configured.payload["source"]["currentTotalKwh"])
+            submitted = asyncio.run(
+                view.post(
+                    FakeJsonRequest(
+                        "127.0.0.1",
+                        tablet,
+                        path,
+                        {"expectedRevision": 1, "action": "submit", "readingKwh": 900.0},
+                    )
+                )
+            )
+            self.assertEqual(source_id, submitted.payload["history"][0]["sourceDeviceId"])
+        finally:
+            globals_["async_dashboard_snapshot"] = original
+
     def test_device_discovery_api_baselines_then_adds_energy_source(self) -> None:
         from custom_components.hausman_hub.application.device_discovery import (
             DiscoveredDevice,
@@ -2651,7 +2737,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.91", panel.payload["integration_version"])
+        self.assertEqual("1.52.92", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",

@@ -28,6 +28,7 @@ def default_energy_meter_settings() -> dict[str, object]:
         "enabled": False,
         "submissionDayOfMonth": 25,
         "reminderDaysBefore": 3,
+        "sourceDeviceId": None,
     }
 
 
@@ -59,10 +60,22 @@ class EnergyMeterService:
                 "lastSubmissionDate": None,
                 "history": [],
             }
-        self._state = _validate_state(loaded)
+        self._state = _validate_state(_migrate_state(loaded))
+
+    @property
+    def source_device_id(self) -> str | None:
+        """Return the selected opaque energy device without exposing storage."""
+
+        settings = _validate_settings(self._require_state()["settings"])
+        source_device_id = settings["sourceDeviceId"]
+        return source_device_id if isinstance(source_device_id, str) else None
 
     def document(
-        self, source_total_kwh: object, source_signature: str | None = None
+        self,
+        source_total_kwh: object,
+        source_signature: str | None = None,
+        source_device_id: str | None = None,
+        source_name: str | None = None,
     ) -> dict[str, object]:
         state = self._require_state()
         source_total = _optional_number(source_total_kwh, "source total")
@@ -122,6 +135,8 @@ class EnergyMeterService:
             "updatedAt": state["updatedAt"],
             "settings": deepcopy(state["settings"]),
             "source": {
+                "deviceId": source_device_id,
+                "name": source_name,
                 "available": source_total is not None,
                 "currentTotalKwh": round(source_total, 3) if source_total is not None else None,
                 "state": source_state,
@@ -145,6 +160,8 @@ class EnergyMeterService:
         payload: object,
         source_total_kwh: object,
         source_signature: str | None = None,
+        source_device_id: str | None = None,
+        source_name: str | None = None,
     ) -> dict[str, object]:
         request = _validate_action(payload)
         source_total = _optional_number(source_total_kwh, "source total")
@@ -184,6 +201,7 @@ class EnergyMeterService:
                         "kind": kind,
                         "readingKwh": reading,
                         "sourceTotalKwh": source_total,
+                        "sourceDeviceId": source_device_id,
                         "recordedAt": timestamp,
                     },
                 )
@@ -193,7 +211,12 @@ class EnergyMeterService:
             validated = _validate_state(next_state)
             await self._store.async_save(validated)
             self._state = validated
-        return self.document(source_total, source_signature)
+        return self.document(
+            source_total,
+            source_signature,
+            source_device_id,
+            source_name,
+        )
 
     def _timestamp(self) -> str:
         value = self._now()
@@ -260,6 +283,23 @@ def _validate_action(value: object) -> dict[str, object]:
     return result
 
 
+def _migrate_state(value: object) -> object:
+    """Add source fields to pre-0.30 durable documents without losing history."""
+
+    if not isinstance(value, dict):
+        return value
+    migrated = deepcopy(value)
+    settings = migrated.get("settings")
+    if isinstance(settings, dict):
+        settings.setdefault("sourceDeviceId", None)
+    history = migrated.get("history")
+    if isinstance(history, list):
+        for record in history:
+            if isinstance(record, dict):
+                record.setdefault("sourceDeviceId", None)
+    return migrated
+
+
 def _validate_state(value: object) -> dict[str, object]:
     required = {"revision", "updatedAt", "settings", "anchor", "cycle", "lastSubmissionDate", "history"}
     if not isinstance(value, dict) or set(value) != required:
@@ -292,7 +332,9 @@ def _validate_state(value: object) -> dict[str, object]:
     if not isinstance(history, list) or len(history) > _MAX_HISTORY:
         raise EnergyMeterViolation("stored energy meter history is invalid")
     for record in history:
-        if not isinstance(record, dict) or set(record) != {"id", "kind", "readingKwh", "sourceTotalKwh", "recordedAt"}:
+        if not isinstance(record, dict) or set(record) != {
+            "id", "kind", "readingKwh", "sourceTotalKwh", "sourceDeviceId", "recordedAt"
+        }:
             raise EnergyMeterViolation("stored energy meter record is invalid")
         if not isinstance(record["id"], str) or not record["id"].startswith("reading_"):
             raise EnergyMeterViolation("stored energy meter record id is invalid")
@@ -300,11 +342,14 @@ def _validate_state(value: object) -> dict[str, object]:
             raise EnergyMeterViolation("stored energy meter record metadata is invalid")
         _number(record["readingKwh"], "history reading")
         _optional_number(record["sourceTotalKwh"], "history source")
+        _optional_device_id(record["sourceDeviceId"], "history source device")
     return deepcopy(value)
 
 
 def _validate_settings(value: object) -> dict[str, object]:
-    if not isinstance(value, dict) or set(value) != {"enabled", "submissionDayOfMonth", "reminderDaysBefore"}:
+    if not isinstance(value, dict) or not set(value).issubset(
+        {"enabled", "submissionDayOfMonth", "reminderDaysBefore", "sourceDeviceId"}
+    ) or not {"enabled", "submissionDayOfMonth", "reminderDaysBefore"}.issubset(value):
         raise EnergyMeterViolation("energy meter settings are invalid")
     enabled = value["enabled"]
     day = value["submissionDayOfMonth"]
@@ -313,7 +358,25 @@ def _validate_settings(value: object) -> dict[str, object]:
         raise EnergyMeterViolation("energy meter settings are invalid")
     if type(reminder) is not int or not 0 <= reminder <= 14:
         raise EnergyMeterViolation("energy meter reminder is invalid")
-    return deepcopy(value)
+    return {
+        "enabled": enabled,
+        "submissionDayOfMonth": day,
+        "reminderDaysBefore": reminder,
+        "sourceDeviceId": _optional_device_id(
+            value.get("sourceDeviceId"), "energy meter source device"
+        ),
+    }
+
+
+def _optional_device_id(value: object, field: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or len(value) != 23 or not value.startswith("device_"):
+        raise EnergyMeterViolation(f"{field} is invalid")
+    suffix = value[7:]
+    if any(character not in "0123456789abcdef" for character in suffix):
+        raise EnergyMeterViolation(f"{field} is invalid")
+    return value
 
 
 def _number(value: object, field: str) -> float:

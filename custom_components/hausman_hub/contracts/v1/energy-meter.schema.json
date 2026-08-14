@@ -26,6 +26,11 @@
       "additionalProperties": false,
       "required": ["available", "currentTotalKwh", "state"],
       "properties": {
+        "deviceId": {
+          "type": ["string", "null"],
+          "pattern": "^device_[0-9a-f]{16}$"
+        },
+        "name": { "type": ["string", "null"], "minLength": 1, "maxLength": 120 },
         "available": { "type": "boolean" },
         "currentTotalKwh": { "type": ["number", "null"], "minimum": 0 },
         "state": { "enum": ["available", "unavailable", "reset_detected"] }
@@ -76,7 +81,11 @@
       "properties": {
         "enabled": { "type": "boolean" },
         "submissionDayOfMonth": { "type": "integer", "minimum": 1, "maximum": 31 },
-        "reminderDaysBefore": { "type": "integer", "minimum": 0, "maximum": 14 }
+        "reminderDaysBefore": { "type": "integer", "minimum": 0, "maximum": 14 },
+        "sourceDeviceId": {
+          "type": ["string", "null"],
+          "pattern": "^device_[0-9a-f]{16}$"
+        }
       }
     },
     "record": {
@@ -88,6 +97,10 @@
         "kind": { "enum": ["submission", "correction"] },
         "readingKwh": { "type": "number", "minimum": 0 },
         "sourceTotalKwh": { "type": ["number", "null"], "minimum": 0 },
+        "sourceDeviceId": {
+          "type": ["string", "null"],
+          "pattern": "^device_[0-9a-f]{16}$"
+        },
         "recordedAt": { "type": "string", "format": "date-time" }
       }
     },

@@ -97,6 +97,64 @@ class EnergyMeterServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(500.0, projected["reading"]["currentKwh"])
         self.assertIsNone(projected["cycle"]["consumptionKwh"])
 
+    async def test_selected_device_is_persisted_and_stamped_on_history(self) -> None:
+        source_id = "device_0123456789abcdef"
+        configured = await self.service.async_action(
+            {
+                "expectedRevision": 0,
+                "action": "configure",
+                "settings": {
+                    "enabled": True,
+                    "submissionDayOfMonth": 25,
+                    "reminderDaysBefore": 3,
+                    "sourceDeviceId": source_id,
+                },
+            },
+            51.03,
+            source_id,
+            source_id,
+            "Вводной автомат",
+        )
+        self.assertEqual(source_id, configured["settings"]["sourceDeviceId"])
+        self.assertEqual(source_id, configured["source"]["deviceId"])
+        self.assertEqual("Вводной автомат", configured["source"]["name"])
+        submitted = await self.service.async_action(
+            {"expectedRevision": 1, "action": "submit", "readingKwh": 1000.0},
+            51.03,
+            source_id,
+            source_id,
+            "Вводной автомат",
+        )
+        self.assertEqual(source_id, submitted["history"][0]["sourceDeviceId"])
+
+    async def test_legacy_document_migrates_nullable_source_fields(self) -> None:
+        legacy = {
+            "revision": 1,
+            "updatedAt": "2026-08-11T01:02:00Z",
+            "settings": {
+                "enabled": True,
+                "submissionDayOfMonth": 25,
+                "reminderDaysBefore": 3,
+            },
+            "anchor": None,
+            "cycle": None,
+            "lastSubmissionDate": None,
+            "history": [
+                {
+                    "id": "reading_1",
+                    "kind": "correction",
+                    "readingKwh": 100.0,
+                    "sourceTotalKwh": 10.0,
+                    "recordedAt": "2026-08-11T01:02:00Z",
+                }
+            ],
+        }
+        restored = EnergyMeterService(_Store(legacy), local_today=lambda: self.today)
+        await restored.async_load()
+        document = restored.document(10.0)
+        self.assertIsNone(document["settings"]["sourceDeviceId"])
+        self.assertIsNone(document["history"][0]["sourceDeviceId"])
+
     async def test_month_end_reminder_is_clamped_and_writes_are_locked(self) -> None:
         self.today = date(2026, 2, 26)
         result = await self.service.async_action(

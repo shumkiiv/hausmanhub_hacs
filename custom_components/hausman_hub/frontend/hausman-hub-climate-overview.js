@@ -1,8 +1,8 @@
 /* Climate control surface shared with the tablet information architecture. */
 
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.91";
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.91";
-import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.91";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.92";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.92";
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.92";
 
 const CLIMATE_ACTION_API = "hausman_hub/v1/climate/actions";
 

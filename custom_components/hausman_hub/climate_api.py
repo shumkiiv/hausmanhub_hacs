@@ -704,8 +704,9 @@ class EnergyHistoryView(_ClimateView):
 
 async def _current_energy_source(
     hass: HomeAssistant,
-) -> tuple[float | None, str | None]:
-    """Read the same configured aggregate total used by the dashboard."""
+    source_device_id: str | None = None,
+) -> tuple[float | None, str | None, str | None, bool]:
+    """Read one explicit energy device or the compatible dashboard aggregate."""
 
     data = hass.data.get(DOMAIN, {})
     preferences = data.get("tablet_preferences_service")
@@ -725,15 +726,34 @@ async def _current_energy_source(
         else None,
     )
     energy = dashboard.get("energy")
+    sources = energy.get("sources") if isinstance(energy, Mapping) else None
+    if source_device_id is not None:
+        if not isinstance(sources, list):
+            return None, source_device_id, None, False
+        for source in sources:
+            if not isinstance(source, Mapping) or source.get("id") != source_device_id:
+                continue
+            total = source.get("totalKwh")
+            valid_total = (
+                not isinstance(total, bool) and isinstance(total, (int, float))
+            )
+            name = source.get("name")
+            return (
+                float(total) if valid_total else None,
+                source_device_id,
+                str(name) if isinstance(name, str) and name.strip() else None,
+                True,
+            )
+        return None, source_device_id, None, False
+
     total = energy.get("totalKwh") if isinstance(energy, Mapping) else None
     if isinstance(total, bool) or not isinstance(total, (int, float)):
-        return None, None
+        return None, None, None, True
     settings = (
         preferences.energy_for_dashboard
         if isinstance(preferences, TabletPreferencesService)
         else None
     )
-    sources = energy.get("sources") if isinstance(energy, Mapping) else None
     included: list[str] = []
     if isinstance(sources, list):
         selected = set(settings.energy_selected_device_ids) if settings else set()
@@ -747,7 +767,7 @@ async def _current_energy_source(
             and not isinstance(source.get("totalKwh"), bool)
             and (use_all or source["id"] in selected)
         )
-    return float(total), "|".join(included)
+    return float(total), "|".join(included), None, True
 
 
 class EnergyMeterView(_ClimateView):
@@ -771,8 +791,13 @@ class EnergyMeterView(_ClimateView):
         if service is None:
             return self._unavailable()
         try:
-            total, signature = await _current_energy_source(self._hass)
-            result = service.document(total, signature)
+            source_device_id = service.source_device_id
+            total, signature, source_name, _found = await _current_energy_source(
+                self._hass, source_device_id
+            )
+            result = service.document(
+                total, signature, source_device_id, source_name
+            )
         except (EnergyMeterViolation, ValueError):
             return self._unavailable()
         return self.json(result, headers=NO_STORE_HEADERS)
@@ -787,8 +812,24 @@ class EnergyMeterView(_ClimateView):
             return self._unavailable()
         try:
             payload = await _request_json(request, maximum_bytes=MAX_ACTION_BODY_BYTES)
-            total, signature = await _current_energy_source(self._hass)
-            result = await service.async_action(payload, total, signature)
+            source_device_id = service.source_device_id
+            if isinstance(payload, Mapping) and payload.get("action") == "configure":
+                settings = payload.get("settings")
+                if isinstance(settings, Mapping) and "sourceDeviceId" in settings:
+                    candidate = settings.get("sourceDeviceId")
+                    source_device_id = candidate if isinstance(candidate, str) else None
+            total, signature, source_name, found = await _current_energy_source(
+                self._hass, source_device_id
+            )
+            if source_device_id is not None and not found:
+                raise EnergyMeterViolation("energy meter source device is unknown")
+            result = await service.async_action(
+                payload,
+                total,
+                signature,
+                source_device_id,
+                source_name,
+            )
         except EnergyMeterViolation as error:
             return self.json_message(
                 "Показания уже изменились на другом клиенте. Обновите данные."
