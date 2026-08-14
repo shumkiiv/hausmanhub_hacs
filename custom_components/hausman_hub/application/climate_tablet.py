@@ -27,6 +27,8 @@ CLIMATE_ACTION_PATH = "/api/hausman_hub/v1/climate/actions"
 CLIMATE_OPERATION_PATH = "/api/hausman_hub/v1/climate/operations/{operation_id}"
 CLIMATE_OPERATION_TTL_MS = 60_000
 MAX_CLIMATE_OPERATION_RECORDS = 256
+BACKGROUND_CONFIRMATION_ATTEMPTS = 33
+BACKGROUND_CONFIRMATION_INTERVAL_SECONDS = 0.25
 
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
 _OPERATION_ID = re.compile(r"^[a-f0-9]{32}$")
@@ -129,7 +131,14 @@ class ClimateTabletRuntime(Protocol):
         self, payload: object, now: object
     ) -> object: ...
 
-    async def async_home_climate_targets(self, payload: object) -> object: ...
+    async def async_home_climate_targets(
+        self,
+        payload: object,
+        *,
+        defer_confirmation: bool = False,
+    ) -> object: ...
+
+    async def async_confirm_contour_application(self, request_id: str) -> object: ...
 
     async def async_synchronize_climate(self) -> object: ...
 
@@ -609,6 +618,7 @@ class ClimateTabletService:
         self._local_now = local_now or (lambda: datetime.now().astimezone())
         self._records_by_request: dict[str, _StoredOperation] = {}
         self._request_by_operation: dict[str, str] = {}
+        self._confirming_operations: set[str] = set()
         self._lock = asyncio.Lock()
 
     async def async_load(self) -> None:
@@ -731,14 +741,25 @@ class ClimateTabletService:
             try:
                 result = await self._async_dispatch(request)
                 final_snapshot = await self._snapshot_unlocked()
-                receipt = _receipt_from_contour_result(
-                    request,
-                    operation_id,
-                    result,
-                    created_at=now,
-                    updated_at=self._safe_now(),
-                    resulting_state_revision=final_snapshot["state_revision"],
+                result_status = getattr(
+                    getattr(result, "status", None),
+                    "value",
+                    None,
                 )
+                if request.action == "set_home_targets" and result_status == "pending":
+                    receipt = {
+                        **receipt,
+                        "updated_at": self._safe_now(),
+                    }
+                else:
+                    receipt = _receipt_from_contour_result(
+                        request,
+                        operation_id,
+                        result,
+                        created_at=now,
+                        updated_at=self._safe_now(),
+                        resulting_state_revision=final_snapshot["state_revision"],
+                    )
             except (ContourApplyViolation, TemporaryTemperatureViolation, HomeClimateTargetsViolation) as error:
                 receipt = _terminal_receipt(
                     request,
@@ -762,6 +783,57 @@ class ClimateTabletService:
             self._remember(request, receipt)
             await self._async_save()
             return dict(receipt)
+
+    async def async_confirm(self, operation_id: str) -> dict[str, object]:
+        """Finish read-back for one accepted home-target operation."""
+
+        if (
+            not isinstance(operation_id, str)
+            or _OPERATION_ID.fullmatch(operation_id) is None
+        ):
+            raise ClimateTabletOperationNotFound(operation_id)
+        async with self._lock:
+            request_id = self._request_by_operation.get(operation_id)
+            if request_id is None:
+                raise ClimateTabletOperationNotFound(operation_id)
+            record = self._records_by_request[request_id]
+            if (
+                record.request.action != "set_home_targets"
+                or record.receipt.get("status") != "pending"
+            ):
+                return dict(record.receipt)
+            if operation_id in self._confirming_operations:
+                return dict(record.receipt)
+            self._confirming_operations.add(operation_id)
+        try:
+            for attempt in range(BACKGROUND_CONFIRMATION_ATTEMPTS):
+                result = await self._runtime.async_confirm_contour_application(
+                    request_id
+                )
+                status = getattr(getattr(result, "status", None), "value", None)
+                if status != "pending":
+                    break
+                if attempt + 1 < BACKGROUND_CONFIRMATION_ATTEMPTS:
+                    await asyncio.sleep(BACKGROUND_CONFIRMATION_INTERVAL_SECONDS)
+            async with self._lock:
+                current = self._records_by_request[request_id]
+                if current.receipt.get("status") != "pending":
+                    return dict(current.receipt)
+                final_snapshot = await self._snapshot_unlocked()
+                receipt = _receipt_from_contour_result(
+                    current.request,
+                    operation_id,
+                    result,
+                    created_at=current.receipt["created_at"],
+                    updated_at=self._safe_now(),
+                    resulting_state_revision=final_snapshot["state_revision"],
+                )
+                self._remember(current.request, receipt)
+                await self._async_save()
+                return dict(receipt)
+        finally:
+            async with self._lock:
+                self._confirming_operations.discard(operation_id)
 
     async def async_operation(self, operation_id: str) -> dict[str, object]:
         """Return one persisted receipt without repeating its physical command."""
@@ -813,7 +885,8 @@ class ClimateTabletService:
                     "target_temperature": request.parameters.get("target_temperature"),
                     "target_humidity": request.parameters.get("target_humidity"),
                     "confirm": True,
-                }
+                },
+                defer_confirmation=True,
             )
         if request.action == "synchronize_home":
             return await self._runtime.async_synchronize_climate()
@@ -907,6 +980,7 @@ class ClimateTabletService:
             (request_id, record)
             for request_id, record in self._records_by_request.items()
             if record.receipt.get("status") == "pending"
+            and record.receipt.get("operation_id") not in self._confirming_operations
         ]
         if not pending:
             return

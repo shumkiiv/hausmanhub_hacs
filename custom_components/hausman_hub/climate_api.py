@@ -463,6 +463,36 @@ class ClimateRuntimeView(_ClimateView):
         return self.json(payload, headers=NO_STORE_HEADERS)
 
 
+async def _async_confirm_climate_operation(
+    hass: HomeAssistant,
+    service: ClimateTabletService,
+    operation_id: str,
+) -> None:
+    """Complete read-back outside the action response and publish its receipt."""
+
+    try:
+        receipt = await service.async_confirm(operation_id)
+    except (ClimateTabletOperationNotFound, ClimateTabletUnavailable):
+        _LOGGER.warning(
+            "climate operation %s could not finish background confirmation",
+            operation_id,
+        )
+        return
+    except Exception:
+        _LOGGER.exception(
+            "climate operation %s background confirmation failed",
+            operation_id,
+        )
+        return
+    if receipt.get("status") == "pending":
+        return
+    publish_command_receipt(
+        hass,
+        receipt,
+        operation="climate.tablet_action",
+    )
+
+
 class ClimateActionView(_ClimateView):
     """Accept one strict, durably idempotent tablet climate action."""
 
@@ -520,6 +550,22 @@ class ClimateActionView(_ClimateView):
             receipt,
             operation="climate.tablet_action",
         )
+        operation_id = receipt.get("operation_id")
+        if (
+            receipt.get("action") == "set_home_targets"
+            and receipt.get("status") == "pending"
+            and receipt.get("duplicate") is False
+            and isinstance(operation_id, str)
+        ):
+            schedule = getattr(self._hass, "async_create_task", None)
+            if callable(schedule):
+                schedule(
+                    _async_confirm_climate_operation(
+                        self._hass,
+                        service,
+                        operation_id,
+                    )
+                )
         return self.json(
             receipt,
             status_code=HTTPStatus.ACCEPTED,

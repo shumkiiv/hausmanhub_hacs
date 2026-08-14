@@ -1340,6 +1340,60 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(1, len(contour_store.saved))
         self.assertEqual(1, len(executor.batches))
 
+    async def test_home_targets_can_defer_read_back_after_commands_are_accepted(self) -> None:
+        bridge = MemoryBridge()
+        registry, contours = build_climate_contour_setup(
+            bridge.snapshot,
+            room_ids=["living"],
+            source_ids=["synthetic-ac-source-living"],
+            name="Климат",
+            mode="automatic",
+            target_temperature=25.0,
+            target_humidity=45,
+            strategy="normal",
+        )
+        registry, state_view = native_application_inputs(registry)
+        executor = ReflectingStrictExecutor(state_view, reflect=False)
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateControlMode.MANAGED),
+            registry_store=MemoryStore(registry),
+            contour_store=MemoryContourStore(contours),
+            strict_ha_call_executor=executor,
+            ha_state_view=state_view,
+            operation_id_factory=lambda: "b" * 32,
+            now_ms=lambda: 1784280005000,
+        )
+        await runtime.async_start()
+
+        with patch(
+            "custom_components.hausman_hub.application.climate_runtime.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as sleep:
+            accepted = await runtime.async_home_climate_targets(
+                {
+                    "request_id": "home-target-deferred-1",
+                    "contour_id": "climate",
+                    "target_temperature": 24.5,
+                    "target_humidity": 50,
+                    "confirm": True,
+                },
+                defer_confirmation=True,
+            )
+            sleep.assert_not_awaited()
+
+        self.assertEqual("pending", accepted.status.value)
+        self.assertEqual(1, accepted.accepted_count)
+        self.assertEqual(1, len(executor.batches))
+        executor.reflect_latest_batch()
+
+        confirmed = await runtime.async_confirm_contour_application(
+            "home-target-deferred-1"
+        )
+
+        self.assertEqual("confirmed", confirmed.status.value)
+        self.assertEqual(1, len(executor.batches))
+
     async def test_next_schedule_period_clears_temporary_temperature(self) -> None:
         bridge = ReflectingContourBridge()
         registry, contours = build_climate_contour_setup(

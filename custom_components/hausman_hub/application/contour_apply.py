@@ -334,6 +334,11 @@ class _ContourApplyLedger:
             )
         return record
 
+    def get(self, request_id: str) -> _ContourApplyRecord | None:
+        """Return one internal record without changing idempotency state."""
+
+        return self._records.get(request_id)
+
     def begin(
         self,
         request_id: str,

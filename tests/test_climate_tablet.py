@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import copy
 from datetime import datetime, timezone
 import json
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
+from unittest.mock import AsyncMock, patch
 
 from jsonschema import Draft202012Validator
 
@@ -94,6 +96,7 @@ class FakeRuntime:
             climate_bridge_mode=ClimateControlMode.MANAGED,
         )
         self.commands: list[dict[str, object]] = []
+        self.confirmations: list[str] = []
         self.result_status = ContourApplyStatus.CONFIRMED
 
     async def async_public_snapshot(self) -> dict[str, object]:
@@ -110,8 +113,25 @@ class FakeRuntime:
             accepted_count=1,
         )
 
-    async def async_home_climate_targets(self, payload: object) -> object:
+    async def async_home_climate_targets(
+        self,
+        payload: object,
+        *,
+        defer_confirmation: bool = False,
+    ) -> object:
         self.commands.append(copy.deepcopy(payload))
+        return SimpleNamespace(
+            status=(
+                ContourApplyStatus.PENDING
+                if defer_confirmation
+                else self.result_status
+            ),
+            confirmed_room_count=0 if defer_confirmation else 1,
+            accepted_count=1,
+        )
+
+    async def async_confirm_contour_application(self, request_id: str) -> object:
+        self.confirmations.append(request_id)
         return SimpleNamespace(
             status=self.result_status,
             confirmed_room_count=1,
@@ -354,6 +374,105 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
             ],
         )
         contract_validator("climate-operation-receipt.schema.json").validate(receipt)
+
+    async def test_home_targets_return_accepted_before_background_read_back(self) -> None:
+        request = {
+            "contract": {
+                "name": "hausman-hub-climate-action-request",
+                "version": 1,
+            },
+            "request_id": "tablet.climate.home.accepted",
+            "expected_state_revision": self.home["state_revision"],
+            "action": "set_home_targets",
+            "room_id": None,
+            "parameters": {"target_temperature": 24.5, "target_humidity": 50},
+        }
+
+        accepted = await self.service.async_execute(request)
+
+        self.assertEqual("pending", accepted["status"])
+        self.assertTrue(accepted["accepted"])
+        self.assertFalse(accepted["confirmed"])
+        self.assertFalse(accepted["read_back"]["attempted"])
+        self.assertEqual([], self.runtime.confirmations)
+        self.assertEqual(1, len(self.runtime.commands))
+        contract_validator("climate-operation-receipt.schema.json").validate(accepted)
+
+        confirmed = await self.service.async_confirm(accepted["operation_id"])
+
+        self.assertEqual("confirmed", confirmed["status"])
+        self.assertTrue(confirmed["read_back"]["attempted"])
+        self.assertEqual([request["request_id"]], self.runtime.confirmations)
+        self.assertEqual(1, len(self.runtime.commands))
+        contract_validator("climate-operation-receipt.schema.json").validate(confirmed)
+
+    async def test_background_confirmation_is_bounded_without_reexecution(self) -> None:
+        request = {
+            "contract": {
+                "name": "hausman-hub-climate-action-request",
+                "version": 1,
+            },
+            "request_id": "tablet.climate.home.bounded",
+            "expected_state_revision": self.home["state_revision"],
+            "action": "set_home_targets",
+            "room_id": None,
+            "parameters": {"target_temperature": 24.5},
+        }
+        self.runtime.result_status = ContourApplyStatus.PENDING
+        accepted = await self.service.async_execute(request)
+
+        with patch(
+            "custom_components.hausman_hub.application.climate_tablet.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as sleep:
+            still_pending = await self.service.async_confirm(
+                accepted["operation_id"]
+            )
+
+        self.assertEqual("pending", still_pending["status"])
+        self.assertTrue(still_pending["read_back"]["attempted"])
+        self.assertEqual(33, len(self.runtime.confirmations))
+        self.assertEqual(32, sleep.await_count)
+        self.assertEqual(1, len(self.runtime.commands))
+
+    async def test_operation_read_stays_available_during_background_confirmation(self) -> None:
+        request = {
+            "contract": {
+                "name": "hausman-hub-climate-action-request",
+                "version": 1,
+            },
+            "request_id": "tablet.climate.home.concurrent-read",
+            "expected_state_revision": self.home["state_revision"],
+            "action": "set_home_targets",
+            "room_id": None,
+            "parameters": {"target_temperature": 24.5},
+        }
+        accepted = await self.service.async_execute(request)
+        confirmation_started = asyncio.Event()
+        allow_confirmation = asyncio.Event()
+        original_confirm = self.runtime.async_confirm_contour_application
+
+        async def delayed_confirm(request_id: str) -> object:
+            confirmation_started.set()
+            await allow_confirmation.wait()
+            return await original_confirm(request_id)
+
+        self.runtime.async_confirm_contour_application = delayed_confirm
+        confirmation = asyncio.create_task(
+            self.service.async_confirm(accepted["operation_id"])
+        )
+        await confirmation_started.wait()
+
+        while_confirming = await asyncio.wait_for(
+            self.service.async_operation(accepted["operation_id"]),
+            timeout=0.05,
+        )
+
+        self.assertEqual("pending", while_confirming["status"])
+        allow_confirmation.set()
+        confirmed = await confirmation
+        self.assertEqual("confirmed", confirmed["status"])
+        self.assertEqual(1, len(self.runtime.commands))
 
     async def test_synchronize_home_dispatches_bounded_explicit_action(self) -> None:
         request = {

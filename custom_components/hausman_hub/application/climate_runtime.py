@@ -1113,7 +1113,12 @@ class ClimateRuntime:
             self.last_error = None
             return _ClimateRoomModeReceipt()
 
-    async def async_home_climate_targets(self, payload: object) -> ContourApplyReceipt:
+    async def async_home_climate_targets(
+        self,
+        payload: object,
+        *,
+        defer_confirmation: bool = False,
+    ) -> ContourApplyReceipt:
         """Save and apply one common temperature and/or humidity target."""
 
         request = parse_home_climate_targets_request(payload)
@@ -1144,6 +1149,28 @@ class ClimateRuntime:
                     action=ClimateControlAction.APPLY_SAVED_SETTINGS,
                 ),
                 desired_state_changes=desired_state_changes,
+                defer_confirmation=defer_confirmation,
+            )
+
+    async def async_confirm_contour_application(
+        self,
+        request_id: str,
+    ) -> ContourApplyReceipt:
+        """Perform one read-back for an already accepted contour command."""
+
+        async with self._lock:
+            record = self._contour_applications.get(request_id)
+            if record is None:
+                raise ClimateRuntimeUnavailable(
+                    "climate contour application is unavailable"
+                )
+            if record.receipt.status is not ContourApplyStatus.PENDING:
+                return record.receipt
+            return await self._async_reobserve_native_contour_application_unlocked(
+                request_id,
+                record,
+                self._climate_contour(),
+                room_ids=record.plan.target_room_ids,
             )
 
     async def async_room_humidity_target(
@@ -1184,6 +1211,7 @@ class ClimateRuntime:
         context: ClimateControlContext,
         room_ids: tuple[str, ...] | None = None,
         desired_state_changes: ClimateDesiredStateChanges,
+        defer_confirmation: bool = False,
     ) -> ContourApplyReceipt:
         self._require_native_contour_apply_mode()
         contour = contour_without_manual_devices(
@@ -1278,6 +1306,14 @@ class ClimateRuntime:
                 accepted_count=accepted_count,
                 confirmed_room_count=0,
                 reasons=("command_result_unavailable",),
+            ).receipt
+        if defer_confirmation:
+            return self._contour_applications.update(
+                request_id,
+                status=ContourApplyStatus.PENDING,
+                accepted_count=accepted_count,
+                confirmed_room_count=0,
+                reasons=(),
             ).receipt
         return await self._async_verify_native_contour_application_unlocked(
             request_id,

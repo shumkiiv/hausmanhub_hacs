@@ -1781,6 +1781,75 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertEqual(operation_id, operation.payload["operation_id"])
         self.assertFalse(operation.payload["duplicate"])
 
+    def test_home_target_action_publishes_background_confirmation(self) -> None:
+        """The HTTP response stays pending while final read-back reaches SSE."""
+
+        from custom_components.hausman_hub.application.climate_tablet import (
+            ClimateTabletService,
+        )
+        from tests.test_climate_tablet import (
+            FakeRuntime,
+            MemoryOperationStore,
+            managed_home,
+        )
+
+        home = managed_home()
+        runtime = FakeRuntime(home)
+        service = ClimateTabletService(
+            runtime,
+            MemoryOperationStore(),
+            operation_id_factory=lambda: "7" * 32,
+            now_ms=lambda: 1_785_949_320_000,
+        )
+        self.hass.data["hausman_hub"]["climate_tablet"] = service
+        scheduled: list[object] = []
+        self.hass.async_create_task = scheduled.append
+        stream = self.hass.data["hausman_hub"]["event_stream_runtime"].broker.subscribe()
+        action_path = "/api/hausman_hub/v1/climate/actions"
+        view = next(item for item in self.hass.http.views if item.url == action_path)
+        request = {
+            "contract": {
+                "name": "hausman-hub-climate-action-request",
+                "version": 1,
+            },
+            "request_id": "tablet.climate.home.background",
+            "expected_state_revision": home["state_revision"],
+            "action": "set_home_targets",
+            "room_id": None,
+            "parameters": {"target_temperature": 24.5, "target_humidity": 50},
+        }
+
+        response = asyncio.run(
+            view.post(
+                FakeJsonRequest(
+                    "192.168.1.20",
+                    reader_user("system-users"),
+                    action_path,
+                    request,
+                )
+            )
+        )
+
+        self.assertEqual(202, response.status)
+        self.assertEqual("pending", response.payload["status"])
+        confirmer = next(
+            task
+            for task in scheduled
+            if getattr(getattr(task, "cr_code", None), "co_name", "")
+            == "_async_confirm_climate_operation"
+        )
+        asyncio.run(confirmer)
+        for task in tuple(scheduled):
+            if task is not confirmer and getattr(task, "cr_frame", None) is not None:
+                asyncio.run(task)
+
+        accepted_event = asyncio.run(stream.get())
+        confirmed_event = asyncio.run(stream.get())
+        self.assertEqual("accepted", accepted_event["data"]["status"])
+        self.assertEqual("confirmed", confirmed_event["data"]["status"])
+        self.assertEqual(1, len(runtime.commands))
+        self.assertEqual([request["request_id"]], runtime.confirmations)
+
     def test_shadow_climate_route_returns_public_state_and_never_posts(self) -> None:
         """Exercise the native Android facade with an actual runtime."""
 
