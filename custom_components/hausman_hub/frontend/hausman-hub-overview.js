@@ -1,6 +1,6 @@
-import { createHeroRoomNavigation } from "./hausman-hub-hero-room-navigation.js?v=1.52.90";
-import { overviewHeroRenderKey, stableOverviewHeroImage } from "./hausman-hub-overview-hero-state.js?v=1.52.90";
-import { renderHomeTargetCard } from "./hausman-hub-climate-overview.js?v=1.52.90";
+import { createHeroRoomNavigation } from "./hausman-hub-hero-room-navigation.js?v=1.52.91";
+import { overviewHeroRenderKey, stableOverviewHeroImage } from "./hausman-hub-overview-hero-state.js?v=1.52.91";
+import { renderHomeTargetCard } from "./hausman-hub-climate-overview.js?v=1.52.91";
 
 const CLIMATE_DOMAINS = new Set(["climate", "humidifier", "fan"]);
 
@@ -322,11 +322,13 @@ function renderDashboardGrid(panel, container, dashboard, deps) {
   const energyWrap = deps.el("div", "overview-canon-dashboard-energy");
   deps.renderEnergyOverviewCard(panel, energyWrap);
   side.appendChild(energyWrap);
-  const devicesCard = deps.el("button", `overview-canon-dashboard-panel is-devices${offline ? " is-alert" : ""}`);
-  devicesCard.type = "button";
-  devicesCard.addEventListener("click", () => panel._activateSection("devices"));
-  appendMetric(deps, devicesCard, "Устройства", String(physicalDeviceCount(devices)), offline ? `${offline} без связи` : "Все на связи");
-  side.appendChild(devicesCard);
+  if (offline) {
+    const devicesCard = deps.el("button", "overview-canon-dashboard-panel is-devices is-alert");
+    devicesCard.type = "button";
+    devicesCard.addEventListener("click", () => panel._activateSection("devices"));
+    appendMetric(deps, devicesCard, "Требуют внимания", String(offline), "Устройства без связи");
+    side.appendChild(devicesCard);
+  }
   const rooms = Array.isArray(dashboard.rooms) ? dashboard.rooms : [];
   const deviations = rooms.map((room) => validNumber(room.temp) && validNumber(room.targetTemp)
     ? Math.abs(Number(room.temp) - Number(room.targetTemp)) : null).filter(Number.isFinite);
@@ -335,10 +337,6 @@ function renderDashboardGrid(panel, container, dashboard, deps) {
   appendMetric(deps, comfortCard, "Комфорт в доме", stable ? "В порядке" : (deviations.length ? "Выравнивается" : "Нет данных"),
     stable ? "Температура близка к целям комнат" : "Откройте климат для подробностей");
   side.appendChild(comfortCard);
-  const attentionCard = cardButton(deps, `overview-canon-dashboard-panel${offline ? " is-alert" : ""}`, "devices", panel);
-  appendMetric(deps, attentionCard, "Внимание", offline ? `${offline} без связи` : "Всё в порядке",
-    offline ? "Проверьте устройства" : "Устройства на связи");
-  side.appendChild(attentionCard);
   layout.appendChild(side);
   container.appendChild(layout);
 }

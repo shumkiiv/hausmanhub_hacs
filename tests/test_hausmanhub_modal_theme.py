@@ -281,7 +281,9 @@ class EnergyLayoutTest(unittest.TestCase):
         self.assertIn("compactEnergySettings(panel, container, energy, deps)", js)
         modal_body = js.split("function renderEnergyModal", 1)[1].split("function renderMeterReadingStrip", 1)[0]
         self.assertNotIn("renderEnergyHistory(", modal_body)
-        self.assertIn("renderEnergyDevices(panel, container, energy.sources, deps)", modal_body)
+        self.assertNotIn("renderEnergyDevices(panel, container, energy.sources, deps)", modal_body)
+        section_body = js.split("export function renderEnergySection", 1)[1].split("export async function loadEnergyHistory", 1)[0]
+        self.assertIn("renderEnergyDevices(panel, container, energy.sources, deps)", section_body)
         self.assertIn('"← К списку энергии"', js)
         self.assertIn("panel._energyModalView = sourceId ? \"device\" : \"overview\";", js)
         css = read(ENERGY_CSS)

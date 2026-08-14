@@ -1,7 +1,7 @@
-import { renderEnergyHistoryChart } from "./hausman-hub-energy-chart.js?v=1.52.90";
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.90";
-import { loadEnergyMeter, meterConfigured, meterNumber, meterReminderText, renderEnergyMeterCard } from "./hausman-hub-energy-meter.js?v=1.52.90";
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.90";
+import { renderEnergyHistoryChart } from "./hausman-hub-energy-chart.js?v=1.52.91";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.91";
+import { loadEnergyMeter, meterConfigured, meterNumber, meterReminderText, renderEnergyMeterCard } from "./hausman-hub-energy-meter.js?v=1.52.91";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.91";
 
 const number = (value, digits = 1) => Number.isFinite(Number(value))
   ? new Intl.NumberFormat("ru-RU", { maximumFractionDigits: digits }).format(Number(value))
@@ -130,23 +130,38 @@ function energyDeviceVisual(panel, source, deps) {
 export function renderEnergyOverviewCard(panel, container, deps) {
   const { el, svgIcon, setAttr } = deps;
   const energy = panel._homeDashboard && panel._homeDashboard.energy;
-  const card = el("button", "energy-overview-card");
-  card.type = "button";
-  setAttr(card, "aria-label", "Открыть подробный раздел энергии");
-  card.addEventListener("click", () => panel._activateSection("energy"));
+  const card = el("section", "energy-overview-card");
   const icon = el("span", "energy-overview-icon");
   icon.appendChild(svgIcon("energy"));
   card.appendChild(icon);
   const copy = el("span", "energy-overview-copy");
-  copy.appendChild(el("span", "assistant-field-label", "Энергия сейчас"));
-  copy.appendChild(el("strong", null, energy && energy.available ? primaryEnergyValue(energy) : "Нет данных"));
+  copy.appendChild(el("span", "assistant-field-label", "Показания энергии"));
+  const meter = panel._energyMeter;
+  copy.appendChild(el("strong", null, meterConfigured(meter)
+    ? `${meterNumber(meter.reading.currentKwh)} кВт·ч`
+    : (energy && energy.available ? primaryEnergyValue(energy) : "Нет данных")));
   const voltage = energy && energy.settings && energy.settings.showVoltage
     ? ` · ${sourceMetric(energy, "voltageV", "В")}` : "";
   const reminder = meterReminderText(panel._energyMeter);
-  copy.appendChild(el("small", null, `${selectedSources(energy).length} источников${voltage}`));
+  copy.appendChild(el("small", null, meterConfigured(meter)
+    ? `Расход цикла ${meter.cycle && meter.cycle.consumptionKwh !== null && meter.cycle.consumptionKwh !== undefined ? `${meterNumber(meter.cycle.consumptionKwh)} кВт·ч` : "не определён"}`
+    : `${selectedSources(energy).length} источников${voltage}`));
   if (reminder) copy.appendChild(el("small", "energy-overview-reminder", reminder));
   card.appendChild(copy);
-  card.appendChild(el("span", "energy-overview-chevron", "›"));
+  const actions = el("span", "energy-overview-actions");
+  const open = el("button", "energy-overview-open", "Энергия");
+  open.type = "button";
+  open.addEventListener("click", () => panel._activateSection("energy"));
+  actions.appendChild(open);
+  const settings = el("button", "energy-overview-settings", "Настройки");
+  settings.type = "button";
+  setAttr(settings, "aria-label", "Открыть настройки показаний энергии");
+  settings.addEventListener("click", () => {
+    panel._activateSection("energy");
+    openEnergyDetails(panel);
+  });
+  actions.appendChild(settings);
+  card.appendChild(actions);
   container.appendChild(card);
 }
 
@@ -287,21 +302,6 @@ function renderEnergyHistory(panel, energy, selected, deps) {
     panel._energyHistoryError = null;
     loadEnergyHistory(panel);
   }));
-  const sources = el("div", "energy-current-sources");
-  sources.appendChild(el("h4", null, "Источники"));
-  selected.slice(0, 2).forEach((source) => {
-    const row = el("button", "energy-current-source");
-    row.type = "button";
-    row.addEventListener("click", () => showEnergyDevice(panel, source.id));
-    const identity = el("span");
-    identity.appendChild(el("strong", null, source.name));
-    identity.appendChild(el("small", null, `${sourceMetric(source, "currentA", "А", 2)} · ${sourceMetric(source, "voltageV", "В")}`));
-    row.appendChild(identity);
-    row.appendChild(el("b", null, sourceMetric(source, "currentPowerW", "Вт")));
-    sources.appendChild(row);
-  });
-  if (!selected.length) sources.appendChild(el("div", "energy-sources-empty", "Выберите источники"));
-  layout.appendChild(sources);
   card.appendChild(layout);
   return card;
 }
@@ -496,7 +496,6 @@ function renderEnergyModal(panel, container, energy, deps) {
   } else {
     if (panel._energyModalView === "device") panel._energyModalView = "overview";
     body.appendChild(renderEnergyMeterCard(panel, deps));
-    body.appendChild(renderEnergyDevices(panel, container, energy.sources, deps));
     body.appendChild(compactEnergySettings(panel, container, energy, deps));
   }
   sheet.appendChild(body);
@@ -539,8 +538,8 @@ function renderMeterReadingStrip(panel, energy, deps) {
     card.appendChild(reading);
   }
   const more = el("span", "energy-meter-reading-more");
-  more.appendChild(el("strong", null, "Все детали"));
-  more.appendChild(el("small", null, "Счётчики и устройства"));
+  more.appendChild(el("strong", null, "Настройки"));
+  more.appendChild(el("small", null, "Показания и источники"));
   more.appendChild(el("b", null, "›"));
   card.appendChild(more);
   return card;
@@ -573,6 +572,7 @@ export function renderEnergySection(panel, container, deps) {
   container.appendChild(renderMeterReadingStrip(panel, energy, deps));
   const selected = selectedSources(energy);
   container.appendChild(renderEnergyHistory(panel, energy, selected, deps));
+  container.appendChild(renderEnergyDevices(panel, container, energy.sources, deps));
   if (panel._energyDetailsOpen) renderEnergyModal(panel, container, energy, deps);
 }
 

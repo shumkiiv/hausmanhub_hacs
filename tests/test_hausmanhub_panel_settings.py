@@ -1426,7 +1426,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         panel._shell.tabs.energy.fire("click");
         await tick();
         let text = textOf(panel._shell.homeSections.energy);
-        if (!text.includes("Энергия дома") || !text.includes("850") || !text.includes("230,1") || !text.includes("0,42 кВт·ч") || !text.includes("Источники") || !text.includes("Все детали") || text.includes("Устройства энергии") || text.includes("Карточка на главной") || text.includes("Единый источник истины")) {
+        if (!text.includes("Энергия дома") || !text.includes("850") || !text.includes("230,1") || !text.includes("0,42 кВт·ч") || !text.includes("Настройки") || !text.includes("Устройства энергии") || text.includes("Карточка на главной") || text.includes("Единый источник истины")) {
           throw new Error("energy main page must stay compact: " + text);
         }
         const summaryCard = findAll(panel._shell.homeSections.energy, (node) =>
@@ -1438,10 +1438,10 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           String(node.className).split(" ").includes("energy-modal"))[0];
         if (!modal()) throw new Error("energy details modal did not open");
         text = textOf(panel._shell.homeSections.energy);
-        if (!text.includes("Торшер") || !text.includes("Выключен") || !text.includes("питание отключено") || !text.includes("Устройства энергии") || !text.includes("Карточка на главной")) {
+        if (!text.includes("Торшер") || !text.includes("Выключен") || !text.includes("питание отключено") || !text.includes("Карточка на главной")) {
           throw new Error("energy modal is incomplete: " + text);
         }
-        const rows = findAll(modal(), (node) =>
+        const rows = findAll(panel._shell.homeSections.energy, (node) =>
           String(node.className).split(" ").includes("energy-device-card"));
         if (rows.length !== 2 || !findAll(rows[0], (node) => node.tagName === "IMG").length) {
           throw new Error("energy sources must use one tablet row and product image per physical device");
@@ -1610,10 +1610,13 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const text = textOf(overview);
         for (const label of [
           "Дом", "Гостиная", "Спальня", "Кабинет", "Климат", "Цель климата",
-          "Освещение", "Безопасность", "Комфорт в доме", "Внимание",
+          "Освещение", "Безопасность", "Комфорт в доме",
           "Избранные сценарии", "Доброе утро", "Погода",
         ]) {
           if (!text.includes(label)) throw new Error("overview text missing: " + label);
+        }
+        if (text.includes("Все на связи") || text.includes("Устройства на связи")) {
+          throw new Error("uninformative all-online panel must be hidden: " + text);
         }
         if (text.includes("0,0–25,0°") || text.includes("0–50%")) {
           throw new Error("missing climate target was coerced to zero: " + text);
@@ -3974,7 +3977,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.90")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.91")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;
