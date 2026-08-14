@@ -1,8 +1,21 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-14 (HACS 1.52.92 source-bound meter readings).
+Last updated: 2026-08-14 (HACS 1.52.93 associative scenario devices).
 
 ## Current work
+
+- 2026-08-14 (Codex): HACS `1.52.93` groups scenario entities by physical
+  Home Assistant device and publishes room, type, capability and allowed
+  property states. The separate picker has search plus combinable room and
+  type quick filters. Motion exposes only `Движение` / `Нет движения`; the
+  corridor chandelier is one physical card with `Освещение` and
+  `Не беспокоить`. Consumer pin is contracts `0.31.0` (`ac54bf6`). Full gate:
+  1392 passed, 4 skipped, 926 subtests; Actions `31794893988` success.
+  Production was backed up, checked, installed and restarted once. Installed,
+  latest and cache marker are `1.52.93`; the live catalog confirms the exact
+  motion and chandelier grouping. Two one-count existing climate shadow/trial
+  warnings appeared at startup; there are no scenario errors. No physical
+  command was sent. Details: `docs/RELEASE_AUDIT_1.52.93.md`.
 
 - 2026-08-14 (Codex): HACS `1.52.92` binds manual electricity readings to one
   explicit energy device. The projection reads only that source, rejects an
