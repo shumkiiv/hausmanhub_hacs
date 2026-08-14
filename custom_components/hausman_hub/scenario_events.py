@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 _EVENT_STATE_CHANGED = "state_changed"
+_UNAVAILABLE_STATE_VALUES = frozenset({"unknown", "unavailable"})
 
 
 def _state_value(state: object | None, property_name: str) -> object | None:
@@ -44,7 +45,11 @@ def state_trigger_matches(
 
     old = _state_value(old_state, property_name)
     new = _state_value(new_state, property_name)
-    if new is None:
+    if old is None or new is None:
+        return False
+    if str(old).lower() in _UNAVAILABLE_STATE_VALUES:
+        return False
+    if str(new).lower() in _UNAVAILABLE_STATE_VALUES:
         return False
     if comparison is ScenarioComparison.CHANGED:
         return old != new

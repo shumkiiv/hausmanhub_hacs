@@ -638,6 +638,33 @@ class ScenarioExecutor:
                 "status": "failed",
                 "error": dependency_error,
             }
+        if allowed.domain == "cover" and action.action_id in {
+            "open_cover",
+            "close_cover",
+        }:
+            current = self._hass.states.get(device.entity_id)
+            if current is not None and _device_action_confirmed(
+                current, action.action_id, action.value
+            ):
+                observed_state = str(getattr(current, "state", "unknown"))
+                return {
+                    **base,
+                    "status": "completed",
+                    "target_id": action.target_id,
+                    "domain": allowed.domain,
+                    "service": allowed.service,
+                    "entity_id": device.entity_id,
+                    "confirmed": True,
+                    "skipped": True,
+                    "reason": "already_in_target_state",
+                    "read_back": {
+                        "attempted": False,
+                        "matched": True,
+                        "observedAt": int(time.time() * 1000),
+                        "observedState": observed_state,
+                        "attempts": 0,
+                    },
+                }
         service_data: dict[str, Any] = {"entity_id": device.entity_id}
         confirmation_value = action.value
         adaptive_minimum: float | None = None

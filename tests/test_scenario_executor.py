@@ -51,6 +51,7 @@ class _FakeHass:
                         "next_setting": "2026-08-15T14:00:00+00:00",
                     },
                 ),
+                "cover.living_room": SimpleNamespace(state="closed", attributes={}),
             }.get(entity_id)
         )
 
@@ -124,6 +125,20 @@ class _FakeCatalog:
                 range_maximum=100.0,
                 range_step=1.0,
             ),
+            "cover_1": ScenarioDeviceEntry(
+                target_id="cover_1",
+                name="Living room curtains",
+                entity_id="cover.living_room",
+                actions=(
+                    ScenarioDeviceAction(
+                        action_id="close_cover",
+                        title="Close",
+                        domain="cover",
+                        service="close_cover",
+                        allowed_fields=frozenset(),
+                    ),
+                ),
+            ),
         }
 
     def device(self, target_id: str) -> Any | None:
@@ -182,6 +197,55 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result["receipts"]), 1)
         self.hass.services.async_call.assert_awaited_once_with(
             "light", "turn_on", {"entity_id": "light.living_room"}, blocking=True
+        )
+
+    async def test_closed_cover_is_not_commanded_again(self) -> None:
+        definition = _definition((
+            ScenarioAction(
+                id="a1",
+                type=ScenarioActionType.DEVICE_ACTION,
+                target_id="cover_1",
+                action_id="close_cover",
+            ),
+        ))
+
+        result = await self.executor.async_execute(
+            definition, "run-1", scenario_id="close-curtains"
+        )
+
+        receipt = result["receipts"][0]
+        self.assertEqual("completed", result["status"])
+        self.assertTrue(result["confirmed"])
+        self.assertTrue(receipt["skipped"])
+        self.assertEqual("already_in_target_state", receipt["reason"])
+        self.assertFalse(receipt["read_back"]["attempted"])
+        self.hass.services.async_call.assert_not_awaited()
+
+    async def test_open_cover_still_receives_close_command(self) -> None:
+        original_get = self.hass.states.get
+        self.hass.states.get = lambda entity_id: (
+            SimpleNamespace(state="open", attributes={})
+            if entity_id == "cover.living_room"
+            else original_get(entity_id)
+        )
+        definition = _definition((
+            ScenarioAction(
+                id="a1",
+                type=ScenarioActionType.DEVICE_ACTION,
+                target_id="cover_1",
+                action_id="close_cover",
+            ),
+        ))
+
+        await self.executor.async_execute(
+            definition, "run-1", scenario_id="close-curtains"
+        )
+
+        self.hass.services.async_call.assert_awaited_once_with(
+            "cover",
+            "close_cover",
+            {"entity_id": "cover.living_room"},
+            blocking=True,
         )
 
     async def test_unpowered_device_action_is_blocked_without_service_call(self) -> None:

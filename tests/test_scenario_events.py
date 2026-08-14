@@ -30,6 +30,30 @@ class StateTriggerMatchesTest(unittest.TestCase):
             )
         )
 
+    def test_equals_ignores_startup_and_availability_recovery(self) -> None:
+        for old_state in (None, _state("unknown"), _state("unavailable")):
+            with self.subTest(old_state=old_state):
+                self.assertFalse(
+                    state_trigger_matches(
+                        old_state,
+                        _state("on"),
+                        "state",
+                        ScenarioComparison.EQUALS,
+                        "on",
+                    )
+                )
+
+    def test_changed_ignores_availability_recovery(self) -> None:
+        self.assertFalse(
+            state_trigger_matches(
+                _state("unavailable"),
+                _state("on"),
+                "state",
+                ScenarioComparison.CHANGED,
+                None,
+            )
+        )
+
     def test_changed_compares_requested_attribute(self) -> None:
         self.assertTrue(
             state_trigger_matches(
