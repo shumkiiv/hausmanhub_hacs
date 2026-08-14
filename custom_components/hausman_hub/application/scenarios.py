@@ -63,6 +63,7 @@ class ScenarioDeviceEntry:
     range_minimum: float | None = None
     range_maximum: float | None = None
     range_step: float | None = None
+    physical_id: str | None = None
 
     def action(self, action_id: str) -> ScenarioDeviceAction | None:
         """Return one allowed action by id."""

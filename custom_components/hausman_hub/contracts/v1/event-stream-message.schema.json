@@ -136,7 +136,31 @@
         "status": { "enum": ["failed", "accepted", "confirmed"] },
         "target_id": { "type": ["string", "null"], "maxLength": 128 },
         "reason": { "type": ["string", "null"], "maxLength": 500 },
-        "error_code": { "type": ["string", "null"], "maxLength": 128 }
+        "error_code": { "type": ["string", "null"], "maxLength": 128 },
+        "queue": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "position", "transitions", "superseded_by_request_id"],
+          "properties": {
+            "state": {
+              "enum": ["queued", "executing", "superseded", "completed"]
+            },
+            "position": { "type": "integer", "minimum": 0, "maximum": 256 },
+            "transitions": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 4,
+              "items": {
+                "enum": ["queued", "executing", "superseded", "completed"]
+              }
+            },
+            "superseded_by_request_id": {
+              "type": ["string", "null"],
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        }
       }
     },
     "heartbeat": {

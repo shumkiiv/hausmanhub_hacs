@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from pathlib import Path
 import unittest
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
+
+from jsonschema import Draft202012Validator
 
 from custom_components.hausman_hub.application.scenario_executor import (
     ScenarioExecutor,
@@ -30,6 +34,23 @@ from custom_components.hausman_hub.domain.scenarios import (
 )
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _device_receipt_validator() -> Draft202012Validator:
+    schema = json.loads(
+        (
+            ROOT
+            / "custom_components"
+            / "hausman_hub"
+            / "contracts"
+            / "v1"
+            / "device-action-receipt.schema.json"
+        ).read_text(encoding="utf-8")
+    )
+    return Draft202012Validator(schema)
+
+
 class _FakeHass:
     def __init__(self) -> None:
         self.services = AsyncMock()
@@ -41,6 +62,9 @@ class _FakeHass:
                 ),
                 "number.breaker_temperature_threshold": SimpleNamespace(
                     state="80", attributes={}
+                ),
+                "number.breaker_current_threshold": SimpleNamespace(
+                    state="40", attributes={}
                 ),
             }.get(entity_id)
         )
@@ -107,6 +131,25 @@ class _FakeCatalog:
                 range_minimum=40.0,
                 range_maximum=100.0,
                 range_step=1.0,
+                physical_id="breaker-device",
+            ),
+            "number_2": ScenarioDeviceEntry(
+                target_id="number_2",
+                name="Порог отключения по току",
+                entity_id="number.breaker_current_threshold",
+                actions=(
+                    ScenarioDeviceAction(
+                        action_id="set_value",
+                        title="Установить значение",
+                        domain="number",
+                        service="set_value",
+                        allowed_fields=frozenset({"value"}),
+                    ),
+                ),
+                range_minimum=1.0,
+                range_maximum=65.0,
+                range_step=1.0,
+                physical_id="breaker-device",
             ),
         }
 
@@ -210,6 +253,177 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(receipt["accepted"])
         self.assertTrue(receipt["confirmed"])
         self.hass.services.async_call.assert_awaited_once()
+
+    async def test_device_commands_are_serialized_without_coalescing_actions(self) -> None:
+        first_started = asyncio.Event()
+        release_first = asyncio.Event()
+        calls: list[dict[str, object]] = []
+
+        async def delayed_call(
+            domain: str,
+            service: str,
+            data: dict[str, object],
+            *,
+            blocking: bool,
+        ) -> None:
+            del domain, service, blocking
+            calls.append(dict(data))
+            if len(calls) == 1:
+                first_started.set()
+                await release_first.wait()
+
+        self.hass.services.async_call.side_effect = delayed_call
+        request_ids = iter(("dangerous-first", "dangerous-second"))
+        self.executor.new_run_id = lambda: next(request_ids)
+
+        first = asyncio.create_task(
+            self.executor.async_execute_device_action("device_1", "turn_on")
+        )
+        await first_started.wait()
+        second = asyncio.create_task(
+            self.executor.async_execute_device_action("device_1", "turn_on")
+        )
+        await asyncio.sleep(0)
+
+        self.assertEqual(1, len(calls))
+        self.assertFalse(second.done())
+        release_first.set()
+        first_receipt, second_receipt = await asyncio.gather(first, second)
+
+        self.assertEqual(2, len(calls))
+        self.assertEqual(0, first_receipt["queue"]["position"])
+        self.assertEqual(1, second_receipt["queue"]["position"])
+        self.assertEqual(
+            ["queued", "executing", "completed"],
+            second_receipt["queue"]["transitions"],
+        )
+
+    async def test_different_entities_of_one_physical_device_share_queue(self) -> None:
+        first_started = asyncio.Event()
+        release_first = asyncio.Event()
+        entities: list[str] = []
+
+        async def delayed_call(
+            domain: str,
+            service: str,
+            data: dict[str, object],
+            *,
+            blocking: bool,
+        ) -> None:
+            del domain, service, blocking
+            entities.append(str(data["entity_id"]))
+            if len(entities) == 1:
+                first_started.set()
+                await release_first.wait()
+
+        self.hass.services.async_call.side_effect = delayed_call
+        request_ids = iter(("physical-first", "physical-second"))
+        self.executor.new_run_id = lambda: next(request_ids)
+
+        first = asyncio.create_task(
+            self.executor.async_execute_device_action("number_1", "set_value", 60)
+        )
+        await first_started.wait()
+        second = asyncio.create_task(
+            self.executor.async_execute_device_action("number_2", "set_value", 40)
+        )
+        await asyncio.sleep(0)
+
+        self.assertEqual(["number.breaker_temperature_threshold"], entities)
+        self.assertFalse(second.done())
+        release_first.set()
+        _, second_receipt = await asyncio.gather(first, second)
+
+        self.assertEqual(
+            [
+                "number.breaker_temperature_threshold",
+                "number.breaker_current_threshold",
+            ],
+            entities,
+        )
+        self.assertEqual(1, second_receipt["queue"]["position"])
+
+    async def test_safe_queued_target_update_uses_latest_wins(self) -> None:
+        first_started = asyncio.Event()
+        release_first = asyncio.Event()
+        values: list[float] = []
+        observed_value = 80.0
+        self.executor._readback_window_seconds = 1.0
+        self.hass.states = SimpleNamespace(
+            get=lambda entity_id: (
+                SimpleNamespace(state=str(observed_value), attributes={})
+                if entity_id == "number.breaker_temperature_threshold"
+                else None
+            )
+        )
+
+        async def delayed_call(
+            domain: str,
+            service: str,
+            data: dict[str, object],
+            *,
+            blocking: bool,
+        ) -> None:
+            nonlocal observed_value
+            del domain, service, blocking
+            values.append(float(data["value"]))
+            if len(values) == 1:
+                first_started.set()
+                await release_first.wait()
+            observed_value = float(data["value"])
+
+        self.hass.services.async_call.side_effect = delayed_call
+        request_ids = iter(("range-first", "range-middle", "range-latest"))
+        self.executor.new_run_id = lambda: next(request_ids)
+
+        first = asyncio.create_task(
+            self.executor.async_execute_device_action("number_1", "set_value", 60)
+        )
+        await first_started.wait()
+        middle = asyncio.create_task(
+            self.executor.async_execute_device_action("number_1", "set_value", 70)
+        )
+        await asyncio.sleep(0)
+        latest = asyncio.create_task(
+            self.executor.async_execute_device_action("number_1", "set_value", 80)
+        )
+        middle_receipt = await asyncio.wait_for(middle, timeout=0.1)
+
+        self.assertEqual("failed", middle_receipt["status"])
+        self.assertTrue(middle_receipt["accepted"])
+        self.assertEqual("superseded", middle_receipt["error"])
+        self.assertEqual("superseded", middle_receipt["queue"]["state"])
+        self.assertEqual(
+            "range-latest",
+            middle_receipt["queue"]["supersededByRequestId"],
+        )
+        _device_receipt_validator().validate(
+            {
+                "contract": {
+                    "name": "hausman-hub-device-action-receipt",
+                    "version": 1,
+                },
+                **middle_receipt,
+            }
+        )
+        self.assertEqual([60.0], values)
+
+        release_first.set()
+        first_receipt, latest_receipt = await asyncio.gather(first, latest)
+
+        self.assertEqual([60.0, 80.0], values)
+        self.assertEqual("completed", first_receipt["queue"]["state"])
+        self.assertEqual("completed", latest_receipt["queue"]["state"])
+        self.assertEqual(1, latest_receipt["queue"]["position"])
+        _device_receipt_validator().validate(
+            {
+                "contract": {
+                    "name": "hausman-hub-device-action-receipt",
+                    "version": 1,
+                },
+                **latest_receipt,
+            }
+        )
 
     async def test_scenario_confirms_multiple_devices_in_one_shared_window(self) -> None:
         both_readbacks_started = asyncio.Event()

@@ -21,5 +21,11 @@
     "observedState": "on",
     "attempts": 2
   },
-  "reason": null
+  "reason": null,
+  "queue": {
+    "state": "completed",
+    "position": 0,
+    "transitions": ["queued", "executing", "completed"],
+    "supersededByRequestId": null
+  }
 }

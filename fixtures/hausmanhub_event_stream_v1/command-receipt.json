@@ -1,0 +1,22 @@
+{
+  "contract": { "name": "hausman-hub-event", "version": 1 },
+  "id": "event-receipt-example",
+  "type": "command_receipt",
+  "occurred_at": "2026-07-31T12:00:00+06:00",
+  "data": {
+    "request_id": "request-example",
+    "operation": "device_action",
+    "accepted": true,
+    "confirmed": true,
+    "status": "confirmed",
+    "target_id": "device_0123456789abcdef",
+    "reason": null,
+    "error_code": null,
+    "queue": {
+      "state": "completed",
+      "position": 0,
+      "transitions": ["queued", "executing", "completed"],
+      "superseded_by_request_id": null
+    }
+  }
+}

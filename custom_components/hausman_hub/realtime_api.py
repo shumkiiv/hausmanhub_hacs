@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from hashlib import sha256
 import json
 from typing import TYPE_CHECKING, Any, Final
@@ -318,6 +319,7 @@ def publish_command_receipt(
     reason = receipt.get("message") or receipt.get("reason")
     error = receipt.get("error")
     target_id = receipt.get("targetId") or receipt.get("target_id")
+    queue = _public_command_queue(receipt.get("queue"))
     normalized = {
         "request_id": request_id,
         "operation": operation,
@@ -327,6 +329,7 @@ def publish_command_receipt(
         "target_id": target_id if isinstance(target_id, str) else None,
         "reason": reason if isinstance(reason, str) else None,
         "error_code": error if isinstance(error, str) else None,
+        **({"queue": queue} if queue is not None else {}),
     }
     from .application.operation_journal import OperationJournalService
     from .operation_journal_api import DATA_OPERATION_JOURNAL
@@ -339,6 +342,37 @@ def publish_command_receipt(
     if runtime is None:
         return None
     return runtime.broker.publish("command_receipt", normalized)
+
+
+def _public_command_queue(value: object) -> dict[str, object] | None:
+    """Copy only bounded public queue metadata into the SSE receipt."""
+
+    if not isinstance(value, Mapping):
+        return None
+    state = value.get("state")
+    position = value.get("position")
+    transitions = value.get("transitions")
+    superseded = value.get("supersededByRequestId")
+    allowed = {"queued", "executing", "superseded", "completed"}
+    if (
+        state not in allowed
+        or type(position) is not int
+        or not 0 <= position <= 256
+        or not isinstance(transitions, list)
+        or not 1 <= len(transitions) <= 4
+        or any(item not in allowed for item in transitions)
+        or (
+            superseded is not None
+            and (not isinstance(superseded, str) or not 1 <= len(superseded) <= 128)
+        )
+    ):
+        return None
+    return {
+        "state": state,
+        "position": position,
+        "transitions": list(transitions),
+        "superseded_by_request_id": superseded,
+    }
 
 
 def _current_runtime(hass: HomeAssistant) -> EventStreamRuntime | None:

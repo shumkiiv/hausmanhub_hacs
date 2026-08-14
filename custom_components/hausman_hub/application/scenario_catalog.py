@@ -452,6 +452,7 @@ async def async_build_scenario_catalog(hass: HomeAssistant) -> ScenarioCatalog:
             range_minimum=number_range[0] if number_range is not None else None,
             range_maximum=number_range[1] if number_range is not None else None,
             range_step=number_range[2] if number_range is not None else None,
+            physical_id=device_id or entity_id,
         )
 
     return ScenarioCatalog(devices=devices, scenarios={})

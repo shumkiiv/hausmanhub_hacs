@@ -1,0 +1,22 @@
+{
+  "contract": {
+    "name": "hausman-hub-device-action-receipt",
+    "version": 1
+  },
+  "requestId": "synthetic-range-request-1",
+  "accepted": true,
+  "confirmed": false,
+  "status": "failed",
+  "statusName": "Не выполнено",
+  "targetId": "entity_0123456789abcdef",
+  "actionId": "set_value",
+  "message": "Команда заменена более новым значением до выполнения.",
+  "reason": "superseded",
+  "error": "superseded",
+  "queue": {
+    "state": "superseded",
+    "position": 1,
+    "transitions": ["queued", "superseded"],
+    "supersededByRequestId": "synthetic-range-request-2"
+  }
+}

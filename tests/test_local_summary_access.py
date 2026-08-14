@@ -3568,6 +3568,12 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 "confirmed": True,
                 "targetId": "device_public_1",
                 "message": "Устройство подтвердило новое состояние.",
+                "queue": {
+                    "state": "completed",
+                    "position": 1,
+                    "transitions": ["queued", "executing", "completed"],
+                    "supersededByRequestId": None,
+                },
             },
             operation="device_action",
         )
@@ -3577,6 +3583,11 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertEqual("command_receipt", message["type"])
         self.assertEqual("request-1", message["data"]["request_id"])
         self.assertEqual("confirmed", message["data"]["status"])
+        self.assertEqual("completed", message["data"]["queue"]["state"])
+        self.assertEqual(
+            ["queued", "executing", "completed"],
+            message["data"]["queue"]["transitions"],
+        )
         self.assertNotIn("entity_id", json.dumps(message, ensure_ascii=False))
         record = journal.snapshot()["records"][0]
         self.assertEqual("request-1", record["correlation_id"])

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 from collections.abc import Mapping
+from dataclasses import dataclass
 import math
 import time
 import uuid
@@ -30,6 +32,23 @@ if TYPE_CHECKING:
 _RUN_SCENARIO_DEPTH_LIMIT = 8
 _DEFAULT_DEVICE_READBACK_WINDOW_SECONDS = 8.0
 _DEFAULT_DEVICE_READBACK_INTERVAL_SECONDS = 0.25
+_MAX_DEVICE_COMMAND_QUEUE_SIZE = 256
+_COALESCIBLE_TARGET_DOMAINS = frozenset(
+    {"climate", "humidifier", "light", "number"}
+)
+
+
+@dataclass(slots=True)
+class _QueuedDeviceCommand:
+    request_id: str
+    target_id: str
+    action_id: str
+    position: int
+    coalescing_key: tuple[str, str] | None
+    base: dict[str, Any]
+    execute: Callable[[], Awaitable[dict[str, Any]]]
+    future: asyncio.Future[dict[str, Any]]
+    transitions: list[str]
 
 
 def _value_parameter_name(action_id: str, domain: str, service: str) -> str | None:
@@ -226,6 +245,8 @@ class ScenarioExecutor:
         self._readback_window_seconds = readback_window_seconds
         self._readback_interval_seconds = readback_interval_seconds
         self._power_dependency_resolver = power_dependency_resolver
+        self._device_command_queues: dict[str, deque[_QueuedDeviceCommand]] = {}
+        self._device_command_workers: dict[str, asyncio.Task[None]] = {}
 
     def new_run_id(self) -> str:
         """Generate a unique execution trace id."""
@@ -260,17 +281,23 @@ class ScenarioExecutor:
                 "type": "device_action",
                 "status": "pending",
             },
+            queue_request_id=request_id,
         )
         if receipt.get("status") != "completed":
+            superseded = receipt.get("error") == "superseded"
             return {
                 "requestId": request_id,
-                "accepted": False,
+                "accepted": superseded,
                 "confirmed": False,
                 "status": "failed",
                 "statusName": "Не выполнено",
                 "targetId": target_id,
                 "actionId": action_id,
-                "message": "Команда не была отправлена устройству.",
+                "message": (
+                    "Команда заменена более новым значением до выполнения."
+                    if superseded
+                    else "Команда не была отправлена устройству."
+                ),
                 "confirmationWindowMs": self._confirmation_window_ms,
                 "readBack": {
                     "attempted": False,
@@ -279,7 +306,13 @@ class ScenarioExecutor:
                     "observedState": None,
                     "attempts": 0,
                 },
+                "reason": "superseded" if superseded else None,
                 "error": receipt.get("error", "device_action_failed"),
+                **(
+                    {"queue": receipt["queue"]}
+                    if isinstance(receipt.get("queue"), dict)
+                    else {}
+                ),
             }
 
         device = self._catalog.device(target_id)
@@ -297,7 +330,7 @@ class ScenarioExecutor:
         confirmed = read_back["matched"] is True
         observed_state = read_back["observedState"]
 
-        return {
+        result = {
             "requestId": request_id,
             "accepted": True,
             "confirmed": confirmed,
@@ -316,6 +349,9 @@ class ScenarioExecutor:
             "readBack": read_back,
             "reason": None if confirmed else "state_not_confirmed",
         }
+        if isinstance(receipt.get("queue"), dict):
+            result["queue"] = receipt["queue"]
+        return result
 
     @property
     def _confirmation_window_ms(self) -> int:
@@ -499,6 +535,7 @@ class ScenarioExecutor:
                     base,
                     dry_run=dry_run,
                     defer_readback=defer_device_readback,
+                    queue_request_id=f"{run_id}:{action.id}",
                 )
             if action.type == ScenarioActionType.DELAY:
                 if not dry_run:
@@ -520,6 +557,8 @@ class ScenarioExecutor:
         *,
         dry_run: bool = False,
         defer_readback: bool = False,
+        queue_request_id: str | None = None,
+        already_queued: bool = False,
     ) -> dict[str, Any]:
         if action.target_id is None or action.action_id is None:
             return {
@@ -578,6 +617,30 @@ class ScenarioExecutor:
                     return {**base, "status": "failed", "error": error}
             service_data[param] = normalized
             confirmation_value = normalized
+        if not dry_run and not already_queued:
+            request_id = queue_request_id or self.new_run_id()
+            coalescing_key = (
+                (device.entity_id, action.action_id)
+                if action.value is not None
+                and allowed.domain in _COALESCIBLE_TARGET_DOMAINS
+                else None
+            )
+            return await self._async_enqueue_device_command(
+                entity_id=device.physical_id or device.entity_id,
+                request_id=request_id,
+                target_id=action.target_id,
+                action_id=action.action_id,
+                coalescing_key=coalescing_key,
+                base=base,
+                execute=lambda: self._device_action_receipt(
+                    action,
+                    base,
+                    dry_run=False,
+                    defer_readback=defer_readback,
+                    queue_request_id=request_id,
+                    already_queued=True,
+                ),
+            )
         if not dry_run:
             await self._call_service(allowed.domain, allowed.service, service_data)
         receipt: dict[str, Any] = {
@@ -603,6 +666,129 @@ class ScenarioExecutor:
                 None if read_back["matched"] is True else "state_not_confirmed"
             )
         return receipt
+
+    async def _async_enqueue_device_command(
+        self,
+        *,
+        entity_id: str,
+        request_id: str,
+        target_id: str,
+        action_id: str,
+        coalescing_key: tuple[str, str] | None,
+        base: dict[str, Any],
+        execute: Callable[[], Awaitable[dict[str, Any]]],
+    ) -> dict[str, Any]:
+        """Serialize one physical device and collapse safe queued targets."""
+
+        queue = self._device_command_queues.setdefault(entity_id, deque())
+        if len(queue) >= _MAX_DEVICE_COMMAND_QUEUE_SIZE:
+            return {
+                **base,
+                "status": "failed",
+                "error": "device_command_queue_full",
+            }
+        position = len(queue) + (1 if entity_id in self._device_command_workers else 0)
+        future: asyncio.Future[dict[str, Any]] = (
+            asyncio.get_running_loop().create_future()
+        )
+        command = _QueuedDeviceCommand(
+            request_id=request_id,
+            target_id=target_id,
+            action_id=action_id,
+            position=position,
+            coalescing_key=coalescing_key,
+            base=dict(base),
+            execute=execute,
+            future=future,
+            transitions=["queued"],
+        )
+        if coalescing_key is not None:
+            previous = next(
+                (
+                    queued
+                    for queued in reversed(queue)
+                    if queued.coalescing_key == coalescing_key
+                ),
+                None,
+            )
+            if previous is not None:
+                queue.remove(previous)
+                previous.transitions.append("superseded")
+                if not previous.future.done():
+                    previous.future.set_result(
+                        {
+                            **previous.base,
+                            "status": "failed",
+                            "error": "superseded",
+                            "queue": {
+                                "state": "superseded",
+                                "position": previous.position,
+                                "transitions": list(previous.transitions),
+                                "supersededByRequestId": request_id,
+                            },
+                        }
+                    )
+        command.position = len(queue) + (
+            1 if entity_id in self._device_command_workers else 0
+        )
+        queue.append(command)
+        if entity_id not in self._device_command_workers:
+            drain = self._async_drain_device_commands(entity_id)
+            schedule = getattr(self._hass, "async_create_task", None)
+            worker = (
+                schedule(drain)
+                if callable(schedule)
+                else asyncio.create_task(
+                    drain,
+                    name=f"hausman_hub_device_queue_{entity_id}",
+                )
+            )
+            if not isinstance(worker, asyncio.Task):
+                raise RuntimeError("device command worker could not be scheduled")
+            self._device_command_workers[entity_id] = worker
+        return await future
+
+    async def _async_drain_device_commands(self, entity_id: str) -> None:
+        """Execute one device queue in order and resolve every caller."""
+
+        queue = self._device_command_queues[entity_id]
+        try:
+            while queue:
+                command = queue.popleft()
+                command.transitions.append("executing")
+                try:
+                    result = await command.execute()
+                except asyncio.CancelledError:
+                    raise
+                except Exception as error:  # noqa: BLE001
+                    result = {
+                        **command.base,
+                        "status": "failed",
+                        "error": str(error) or type(error).__name__,
+                    }
+                command.transitions.append("completed")
+                result = {
+                    **result,
+                    "queue": {
+                        "state": "completed",
+                        "position": command.position,
+                        "transitions": list(command.transitions),
+                        "supersededByRequestId": None,
+                    },
+                }
+                if not command.future.done():
+                    command.future.set_result(result)
+        finally:
+            self._device_command_workers.pop(entity_id, None)
+            if not queue:
+                self._device_command_queues.pop(entity_id, None)
+            else:
+                for command in queue:
+                    if not command.future.done():
+                        command.future.set_exception(
+                            RuntimeError("device command queue stopped")
+                        )
+                queue.clear()
 
     def _power_dependency_error(self, entity_id: str) -> str | None:
         """Fail closed when an upstream source does not currently provide power."""

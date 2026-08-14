@@ -53,7 +53,27 @@
       }
     },
     "reason": { "type": ["string", "null"] },
-    "error": { "type": ["string", "null"] }
+    "error": { "type": ["string", "null"] },
+    "queue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "position", "transitions", "supersededByRequestId"],
+      "properties": {
+        "state": {
+          "enum": ["queued", "executing", "superseded", "completed"]
+        },
+        "position": { "type": "integer", "minimum": 0, "maximum": 256 },
+        "transitions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": {
+            "enum": ["queued", "executing", "superseded", "completed"]
+          }
+        },
+        "supersededByRequestId": { "type": ["string", "null"], "minLength": 1 }
+      }
+    }
   },
   "allOf": [
     {
@@ -82,6 +102,48 @@
         "properties": {
           "confirmed": { "const": false },
           "statusName": { "const": "Не выполнено" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "queue": {
+            "properties": { "state": { "const": "superseded" } },
+            "required": ["state"]
+          }
+        },
+        "required": ["queue"]
+      },
+      "then": {
+        "properties": {
+          "accepted": { "const": true },
+          "confirmed": { "const": false },
+          "status": { "const": "failed" },
+          "statusName": { "const": "Не выполнено" },
+          "error": { "const": "superseded" }
+        },
+        "required": ["error"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "queue": {
+            "properties": {
+              "state": { "enum": ["queued", "executing"] }
+            },
+            "required": ["state"]
+          }
+        },
+        "required": ["queue"]
+      },
+      "then": {
+        "properties": {
+          "accepted": { "const": true },
+          "confirmed": { "const": false },
+          "status": { "const": "accepted" },
+          "statusName": { "const": "Проверяется" }
         }
       }
     }
