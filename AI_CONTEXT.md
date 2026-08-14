@@ -4,6 +4,18 @@ Last updated: 2026-08-14 (HACS 1.52.93 associative scenario devices).
 
 ## Current work
 
+- 2026-08-14 (Codex): live-причина отсутствия управления Midea кабинета и
+  комнаты Алисы была в родительских комнатах `manual`, хотя сами устройства
+  уже имели `automatic`. Два штатных `set_room_mode automatic` вернули комнаты
+  в контур без физической команды. Операции
+  `57cd1f5512bf94f595b579986fac9776` и
+  `20893a4c695e7cac22bc8e07c11bbea7` подтверждены readback. Ближайший managed
+  tick применил поддержание к обоим Midea: `cool`, 27 °C, fan `low`, при
+  сохранённой комнатной цели 25 °C. В следующем 75-секундном WebSocket-окне
+  повторных climate service calls к этой паре не было. Runtime managed,
+  commands enabled, authority `hausman_hub`, blockers и pending отсутствуют.
+  `synchronize_home` не запускался, код, версия и deploy не менялись.
+
 - 2026-08-14 (Codex): HACS `1.52.93` groups scenario entities by physical
   Home Assistant device and publishes room, type, capability and allowed
   property states. The separate picker has search plus combinable room and
