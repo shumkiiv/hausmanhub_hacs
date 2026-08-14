@@ -438,4 +438,7 @@ async def async_dashboard_snapshot(
         capabilities["weatherDetails"] = bool(weather_payload["available"])
     await _refresh_catalog_for_missing_pinned(scenario_service, pinned_entity_ids)
     _attach_catalog_actions(payload, scenario_service)
+    readiness = getattr(scenario_service, "catalog_readiness", None)
+    if isinstance(readiness, Mapping):
+        payload["catalogReadiness"] = dict(readiness)
     return payload

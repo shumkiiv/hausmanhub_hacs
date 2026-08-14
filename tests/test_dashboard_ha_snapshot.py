@@ -39,6 +39,14 @@ class _ScenarioService:
             actions=(action,),
         )
         self._catalog = SimpleNamespace(devices={device.target_id: device})
+        self.catalog_readiness = {
+            "status": "ready",
+            "attempt": 4,
+            "maxAttempts": 4,
+            "deviceCount": 1,
+            "updatedAt": 1_786_379_619_981,
+            "reason": "warmup_complete",
+        }
 
     async def async_list_scenarios(self) -> tuple[object, ...]:
         return (
@@ -177,6 +185,8 @@ class DashboardHaSnapshotTest(unittest.IsolatedAsyncioTestCase):
             payload["devices"][0]["actions"][0]["payload"]["targetId"],
         )
         self.assertTrue(payload["capabilities"]["actions"])
+        self.assertEqual("ready", payload["catalogReadiness"]["status"])
+        self.assertEqual(1, payload["catalogReadiness"]["deviceCount"])
         self.assertEqual(["welcome"], [item["id"] for item in payload["scenarios"]])
         self.assertEqual(int(now.timestamp() * 1000), payload["generatedAt"])
 

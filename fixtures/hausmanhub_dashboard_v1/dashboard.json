@@ -209,6 +209,14 @@
       "level": "info"
     }
   ],
+  "catalogReadiness": {
+    "status": "ready",
+    "attempt": 4,
+    "maxAttempts": 4,
+    "deviceCount": 2,
+    "updatedAt": 1782225600000,
+    "reason": "warmup_complete"
+  },
   "capabilities": {
     "actions": true,
     "scenarios": true,

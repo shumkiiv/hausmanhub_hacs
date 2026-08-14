@@ -198,6 +198,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         power_dependency_resolver=lambda: device_power_dependency_service.mapping,
     )
     scenario_service.set_executor(scenario_executor)
+    entry.async_on_unload(scenario_service.start_catalog_warmup())
     await async_start_scenario_schedule(hass, entry, scenario_service)
     from .scenario_events import async_start_scenario_events
 

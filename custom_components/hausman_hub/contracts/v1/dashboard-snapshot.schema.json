@@ -55,6 +55,7 @@
     "inventory": {
       "$ref": "#/$defs/inventory"
     },
+    "catalogReadiness": { "$ref": "#/$defs/catalogReadiness" },
     "scenarios": {
       "type": "array",
       "items": { "$ref": "#/$defs/scenario" }
@@ -77,6 +78,19 @@
     }
   },
   "$defs": {
+    "catalogReadiness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "attempt", "maxAttempts", "deviceCount", "updatedAt", "reason"],
+      "properties": {
+        "status": { "enum": ["warming", "ready", "degraded"] },
+        "attempt": { "type": "integer", "minimum": 0, "maximum": 4 },
+        "maxAttempts": { "const": 4 },
+        "deviceCount": { "type": "integer", "minimum": 0, "maximum": 4096 },
+        "updatedAt": { "type": "integer", "minimum": 0 },
+        "reason": { "enum": ["initial_scan", "warmup_complete", "warmup_failed"] }
+      }
+    },
     "comfort": {
       "type": "object",
       "additionalProperties": false,

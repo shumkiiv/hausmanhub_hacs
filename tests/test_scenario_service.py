@@ -233,6 +233,72 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([("late_light", "turn_on", None)], self.executor.device_actions)
         self.assertTrue(receipt["confirmed"])
 
+    async def test_catalog_warmup_is_bounded_and_publishes_ready(self) -> None:
+        refreshes = 0
+
+        async def skip_delay(_: float) -> None:
+            return None
+
+        async def load_catalog() -> ScenarioCatalog:
+            nonlocal refreshes
+            refreshes += 1
+            return self.catalog
+
+        service = ScenarioService(
+            None,
+            self.store,
+            ScenarioCatalog(devices={}, scenarios={}),
+            self.executor,
+            catalog_loader=load_catalog,
+            sleep=skip_delay,
+        )
+
+        await service._async_catalog_warmup()
+
+        self.assertEqual(3, refreshes)
+        self.assertEqual(
+            {
+                "status": "ready",
+                "attempt": 4,
+                "maxAttempts": 4,
+                "deviceCount": 1,
+                "reason": "warmup_complete",
+            },
+            {
+                key: value
+                for key, value in service.catalog_readiness.items()
+                if key != "updatedAt"
+            },
+        )
+
+    async def test_catalog_warmup_exhaustion_is_degraded(self) -> None:
+        refreshes = 0
+
+        async def skip_delay(_: float) -> None:
+            return None
+
+        async def load_catalog() -> ScenarioCatalog:
+            nonlocal refreshes
+            refreshes += 1
+            raise RuntimeError("late integration unavailable")
+
+        service = ScenarioService(
+            None,
+            self.store,
+            self.catalog,
+            self.executor,
+            catalog_loader=load_catalog,
+            sleep=skip_delay,
+        )
+
+        await service._async_catalog_warmup()
+
+        self.assertEqual(3, refreshes)
+        self.assertEqual("degraded", service.catalog_readiness["status"])
+        self.assertEqual(4, service.catalog_readiness["attempt"])
+        self.assertEqual("warmup_failed", service.catalog_readiness["reason"])
+        self.assertEqual(1, service.catalog_readiness["deviceCount"])
+
     async def test_get_scenario_found(self) -> None:
         await self.service.async_update_scenario(_valid_payload())
         scenario = await self.service.async_get_scenario("scenario_1")
