@@ -88,6 +88,18 @@ class MemoryOperationStore:
         self.saved.append(copy.deepcopy(payload))
 
 
+class InterruptingOperationStore(MemoryOperationStore):
+    def __init__(self, payload: object | None = None) -> None:
+        super().__init__(payload)
+        self.fail_next_save = False
+
+    async def async_save(self, payload: dict[str, object]) -> None:
+        if self.fail_next_save:
+            self.fail_next_save = False
+            raise RuntimeError("simulated interrupted storage write")
+        await super().async_save(payload)
+
+
 class FakeRuntime:
     def __init__(self, home: dict[str, object]) -> None:
         self.home = copy.deepcopy(home)
@@ -629,6 +641,40 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(original["operation_id"], duplicate["operation_id"])
         self.assertTrue(duplicate["duplicate"])
         self.assertEqual([], restarted_runtime.commands)
+
+    async def test_interrupted_reservation_keeps_last_whole_version(self) -> None:
+        store = InterruptingOperationStore()
+        runtime = FakeRuntime(self.home)
+        service = ClimateTabletService(runtime, store)
+        first_request = action_request(
+            self.home["state_revision"],
+            request_id="tablet.climate.storage.1",
+        )
+        second_request = action_request(
+            self.home["state_revision"],
+            request_id="tablet.climate.storage.2",
+            target=24.0,
+        )
+        first = await service.async_execute(first_request)
+        last_whole_payload = copy.deepcopy(store.payload)
+        store.fail_next_save = True
+
+        with self.assertRaisesRegex(RuntimeError, "interrupted storage write"):
+            await service.async_execute(second_request)
+
+        self.assertEqual(last_whole_payload, store.payload)
+        self.assertEqual(1, len(runtime.commands))
+
+        restarted_runtime = FakeRuntime(self.home)
+        restarted = ClimateTabletService(restarted_runtime, store)
+        await restarted.async_load()
+        duplicate = await restarted.async_execute(first_request)
+        second = await restarted.async_execute(second_request)
+
+        self.assertEqual(first["operation_id"], duplicate["operation_id"])
+        self.assertTrue(duplicate["duplicate"])
+        self.assertEqual("confirmed", second["status"])
+        self.assertEqual(1, len(restarted_runtime.commands))
 
     async def test_pending_reservation_times_out_after_restart_without_reexecution(self) -> None:
         request = action_request(self.home["state_revision"])
