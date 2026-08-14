@@ -29,6 +29,10 @@
    и выберите **Обновить сведения**.
 3. Если HACS показывает новую версию, установите её и перезапустите Home
    Assistant.
+4. До полного deploy пройдите fail-closed production canary из
+   `docs/production-release-canary.md`: готовый backup, успешный config check,
+   одна read-only health-проба и окно по error rate, latency, pending age и
+   unavailable count. Физические команды в эту проверку не входят.
 
 HACS показывает удобный выбор версий, когда в репозитории есть опубликованные
 выпуски. Для добавленного вручную репозитория команда **Обновить сведения**
