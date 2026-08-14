@@ -21,6 +21,7 @@ from ..domain.contours import (
     CLIMATE_TARGET_TEMPERATURE_MINIMUM,
 )
 from .dashboard_comfort import build_dashboard_comfort
+from .command_blocking import public_command_block
 
 
 DASHBOARD_CONTRACT_NAME = "universal-home"
@@ -1087,6 +1088,15 @@ def build_dashboard_snapshot(
                 "reason": dependency_status.reason,
                 "blocksCommands": dependency_status.blocks_commands,
             }
+        if (
+            dependency_payload is not None
+            and dependency_payload["blocksCommands"] is True
+        ):
+            command_block = public_command_block("dependency_unavailable")
+        elif unavailable:
+            command_block = public_command_block("device_unavailable")
+        else:
+            command_block = None
         device_payloads.append(
             {
                 "id": public_id,
@@ -1123,6 +1133,7 @@ def build_dashboard_snapshot(
                 "details": details,
                 "energy": electrical if has_energy else None,
                 "powerDependency": dependency_payload,
+                **({"commandBlock": command_block} if command_block else {}),
             }
         )
         if has_energy:

@@ -42,6 +42,35 @@
     "message": { "type": "string", "minLength": 1, "maxLength": 500 },
     "retryable": { "type": "boolean" },
     "requestId": { "type": ["string", "null"], "maxLength": 128 },
-    "details": { "type": "object", "additionalProperties": true }
+    "details": {
+      "type": "object",
+      "properties": {
+        "blocking": { "$ref": "#/$defs/blocking" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "blocking": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "recommendedAction"],
+      "properties": {
+        "code": {
+          "enum": [
+            "offline",
+            "stale_evidence",
+            "unsupported_action",
+            "safety_policy",
+            "conflict",
+            "dependency_unavailable"
+          ]
+        },
+        "message": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "recommendedAction": {
+          "enum": ["retry", "refresh", "wait", "check_device", "review_settings"]
+        }
+      }
+    }
   }
 }

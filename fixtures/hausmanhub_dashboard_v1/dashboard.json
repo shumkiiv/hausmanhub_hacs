@@ -181,6 +181,11 @@
         "state": "unpowered",
         "reason": "power_source_off",
         "blocksCommands": true
+      },
+      "commandBlock": {
+        "code": "dependency_unavailable",
+        "message": "Сначала включите связанное устройство питания.",
+        "recommendedAction": "check_device"
       }
     }
   ],

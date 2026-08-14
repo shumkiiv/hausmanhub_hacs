@@ -1764,6 +1764,27 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
         self.assertEqual(1, len(runtime.commands))
 
+        conflict_request = action_request(
+            snapshot.payload["state_revision"] + 1,
+            request_id="tablet.climate.conflict",
+        )
+        conflict = asyncio.run(
+            views[action_path].post(
+                FakeJsonRequest(
+                    "192.168.1.20", tablet, action_path, conflict_request
+                )
+            )
+        )
+        self.assertEqual(409, conflict.status)
+        self.assertEqual("revision_conflict", conflict.payload["code"])
+        self.assertEqual(
+            "conflict", conflict.payload["details"]["blocking"]["code"]
+        )
+        self.assertEqual(
+            "refresh",
+            conflict.payload["details"]["blocking"]["recommendedAction"],
+        )
+
         operation_id = first.payload["operation_id"]
         operation = asyncio.run(
             views[operation_template].get(

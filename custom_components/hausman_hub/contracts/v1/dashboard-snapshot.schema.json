@@ -254,7 +254,8 @@
             { "$ref": "#/$defs/powerDependency" },
             { "type": "null" }
           ]
-        }
+        },
+        "commandBlock": { "$ref": "#/$defs/commandBlock" }
       },
       "additionalProperties": true
     },
@@ -269,6 +270,27 @@
           "enum": ["power_source_on", "power_source_off", "power_source_unavailable"]
         },
         "blocksCommands": { "type": "boolean" }
+      }
+    },
+    "commandBlock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "recommendedAction"],
+      "properties": {
+        "code": {
+          "enum": [
+            "offline",
+            "stale_evidence",
+            "unsupported_action",
+            "safety_policy",
+            "conflict",
+            "dependency_unavailable"
+          ]
+        },
+        "message": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "recommendedAction": {
+          "enum": ["retry", "refresh", "wait", "check_device", "review_settings"]
+        }
       }
     },
     "inventory": {

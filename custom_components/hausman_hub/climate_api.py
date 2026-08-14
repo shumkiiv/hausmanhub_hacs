@@ -39,6 +39,7 @@ from .application.climate_tablet import (
     ClimateTabletUnavailable,
     ClimateTabletViolation,
 )
+from .application.command_blocking import public_command_block
 from .application.ai_assistant import AiAssistantService
 from .application.ai_assistant_config import (
     AiAssistantBinding,
@@ -3094,13 +3095,17 @@ def _api_error(
 ) -> Any:
     """Return the strict public error envelope used by the new tablet routes."""
 
+    payload: dict[str, object] = {
+        "contract": {"name": "hausman-hub-error", "version": 1},
+        "code": code,
+        "message": message,
+        "retryable": retryable,
+    }
+    blocking = public_command_block(code)
+    if blocking is not None:
+        payload["details"] = {"blocking": blocking}
     return view.json(
-        {
-            "contract": {"name": "hausman-hub-error", "version": 1},
-            "code": code,
-            "message": message,
-            "retryable": retryable,
-        },
+        payload,
         status_code=status,
         headers=NO_STORE_HEADERS,
     )

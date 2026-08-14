@@ -4,5 +4,13 @@
   "message": "Настройки изменились на другом клиенте. Обновите данные и повторите попытку.",
   "retryable": true,
   "requestId": "request-example",
-  "details": { "expectedRevision": 3, "actualRevision": 4 }
+  "details": {
+    "expectedRevision": 3,
+    "actualRevision": 4,
+    "blocking": {
+      "code": "conflict",
+      "message": "Состояние изменилось. Обновите данные и повторите команду.",
+      "recommendedAction": "refresh"
+    }
+  }
 }

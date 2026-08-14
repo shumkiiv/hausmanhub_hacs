@@ -22,6 +22,10 @@
   ограниченных refresh через 1, 3 и 8 секунд. Dashboard публикует
   `catalogReadiness` со статусом прогрева, номером попытки и числом targets;
   поздняя интеграция больше не зависит только от ленивого refresh клиента.
+- Dashboard и API errors используют общую taxonomy блокировки команды:
+  offline, stale evidence, unsupported action, safety policy, conflict и
+  unavailable dependency. Для каждой причины backend отдаёт короткое русское
+  объяснение и рекомендуемое действие без Home Assistant entity ID.
 
 ## 1.52.90 - 2026-08-13
 

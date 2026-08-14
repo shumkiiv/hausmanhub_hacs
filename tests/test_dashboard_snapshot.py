@@ -214,6 +214,10 @@ class DashboardSnapshotTest(unittest.TestCase):
         self.assertEqual(switch["id"], light["powerDependency"]["sourceDeviceId"])
         self.assertEqual("unpowered", light["powerDependency"]["state"])
         self.assertTrue(light["powerDependency"]["blocksCommands"])
+        self.assertEqual(
+            "dependency_unavailable", light["commandBlock"]["code"]
+        )
+        self.assertEqual("check_device", light["commandBlock"]["recommendedAction"])
 
     def test_events_are_newest_first_and_enable_activity_capability(self) -> None:
         snapshot = build_dashboard_snapshot(
@@ -670,6 +674,7 @@ class DashboardSnapshotTest(unittest.TestCase):
         self.assertTrue(device["unavailable"])
         self.assertFalse(device["active"])
         self.assertEqual("bad", device["tone"])
+        self.assertEqual("offline", device["commandBlock"]["code"])
 
     def test_multi_control_device_is_online_when_one_control_is_available(self) -> None:
         snapshot = build_dashboard_snapshot(
