@@ -315,6 +315,7 @@ async def async_dashboard_snapshot(
     climate_targets: Mapping[str, tuple[float, int]] | None = None,
     pinned_entity_ids: frozenset[str] | None = None,
     power_dependencies: Mapping[str, str] | None = None,
+    climate_ownership: Mapping[str, Mapping[str, str]] | None = None,
 ) -> dict[str, object]:
     """Collect current HA registries and project one side-effect-free payload."""
 
@@ -394,6 +395,7 @@ async def async_dashboard_snapshot(
         climate_targets=climate_targets,
         pinned_entity_ids=pinned_entity_ids,
         power_dependencies=power_dependencies,
+        climate_ownership=climate_ownership,
     )
     weather_entity = next(
         (entity for entity in entity_values if entity.domain == "weather"), None

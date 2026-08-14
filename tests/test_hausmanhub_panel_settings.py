@@ -1918,6 +1918,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
                     "entityId": "climate.living", "name": "Кондиционер гостиная",
                     "roomId": "living", "roomName": "Гостиная", "domain": "climate",
                     "category": "climate", "state": "cool", "stateLabel": "cool",
+                    "climateMode": "manual", "climateModeName": "Ручной режим",
                     "active": True, "tone": "good", "unavailable": False,
                     "imageUrl": "https://www.zigbee2mqtt.io/images/devices/ac.png",
                     "details": [{"entityId": "climate.living", "label": "Режим", "value": "Охлаждение"}],
@@ -1994,7 +1995,8 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         let sheet = findAll(climate, (node) =>
           String(node.className).split(" ").includes("climate-device-sheet"))[0];
         if (!sheet || !textOf(sheet).includes("Кондиционер гостиная")
-          || !textOf(sheet).includes("Охлаждение")) {
+          || !textOf(sheet).includes("Охлаждение")
+          || !textOf(sheet).includes("Ручной режим")) {
           throw new Error("category did not open all conditioner devices");
         }
         let products = findAll(sheet, (node) =>
@@ -4047,7 +4049,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.95")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.96")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

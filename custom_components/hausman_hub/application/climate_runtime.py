@@ -468,6 +468,46 @@ class ClimateRuntime:
                 for room in contour.rooms
             }
 
+    async def async_dashboard_climate_ownership(self) -> dict[str, dict[str, str]]:
+        """Return private lookup keys used to annotate shared device cards."""
+
+        async with self._lock:
+            contour = self._contours.contour(CLIMATE_CONTOUR_ID)
+            if contour is None:
+                return {"rooms": {}, "entities": {}}
+            assigned_device_ids = {
+                device_id
+                for room in contour.rooms
+                for device_id in room.device_ids
+            }
+            manual_room_ids = set(
+                effective_manual_room_ids(self._manual_memory, self._registry)
+            )
+            manual_device_ids = set(self._manual_memory.manual_device_ids)
+            rooms = {
+                room.room_id: (
+                    "manual" if room.room_id in manual_room_ids else "automatic"
+                )
+                for room in contour.rooms
+            }
+            entities: dict[str, str] = {}
+            for device in self._registry.devices:
+                if (
+                    device.device_id not in assigned_device_ids
+                    or device.kind is not ClimateDeviceKind.AIR_CONDITIONER
+                ):
+                    continue
+                endpoint = device.endpoint(ClimateEndpointRole.CONTROL)
+                if endpoint is None:
+                    continue
+                entities[endpoint.entity_id] = (
+                    "manual"
+                    if device.room_id in manual_room_ids
+                    or device.device_id in manual_device_ids
+                    else "automatic"
+                )
+            return {"rooms": rooms, "entities": entities}
+
     async def async_public_snapshot(self) -> dict[str, object]:
         """Refresh and return the private-id-free tablet contract."""
 
@@ -1112,6 +1152,82 @@ class ClimateRuntime:
                 self._manual_memory = updated
             self.last_error = None
             return _ClimateRoomModeReceipt()
+
+    async def async_set_device_mode_for_entity(
+        self,
+        entity_id: object,
+        mode: object,
+    ) -> dict[str, object] | None:
+        """Persist an AC ownership choice resolved from its control entity."""
+
+        if not isinstance(entity_id, str) or mode not in {"automatic", "manual"}:
+            raise ClimateManualViolation("climate device entity mode request is invalid")
+        async with self._lock:
+            contour = self._contours.contour(CLIMATE_CONTOUR_ID)
+            if contour is None:
+                return None
+            assigned_device_ids = {
+                device_id
+                for room in contour.rooms
+                for device_id in room.device_ids
+            }
+            device = next(
+                (
+                    candidate
+                    for candidate in self._registry.devices
+                    if candidate.device_id in assigned_device_ids
+                    and candidate.kind is ClimateDeviceKind.AIR_CONDITIONER
+                    and (
+                        endpoint := candidate.endpoint(ClimateEndpointRole.CONTROL)
+                    ) is not None
+                    and endpoint.entity_id == entity_id
+                ),
+                None,
+            )
+            if device is None:
+                return None
+            manual_room_ids = set(
+                effective_manual_room_ids(self._manual_memory, self._registry)
+            )
+            was_explicitly_manual = device.device_id in set(
+                self._manual_memory.manual_device_ids
+            )
+            previous_mode = (
+                "manual"
+                if device.room_id in manual_room_ids or was_explicitly_manual
+                else "automatic"
+            )
+            should_be_manual = mode == "manual"
+            if device.room_id in manual_room_ids and should_be_manual:
+                updated = self._manual_memory
+            else:
+                updated = with_climate_device_mode(
+                    self._manual_memory,
+                    self._registry,
+                    room_id=device.room_id,
+                    device_id=device.device_id,
+                    manual=should_be_manual,
+                    updated_at=self._safe_now(),
+                )
+            changed = updated != self._manual_memory
+            if changed:
+                await self._async_save_manual(updated)
+                self._manual_memory = updated
+            self.last_error = None
+            effective_mode = (
+                "manual"
+                if device.room_id in manual_room_ids
+                or device.device_id in set(self._manual_memory.manual_device_ids)
+                else "automatic"
+            )
+            return {
+                "device_id": device.device_id,
+                "room_id": device.room_id,
+                "entity_id": entity_id,
+                "previous_mode": previous_mode,
+                "mode": effective_mode,
+                "changed": changed,
+            }
 
     async def async_home_climate_targets(self, payload: object) -> ContourApplyReceipt:
         """Save and apply one common temperature and/or humidity target."""

@@ -825,6 +825,7 @@ def build_dashboard_snapshot(
     climate_targets: Mapping[str, tuple[float, int]] | None = None,
     pinned_entity_ids: Iterable[str] | None = None,
     power_dependencies: Mapping[str, str] | None = None,
+    climate_ownership: Mapping[str, Mapping[str, str]] | None = None,
 ) -> dict[str, object]:
     """Project one immutable, read-only universal dashboard snapshot."""
 
@@ -849,6 +850,11 @@ def build_dashboard_snapshot(
     device_by_id = {device.device_id: device for device in devices}
     reported_entities = tuple(entities)
     dependency_mapping = dict(power_dependencies or {})
+    ownership = climate_ownership if isinstance(climate_ownership, Mapping) else {}
+    raw_room_modes = ownership.get("rooms", {})
+    raw_entity_modes = ownership.get("entities", {})
+    room_modes = raw_room_modes if isinstance(raw_room_modes, Mapping) else {}
+    entity_modes = raw_entity_modes if isinstance(raw_entity_modes, Mapping) else {}
     reported_by_id = {entity.entity_id: entity for entity in reported_entities}
     all_entities, dependency_statuses = _apply_power_dependencies(
         reported_entities, dependency_mapping
@@ -1087,6 +1093,19 @@ def build_dashboard_snapshot(
                 "reason": dependency_status.reason,
                 "blocksCommands": dependency_status.blocks_commands,
             }
+        climate_mode = entity_modes.get(primary.entity_id)
+        climate_fields = (
+            {
+                "climateMode": climate_mode,
+                "climateModeName": (
+                    "Ручной режим"
+                    if climate_mode == "manual"
+                    else "Автоматический режим"
+                ),
+            }
+            if climate_mode in {"automatic", "manual"}
+            else {}
+        )
         device_payloads.append(
             {
                 "id": public_id,
@@ -1123,6 +1142,7 @@ def build_dashboard_snapshot(
                 "details": details,
                 "energy": electrical if has_energy else None,
                 "powerDependency": dependency_payload,
+                **climate_fields,
             }
         )
         if has_energy:
@@ -1211,7 +1231,7 @@ def build_dashboard_snapshot(
                 "targetHumidity": target_humidity,
                 "minTargetTemp": target,
                 "manualTarget": False,
-                "manualControl": False,
+                "manualControl": room_modes.get(area.area_id) == "manual",
                 "targetStrategy": "normal" if climate is not None else None,
                 "climateState": climate_state,
                 "climateRunning": climate_state in _ACTIVE_STATES,

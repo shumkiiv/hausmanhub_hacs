@@ -330,6 +330,39 @@ class MemoryManualStore:
 
 
 class ClimateManualRuntimeTest(unittest.IsolatedAsyncioTestCase):
+    async def test_entity_mode_updates_dashboard_ownership_without_command(self) -> None:
+        registry = native_registry(ClimateControlScope.MANAGED)
+        store = MemoryManualStore()
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=SafeConfiguration(
+                mode="shadow",
+                climate_bridge_mode=ClimateControlMode.MANAGED,
+                climate_canary_room_id=None,
+            ),
+            registry_store=MemoryStore(registry),
+            contour_store=MemoryStore(native_contours()),
+            manual_store=store,
+            strict_ha_call_executor=RecordingTrialExecutor(),
+            ha_state_view=MutableStateView(healthy_states()),
+            now_ms=lambda: NOW,
+        )
+        await runtime.async_start()
+
+        automatic = await runtime.async_dashboard_climate_ownership()
+        changed = await runtime.async_set_device_mode_for_entity(
+            "climate.living_ac", "manual"
+        )
+        manual = await runtime.async_dashboard_climate_ownership()
+
+        self.assertEqual("automatic", automatic["rooms"]["living"])
+        self.assertEqual("automatic", automatic["entities"]["climate.living_ac"])
+        self.assertEqual("automatic", changed["previous_mode"])
+        self.assertEqual("manual", changed["mode"])
+        self.assertTrue(changed["changed"])
+        self.assertEqual("manual", manual["entities"]["climate.living_ac"])
+        self.assertEqual(("living_ac",), store.memory.manual_device_ids)  # type: ignore[union-attr]
+
     async def test_external_off_stops_managed_commands_and_survives_restart(
         self,
     ) -> None:

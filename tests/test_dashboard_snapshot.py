@@ -172,6 +172,35 @@ class DashboardSnapshotTest(unittest.TestCase):
         self.assertIsInstance(self.snapshot["comfort"]["score"], int)
         self.assertEqual("limited", self.snapshot["comfort"]["dataQuality"])
 
+    def test_climate_ownership_is_visible_on_room_and_device_cards(self) -> None:
+        snapshot = build_dashboard_snapshot(
+            areas=(DashboardArea("living", "Гостиная"),),
+            devices=(DashboardDevice("ac-device", "Кондиционер", "living"),),
+            entities=(
+                DashboardEntity(
+                    "climate.living",
+                    "climate",
+                    "off",
+                    "Кондиционер",
+                    {"temperature": 24},
+                    "ac-device",
+                    "living",
+                ),
+            ),
+            generated_at_ms=1,
+            local_iso="2026-08-14T22:30:00+03:00",
+            climate_ownership={
+                "rooms": {"living": "manual"},
+                "entities": {"climate.living": "manual"},
+            },
+        )
+
+        self.assertTrue(snapshot["rooms"][0]["manualControl"])
+        self.assertEqual("manual", snapshot["devices"][0]["climateMode"])
+        self.assertEqual(
+            "Ручной режим", snapshot["devices"][0]["climateModeName"]
+        )
+
     def test_unpowered_light_uses_effective_off_state_and_keeps_reported_state(self) -> None:
         snapshot = build_dashboard_snapshot(
             areas=(DashboardArea("hall", "Коридор"),),

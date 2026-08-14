@@ -34,6 +34,7 @@
           "available": true,
           "state": "idle",
           "mode": "automatic",
+          "mode_name": "Автоматический режим",
           "control": {"enabled": true, "allowed_actions": ["set_device_mode"], "blocked_reasons": []},
           "cooldown": null,
           "last_confirmed_operation": null
@@ -46,6 +47,7 @@
           "available": true,
           "state": "idle",
           "mode": "manual",
+          "mode_name": "Ручной режим",
           "control": {"enabled": true, "allowed_actions": ["set_device_mode"], "blocked_reasons": []},
           "cooldown": null,
           "last_confirmed_operation": null
@@ -55,4 +57,3 @@
   ],
   "active_operations": []
 }
-

@@ -174,6 +174,21 @@ class ClimateTabletProjectionTest(unittest.TestCase):
         self.assertEqual("hausman_hub", payload["authority"])
         self.assertTrue(payload["commands_enabled"])
         self.assertEqual(
+            "Режим неизвестен",
+            payload["rooms"][0]["devices"][0]["mode_name"],
+        )
+
+    def test_manual_device_mode_has_russian_label(self) -> None:
+        home = managed_home()
+        home["rooms"][0]["devices"][0]["mode"] = "manual"
+
+        payload = climate_tablet_snapshot(home, climate_mode="managed")
+
+        self.assertEqual(
+            "Ручной режим",
+            payload["rooms"][0]["devices"][0]["mode_name"],
+        )
+        self.assertEqual(
             ["set_home_targets", "synchronize_home"],
             payload["home_control"]["allowed_actions"],
         )

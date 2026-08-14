@@ -597,6 +597,12 @@ class DashboardView(_ClimateView):
         try:
             target_reader = getattr(runtime, "async_dashboard_climate_targets", None)
             climate_targets = await target_reader() if callable(target_reader) else None
+            ownership_reader = getattr(
+                runtime, "async_dashboard_climate_ownership", None
+            )
+            climate_ownership = (
+                await ownership_reader() if callable(ownership_reader) else None
+            )
             payload = await async_dashboard_snapshot(
                 self._hass,
                 scenario_service if scenario_service is not None else None,
@@ -610,6 +616,7 @@ class DashboardView(_ClimateView):
                 power_dependency_service.mapping
                 if isinstance(power_dependency_service, DevicePowerDependencyService)
                 else None,
+                climate_ownership,
             )
         except Exception:
             return self._unavailable()

@@ -636,6 +636,20 @@ class ScenarioService:
             value,
         )
 
+    async def async_resolve_device_action(
+        self,
+        target_id: str,
+        action_id: str,
+    ) -> tuple[str, str] | None:
+        """Resolve an approved catalog action without executing it."""
+
+        catalog = await self.async_refresh_catalog()
+        device = catalog.device(target_id)
+        action = device.action(action_id) if device is not None else None
+        if device is None or action is None:
+            return None
+        return device.entity_id, action.domain
+
     async def async_schedule_intercom_release(
         self,
         target_id: str,

@@ -9,8 +9,10 @@
   "status": "confirmed",
   "statusName": "Выполнено",
   "targetId": "entity_0123456789abcdef",
-  "actionId": "turn_on",
-  "observedState": "on",
+  "actionId": "turn_off",
+  "climateMode": "manual",
+  "climateModeName": "Ручной режим",
+  "observedState": "off",
   "appliedAt": 1785268800000,
   "message": "Устройство подтвердило новое состояние.",
   "confirmationWindowMs": 8000,
@@ -18,7 +20,7 @@
     "attempted": true,
     "matched": true,
     "observedAt": 1785268800000,
-    "observedState": "on",
+    "observedState": "off",
     "attempts": 2
   },
   "reason": null

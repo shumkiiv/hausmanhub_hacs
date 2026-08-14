@@ -2737,7 +2737,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.95", panel.payload["integration_version"])
+        self.assertEqual("1.52.96", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
@@ -3294,7 +3294,6 @@ class LocalSummaryAccessTest(unittest.TestCase):
             [("living-light", "turn_on", None), ("living-light", "turn_on", None)],
             executions,
         )
-
         forbidden = asyncio.run(
             view.post(
                 FakeJsonRequest(
@@ -3307,6 +3306,110 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
         self.assertEqual(403, forbidden.status)
         self.assertEqual(2, len(executions))
+
+    def test_manual_ac_off_enters_manual_mode_before_command(self) -> None:
+        path = "/api/hausman_hub/v1/device-actions"
+        view = next(item for item in self.hass.http.views if item.url == path)
+        service = self.hass.data["hausman_hub"]["scenario_service"]
+        runtime = self.hass.data["hausman_hub"]["climate_runtime"]
+        events: list[tuple[str, object]] = []
+
+        async def resolve_device_action(
+            target_id: str, action_id: str
+        ) -> tuple[str, str]:
+            events.append(("resolve", (target_id, action_id)))
+            return "climate.office", "climate"
+
+        async def set_mode(entity_id: object, mode: object) -> dict[str, object]:
+            events.append(("mode", (entity_id, mode)))
+            return {
+                "entity_id": entity_id,
+                "previous_mode": "automatic",
+                "mode": mode,
+                "changed": True,
+            }
+
+        async def execute_device_action(
+            target_id: str, action_id: str, value: object
+        ) -> dict[str, object]:
+            events.append(("execute", (target_id, action_id, value)))
+            return {"accepted": True, "confirmed": True, "status": "confirmed"}
+
+        service.async_resolve_device_action = resolve_device_action
+        service.async_execute_device_action = execute_device_action
+        runtime.async_set_device_mode_for_entity = set_mode
+        response = asyncio.run(
+            view.post(
+                FakeJsonRequest(
+                    "192.168.1.20",
+                    reader_user("system-users"),
+                    path,
+                    {"targetId": "office-ac", "actionId": "turn_off"},
+                )
+            )
+        )
+
+        self.assertEqual(200, response.status)
+        self.assertEqual("manual", response.payload["climateMode"])
+        self.assertEqual("Ручной режим", response.payload["climateModeName"])
+        self.assertEqual(
+            [
+                ("resolve", ("office-ac", "turn_off")),
+                ("mode", ("climate.office", "manual")),
+                ("execute", ("office-ac", "turn_off", None)),
+            ],
+            events,
+        )
+
+    def test_rejected_manual_ac_off_restores_automatic_mode(self) -> None:
+        path = "/api/hausman_hub/v1/device-actions"
+        view = next(item for item in self.hass.http.views if item.url == path)
+        service = self.hass.data["hausman_hub"]["scenario_service"]
+        runtime = self.hass.data["hausman_hub"]["climate_runtime"]
+        modes: list[tuple[object, object]] = []
+
+        async def resolve_device_action(
+            target_id: str, action_id: str
+        ) -> tuple[str, str]:
+            return "climate.office", "climate"
+
+        async def set_mode(entity_id: object, mode: object) -> dict[str, object]:
+            modes.append((entity_id, mode))
+            return {
+                "entity_id": entity_id,
+                "previous_mode": "automatic" if mode == "manual" else "manual",
+                "mode": mode,
+                "changed": True,
+            }
+
+        async def execute_device_action(
+            target_id: str, action_id: str, value: object
+        ) -> dict[str, object]:
+            return {"accepted": False, "confirmed": False, "status": "rejected"}
+
+        service.async_resolve_device_action = resolve_device_action
+        service.async_execute_device_action = execute_device_action
+        runtime.async_set_device_mode_for_entity = set_mode
+        response = asyncio.run(
+            view.post(
+                FakeJsonRequest(
+                    "192.168.1.20",
+                    reader_user("system-users"),
+                    path,
+                    {"targetId": "office-ac", "actionId": "turn_off"},
+                )
+            )
+        )
+
+        self.assertEqual(409, response.status)
+        self.assertNotIn("climateMode", response.payload)
+        self.assertEqual(
+            [
+                ("climate.office", "manual"),
+                ("climate.office", "automatic"),
+            ],
+            modes,
+        )
 
     def test_view_rejects_disallowed_origins_before_reading_the_home(self) -> None:
         """Only ordinary home-network source ranges may read the summary."""

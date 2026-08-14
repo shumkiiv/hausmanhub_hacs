@@ -954,6 +954,16 @@ def _project_device(
 ) -> dict[str, object]:
     if not isinstance(device, Mapping):
         raise ClimateTabletUnavailable("climate device projection is invalid")
+    mode = (
+        device.get("mode")
+        if device.get("mode") in {"automatic", "manual", "unknown"}
+        else "unknown"
+    )
+    mode_name = {
+        "automatic": "Автоматический режим",
+        "manual": "Ручной режим",
+        "unknown": "Режим неизвестен",
+    }[mode]
     return {
         "id": device.get("id"),
         "name": device.get("name"),
@@ -965,9 +975,8 @@ def _project_device(
         ),
         "available": device.get("available") is True,
         "state": device.get("state"),
-        "mode": device.get("mode") if device.get("mode") in {
-            "automatic", "manual", "unknown"
-        } else "unknown",
+        "mode": mode,
+        "mode_name": mode_name,
         "control": _project_device_control(device.get("control")),
         "cooldown": None,
         "last_confirmed_operation": (

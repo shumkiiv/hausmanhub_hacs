@@ -253,6 +253,9 @@
         "available": {"type": "boolean"},
         "state": {"enum": ["working", "idle", "off", "unavailable", "unknown"]},
         "mode": {"enum": ["automatic", "manual", "unknown"]},
+        "mode_name": {
+          "enum": ["Автоматический режим", "Ручной режим", "Режим неизвестен"]
+        },
         "control": {"$ref": "#/$defs/control"},
         "cooldown": {"oneOf": [{"$ref": "#/$defs/cooldown"}, {"type": "null"}]},
         "last_confirmed_operation": {

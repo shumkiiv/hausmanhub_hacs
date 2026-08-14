@@ -208,6 +208,10 @@
         "state": { "type": "string" },
         "reportedState": { "type": ["string", "null"] },
         "stateLabel": { "type": ["string", "null"] },
+        "climateMode": { "enum": ["automatic", "manual"] },
+        "climateModeName": {
+          "enum": ["Автоматический режим", "Ручной режим"]
+        },
         "active": { "type": "boolean" },
         "unavailable": { "type": "boolean" },
         "tone": { "type": ["string", "null"] },

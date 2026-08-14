@@ -291,6 +291,18 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([("late_light", "turn_on", None)], self.executor.device_actions)
         self.assertTrue(receipt["confirmed"])
 
+    async def test_device_action_can_be_resolved_without_execution(self) -> None:
+        resolved = await self.service.async_resolve_device_action(
+            "device_abc", "turn_on"
+        )
+        missing = await self.service.async_resolve_device_action(
+            "device_abc", "turn_off"
+        )
+
+        self.assertEqual(("light.living_room", "light"), resolved)
+        self.assertIsNone(missing)
+        self.assertEqual([], self.executor.device_actions)
+
     async def test_get_scenario_found(self) -> None:
         await self.service.async_update_scenario(_valid_payload())
         scenario = await self.service.async_get_scenario("scenario_1")

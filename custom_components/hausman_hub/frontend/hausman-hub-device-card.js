@@ -1,6 +1,6 @@
 /* Canonical physical-device card shared by all tablet-style HACS sections. */
 
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.95";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.96";
 
 const STATE_LABELS = {
   on: "Включено",
@@ -78,6 +78,22 @@ export function localizedDeviceState(device) {
   const rawLabel = normalized(device && device.stateLabel);
   return STATE_LABELS[rawLabel] || STATE_LABELS[rawState]
     || (device && device.stateLabel) || "Состояние неизвестно";
+}
+
+export function climateModePresentation(device) {
+  const mode = device && device.climateMode;
+  if (mode !== "automatic" && mode !== "manual") return null;
+  const supplied = String(device.climateModeName || "").trim();
+  const expected = mode === "manual" ? "Ручной режим" : "Автоматический режим";
+  return { mode, label: supplied === expected ? supplied : expected };
+}
+
+function appendClimateModeBadge(container, device, deps, className) {
+  const mode = climateModePresentation(device);
+  if (!mode) return null;
+  const badge = deps.el("span", `${className} is-${mode.mode}`, mode.label);
+  container.appendChild(badge);
+  return badge;
 }
 
 function actionObjectName(target, device) {
@@ -352,7 +368,10 @@ function openDeviceSheet(owner, device, deps) {
   identity.appendChild(el("p", null, [device.roomName || "Без комнаты", device.manufacturer, device.model]
     .filter(Boolean).filter((value, index, values) => values.indexOf(value) === index).join(" · ")));
   const status = el("span", `device-sheet-status ${device.unavailable ? "bad" : (device.tone || "neutral")}`, state);
-  identity.appendChild(status);
+  const statuses = el("div", "device-sheet-statuses");
+  statuses.appendChild(status);
+  appendClimateModeBadge(statuses, device, deps, "device-climate-mode");
+  identity.appendChild(statuses);
   hero.appendChild(identity);
   sheet.appendChild(hero);
 
@@ -404,15 +423,17 @@ export function renderPhysicalDeviceCard(owner, device, deps) {
   const { el, setAttr } = deps;
   const iconName = owner._deviceIcon(device);
   const state = localizedDeviceState(device);
+  const climateMode = climateModePresentation(device);
   const card = el("article", `inventory-device-card physical-device-card${device.unavailable ? " is-unavailable" : ""}`);
   const summary = el("button", "inventory-device-summary");
   summary.type = "button";
-  setAttr(summary, "aria-label", `Открыть подробности устройства ${device.name || "Устройство"}. Состояние: ${state}.`);
+  setAttr(summary, "aria-label", `Открыть подробности устройства ${device.name || "Устройство"}. Состояние: ${state}.${climateMode ? ` ${climateMode.label}.` : ""}`);
   summary.addEventListener("click", () => openDeviceSheet(owner, device, deps));
   appendDeviceVisual(summary, device, iconName, deps, "inventory-device-visual");
   const copy = el("span", "inventory-device-copy");
   copy.appendChild(el("strong", null, device.name || "Устройство"));
   copy.appendChild(el("small", null, `${device.roomName || "Без комнаты"} · ${owner._deviceCategoryName(device)}`));
+  appendClimateModeBadge(copy, device, deps, "device-climate-mode");
   summary.appendChild(copy);
   summary.appendChild(el("span", "inventory-device-chevron", "›"));
   const footer = el("span", "inventory-device-footer");

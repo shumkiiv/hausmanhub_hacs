@@ -126,6 +126,12 @@ button.climate-product-card:hover { border-color:color-mix(in srgb,var(--hmh-acc
 .climate-product-copy strong,.climate-product-copy small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .climate-product-copy strong { font-size:16px; }
 .climate-product-copy small { margin-top:7px; color:var(--hmh-text-dim,#9AA7B4); font-size:13px; }
+.climate-product-mode { display:inline-flex; width:max-content; max-width:100%; min-height:25px; align-items:center; margin-top:8px; padding:4px 9px;
+  border:1px solid color-mix(in srgb,var(--hmh-accent,#4F8CFF) 25%,var(--hmh-border,#2F3845)); border-radius:999px;
+  color:var(--hmh-text-dim,#9AA7B4); background:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 7%,var(--hmh-raised,#181E26));
+  font-size:12px; font-weight:720; line-height:1.15; white-space:nowrap; }
+.climate-product-mode.is-manual { border-color:color-mix(in srgb,var(--hmh-warning,#E5A84B) 48%,var(--hmh-border,#2F3845));
+  color:var(--hmh-warning,#E5A84B); background:color-mix(in srgb,var(--hmh-warning,#E5A84B) 9%,var(--hmh-raised,#181E26)); }
 .climate-product-state { width:9px; height:9px; border-radius:50%; background:var(--hmh-text-dim,#9AA7B4); }
 .climate-product-state.good { background:var(--success-color,#4CAF6E); }
 .climate-product-state.bad { background:var(--error-color,#E5534B); }

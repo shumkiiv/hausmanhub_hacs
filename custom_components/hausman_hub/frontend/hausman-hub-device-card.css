@@ -58,6 +58,27 @@
   -webkit-box-orient:vertical;
   -webkit-line-clamp:2;
 }
+.device-climate-mode {
+  display:inline-flex;
+  width:max-content;
+  max-width:100%;
+  align-items:center;
+  min-height:25px;
+  padding:4px 9px;
+  border:1px solid color-mix(in srgb,var(--hmh-accent,#2688EA) 25%,var(--hmh-border,#D9E1EC));
+  border-radius:999px;
+  color:var(--hmh-text-dim,#667386);
+  background:color-mix(in srgb,var(--hmh-accent,#2688EA) 6%,var(--hmh-surface,#FFFFFF));
+  font-size:12px;
+  font-weight:720;
+  line-height:1.15;
+  white-space:nowrap;
+}
+.device-climate-mode.is-manual {
+  border-color:color-mix(in srgb,var(--hmh-status-warning,#B56D00) 42%,var(--hmh-border,#D9E1EC));
+  color:var(--hmh-status-warning,#9A6200);
+  background:color-mix(in srgb,var(--hmh-status-warning,#D89213) 9%,var(--hmh-surface,#FFFFFF));
+}
 .inventory-device-visual {
   display:grid;
   place-items:center;
@@ -172,7 +193,10 @@
 .device-sheet-eyebrow { color:var(--hmh-accent,#2688EA); font-size:12px; font-weight:750; letter-spacing:.1em; text-transform:uppercase; }
 .device-sheet-identity h3 { margin:9px 0 0; color:var(--hmh-text); font-size:32px; line-height:1.12; letter-spacing:-.02em; overflow-wrap:anywhere; }
 .device-sheet-identity p { margin:9px 0 0; color:var(--hmh-text-dim); font-size:15px; line-height:1.45; overflow-wrap:anywhere; }
-.device-sheet-status { display:inline-flex; margin-top:17px; padding:8px 12px; border-radius:999px; color:var(--hmh-text); background:var(--hmh-modal-raised); font-size:14px; font-weight:700; }
+.device-sheet-statuses { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:17px; }
+.device-sheet-status { display:inline-flex; padding:8px 12px; border-radius:999px; color:var(--hmh-text); background:var(--hmh-modal-raised); font-size:14px; font-weight:700; }
+.device-sheet-statuses .device-climate-mode { min-height:34px; padding:8px 12px; background:var(--hmh-modal-raised); font-size:14px; }
+.device-sheet-statuses .device-climate-mode.is-manual { background:color-mix(in srgb,var(--hmh-status-warning,#D89213) 10%,var(--hmh-modal-raised)); }
 .device-sheet-status.good { color:var(--hmh-status-success); background:color-mix(in srgb,var(--hmh-status-success) 10%,var(--hmh-modal-raised)); }
 .device-sheet-status.bad { color:var(--hmh-status-warning); background:color-mix(in srgb,var(--hmh-status-warning) 10%,var(--hmh-modal-raised)); }
 .device-sheet-facts { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin:22px 0 0; }

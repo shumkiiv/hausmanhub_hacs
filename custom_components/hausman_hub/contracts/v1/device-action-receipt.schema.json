@@ -32,6 +32,10 @@
     },
     "targetId": { "type": "string", "minLength": 1 },
     "actionId": { "type": "string", "minLength": 1 },
+    "climateMode": { "enum": ["automatic", "manual"] },
+    "climateModeName": {
+      "enum": ["Автоматический режим", "Ручной режим"]
+    },
     "observedState": { "type": ["string", "null"] },
     "appliedAt": { "type": ["integer", "null"] },
     "message": { "type": ["string", "null"], "maxLength": 500 },

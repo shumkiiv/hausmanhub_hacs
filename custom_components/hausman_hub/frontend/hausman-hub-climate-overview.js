@@ -1,8 +1,8 @@
 /* Climate control surface shared with the tablet information architecture. */
 
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.95";
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.95";
-import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.95";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.96";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.96";
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.96";
 
 const CLIMATE_ACTION_API = "hausman_hub/v1/climate/actions";
 
@@ -267,6 +267,16 @@ function stateLabel(device) {
   return labels[raw] || device && device.stateLabel || "Состояние неизвестно";
 }
 
+function dashboardClimateMode(device) {
+  const mode = device && device.climateMode;
+  if (mode !== "automatic" && mode !== "manual") return null;
+  const expected = mode === "manual" ? "Ручной режим" : "Автоматический режим";
+  return {
+    mode,
+    label: device.climateModeName === expected ? device.climateModeName : expected,
+  };
+}
+
 function deviceIsActive(device) {
   if (!device || device.unavailable) return false;
   if (typeof device.active === "boolean") return device.active;
@@ -363,6 +373,14 @@ function renderClimateDeviceList(panel, body, title, devices, deps, onBack) {
     const deviceCopy = el("span", "climate-product-copy");
     deviceCopy.appendChild(el("strong", null, device.name || "Климатическое устройство"));
     deviceCopy.appendChild(el("small", null, `${device.roomName || "Без комнаты"} · ${stateLabel(device)}`));
+    const climateMode = dashboardClimateMode(device);
+    if (climateMode) {
+      deviceCopy.appendChild(el(
+        "span",
+        `climate-product-mode is-${climateMode.mode}`,
+        climateMode.label,
+      ));
+    }
     card.appendChild(deviceCopy);
     const dot = el("span", `climate-product-state ${device.unavailable ? "bad" : (deviceIsActive(device) ? "good" : "neutral")}`);
     card.appendChild(dot);
@@ -673,7 +691,9 @@ function renderRooms(panel, container, rooms, devices, deps) {
         const row = el("div", `climate-contour-device${deviceManual ? " is-manual" : ""}`);
         const copy = el("span");
         copy.appendChild(el("strong", null, device.name || climateDeviceKindLabel(device.kind)));
-        copy.appendChild(el("small", null, `${climateDeviceKindLabel(device.kind)} · ${deviceManual ? "ручной режим" : "автоматика"}`));
+        const modeName = device.mode_name === "Ручной режим" || device.mode_name === "Автоматический режим"
+          ? device.mode_name : (deviceManual ? "Ручной режим" : "Автоматический режим");
+        copy.appendChild(el("small", null, `${climateDeviceKindLabel(device.kind)} · ${modeName}`));
         row.appendChild(copy);
         const control = device.control;
         if (control && Array.isArray(control.allowed_actions) && control.allowed_actions.includes("set_device_mode")) {
