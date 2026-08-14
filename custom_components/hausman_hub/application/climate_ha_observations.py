@@ -49,7 +49,13 @@ from ..domain.contours import ContourDefinition, ContourMode
 # every 10-40 minutes while the room drifts slowly, so a shorter window would
 # keep managed rooms stuck behind the freshness guard. Window safety does not
 # depend on this threshold: it uses the dedicated window entity state.
-MAX_NATIVE_STATE_AGE_MS = 30 * 60 * 1000
+MAX_HEAT_LOAD_STATE_AGE_MS = 30 * 60 * 1000
+MAX_DEVICE_MODE_STATE_AGE_MS = 30 * 60 * 1000
+MAX_POWER_STATE_AGE_MS = 6 * 60 * 60 * 1000
+MAX_CONTACT_STATE_AGE_MS = 24 * 60 * 60 * 1000
+MAX_PHYSICAL_FEEDBACK_STATE_AGE_MS = 2 * 60 * 1000
+# Backward-compatible internal name used by existing tests and adapters.
+MAX_NATIVE_STATE_AGE_MS = MAX_HEAT_LOAD_STATE_AGE_MS
 # Passive room sensors also show multi-hour report gaps on healthy devices
 # (observed up to ~84 min in production): Zigbee2MQTT marks a truly dead
 # device unavailable, so the room-level freshness window only needs to cover
@@ -208,7 +214,7 @@ def _room_observation(
         states,
         observed_at,
     )
-    window = _window_state(room.window_entity_id, states)
+    window = _window_state(room.window_entity_id, states, observed_at)
     contour_room = (
         None
         if contour is None
@@ -311,14 +317,21 @@ def _median(values: list[float]) -> float:
     return (ordered[middle - 1] + ordered[middle]) / 2
 
 
-def _is_fresh(state: ClimateHaEntityState, observed_at: int) -> bool:
+def _is_fresh_for(
+    state: ClimateHaEntityState,
+    observed_at: int,
+    maximum_age_ms: int,
+) -> bool:
     age = max(0, observed_at - state.last_updated_ms)
-    return age <= MAX_NATIVE_STATE_AGE_MS
+    return age <= maximum_age_ms
+
+
+def _is_fresh(state: ClimateHaEntityState, observed_at: int) -> bool:
+    return _is_fresh_for(state, observed_at, MAX_HEAT_LOAD_STATE_AGE_MS)
 
 
 def _is_room_sensor_fresh(state: ClimateHaEntityState, observed_at: int) -> bool:
-    age = max(0, observed_at - state.last_updated_ms)
-    return age <= MAX_ROOM_SENSOR_STATE_AGE_MS
+    return _is_fresh_for(state, observed_at, MAX_ROOM_SENSOR_STATE_AGE_MS)
 
 
 def _room_climate_current_temperature(
@@ -354,11 +367,14 @@ def _room_climate_current_temperature(
 def _window_state(
     window_entity_id: str | None,
     states: ClimateHaStateView,
+    observed_at: int,
 ) -> ClimateWindowState:
     if window_entity_id is None:
         return ClimateWindowState.NOT_CONFIGURED
     state = states.entity_state(window_entity_id)
     if state is None or state.state in _UNAVAILABLE_STATES:
+        return ClimateWindowState.UNKNOWN
+    if not _is_fresh_for(state, observed_at, MAX_CONTACT_STATE_AGE_MS):
         return ClimateWindowState.UNKNOWN
     if state.state == "on":
         return ClimateWindowState.OPEN
@@ -404,6 +420,7 @@ def _home_observation(
         central_heating_on=_central_heating_state(
             home.central_heating_entity_id,
             states,
+            observed_at,
             home.central_heating_temperature_on,
             home.central_heating_temperature_off,
             previous_central_heating_on,
@@ -415,7 +432,7 @@ def _home_observation(
             home.heating_lockout_low,
             previous_weather_lockout,
         ),
-        occupancy=_occupancy(home.presence_entity_id, states),
+        occupancy=_occupancy(home.presence_entity_id, states, observed_at),
     )
 
 
@@ -520,6 +537,7 @@ def _outdoor_temperature_value(state: ClimateHaEntityState) -> float | None:
 def _central_heating_state(
     entity_id: str | None,
     states: ClimateHaStateView,
+    observed_at: int,
     temperature_on: float,
     temperature_off: float,
     previous: bool | None,
@@ -528,6 +546,8 @@ def _central_heating_state(
         return None
     state = states.entity_state(entity_id)
     if state is None or state.state in _UNAVAILABLE_STATES:
+        return None
+    if not _is_fresh_for(state, observed_at, MAX_POWER_STATE_AGE_MS):
         return None
     if state.state == "on":
         return True
@@ -548,6 +568,7 @@ def _central_heating_state(
 def _occupancy(
     entity_id: str | None,
     states: ClimateHaStateView,
+    observed_at: int,
 ) -> ClimateOccupancyMode:
     if entity_id is None:
         return ClimateOccupancyMode.HOME
@@ -555,6 +576,8 @@ def _occupancy(
     if state is None or state.state in _UNAVAILABLE_STATES:
         # A configured but unobserved presence forbids auto-humidifying
         # without inventing an away setback.
+        return ClimateOccupancyMode.UNKNOWN
+    if not _is_fresh_for(state, observed_at, MAX_CONTACT_STATE_AGE_MS):
         return ClimateOccupancyMode.UNKNOWN
     identity = " ".join(
         value
@@ -618,24 +641,37 @@ def _device_observation(
             availability=ClimateDeviceAvailability.UNAVAILABLE,
         )
     transitions = _protection_transitions(device, protection, observed_at)
+    control_fresh = _is_fresh_for(
+        state,
+        observed_at,
+        MAX_DEVICE_MODE_STATE_AGE_MS,
+    )
     return ClimateDeviceObservation(
         device_id=device.device_id,
         name=device.name,
         room_id=device.room_id,
         kind=kind,
         availability=ClimateDeviceAvailability.AVAILABLE,
-        activity=_device_activity(device.kind, state),
-        current_target_temperature=_bounded_number(
-            state.attributes.get("temperature"),
-            10,
-            35,
+        activity=(
+            _device_activity(device.kind, state)
+            if control_fresh
+            else ClimateDeviceActivity.UNKNOWN
         ),
-        current_target_humidity=_bounded_number(
-            state.attributes.get("humidity"),
-            0,
-            100,
+        current_target_temperature=(
+            _bounded_number(state.attributes.get("temperature"), 10, 35)
+            if control_fresh
+            else None
         ),
-        fan_mode=_fan_mode(state.attributes.get("fan_mode")),
+        current_target_humidity=(
+            _bounded_number(state.attributes.get("humidity"), 0, 100)
+            if control_fresh
+            else None
+        ),
+        fan_mode=(
+            _fan_mode(state.attributes.get("fan_mode"))
+            if control_fresh
+            else None
+        ),
         physical_feedback=_physical_feedback(device, states, observed_at),
         last_started_at=transitions[0],
         last_stopped_at=transitions[1],
@@ -721,7 +757,11 @@ def _physical_feedback(
     state = states.entity_state(endpoint.entity_id)
     if state is None or state.state in _UNAVAILABLE_STATES:
         return ClimatePhysicalFeedback.UNKNOWN
-    if not _is_fresh(state, observed_at):
+    if not _is_fresh_for(
+        state,
+        observed_at,
+        MAX_PHYSICAL_FEEDBACK_STATE_AGE_MS,
+    ):
         return ClimatePhysicalFeedback.STALE
     return ClimatePhysicalFeedback.CONFIRMED
 

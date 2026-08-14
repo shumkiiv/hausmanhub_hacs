@@ -6,7 +6,11 @@ from dataclasses import replace
 import unittest
 
 from custom_components.hausman_hub.application.climate_ha_observations import (
+    MAX_CONTACT_STATE_AGE_MS,
+    MAX_DEVICE_MODE_STATE_AGE_MS,
     MAX_NATIVE_STATE_AGE_MS,
+    MAX_PHYSICAL_FEEDBACK_STATE_AGE_MS,
+    MAX_POWER_STATE_AGE_MS,
     MAX_ROOM_SENSOR_STATE_AGE_MS,
     ClimateHaEntityState,
     ClimateHaObservationViolation,
@@ -491,6 +495,77 @@ class NativeHaObservationTest(unittest.TestCase):
         self.assertEqual(25.5, room.temperature)
         self.assertEqual(41.0, room.humidity)
         self.assertTrue(room.authority_eligible)
+
+    def test_device_mode_staleness_does_not_reuse_old_targets(self) -> None:
+        states = full_states()
+        states["climate.living_ac"] = ha_state(
+            "climate.living_ac",
+            "cool",
+            {
+                "hvac_action": "cooling",
+                "temperature": 24.5,
+                "fan_mode": "low",
+                "current_temperature": 26.0,
+            },
+            updated=NOW - MAX_DEVICE_MODE_STATE_AGE_MS - 1,
+        )
+
+        observation = self.build(states=states)
+        ac = observation.device("living_ac")
+
+        self.assertIsNotNone(ac)
+        assert ac is not None
+        self.assertIs(ac.availability, ClimateDeviceAvailability.AVAILABLE)
+        self.assertIs(ac.activity, ClimateDeviceActivity.UNKNOWN)
+        self.assertIsNone(ac.current_target_temperature)
+        self.assertIsNone(ac.fan_mode)
+
+    def test_physical_feedback_uses_short_read_back_window(self) -> None:
+        states = full_states()
+        states["binary_sensor.living_ac_flap"] = ha_state(
+            "binary_sensor.living_ac_flap",
+            "on",
+            updated=NOW - MAX_PHYSICAL_FEEDBACK_STATE_AGE_MS - 1,
+        )
+
+        observation = self.build(states=states)
+        ac = observation.device("living_ac")
+
+        self.assertIsNotNone(ac)
+        assert ac is not None
+        self.assertIs(ac.activity, ClimateDeviceActivity.COOLING)
+        self.assertIs(ac.physical_feedback, ClimatePhysicalFeedback.STALE)
+
+    def test_stale_contact_and_presence_fail_closed_independently(self) -> None:
+        states = full_states()
+        stale_contact = NOW - MAX_CONTACT_STATE_AGE_MS - 1
+        states["binary_sensor.living_window"] = ha_state(
+            "binary_sensor.living_window", "off", updated=stale_contact
+        )
+        states["person.ivan"] = ha_state(
+            "person.ivan", "home", updated=stale_contact
+        )
+
+        observation = self.build(states=states)
+        room = observation.room("living")
+
+        self.assertIsNotNone(room)
+        assert room is not None
+        self.assertIs(room.window, ClimateWindowState.UNKNOWN)
+        self.assertIs(observation.home.occupancy, ClimateOccupancyMode.UNKNOWN)
+
+    def test_stale_power_does_not_invent_central_heating_state(self) -> None:
+        states = full_states()
+        states["switch.central_heating"] = ha_state(
+            "switch.central_heating",
+            "off",
+            updated=NOW - MAX_POWER_STATE_AGE_MS - 1,
+        )
+
+        observation = self.build(states=states)
+
+        self.assertIsNone(observation.home.central_heating_on)
+        self.assertIs(observation.home.occupancy, ClimateOccupancyMode.HOME)
 
     def test_weather_lockout_first_observation_in_band_fails_closed(self) -> None:
         observation = self.build(
