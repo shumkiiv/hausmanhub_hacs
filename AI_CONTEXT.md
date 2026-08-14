@@ -1,8 +1,24 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-14 (HACS 1.52.95 adaptive corridor lighting).
+Last updated: 2026-08-14 (HACS 1.52.96 manual AC shutdown ownership).
 
 ## Current work
+
+- 2026-08-14 (Codex): HACS `1.52.96` makes an explicit device-card
+  `turn_off` for a configured air conditioner persist device-level manual
+  ownership before the physical command. A rejected action restores the prior
+  automatic mode; scenario and contour commands retain their existing path.
+  Dashboard cards and climate runtime expose Russian ownership labels, and the
+  HACS device card, detail sheet and climate list render the same compact
+  status. Consumer pin is contracts `0.32.0` (`9e29af7`). Full gate: 1407
+  passed, 4 skipped, 926 subtests; Actions `31835035051` success. Release
+  commit `34cf496`, tag and GitHub Release are published. Production backup
+  `a8fe37bd` completed, three config checks and one restart passed;
+  installed/latest are `v1.52.96`, runtime is fresh and managed. The live
+  dashboard exposes four climate ownership cards; the two currently off units
+  in Cabinet and Alice's room are shown as manual. Deployment verification
+  was read-only and sent no physical command. Details:
+  `docs/RELEASE_AUDIT_1.52.96.md`.
 
 - 2026-08-14 (Codex): сценарий `Свет по движению малый коридор` переведён на
   солнечную адаптацию. Движение запускает свет после заката либо до заката при
