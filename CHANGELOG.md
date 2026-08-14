@@ -30,6 +30,10 @@
   circuit breaker по service-domain. После трёх сбоев контур открывается на
   30 секунд, затем допускает одну пробу восстановления; dashboard публикует
   обезличенные timeout, open и recovery metrics, не блокируя чтение дома.
+- Зафиксирован воспроизводимый baseline dashboard snapshot: representative
+  payload около 7,3 КиБ, median чистой сборки 0,171 мс и p95 0,331 мс.
+  Conditional/delta отложены до измеримого порога, полный snapshot остаётся
+  обязательным fallback после restart, SSE gap и смены contract capability.
 
 ## 1.52.90 - 2026-08-13
 
