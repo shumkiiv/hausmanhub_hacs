@@ -56,6 +56,11 @@
       "$ref": "#/$defs/inventory"
     },
     "catalogReadiness": { "$ref": "#/$defs/catalogReadiness" },
+    "adapterHealth": {
+      "type": "array",
+      "maxItems": 32,
+      "items": { "$ref": "#/$defs/adapterHealth" }
+    },
     "scenarios": {
       "type": "array",
       "items": { "$ref": "#/$defs/scenario" }
@@ -78,6 +83,20 @@
     }
   },
   "$defs": {
+    "adapterHealth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["adapter", "state", "budgetMs", "consecutiveFailures", "timeoutCount", "openCount", "recoveryCount"],
+      "properties": {
+        "adapter": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" },
+        "state": { "enum": ["closed", "open", "half_open"] },
+        "budgetMs": { "type": "integer", "minimum": 100, "maximum": 30000 },
+        "consecutiveFailures": { "type": "integer", "minimum": 0 },
+        "timeoutCount": { "type": "integer", "minimum": 0 },
+        "openCount": { "type": "integer", "minimum": 0 },
+        "recoveryCount": { "type": "integer", "minimum": 0 }
+      }
+    },
     "catalogReadiness": {
       "type": "object",
       "additionalProperties": false,

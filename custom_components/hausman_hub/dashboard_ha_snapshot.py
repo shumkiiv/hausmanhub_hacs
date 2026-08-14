@@ -441,4 +441,10 @@ async def async_dashboard_snapshot(
     readiness = getattr(scenario_service, "catalog_readiness", None)
     if isinstance(readiness, Mapping):
         payload["catalogReadiness"] = dict(readiness)
+    breaker = getattr(hass, "data", {}).get("hausman_hub", {}).get(
+        "adapter_circuit_breaker"
+    )
+    health_snapshot = getattr(breaker, "snapshot", None)
+    if callable(health_snapshot):
+        payload["adapterHealth"] = health_snapshot()
     return payload

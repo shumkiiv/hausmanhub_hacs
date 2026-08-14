@@ -131,6 +131,23 @@ class DashboardHaSnapshotTest(unittest.IsolatedAsyncioTestCase):
         )
         hass = SimpleNamespace(
             config=SimpleNamespace(location_name="Тестовый дом"),
+            data={
+                "hausman_hub": {
+                    "adapter_circuit_breaker": SimpleNamespace(
+                        snapshot=lambda: [
+                            {
+                                "adapter": "climate",
+                                "state": "open",
+                                "budgetMs": 5000,
+                                "consecutiveFailures": 0,
+                                "timeoutCount": 0,
+                                "openCount": 0,
+                                "recoveryCount": 1,
+                            }
+                        ]
+                    )
+                }
+            },
             states=_States(
                 {
                     "climate.living": SimpleNamespace(
@@ -187,6 +204,8 @@ class DashboardHaSnapshotTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(payload["capabilities"]["actions"])
         self.assertEqual("ready", payload["catalogReadiness"]["status"])
         self.assertEqual(1, payload["catalogReadiness"]["deviceCount"])
+        self.assertEqual("climate", payload["adapterHealth"][0]["adapter"])
+        self.assertEqual("open", payload["adapterHealth"][0]["state"])
         self.assertEqual(["welcome"], [item["id"] for item in payload["scenarios"]])
         self.assertEqual(int(now.timestamp() * 1000), payload["generatedAt"])
 

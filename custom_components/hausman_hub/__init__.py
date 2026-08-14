@@ -43,6 +43,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from homeassistant.util import dt as dt_util
 
     from .application.climate_runtime import ClimateRuntime
+    from .application.adapter_circuit_breaker import AdapterCircuitBreaker
     from .climate_api import register_climate_api
     from .climate_ha_executor import HomeAssistantClimateCallExecutor
     from .ha_area_assignment import HomeAssistantAreaAssignmentService
@@ -115,6 +116,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     domain_data["energy_meter_service"] = energy_meter_service
     domain_data["device_discovery_service"] = device_discovery_service
+    adapter_circuit_breaker = AdapterCircuitBreaker()
+    domain_data["adapter_circuit_breaker"] = adapter_circuit_breaker
     from .application.operation_journal import OperationJournalService
     from .operation_journal_api import DATA_OPERATION_JOURNAL
     from .operation_journal_storage import HomeAssistantOperationJournalStore
@@ -136,7 +139,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         command_guard_store=HomeAssistantClimateCommandGuardStore(
             hass, entry.entry_id
         ),
-        strict_ha_call_executor=HomeAssistantClimateCallExecutor(hass),
+        strict_ha_call_executor=HomeAssistantClimateCallExecutor(
+            hass,
+            adapter_circuit_breaker,
+        ),
         ha_state_view=HomeAssistantClimateStateView(hass),
         ha_area_assignment=HomeAssistantAreaAssignmentService(hass),
         ir_code_service=ir_code_service,
@@ -196,6 +202,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         scenario_catalog,
         scenario_service.async_run_scenario,
         power_dependency_resolver=lambda: device_power_dependency_service.mapping,
+        circuit_breaker=adapter_circuit_breaker,
     )
     scenario_service.set_executor(scenario_executor)
     entry.async_on_unload(scenario_service.start_catalog_warmup())

@@ -11,6 +11,7 @@ import time
 import uuid
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
+from .adapter_circuit_breaker import AdapterCircuitBreaker
 from .scenarios import (
     ScenarioAction,
     ScenarioActionType,
@@ -233,6 +234,7 @@ class ScenarioExecutor:
         readback_window_seconds: float = _DEFAULT_DEVICE_READBACK_WINDOW_SECONDS,
         readback_interval_seconds: float = _DEFAULT_DEVICE_READBACK_INTERVAL_SECONDS,
         power_dependency_resolver: Callable[[], Mapping[str, str]] | None = None,
+        circuit_breaker: AdapterCircuitBreaker | None = None,
     ):
         if not 0.01 <= readback_window_seconds <= 30.0:
             raise ValueError("readback window must be between 0.01 and 30 seconds")
@@ -245,6 +247,7 @@ class ScenarioExecutor:
         self._readback_window_seconds = readback_window_seconds
         self._readback_interval_seconds = readback_interval_seconds
         self._power_dependency_resolver = power_dependency_resolver
+        self._circuit_breaker = circuit_breaker or AdapterCircuitBreaker()
         self._device_command_queues: dict[str, deque[_QueuedDeviceCommand]] = {}
         self._device_command_workers: dict[str, asyncio.Task[None]] = {}
 
@@ -906,7 +909,10 @@ class ScenarioExecutor:
         call = getattr(services, "async_call", None)
         if call is None:
             raise RuntimeError("Home Assistant async_call is not available")
-        await call(domain, service, service_data, blocking=True)
+        await self._circuit_breaker.async_run(
+            domain,
+            lambda: call(domain, service, service_data, blocking=True),
+        )
 
     async def async_release_intercom_switch(self, entity_id: str) -> None:
         """Return the intercom relay to off after the hold window."""

@@ -222,6 +222,17 @@
     "updatedAt": 1782225600000,
     "reason": "warmup_complete"
   },
+  "adapterHealth": [
+    {
+      "adapter": "climate",
+      "state": "closed",
+      "budgetMs": 5000,
+      "consecutiveFailures": 0,
+      "timeoutCount": 0,
+      "openCount": 0,
+      "recoveryCount": 1
+    }
+  ],
   "capabilities": {
     "actions": true,
     "scenarios": true,

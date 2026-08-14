@@ -26,6 +26,10 @@
   offline, stale evidence, unsupported action, safety policy, conflict и
   unavailable dependency. Для каждой причины backend отдаёт короткое русское
   объяснение и рекомендуемое действие без Home Assistant entity ID.
+- Внешние Home Assistant service-call получили общий time budget 5 секунд и
+  circuit breaker по service-domain. После трёх сбоев контур открывается на
+  30 секунд, затем допускает одну пробу восстановления; dashboard публикует
+  обезличенные timeout, open и recovery metrics, не блокируя чтение дома.
 
 ## 1.52.90 - 2026-08-13
 

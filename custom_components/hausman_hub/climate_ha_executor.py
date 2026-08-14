@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from .application.adapter_circuit_breaker import AdapterCircuitBreaker
 from .domain.climate_ha_calls import ClimateHaService, ClimateHaServiceCall
 
 if TYPE_CHECKING:
@@ -21,8 +22,13 @@ class ClimateHaExecutionError(RuntimeError):
 class HomeAssistantClimateCallExecutor:
     """Execute the single strict climate call boundary through Home Assistant services only."""
 
-    def __init__(self, hass: HomeAssistant) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        circuit_breaker: AdapterCircuitBreaker | None = None,
+    ) -> None:
         self._hass = hass
+        self._circuit_breaker = circuit_breaker or AdapterCircuitBreaker()
 
     async def async_execute(self, calls: tuple[ClimateHaServiceCall, ...]) -> int:
         """Run the strict calls in order and stop at the first failure."""
@@ -43,11 +49,14 @@ class HomeAssistantClimateCallExecutor:
                 data["device"] = call.device
                 data["command"] = call.command
             try:
-                await self._hass.services.async_call(
+                await self._circuit_breaker.async_run(
                     domain,
-                    service,
-                    data,
-                    blocking=True,
+                    lambda: self._hass.services.async_call(
+                        domain,
+                        service,
+                        data,
+                        blocking=True,
+                    ),
                 )
             except Exception as error:
                 raise ClimateHaExecutionError(completed) from error
