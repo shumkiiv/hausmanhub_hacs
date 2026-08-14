@@ -79,11 +79,29 @@ class ScenarioDomainTest(unittest.TestCase):
         self.assertTrue(scenario.enabled)
 
     def test_round_trip_payload(self) -> None:
-        registry = ScenarioRegistry(scenarios=(valid_scenario(),))
+        registry = ScenarioRegistry(scenarios=(valid_scenario(
+            room_id="living",
+            room_name="Гостиная",
+        ),))
         payload = scenario_registry_to_payload(registry)
         restored = scenario_registry_from_payload(payload)
         self.assertEqual(len(restored.scenarios), 1)
         self.assertEqual(restored.scenarios[0].id, "test_scenario")
+        self.assertEqual(restored.scenarios[0].room_id, "living")
+        self.assertEqual(restored.scenarios[0].room_name, "Гостиная")
+
+    def test_legacy_scenario_without_room_loads_as_general(self) -> None:
+        registry = ScenarioRegistry(scenarios=(valid_scenario(),))
+        payload = scenario_registry_to_payload(registry)
+        payload["scenarios"][0].pop("roomId")
+        payload["scenarios"][0].pop("roomName")
+        restored = scenario_registry_from_payload(payload)
+        self.assertIsNone(restored.scenarios[0].room_id)
+        self.assertIsNone(restored.scenarios[0].room_name)
+
+    def test_room_name_without_room_id_is_rejected(self) -> None:
+        with self.assertRaises(ScenarioViolation):
+            valid_scenario(room_name="Гостиная")
 
     def test_empty_registry(self) -> None:
         registry = ScenarioRegistry()

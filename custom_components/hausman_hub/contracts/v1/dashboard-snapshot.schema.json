@@ -397,6 +397,8 @@
         "group": { "type": ["string", "null"] },
         "description": { "type": ["string", "null"] },
         "icon": { "type": ["string", "null"] },
+        "roomId": { "type": ["string", "null"] },
+        "roomName": { "type": ["string", "null"] },
         "requiresConfirmation": { "type": "boolean" },
         "favorite": { "type": "boolean" },
         "danger": { "type": "boolean" }

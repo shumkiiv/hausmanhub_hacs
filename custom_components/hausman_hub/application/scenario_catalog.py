@@ -638,10 +638,22 @@ async def async_build_scenario_catalog(hass: HomeAssistant) -> ScenarioCatalog:
 
     device_registry, entity_registry, area_registry = _registries(hass)
     devices: dict[str, ScenarioDeviceEntry] = {}
+    rooms: dict[str, str] = {}
+    area_entries = getattr(area_registry, "areas", None)
+    if isinstance(area_entries, Mapping):
+        for area_id, area_entry in area_entries.items():
+            room_name = getattr(area_entry, "name", None)
+            if (
+                isinstance(area_id, str)
+                and area_id
+                and isinstance(room_name, str)
+                and room_name.strip()
+            ):
+                rooms[area_id] = room_name.strip()
 
     states_async_all = getattr(hass.states, "async_all", None)
     if states_async_all is None:
-        return ScenarioCatalog(devices=devices, scenarios={})
+        return ScenarioCatalog(devices=devices, scenarios={}, rooms=rooms)
 
     for state in states_async_all():
         entity_id = getattr(state, "entity_id", "")
@@ -719,4 +731,4 @@ async def async_build_scenario_catalog(hass: HomeAssistant) -> ScenarioCatalog:
             range_step=number_range[2] if number_range is not None else None,
         )
 
-    return ScenarioCatalog(devices=devices, scenarios={})
+    return ScenarioCatalog(devices=devices, scenarios={}, rooms=rooms)

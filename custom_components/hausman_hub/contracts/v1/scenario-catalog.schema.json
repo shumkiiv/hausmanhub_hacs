@@ -6,6 +6,11 @@
   "additionalProperties": false,
   "required": ["devices"],
   "properties": {
+    "rooms": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {"$ref": "#/$defs/room"}
+    },
     "devices": {
       "type": "array",
       "maxItems": 1024,
@@ -21,6 +26,15 @@
     "stable_id": {
       "type": "string",
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "room": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["room_id", "room_name"],
+      "properties": {
+        "room_id": {"$ref": "#/$defs/stable_id"},
+        "room_name": {"type": "string", "minLength": 1, "maxLength": 120}
+      }
     },
     "device": {
       "type": "object",
@@ -109,6 +123,13 @@
       "properties": {
         "id": {"$ref": "#/$defs/stable_id"},
         "title": {"type": "string", "minLength": 1, "maxLength": 120},
+        "room_id": {
+          "oneOf": [
+            {"$ref": "#/$defs/stable_id"},
+            {"type": "null"}
+          ]
+        },
+        "room_name": {"type": ["string", "null"], "minLength": 1, "maxLength": 120},
         "icon": {
           "type": "string",
           "pattern": "^mdi:[a-z0-9-]+$",

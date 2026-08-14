@@ -120,6 +120,7 @@ class ScenarioCatalog:
     scenario_definitions: Mapping[str, ScenarioDefinition] = field(
         default_factory=dict
     )
+    rooms: Mapping[str, str] = field(default_factory=dict)
 
     def device(self, target_id: str) -> ScenarioDeviceEntry | None:
         return self.devices.get(target_id)

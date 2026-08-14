@@ -191,6 +191,8 @@
       "group": "Безопасность",
       "description": "Закрывает воду и шторы, выключает свет, телевизоры и кондиционеры",
       "icon": "shield",
+      "roomId": null,
+      "roomName": null,
       "requiresConfirmation": true,
       "favorite": true,
       "danger": true

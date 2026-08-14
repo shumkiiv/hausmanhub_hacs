@@ -1,9 +1,31 @@
 {
+  "rooms": [
+    {"room_id": "living_room", "room_name": "Гостиная"}
+  ],
   "devices": [
     {
       "target_id": "entity_0123456789abcdef",
       "name": "Свет в гостиной",
       "entity_id": "light.living_room",
+      "physical_id": "device_0123456789abcdef",
+      "physical_name": "Люстра",
+      "room_id": "living_room",
+      "room_name": "Гостиная",
+      "device_type": "light",
+      "device_type_name": "Освещение",
+      "capability_name": "Основной свет",
+      "properties": [
+        {
+          "property_id": "state",
+          "label": "Свет",
+          "value_type": "enum",
+          "comparisons": ["equals", "not_equals", "changed"],
+          "options": [
+            {"value": "on", "label": "Включено"},
+            {"value": "off", "label": "Выключено"}
+          ]
+        }
+      ],
       "actions": [
         {
           "action_id": "turn_on",
@@ -19,11 +41,15 @@
     {
       "id": "close_curtains",
       "title": "Закрыть шторы",
+      "room_id": "living_room",
+      "room_name": "Гостиная",
       "icon": "mdi:curtains"
     },
     {
       "id": "quiet_evening",
-      "title": "Тихий вечер"
+      "title": "Тихий вечер",
+      "room_id": null,
+      "room_name": null
     }
   ]
 }

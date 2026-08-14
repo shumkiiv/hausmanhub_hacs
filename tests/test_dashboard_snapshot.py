@@ -148,6 +148,8 @@ class DashboardSnapshotTest(unittest.TestCase):
                     "Кино",
                     group="Комфорт",
                     favorite=True,
+                    room_id="living",
+                    room_name="Гостиная",
                 ),
             ),
             generated_at_ms=1_782_225_600_000,

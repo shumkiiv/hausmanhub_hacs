@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from datetime import datetime, timezone
 import logging
 import time
@@ -393,7 +394,40 @@ class ScenarioService:
                 **self._catalog.scenario_definitions,
                 **scenario_defs,
             },
+            rooms=self._catalog.rooms,
         )
+
+    def _scenario_room(
+        self,
+        payload: Mapping[str, Any],
+    ) -> tuple[str | None, str | None]:
+        """Resolve an optional public room id to its current HA label."""
+
+        raw_room_id = payload.get("roomId")
+        if raw_room_id is None or raw_room_id == "":
+            return None, None
+        if not isinstance(raw_room_id, str):
+            raise ScenarioValidationError((ScenarioDefinitionViolation(
+                "scenario room must be a string or null",
+                path="roomId",
+            ),))
+        room_name = self._catalog.rooms.get(raw_room_id)
+        if room_name is None:
+            room_name = next(
+                (
+                    device.room_name
+                    for device in self._catalog.devices.values()
+                    if device.room_id == raw_room_id and device.room_name
+                ),
+                None,
+            )
+        if room_name is None:
+            raise ScenarioValidationError((ScenarioDefinitionViolation(
+                "scenario room is not available",
+                code="scenario_room_not_found",
+                path="roomId",
+            ),))
+        return raw_room_id, room_name
 
     async def async_update_scenario(
         self, payload: dict[str, Any]
@@ -449,6 +483,7 @@ class ScenarioService:
                 catalog=self._validation_catalog(registry),
                 existing_scenario_id=raw_id,
             )
+            room_id, room_name = self._scenario_room(payload)
 
             raw_enabled = payload.get("enabled", True)
             enabled = raw_enabled is True or (
@@ -475,6 +510,8 @@ class ScenarioService:
                 ),
                 action_description=_str_or_default(payload, "actionDescription", ""),
                 updated_at=int(time.time() * 1000),
+                room_id=room_id,
+                room_name=room_name,
             )
             scenarios = [
                 s
@@ -511,6 +548,7 @@ class ScenarioService:
             catalog=self._validation_catalog(registry),
             existing_scenario_id=payload.get("id") or payload.get("scenarioId"),
         )
+        self._scenario_room(payload)
 
         action_count = len(definition.actions)
         referenced = {

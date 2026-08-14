@@ -147,6 +147,34 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.store._data)
         self.assertEqual(self.store._data.version, 1)
 
+    async def test_update_persists_optional_room_with_server_label(self) -> None:
+        self.service._catalog = ScenarioCatalog(
+            devices=self.catalog.devices,
+            scenarios={},
+            rooms={"living": "Гостиная"},
+        )
+        payload = _valid_payload()
+        payload["roomId"] = "living"
+        scenario = await self.service.async_update_scenario(payload)
+        self.assertEqual("living", scenario.room_id)
+        self.assertEqual("Гостиная", scenario.room_name)
+
+    async def test_update_without_room_creates_general_scenario(self) -> None:
+        scenario = await self.service.async_update_scenario(_valid_payload())
+        self.assertIsNone(scenario.room_id)
+        self.assertIsNone(scenario.room_name)
+
+    async def test_update_rejects_unknown_room(self) -> None:
+        payload = _valid_payload()
+        payload["roomId"] = "missing"
+        with self.assertRaises(ScenarioValidationError) as raised:
+            await self.service.async_update_scenario(payload)
+        self.assertEqual("roomId", raised.exception.violations[0].path)
+        self.assertEqual(
+            "scenario_room_not_found",
+            raised.exception.violations[0].code,
+        )
+
     async def test_event_trigger_projection_contains_only_enabled_filter(self) -> None:
         payload = _valid_payload("event_button")
         payload["definition"]["triggers"] = [{

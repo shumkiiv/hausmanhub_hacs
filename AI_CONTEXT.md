@@ -1,8 +1,17 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-14 (HACS 1.52.93 associative scenario devices).
+Last updated: 2026-08-14 (HACS 1.52.94 scenario room backend candidate).
 
 ## Current work
+
+- 2026-08-14 (Codex): подготовлен HACS backend `1.52.94` для необязательной
+  комнаты сценария по contracts `0.32.0` (`bc31bad`). `roomId=null` или
+  отсутствие поля означает общий сценарий; неизвестная комната отклоняется.
+  API выдаёт актуальный `roomName`, полный каталог комнат и комнату в
+  dashboard-проекции. Старое storage без комнаты совместимо. Gate: 1395
+  тестов, 4 skipped, 926 subtests. Frontend HACS и Android не изменены: две
+  отдельные узкие Kimi design-сессии зависли до первого tool-вызова и не
+  создали diff. Версия не выпущена и не развёрнута до восстановления UI-трека.
 
 - 2026-08-14 (Codex): HACS `1.52.93` groups scenario entities by physical
   Home Assistant device and publishes room, type, capability and allowed

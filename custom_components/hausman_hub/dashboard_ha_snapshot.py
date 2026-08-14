@@ -212,6 +212,8 @@ async def _dashboard_scenarios(
             group=_non_empty_string(scenario.group),
             description=_non_empty_string(scenario.description),
             icon=_non_empty_string(scenario.icon),
+            room_id=getattr(scenario, "room_id", None),
+            room_name=getattr(scenario, "room_name", None),
             requires_confirmation=bool(scenario.requires_confirmation),
             favorite=bool(scenario.favorite),
             danger=bool(scenario.danger),

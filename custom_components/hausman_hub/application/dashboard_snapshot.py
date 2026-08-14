@@ -247,6 +247,8 @@ class DashboardScenario:
     requires_confirmation: bool = False
     favorite: bool = False
     danger: bool = False
+    room_id: str | None = None
+    room_name: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1274,6 +1276,8 @@ def build_dashboard_snapshot(
             "group": scenario.group,
             "description": scenario.description,
             "icon": scenario.icon,
+            "roomId": scenario.room_id,
+            "roomName": scenario.room_name,
             "requiresConfirmation": scenario.requires_confirmation,
             "favorite": scenario.favorite,
             "danger": scenario.danger,

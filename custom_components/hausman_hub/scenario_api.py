@@ -150,6 +150,13 @@ class ScenarioCatalogView(_ScenarioView):
         ]
         return self.json(
             {
+                "rooms": [
+                    {"room_id": room_id, "room_name": room_name}
+                    for room_id, room_name in sorted(
+                        catalog.rooms.items(),
+                        key=lambda item: item[1].casefold(),
+                    )
+                ],
                 "devices": sorted(devices, key=lambda item: item["name"]),
                 "scenarios": scenarios,
             },
@@ -157,7 +164,7 @@ class ScenarioCatalogView(_ScenarioView):
         )
 
 
-def _scenario_catalog_summary(scenario: object) -> dict[str, str]:
+def _scenario_catalog_summary(scenario: object) -> dict[str, object]:
     """Return the additive scenario metadata approved by catalog contract v1."""
 
     summary = {
@@ -171,6 +178,10 @@ def _scenario_catalog_summary(scenario: object) -> dict[str, str]:
         and _MDI_ICON.fullmatch(icon) is not None
     ):
         summary["icon"] = icon
+    room_id = getattr(scenario, "room_id", None)
+    room_name = getattr(scenario, "room_name", None)
+    summary["room_id"] = room_id if isinstance(room_id, str) else None
+    summary["room_name"] = room_name if isinstance(room_name, str) else None
     return summary
 
 

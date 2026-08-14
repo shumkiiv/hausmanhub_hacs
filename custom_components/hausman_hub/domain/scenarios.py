@@ -345,6 +345,8 @@ class Scenario:
     action_description: str
     updated_at: int
     definition: ScenarioDefinition
+    room_id: str | None = None
+    room_name: str | None = None
 
     def __post_init__(self) -> None:
         _stable_id(self.id, "scenario id")
@@ -384,6 +386,12 @@ class Scenario:
             raise ScenarioViolation("scenario updated_at must be a non-negative integer")
         if not isinstance(self.definition, ScenarioDefinition):
             raise ScenarioViolation("scenario definition must be validated")
+        if self.room_id is not None:
+            _stable_id(self.room_id, "scenario room_id")
+        if self.room_name is not None:
+            _title(self.room_name, "scenario room_name")
+        if self.room_id is None and self.room_name is not None:
+            raise ScenarioViolation("scenario room_name requires room_id")
 
     @classmethod
     def from_definition(
@@ -403,6 +411,8 @@ class Scenario:
         condition_description: str = "None",
         action_description: str = "None",
         updated_at: int | None = None,
+        room_id: str | None = None,
+        room_name: str | None = None,
     ) -> "Scenario":
         """Build a full persisted scenario from a validated definition."""
 
@@ -423,6 +433,8 @@ class Scenario:
             action_description=action_description,
             updated_at=updated_at,
             definition=definition,
+            room_id=room_id,
+            room_name=room_name,
         )
 
 
@@ -569,7 +581,7 @@ def scenario_registry_to_payload(registry: ScenarioRegistry) -> dict[str, object
 
 def _scenario_from_payload(payload: object, label: str) -> Scenario:
     root = _mapping(payload, label)
-    _exact_keys(
+    _required_allowed_keys(
         root,
         {
             "id",
@@ -587,6 +599,7 @@ def _scenario_from_payload(payload: object, label: str) -> Scenario:
             "updatedAt",
             "definition",
         },
+        {"roomId", "roomName"},
         label,
     )
     return Scenario(
@@ -612,6 +625,8 @@ def _scenario_from_payload(payload: object, label: str) -> Scenario:
         ),
         updated_at=_int(root.get("updatedAt"), f"{label} updatedAt"),
         definition=_definition_from_payload(root.get("definition"), f"{label} definition"),
+        room_id=_optional_str(root.get("roomId")),
+        room_name=_optional_str(root.get("roomName")),
     )
 
 
@@ -631,6 +646,8 @@ def _scenario_to_payload(scenario: Scenario) -> dict[str, object]:
         "actionDescription": scenario.action_description,
         "updatedAt": scenario.updated_at,
         "definition": _definition_to_payload(scenario.definition),
+        "roomId": scenario.room_id,
+        "roomName": scenario.room_name,
     }
 
 
@@ -886,4 +903,14 @@ def _list(value: object, label: str) -> list[object]:
 
 def _exact_keys(root: Mapping[str, object], keys: set[str], label: str) -> None:
     if set(root) != keys:
+        raise ScenarioViolation(f"{label} has unexpected fields")
+
+
+def _required_allowed_keys(
+    root: Mapping[str, object],
+    required: set[str],
+    optional: set[str],
+    label: str,
+) -> None:
+    if not required.issubset(root) or not set(root).issubset(required | optional):
         raise ScenarioViolation(f"{label} has unexpected fields")

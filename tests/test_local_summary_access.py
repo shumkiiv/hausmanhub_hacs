@@ -2737,7 +2737,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.93", panel.payload["integration_version"])
+        self.assertEqual("1.52.94", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
@@ -3222,6 +3222,8 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 "id": "close_curtains",
                 "title": "Закрыть шторы",
                 "icon": "mdi:curtains",
+                "room_id": None,
+                "room_name": None,
             },
             catalog.payload["scenarios"][0],
         )
