@@ -1,8 +1,19 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-14 (HACS 1.52.91 compact energy surfaces).
+Last updated: 2026-08-14 (HACS 1.52.92 source-bound meter readings).
 
 ## Current work
+
+- 2026-08-14 (Codex): HACS `1.52.92` binds manual electricity readings to one
+  explicit energy device. The projection reads only that source, rejects an
+  unknown source, stamps each new history record and migrates old state with a
+  nullable source. HACS always shows history and blocks submit/correct until
+  the source is saved. Consumer pin is contracts `0.30.0` (`9137aea`). Full
+  gate: 1385 passed, 4 skipped; Actions `31788813887` success. Production was
+  backed up, checked, installed and restarted once. Installed/latest, admin
+  panel and cache marker are `1.52.92`; dashboard has 13 rooms, 82 devices and
+  2 energy sources, all 10 entities are available, and system log is clean. No
+  physical command was sent. Details: `docs/RELEASE_AUDIT_1.52.92.md`.
 
 - 2026-08-14 (Codex): HACS `1.52.91` replaces the large dashboard energy card
   with compact readings and a separate settings action. Meter and source
