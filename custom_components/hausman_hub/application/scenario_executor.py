@@ -513,19 +513,31 @@ class ScenarioExecutor:
                 }
 
         receipts: list[dict[str, Any]] = []
+        powered_sources: set[str] = set()
         start_ms = int(time.time() * 1000)
 
         for action in definition.actions:
+            if not dry_run and action.type is ScenarioActionType.DELAY:
+                await self._confirm_deferred_device_receipts(receipts)
             receipt = await self._execute_action(
                 action,
                 run_id,
                 next_visited,
                 dry_run=dry_run,
                 defer_device_readback=True,
+                powered_sources=frozenset(powered_sources),
             )
             receipts.append(receipt)
             if receipt.get("status") == "failed":
                 break
+            if action.type is ScenarioActionType.DEVICE_ACTION:
+                device = self._catalog.device(action.target_id or "")
+                entity_id = getattr(device, "entity_id", None)
+                if isinstance(entity_id, str):
+                    if action.action_id == "turn_on":
+                        powered_sources.add(entity_id)
+                    elif action.action_id == "turn_off":
+                        powered_sources.discard(entity_id)
 
         if not dry_run:
             await self._confirm_deferred_device_receipts(receipts)
@@ -557,6 +569,7 @@ class ScenarioExecutor:
         *,
         dry_run: bool = False,
         defer_device_readback: bool = False,
+        powered_sources: frozenset[str] = frozenset(),
     ) -> dict[str, Any]:
         base = {
             "action_id": action.id,
@@ -571,6 +584,7 @@ class ScenarioExecutor:
                     base,
                     dry_run=dry_run,
                     defer_readback=defer_device_readback,
+                    powered_sources=powered_sources,
                 )
             if action.type == ScenarioActionType.DELAY:
                 if not dry_run:
@@ -592,6 +606,7 @@ class ScenarioExecutor:
         *,
         dry_run: bool = False,
         defer_readback: bool = False,
+        powered_sources: frozenset[str] = frozenset(),
     ) -> dict[str, Any]:
         if action.target_id is None or action.action_id is None:
             return {
@@ -613,7 +628,10 @@ class ScenarioExecutor:
                 "status": "failed",
                 "error": f"action {action.action_id} is not available for device {action.target_id}",
             }
-        dependency_error = self._power_dependency_error(device.entity_id)
+        dependency_error = self._power_dependency_error(
+            device.entity_id,
+            powered_sources=powered_sources,
+        )
         if dependency_error is not None:
             return {
                 **base,
@@ -687,7 +705,12 @@ class ScenarioExecutor:
             }
         return receipt
 
-    def _power_dependency_error(self, entity_id: str) -> str | None:
+    def _power_dependency_error(
+        self,
+        entity_id: str,
+        *,
+        powered_sources: frozenset[str] = frozenset(),
+    ) -> str | None:
         """Fail closed when an upstream source does not currently provide power."""
 
         if self._power_dependency_resolver is None:
@@ -697,6 +720,8 @@ class ScenarioExecutor:
             return None
 
         def read_state(requested_entity_id: str) -> str | None:
+            if requested_entity_id in powered_sources:
+                return "on"
             states = getattr(self._hass, "states", None)
             state = states.get(requested_entity_id) if states is not None else None
             return None if state is None else str(getattr(state, "state", "unknown"))
@@ -763,7 +788,8 @@ class ScenarioExecutor:
         if dry_run:
             return {
                 **base,
-                "status": "planned",
+                "status": "completed",
+                "planned": True,
                 "scenario_id": action.scenario_id,
             }
         result = await self._run_callback(action.scenario_id, visited=visited)

@@ -1,7 +1,7 @@
-import { renderEnergyHistoryChart } from "./hausman-hub-energy-chart.js?v=1.52.94";
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.94";
-import { loadEnergyMeter, meterConfigured, meterNumber, meterReminderText, renderEnergyMeterCard } from "./hausman-hub-energy-meter.js?v=1.52.94";
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.94";
+import { renderEnergyHistoryChart } from "./hausman-hub-energy-chart.js?v=1.52.95";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.95";
+import { loadEnergyMeter, meterConfigured, meterNumber, meterReminderText, renderEnergyMeterCard } from "./hausman-hub-energy-meter.js?v=1.52.95";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.95";
 
 const number = (value, digits = 1) => Number.isFinite(Number(value))
   ? new Intl.NumberFormat("ru-RU", { maximumFractionDigits: digits }).format(Number(value))

@@ -227,6 +227,117 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(receipt["confirmed"])
         self.hass.services.async_call.assert_awaited_once()
 
+    async def test_scenario_uses_power_source_enabled_by_previous_action(self) -> None:
+        self.catalog._devices["switch_1"] = ScenarioDeviceEntry(
+            target_id="switch_1",
+            name="Wall relay",
+            entity_id="switch.wall",
+            actions=(
+                ScenarioDeviceAction(
+                    action_id="turn_on",
+                    title="On",
+                    domain="switch",
+                    service="turn_on",
+                    allowed_fields=frozenset(),
+                ),
+            ),
+        )
+        self.hass.states = SimpleNamespace(
+            get=lambda entity_id: {
+                "light.living_room": SimpleNamespace(state="on", attributes={}),
+                "switch.wall": SimpleNamespace(state="off", attributes={}),
+                "sun.sun": SimpleNamespace(
+                    state="below_horizon",
+                    attributes={
+                        "next_rising": "2026-08-15T06:00:00+06:00",
+                        "next_setting": "2026-08-15T20:00:00+06:00",
+                    },
+                ),
+            }.get(entity_id)
+        )
+        executor = ScenarioExecutor(
+            self.hass,
+            self.catalog,
+            self.executor._run_callback,
+            power_dependency_resolver=lambda: {
+                "light.living_room": "switch.wall"
+            },
+        )
+        definition = _definition((
+            ScenarioAction(
+                id="a1",
+                type=ScenarioActionType.DEVICE_ACTION,
+                target_id="switch_1",
+                action_id="turn_on",
+            ),
+            ScenarioAction(
+                id="a2",
+                type=ScenarioActionType.DEVICE_ACTION,
+                target_id="device_1",
+                action_id="set_adaptive_brightness",
+                value=25,
+            ),
+        ))
+
+        result = await executor.async_execute(
+            definition,
+            "run-1",
+            scenario_id="sc-1",
+            dry_run=True,
+        )
+
+        self.assertEqual("completed", result["status"])
+        self.assertEqual("completed", result["receipts"][1]["status"])
+        self.assertEqual(25, result["receipts"][1]["adaptive_brightness"]["minimum_percent"])
+        self.hass.services.async_call.assert_not_awaited()
+
+    async def test_scenario_confirms_device_actions_before_delay(self) -> None:
+        self.executor._read_back_device = AsyncMock(
+            return_value={
+                "attempted": True,
+                "matched": True,
+                "observedAt": 1,
+                "observedState": "on",
+                "attempts": 1,
+            }
+        )
+        readback_counts: list[int] = []
+
+        async def fake_sleep(_: float) -> None:
+            readback_counts.append(self.executor._read_back_device.await_count)
+
+        definition = _definition((
+            ScenarioAction(
+                id="a1",
+                type=ScenarioActionType.DEVICE_ACTION,
+                target_id="device_1",
+                action_id="turn_on",
+            ),
+            ScenarioAction(
+                id="a2",
+                type=ScenarioActionType.DELAY,
+                delay_seconds=1,
+            ),
+            ScenarioAction(
+                id="a3",
+                type=ScenarioActionType.DEVICE_ACTION,
+                target_id="device_1",
+                action_id="turn_on",
+            ),
+        ))
+
+        with patch(
+            "custom_components.hausman_hub.application.scenario_executor.asyncio.sleep",
+            side_effect=fake_sleep,
+        ):
+            result = await self.executor.async_execute(
+                definition, "run-1", scenario_id="sc-1"
+            )
+
+        self.assertEqual("completed", result["status"])
+        self.assertEqual([1], readback_counts)
+        self.assertEqual(2, self.executor._read_back_device.await_count)
+
     async def test_scenario_confirms_multiple_devices_in_one_shared_window(self) -> None:
         both_readbacks_started = asyncio.Event()
         started = 0
@@ -455,6 +566,26 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["status"], "completed")
         self.assertEqual(self.nested_runs, ["other"])
         self.assertEqual(result["receipts"][0]["nested_run_id"], "nested-other")
+
+    async def test_run_scenario_dry_run_is_a_successful_plan(self) -> None:
+        definition = _definition((
+            ScenarioAction(
+                id="a1",
+                type=ScenarioActionType.RUN_SCENARIO,
+                scenario_id="other",
+            ),
+        ))
+
+        result = await self.executor.async_execute(
+            definition,
+            "run-1",
+            scenario_id="sc-1",
+            dry_run=True,
+        )
+
+        self.assertEqual("completed", result["status"])
+        self.assertTrue(result["receipts"][0]["planned"])
+        self.assertEqual([], self.nested_runs)
 
     async def test_notification_action_targets_configured_entity(self) -> None:
         definition = _definition((
