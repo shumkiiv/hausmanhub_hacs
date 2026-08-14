@@ -42,6 +42,32 @@ class ScenarioDefinitionViolation(ScenarioViolation):
         self.path = path
 
 
+def adaptive_brightness_minimum(value: object) -> float:
+    """Parse the minimum percentage for the solar brightness curve."""
+
+    if isinstance(value, str):
+        normalized = value.strip()
+        if normalized.endswith("%"):
+            normalized = normalized[:-1].strip()
+        try:
+            numeric = float(normalized)
+        except ValueError as error:
+            raise ValueError(
+                "adaptive brightness minimum must be a percentage from 1 to 100"
+            ) from error
+    elif isinstance(value, (int, float)) and not isinstance(value, bool):
+        numeric = float(value)
+    else:
+        raise ValueError(
+            "adaptive brightness minimum must be a percentage from 1 to 100"
+        )
+    if not math.isfinite(numeric) or not 1 <= numeric <= 100:
+        raise ValueError(
+            "adaptive brightness minimum must be a percentage from 1 to 100"
+        )
+    return numeric
+
+
 @dataclass(frozen=True, slots=True)
 class ScenarioDeviceAction:
     """One resolved action that a physical device can perform."""
@@ -347,6 +373,14 @@ def _validate_device_action(
             f"action {action.action_id} requires a value",
             path=f"{path}.value",
         )
+    if action.action_id == "set_adaptive_brightness":
+        try:
+            adaptive_brightness_minimum(action.value)
+        except ValueError as error:
+            raise ScenarioDefinitionViolation(
+                str(error),
+                path=f"{path}.value",
+            ) from error
     if action.command is not None:
         if action.command.domain != allowed.domain:
             raise ScenarioDefinitionViolation(

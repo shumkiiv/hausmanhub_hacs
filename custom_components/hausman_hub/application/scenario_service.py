@@ -23,6 +23,7 @@ from ..domain.scenarios import (
     Scenario,
     ScenarioComparison,
     ScenarioDefinition,
+    ScenarioExecutionMode,
     ScenarioRegistry,
     ScenarioTriggerType,
     ScenarioViolation,
@@ -120,6 +121,9 @@ class ScenarioService:
         self._intercom_release_entity: str | None = None
         self._registry: ScenarioRegistry | None = None
         self._lock = asyncio.Lock()
+        self._run_lock = asyncio.Lock()
+        self._run_tasks: dict[str, asyncio.Task[dict[str, Any]]] = {}
+        self._queue_locks: dict[str, asyncio.Lock] = {}
 
     async def async_load(self) -> None:
         """Load persisted scenarios; fall back to an empty registry."""
@@ -569,14 +573,51 @@ class ScenarioService:
             )
         if self._executor is None:
             raise ScenarioServiceError("Executor not configured", status=500)
-        run_id = self._executor.new_run_id()
-        result = await self._executor.async_execute(
-            scenario.definition,
-            run_id,
-            scenario_id=scenario.id,
-            visited_scenarios=visited,
-        )
-        return result
+        async def execute() -> dict[str, Any]:
+            run_id = self._executor.new_run_id()
+            return await self._executor.async_execute(
+                scenario.definition,
+                run_id,
+                scenario_id=scenario.id,
+                visited_scenarios=visited,
+            )
+
+        if scenario.definition.execution_mode is ScenarioExecutionMode.QUEUED:
+            queue_lock = self._queue_locks.setdefault(scenario.id, asyncio.Lock())
+            async with queue_lock:
+                return await execute()
+
+        async with self._run_lock:
+            previous = self._run_tasks.get(scenario.id)
+            if previous is not None and not previous.done():
+                if scenario.definition.execution_mode is ScenarioExecutionMode.SINGLE:
+                    return {
+                        "scenario_id": scenario.id,
+                        "status": "skipped",
+                        "reason": "scenario_already_running",
+                        "receipts": [],
+                    }
+                previous.cancel()
+            task = asyncio.create_task(execute())
+            self._run_tasks[scenario.id] = task
+
+        try:
+            return await task
+        except asyncio.CancelledError:
+            async with self._run_lock:
+                replaced = self._run_tasks.get(scenario.id) is not task
+            if not replaced:
+                raise
+            return {
+                "scenario_id": scenario.id,
+                "status": "cancelled",
+                "reason": "restarted_by_new_trigger",
+                "receipts": [],
+            }
+        finally:
+            async with self._run_lock:
+                if self._run_tasks.get(scenario.id) is task:
+                    self._run_tasks.pop(scenario.id, None)
 
     async def async_execute_device_action(
         self,

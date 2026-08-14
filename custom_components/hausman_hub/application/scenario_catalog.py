@@ -33,6 +33,7 @@ SCENARIO_CATALOG_DOMAINS = frozenset(
         "number",
         "select",
         "sensor",
+        "sun",
         "switch",
         "vacuum",
         "valve",
@@ -53,6 +54,7 @@ _TYPE_NAMES = {
     "number": "Настройки",
     "select": "Режимы",
     "sensor": "Датчики",
+    "sun": "Солнце",
     "switch": "Выключатели",
     "vacuum": "Пылесосы",
     "valve": "Клапаны",
@@ -156,6 +158,13 @@ def _domain_actions(domain: str) -> tuple[ScenarioDeviceAction, ...]:
             ScenarioDeviceAction(
                 action_id="set_brightness",
                 title="Яркость",
+                domain="light",
+                service="turn_on",
+                allowed_fields=frozenset({"value"}),
+            ),
+            ScenarioDeviceAction(
+                action_id="set_adaptive_brightness",
+                title="Яркость по времени суток",
                 domain="light",
                 service="turn_on",
                 allowed_fields=frozenset({"value"}),
@@ -510,6 +519,11 @@ def _state_options(
         return (
             ScenarioPropertyOption("on", "Включено"),
             ScenarioPropertyOption("off", "Выключено"),
+        )
+    if domain == "sun":
+        return (
+            ScenarioPropertyOption("above_horizon", "До заката"),
+            ScenarioPropertyOption("below_horizon", "После заката"),
         )
     if domain == "lock":
         return (

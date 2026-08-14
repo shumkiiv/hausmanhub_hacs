@@ -74,6 +74,64 @@ class _FakeExecutor:
         }
 
 
+class _RestartExecutor(_FakeExecutor):
+    def __init__(self) -> None:
+        super().__init__()
+        self.first_started = asyncio.Event()
+        self.first_cancelled = asyncio.Event()
+
+    async def async_execute(
+        self,
+        definition: Any,
+        run_id: str,
+        *,
+        scenario_id: str = "",
+        visited_scenarios: frozenset[str] | None = None,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        self.runs.append((definition, run_id, dry_run))
+        if len(self.runs) == 1:
+            self.first_started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.first_cancelled.set()
+                raise
+        return {
+            "run_id": run_id,
+            "scenario_id": scenario_id,
+            "status": "completed",
+            "receipts": [],
+        }
+
+
+class _QueueExecutor(_FakeExecutor):
+    def __init__(self) -> None:
+        super().__init__()
+        self.first_started = asyncio.Event()
+        self.release_first = asyncio.Event()
+
+    async def async_execute(
+        self,
+        definition: Any,
+        run_id: str,
+        *,
+        scenario_id: str = "",
+        visited_scenarios: frozenset[str] | None = None,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        self.runs.append((definition, run_id, dry_run))
+        if len(self.runs) == 1:
+            self.first_started.set()
+            await self.release_first.wait()
+        return {
+            "run_id": run_id,
+            "scenario_id": scenario_id,
+            "status": "completed",
+            "receipts": [],
+        }
+
+
 def _catalog() -> ScenarioCatalog:
     entry = ScenarioDeviceEntry(
         target_id="device_abc",
@@ -270,6 +328,60 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
         result = await self.service.async_run_scenario("scenario_1")
         self.assertEqual(result["status"], "completed")
         self.assertEqual(len(self.executor.runs), 1)
+
+    async def test_restart_mode_restarts_the_five_minute_timer(self) -> None:
+        executor = _RestartExecutor()
+        service = ScenarioService(None, self.store, self.catalog, executor)
+        await service.async_load()
+        payload = _valid_payload()
+        payload["definition"]["executionMode"] = "restart"
+        await service.async_update_scenario(payload)
+
+        first = asyncio.create_task(service.async_run_scenario("scenario_1"))
+        await asyncio.wait_for(executor.first_started.wait(), timeout=0.1)
+        second_result = await service.async_run_scenario("scenario_1")
+        first_result = await asyncio.wait_for(first, timeout=0.1)
+
+        self.assertTrue(executor.first_cancelled.is_set())
+        self.assertEqual("cancelled", first_result["status"])
+        self.assertEqual("completed", second_result["status"])
+        self.assertEqual(2, len(executor.runs))
+
+    async def test_single_mode_skips_parallel_duplicate(self) -> None:
+        executor = _RestartExecutor()
+        service = ScenarioService(None, self.store, self.catalog, executor)
+        await service.async_load()
+        await service.async_update_scenario(_valid_payload())
+
+        first = asyncio.create_task(service.async_run_scenario("scenario_1"))
+        await asyncio.wait_for(executor.first_started.wait(), timeout=0.1)
+        second_result = await service.async_run_scenario("scenario_1")
+
+        self.assertEqual("skipped", second_result["status"])
+        self.assertEqual("scenario_already_running", second_result["reason"])
+        first.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await first
+
+    async def test_queued_mode_waits_for_the_previous_run(self) -> None:
+        executor = _QueueExecutor()
+        service = ScenarioService(None, self.store, self.catalog, executor)
+        await service.async_load()
+        payload = _valid_payload()
+        payload["definition"]["executionMode"] = "queued"
+        await service.async_update_scenario(payload)
+
+        first = asyncio.create_task(service.async_run_scenario("scenario_1"))
+        await asyncio.wait_for(executor.first_started.wait(), timeout=0.1)
+        second = asyncio.create_task(service.async_run_scenario("scenario_1"))
+        await asyncio.sleep(0)
+        self.assertEqual(1, len(executor.runs))
+        executor.release_first.set()
+
+        first_result, second_result = await asyncio.gather(first, second)
+        self.assertEqual("completed", first_result["status"])
+        self.assertEqual("completed", second_result["status"])
+        self.assertEqual(2, len(executor.runs))
 
     async def test_run_without_executor_raises(self) -> None:
         await self.service.async_update_scenario(_valid_payload())

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
+from datetime import datetime, time as datetime_time, timedelta
 import math
 import time
 import uuid
@@ -14,6 +15,7 @@ from .scenarios import (
     ScenarioActionType,
     ScenarioCatalog,
     ScenarioDefinition,
+    adaptive_brightness_minimum,
 )
 from ..domain.scenarios import (
     ScenarioComparison,
@@ -35,7 +37,11 @@ _DEFAULT_DEVICE_READBACK_INTERVAL_SECONDS = 0.25
 def _value_parameter_name(action_id: str, domain: str, service: str) -> str | None:
     """Return the Home Assistant service-data key for an action value."""
 
-    if domain == "light" and service == "turn_on" and action_id == "set_brightness":
+    if (
+        domain == "light"
+        and service == "turn_on"
+        and action_id in {"set_brightness", "set_adaptive_brightness"}
+    ):
         return "brightness"
     if domain == "cover" and service == "set_cover_position" and action_id == "set_position":
         return "position"
@@ -113,6 +119,72 @@ def _now_local(hass: "HomeAssistant") -> Any:
         return dt_util.now()
     import datetime
     return datetime.datetime.now(tz=datetime.timezone.utc)
+
+
+def _parse_solar_time(value: object, now: datetime) -> datetime:
+    if not isinstance(value, str):
+        raise ValueError("solar transition time is unavailable")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ValueError("solar transition time is invalid") from error
+    if parsed.tzinfo is None or now.tzinfo is None:
+        raise ValueError("solar transition time must include a timezone")
+    return parsed.astimezone(now.tzinfo)
+
+
+def _solar_curve_brightness(
+    now: datetime,
+    sun_state: str,
+    next_rising: object,
+    next_setting: object,
+    minimum_percent: float,
+) -> int:
+    """Resolve a symmetric sunset-to-midnight-to-sunrise brightness curve."""
+
+    if sun_state == "above_horizon":
+        return 255
+    if sun_state != "below_horizon":
+        raise ValueError("sun state is unavailable")
+
+    rising = _parse_solar_time(next_rising, now)
+    setting = _parse_solar_time(next_setting, now)
+    previous_setting = setting - timedelta(days=1)
+    if previous_setting.date() == now.date() and previous_setting <= now:
+        boundary = datetime.combine(
+            now.date() + timedelta(days=1), datetime_time.min, tzinfo=now.tzinfo
+        )
+        duration = (boundary - previous_setting).total_seconds()
+        elapsed = (now - previous_setting).total_seconds()
+        progress = elapsed / duration if duration > 0 else 1.0
+        percentage = 100 - (100 - minimum_percent) * progress
+    else:
+        boundary = datetime.combine(now.date(), datetime_time.min, tzinfo=now.tzinfo)
+        duration = (rising - boundary).total_seconds()
+        elapsed = (now - boundary).total_seconds()
+        progress = elapsed / duration if duration > 0 else 0.0
+        percentage = minimum_percent + (100 - minimum_percent) * progress
+    percentage = min(100.0, max(minimum_percent, percentage))
+    return round(255 * percentage / 100)
+
+
+def _adaptive_brightness(hass: "HomeAssistant", value: object) -> tuple[int, float]:
+    minimum_percent = adaptive_brightness_minimum(value)
+    states = getattr(hass, "states", None)
+    sun = states.get("sun.sun") if states is not None else None
+    if sun is None:
+        raise ValueError("sun state is unavailable")
+    attributes = getattr(sun, "attributes", {})
+    if not isinstance(attributes, Mapping):
+        attributes = {}
+    brightness = _solar_curve_brightness(
+        _now_local(hass),
+        str(getattr(sun, "state", "unknown")),
+        attributes.get("next_rising"),
+        attributes.get("next_setting"),
+        minimum_percent,
+    )
+    return brightness, minimum_percent
 
 
 def _evaluate_condition(
@@ -550,6 +622,7 @@ class ScenarioExecutor:
             }
         service_data: dict[str, Any] = {"entity_id": device.entity_id}
         confirmation_value = action.value
+        adaptive_minimum: float | None = None
         if allowed.domain == "number" and action.value is None:
             return {
                 **base,
@@ -565,7 +638,12 @@ class ScenarioExecutor:
                     "error": f"action {action.action_id} does not accept a value",
                 }
             try:
-                normalized = _normalize_action_value(param, action.value)
+                if action.action_id == "set_adaptive_brightness":
+                    normalized, adaptive_minimum = _adaptive_brightness(
+                        self._hass, action.value
+                    )
+                else:
+                    normalized = _normalize_action_value(param, action.value)
             except ValueError as error:
                 return {
                     **base,
@@ -602,6 +680,11 @@ class ScenarioExecutor:
             receipt["reason"] = (
                 None if read_back["matched"] is True else "state_not_confirmed"
             )
+        if adaptive_minimum is not None:
+            receipt["adaptive_brightness"] = {
+                "minimum_percent": adaptive_minimum,
+                "resolved_percent": round(100 * confirmation_value / 255),
+            }
         return receipt
 
     def _power_dependency_error(self, entity_id: str) -> str | None:
@@ -764,6 +847,7 @@ def _device_action_confirmed(state: object, action_id: str, value: object | None
         return state_value in {"closed", "closing"}
     expected_attribute = {
         "set_brightness": "brightness",
+        "set_adaptive_brightness": "brightness",
         "set_position": "current_position",
         "set_temperature": "temperature",
         "set_hvac_mode": "hvac_mode",

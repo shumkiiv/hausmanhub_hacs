@@ -34,6 +34,7 @@ class ScenarioCatalogPureTest(unittest.TestCase):
                 "number",
                 "select",
                 "sensor",
+                "sun",
                 "switch",
                 "vacuum",
                 "valve",
@@ -44,11 +45,38 @@ class ScenarioCatalogPureTest(unittest.TestCase):
     def test_light_actions_include_brightness(self) -> None:
         actions = _domain_actions("light")
         ids = {action.action_id for action in actions}
-        self.assertEqual(ids, {"turn_on", "turn_off", "toggle", "set_brightness"})
+        self.assertEqual(
+            ids,
+            {
+                "turn_on",
+                "turn_off",
+                "toggle",
+                "set_brightness",
+                "set_adaptive_brightness",
+            },
+        )
         brightness = next(action for action in actions if action.action_id == "set_brightness")
         self.assertEqual(brightness.domain, "light")
         self.assertEqual(brightness.service, "turn_on")
         self.assertIn("value", brightness.allowed_fields)
+        adaptive = next(
+            action for action in actions
+            if action.action_id == "set_adaptive_brightness"
+        )
+        self.assertEqual("Яркость по времени суток", adaptive.title)
+        self.assertIn("value", adaptive.allowed_fields)
+
+    def test_sun_exposes_associative_horizon_states(self) -> None:
+        state = type(
+            "State",
+            (),
+            {"state": "below_horizon", "attributes": {}},
+        )()
+        prop = _state_property(state, "sun", "", "Солнце")
+        self.assertEqual(
+            [("above_horizon", "До заката"), ("below_horizon", "После заката")],
+            [(option.value, option.label) for option in prop.options],
+        )
 
     def test_switch_actions_do_not_accept_value(self) -> None:
         actions = _domain_actions("switch")

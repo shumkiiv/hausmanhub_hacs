@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 import unittest
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from custom_components.hausman_hub.application.scenario_executor import (
     ScenarioExecutor,
     _device_action_confirmed,
     _normalize_action_value,
     _number_range_error,
+    _solar_curve_brightness,
     _value_parameter_name,
 )
 from custom_components.hausman_hub.application.scenarios import (
@@ -42,6 +44,13 @@ class _FakeHass:
                 "number.breaker_temperature_threshold": SimpleNamespace(
                     state="80", attributes={}
                 ),
+                "sun.sun": SimpleNamespace(
+                    state="below_horizon",
+                    attributes={
+                        "next_rising": "2026-08-15T00:00:00+00:00",
+                        "next_setting": "2026-08-15T14:00:00+00:00",
+                    },
+                ),
             }.get(entity_id)
         )
 
@@ -64,6 +73,13 @@ class _FakeCatalog:
                     ScenarioDeviceAction(
                         action_id="set_brightness",
                         title="Brightness",
+                        domain="light",
+                        service="turn_on",
+                        allowed_fields=frozenset({"value"}),
+                    ),
+                    ScenarioDeviceAction(
+                        action_id="set_adaptive_brightness",
+                        title="Adaptive brightness",
                         domain="light",
                         service="turn_on",
                         allowed_fields=frozenset({"value"}),
@@ -344,6 +360,74 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(receipt["confirmed"])
         self.hass.services.async_call.assert_awaited_once_with(
             "light", "turn_on", {"entity_id": "light.living_room", "brightness": 50}, blocking=True
+        )
+
+    async def test_adaptive_brightness_uses_solar_curve_and_minimum_percent(self) -> None:
+        self.hass.states.get = lambda entity_id: {
+            "light.living_room": SimpleNamespace(
+                state="on", attributes={"brightness": 159}
+            ),
+            "sun.sun": SimpleNamespace(
+                state="below_horizon",
+                attributes={
+                    "next_rising": "2026-08-15T06:00:00+06:00",
+                    "next_setting": "2026-08-15T20:00:00+06:00",
+                },
+            ),
+        }.get(entity_id)
+        now = datetime(
+            2026, 8, 14, 22, 0, tzinfo=timezone(timedelta(hours=6))
+        )
+
+        with patch(
+            "custom_components.hausman_hub.application.scenario_executor._now_local",
+            return_value=now,
+        ):
+            receipt = await self.executor.async_execute_device_action(
+                "device_1", "set_adaptive_brightness", 25
+            )
+
+        self.assertTrue(receipt["confirmed"])
+        self.hass.services.async_call.assert_awaited_once_with(
+            "light",
+            "turn_on",
+            {"entity_id": "light.living_room", "brightness": 159},
+            blocking=True,
+        )
+
+    def test_solar_curve_is_darkest_at_midnight_and_reverses_in_morning(self) -> None:
+        setting = "2026-08-15T20:00:00+06:00"
+        rising = "2026-08-15T06:00:00+06:00"
+        tz = timezone(timedelta(hours=6))
+        self.assertEqual(
+            255,
+            _solar_curve_brightness(
+                datetime(2026, 8, 14, 20, 0, tzinfo=tz),
+                "below_horizon",
+                rising,
+                setting,
+                25,
+            ),
+        )
+        self.assertEqual(
+            64,
+            _solar_curve_brightness(
+                datetime(2026, 8, 15, 0, 0, tzinfo=tz),
+                "below_horizon",
+                rising,
+                setting,
+                25,
+            ),
+        )
+        self.assertEqual(
+            159,
+            _solar_curve_brightness(
+                datetime(2026, 8, 15, 3, 0, tzinfo=tz),
+                "below_horizon",
+                rising,
+                setting,
+                25,
+            ),
         )
 
     async def test_delay_action_receipt(self) -> None:
