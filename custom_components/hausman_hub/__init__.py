@@ -203,6 +203,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await async_start_scenario_events(hass, entry, scenario_service)
 
+    from .error_taxonomy import async_preload_error_policies
+
+    await async_preload_error_policies(hass)
     register_climate_api(
         hass,
         climate_runtime,

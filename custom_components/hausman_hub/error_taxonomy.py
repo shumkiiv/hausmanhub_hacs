@@ -6,7 +6,10 @@ from collections.abc import Mapping
 from functools import lru_cache
 import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from homeassistant.core import HomeAssistant
 
 
 _TAXONOMY_PATH = Path(__file__).parent / "contracts" / "v1" / "error-taxonomy.json"
@@ -34,6 +37,12 @@ def error_policies() -> dict[str, dict[str, Any]]:
     if len(policies) != 20 or _FALLBACK_CODE not in policies:
         raise RuntimeError("HausmanHub error taxonomy coverage is invalid")
     return policies
+
+
+async def async_preload_error_policies(hass: HomeAssistant) -> None:
+    """Load the packaged taxonomy outside the Home Assistant event loop."""
+
+    await hass.async_add_executor_job(error_policies)
 
 
 def error_policy(code: str) -> Mapping[str, Any]:

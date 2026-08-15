@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from pathlib import Path
@@ -12,6 +13,7 @@ from jsonschema import Draft202012Validator
 from custom_components.hausman_hub.error_taxonomy import (
     api_error_payload,
     api_error_status,
+    async_preload_error_policies,
     error_policies,
 )
 
@@ -39,6 +41,19 @@ CONTRACTS_0_34_0_SHA256 = (
 
 
 class ErrorTaxonomyTests(unittest.TestCase):
+    def test_packaged_taxonomy_is_preloaded_through_executor(self) -> None:
+        class Hass:
+            def __init__(self) -> None:
+                self.targets: list[object] = []
+
+            async def async_add_executor_job(self, target, *args):
+                self.targets.append(target)
+                return target(*args)
+
+        hass = Hass()
+        asyncio.run(async_preload_error_policies(hass))
+        self.assertEqual([error_policies], hass.targets)
+
     def test_packaged_taxonomy_matches_contracts_0_34_0(self) -> None:
         self.assertEqual(
             CONTRACTS_0_34_0_SHA256,
