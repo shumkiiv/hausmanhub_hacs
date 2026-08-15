@@ -697,6 +697,9 @@
             "testPath": {
               "const": "/api/hausman_hub/v1/voice/yandex-greeting/test"
             },
+            "testMethod": {
+              "const": "POST"
+            },
             "optimistic_locking": {
               "const": true
             },
@@ -715,6 +718,12 @@
                   "const": 1
                 }
               }
+            },
+            "test_request_contract": {
+              "$ref": "#/$defs/voice_greeting_test_request_contract"
+            },
+            "test_receipt_contract": {
+              "$ref": "#/$defs/voice_command_receipt_contract"
             },
             "stations": {
               "type": "array",
@@ -743,6 +752,24 @@
       "required": ["name", "version"],
       "properties": {
         "name": { "const": "hausman-hub-device-discovery" },
+        "version": { "const": 1 }
+      }
+    },
+    "voice_greeting_test_request_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "hausman-hub-voice-greeting-test-request" },
+        "version": { "const": 1 }
+      }
+    },
+    "voice_command_receipt_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "hausman-hub-voice-command-receipt" },
         "version": { "const": 1 }
       }
     },

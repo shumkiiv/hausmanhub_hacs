@@ -224,9 +224,18 @@
         "PUT"
       ],
       "testPath": "/api/hausman_hub/v1/voice/yandex-greeting/test",
+      "testMethod": "POST",
       "optimistic_locking": true,
       "response_contract": {
         "name": "hausman-hub-voice-greeting-config",
+        "version": 1
+      },
+      "test_request_contract": {
+        "name": "hausman-hub-voice-greeting-test-request",
+        "version": 1
+      },
+      "test_receipt_contract": {
+        "name": "hausman-hub-voice-command-receipt",
         "version": 1
       },
       "stations": []

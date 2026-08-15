@@ -1,5 +1,11 @@
 # История версий
 
+## Unreleased
+
+- Runtime capability `voice_greeting` рекламирует `POST` test method и точные
+  версии test request/receipt contracts из contracts 0.32.2. Старые клиенты
+  могут игнорировать новые optional поля.
+
 ## 1.52.97 - 2026-08-15
 
 - Сценарии состояний больше не принимают загрузку и восстановление устройства

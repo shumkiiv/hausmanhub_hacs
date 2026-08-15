@@ -17,6 +17,14 @@ from .contour_override import (
     TEMPORARY_TEMPERATURE_REQUEST_CONTRACT_VERSION,
 )
 from .contours import CONTOUR_CONTRACT_NAME, CONTOUR_CONTRACT_VERSION
+from .voice_greeting import (
+    VOICE_GREETING_CONTRACT_NAME,
+    VOICE_GREETING_CONTRACT_VERSION,
+    VOICE_RECEIPT_CONTRACT_NAME,
+    VOICE_RECEIPT_CONTRACT_VERSION,
+    VOICE_TEST_REQUEST_CONTRACT_NAME,
+    VOICE_TEST_REQUEST_CONTRACT_VERSION,
+)
 
 
 API_CAPABILITIES_CONTRACT_NAME = "hausman-hub-capabilities"
@@ -273,10 +281,19 @@ def api_capabilities_snapshot(
                 "path": VOICE_GREETING_PATH,
                 "methods": ["GET", "PUT"],
                 "testPath": VOICE_GREETING_TEST_PATH,
+                "testMethod": "POST",
                 "optimistic_locking": True,
                 "response_contract": {
-                    "name": "hausman-hub-voice-greeting-config",
-                    "version": 1,
+                    "name": VOICE_GREETING_CONTRACT_NAME,
+                    "version": VOICE_GREETING_CONTRACT_VERSION,
+                },
+                "test_request_contract": {
+                    "name": VOICE_TEST_REQUEST_CONTRACT_NAME,
+                    "version": VOICE_TEST_REQUEST_CONTRACT_VERSION,
+                },
+                "test_receipt_contract": {
+                    "name": VOICE_RECEIPT_CONTRACT_NAME,
+                    "version": VOICE_RECEIPT_CONTRACT_VERSION,
                 },
                 "stations": list(voice_stations),
             },

@@ -174,6 +174,16 @@ class ClimateContractSchemasTest(unittest.TestCase):
             load_json(ROOT / "fixtures" / "hausmanhub_capabilities_v1" / "capabilities.json"),
             capabilities,
         )
+        voice_capability = capabilities["capabilities"]["voice_greeting"]
+        self.assertEqual("POST", voice_capability["testMethod"])
+        self.assertEqual(
+            {"name": "hausman-hub-voice-greeting-test-request", "version": 1},
+            voice_capability["test_request_contract"],
+        )
+        self.assertEqual(
+            {"name": "hausman-hub-voice-command-receipt", "version": 1},
+            voice_capability["test_receipt_contract"],
+        )
 
         registry = registry_from_payload(load_json(FIXTURES / "registry.json"))
         snapshot = import_climate_state(load_json(SOURCE_FIXTURE))
