@@ -1,5 +1,12 @@
 # История версий
 
+## 1.52.100 - 2026-08-15
+
+- Canonical error taxonomy загружается через executor до регистрации API.
+  Первый strict error response больше не читает packaged JSON внутри event
+  loop, поэтому Home Assistant не создаёт blocking-call warning.
+- Поведение error envelope и consumer pin contracts 0.34.0 не менялись.
+
 ## 1.52.99 - 2026-08-15
 
 - Strict tablet и climate routes используют canonical error taxonomy из
