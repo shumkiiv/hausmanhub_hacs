@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from itertools import count
 from typing import Final
 
+from ..correlation import new_correlation_id, validate_correlation_id
+
 
 EVENT_CONTRACT_NAME: Final = "hausman-hub-event"
 EVENT_CONTRACT_VERSION: Final = 1
@@ -77,21 +79,43 @@ class EventStreamBroker:
     def unsubscribe(self, queue: asyncio.Queue[dict[str, object] | None]) -> None:
         self._subscribers.discard(queue)
 
-    def event(self, event_type: str, data: dict[str, object]) -> dict[str, object]:
+    def event(
+        self,
+        event_type: str,
+        data: dict[str, object],
+        *,
+        correlation_id: str | None = None,
+    ) -> dict[str, object]:
         sequence = next(self._sequence)
+        resolved_correlation_id = (
+            new_correlation_id()
+            if correlation_id is None
+            else validate_correlation_id(correlation_id)
+        )
         return {
             "contract": {
                 "name": EVENT_CONTRACT_NAME,
                 "version": EVENT_CONTRACT_VERSION,
             },
             "id": f"evt-{sequence}",
+            "correlation_id": resolved_correlation_id,
             "type": event_type,
             "occurred_at": datetime.now(timezone.utc).isoformat(),
             "data": data,
         }
 
-    def publish(self, event_type: str, data: dict[str, object]) -> dict[str, object]:
-        message = self.event(event_type, data)
+    def publish(
+        self,
+        event_type: str,
+        data: dict[str, object],
+        *,
+        correlation_id: str | None = None,
+    ) -> dict[str, object]:
+        message = self.event(
+            event_type,
+            data,
+            correlation_id=correlation_id,
+        )
         if self._closed:
             return message
         self._replay.append(message)

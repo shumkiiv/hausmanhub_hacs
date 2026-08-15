@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 import re
 
+from ..correlation import CorrelationIdError, validate_correlation_id
 from ..domain.contours import climate_target_temperature
 
 
@@ -45,6 +46,7 @@ class TemporaryTemperatureRequest:
     """One explicitly confirmed, idempotent room request."""
 
     request_id: str
+    correlation_id: str | None
     room_id: str
     action: TemporaryTemperatureAction
     target_temperature: float | None
@@ -61,14 +63,15 @@ def parse_temporary_temperature_request(
         raise TemporaryTemperatureViolation(
             "temporary temperature request must be an object"
         )
-    if set(payload) != {
+    required_fields = {
         "request_id",
         "contour_id",
         "room_id",
         "action",
         "target_temperature",
         "confirm",
-    }:
+    }
+    if not required_fields <= set(payload) <= required_fields | {"correlation_id"}:
         raise TemporaryTemperatureViolation(
             "temporary temperature request fields are invalid"
         )
@@ -84,6 +87,12 @@ def parse_temporary_temperature_request(
         raise TemporaryTemperatureViolation(
             "temporary temperature requires explicit confirmation"
         )
+    correlation_id = None
+    if "correlation_id" in payload:
+        try:
+            correlation_id = validate_correlation_id(payload["correlation_id"])
+        except CorrelationIdError as error:
+            raise TemporaryTemperatureViolation("correlation id is invalid") from error
     try:
         action = TemporaryTemperatureAction(payload.get("action"))
     except (TypeError, ValueError) as error:
@@ -104,6 +113,7 @@ def parse_temporary_temperature_request(
             raise TemporaryTemperatureViolation(str(error)) from error
     return TemporaryTemperatureRequest(
         request_id=request_id,
+        correlation_id=correlation_id,
         room_id=room_id,
         action=action,
         target_temperature=target_temperature,

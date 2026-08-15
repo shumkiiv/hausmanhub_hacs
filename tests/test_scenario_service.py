@@ -341,6 +341,17 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["status"], "completed")
         self.assertEqual(len(self.executor.runs), 1)
 
+    async def test_run_scenario_preserves_supplied_correlation_id(self) -> None:
+        await self.service.async_update_scenario(_valid_payload())
+
+        result = await self.service.async_run_scenario(
+            "scenario_1",
+            correlation_id="corr.scenario.tablet-1",
+        )
+
+        self.assertEqual("corr.scenario.tablet-1", result["run_id"])
+        self.assertEqual("corr.scenario.tablet-1", self.executor.runs[0][1])
+
     async def test_restart_mode_restarts_the_five_minute_timer(self) -> None:
         executor = _RestartExecutor()
         service = ScenarioService(None, self.store, self.catalog, executor)

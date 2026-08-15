@@ -12,6 +12,8 @@ from copy import deepcopy
 import re
 from typing import Any
 
+from ..correlation import CorrelationIdError, validate_correlation_id
+
 
 VOICE_GREETING_CONTRACT_NAME = "hausman-hub-voice-greeting-config"
 VOICE_GREETING_CONTRACT_VERSION = 1
@@ -104,7 +106,7 @@ def validate_voice_greeting_settings(value: object) -> dict[str, Any]:
 
 
 def validate_voice_test_request(value: object) -> dict[str, Any]:
-    if not isinstance(value, dict) or set(value) != {
+    required_fields = {
         "contract",
         "stationEntityId",
         "useCurrentHomeState",
@@ -113,9 +115,19 @@ def validate_voice_test_request(value: object) -> dict[str, Any]:
         "includeFollowUp",
         "speechText",
         "openDialog",
-    }:
+    }
+    if (
+        not isinstance(value, dict)
+        or not required_fields <= set(value)
+        or set(value) - required_fields > {"correlationId"}
+    ):
         raise VoiceGreetingViolation("voice test request fields are invalid")
     result = deepcopy(value)
+    if "correlationId" in result:
+        try:
+            result["correlationId"] = validate_correlation_id(result["correlationId"])
+        except CorrelationIdError as error:
+            raise VoiceGreetingViolation("correlationId is invalid") from error
     if result.pop("contract") != {
         "name": VOICE_TEST_REQUEST_CONTRACT_NAME,
         "version": VOICE_TEST_REQUEST_CONTRACT_VERSION,
@@ -151,6 +163,7 @@ def voice_receipt(
     timestamp: str,
     revision: int | None = None,
     echo: dict[str, Any] | None = None,
+    correlation_id: str | None = None,
 ) -> dict[str, Any]:
     """Build one contract-shaped voice command receipt."""
 
@@ -162,6 +175,7 @@ def voice_receipt(
             "version": VOICE_RECEIPT_CONTRACT_VERSION,
         },
         "commandId": command_id,
+        "correlationId": correlation_id or command_id,
         "accepted": accepted,
         "confirmed": confirmed,
         "code": code,

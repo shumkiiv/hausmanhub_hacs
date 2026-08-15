@@ -136,6 +136,7 @@ class VoiceGreetingService:
                 operation="voice.yandexGreeting.test",
             )
         station_id = validated["stationEntityId"]
+        correlation_id = validated.get("correlationId")
         echo = {
             "includeGreeting": validated["includeGreeting"],
             "summaryItems": validated["summaryItems"],
@@ -148,6 +149,7 @@ class VoiceGreetingService:
                 detail="Выбранная Станция не найдена среди устройств дома",
                 station_entity_id=station_id,
                 operation="voice.yandexGreeting.test", echo=echo,
+                correlation_id=correlation_id,
             )
         if not station.get("available"):
             return self._finish(
@@ -155,6 +157,7 @@ class VoiceGreetingService:
                 detail="Выбранная Станция недоступна, речь не отправлена",
                 station_entity_id=station_id,
                 operation="voice.yandexGreeting.test", echo=echo,
+                correlation_id=correlation_id,
             )
         if validated["openDialog"] and not station.get("localDialogSupported"):
             return self._finish(
@@ -162,6 +165,7 @@ class VoiceGreetingService:
                 detail="Станция не поддерживает локальный диалог, речь не отправлена",
                 station_entity_id=station_id,
                 operation="voice.yandexGreeting.test", echo=echo,
+                correlation_id=correlation_id,
             )
         try:
             await self._gateway.async_say_text(station_id, validated["speechText"])
@@ -171,6 +175,7 @@ class VoiceGreetingService:
                 detail="Голосовой провайдер не принял речь",
                 station_entity_id=station_id,
                 operation="voice.yandexGreeting.test", echo=echo,
+                correlation_id=correlation_id,
             )
         room = station.get("roomName")
         where = f" ({room})" if isinstance(room, str) and room else ""
@@ -179,6 +184,7 @@ class VoiceGreetingService:
             detail=f"Тестовая сводка произнесена на Станции{where}",
             station_entity_id=station_id,
             operation="voice.yandexGreeting.test", echo=echo,
+            correlation_id=correlation_id,
         )
 
     async def async_home_mode_changed(
@@ -357,6 +363,7 @@ class VoiceGreetingService:
         station_entity_id: str | None,
         operation: str,
         echo: dict[str, Any] | None = None,
+        correlation_id: str | None = None,
     ) -> dict[str, Any]:
         receipt = voice_receipt(
             self._command_id(),
@@ -367,6 +374,7 @@ class VoiceGreetingService:
             station_entity_id=station_entity_id,
             timestamp=self._timestamp(),
             echo=echo,
+            correlation_id=correlation_id,
         )
         self._emit(receipt, operation)
         return receipt

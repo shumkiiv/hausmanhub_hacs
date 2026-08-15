@@ -85,6 +85,11 @@ class OperationJournalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(1, len(filtered["records"]))
         self.assertEqual("climate", filtered["records"][0]["source"])
 
+        explicit = receipt("private-request", "scenario_run", confirmed=True)
+        explicit["correlation_id"] = "corr.scenario.public-1"
+        record = await service.async_append(explicit)
+        self.assertEqual("corr.scenario.public-1", record["correlation_id"])
+
     async def test_restart_restores_sequence_and_records(self) -> None:
         store = MemoryStore()
         first = OperationJournalService(store, now_ms=lambda: 10)

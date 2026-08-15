@@ -63,7 +63,7 @@ class OperationJournalService:
     async def async_append(self, receipt: Mapping[str, object]) -> dict[str, object]:
         """Append one already normalized receipt without private target details."""
 
-        correlation_id = receipt.get("request_id")
+        correlation_id = receipt.get("correlation_id") or receipt.get("request_id")
         operation = receipt.get("operation")
         accepted = receipt.get("accepted")
         confirmed = receipt.get("confirmed")

@@ -23,6 +23,7 @@
       "required": ["expectedRevision", "action", "deviceId", "changes"],
       "properties": {
         "contract": {"$ref": "#/$defs/contract"},
+        "correlationId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
         "expectedRevision": {"type": "string", "pattern": "^[a-f0-9]{16,64}$"},
         "action": {"const": "update"},
         "deviceId": {"type": "string", "minLength": 1, "maxLength": 128},
@@ -43,6 +44,7 @@
       "required": ["expectedRevision", "action", "deviceId", "confirmed"],
       "properties": {
         "contract": {"$ref": "#/$defs/contract"},
+        "correlationId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
         "expectedRevision": {"type": "string", "pattern": "^[a-f0-9]{16,64}$"},
         "action": {"const": "identify"},
         "deviceId": {"type": "string", "minLength": 1, "maxLength": 128},
@@ -55,6 +57,7 @@
       "required": ["expectedRevision", "action", "deviceId", "confirmed"],
       "properties": {
         "contract": {"$ref": "#/$defs/contract"},
+        "correlationId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
         "expectedRevision": {"type": "string", "pattern": "^[a-f0-9]{16,64}$"},
         "action": {"const": "delete"},
         "deviceId": {"type": "string", "minLength": 1, "maxLength": 128},

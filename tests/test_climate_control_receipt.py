@@ -115,14 +115,21 @@ class ClimateControlReceiptTest(unittest.IsolatedAsyncioTestCase):
             await runtime.async_start()
 
         applied = await apply_runtime.async_apply_contour(
-            {"request_id": "android-climate-0001", "contour_id": "climate", "confirm": True}
+            {
+                "request_id": "android-climate-0001",
+                "correlation_id": "corr.android-climate-0001",
+                "contour_id": "climate",
+                "confirm": True,
+            }
         )
         scheduled_receipt = await schedule_runtime.async_run_climate_schedule(datetime(2026, 7, 19, 23, 0))
         if scheduled_receipt is None:
             self.fail("schedule did not produce a receipt")
         temporary = await temporary_runtime.async_temporary_temperature(
             {
-                "request_id": "temporary-living-1", "contour_id": "climate",
+                "request_id": "temporary-living-1",
+                "correlation_id": "corr.tablet-temp-001",
+                "contour_id": "climate",
                 "room_id": "living", "action": "set", "target_temperature": 23.5,
                 "confirm": True,
             },

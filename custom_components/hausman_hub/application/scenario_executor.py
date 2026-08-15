@@ -313,10 +313,13 @@ class ScenarioExecutor:
         target_id: str,
         action_id: str,
         value: object | None = None,
+        *,
+        correlation_id: str | None = None,
     ) -> dict[str, Any]:
         """Execute one allowlisted device action and confirm its HA read-back."""
 
         request_id = self.new_run_id()
+        correlation_id = correlation_id or request_id
         execution_action_id = f"action_{request_id[:16]}"
         action = ScenarioAction(
             id=execution_action_id,
@@ -335,6 +338,7 @@ class ScenarioExecutor:
         )
         if receipt.get("status") != "completed":
             return {
+                "correlationId": correlation_id,
                 "requestId": request_id,
                 "accepted": False,
                 "confirmed": False,
@@ -370,6 +374,7 @@ class ScenarioExecutor:
         observed_state = read_back["observedState"]
 
         return {
+            "correlationId": correlation_id,
             "requestId": request_id,
             "accepted": True,
             "confirmed": confirmed,
@@ -573,6 +578,7 @@ class ScenarioExecutor:
     ) -> dict[str, Any]:
         base = {
             "action_id": action.id,
+            "correlation_id": run_id,
             "type": action.type,
             "status": "pending",
         }
@@ -844,7 +850,14 @@ class ScenarioExecutor:
             }
         domain, service = self._notify_target.split(".", 1)
         if not dry_run:
-            await self._call_service(domain, service, {"message": action.message})
+            await self._call_service(
+                domain,
+                service,
+                {
+                    "message": action.message,
+                    "data": {"correlation_id": base["correlation_id"]},
+                },
+            )
         return {**base, "status": "completed", "message": action.message}
 
     async def _call_service(

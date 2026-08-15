@@ -3197,10 +3197,12 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
         executions: list[str] = []
 
-        async def run_scenario(scenario_id: str) -> dict[str, object]:
+        async def run_scenario(
+            scenario_id: str, *, correlation_id: str | None = None
+        ) -> dict[str, object]:
             executions.append(scenario_id)
             return {
-                "run_id": "run-close-curtains",
+                "run_id": correlation_id or "run-close-curtains",
                 "scenario_id": scenario_id,
                 "status": "completed",
                 "accepted": True,
@@ -3251,6 +3253,8 @@ class LocalSummaryAccessTest(unittest.TestCase):
             target_id: str,
             action_id: str,
             value: object,
+            *,
+            correlation_id: str | None = None,
         ) -> dict[str, object]:
             executions.append((target_id, action_id, value))
             return {
@@ -3338,7 +3342,11 @@ class LocalSummaryAccessTest(unittest.TestCase):
             }
 
         async def execute_device_action(
-            target_id: str, action_id: str, value: object
+            target_id: str,
+            action_id: str,
+            value: object,
+            *,
+            correlation_id: str | None = None,
         ) -> dict[str, object]:
             events.append(("execute", (target_id, action_id, value)))
             return {"accepted": True, "confirmed": True, "status": "confirmed"}
@@ -3391,7 +3399,11 @@ class LocalSummaryAccessTest(unittest.TestCase):
             }
 
         async def execute_device_action(
-            target_id: str, action_id: str, value: object
+            target_id: str,
+            action_id: str,
+            value: object,
+            *,
+            correlation_id: str | None = None,
         ) -> dict[str, object]:
             return {"accepted": False, "confirmed": False, "status": "rejected"}
 
@@ -3692,6 +3704,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             self.hass,
             {
                 "requestId": "request-1",
+                "correlationId": "corr.device-action.0001",
                 "accepted": True,
                 "confirmed": True,
                 "targetId": "device_public_1",
@@ -3704,10 +3717,12 @@ class LocalSummaryAccessTest(unittest.TestCase):
 
         self.assertEqual("command_receipt", message["type"])
         self.assertEqual("request-1", message["data"]["request_id"])
+        self.assertEqual("corr.device-action.0001", message["correlation_id"])
+        self.assertEqual("corr.device-action.0001", message["data"]["correlation_id"])
         self.assertEqual("confirmed", message["data"]["status"])
         self.assertNotIn("entity_id", json.dumps(message, ensure_ascii=False))
         record = journal.snapshot()["records"][0]
-        self.assertEqual("request-1", record["correlation_id"])
+        self.assertEqual("corr.device-action.0001", record["correlation_id"])
         self.assertEqual("device", record["source"])
         self.assertNotIn("target_id", record)
 

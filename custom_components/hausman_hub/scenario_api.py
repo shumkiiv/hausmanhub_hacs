@@ -37,6 +37,7 @@ from .application.api_capabilities import (
     SCENARIOS_UPCOMING_PATH,
 )
 from .domain.scenarios import ScenarioDefinition, _scenario_to_payload
+from .correlation import CorrelationIdError, resolve_correlation_id
 from .realtime_api import publish_command_receipt
 
 if TYPE_CHECKING:
@@ -392,7 +393,17 @@ class ScenarioRunView(_ScenarioView):
                 headers=NO_STORE_HEADERS,
             )
         try:
-            result = await service.async_run_scenario(scenario_id)
+            correlation_id = resolve_correlation_id(payload, field="correlationId")
+            result = await service.async_run_scenario(
+                scenario_id,
+                correlation_id=correlation_id,
+            )
+        except CorrelationIdError:
+            return self.json_message(
+                "correlationId is invalid.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
         except ScenarioNotFoundError as error:
             return self.json_message(
                 error.message,
@@ -408,6 +419,7 @@ class ScenarioRunView(_ScenarioView):
         completed = result.get("status") == "completed"
         confirmed = completed and result.get("confirmed") is True
         response = {
+            "correlationId": correlation_id,
             "ok": completed,
             "accepted": completed,
             "confirmed": confirmed,
@@ -424,7 +436,7 @@ class ScenarioRunView(_ScenarioView):
         publish_command_receipt(
             self._hass,
             {
-                "requestId": result.get("run_id"),
+                "requestId": correlation_id,
                 "targetId": scenario_id,
                 **response,
             },
@@ -581,14 +593,31 @@ class ScenarioUpcomingCancelView(_ScenarioView):
                 headers=NO_STORE_HEADERS,
             )
         try:
+            correlation_id = resolve_correlation_id(payload, field="correlationId")
             receipt = await service.async_cancel_upcoming(
                 scenario_id, trigger_id, run_at
+            )
+        except CorrelationIdError:
+            return self.json_message(
+                "correlationId is invalid.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
             )
         except ScenarioServiceError as error:
             return self.json_message(
                 error.message, error.status, headers=NO_STORE_HEADERS
             )
-        return self.json(receipt, headers=NO_STORE_HEADERS)
+        response = {**receipt, "correlationId": correlation_id}
+        publish_command_receipt(
+            self._hass,
+            {
+                **response,
+                "requestId": correlation_id,
+                "targetId": scenario_id,
+            },
+            operation="scenario_upcoming_cancel",
+        )
+        return self.json(response, headers=NO_STORE_HEADERS)
 
 
 class TabletScenarioCatalogView(_TabletScenarioAccess, ScenarioCatalogView):
@@ -662,7 +691,15 @@ async def _run_scenario(
     if not isinstance(scenario_id, str) or not scenario_id:
         return view.json_message("scenario_id is required.", HTTPStatus.BAD_REQUEST, headers=NO_STORE_HEADERS)
     try:
-        result = await service.async_run_scenario(scenario_id)
+        correlation_id = resolve_correlation_id(payload, field="correlationId")
+        result = await service.async_run_scenario(
+            scenario_id,
+            correlation_id=correlation_id,
+        )
+    except CorrelationIdError:
+        return view.json_message(
+            "correlationId is invalid.", HTTPStatus.BAD_REQUEST, headers=NO_STORE_HEADERS
+        )
     except ScenarioNotFoundError as error:
         return view.json_message(error.message, HTTPStatus.NOT_FOUND, headers=NO_STORE_HEADERS)
     except ScenarioServiceError as error:
@@ -670,6 +707,7 @@ async def _run_scenario(
     completed = result.get("status") == "completed"
     confirmed = completed and result.get("confirmed") is True
     response = {
+        "correlationId": correlation_id,
         "ok": completed,
         "accepted": completed,
         "confirmed": confirmed,
@@ -686,7 +724,7 @@ async def _run_scenario(
     publish_command_receipt(
         view._hass,
         {
-            "requestId": result.get("run_id"),
+            "requestId": correlation_id,
             "targetId": scenario_id,
             **response,
         },

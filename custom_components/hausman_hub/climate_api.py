@@ -113,6 +113,7 @@ from .device_maintenance_ha import (
 )
 from .device_discovery_ha import assign_device_area, device_discovery_snapshot
 from .realtime_api import publish_command_receipt
+from .correlation import CorrelationIdError, resolve_correlation_id
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -858,6 +859,7 @@ class DeviceDiscoveryView(_ClimateView):
             expected_fields = {
                 "expectedRevision", "action", "notificationId",
                 *(("areaId",) if action == "assign_area" else ()),
+                *(("correlationId",) if "correlationId" in payload else ()),
             }
             if (
                 set(payload) != expected_fields
@@ -866,6 +868,8 @@ class DeviceDiscoveryView(_ClimateView):
                 or payload["expectedRevision"] < 0
             ):
                 raise DeviceDiscoveryViolation("device discovery action fields are invalid")
+            if "correlationId" in payload:
+                resolve_correlation_id(payload, field="correlationId")
             current, areas = await self._snapshot(service, preferences)
             if payload["expectedRevision"] != current["revision"]:
                 raise DeviceDiscoveryViolation(
@@ -909,7 +913,12 @@ class DeviceDiscoveryView(_ClimateView):
                 status,
                 headers=NO_STORE_HEADERS,
             )
-        except (TabletPreferencesViolation, ValueError, json.JSONDecodeError):
+        except (
+            TabletPreferencesViolation,
+            ValueError,
+            json.JSONDecodeError,
+            CorrelationIdError,
+        ):
             return self.json_message(
                 "Действие с новым устройством выполнить не удалось.",
                 HTTPStatus.BAD_REQUEST,
@@ -1156,8 +1165,13 @@ class ContourApplyView(_ClimateView):
             return self._unavailable()
         try:
             payload = await _request_json(request)
+            correlation_id = resolve_correlation_id(
+                payload,
+                field="correlation_id",
+                fallback=payload.get("request_id"),
+            )
             receipt = await runtime.async_apply_contour(payload)
-        except ContourApplyViolation:
+        except (ContourApplyViolation, CorrelationIdError):
             return self.json_message(
                 "The climate contour application is invalid.",
                 HTTPStatus.BAD_REQUEST,
@@ -1168,6 +1182,7 @@ class ContourApplyView(_ClimateView):
         except Exception:
             return self._unavailable()
         response = receipt.as_payload()
+        response["correlation_id"] = correlation_id
         publish_command_receipt(self._hass, response, operation="contour_apply")
         return self.json(response, headers=NO_STORE_HEADERS)
 
@@ -1188,11 +1203,16 @@ class TemporaryTemperatureView(_ClimateView):
             return self._unavailable()
         try:
             payload = await _request_json(request)
+            correlation_id = resolve_correlation_id(
+                payload,
+                field="correlation_id",
+                fallback=payload.get("request_id"),
+            )
             receipt = await runtime.async_temporary_temperature(
                 payload,
                 dt_util.now(),
             )
-        except TemporaryTemperatureViolation:
+        except (TemporaryTemperatureViolation, CorrelationIdError):
             return self.json_message(
                 "The temporary climate temperature request is invalid.",
                 HTTPStatus.BAD_REQUEST,
@@ -1209,6 +1229,7 @@ class TemporaryTemperatureView(_ClimateView):
         except Exception:
             return self._unavailable()
         response = receipt.as_payload()
+        response["correlation_id"] = correlation_id
         publish_command_receipt(
             self._hass, response, operation="temporary_temperature"
         )
@@ -1231,8 +1252,13 @@ class HomeClimateTargetsView(_ClimateView):
             return self._unavailable()
         try:
             payload = await _request_json(request)
+            correlation_id = resolve_correlation_id(
+                payload,
+                field="correlation_id",
+                fallback=payload.get("request_id"),
+            )
             receipt = await runtime.async_home_climate_targets(payload)
-        except HomeClimateTargetsViolation:
+        except (HomeClimateTargetsViolation, CorrelationIdError):
             return self.json_message(
                 "The home climate target request is invalid.",
                 HTTPStatus.BAD_REQUEST,
@@ -1243,6 +1269,7 @@ class HomeClimateTargetsView(_ClimateView):
         except Exception:
             return self._unavailable()
         response = receipt.as_payload()
+        response["correlation_id"] = correlation_id
         publish_command_receipt(self._hass, response, operation="home_climate_targets")
         return self.json(response, headers=NO_STORE_HEADERS)
 
@@ -1486,14 +1513,20 @@ class ClimateAdminDeviceMaintenanceView(_ClimateView):
             payload = await _request_json(request, maximum_bytes=MAX_ACTION_BODY_BYTES)
             if not isinstance(payload, dict):
                 raise DeviceMaintenanceViolation("request body is invalid")
-            action = payload.get("action")
+            correlation_id = resolve_correlation_id(
+                payload,
+                field="correlationId",
+            )
+            service_payload = dict(payload)
+            service_payload.pop("correlationId", None)
+            action = service_payload.get("action")
             service = HomeAssistantDeviceMaintenanceService(self._hass)
             if action == "update":
-                result = await service.async_update(payload)
+                result = await service.async_update(service_payload)
             elif action == "identify":
-                result = await service.async_identify(payload)
+                result = await service.async_identify(service_payload)
             elif action == "delete":
-                result = await service.async_delete(payload)
+                result = await service.async_delete(service_payload)
             else:
                 raise DeviceMaintenanceViolation("unknown maintenance action")
         except DeviceMaintenanceViolation as error:
@@ -1510,7 +1543,7 @@ class ClimateAdminDeviceMaintenanceView(_ClimateView):
                 status=status,
                 headers=NO_STORE_HEADERS,
             )
-        except ValueError:
+        except (ValueError, CorrelationIdError):
             return self.json_message(
                 "Запрос обслуживания устройства заполнен неверно.",
                 HTTPStatus.BAD_REQUEST,
@@ -1518,7 +1551,18 @@ class ClimateAdminDeviceMaintenanceView(_ClimateView):
             )
         except Exception:
             return self._unavailable()
-        return self.json(result, headers=NO_STORE_HEADERS)
+        response = {**result, "correlationId": correlation_id}
+        publish_command_receipt(
+            self._hass,
+            {
+                **response,
+                "requestId": correlation_id,
+                "targetId": response.get("deviceId"),
+                "message": response.get("message"),
+            },
+            operation="device_maintenance",
+        )
+        return self.json(response, headers=NO_STORE_HEADERS)
 
 
 class ClimateAdminDeviceBindingsView(_ClimateView):

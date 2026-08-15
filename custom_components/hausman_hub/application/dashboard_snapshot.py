@@ -259,6 +259,7 @@ class DashboardEvent:
     message: str | None = None
     kind: str | None = None
     level: str = "info"
+    correlation_id: str | None = None
 
 
 def _opaque_id(prefix: str, source_id: str) -> str:
@@ -837,6 +838,11 @@ def build_dashboard_snapshot(
             "message": event.message,
             "kind": event.kind,
             "level": event.level,
+            **(
+                {"correlationId": event.correlation_id}
+                if event.correlation_id is not None
+                else {}
+            ),
         }
         for event in sorted(events, key=lambda item: item.timestamp_ms, reverse=True)
     ][:100]
@@ -1253,6 +1259,7 @@ def build_dashboard_snapshot(
         alarms.append(
             {
                 "id": _opaque_id("alarm", entity.entity_id),
+                "correlationId": f"corr.alarm.{_opaque_id('alarm', entity.entity_id).removeprefix('alarm_')}",
                 "title": entity.name,
                 "message": _detail_label(entity),
                 "level": "bad" if active else "info",

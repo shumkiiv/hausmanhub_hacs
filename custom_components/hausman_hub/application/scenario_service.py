@@ -562,6 +562,8 @@ class ScenarioService:
         self,
         scenario_id: str,
         visited: frozenset[str] | None = None,
+        *,
+        correlation_id: str | None = None,
     ) -> dict[str, Any]:
         """Execute a scenario via the configured executor."""
 
@@ -573,8 +575,9 @@ class ScenarioService:
             )
         if self._executor is None:
             raise ScenarioServiceError("Executor not configured", status=500)
+        run_id = correlation_id or self._executor.new_run_id()
+
         async def execute() -> dict[str, Any]:
-            run_id = self._executor.new_run_id()
             return await self._executor.async_execute(
                 scenario.definition,
                 run_id,
@@ -593,6 +596,7 @@ class ScenarioService:
                 if scenario.definition.execution_mode is ScenarioExecutionMode.SINGLE:
                     return {
                         "scenario_id": scenario.id,
+                        "run_id": run_id,
                         "status": "skipped",
                         "reason": "scenario_already_running",
                         "receipts": [],
@@ -610,6 +614,7 @@ class ScenarioService:
                 raise
             return {
                 "scenario_id": scenario.id,
+                "run_id": run_id,
                 "status": "cancelled",
                 "reason": "restarted_by_new_trigger",
                 "receipts": [],
@@ -624,16 +629,25 @@ class ScenarioService:
         target_id: str,
         action_id: str,
         value: object | None = None,
+        *,
+        correlation_id: str | None = None,
     ) -> dict[str, Any]:
         """Execute one catalog action through the shared strict executor."""
 
         await self.async_refresh_catalog()
         if self._executor is None:
             raise ScenarioServiceError("Executor not configured", status=500)
+        if correlation_id is None:
+            return await self._executor.async_execute_device_action(
+                target_id,
+                action_id,
+                value,
+            )
         return await self._executor.async_execute_device_action(
             target_id,
             action_id,
             value,
+            correlation_id=correlation_id,
         )
 
     async def async_resolve_device_action(

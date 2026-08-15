@@ -28,6 +28,7 @@ class EventStreamBrokerTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(published, await second.get())
         self.assertEqual("hausman-hub-event", published["contract"]["name"])
         self.assertEqual(1, published["contract"]["version"])
+        self.assertRegex(published["correlation_id"], r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
         broker.unsubscribe(second)
         self.assertEqual(1, broker.subscriber_count)
 
@@ -96,6 +97,21 @@ class EventStreamBrokerTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(30, hello["data"]["heartbeat_seconds"])
         self.assertEqual("heartbeat", heartbeat["type"])
         self.assertEqual(4, heartbeat["data"]["sequence"])
+        self.assertRegex(hello["correlation_id"], r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+        self.assertRegex(heartbeat["correlation_id"], r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+
+    async def test_supplied_correlation_id_is_preserved(self) -> None:
+        broker = EventStreamBroker()
+
+        published = broker.publish(
+            "command_receipt",
+            {"request_id": "request-1"},
+            correlation_id="corr.command.0001",
+        )
+
+        self.assertEqual("corr.command.0001", published["correlation_id"])
+        with self.assertRaises(ValueError):
+            broker.publish("heartbeat", {}, correlation_id="invalid value")
 
 
 if __name__ == "__main__":

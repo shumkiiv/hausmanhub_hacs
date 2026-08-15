@@ -20,6 +20,10 @@
       "minLength": 1,
       "maxLength": 128
     },
+    "correlation_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
     "type": {
       "enum": [
         "hello",
@@ -129,6 +133,7 @@
       "additionalProperties": false,
       "required": ["request_id", "operation", "accepted", "confirmed", "status"],
       "properties": {
+        "correlation_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
         "request_id": { "type": "string", "minLength": 1, "maxLength": 128 },
         "operation": { "type": "string", "minLength": 1, "maxLength": 128 },
         "accepted": { "type": "boolean" },

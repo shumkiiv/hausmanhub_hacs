@@ -3,6 +3,7 @@
     "name": "hausman-hub-device-action-request",
     "version": 1
   },
+  "correlationId": "corr.device-action-0001",
   "targetId": "entity_0123456789abcdef",
   "actionId": "turn_on"
 }

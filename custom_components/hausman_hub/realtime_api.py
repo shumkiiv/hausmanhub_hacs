@@ -17,6 +17,7 @@ from .application.event_stream import (
     heartbeat_event,
     hello_event,
 )
+from .correlation import receipt_correlation_id
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -312,6 +313,7 @@ def publish_command_receipt(
     request_id = receipt.get("requestId") or receipt.get("request_id")
     if not isinstance(request_id, str) or not request_id:
         return None
+    correlation_id = receipt_correlation_id(receipt)
     accepted = receipt.get("accepted") is True
     confirmed = receipt.get("confirmed") is True
     status = "confirmed" if confirmed else "accepted" if accepted else "failed"
@@ -319,6 +321,7 @@ def publish_command_receipt(
     error = receipt.get("error")
     target_id = receipt.get("targetId") or receipt.get("target_id")
     normalized = {
+        "correlation_id": correlation_id,
         "request_id": request_id,
         "operation": operation,
         "accepted": accepted,
@@ -338,7 +341,11 @@ def publish_command_receipt(
     runtime = _current_runtime(hass)
     if runtime is None:
         return None
-    return runtime.broker.publish("command_receipt", normalized)
+    return runtime.broker.publish(
+        "command_receipt",
+        normalized,
+        correlation_id=correlation_id,
+    )
 
 
 def _current_runtime(hass: HomeAssistant) -> EventStreamRuntime | None:

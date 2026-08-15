@@ -1,9 +1,9 @@
 {
   "contract": {"name": "hausman-hub-climate-action-request", "version": 1},
+  "correlation_id": "corr.tablet.climate.device-mode.1",
   "request_id": "tablet.climate.device-mode.1",
   "expected_state_revision": 44,
   "action": "set_device_mode",
   "room_id": "living",
   "parameters": {"device_id": "living_temperature", "mode": "automatic"}
 }
-

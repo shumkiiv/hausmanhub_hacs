@@ -24,6 +24,7 @@
         "version": { "const": 1 }
       }
     },
+    "correlationId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
     "stationEntityId": {
       "type": "string",
       "pattern": "^media_player\\.[a-z0-9_]+$",

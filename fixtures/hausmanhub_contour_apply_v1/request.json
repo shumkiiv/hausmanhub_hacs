@@ -1,4 +1,5 @@
 {
+  "correlation_id": "corr.android-climate-0001",
   "request_id": "android-climate-0001",
   "contour_id": "climate",
   "confirm": true

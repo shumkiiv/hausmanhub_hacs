@@ -70,6 +70,10 @@ class DeviceDiscoveryServiceTest(unittest.IsolatedAsyncioTestCase):
         document = self.service.document([DiscoveryArea("office", "Кабинет")])
         self.assertEqual(1, document["pendingCount"])
         notice = document["notifications"][0]
+        self.assertEqual(
+            f"corr.notice.{notice['id'].removeprefix('notice_')}",
+            notice["correlationId"],
+        )
         self.assertTrue(any(item["kind"] == "assign_area" for item in notice["suggestedPlacements"]))
         self.assertTrue(any(item["kind"] == "add_to_energy" for item in notice["suggestedPlacements"]))
         encoded = json.dumps(document, ensure_ascii=False)

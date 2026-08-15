@@ -662,8 +662,12 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         result = await self.executor.async_execute(definition, "run-1", scenario_id="sc-1")
         self.assertEqual(result["status"], "completed")
         self.hass.services.async_call.assert_awaited_once_with(
-            "notify", "mobile_app_tablet", {"message": "Hello"}, blocking=True
+            "notify",
+            "mobile_app_tablet",
+            {"message": "Hello", "data": {"correlation_id": "run-1"}},
+            blocking=True,
         )
+        self.assertEqual("run-1", result["receipts"][0]["correlation_id"])
 
     async def test_notification_fails_without_target(self) -> None:
         executor = ScenarioExecutor(self.hass, self.catalog, self.executor._run_callback)

@@ -6,6 +6,7 @@
   "additionalProperties": false,
   "required": ["request_id", "contour_id", "room_id", "action", "target_temperature", "confirm"],
   "properties": {
+    "correlation_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
     "request_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"},
     "contour_id": {"const": "climate"},
     "room_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},

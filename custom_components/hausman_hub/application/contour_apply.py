@@ -8,6 +8,8 @@ import json
 import re
 import secrets
 import time
+
+from ..correlation import CorrelationIdError, validate_correlation_id
 from ..domain.climate import ClimateDeviceKind, ClimateRegistry
 from ..domain.climate_bridge import ClimateControlMode
 from ..domain.climate_observation import ClimateObservationSnapshot
@@ -210,6 +212,7 @@ class ContourApplyReceipt:
 
     operation_id: str
     request_id: str
+    correlation_id: str | None
     contour_id: str
     context: ClimateControlContext
     status: ContourApplyStatus
@@ -263,6 +266,11 @@ class ContourApplyReceipt:
             },
             "operation_id": self.operation_id,
             "request_id": self.request_id,
+            **(
+                {"correlation_id": self.correlation_id}
+                if self.correlation_id is not None
+                else {}
+            ),
             "contour_id": self.contour_id,
             "action": self.context.as_payload(),
             "status": self.status.value,
@@ -319,6 +327,7 @@ class _ContourApplyLedger:
         request_id: str,
         fingerprint: str,
         context: ClimateControlContext,
+        correlation_id: str | None = None,
     ) -> _ContourApplyRecord | None:
         """Return an identical prior request or reject conflicting reuse."""
 
@@ -328,6 +337,10 @@ class _ContourApplyLedger:
         if (
             record.plan.fingerprint != fingerprint
             or record.receipt.context != context
+            or (
+                correlation_id is not None
+                and record.receipt.correlation_id != correlation_id
+            )
         ):
             raise ContourApplyViolation(
                 "request id was already used for another climate operation"
@@ -339,6 +352,7 @@ class _ContourApplyLedger:
         request_id: str,
         plan: ContourApplyPlan,
         context: ClimateControlContext,
+        correlation_id: str | None = None,
     ) -> _ContourApplyRecord:
         """Reserve idempotency before the first backend POST."""
 
@@ -356,6 +370,7 @@ class _ContourApplyLedger:
         receipt = ContourApplyReceipt(
             operation_id=operation_id,
             request_id=request_id,
+            correlation_id=correlation_id,
             contour_id=plan.contour_id,
             context=context,
             status=(
@@ -423,7 +438,9 @@ class _ContourApplyLedger:
         return value
 
 
-def parse_contour_apply_request(payload: object) -> tuple[str, str, tuple[str, ...] | None]:
+def parse_contour_apply_request(
+    payload: object,
+) -> tuple[str, str, tuple[str, ...] | None, str | None]:
     """Require one explicit, idempotent confirmation from UI or Android.
 
     An optional ``room_ids`` scope limits the application to the listed
@@ -439,6 +456,7 @@ def parse_contour_apply_request(payload: object) -> tuple[str, str, tuple[str, .
         "contour_id",
         "confirm",
         "room_ids",
+        "correlation_id",
     }:
         raise ContourApplyViolation("contour apply request fields are invalid")
     request_id = payload.get("request_id")
@@ -449,9 +467,15 @@ def parse_contour_apply_request(payload: object) -> tuple[str, str, tuple[str, .
         raise ContourApplyViolation("only the climate contour can be applied")
     if payload.get("confirm") is not True:
         raise ContourApplyViolation("contour apply requires explicit confirmation")
+    correlation_id = None
+    if "correlation_id" in payload:
+        try:
+            correlation_id = validate_correlation_id(payload["correlation_id"])
+        except CorrelationIdError as error:
+            raise ContourApplyViolation("correlation id is invalid") from error
     room_ids = payload.get("room_ids")
     if room_ids is None:
-        return request_id, contour_id, None
+        return request_id, contour_id, None, correlation_id
     if (
         not isinstance(room_ids, list)
         or not room_ids
@@ -463,7 +487,7 @@ def parse_contour_apply_request(payload: object) -> tuple[str, str, tuple[str, .
         or len(room_ids) != len(set(room_ids))
     ):
         raise ContourApplyViolation("contour apply room scope is invalid")
-    return request_id, contour_id, tuple(room_ids)
+    return request_id, contour_id, tuple(room_ids), correlation_id
 
 
 def build_contour_apply_plan(

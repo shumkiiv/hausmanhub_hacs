@@ -13,6 +13,7 @@ import secrets
 import time
 from typing import Protocol
 
+from ..correlation import resolve_correlation_id, validate_correlation_id
 from .contour_apply import ContourApplyStatus, ContourApplyViolation
 from .contour_override import TemporaryTemperatureViolation
 from .home_climate_targets import HomeClimateTargetsViolation
@@ -147,6 +148,7 @@ class ClimateTabletRuntime(Protocol):
 @dataclass(frozen=True, slots=True)
 class ClimateTabletActionRequest:
     request_id: str
+    correlation_id: str
     expected_state_revision: int
     action: str
     room_id: str | None
@@ -182,14 +184,15 @@ def parse_climate_tablet_action(payload: object) -> ClimateTabletActionRequest:
         not isinstance(key, str) for key in payload
     ):
         raise ClimateTabletViolation("climate action must be an object")
-    if set(payload) != {
+    required_fields = {
         "contract",
         "request_id",
         "expected_state_revision",
         "action",
         "room_id",
         "parameters",
-    }:
+    }
+    if not required_fields <= set(payload) <= required_fields | {"correlation_id"}:
         raise ClimateTabletViolation("climate action fields are invalid")
     contract = payload.get("contract")
     if contract != {
@@ -200,6 +203,14 @@ def parse_climate_tablet_action(payload: object) -> ClimateTabletActionRequest:
     request_id = payload.get("request_id")
     if not isinstance(request_id, str) or _REQUEST_ID.fullmatch(request_id) is None:
         raise ClimateTabletViolation("climate action request id is invalid")
+    try:
+        correlation_id = resolve_correlation_id(
+            payload,
+            field="correlation_id",
+            fallback=request_id,
+        )
+    except ValueError as error:
+        raise ClimateTabletViolation("climate action correlation id is invalid") from error
     revision = payload.get("expected_state_revision")
     if type(revision) is not int or not 0 <= revision <= 9_007_199_254_740_991:
         raise ClimateTabletViolation("climate action revision is invalid")
@@ -272,6 +283,7 @@ def parse_climate_tablet_action(payload: object) -> ClimateTabletActionRequest:
             raise ClimateTabletViolation("room target strategy is invalid")
     return ClimateTabletActionRequest(
         request_id=request_id,
+        correlation_id=correlation_id,
         expected_state_revision=revision,
         action=action,
         room_id=room_id,
@@ -808,6 +820,7 @@ class ClimateTabletService:
         if request.action == "set_home_targets":
             return await self._runtime.async_home_climate_targets(
                 {
+                    "correlation_id": request.correlation_id,
                     "request_id": request.request_id,
                     "contour_id": "climate",
                     "target_temperature": request.parameters.get("target_temperature"),
@@ -836,6 +849,7 @@ class ClimateTabletService:
             )
         return await self._runtime.async_temporary_temperature(
             {
+                "correlation_id": request.correlation_id,
                 "request_id": request.request_id,
                 "contour_id": "climate",
                 "room_id": request.room_id,
@@ -1133,6 +1147,7 @@ def _pending_receipt(
 ) -> dict[str, object]:
     return {
         "contract": {"name": CLIMATE_OPERATION_CONTRACT_NAME, "version": 1},
+        "correlation_id": request.correlation_id,
         "operation_id": operation_id,
         "request_id": request.request_id,
         "action": request.action,
@@ -1161,6 +1176,7 @@ def _pending_receipt(
 def _request_payload(request: ClimateTabletActionRequest) -> dict[str, object]:
     return {
         "contract": {"name": CLIMATE_ACTION_CONTRACT_NAME, "version": 1},
+        "correlation_id": request.correlation_id,
         "request_id": request.request_id,
         "expected_state_revision": request.expected_state_revision,
         "action": request.action,
@@ -1326,6 +1342,7 @@ def _receipt_from_contour_result(
     }
     return {
         "contract": {"name": CLIMATE_OPERATION_CONTRACT_NAME, "version": 1},
+        "correlation_id": request.correlation_id,
         "operation_id": operation_id,
         "request_id": request.request_id,
         "action": request.action,
@@ -1363,6 +1380,7 @@ def _terminal_receipt(
 ) -> dict[str, object]:
     return {
         "contract": {"name": CLIMATE_OPERATION_CONTRACT_NAME, "version": 1},
+        "correlation_id": request.correlation_id,
         "operation_id": operation_id,
         "request_id": request.request_id,
         "action": request.action,
@@ -1389,8 +1407,11 @@ def _terminal_receipt(
 
 
 def _validate_receipt(receipt: dict[str, object]) -> dict[str, object]:
+    receipt = dict(receipt)
+    if "correlation_id" not in receipt:
+        receipt["correlation_id"] = receipt.get("request_id")
     required = {
-        "contract", "operation_id", "request_id", "action", "room_id",
+        "contract", "correlation_id", "operation_id", "request_id", "action", "room_id",
         "expected_state_revision", "resulting_state_revision", "status",
         "accepted", "confirmed", "final", "duplicate", "reason", "message",
         "read_back", "created_at", "updated_at", "expires_at",
@@ -1405,6 +1426,12 @@ def _validate_receipt(receipt: dict[str, object]) -> dict[str, object]:
         raise ClimateTabletUnavailable("climate operation receipt id is invalid")
     if not isinstance(request_id, str) or _REQUEST_ID.fullmatch(request_id) is None:
         raise ClimateTabletUnavailable("climate operation request id is invalid")
+    try:
+        validate_correlation_id(receipt.get("correlation_id"))
+    except ValueError as error:
+        raise ClimateTabletUnavailable(
+            "climate operation correlation id is invalid"
+        ) from error
     if receipt.get("action") not in _ALL_ACTIONS:
         raise ClimateTabletUnavailable("climate operation action is invalid")
     room_id = receipt.get("room_id")

@@ -119,6 +119,7 @@ def _dashboard_operation_events(hass: HomeAssistant) -> tuple[DashboardEvent, ..
                 message=message,
                 kind=kind,
                 level="bad" if status == "failed" else "info",
+                correlation_id=record.get("correlation_id"),
             )
         )
     return tuple(events)

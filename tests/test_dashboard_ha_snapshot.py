@@ -76,6 +76,7 @@ class DashboardHaSnapshotTest(unittest.IsolatedAsyncioTestCase):
         await journal.async_append(
             {
                 "request_id": "private-run-id",
+                "correlation_id": "corr.dashboard.scenario-1",
                 "operation": "scenario_run",
                 "accepted": True,
                 "confirmed": True,
@@ -93,6 +94,7 @@ class DashboardHaSnapshotTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("operation-1", events[0].event_id)
         self.assertEqual("Сценарий", events[0].title)
         self.assertEqual("scenario", events[0].kind)
+        self.assertEqual("corr.dashboard.scenario-1", events[0].correlation_id)
         self.assertNotIn("private-run-id", repr(events[0]))
 
     async def test_adapter_reads_registries_without_mutating_home_assistant(self) -> None:

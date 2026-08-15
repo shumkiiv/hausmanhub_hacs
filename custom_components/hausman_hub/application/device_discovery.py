@@ -245,6 +245,7 @@ def _public_notification(
             "kind", "status", "domains", "manufacturer", "model",
         )
     } | {
+        "correlationId": f"corr.notice.{str(item['id']).removeprefix('notice_')}",
         "suggestedPlacements": _placements(item),
         "areaOptions": [
             {

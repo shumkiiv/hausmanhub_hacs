@@ -24,6 +24,7 @@
         "version": { "const": 1 }
       }
     },
+    "correlationId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
     "commandId": { "type": "string", "minLength": 1, "maxLength": 128 },
     "accepted": { "type": "boolean" },
     "confirmed": { "type": "boolean" },

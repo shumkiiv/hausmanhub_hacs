@@ -472,7 +472,7 @@ class NativeClimateApplicationPlannerTest(unittest.TestCase):
 class ContourApplyRequestTest(unittest.TestCase):
     def test_request_requires_exact_explicit_confirmation(self) -> None:
         self.assertEqual(
-            ("android-1", "climate", None),
+            ("android-1", "climate", None, None),
             parse_contour_apply_request(
                 {
                     "request_id": "android-1",
@@ -502,7 +502,7 @@ class ContourApplyRequestTest(unittest.TestCase):
 
     def test_request_accepts_optional_room_scope(self) -> None:
         self.assertEqual(
-            ("admin-1", "climate", ("living",)),
+            ("admin-1", "climate", ("living",), None),
             parse_contour_apply_request(
                 {
                     "request_id": "admin-1",

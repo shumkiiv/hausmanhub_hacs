@@ -1,4 +1,5 @@
 {
+  "correlation_id": "corr.tablet-temp-001",
   "request_id": "tablet-temp-001",
   "contour_id": "climate",
   "room_id": "living",

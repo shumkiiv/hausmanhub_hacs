@@ -1,5 +1,6 @@
 {
   "contract": {"name": "hausman-hub-climate-operation", "version": 1},
+  "correlation_id": "corr.tablet.climate.0001",
   "operation_id": "0123456789abcdef0123456789abcdef",
   "request_id": "tablet.climate.0001",
   "action": "set_room_target",

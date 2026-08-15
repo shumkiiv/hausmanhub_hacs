@@ -412,6 +412,7 @@
       "required": ["id", "title", "level", "active"],
       "properties": {
         "id": { "type": "string" },
+        "correlationId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
         "title": { "type": "string" },
         "message": { "type": ["string", "null"] },
         "level": { "enum": ["info", "warn", "bad"] },
@@ -427,6 +428,7 @@
       "required": ["id", "ts", "title"],
       "properties": {
         "id": { "type": "string" },
+        "correlationId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
         "ts": { "type": "integer" },
         "title": { "type": "string" },
         "message": { "type": ["string", "null"] },

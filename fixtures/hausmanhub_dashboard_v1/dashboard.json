@@ -202,6 +202,7 @@
   "events": [
     {
       "id": "event-1",
+      "correlationId": "corr.dashboard.event-1",
       "ts": 1782225580000,
       "title": "Климат",
       "message": "Гостиная: охлаждение 25°C",

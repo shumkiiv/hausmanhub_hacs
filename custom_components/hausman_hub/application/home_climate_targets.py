@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 
+from ..correlation import CorrelationIdError, validate_correlation_id
 from ..domain.contours import (
     CLIMATE_TARGET_HUMIDITY_MAXIMUM,
     CLIMATE_TARGET_HUMIDITY_MINIMUM,
@@ -29,6 +30,7 @@ class HomeClimateTargetsRequest:
     """One explicitly confirmed, idempotent whole-home target request."""
 
     request_id: str
+    correlation_id: str | None
     target_temperature: float | None
     target_humidity: int | None
 
@@ -36,13 +38,16 @@ class HomeClimateTargetsRequest:
 def parse_home_climate_targets_request(payload: object) -> HomeClimateTargetsRequest:
     """Validate an exact whole-home target payload without coercion."""
 
-    if not isinstance(payload, dict) or set(payload) != {
+    required_fields = {
         "request_id",
         "contour_id",
         "target_temperature",
         "target_humidity",
         "confirm",
-    }:
+    }
+    if not isinstance(payload, dict) or not required_fields <= set(
+        payload
+    ) <= required_fields | {"correlation_id"}:
         raise HomeClimateTargetsViolation("home climate target request is invalid")
     request_id = payload.get("request_id")
     if not isinstance(request_id, str) or _REQUEST_ID.fullmatch(request_id) is None:
@@ -53,6 +58,12 @@ def parse_home_climate_targets_request(payload: object) -> HomeClimateTargetsReq
         raise HomeClimateTargetsViolation(
             "home climate target requires explicit confirmation"
         )
+    correlation_id = None
+    if "correlation_id" in payload:
+        try:
+            correlation_id = validate_correlation_id(payload["correlation_id"])
+        except CorrelationIdError as error:
+            raise HomeClimateTargetsViolation("correlation id is invalid") from error
     temperature_value = payload.get("target_temperature")
     humidity_value = payload.get("target_humidity")
     if temperature_value is None and humidity_value is None:
@@ -79,6 +90,7 @@ def parse_home_climate_targets_request(payload: object) -> HomeClimateTargetsReq
         target_humidity = humidity_value
     return HomeClimateTargetsRequest(
         request_id=request_id,
+        correlation_id=correlation_id,
         target_temperature=target_temperature,
         target_humidity=target_humidity,
     )

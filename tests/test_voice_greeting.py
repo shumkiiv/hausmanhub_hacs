@@ -199,9 +199,12 @@ class VoiceGreetingServiceTest(unittest.IsolatedAsyncioTestCase):
         return request
 
     async def test_test_request_speaks_exact_text_and_echoes(self) -> None:
-        receipt = await self.service.async_test(self._test_request())
+        receipt = await self.service.async_test(
+            self._test_request(correlationId="corr.voice.tablet-1")
+        )
         self.assertTrue(receipt["confirmed"])
         self.assertEqual("spoken", receipt["code"])
+        self.assertEqual("corr.voice.tablet-1", receipt["correlationId"])
         self.assertEqual(
             [("media_player.yandex_station_demo", "Добро пожаловать домой. Дома 24,5 градуса.")],
             self.gateway.spoken,
@@ -481,6 +484,10 @@ class VoiceTestRequestValidationTest(unittest.TestCase):
         }
         validated = validate_voice_test_request(valid)
         self.assertEqual([], validated["summaryItems"])
+        correlated = validate_voice_test_request(
+            {**valid, "correlationId": "corr.voice.tablet-1"}
+        )
+        self.assertEqual("corr.voice.tablet-1", correlated["correlationId"])
 
         for broken in (
             {**valid, "speechText": ""},
@@ -488,6 +495,7 @@ class VoiceTestRequestValidationTest(unittest.TestCase):
             {**valid, "stationEntityId": "light.kitchen"},
             {**valid, "summaryItems": ["unknown_block"]},
             {**valid, "contract": {"name": "other", "version": 1}},
+            {**valid, "correlationId": "invalid value"},
         ):
             with self.assertRaises(VoiceGreetingViolation):
                 validate_voice_test_request(broken)

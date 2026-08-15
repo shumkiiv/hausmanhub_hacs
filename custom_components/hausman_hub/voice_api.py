@@ -54,6 +54,7 @@ async def async_start_voice_greeting(hass: HomeAssistant, entry: Any) -> VoiceGr
             hass,
             {
                 "requestId": receipt.get("commandId"),
+                "correlationId": receipt.get("correlationId"),
                 "accepted": receipt.get("accepted"),
                 "confirmed": receipt.get("confirmed"),
                 "targetId": receipt.get("stationEntityId"),

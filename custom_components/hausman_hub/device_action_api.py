@@ -20,6 +20,7 @@ from .climate_api import (
     _not_found,
     _request_json,
 )
+from .correlation import CorrelationIdError, resolve_correlation_id
 from .realtime_api import publish_command_receipt
 
 if TYPE_CHECKING:
@@ -80,6 +81,17 @@ class DeviceActionView(HomeAssistantView):
                 HTTPStatus.BAD_REQUEST,
                 headers=NO_STORE_HEADERS,
             )
+        try:
+            correlation_id = resolve_correlation_id(
+                payload,
+                field="correlationId",
+            )
+        except CorrelationIdError:
+            return self.json_message(
+                "correlationId is invalid.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
         climate_mode_change: dict[str, object] | None = None
         climate_runtime = self._hass.data.get(DOMAIN, {}).get("climate_runtime")
         mode_writer = getattr(
@@ -96,6 +108,7 @@ class DeviceActionView(HomeAssistantView):
                 target_id,
                 action_id,
                 payload.get("value"),
+                correlation_id=correlation_id,
             )
         except Exception:
             await self._async_restore_climate_mode(

@@ -36,6 +36,7 @@
       ],
       "properties": {
         "id": { "type": "string", "pattern": "^notice_[0-9a-f]{16}$" },
+        "correlationId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
         "deviceId": { "type": "string", "pattern": "^device_[0-9a-f]{16}$" },
         "firstSeenAt": { "type": "string", "format": "date-time" },
         "title": { "type": "string", "minLength": 1, "maxLength": 160 },
@@ -92,6 +93,7 @@
       "additionalProperties": false,
       "required": ["expectedRevision", "action", "notificationId"],
       "properties": {
+        "correlationId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
         "expectedRevision": { "type": "integer", "minimum": 0 },
         "action": { "enum": ["acknowledge", "assign_area", "add_to_energy", "show_on_dashboard"] },
         "notificationId": { "type": "string", "pattern": "^notice_[0-9a-f]{16}$" },

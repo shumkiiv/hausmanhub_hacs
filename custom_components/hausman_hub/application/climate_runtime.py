@@ -885,12 +885,15 @@ class ClimateRuntime:
     async def async_apply_contour(self, payload: object) -> ContourApplyReceipt:
         """Idempotently apply three supported settings after explicit consent."""
 
-        request_id, contour_id, room_scope = parse_contour_apply_request(payload)
+        request_id, contour_id, room_scope, correlation_id = (
+            parse_contour_apply_request(payload)
+        )
         async with self._lock:
             self._require_native_contour_apply_mode()
             return await self._async_apply_native_contour_unlocked(
                 request_id,
                 contour_id,
+                correlation_id=correlation_id,
                 context=ClimateControlContext(
                     action=ClimateControlAction.APPLY_SAVED_SETTINGS,
                 ),
@@ -1007,10 +1010,12 @@ class ClimateRuntime:
                         request.request_id,
                         fingerprint,
                         context,
+                        request.correlation_id,
                     ) is not None:
                         return await self._async_apply_native_contour_unlocked(
                             request.request_id,
                             CLIMATE_CONTOUR_ID,
+                            correlation_id=request.correlation_id,
                             context=context,
                             room_ids=room_scope,
                             desired_state_changes=ClimateDesiredStateChanges(0, 0, 0),
@@ -1063,12 +1068,14 @@ class ClimateRuntime:
                     request.request_id,
                     fingerprint,
                     context,
+                    request.correlation_id,
                 )
                 is not None
             ):
                 return await self._async_apply_native_contour_unlocked(
                     request.request_id,
                     CLIMATE_CONTOUR_ID,
+                    correlation_id=request.correlation_id,
                     context=context,
                     room_ids=room_scope,
                     desired_state_changes=ClimateDesiredStateChanges(0, 0, 0),
@@ -1086,6 +1093,7 @@ class ClimateRuntime:
             return await self._async_apply_native_contour_unlocked(
                 request.request_id,
                 CLIMATE_CONTOUR_ID,
+                correlation_id=request.correlation_id,
                 context=context,
                 room_ids=room_scope,
                 desired_state_changes=desired_state_changes,
@@ -1256,6 +1264,7 @@ class ClimateRuntime:
             return await self._async_apply_native_contour_unlocked(
                 request.request_id,
                 CLIMATE_CONTOUR_ID,
+                correlation_id=request.correlation_id,
                 context=ClimateControlContext(
                     action=ClimateControlAction.APPLY_SAVED_SETTINGS,
                 ),
@@ -1297,6 +1306,7 @@ class ClimateRuntime:
         request_id: str,
         contour_id: str,
         *,
+        correlation_id: str | None = None,
         context: ClimateControlContext,
         room_ids: tuple[str, ...] | None = None,
         desired_state_changes: ClimateDesiredStateChanges,
@@ -1312,6 +1322,7 @@ class ClimateRuntime:
             request_id,
             fingerprint,
             context,
+            correlation_id,
         )
         if prior is not None:
             return await self._async_reobserve_native_contour_application_unlocked(
@@ -1330,7 +1341,12 @@ class ClimateRuntime:
             room_ids=room_ids,
             desired_state_changes=desired_state_changes,
         )
-        record = self._contour_applications.begin(request_id, plan, context)
+        record = self._contour_applications.begin(
+            request_id,
+            plan,
+            context,
+            correlation_id,
+        )
         if not plan.native_plan.preflight_permitted or not plan.strict_calls:
             if not plan.native_plan.preflight_permitted:
                 _LOGGER.warning(

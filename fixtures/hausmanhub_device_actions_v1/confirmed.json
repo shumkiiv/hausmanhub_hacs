@@ -3,6 +3,7 @@
     "name": "hausman-hub-device-action-receipt",
     "version": 1
   },
+  "correlationId": "corr.device-action-0001",
   "requestId": "synthetic-request-1",
   "accepted": true,
   "confirmed": true,

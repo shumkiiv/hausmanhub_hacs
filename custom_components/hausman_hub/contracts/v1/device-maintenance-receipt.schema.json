@@ -27,6 +27,7 @@
         "version": {"const": 1}
       }
     },
+    "correlationId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
     "accepted": {"type": "boolean"},
     "confirmed": {"type": "boolean"},
     "status": {"enum": ["accepted", "confirmed"]},

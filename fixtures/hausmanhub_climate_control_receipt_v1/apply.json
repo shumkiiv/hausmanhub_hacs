@@ -3,6 +3,7 @@
     "name": "hausman-hub-climate-control-receipt",
     "version": 1
   },
+  "correlation_id": "corr.android-climate-0001",
   "operation_id": "0123456789abcdef0123456789abcdef",
   "request_id": "android-climate-0001",
   "contour_id": "climate",
