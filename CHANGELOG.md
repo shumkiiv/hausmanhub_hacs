@@ -1,10 +1,11 @@
 # История версий
 
-## Unreleased
+## 1.52.98 - 2026-08-15
 
 - Runtime capability `voice_greeting` рекламирует `POST` test method и точные
-  версии test request/receipt contracts из contracts 0.32.2. Старые клиенты
-  могут игнорировать новые optional поля.
+  версии test request/receipt contracts из contracts 0.32.3. Новый contracts
+  fixture set покрывает все десять Android production screens. Старые клиенты
+  могут игнорировать новые optional поля capability.
 
 ## 1.52.97 - 2026-08-15
 
