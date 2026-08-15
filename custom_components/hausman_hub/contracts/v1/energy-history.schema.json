@@ -18,6 +18,39 @@
     "from": { "type": "string", "format": "date-time" },
     "to": { "type": "string", "format": "date-time" },
     "interval": { "enum": ["5m", "15m", "1h", "1d"] },
+    "page": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "strategy",
+        "order",
+        "fromInclusive",
+        "toExclusive",
+        "maxWindowDays",
+        "maxSeries",
+        "maxPointsPerSeries"
+      ],
+      "properties": {
+        "strategy": { "const": "time_window" },
+        "order": { "const": "timestamp_asc" },
+        "fromInclusive": { "const": true },
+        "toExclusive": { "const": true },
+        "maxWindowDays": { "const": 31 },
+        "maxSeries": { "const": 128 },
+        "maxPointsPerSeries": { "const": 8928 }
+      }
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "source", "separateCopy", "missingPointsAllowed"],
+      "properties": {
+        "mode": { "const": "source_bound" },
+        "source": { "const": "home_assistant_recorder" },
+        "separateCopy": { "const": false },
+        "missingPointsAllowed": { "const": true }
+      }
+    },
     "series": {
       "type": "array",
       "maxItems": 128,

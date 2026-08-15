@@ -17,6 +17,11 @@ from .contour_override import (
     TEMPORARY_TEMPERATURE_REQUEST_CONTRACT_VERSION,
 )
 from .contours import CONTOUR_CONTRACT_NAME, CONTOUR_CONTRACT_VERSION
+from .event_stream import (
+    EVENT_STREAM_HEARTBEAT_SECONDS,
+    EVENT_STREAM_QUEUE_SIZE,
+    EVENT_STREAM_REPLAY_SIZE,
+)
 from .voice_greeting import (
     VOICE_GREETING_CONTRACT_NAME,
     VOICE_GREETING_CONTRACT_VERSION,
@@ -252,7 +257,14 @@ def api_capabilities_snapshot(
                     "name": "hausman-hub-event",
                     "version": 1,
                 },
-                "heartbeat_seconds": 30,
+                "heartbeat_seconds": EVENT_STREAM_HEARTBEAT_SECONDS,
+                "resume": {
+                    "strategy": "last_event_id",
+                    "request_header": "Last-Event-ID",
+                    "max_events": EVENT_STREAM_REPLAY_SIZE,
+                    "delivery_queue_limit": EVENT_STREAM_QUEUE_SIZE,
+                    "survives_restart": False,
+                },
             },
             "scenarios": {
                 "available": True,

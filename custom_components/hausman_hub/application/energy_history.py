@@ -7,6 +7,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 
+ENERGY_HISTORY_MAX_WINDOW_DAYS = 31
+ENERGY_HISTORY_MAX_SERIES = 128
+ENERGY_HISTORY_MAX_POINTS_PER_SERIES = 8928
+
+
 @dataclass(frozen=True, slots=True)
 class EnergySeriesDescriptor:
     entity_id: str
@@ -22,7 +27,7 @@ class EnergySeriesDescriptor:
 
 def _timestamp(value: object) -> datetime | None:
     if isinstance(value, datetime):
-        return value
+        return value if value.tzinfo is not None else None
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         try:
             return datetime.fromtimestamp(value, tz=timezone.utc)
@@ -30,7 +35,8 @@ def _timestamp(value: object) -> datetime | None:
             return None
     if isinstance(value, str):
         try:
-            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return parsed if parsed.tzinfo is not None else None
         except ValueError:
             return None
     return None
@@ -49,6 +55,8 @@ def _points(
     descriptor: EnergySeriesDescriptor,
     rows: object,
     interval: str,
+    start: datetime,
+    end: datetime,
 ) -> list[dict[str, object]]:
     if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)):
         return []
@@ -62,7 +70,7 @@ def _points(
             value = _number(row.get("state"))
         if value is None:
             value = _number(row.get("mean"))
-        if at is not None and value is not None:
+        if at is not None and start <= at < end and value is not None:
             normalized.append((at, value * descriptor.scale))
     normalized.sort(key=lambda item: item[0])
     is_energy = descriptor.metric == "energy" or descriptor.unit == "kWh"
@@ -80,7 +88,7 @@ def _points(
         return [
             {"at": at.isoformat(), "value": round(value, 3)}
             for at, value in normalized
-        ]
+        ][:ENERGY_HISTORY_MAX_POINTS_PER_SERIES]
     buckets: dict[datetime, list[float]] = {}
     for at, value in normalized:
         bucket = at.replace(minute=(at.minute // 15) * 15, second=0, microsecond=0)
@@ -94,7 +102,7 @@ def _points(
             ),
         }
         for at, values in sorted(buckets.items())
-    ]
+    ][:ENERGY_HISTORY_MAX_POINTS_PER_SERIES]
 
 
 def build_energy_history(
@@ -121,6 +129,8 @@ def build_energy_history(
                 descriptor,
                 rows_by_entity.get(descriptor.entity_id, []),
                 interval,
+                start,
+                end,
             ),
         }
         for descriptor in descriptors[:124]
@@ -130,6 +140,21 @@ def build_energy_history(
         "from": start.isoformat(),
         "to": end.isoformat(),
         "interval": interval,
+        "page": {
+            "strategy": "time_window",
+            "order": "timestamp_asc",
+            "fromInclusive": True,
+            "toExclusive": True,
+            "maxWindowDays": ENERGY_HISTORY_MAX_WINDOW_DAYS,
+            "maxSeries": ENERGY_HISTORY_MAX_SERIES,
+            "maxPointsPerSeries": ENERGY_HISTORY_MAX_POINTS_PER_SERIES,
+        },
+        "retention": {
+            "mode": "source_bound",
+            "source": "home_assistant_recorder",
+            "separateCopy": False,
+            "missingPointsAllowed": True,
+        },
         "series": physical_series + _selection_series(physical_series),
     }
 

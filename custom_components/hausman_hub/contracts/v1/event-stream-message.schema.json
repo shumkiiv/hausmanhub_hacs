@@ -82,7 +82,29 @@
       "required": ["api_major_version", "heartbeat_seconds"],
       "properties": {
         "api_major_version": { "const": 1 },
-        "heartbeat_seconds": { "type": "integer", "minimum": 5, "maximum": 120 }
+        "heartbeat_seconds": { "type": "integer", "minimum": 5, "maximum": 120 },
+        "stream_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "replay": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "strategy",
+            "request_header",
+            "max_events",
+            "delivery_queue_limit",
+            "survives_restart"
+          ],
+          "properties": {
+            "strategy": { "const": "last_event_id" },
+            "request_header": { "const": "Last-Event-ID" },
+            "max_events": { "const": 128 },
+            "delivery_queue_limit": { "const": 32 },
+            "survives_restart": { "const": false }
+          }
+        }
       }
     },
     "snapshot_invalidated": {
@@ -93,7 +115,8 @@
         "reason": {
           "enum": ["state_changed", "registry_changed", "scenario_changed", "settings_changed"]
         },
-        "state_revision": { "type": ["integer", "null"], "minimum": 0 }
+        "state_revision": { "type": ["integer", "null"], "minimum": 0 },
+        "replay_status": { "const": "gap" }
       }
     },
     "critical_alert": {

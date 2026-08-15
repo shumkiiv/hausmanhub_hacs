@@ -110,6 +110,7 @@ class OperationJournalService:
         self,
         *,
         limit: int = 100,
+        before_sequence: int | None = None,
         source: str | None = None,
         correlation_id: str | None = None,
     ) -> dict[str, object]:
@@ -117,13 +118,17 @@ class OperationJournalService:
 
         if not 1 <= limit <= MAX_OPERATION_JOURNAL_RECORDS:
             raise ValueError("operation journal limit is invalid")
+        if before_sequence is not None and (
+            type(before_sequence) is not int or before_sequence < 1
+        ):
+            raise ValueError("operation journal cursor is invalid")
         if source is not None and source not in OPERATION_SOURCES:
             raise ValueError("operation journal source is invalid")
         if correlation_id is not None and (
             _CORRELATION_ID.fullmatch(correlation_id) is None
         ):
             raise ValueError("operation journal correlation id is invalid")
-        records = [
+        eligible = [
             dict(item)
             for item in self._records
             if (source is None or item["source"] == source)
@@ -131,7 +136,13 @@ class OperationJournalService:
                 correlation_id is None
                 or item["correlation_id"] == correlation_id
             )
-        ][:limit]
+            and (
+                before_sequence is None
+                or int(item["sequence"]) < before_sequence
+            )
+        ]
+        records = eligible[:limit]
+        has_more = len(eligible) > limit
         return {
             "contract": {
                 "name": OPERATION_JOURNAL_CONTRACT_NAME,
@@ -139,6 +150,17 @@ class OperationJournalService:
             },
             "generated_at": max(0, self._now_ms()),
             "sequence": self._sequence,
+            "page": {
+                "order": "sequence_desc",
+                "limit": limit,
+                "returned": len(records),
+                "has_more": has_more,
+                "next_before_sequence": (
+                    int(records[-1]["sequence"]) if has_more and records else None
+                ),
+                "retained_records": len(self._records),
+                "retention_limit": MAX_OPERATION_JOURNAL_RECORDS,
+            },
             "records": records,
         }
 

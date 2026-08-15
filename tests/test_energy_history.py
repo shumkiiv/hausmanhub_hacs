@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import json
+from pathlib import Path
 import unittest
+
+from jsonschema import Draft202012Validator
 
 from custom_components.hausman_hub.application.energy_history import (
     EnergySeriesDescriptor,
@@ -46,6 +50,18 @@ class EnergyHistoryTest(unittest.TestCase):
             [1289.0, 640.0],
             [point["value"] for point in payload["series"][0]["points"]],
         )
+        self.assertEqual("time_window", payload["page"]["strategy"])
+        self.assertEqual(31, payload["page"]["maxWindowDays"])
+        self.assertEqual("home_assistant_recorder", payload["retention"]["source"])
+        self.assertFalse(payload["retention"]["separateCopy"])
+        root = Path(__file__).resolve().parents[1]
+        schema = json.loads(
+            (
+                root
+                / "custom_components/hausman_hub/contracts/v1/energy-history.schema.json"
+            ).read_text(encoding="utf-8")
+        )
+        Draft202012Validator(schema).validate(payload)
 
     def test_fifteen_minute_series_is_bounded_aggregated_and_private(self) -> None:
         start = datetime(2026, 7, 31, 6, 0, tzinfo=timezone.utc)
@@ -124,6 +140,33 @@ class EnergyHistoryTest(unittest.TestCase):
         self.assertEqual([0.2, 0.1], [point["value"] for point in by_source["a:energy"]["points"]])
         self.assertEqual("delta", by_source["a:energy"]["aggregation"])
         self.assertEqual("sum", by_source["selection:energy"]["aggregation"])
+
+    def test_window_is_half_open_and_excludes_the_to_boundary(self) -> None:
+        start = datetime(2026, 8, 1, 0, 0, tzinfo=timezone.utc)
+        end = start + timedelta(hours=1)
+        descriptor = EnergySeriesDescriptor(
+            "sensor.power", "device:power", "device", "Мощность", None, "W", "mean"
+        )
+
+        payload = build_energy_history(
+            start=start,
+            end=end,
+            interval="5m",
+            descriptors=(descriptor,),
+            rows_by_entity={
+                descriptor.entity_id: [
+                    {"start": start - timedelta(minutes=5), "mean": 1},
+                    {"start": start, "mean": 2},
+                    {"start": end - timedelta(minutes=5), "mean": 3},
+                    {"start": end, "mean": 4},
+                ]
+            },
+        )
+
+        self.assertEqual(
+            [start.isoformat(), (end - timedelta(minutes=5)).isoformat()],
+            [point["at"] for point in payload["series"][0]["points"]],
+        )
 
 
 if __name__ == "__main__":

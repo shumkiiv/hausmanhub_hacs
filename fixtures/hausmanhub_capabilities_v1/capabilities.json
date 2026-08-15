@@ -190,7 +190,14 @@
         "name": "hausman-hub-event",
         "version": 1
       },
-      "heartbeat_seconds": 30
+      "heartbeat_seconds": 30,
+      "resume": {
+        "strategy": "last_event_id",
+        "request_header": "Last-Event-ID",
+        "max_events": 128,
+        "delivery_queue_limit": 32,
+        "survives_restart": false
+      }
     },
     "scenarios": {
       "available": true,

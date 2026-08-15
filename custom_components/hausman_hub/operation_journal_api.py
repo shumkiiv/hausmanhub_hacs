@@ -49,6 +49,7 @@ class OperationJournalView(HomeAssistantView):
         query = getattr(request, "query", None)
         if not isinstance(query, Mapping) or not set(query) <= {
             "limit",
+            "before_sequence",
             "source",
             "correlation_id",
         }:
@@ -61,6 +62,17 @@ class OperationJournalView(HomeAssistantView):
             limit_value = query.get("limit", "100")
             limit = int(limit_value)
             if str(limit) != str(limit_value) or not 1 <= limit <= MAX_OPERATION_JOURNAL_RECORDS:
+                raise ValueError
+            before_sequence_value = query.get("before_sequence")
+            before_sequence = (
+                int(before_sequence_value)
+                if before_sequence_value is not None
+                else None
+            )
+            if before_sequence is not None and (
+                str(before_sequence) != str(before_sequence_value)
+                or before_sequence < 1
+            ):
                 raise ValueError
             source = query.get("source")
             correlation_id = query.get("correlation_id")
@@ -77,6 +89,7 @@ class OperationJournalView(HomeAssistantView):
                 )
             payload = service.snapshot(
                 limit=limit,
+                before_sequence=before_sequence,
                 source=source,
                 correlation_id=correlation_id,
             )

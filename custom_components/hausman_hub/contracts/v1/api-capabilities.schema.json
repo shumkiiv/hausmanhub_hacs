@@ -496,6 +496,24 @@
               "type": "integer",
               "minimum": 5,
               "maximum": 120
+            },
+            "resume": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "strategy",
+                "request_header",
+                "max_events",
+                "delivery_queue_limit",
+                "survives_restart"
+              ],
+              "properties": {
+                "strategy": { "const": "last_event_id" },
+                "request_header": { "const": "Last-Event-ID" },
+                "max_events": { "const": 128 },
+                "delivery_queue_limit": { "const": 32 },
+                "survives_restart": { "const": false }
+              }
             }
           }
         },

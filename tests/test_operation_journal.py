@@ -77,6 +77,17 @@ class OperationJournalTests(unittest.IsolatedAsyncioTestCase):
 
         snapshot = service.snapshot()
         self.assertEqual(4, snapshot["sequence"])
+        self.assertEqual(4, snapshot["page"]["returned"])
+        self.assertFalse(snapshot["page"]["has_more"])
+        self.assertEqual(512, snapshot["page"]["retention_limit"])
+        root = Path(__file__).resolve().parents[1]
+        schema = json.loads(
+            (
+                root
+                / "custom_components/hausman_hub/contracts/v1/operation-journal.schema.json"
+            ).read_text(encoding="utf-8")
+        )
+        Draft202012Validator(schema).validate(snapshot)
         self.assertEqual(
             ["voice", "scenario", "climate", "device"],
             [item["source"] for item in snapshot["records"]],
@@ -117,3 +128,30 @@ class OperationJournalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(MAX_OPERATION_JOURNAL_RECORDS, len(records))
         self.assertEqual("device-514", records[0]["correlation_id"])
         self.assertNotIn("target_id", records[0])
+
+    async def test_keyset_pages_are_stable_and_do_not_overlap(self) -> None:
+        store = MemoryStore()
+        service = OperationJournalService(store, now_ms=lambda: 40)
+        for index in range(5):
+            await service.async_append(receipt(f"device-{index}", "device_action"))
+
+        first = service.snapshot(limit=2)
+        second = service.snapshot(
+            limit=2,
+            before_sequence=first["page"]["next_before_sequence"],
+        )
+        third = service.snapshot(
+            limit=2,
+            before_sequence=second["page"]["next_before_sequence"],
+        )
+
+        self.assertEqual([5, 4], [item["sequence"] for item in first["records"]])
+        self.assertEqual([3, 2], [item["sequence"] for item in second["records"]])
+        self.assertEqual([1], [item["sequence"] for item in third["records"]])
+        self.assertTrue(first["page"]["has_more"])
+        self.assertTrue(second["page"]["has_more"])
+        self.assertFalse(third["page"]["has_more"])
+        self.assertIsNone(third["page"]["next_before_sequence"])
+
+        with self.assertRaises(ValueError):
+            service.snapshot(before_sequence=0)

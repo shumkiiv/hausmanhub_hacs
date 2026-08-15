@@ -250,7 +250,11 @@ class EventStreamView(HomeAssistantView):
                     _encode_sse(
                         runtime.broker.event(
                             "snapshot_invalidated",
-                            {"reason": "state_changed", "state_revision": None},
+                            {
+                                "reason": "state_changed",
+                                "state_revision": None,
+                                "replay_status": "gap",
+                            },
                         )
                     )
                 )

@@ -1169,20 +1169,35 @@ class LocalSummaryAccessTest(unittest.TestCase):
             )
             self.assertEqual(400, asyncio.run(view.get(invalid)).status)
 
-            yearly = FakeRequest(
+            maximum_window = FakeRequest(
                 "127.0.0.1",
                 reader_user("system-users"),
                 path=path,
                 query_string="from=...",
             )
-            yearly.query = Query(
+            maximum_window.query = Query(
+                {
+                    "from": "2026-06-30T00:00:00+00:00",
+                    "to": "2026-07-31T00:00:00+00:00",
+                    "interval": "1d",
+                }
+            )
+            self.assertEqual(200, asyncio.run(view.get(maximum_window)).status)
+
+            oversized_window = FakeRequest(
+                "127.0.0.1",
+                reader_user("system-users"),
+                path=path,
+                query_string="from=...",
+            )
+            oversized_window.query = Query(
                 {
                     "from": "2025-08-01T00:00:00+00:00",
                     "to": "2026-07-31T00:00:00+00:00",
                     "interval": "1d",
                 }
             )
-            self.assertEqual(200, asyncio.run(view.get(yearly)).status)
+            self.assertEqual(400, asyncio.run(view.get(oversized_window)).status)
         finally:
             method_globals["async_dashboard_snapshot"] = original_dashboard
             method_globals["async_energy_history"] = original_history
@@ -3770,6 +3785,29 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertEqual(200, response.status)
         self.assertEqual("hausman-hub-operation-journal", response.payload["contract"]["name"])
         self.assertEqual("climate-1", response.payload["records"][0]["correlation_id"])
+        self.assertEqual("sequence_desc", response.payload["page"]["order"])
+        self.assertEqual(512, response.payload["page"]["retention_limit"])
+
+        cursor_request = FakeRequest(
+            "192.168.1.20",
+            reader_user(admin=True),
+            path=ADMIN_OPERATION_JOURNAL_PATH,
+            query_string="before_sequence=1",
+        )
+        cursor_request.query = {"before_sequence": "1"}
+        cursor_response = asyncio.run(OperationJournalView(self.hass).get(cursor_request))
+        self.assertEqual(200, cursor_response.status)
+        self.assertEqual([], cursor_response.payload["records"])
+
+        invalid_request = FakeRequest(
+            "192.168.1.20",
+            reader_user(admin=True),
+            path=ADMIN_OPERATION_JOURNAL_PATH,
+            query_string="before_sequence=01",
+        )
+        invalid_request.query = {"before_sequence": "01"}
+        invalid_response = asyncio.run(OperationJournalView(self.hass).get(invalid_request))
+        self.assertEqual(400, invalid_response.status)
 
     def test_closed_optional_page_request_does_not_read_the_home(self) -> None:
         """The page request remains closed even with a stale runtime pointer."""

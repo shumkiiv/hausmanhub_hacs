@@ -90,6 +90,7 @@ from .application.device_discovery import (
     DeviceDiscoveryService,
     DeviceDiscoveryViolation,
 )
+from .application.energy_history import ENERGY_HISTORY_MAX_WINDOW_DAYS
 from .application.legacy_settings_import import (
     LegacySettingsImportViolation,
     preview_legacy_settings,
@@ -595,11 +596,11 @@ class EnergyHistoryView(_ClimateView):
             or start.tzinfo is None
             or end.tzinfo is None
             or end <= start
-            or end - start > timedelta(days=366)
+            or end - start > timedelta(days=ENERGY_HISTORY_MAX_WINDOW_DAYS)
             or interval not in {"5m", "15m", "1h", "1d"}
         ):
             return self.json_message(
-                "Диапазон истории энергии должен быть корректным и не длиннее 366 дней.",
+                "Диапазон истории энергии должен быть корректным и не длиннее 31 дня.",
                 HTTPStatus.BAD_REQUEST,
                 headers=NO_STORE_HEADERS,
             )
