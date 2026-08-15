@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/device-feature-matrix.schema.json",
+  "title": "HausmanHub device feature matrix v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "apiMajorVersion", "authority", "deviceTypes"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-device-feature-matrix"},
+        "version": {"const": 1}
+      }
+    },
+    "apiMajorVersion": {"const": 1},
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "semantics",
+        "runtimeActionSource",
+        "unknownTypePolicy",
+        "unknownControlPolicy",
+        "clientMaySynthesizeActions"
+      ],
+      "properties": {
+        "semantics": {"const": "upper_bound"},
+        "runtimeActionSource": {"const": "scenario_catalog"},
+        "unknownTypePolicy": {"const": "read_only"},
+        "unknownControlPolicy": {"const": "hidden"},
+        "clientMaySynthesizeActions": {"const": false}
+      }
+    },
+    "deviceTypes": {
+      "type": "array",
+      "minItems": 19,
+      "maxItems": 64,
+      "items": {"$ref": "#/$defs/deviceType"}
+    }
+  },
+  "$defs": {
+    "stableId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$"
+    },
+    "deviceType": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "title", "category", "readOnly", "controls"],
+      "properties": {
+        "type": {"$ref": "#/$defs/stableId"},
+        "title": {"type": "string", "minLength": 1, "maxLength": 120},
+        "category": {
+          "enum": ["lighting", "climate", "security", "media", "devices"]
+        },
+        "readOnly": {"type": "boolean"},
+        "controls": {
+          "type": "array",
+          "maxItems": 12,
+          "items": {"$ref": "#/$defs/control"}
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"readOnly": {"const": true}},
+            "required": ["readOnly"]
+          },
+          "then": {"properties": {"controls": {"maxItems": 0}}},
+          "else": {"properties": {"controls": {"minItems": 1}}}
+        }
+      ]
+    },
+    "control": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "actionIds",
+        "valueType",
+        "valueSource",
+        "receiptRequired"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/stableId"},
+        "kind": {"enum": ["binary", "range", "enum", "momentary", "transport"]},
+        "actionIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/stableId"}
+        },
+        "valueType": {"enum": ["none", "number", "string"]},
+        "valueSource": {
+          "enum": ["none", "runtime_bounds", "runtime_options", "contract_bounds"]
+        },
+        "minimum": {"type": "number"},
+        "maximum": {"type": "number"},
+        "receiptRequired": {"const": true}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"valueType": {"const": "none"}},
+            "required": ["valueType"]
+          },
+          "then": {
+            "properties": {"valueSource": {"const": "none"}},
+            "not": {"anyOf": [{"required": ["minimum"]}, {"required": ["maximum"]}]}
+          }
+        },
+        {
+          "if": {
+            "properties": {"valueType": {"const": "number"}},
+            "required": ["valueType"]
+          },
+          "then": {
+            "properties": {
+              "valueSource": {"enum": ["runtime_bounds", "contract_bounds"]}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"valueType": {"const": "string"}},
+            "required": ["valueType"]
+          },
+          "then": {"properties": {"valueSource": {"const": "runtime_options"}}}
+        },
+        {
+          "if": {
+            "properties": {"valueSource": {"const": "contract_bounds"}},
+            "required": ["valueSource"]
+          },
+          "then": {"required": ["minimum", "maximum"]},
+          "else": {
+            "not": {"anyOf": [{"required": ["minimum"]}, {"required": ["maximum"]}]}
+          }
+        }
+      ]
+    }
+  }
+}

@@ -14,6 +14,13 @@ from jsonschema import Draft202012Validator
 from custom_components.hausman_hub.application.api_capabilities import (
     api_capabilities_snapshot,
 )
+from custom_components.hausman_hub.application.device_features import (
+    device_feature_matrix_snapshot,
+)
+from custom_components.hausman_hub.application.scenario_catalog import (
+    SCENARIO_CATALOG_DOMAINS,
+    _domain_actions,
+)
 from custom_components.hausman_hub.application.climate_native_projections import (
     native_admin_climate_import_snapshot as admin_climate_import_snapshot,
     native_android_climate_snapshot as android_climate_snapshot,
@@ -92,6 +99,7 @@ class ClimateContractSchemasTest(unittest.TestCase):
             "hausmanhub_device_discovery_v1/device-discovery.json": "v1/device-discovery.schema.json",
             "hausmanhub_device_actions_v1/request.json": "v1/device-action-request.schema.json",
             "hausmanhub_device_actions_v1/confirmed.json": "v1/device-action-receipt.schema.json",
+            "hausmanhub_device_feature_matrix_v1/document.json": "v1/device-feature-matrix.schema.json",
             "hausmanhub_scenario_catalog_v1/catalog.json": "v1/scenario-catalog.schema.json",
             "hausmanhub_climate_runtime_v1/climate-action-request.json": "v1/climate-action-request.schema.json",
             "hausmanhub_climate_v1/operation-query.json": "v1/climate-operation-query.schema.json",
@@ -174,6 +182,33 @@ class ClimateContractSchemasTest(unittest.TestCase):
             load_json(ROOT / "fixtures" / "hausmanhub_capabilities_v1" / "capabilities.json"),
             capabilities,
         )
+
+        matrix = device_feature_matrix_snapshot()
+        validator("v1/device-feature-matrix.schema.json").validate(matrix)
+        self.assertEqual(
+            load_json(
+                ROOT
+                / "fixtures"
+                / "hausmanhub_device_feature_matrix_v1"
+                / "document.json"
+            ),
+            matrix,
+        )
+        matrix_types = {item["type"]: item for item in matrix["deviceTypes"]}
+        self.assertEqual(
+            SCENARIO_CATALOG_DOMAINS | {"alarm_control_panel", "camera"},
+            set(matrix_types),
+        )
+        for domain in SCENARIO_CATALOG_DOMAINS:
+            expected_actions = {
+                action.action_id for action in _domain_actions(domain)
+            }
+            matrix_actions = {
+                action_id
+                for control in matrix_types[domain]["controls"]
+                for action_id in control["actionIds"]
+            }
+            self.assertEqual(expected_actions, matrix_actions, domain)
         voice_capability = capabilities["capabilities"]["voice_greeting"]
         self.assertEqual("POST", voice_capability["testMethod"])
         self.assertEqual(

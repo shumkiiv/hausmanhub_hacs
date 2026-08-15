@@ -22,6 +22,10 @@ from .event_stream import (
     EVENT_STREAM_QUEUE_SIZE,
     EVENT_STREAM_REPLAY_SIZE,
 )
+from .device_features import (
+    DEVICE_FEATURE_MATRIX_CONTRACT_NAME,
+    DEVICE_FEATURE_MATRIX_CONTRACT_VERSION,
+)
 from .voice_greeting import (
     VOICE_GREETING_CONTRACT_NAME,
     VOICE_GREETING_CONTRACT_VERSION,
@@ -47,6 +51,7 @@ ENERGY_METER_PATH = f"{API_BASE_PATH}/energy/meter"
 DEVICE_DISCOVERY_PATH = f"{API_BASE_PATH}/device-discovery"
 EVENT_STREAM_PATH = f"{API_BASE_PATH}/events"
 DEVICE_ACTIONS_PATH = f"{API_BASE_PATH}/device-actions"
+DEVICE_FEATURES_PATH = f"{API_BASE_PATH}/device-features"
 CONTOURS_PATH = f"{API_BASE_PATH}/contours"
 CONTOUR_APPLY_PREVIEW_PATH = f"{CONTOURS_PATH}/apply-preview"
 CONTOUR_APPLY_PATH = f"{CONTOURS_PATH}/apply"
@@ -100,6 +105,12 @@ def api_capabilities_snapshot(
                 "response_contract": {
                     "name": "hausman-hub-device-action-receipt",
                     "version": 1,
+                },
+                "feature_matrix_path": DEVICE_FEATURES_PATH,
+                "feature_matrix_method": "GET",
+                "feature_matrix_contract": {
+                    "name": DEVICE_FEATURE_MATRIX_CONTRACT_NAME,
+                    "version": DEVICE_FEATURE_MATRIX_CONTRACT_VERSION,
                 },
             },
             "dashboard_snapshot": {

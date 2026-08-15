@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.http import HomeAssistantView
 
-from .application.api_capabilities import DEVICE_ACTIONS_PATH
+from .application.api_capabilities import DEVICE_ACTIONS_PATH, DEVICE_FEATURES_PATH
+from .application.device_features import device_feature_matrix_snapshot
 from .application.scenario_service import ScenarioService
 from .climate_api import (
     DOMAIN,
@@ -25,6 +26,25 @@ from .realtime_api import publish_command_receipt
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
+
+
+class DeviceFeatureMatrixView(HomeAssistantView):
+    """Expose the authenticated, read-only device control upper bound."""
+
+    requires_auth = True
+    cors_allowed = False
+    extra_urls: tuple[str, ...] = ()
+    url = DEVICE_FEATURES_PATH
+    name = "api:hausman_hub:device_features"
+
+    async def get(self, request: Any) -> Any:
+        if not _is_exact_request(request, DEVICE_FEATURES_PATH):
+            return _not_found(self)
+        if not (
+            _is_local_tablet_request(request) or _is_local_admin_request(request)
+        ):
+            return _forbidden(self)
+        return self.json(device_feature_matrix_snapshot(), headers=NO_STORE_HEADERS)
 
 
 class DeviceActionView(HomeAssistantView):

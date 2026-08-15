@@ -226,8 +226,11 @@ def register_climate_api(
     if climate_tablet is not None:
         data[DATA_CLIMATE_TABLET] = climate_tablet
     if DATA_CLIMATE_VIEWS not in data:
+        from .device_action_api import DeviceFeatureMatrixView
+
         views = [
             ClimateCapabilitiesView(hass),
+            DeviceFeatureMatrixView(),
             DashboardView(hass),
             EnergyHistoryView(hass),
             EnergyMeterView(hass),

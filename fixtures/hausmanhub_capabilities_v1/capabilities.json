@@ -21,6 +21,12 @@
       "response_contract": {
         "name": "hausman-hub-device-action-receipt",
         "version": 1
+      },
+      "feature_matrix_path": "/api/hausman_hub/v1/device-features",
+      "feature_matrix_method": "GET",
+      "feature_matrix_contract": {
+        "name": "hausman-hub-device-feature-matrix",
+        "version": 1
       }
     },
     "dashboard_snapshot": {

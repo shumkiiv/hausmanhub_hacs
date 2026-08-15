@@ -3334,6 +3334,72 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertEqual(403, forbidden.status)
         self.assertEqual(2, len(executions))
 
+    def test_public_device_feature_matrix_is_read_only_and_local(self) -> None:
+        path = "/api/hausman_hub/v1/device-features"
+        view = next(item for item in self.hass.http.views if item.url == path)
+
+        tablet = asyncio.run(
+            view.get(
+                FakeRequest(
+                    "192.168.1.20",
+                    reader_user("system-users"),
+                    path=path,
+                )
+            )
+        )
+        self.assertEqual(200, tablet.status)
+        self.assertEqual(
+            {"name": "hausman-hub-device-feature-matrix", "version": 1},
+            tablet.payload["contract"],
+        )
+        self.assertEqual("upper_bound", tablet.payload["authority"]["semantics"])
+        self.assertFalse(
+            tablet.payload["authority"]["clientMaySynthesizeActions"]
+        )
+        self.assertEqual(19, len(tablet.payload["deviceTypes"]))
+        self.assertEqual("no-store", tablet.headers.get("Cache-Control"))
+
+        admin = asyncio.run(
+            view.get(
+                FakeRequest(
+                    "192.168.1.20",
+                    reader_user("system-admin", admin=True),
+                    path=path,
+                )
+            )
+        )
+        self.assertEqual(200, admin.status)
+        forbidden = asyncio.run(
+            view.get(
+                FakeRequest(
+                    "192.168.1.20",
+                    reader_user("system-read-only"),
+                    path=path,
+                )
+            )
+        )
+        self.assertEqual(403, forbidden.status)
+        non_local = asyncio.run(
+            view.get(
+                FakeRequest(
+                    "203.0.113.10",
+                    reader_user("system-users"),
+                    path=path,
+                )
+            )
+        )
+        self.assertEqual(403, non_local.status)
+        wrong_path = asyncio.run(
+            view.get(
+                FakeRequest(
+                    "192.168.1.20",
+                    reader_user("system-users"),
+                    path=f"{path}/",
+                )
+            )
+        )
+        self.assertEqual(404, wrong_path.status)
+
     def test_manual_ac_off_enters_manual_mode_before_command(self) -> None:
         path = "/api/hausman_hub/v1/device-actions"
         view = next(item for item in self.hass.http.views if item.url == path)
@@ -3581,7 +3647,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertFalse(hasattr(self.view, method))
 
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
-        self.assertEqual(73, len(self.hass.http.views))
+        self.assertEqual(74, len(self.hass.http.views))
         self.assertEqual(
             1,
             sum(
@@ -4055,13 +4121,14 @@ class LocalSummaryAccessTest(unittest.TestCase):
             [(closed_entry, ("sensor", "switch"))],
             closed_hass.config_entries.forwarded,
         )
-        self.assertEqual(72, len(closed_hass.http.views))
+        self.assertEqual(73, len(closed_hass.http.views))
         self.assertEqual(
             {
                 "/api/hausman_hub/v1/capabilities",
                 "/api/hausman_hub/v1/dashboard",
                 "/api/hausman_hub/v1/events",
                 "/api/hausman_hub/v1/device-actions",
+                "/api/hausman_hub/v1/device-features",
                 "/api/hausman_hub/v1/energy/history",
                 "/api/hausman_hub/v1/energy/meter",
                 "/api/hausman_hub/v1/energy-settings",

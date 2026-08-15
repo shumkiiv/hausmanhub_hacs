@@ -62,6 +62,11 @@
         "device_actions": {
           "type": "object",
           "additionalProperties": false,
+          "dependentRequired": {
+            "feature_matrix_path": ["feature_matrix_method", "feature_matrix_contract"],
+            "feature_matrix_method": ["feature_matrix_path", "feature_matrix_contract"],
+            "feature_matrix_contract": ["feature_matrix_path", "feature_matrix_method"]
+          },
           "required": [
             "available",
             "path",
@@ -92,6 +97,15 @@
             },
             "response_contract": {
               "$ref": "#/$defs/device_action_receipt_contract"
+            },
+            "feature_matrix_path": {
+              "const": "/api/hausman_hub/v1/device-features"
+            },
+            "feature_matrix_method": {
+              "const": "GET"
+            },
+            "feature_matrix_contract": {
+              "$ref": "#/$defs/device_feature_matrix_contract"
             }
           }
         },
@@ -865,6 +879,15 @@
         "version": {
           "const": 1
         }
+      }
+    },
+    "device_feature_matrix_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-device-feature-matrix"},
+        "version": {"const": 1}
       }
     },
     "dashboard_contract": {
