@@ -1,8 +1,23 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-15 (HACS 1.52.102 pagination and retention release).
+Last updated: 2026-08-15 (HACS 1.52.103 device feature matrix release).
 
 ## Current work
+
+- 2026-08-15 (Codex): HACS `1.52.103` закреплён на contracts `0.37.0`
+  (`643e97e`) и публикует защищённую read-only feature matrix: 19 типов
+  устройств, 24 control group, 41 action binding и 25 уникальных action ID.
+  Runtime scenario catalog остаётся источником фактических действий,
+  неизвестные типы работают read-only, клиент не синтезирует action ID.
+  Backend commit `6558af4`, release commit и tag target `23c3209`; GitHub
+  Release опубликован. Full pytest: 1423 passed, 4 skipped, 971 subtests;
+  staged gate: 1421 tests, 4 skipped; Actions `31887924256` success.
+  Production backup `350aa3e0` включает Home Assistant 2026.8.2, базу, три
+  папки и десять add-ons без ошибок. После штатных повторов HACS из-за
+  медленного GitHub, двух config checks и одного restart installed/latest и
+  panel равны `1.52.103`; 9 из 9 сущностей доступны, runtime fresh/managed,
+  live matrix совпадает с fixture, system log чист. Физические команды не
+  отправлялись. Details: `docs/RELEASE_AUDIT_1.52.103.md`.
 
 - 2026-08-15 (Codex): HACS `1.52.102` закреплён на contracts `0.36.0`
   (`28e1f4e`) и публикует bounded policy для SSE, energy history и operation
