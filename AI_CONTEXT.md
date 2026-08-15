@@ -1,8 +1,25 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-15 (HACS 1.52.98 capability metadata release).
+Last updated: 2026-08-15 (HACS 1.52.100 canonical error taxonomy release).
 
 ## Current work
+
+- 2026-08-15 (Codex): HACS `1.52.100` enforces the canonical API error
+  taxonomy from contracts `0.34.0` (`7d4a2f9`) on strict tablet and climate
+  routes. Caller exception text is never returned, unknown codes fail closed,
+  request IDs are bounded and details use per-code allowlists. The first
+  `1.52.99` production audit found one Home Assistant blocking-call warning
+  from lazy packaged JSON loading. `1.52.100` preloads the taxonomy through
+  the executor before API registration and the repeated live strict-error
+  probe leaves the HausmanHub system log empty. Backend commits `1b1571b` and
+  `ef98566`, release commit `43dc778`, tag and GitHub Release are published.
+  Full gate: 1415 passed, 4 skipped; Actions `31881355990` success. Full
+  rollback backup `b9e79fa4` is on KeeneticSSD, 870.88 MB, includes Home
+  Assistant 2026.8.2, the database, three folders and ten add-ons. Final
+  installed/latest and admin panel are `1.52.100`; all nine integration
+  entities are available, runtime is fresh and managed, active operations and
+  blocked reasons are zero. No physical command was sent. Details:
+  `docs/RELEASE_AUDIT_1.52.100.md`.
 
 - 2026-08-15 (Codex): HACS `1.52.98` publishes the exact `voice_greeting`
   `POST` test method plus request and receipt contract identities. Consumer pin
