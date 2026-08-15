@@ -1,8 +1,20 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-15 (HACS 1.52.97 curtain recovery guard).
+Last updated: 2026-08-15 (unreleased optional capability metadata).
 
 ## Current work
+
+- 2026-08-15 (Codex): unreleased backend commit `438eadf` updates the HACS
+  consumer pin to contracts `0.32.2` (`6420ba2`) and publishes the exact
+  `voice_greeting` test method plus request and receipt contract identities.
+  The schema and synthetic runtime fixture accept the additive optional
+  fields, while older clients may ignore them. Full pytest: 1411 passed,
+  4 skipped, 929 subtests; package, repository boundary, product naming,
+  synthetic fixtures and Android compatibility checks passed. HACS remains
+  `1.52.97`; no tag, release, deploy or production operation was performed.
+  Next: Android must consume `inventory/optional-capabilities.json` from the
+  contracts repository and add fail-closed consumer tests before a coordinated
+  release.
 
 - 2026-08-15 (Codex): HACS `1.52.97` stops false curtain runs caused by
   Home Assistant device recovery. A state transition with a missing,
