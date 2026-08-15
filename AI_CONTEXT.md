@@ -1,8 +1,24 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-15 (HACS 1.52.101 correlation ID release).
+Last updated: 2026-08-15 (HACS 1.52.102 pagination and retention release).
 
 ## Current work
+
+- 2026-08-15 (Codex): HACS `1.52.102` закреплён на contracts `0.36.0`
+  (`28e1f4e`) и публикует bounded policy для SSE, energy history и operation
+  journal. SSE получил restart-safe stream ID, `Last-Event-ID` replay на 128
+  событий и queue limit 32; gap требует перечитать snapshot. Journal использует
+  exclusive `before_sequence`, page metadata и durable retention 512 без TTL.
+  Energy history ограничена окнами `[from, to)` до 31 дня, 128 series и 8928
+  points на series, а retention зависит от Recorder. Backend commit `c3b64df`,
+  release commit и tag target `5dde51c`; GitHub Release опубликован. Full
+  pytest: 1422 passed, 4 skipped; staged gate: 1420 tests, 4 skipped; Actions
+  `31885789878` success. Production backup `0037d467` размером 900 915 200
+  байт записан локально и на KeeneticSSD, обе копии защищены. После двух config
+  checks и одного restart installed/latest и panel равны `1.52.102`; 9 из 9
+  сущностей доступны, runtime fresh/managed, journal, energy history и SSE
+  подтверждают новые лимиты, system log чист. Физические команды не
+  отправлялись. Details: `docs/RELEASE_AUDIT_1.52.102.md`.
 
 - 2026-08-15 (Codex): HACS `1.52.101` закреплён на contracts `0.35.0`
   (`0327f2c`) и проводит один optional correlation ID через публичные команды,
