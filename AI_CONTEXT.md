@@ -1,8 +1,19 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-15 (HACS 1.52.103 device feature matrix release).
+Last updated: 2026-08-16 (HACS 1.52.104 secure local access release).
 
 ## Current work
+
+- 2026-08-16 (Codex): HACS `1.52.104` добавляет безопасный путь для нового
+  компьютера. В разделе «Система» панель открывает или копирует HTTPS-адрес
+  текущего Home Assistant, а `docs/secure-local-access.md` объясняет проверку
+  SHA-256 и установку только публичного корневого сертификата в Windows.
+  HTTP, обход предупреждений браузера и автоматический импорт доверенного
+  центра намеренно не добавлены. Release commit и tag target `c06b54b`,
+  GitHub Release опубликован без assets. Full local gate: 1422 passed,
+  4 skipped за 172.995 s, включая package и repository safety. Home Assistant
+  не развёртывался и физические команды не отправлялись. Details:
+  `docs/RELEASE_AUDIT_1.52.104.md`.
 
 - 2026-08-15 (Codex): HACS `1.52.103` закреплён на contracts `0.37.0`
   (`643e97e`) и публикует защищённую read-only feature matrix: 19 типов
