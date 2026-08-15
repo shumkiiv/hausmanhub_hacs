@@ -2776,7 +2776,11 @@ class LocalSummaryAccessTest(unittest.TestCase):
                     )
                 )
                 self.assertEqual(403, panel.status)
-                self.assertEqual({"message"}, set(panel.payload))
+                self.assertEqual(
+                    {"contract", "code", "message", "retryable"},
+                    set(panel.payload),
+                )
+                self.assertEqual("forbidden", panel.payload["code"])
 
         tablet = reader_user("system-users")
         tablet_path = "/api/hausman_hub/v1/capabilities"
@@ -2786,7 +2790,11 @@ class LocalSummaryAccessTest(unittest.TestCase):
             )
         )
         self.assertEqual(403, tablet_response.status)
-        self.assertEqual({"message"}, set(tablet_response.payload))
+        self.assertEqual(
+            {"contract", "code", "message", "retryable"},
+            set(tablet_response.payload),
+        )
+        self.assertEqual("forbidden", tablet_response.payload["code"])
 
     def test_admin_panel_shows_managed_unavailable_readiness_without_snapshot(
         self,

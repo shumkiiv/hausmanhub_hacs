@@ -106,6 +106,7 @@ from .domain.ai_assistant import AiAdvisoryStatus, AiAssistantViolation
 from .domain.hub_settings import HausmanHubSettings
 from .dashboard_ha_snapshot import async_dashboard_snapshot
 from .energy_history_ha import async_energy_history
+from .error_taxonomy import api_error_payload, api_error_status
 from .device_maintenance_ha import (
     DeviceMaintenanceViolation,
     HomeAssistantDeviceMaintenanceService,
@@ -443,23 +444,11 @@ class ClimateRuntimeView(_ClimateView):
             return _forbidden(self)
         service = self._climate_tablet()
         if service is None:
-            return _api_error(
-                self,
-                "unavailable",
-                "Климатический API HausmanHub недоступен.",
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                retryable=True,
-            )
+            return _api_error(self, "unavailable")
         try:
             payload = await service.async_snapshot()
         except ClimateTabletUnavailable:
-            return _api_error(
-                self,
-                "unavailable",
-                "Климатический API HausmanHub недоступен.",
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                retryable=True,
-            )
+            return _api_error(self, "unavailable")
         return self.json(payload, headers=NO_STORE_HEADERS)
 
 
@@ -476,45 +465,16 @@ class ClimateActionView(_ClimateView):
             return _forbidden(self)
         service = self._climate_tablet()
         if service is None:
-            return _api_error(
-                self,
-                "unavailable",
-                "Климатический API HausmanHub недоступен.",
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                retryable=True,
-            )
+            return _api_error(self, "unavailable")
         try:
             payload = await _request_json(request)
             receipt = await service.async_execute(payload)
         except ClimateTabletViolation as error:
-            status = (
-                HTTPStatus.BAD_REQUEST
-                if error.code == "invalid_request"
-                else HTTPStatus.CONFLICT
-            )
-            return _api_error(
-                self,
-                error.code,
-                str(error),
-                status,
-                retryable=error.code in {"revision_conflict", "climate_state_stale"},
-            )
+            return _api_error(self, error.code)
         except (ValueError, json.JSONDecodeError):
-            return _api_error(
-                self,
-                "invalid_request",
-                "Запрос климатического действия некорректен.",
-                HTTPStatus.BAD_REQUEST,
-                retryable=False,
-            )
+            return _api_error(self, "invalid_request")
         except ClimateTabletUnavailable:
-            return _api_error(
-                self,
-                "unavailable",
-                "Климатический API HausmanHub недоступен.",
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                retryable=True,
-            )
+            return _api_error(self, "unavailable")
         publish_command_receipt(
             self._hass,
             receipt,
@@ -544,31 +504,13 @@ class ClimateOperationView(_ClimateView):
             return _forbidden(self)
         service = self._climate_tablet()
         if service is None:
-            return _api_error(
-                self,
-                "unavailable",
-                "Климатический API HausmanHub недоступен.",
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                retryable=True,
-            )
+            return _api_error(self, "unavailable")
         try:
             receipt = await service.async_operation(operation_id)
         except ClimateTabletOperationNotFound:
-            return _api_error(
-                self,
-                "climate_operation_not_found",
-                "Климатическая операция не найдена.",
-                HTTPStatus.NOT_FOUND,
-                retryable=False,
-            )
+            return _api_error(self, "climate_operation_not_found")
         except ClimateTabletUnavailable:
-            return _api_error(
-                self,
-                "unavailable",
-                "Климатический API HausmanHub недоступен.",
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                retryable=True,
-            )
+            return _api_error(self, "unavailable")
         return self.json(receipt, headers=NO_STORE_HEADERS)
 
 
@@ -3071,38 +3013,24 @@ def _is_local_address(
 
 
 def _not_found(view: HomeAssistantView) -> Any:
-    return view.json_message(
-        "The HausmanHub climate API route was not found.",
-        HTTPStatus.NOT_FOUND,
-        headers=NO_STORE_HEADERS,
-    )
+    return _api_error(view, "not_found")
 
 
 def _forbidden(view: HomeAssistantView) -> Any:
-    return view.json_message(
-        "Local HausmanHub access is required.",
-        HTTPStatus.FORBIDDEN,
-        headers=NO_STORE_HEADERS,
-    )
+    return _api_error(view, "forbidden")
 
 
 def _api_error(
     view: HomeAssistantView,
     code: str,
-    message: str,
-    status: HTTPStatus,
     *,
-    retryable: bool,
+    request_id: str | None = None,
+    details: Mapping[str, object] | None = None,
 ) -> Any:
-    """Return the strict public error envelope used by the new tablet routes."""
+    """Return the pinned safe error envelope used by strict tablet routes."""
 
     return view.json(
-        {
-            "contract": {"name": "hausman-hub-error", "version": 1},
-            "code": code,
-            "message": message,
-            "retryable": retryable,
-        },
-        status_code=status,
+        api_error_payload(code, request_id=request_id, details=details),
+        status_code=api_error_status(code),
         headers=NO_STORE_HEADERS,
     )
