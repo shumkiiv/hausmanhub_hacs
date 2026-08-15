@@ -61,13 +61,21 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         self.assertEqual("hausman_hub", manifest["domain"])
         self.assertTrue(manifest["config_flow"])
         self.assertTrue(manifest["single_config_entry"])
-        self.assertEqual("1.52.103", manifest["version"])
+        self.assertEqual("1.52.104", manifest["version"])
 
     def test_current_manifest_version_has_a_plain_change_note(self) -> None:
         manifest = json.loads((INTEGRATION / "manifest.json").read_text(encoding="utf-8"))
         change_history = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
 
         self.assertIn(f"## {manifest['version']} -", change_history)
+
+    def test_secure_local_access_guide_keeps_certificate_validation_enabled(self) -> None:
+        guide = (ROOT / "docs" / "secure-local-access.md").read_text(encoding="utf-8")
+
+        self.assertIn("https://<имя-дома>:8123/config/dashboard", guide)
+        self.assertIn("SHA-256", guide)
+        self.assertIn("не выбирайте обход", guide)
+        self.assertIn("certmgr.msc", guide)
 
     def test_local_access_guides_explain_the_exact_allowed_address_shapes(self) -> None:
         """The visible instructions must not weaken the checked address boundary."""

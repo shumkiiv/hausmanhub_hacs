@@ -29,6 +29,10 @@
 .system-technical-report summary { padding:15px 17px; cursor:pointer; font-size:14px; font-weight:650; }
 .system-technical-report pre { margin:0; padding:0 17px 17px; overflow:auto; color:var(--hmh-text-dim,#9AA7B4);
   font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace; white-space:pre-wrap; }
+.system-secure-access { margin-top:18px; padding:18px; border:1px solid var(--divider-color); border-radius:16px; background:var(--card-background-color); }
+.system-secure-access strong { display:block; font-size:16px; color:var(--primary-text-color); }
+.system-secure-access ol { margin:12px 0; padding-left:22px; color:var(--secondary-text-color); line-height:1.55; }
+.system-secure-access-actions { display:flex; flex-wrap:wrap; gap:10px; margin:14px 0 6px; }
 @media (max-width:760px) {
   .system-diagnostic-grid { grid-template-columns:1fr; }
   .system-diagnostic-item:last-child:nth-child(odd) { grid-column:auto; }

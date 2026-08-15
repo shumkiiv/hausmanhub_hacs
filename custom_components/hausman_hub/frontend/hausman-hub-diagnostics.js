@@ -1,5 +1,49 @@
 /* Redacted owner-facing diagnostics shared by the system page and copied report. */
 
+function secureDashboardUrl() {
+  const host = globalThis.location && globalThis.location.host;
+  return host ? `https://${host}/config/dashboard` : null;
+}
+
+async function copySecureUrl(button, url) {
+  try {
+    if (!globalThis.navigator?.clipboard?.writeText) {
+      throw new Error("Clipboard API is unavailable");
+    }
+    await globalThis.navigator.clipboard.writeText(url);
+    button.textContent = "Адрес скопирован";
+  } catch (error) {
+    button.textContent = "Скопируйте адрес вручную";
+  }
+}
+
+function renderSecureAccessGuide(deps) {
+  const { el } = deps;
+  const url = secureDashboardUrl();
+  const card = el("section", "system-secure-access");
+  card.appendChild(el("strong", null, "Безопасный доступ с нового компьютера"));
+  card.appendChild(el("p", "muted", "HausmanHub использует HTTPS. Не отключайте проверку сертификата и не продолжайте работу через предупреждение браузера."));
+  const steps = el("ol");
+  steps.appendChild(el("li", null, "Откройте безопасный адрес Home Assistant."));
+  steps.appendChild(el("li", null, "Если браузер не доверяет сертификату, установите только корневой сертификат, полученный от владельца дома, и сверяйте его отпечаток."));
+  steps.appendChild(el("li", null, "Полностью закройте браузер и откройте адрес снова."));
+  card.appendChild(steps);
+  if (url) {
+    const actions = el("div", "system-secure-access-actions");
+    const open = el("a", "hmh-button primary", "Открыть безопасный адрес");
+    open.href = url;
+    open.target = "_self";
+    actions.appendChild(open);
+    const copy = el("button", "hmh-button secondary", "Скопировать адрес");
+    copy.type = "button";
+    copy.addEventListener("click", () => copySecureUrl(copy, url));
+    actions.appendChild(copy);
+    card.appendChild(actions);
+  }
+  card.appendChild(el("p", "muted", "Автоматическая установка сертификата намеренно недоступна: Windows и браузер должны запросить ваше подтверждение."));
+  return card;
+}
+
 export function buildDiagnosticChecks(panel, readinessLabels) {
   const setup = panel._settings.setup || {};
   const summary = setup.summary || {};
@@ -99,6 +143,7 @@ export function renderDiagnosticDetails(panel, health, checks, deps) {
     diagnosticGrid.appendChild(card);
   });
   health.appendChild(diagnosticGrid);
+  health.appendChild(renderSecureAccessGuide(deps));
   const hints = checks.filter((check) => check.hint);
   if (hints.length) {
     const attention = el("div", "system-diagnostic-attention");
