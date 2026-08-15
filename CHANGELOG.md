@@ -1,5 +1,17 @@
 # История версий
 
+## 1.52.102 - 2026-08-15
+
+- Contracts pin обновлён до 0.36.0 (`28e1f4e`). SSE сообщает replay policy,
+  хранит 128 domain events и использует уникальный stream ID после каждого
+  restart. Неизвестный `Last-Event-ID` приводит к явному gap signal и
+  перечитыванию snapshot.
+- Operation journal получил keyset pagination через `before_sequence`, page
+  metadata и прежний durable retention 512 записей без TTL.
+- Energy history использует непересекающиеся окна `[from, to)` до 31 дня,
+  публикует source-bound Recorder retention и ограничивает размер series и
+  points. Физические команды и автоматические повторы не добавлялись.
+
 ## 1.52.101 - 2026-08-15
 
 - Все публичные команды принимают безопасный optional correlation ID по
