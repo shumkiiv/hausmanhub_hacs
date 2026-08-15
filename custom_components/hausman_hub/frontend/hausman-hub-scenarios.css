@@ -1,4 +1,4 @@
-@import url("./hausman-hub-scenario-device-picker.css?v=1.52.98");
+@import url("./hausman-hub-scenario-device-picker.css?v=1.52.99");
 
 /* Full scenario library and editor aligned with the HausmanHub tablet visual language. */
 .scenario-library-hero { display:grid; grid-template-columns:minmax(0,1.55fr) minmax(320px,.75fr); align-items:end; gap:28px; min-height:230px; padding:32px; overflow:hidden; border:1px solid color-mix(in srgb,var(--hmh-accent,#4D8DFF) 30%,var(--hmh-border,#2F3845)); border-radius:22px; color:var(--hmh-text,#E7ECF3); background:radial-gradient(circle at 82% 18%,color-mix(in srgb,var(--hmh-accent,#4D8DFF) 25%,transparent),transparent 42%),linear-gradient(135deg,color-mix(in srgb,var(--hmh-raised,#181E26) 88%,#08111f),var(--hmh-raised,#181E26)); box-shadow:0 22px 54px rgba(5,11,20,.14); }

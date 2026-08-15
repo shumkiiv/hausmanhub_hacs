@@ -1,5 +1,17 @@
 # История версий
 
+## 1.52.99 - 2026-08-15
+
+- Strict tablet и climate routes используют canonical error taxonomy из
+  contracts 0.34.0. Произвольный exception text больше не попадает в API:
+  code, HTTP status, retryable и безопасное русское сообщение выбираются по
+  закреплённой policy.
+- Unknown error code fail-closed превращается в `internal_error`, request ID
+  ограничен, details фильтруются по allowlist. Forbidden и not-found ответы
+  теперь соответствуют общему `hausman-hub-error v1` envelope.
+- Consumer pin обновлён до contracts 0.34.0 (`7d4a2f9`). Автоматический повтор
+  физических команд по одному `retryable=true` по-прежнему запрещён.
+
 ## 1.52.98 - 2026-08-15
 
 - Runtime capability `voice_greeting` рекламирует `POST` test method и точные
