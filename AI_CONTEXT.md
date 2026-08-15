@@ -1,8 +1,23 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-15 (HACS 1.52.100 canonical error taxonomy release).
+Last updated: 2026-08-15 (HACS 1.52.101 correlation ID release).
 
 ## Current work
+
+- 2026-08-15 (Codex): HACS `1.52.101` закреплён на contracts `0.35.0`
+  (`0327f2c`) и проводит один optional correlation ID через публичные команды,
+  receipts, SSE, operation journal, dashboard activity, alarms, device
+  discovery и metadata сценарных уведомлений. Некорректный ID отклоняется до
+  команды, старые клиенты остаются совместимыми. Backend commit `62945bf`,
+  release commit и tag target `ae64952`; GitHub Release опубликован. Full gate:
+  1417 passed, 4 skipped; Actions `31883493197` success. Production backup
+  `87c14426` размером 900 362 240 байт находится локально и на KeeneticSSD,
+  включает Home Assistant 2026.8.2, базу, три папки и десять add-ons. После
+  установки, двух config checks и одного restart installed/latest и panel
+  равны `1.52.101`; 9 из 9 сущностей доступны, runtime fresh/managed, active
+  operations и blocked reasons 0, system log чист. Live SSE, dashboard и
+  journal подтверждают correlation ID. Физические команды не отправлялись.
+  Details: `docs/RELEASE_AUDIT_1.52.101.md`.
 
 - 2026-08-15 (Codex): HACS `1.52.100` enforces the canonical API error
   taxonomy from contracts `0.34.0` (`7d4a2f9`) on strict tablet and climate
