@@ -1,20 +1,24 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-15 (unreleased optional capability metadata).
+Last updated: 2026-08-15 (HACS 1.52.98 capability metadata release).
 
 ## Current work
 
-- 2026-08-15 (Codex): unreleased backend commit `438eadf` updates the HACS
-  consumer pin to contracts `0.32.2` (`6420ba2`) and publishes the exact
-  `voice_greeting` test method plus request and receipt contract identities.
-  The schema and synthetic runtime fixture accept the additive optional
-  fields, while older clients may ignore them. Full pytest: 1411 passed,
-  4 skipped, 929 subtests; package, repository boundary, product naming,
-  synthetic fixtures and Android compatibility checks passed. HACS remains
-  `1.52.97`; no tag, release, deploy or production operation was performed.
-  Next: Android must consume `inventory/optional-capabilities.json` from the
-  contracts repository and add fail-closed consumer tests before a coordinated
-  release.
+- 2026-08-15 (Codex): HACS `1.52.98` publishes the exact `voice_greeting`
+  `POST` test method plus request and receipt contract identities. Consumer pin
+  is contracts `0.32.3` (`67acee1`), whose fixture set covers all ten Android
+  production screens. The change is additive and older clients may ignore the
+  optional metadata. Backend commit `438eadf`, release commit `c00215e`, tag
+  and GitHub Release are published. Focused gate: 44 tests and 222 subtests;
+  full gate: 1411 passed, 4 skipped and 929 subtests; Actions `31878143953`
+  success. Production backup `214c8013` is full, includes the database and is
+  stored locally plus on KeeneticSSD; a separate 1.52.97 component archive is
+  available. Two config checks and one restart passed. Installed/latest,
+  manifest and panel are 1.52.98, 104 cache refs are current and none remain on
+  1.52.97. All nine integration entities plus the HACS update entity are
+  available, runtime is fresh, active operations and blocked reasons are zero,
+  and system log has no HausmanHub entries. No physical command was sent.
+  Details: `docs/RELEASE_AUDIT_1.52.98.md`.
 
 - 2026-08-15 (Codex): HACS `1.52.97` stops false curtain runs caused by
   Home Assistant device recovery. A state transition with a missing,
