@@ -1,8 +1,17 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-16 (HACS 1.52.107 frontend error taxonomy).
+Last updated: 2026-08-16 (HACS 1.52.108 frontend UI state projection).
 
 ## Current work
+
+- 2026-08-16 (Kimi): HACS `1.52.108` добавляет общий UI state
+  `hausman-hub-ui-state v1` (contracts `0.33.0`): новый модуль
+  `frontend/hausman-hub-ui-state.js` с pinned snapshot семи golden fixtures
+  (завендорены в `contracts/v1/ui-state/`) и fail-closed parity-тестом
+  `tests/test_frontend_ui_state.py`. Панель проецирует loading/stale/offline
+  на экран, запрещает физические команды в stale/offline/pending/disabled,
+  confirmed принимает только receipt `confirmed=true` с read-back, optional
+  slice изолирован от остального dashboard. Backend не менялся.
 
 - 2026-08-16 (Kimi): HACS `1.52.107` переводит панель на canonical error
   taxonomy `hausman-hub-error-taxonomy v1` (contracts `0.34.0`): новый

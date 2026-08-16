@@ -1,0 +1,12 @@
+{
+  "contract": {"name": "hausman-hub-ui-state", "version": 1},
+  "state": "failed",
+  "scope": "command",
+  "commandsAllowed": false,
+  "message": "Не удалось выполнить команду",
+  "retryAction": "retry",
+  "updatedAt": "2026-08-15T10:25:00Z",
+  "dataAgeSeconds": null,
+  "operationId": "operation-demo-001",
+  "reasonCode": "command_failed"
+}

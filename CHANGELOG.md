@@ -1,5 +1,21 @@
 # История версий
 
+## 1.52.108 - 2026-08-16
+
+- Панель переведена на общий UI state `hausman-hub-ui-state v1` (contracts
+  `0.33.0`): новый модуль `frontend/hausman-hub-ui-state.js` хранит pinned
+  snapshot семи golden fixtures, завендоренных в `contracts/v1/ui-state/`, и
+  проецирует подтверждённые серверные факты в состояния loading, stale,
+  offline, pending, confirmed, failed и disabled.
+- Физические команды запрещены в состояниях stale, offline, pending и
+  disabled: stale предлагает отдельное обновление, offline - переподключение,
+  confirmed принимается только по receipt с `confirmed=true` и read-back,
+  failed сохраняет operation ID. Ошибка optional slice не скрывает остальные
+  разделы dashboard, а disabled показывается явно.
+- Добавлен fail-closed parity-тест `tests/test_frontend_ui_state.py`:
+  snapshot сверяется с завендоренными fixtures, семантические мутации
+  отклоняются, невалидный ввод не разблокирует команды. Backend не менялся.
+
 ## 1.52.107 - 2026-08-16
 
 - Панель переведена на canonical error taxonomy `hausman-hub-error-taxonomy v1`:

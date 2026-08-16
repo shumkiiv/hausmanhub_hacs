@@ -1,0 +1,12 @@
+{
+  "contract": {"name": "hausman-hub-ui-state", "version": 1},
+  "state": "offline",
+  "scope": "screen",
+  "commandsAllowed": false,
+  "message": "Нет связи с Home Assistant",
+  "retryAction": "reconnect",
+  "updatedAt": "2026-08-15T10:25:00Z",
+  "dataAgeSeconds": 180,
+  "operationId": null,
+  "reasonCode": "home_assistant_offline"
+}

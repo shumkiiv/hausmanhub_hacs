@@ -26,6 +26,7 @@ DEVICES_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-devices-overview.js")
 TECHNICAL_LOG_JS = PANEL_JS.with_name("hausman-hub-technical-log.js")
 FEEDBACK_JS = PANEL_JS.with_name("hausman-hub-feedback.js")
 ERROR_TAXONOMY_JS = PANEL_JS.with_name("hausman-hub-error-taxonomy.js")
+UI_STATE_JS = PANEL_JS.with_name("hausman-hub-ui-state.js")
 KIOSK_JS = PANEL_JS.with_name("hausman-hub-kiosk.js")
 SETTINGS_PROFILE_JS = PANEL_JS.with_name("hausman-hub-settings-profile.js")
 SETTINGS_ROOMS_JS = PANEL_JS.with_name("hausman-hub-settings-rooms.js")
@@ -654,6 +655,10 @@ def panel_script(
       vm.runInThisContext(
         fs.readFileSync({str(ERROR_TAXONOMY_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(ERROR_TAXONOMY_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(UI_STATE_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(UI_STATE_JS)!r} }}
       );
       const log = recordTechnicalEvent;
       vm.runInThisContext(
@@ -4054,7 +4059,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.107")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.108")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;
@@ -4963,7 +4968,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         getTable["hausman_hub/v1/admin/panel"] = { __fail: true };
         await panel._load();
         let text = textOf(panel.shadowRoot);
-        if (!text.includes("недоступны")) throw new Error("error banner missing after GET failure");
+        if (!text.includes("Нет связи с Home Assistant")) throw new Error("error banner missing after GET failure");
         if (panel._shell.banner.style.display === "none") throw new Error("banner must be visible after GET failure");
         const preserved = findAll(panel.shadowRoot, (node) => node.type === "number")
           .find((node) => String(node.value) === "24.5");
