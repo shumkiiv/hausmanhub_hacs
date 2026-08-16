@@ -1,8 +1,19 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-16 (HACS 1.52.104 secure local access release).
+Last updated: 2026-08-16 (HACS 1.52.106 copy release and production install).
 
 ## Current work
+
+- 2026-08-16 (Codex): HACS `1.52.106` завершает copy-release: интеграция
+  называется `Hausman for Home Assistant`, а панель и пользовательские
+  подсказки используют `Hausman Hub`; технический domain и API сохранены.
+  Release commit и tag target `a8c7590`, GitHub Release опубликован без
+  assets. Full local gate: 1422 passed, 4 skipped. Перед установкой принят
+  config check и запрошен automatic backup. `update.install` явно установил
+  `v1.52.106`, installed/latest совпали до restart. После единственного
+  restart API Home Assistant не восстановился в контрольное время, поэтому
+  post-restart проверки панели, runtime и system log не выполнены. Новые
+  изменяющие команды не отправлялись.
 
 - 2026-08-16 (Codex): HACS `1.52.104` добавляет безопасный путь для нового
   компьютера. В разделе «Система» панель открывает или копирует HTTPS-адрес
