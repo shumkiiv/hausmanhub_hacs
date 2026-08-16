@@ -1,8 +1,19 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-16 (HACS 1.52.109 frontend device feature matrix).
+Last updated: 2026-08-16 (HACS 1.52.110 frontend correlation ID).
 
 ## Current work
+
+- 2026-08-16 (Kimi): HACS `1.52.110` подключает панель к correlation ID
+  `hausman-hub-correlation-surfaces v1` (contracts `0.35.0`): новый модуль
+  `frontend/hausman-hub-correlation.js` с pinned snapshot матрицы (10 command
+  surfaces, 5 notification surfaces), вендорской копией
+  `contracts/v1/correlation-surfaces.json` и fail-closed parity-тестом
+  `tests/test_frontend_correlation_id.py`. Команды панели (`_post`, климат,
+  device actions, device maintenance, сценарии run/cancel) отправляют свежий
+  неприватный ID `corr.panel.<32 hex>` в поле из матрицы; invalid ID
+  блокируется до API-вызова; discovery-уведомления дедуплицируются по ID
+  через bounded tracker (256). Backend не менялся.
 
 - 2026-08-16 (Kimi): HACS `1.52.109` подключает панель к device feature
   matrix `hausman-hub-device-feature-matrix v1` (contracts `0.37.0`): новый

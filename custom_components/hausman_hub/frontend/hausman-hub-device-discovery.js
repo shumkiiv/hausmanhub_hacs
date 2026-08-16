@@ -1,5 +1,7 @@
 /* New-device discovery notifications: pending list, tab badge and actions. */
 
+import { dedupeCorrelationNotifications } from "./hausman-hub-correlation.js?v=1.52.110";
+
 export const DEVICE_DISCOVERY_API = "hausman_hub/v1/device-discovery";
 
 const DISCOVERY_ACTION_KINDS = ["assign_area", "add_to_energy", "show_on_dashboard"];
@@ -19,7 +21,8 @@ const DISCOVERY_SUCCESS_TEXT = {
 
 export function deviceDiscoveryNotifications(panel) {
   const data = panel._deviceDiscovery;
-  return data && Array.isArray(data.notifications) ? data.notifications : [];
+  const list = data && Array.isArray(data.notifications) ? data.notifications : [];
+  return dedupeCorrelationNotifications(list);
 }
 
 export function deviceDiscoveryPendingCount(panel) {

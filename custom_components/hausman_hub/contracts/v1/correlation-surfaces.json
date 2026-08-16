@@ -1,0 +1,135 @@
+{
+  "contract": {
+    "name": "hausman-hub-correlation-surfaces",
+    "version": 1
+  },
+  "idPattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+  "generation": {
+    "clientMayProvide": true,
+    "serverGeneratesWhenMissing": true,
+    "serverMustPreserveValidClientValue": true,
+    "fallbackToRequestIdAllowed": true
+  },
+  "commands": [
+    {
+      "operationId": "applyHausmanHubContour",
+      "requestSchema": "schemas/v1/contour-apply-request.schema.json",
+      "requestField": "correlation_id",
+      "receiptSchema": "schemas/v1/climate-control-receipt.schema.json",
+      "receiptField": "correlation_id",
+      "journalSource": "climate"
+    },
+    {
+      "operationId": "setHausmanHubTemporaryTemperature",
+      "requestSchema": "schemas/v1/temporary-temperature-request.schema.json",
+      "requestField": "correlation_id",
+      "receiptSchema": "schemas/v1/climate-control-receipt.schema.json",
+      "receiptField": "correlation_id",
+      "journalSource": "climate"
+    },
+    {
+      "operationId": "setHausmanHubHomeClimateTargets",
+      "requestSchema": "schemas/v1/home-climate-targets-request.schema.json",
+      "requestField": "correlation_id",
+      "receiptSchema": "schemas/v1/climate-control-receipt.schema.json",
+      "receiptField": "correlation_id",
+      "journalSource": "climate"
+    },
+    {
+      "operationId": "executeHausmanHubClimateAction",
+      "requestSchema": "schemas/v1/climate-action-request.schema.json",
+      "requestField": "correlation_id",
+      "receiptSchema": "schemas/v1/climate-operation-receipt.schema.json",
+      "receiptField": "correlation_id",
+      "journalSource": "climate"
+    },
+    {
+      "operationId": "executeHausmanHubDeviceAction",
+      "requestSchema": "schemas/v1/device-action-request.schema.json",
+      "requestField": "correlationId",
+      "receiptSchema": "schemas/v1/device-action-receipt.schema.json",
+      "receiptField": "correlationId",
+      "journalSource": "device"
+    },
+    {
+      "operationId": "maintainHausmanHubDevice",
+      "requestSchema": "schemas/v1/device-maintenance-request.schema.json",
+      "requestField": "correlationId",
+      "receiptSchema": "schemas/v1/device-maintenance-receipt.schema.json",
+      "receiptField": "correlationId",
+      "journalSource": "device"
+    },
+    {
+      "operationId": "runHausmanHubScenario",
+      "requestField": "correlationId",
+      "receiptField": "correlationId",
+      "journalSource": "scenario"
+    },
+    {
+      "operationId": "dispatchHausmanHubScenarioAction",
+      "requestField": "correlationId",
+      "receiptField": "correlationId",
+      "journalSource": "scenario"
+    },
+    {
+      "operationId": "cancelHausmanHubScenarioUpcoming",
+      "requestSchema": "schemas/v1/scenario-upcoming-cancel-request.schema.json",
+      "requestField": "correlationId",
+      "receiptSchema": "schemas/v1/scenario-upcoming-cancel-receipt.schema.json",
+      "receiptField": "correlationId",
+      "journalSource": "scenario"
+    },
+    {
+      "operationId": "testHausmanHubVoiceGreeting",
+      "requestSchema": "schemas/v1/voice-greeting-test-request.schema.json",
+      "requestField": "correlationId",
+      "receiptSchema": "schemas/v1/voice-command-receipt.schema.json",
+      "receiptField": "correlationId",
+      "journalSource": "voice"
+    }
+  ],
+  "events": {
+    "schema": "schemas/v1/event-stream-message.schema.json",
+    "messageField": "correlation_id",
+    "commandReceiptField": "data.correlation_id",
+    "allTypes": [
+      "hello",
+      "snapshot_invalidated",
+      "critical_alert",
+      "attention_alert",
+      "command_receipt",
+      "heartbeat"
+    ]
+  },
+  "operationJournal": {
+    "schema": "schemas/v1/operation-journal.schema.json",
+    "recordField": "correlation_id",
+    "mustMatchCommandReceipt": true
+  },
+  "notifications": [
+    {
+      "surface": "device_discovery",
+      "schema": "schemas/v1/device-discovery.schema.json",
+      "field": "notifications[].correlationId"
+    },
+    {
+      "surface": "dashboard_alarm",
+      "schema": "schemas/v1/dashboard-snapshot.schema.json",
+      "field": "alarms[].correlationId"
+    },
+    {
+      "surface": "dashboard_event",
+      "schema": "schemas/v1/dashboard-snapshot.schema.json",
+      "field": "events[].correlationId"
+    },
+    {
+      "surface": "sse_alert",
+      "schema": "schemas/v1/event-stream-message.schema.json",
+      "field": "correlation_id"
+    },
+    {
+      "surface": "scenario_notify_service",
+      "field": "serviceData.data.correlation_id"
+    }
+  ]
+}

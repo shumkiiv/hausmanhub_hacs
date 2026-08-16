@@ -1,4 +1,5 @@
-import { dupAttention, dupCompare, dupFilter, dupGroups, dupGuide, dupSize, dupView } from "./hausman-hub-inventory-duplicates.js?v=1.52.109";
+import { dupAttention, dupCompare, dupFilter, dupGroups, dupGuide, dupSize, dupView } from "./hausman-hub-inventory-duplicates.js?v=1.52.110";
+import { withCorrelationId } from "./hausman-hub-correlation.js?v=1.52.110";
 
 const DEVICE_MAINTENANCE_API = "hausman_hub/v1/admin/device-maintenance";
 const Z2M_DEVICE_IMAGE =
@@ -78,11 +79,11 @@ async function runAction(panel, device, action, payload, repaint) {
   state.messageTone = "";
   repaint();
   try {
-    await panel._hass.callApi("POST", DEVICE_MAINTENANCE_API, {
+    await panel._hass.callApi("POST", DEVICE_MAINTENANCE_API, withCorrelationId(DEVICE_MAINTENANCE_API, {
       contract: { name: "hausman-hub-device-maintenance-request", version: 1 },
       expectedRevision: state.data.snapshotRevision,
       action, deviceId: device.id, ...payload,
-    });
+    }));
     state.message = action === "update"
       ? "Название и комната сохранены в Home Assistant."
       : action === "identify"

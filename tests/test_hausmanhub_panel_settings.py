@@ -28,6 +28,7 @@ FEEDBACK_JS = PANEL_JS.with_name("hausman-hub-feedback.js")
 ERROR_TAXONOMY_JS = PANEL_JS.with_name("hausman-hub-error-taxonomy.js")
 UI_STATE_JS = PANEL_JS.with_name("hausman-hub-ui-state.js")
 DEVICE_FEATURES_JS = PANEL_JS.with_name("hausman-hub-device-features.js")
+CORRELATION_JS = PANEL_JS.with_name("hausman-hub-correlation.js")
 KIOSK_JS = PANEL_JS.with_name("hausman-hub-kiosk.js")
 SETTINGS_PROFILE_JS = PANEL_JS.with_name("hausman-hub-settings-profile.js")
 SETTINGS_ROOMS_JS = PANEL_JS.with_name("hausman-hub-settings-rooms.js")
@@ -554,7 +555,7 @@ def panel_script(
         {{ filename: {str(INVENTORY_DUPLICATES_JS)!r} }}
       );
       vm.runInThisContext(
-        fs.readFileSync({str(DEVICE_INVENTORY_JS)!r}, "utf8").replace(/^import[\s\S]*?from .*;\s*/, "").replace("export function renderDeviceInventory", "function renderDeviceInventory"),
+        fs.readFileSync({str(DEVICE_INVENTORY_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, "").replace("export function renderDeviceInventory", "function renderDeviceInventory"),
         {{ filename: {str(DEVICE_INVENTORY_JS)!r} }}
       );
       vm.runInThisContext(
@@ -582,7 +583,7 @@ def panel_script(
         {{ filename: {str(ENERGY_METER_JS)!r} }}
       );
       vm.runInThisContext(
-        fs.readFileSync({str(DEVICE_DISCOVERY_JS)!r}, "utf8").replace(/export /g, ""),
+        fs.readFileSync({str(DEVICE_DISCOVERY_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(DEVICE_DISCOVERY_JS)!r} }}
       );
       vm.runInThisContext(
@@ -664,6 +665,10 @@ def panel_script(
       vm.runInThisContext(
         fs.readFileSync({str(DEVICE_FEATURES_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(DEVICE_FEATURES_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(CORRELATION_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(CORRELATION_JS)!r} }}
       );
       const log = recordTechnicalEvent;
       vm.runInThisContext(
@@ -4064,7 +4069,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.109")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.110")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_DIR = ROOT / "custom_components" / "hausman_hub" / "frontend"
 TAXONOMY_JS = FRONTEND_DIR / "hausman-hub-error-taxonomy.js"
 CLIMATE_OVERVIEW_JS = FRONTEND_DIR / "hausman-hub-climate-overview.js"
+CORRELATION_JS = FRONTEND_DIR / "hausman-hub-correlation.js"
 CANONICAL_JSON = (
     ROOT
     / "custom_components"
@@ -196,11 +197,15 @@ class FrontendErrorTaxonomyTest(unittest.TestCase):
           import fs from "node:fs";
           const taxonomyUrl = `data:text/javascript;base64,${Buffer.from(
             fs.readFileSync(process.argv[1], "utf8")).toString("base64")}`;
+          const correlationUrl = `data:text/javascript;base64,${Buffer.from(
+            fs.readFileSync(process.argv[3], "utf8")).toString("base64")}`;
           let source = fs.readFileSync(process.argv[2], "utf8");
           source = source
             .replace(/^import .*library-hero.*$/m, "const createLibraryHero = () => null;")
             .replace(/^import .*modal.*$/m, "const enhanceAppendedModal = () => null;")
             .replace(/^import .*room-icons.*$/m, 'const roomIconName = () => ""; const roomSvgIcon = () => null;')
+            .replace(/^import .*correlation.*$/m,
+              `import { withCorrelationId } from "${correlationUrl}";`)
             .replace(/^import .*error-taxonomy.*$/m,
               `import { pendingOperationId, requiresSnapshotRefresh, resolveApiError, resolveClimateReceipt } from "${taxonomyUrl}";`);
           const mod = await import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
@@ -288,7 +293,7 @@ class FrontendErrorTaxonomyTest(unittest.TestCase):
           if (await mod.setClimateManualMode(confirmedPanel, ...manualArgs) !== true) fail("confirmed action failed");
           if (confirmedPanel._notice !== "Ручной режим включён.") fail("success notice lost");
         """
-        result = run_node_module(script, str(TAXONOMY_JS), str(CLIMATE_OVERVIEW_JS))
+        result = run_node_module(script, str(TAXONOMY_JS), str(CLIMATE_OVERVIEW_JS), str(CORRELATION_JS))
         self.assertEqual(0, result.returncode, result.stderr)
 
     def test_panel_wiring_uses_taxonomy_module(self) -> None:

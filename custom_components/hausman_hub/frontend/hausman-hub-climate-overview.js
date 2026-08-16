@@ -1,9 +1,10 @@
 /* Climate control surface shared with the tablet information architecture. */
 
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.109";
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.109";
-import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.109";
-import { pendingOperationId, requiresSnapshotRefresh, resolveApiError, resolveClimateReceipt } from "./hausman-hub-error-taxonomy.js?v=1.52.109";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.110";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.110";
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.110";
+import { pendingOperationId, requiresSnapshotRefresh, resolveApiError, resolveClimateReceipt } from "./hausman-hub-error-taxonomy.js?v=1.52.110";
+import { withCorrelationId } from "./hausman-hub-correlation.js?v=1.52.110";
 
 const CLIMATE_ACTION_API = "hausman_hub/v1/climate/actions";
 const CLIMATE_OPERATION_API = "hausman_hub/v1/climate/operations";
@@ -36,14 +37,14 @@ export async function synchronizeClimate(panel) {
   panel._error = false;
   panel._render();
   try {
-    const receipt = await panel._hass.callApi("POST", CLIMATE_ACTION_API, {
+    const receipt = await panel._hass.callApi("POST", CLIMATE_ACTION_API, withCorrelationId(CLIMATE_ACTION_API, {
       contract: { name: "hausman-hub-climate-action-request", version: 1 },
       request_id: `hacs.climate.sync.${Date.now().toString(36)}`,
       expected_state_revision: panel._climateRuntime.state_revision,
       action: "synchronize_home",
       room_id: null,
       parameters: {},
-    });
+    }));
     if (!receipt || receipt.confirmed !== true) {
       await failClimateAction(panel, null, receipt);
       return false;
@@ -69,7 +70,7 @@ export async function setClimateManualMode(panel, roomId, deviceId, manual) {
   panel._notice = manual ? "Переводим в ручной режим..." : "Возвращаем в автоматику...";
   panel._render();
   try {
-    const receipt = await panel._hass.callApi("POST", CLIMATE_ACTION_API, {
+    const receipt = await panel._hass.callApi("POST", CLIMATE_ACTION_API, withCorrelationId(CLIMATE_ACTION_API, {
       contract: { name: "hausman-hub-climate-action-request", version: 1 },
       request_id: `hacs.climate.${Date.now().toString(36)}`,
       expected_state_revision: panel._climateRuntime.state_revision,
@@ -78,7 +79,7 @@ export async function setClimateManualMode(panel, roomId, deviceId, manual) {
       parameters: deviceId
         ? { device_id: deviceId, mode: manual ? "manual" : "automatic" }
         : { mode: manual ? "manual" : "automatic" },
-    });
+    }));
     if (!receipt || receipt.confirmed !== true) {
       await failClimateAction(panel, null, receipt);
       return false;
@@ -104,14 +105,14 @@ export async function setClimateRoomTarget(panel, roomId, action, parameter, val
   panel._notice = "Сохраняем климатическую цель...";
   panel._render();
   try {
-    const receipt = await panel._hass.callApi("POST", CLIMATE_ACTION_API, {
+    const receipt = await panel._hass.callApi("POST", CLIMATE_ACTION_API, withCorrelationId(CLIMATE_ACTION_API, {
       contract: { name: "hausman-hub-climate-action-request", version: 1 },
       request_id: `hacs.climate.${Date.now().toString(36)}`,
       expected_state_revision: panel._climateRuntime.state_revision,
       action,
       room_id: roomId,
       parameters: { [parameter]: value },
-    });
+    }));
     if (!receipt || receipt.confirmed !== true) {
       await failClimateAction(panel, null, receipt);
       return false;
@@ -141,14 +142,14 @@ export async function setClimateHomeTarget(panel, targetTemperature) {
   panel._error = false;
   panel._render();
   try {
-    const receipt = await panel._hass.callApi("POST", CLIMATE_ACTION_API, {
+    const receipt = await panel._hass.callApi("POST", CLIMATE_ACTION_API, withCorrelationId(CLIMATE_ACTION_API, {
       contract: { name: "hausman-hub-climate-action-request", version: 1 },
       request_id: `hacs.climate.home.${Date.now().toString(36)}`,
       expected_state_revision: panel._climateRuntime.state_revision,
       action: "set_home_targets",
       room_id: null,
       parameters: { target_temperature: targetTemperature },
-    });
+    }));
     if (!receipt || receipt.confirmed !== true) {
       await failClimateAction(panel, null, receipt);
       return false;

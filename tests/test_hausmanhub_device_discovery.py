@@ -10,6 +10,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "custom_components" / "hausman_hub" / "frontend"
 DISCOVERY_JS = FRONTEND / "hausman-hub-device-discovery.js"
+CORRELATION_JS = FRONTEND / "hausman-hub-correlation.js"
 
 FIXTURE = {
     "contract": {"name": "hausman-hub-device-discovery", "version": 1},
@@ -129,7 +130,14 @@ HARNESS = """
   };
 
   vm.runInThisContext(
-    fs.readFileSync(__DISCOVERY_JS__, "utf8").replace(/export /g, ""),
+    fs.readFileSync(__CORRELATION_JS__, "utf8").replace(/export /g, ""),
+    { filename: __CORRELATION_JS__ }
+  );
+
+  vm.runInThisContext(
+    fs.readFileSync(__DISCOVERY_JS__, "utf8")
+      .replace(/^import .*$/gm, "")
+      .replace(/export /g, ""),
     { filename: __DISCOVERY_JS__ }
   );
 
@@ -177,6 +185,7 @@ class DeviceDiscoveryFrontendTest(unittest.TestCase):
 
     def _run_script(self, body: str) -> subprocess.CompletedProcess[str]:
         script = (HARNESS
+            .replace("__CORRELATION_JS__", repr(str(CORRELATION_JS)))
             .replace("__DISCOVERY_JS__", repr(str(DISCOVERY_JS)))
             .replace("__FIXTURE__", json.dumps(FIXTURE, ensure_ascii=False))) + body
         return subprocess.run(

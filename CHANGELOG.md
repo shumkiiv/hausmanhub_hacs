@@ -1,5 +1,28 @@
 # История версий
 
+## 1.52.110 - 2026-08-16
+
+- Панель подключена к correlation ID `hausman-hub-correlation-surfaces v1`
+  (contracts `0.35.0`): новый модуль
+  `frontend/hausman-hub-correlation.js` хранит pinned snapshot матрицы
+  (10 командных поверхностей, 5 поверхностей уведомлений) и вендорскую копию
+  в `contracts/v1/correlation-surfaces.json`.
+- Каждая пользовательская команда панели получает свежий неприватный ID
+  формата `corr.panel.<32 hex>`: контур и временная температура через
+  `_post`, климатические действия, device actions, device maintenance и
+  сценарии run/cancel. Поле (`correlation_id` или `correlationId`) выбирается
+  из матрицы по пути endpoint; неизвестный путь не меняется, legacy payload
+  без ID продолжает работать.
+- Invalid ID блокируется до API-вызова (`requireValidCorrelationId`), а
+  повторное событие или повторное чтение журнала с тем же ID не создаёт новую
+  карточку уведомления: `deviceDiscoveryNotifications` дедуплицирует список
+  через bounded tracker (лимит 256).
+- Добавлен fail-closed parity-тест `tests/test_frontend_correlation_id.py`:
+  snapshot сверяется с вендорской матрицей, все десять command surfaces
+  проверяются параметризованно, семантические мутации отклоняются, contract
+  fixtures подтверждают совпадение ID в запросе, receipt, событии и журнале.
+  Backend не менялся.
+
 ## 1.52.109 - 2026-08-16
 
 - Панель подключена к device feature matrix `hausman-hub-device-feature-matrix
