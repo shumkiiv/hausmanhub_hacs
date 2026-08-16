@@ -1,5 +1,28 @@
 # История версий
 
+## 1.52.109 - 2026-08-16
+
+- Панель подключена к device feature matrix `hausman-hub-device-feature-matrix
+  v1` (contracts `0.37.0`): новый модуль
+  `frontend/hausman-hub-device-features.js` хранит pinned snapshot матрицы
+  (19 типов устройств, 24 группы управления, 41 привязка действий, 25
+  уникальных action ID, 6 read-only типов) и загружает свежую матрицу с
+  `GET /api/hausman_hub/v1/device-features`, только когда capabilities
+  объявляют путь, метод и контракт.
+- Detail sheet показывает действия как пересечение матрицы с runtime scenario
+  catalog: матрица задаёт верхнюю границу, неизвестный тип остаётся read-only,
+  неизвестный control скрывается, клиент не создаёт action ID самостоятельно.
+  Границы и варианты значений берутся из runtime catalog properties,
+  контрактные границы - только при `contract_bounds`.
+- Отсутствующие metadata матрицы в capabilities не ломают старый API v1:
+  панель без сетевого вызова переходит на pinned snapshot. Receipt и
+  состояния pending/error из `hausman-hub-ui-state v1` сохранены. Backend не
+  менялся.
+- Добавлен fail-closed parity-тест
+  `tests/test_frontend_device_feature_matrix.py`: snapshot сверяется с
+  завендоренной fixture, authority-блок и счётчики проверяются целиком,
+  семантические мутации отклоняются.
+
 ## 1.52.108 - 2026-08-16
 
 - Панель переведена на общий UI state `hausman-hub-ui-state v1` (contracts

@@ -42,6 +42,7 @@ TECHNICAL_LOG_JS = PANEL_JS.with_name("hausman-hub-technical-log.js")
 FEEDBACK_JS = PANEL_JS.with_name("hausman-hub-feedback.js")
 ERROR_TAXONOMY_JS = PANEL_JS.with_name("hausman-hub-error-taxonomy.js")
 UI_STATE_JS = PANEL_JS.with_name("hausman-hub-ui-state.js")
+DEVICE_FEATURES_JS = PANEL_JS.with_name("hausman-hub-device-features.js")
 KIOSK_JS = PANEL_JS.with_name("hausman-hub-kiosk.js")
 ROLLOUT_JS = PANEL_JS.with_name("hausman-hub-rollout.js")
 
@@ -441,6 +442,10 @@ def panel_script(get_table: dict, post_table: dict, assertions: str) -> str:
       vm.runInThisContext(
         fs.readFileSync({str(UI_STATE_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(UI_STATE_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(DEVICE_FEATURES_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(DEVICE_FEATURES_JS)!r} }}
       );
       const log = recordTechnicalEvent;
       vm.runInThisContext(

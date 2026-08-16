@@ -1,8 +1,19 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-16 (HACS 1.52.108 frontend UI state projection).
+Last updated: 2026-08-16 (HACS 1.52.109 frontend device feature matrix).
 
 ## Current work
+
+- 2026-08-16 (Kimi): HACS `1.52.109` подключает панель к device feature
+  matrix `hausman-hub-device-feature-matrix v1` (contracts `0.37.0`): новый
+  модуль `frontend/hausman-hub-device-features.js` с pinned snapshot матрицы
+  (19 типов, 24 control group, 41 binding, 25 уникальных action ID) и
+  fail-closed parity-тестом `tests/test_frontend_device_feature_matrix.py`.
+  Матрица загружается с `GET /api/hausman_hub/v1/device-features` только при
+  объявленных capabilities metadata, иначе pinned snapshot без сетевого
+  вызова. Действия в detail sheet - пересечение матрицы с runtime scenario
+  catalog, неизвестный тип read-only, неизвестный control скрыт. Backend не
+  менялся.
 
 - 2026-08-16 (Kimi): HACS `1.52.108` добавляет общий UI state
   `hausman-hub-ui-state v1` (contracts `0.33.0`): новый модуль
