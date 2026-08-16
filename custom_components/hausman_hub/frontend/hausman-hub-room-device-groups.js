@@ -1,4 +1,4 @@
-import { createControlChannelAssistant, recommendControlChannel } from "./hausman-hub-control-channel.js?v=1.52.104";
+import { createControlChannelAssistant, recommendControlChannel } from "./hausman-hub-control-channel.js?v=1.52.106";
 
 export function renderFirstRunDeviceGroups(owner, choiceList, room, fields, allChoices, searchable, deps) {
   const {
@@ -116,7 +116,7 @@ export function renderFirstRunDeviceGroups(owner, choiceList, room, fields, allC
         channelRow = el("label", "device-channel-field");
         const channelCopy = el("span", "device-channel-copy");
         channelCopy.appendChild(el("strong", null, "Способ управления"));
-        channelCopy.appendChild(el("small", null, "Как HausmanHub отправляет команды устройству"));
+        channelCopy.appendChild(el("small", null, "Как Hausman Hub отправляет команды устройству"));
         channelRow.appendChild(channelCopy);
         channelRow.appendChild(controlChannel);
         channelRow.hidden = !choice.device.selected;

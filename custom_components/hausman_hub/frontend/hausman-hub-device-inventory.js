@@ -1,4 +1,4 @@
-import { dupAttention, dupCompare, dupFilter, dupGroups, dupGuide, dupSize, dupView } from "./hausman-hub-inventory-duplicates.js?v=1.52.104";
+import { dupAttention, dupCompare, dupFilter, dupGroups, dupGuide, dupSize, dupView } from "./hausman-hub-inventory-duplicates.js?v=1.52.106";
 
 const DEVICE_MAINTENANCE_API = "hausman_hub/v1/admin/device-maintenance";
 const Z2M_DEVICE_IMAGE =
@@ -137,17 +137,17 @@ function detailPanel(panel, el, device, maintenance, repaint, duplicateGroupSize
   if (uses.length) {
     uses.forEach((item) => {
       const row = el("div", "device-maintenance-use");
-      row.appendChild(el("strong", null, item.name || "HausmanHub"));
+      row.appendChild(el("strong", null, item.name || "Hausman Hub"));
       row.appendChild(el("small", "muted", "Эта ссылка должна быть удалена до удаления устройства."));
       usage.appendChild(row);
     });
   } else {
     usage.appendChild(el("strong", "device-maintenance-free", maintenance.deleteEligible === false
       ? "Удаление временно заблокировано"
-      : "Не используется настройками HausmanHub"));
+      : "Не используется настройками Hausman Hub"));
     const warnings = state.data && state.data.usageIndex && Array.isArray(state.data.usageIndex.warnings)
       ? state.data.usageIndex.warnings : [];
-    usage.appendChild(el("p", "muted", warnings[0] || "HausmanHub проверил свои настройки, автоматизации, сценарии, группы и скрипты Home Assistant."));
+    usage.appendChild(el("p", "muted", warnings[0] || "Hausman Hub проверил свои настройки, автоматизации, сценарии, группы и скрипты Home Assistant."));
   }
   overview.appendChild(usage);
 

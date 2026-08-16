@@ -64,7 +64,7 @@ async def async_register_hausmanhub_panel(hass: HomeAssistant) -> None:
         hass,
         frontend_url_path=PANEL_URL_PATH,
         webcomponent_name=PANEL_WEBCOMPONENT_NAME,
-        sidebar_title="HausmanHub",
+        sidebar_title="Hausman Hub",
         sidebar_icon="mdi:thermostat",
         module_url=module_url,
         require_admin=True,

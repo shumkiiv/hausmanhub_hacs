@@ -1,6 +1,6 @@
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.104";
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.104";
-import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.104";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.106";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.106";
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.106";
 
 function mediaOverviewNormalized(value) { return String(value || "").trim().toLocaleLowerCase("ru"); }
 function mediaOverviewKey(device) { return device.physicalId || device.id || device.entityId; }
@@ -156,7 +156,7 @@ export function renderMediaOverview(panel, container, deps) {
   if (!dashboard) {
     const empty = deps.el("section", "card empty-state");
     empty.appendChild(deps.el("h2", null, "Медиа"));
-    empty.appendChild(deps.el("p", null, "Данные медиа пока недоступны. Проверьте подключение HausmanHub."));
+    empty.appendChild(deps.el("p", null, "Данные медиа пока недоступны. Проверьте подключение Hausman Hub."));
     container.appendChild(empty); return;
   }
   const rooms = Array.isArray(dashboard.rooms) ? dashboard.rooms : [];

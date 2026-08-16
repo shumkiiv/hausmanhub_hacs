@@ -151,7 +151,7 @@ function renderSummary(panel, container, helpers) {
   const copy = el("div");
   copy.appendChild(el("div", "settings-heading-eyebrow", "Служебное восстановление"));
   copy.appendChild(el("h3", null, "Связи с устройствами Home Assistant"));
-  copy.appendChild(el("p", "muted settings-card-intro", "HausmanHub помнит назначение устройства, но после переноса или переименования может потерять ссылку на его сущность. Здесь ссылка восстанавливается — сами устройства и их настройки не меняются."));
+  copy.appendChild(el("p", "muted settings-card-intro", "Hausman Hub помнит назначение устройства, но после переноса или переименования может потерять ссылку на его сущность. Здесь ссылка восстанавливается — сами устройства и их настройки не меняются."));
   head.appendChild(copy);
   const refresh = el("button", "secondary", "Обновить список");
   refresh.disabled = panel._busy || state.loading || isDirty(panel);
@@ -167,7 +167,7 @@ function renderSummary(panel, container, helpers) {
   const steps = el("div", "native-binding-explanation");
   [
     ["1", "Найдите назначение", "Например: кондиционер гостиной или главный датчик температуры."],
-    ["2", "Выберите сущность", "HausmanHub покажет только подходящий тип и сначала — ту же комнату."],
+    ["2", "Выберите сущность", "Hausman Hub покажет только подходящий тип и сначала — ту же комнату."],
     ["3", "Проверьте и сохраните", "Проверка безопасна: команды устройствам не отправляются."],
   ].forEach(([number, title, text]) => {
     const item = el("div", "native-binding-explanation-item");
@@ -216,12 +216,12 @@ function renderSummary(panel, container, helpers) {
 
 function purposeFor(device) {
   const kind = String(device.kind_name || "").toLowerCase();
-  if (kind.includes("температур")) return "По этой сущности HausmanHub получает температуру комнаты.";
-  if (kind.includes("влажност")) return "По этой сущности HausmanHub получает влажность комнаты.";
-  if (kind.includes("кондиционер")) return "Через эту сущность HausmanHub управляет режимом и температурой кондиционера.";
-  if (kind.includes("термоголов")) return "Через эту сущность HausmanHub управляет отоплением радиатора.";
-  if (kind.includes("увлажн")) return "Через эту сущность HausmanHub управляет увлажнителем.";
-  return "Эта связь нужна HausmanHub для наблюдения или управления устройством.";
+  if (kind.includes("температур")) return "По этой сущности Hausman Hub получает температуру комнаты.";
+  if (kind.includes("влажност")) return "По этой сущности Hausman Hub получает влажность комнаты.";
+  if (kind.includes("кондиционер")) return "Через эту сущность Hausman Hub управляет режимом и температурой кондиционера.";
+  if (kind.includes("термоголов")) return "Через эту сущность Hausman Hub управляет отоплением радиатора.";
+  if (kind.includes("увлажн")) return "Через эту сущность Hausman Hub управляет увлажнителем.";
+  return "Эта связь нужна Hausman Hub для наблюдения или управления устройством.";
 }
 
 function renderBindingDeviceRow(panel, list, device, helpers, usedSelections) {
@@ -291,7 +291,7 @@ function renderBindingDeviceRow(panel, list, device, helpers, usedSelections) {
     ? (selectedCandidate?.same_room
       ? "Комната и назначение совпадают. Осталось проверить связь перед сохранением."
       : "Выбранная сущность относится к другой комнате. Сначала исправьте комнату в Home Assistant.")
-    : "Связь не выбрана — эта функция HausmanHub сейчас не работает."));
+    : "Связь не выбрана — эта функция Hausman Hub сейчас не работает."));
   row.appendChild(field);
   row.appendChild(currentValue
     ? el("span", `native-binding-state ${selectedCandidate?.available ? "is-ready" : "is-warning"}`, selectedCandidate?.available ? "Связь выбрана" : "Нет связи")

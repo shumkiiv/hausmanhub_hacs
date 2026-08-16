@@ -22,7 +22,7 @@ export function recordTechnicalEvent(host, level, message) {
 export function technicalLogText(entries, version) {
   const rows = entries.length ? entries : [EMPTY_ENTRY];
   return [
-    `HausmanHub ${version || "—"}`,
+    `Hausman Hub ${version || "—"}`,
     "Технический журнал текущего сеанса",
     ...rows.map((entry) => `${entry.at} [${entry.level.toUpperCase()}] ${entry.message}`),
   ].join("\n");

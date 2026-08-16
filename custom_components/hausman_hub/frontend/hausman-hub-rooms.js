@@ -1,6 +1,6 @@
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.104";
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.104";
-import { canonicalRoomMdiIcon, ROOM_TYPE_OPTIONS, roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.104";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.106";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.106";
+import { canonicalRoomMdiIcon, ROOM_TYPE_OPTIONS, roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.106";
 
 function roomNormalized(value) {
   return String(value || "").trim().toLocaleLowerCase("ru");
@@ -244,7 +244,7 @@ export function renderRoomsOverview(panel, container, deps) {
   if (!dashboard) {
     const empty = deps.el("section", "card empty-state");
     empty.appendChild(deps.el("h2", null, "Комнаты"));
-    empty.appendChild(deps.el("p", null, "Данные комнат пока недоступны. Проверьте подключение HausmanHub."));
+    empty.appendChild(deps.el("p", null, "Данные комнат пока недоступны. Проверьте подключение Hausman Hub."));
     container.appendChild(empty);
     return;
   }

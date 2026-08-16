@@ -1,6 +1,6 @@
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.104";
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.104";
-import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.104";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.106";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.106";
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.106";
 
 const LIGHTING_EXCLUSIONS = [
   "ambilight", "глазок", "домофон", "пульт", "очистител", "аквариум", "aquarium",
@@ -183,7 +183,7 @@ export function renderLightingOverview(panel, container, deps) {
   if (!dashboard) {
     const empty = deps.el("section", "card empty-state lighting-empty-state");
     empty.appendChild(deps.el("h2", null, "Освещение"));
-    empty.appendChild(deps.el("p", null, "Данные освещения пока недоступны. Проверьте подключение HausmanHub."));
+    empty.appendChild(deps.el("p", null, "Данные освещения пока недоступны. Проверьте подключение Hausman Hub."));
     container.appendChild(empty);
     return;
   }

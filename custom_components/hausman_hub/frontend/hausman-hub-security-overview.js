@@ -1,6 +1,6 @@
 /* Canonical tablet-style security overview with one card per physical device. */
 
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.104";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.106";
 
 const SECURITY_CATEGORIES = new Set([
   "security", "moisture", "smoke", "gas", "carbon_monoxide", "safety", "problem",
@@ -200,7 +200,7 @@ export function renderSecurityOverview(panel, container, deps) {
   if (!panel._homeDashboard) {
     const empty = deps.el("section", "card empty-state security-canon-empty-state");
     empty.appendChild(deps.el("h2", null, "Безопасность"));
-    empty.appendChild(deps.el("p", null, "Данные безопасности пока недоступны. Проверьте подключение HausmanHub."));
+    empty.appendChild(deps.el("p", null, "Данные безопасности пока недоступны. Проверьте подключение Hausman Hub."));
     container.appendChild(empty);
     return;
   }

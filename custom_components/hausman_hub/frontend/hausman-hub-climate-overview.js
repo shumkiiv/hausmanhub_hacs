@@ -1,8 +1,8 @@
 /* Climate control surface shared with the tablet information architecture. */
 
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.104";
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.104";
-import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.104";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.106";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.106";
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.106";
 
 const CLIMATE_ACTION_API = "hausman_hub/v1/climate/actions";
 
@@ -775,7 +775,7 @@ export function renderClimateOverview(panel, container, deps) {
   container.innerHTML = "";
   const dashboard = panel._homeDashboard;
   if (!dashboard) {
-    container.appendChild(deps.el("div", "card empty-state", "Данные климата пока недоступны. Проверьте подключение HausmanHub."));
+    container.appendChild(deps.el("div", "card empty-state", "Данные климата пока недоступны. Проверьте подключение Hausman Hub."));
     return;
   }
   const rooms = Array.isArray(dashboard.rooms) ? dashboard.rooms : [];

@@ -1,7 +1,7 @@
 /* Canonical physical-device catalog shared with the tablet information hierarchy. */
 
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.104";
-import { renderDeviceDiscovery } from "./hausman-hub-device-discovery.js?v=1.52.104";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.106";
+import { renderDeviceDiscovery } from "./hausman-hub-device-discovery.js?v=1.52.106";
 
 const DEVICE_CATEGORY_META = {
   lighting: { label: "Освещение", icon: "lightbulb" },
@@ -177,7 +177,7 @@ export function renderDevicesOverview(panel, container, deps) {
     renderDeviceDiscovery(panel, container, deps);
     const empty = deps.el("section", "card empty-state devices-canon-empty-state");
     empty.appendChild(deps.el("h2", null, "Устройства"));
-    empty.appendChild(deps.el("p", null, "Каталог устройств пока недоступен. Проверьте подключение HausmanHub."));
+    empty.appendChild(deps.el("p", null, "Каталог устройств пока недоступен. Проверьте подключение Hausman Hub."));
     container.appendChild(empty);
     return;
   }

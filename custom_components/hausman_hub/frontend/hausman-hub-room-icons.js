@@ -18,7 +18,7 @@ const ROOM_ICON_PATHS = {
 
 /**
  * Canonical room purposes used by the tablet. Home Assistant stores the MDI
- * icon on the area, so every HausmanHub surface reads the same semantic value.
+ * icon on the area, so every Hausman Hub surface reads the same semantic value.
  */
 export const ROOM_TYPE_OPTIONS = [
   { id: "rooms", label: "Обычная комната", mdiIcon: "mdi:door-open" },

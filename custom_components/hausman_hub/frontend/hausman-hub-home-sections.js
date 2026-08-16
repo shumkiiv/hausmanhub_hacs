@@ -219,7 +219,7 @@ export function renderHomeSection(panel, sectionId, container, deps) {
   if (sectionId === "security" && panel._homeDashboard) panel._renderAlarmSummary(container);
   renderToolbar(container, devices.length, deps);
   if (!panel._homeDashboard) {
-    container.appendChild(el("div", "card empty-state", "Данные дома пока недоступны. Проверьте подключение HausmanHub."));
+    container.appendChild(el("div", "card empty-state", "Данные дома пока недоступны. Проверьте подключение Hausman Hub."));
     return;
   }
   if (!devices.length) {

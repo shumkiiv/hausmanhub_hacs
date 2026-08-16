@@ -22,7 +22,7 @@ function renderSecureAccessGuide(deps) {
   const url = secureDashboardUrl();
   const card = el("section", "system-secure-access");
   card.appendChild(el("strong", null, "Безопасный доступ с нового компьютера"));
-  card.appendChild(el("p", "muted", "HausmanHub использует HTTPS. Не отключайте проверку сертификата и не продолжайте работу через предупреждение браузера."));
+  card.appendChild(el("p", "muted", "Hausman Hub использует HTTPS. Не отключайте проверку сертификата и не продолжайте работу через предупреждение браузера."));
   const steps = el("ol");
   steps.appendChild(el("li", null, "Откройте безопасный адрес Home Assistant."));
   steps.appendChild(el("li", null, "Если браузер не доверяет сертификату, установите только корневой сертификат, полученный от владельца дома, и сверяйте его отпечаток."));
@@ -97,7 +97,7 @@ export function buildDiagnosticChecks(panel, readinessLabels) {
         ? "Проверяются…"
         : (scenarios ? `${scenarios.length} сохранено · ${scenarioEnabled} включено` : "Список недоступен"),
       detail: scenarios
-        ? "Сценарии читаются из единого хранилища HausmanHub."
+        ? "Сценарии читаются из единого хранилища Hausman Hub."
         : "Панель пока не получила список сохранённых сценариев.",
       tone: scenarios ? "is-ready" : (panel._scenarios.loading ? "is-neutral" : "is-warning"),
       hint: scenarios || panel._scenarios.loading ? "" : "Обновите состояние. Если ошибка повторится, проверьте журнал Home Assistant.",
@@ -118,9 +118,9 @@ export function buildDiagnosticChecks(panel, readinessLabels) {
 
 export function diagnosticSummaryText(panel, checks) {
   return [
-    "HausmanHub — техническая сводка",
+    "Hausman Hub — техническая сводка",
     `Версия: ${panel._data && panel._data.integration_version || "не определена"}`,
-    "Подключение: HausmanHub в Home Assistant",
+    "Подключение: Hausman Hub в Home Assistant",
     "",
     "Проверки:",
     ...checks.map((check) => `${check.title}: ${check.value}`),

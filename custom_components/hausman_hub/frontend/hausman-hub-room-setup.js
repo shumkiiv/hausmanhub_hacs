@@ -43,7 +43,7 @@ const {
   };
   const scheduleSection = el("section", "wizard-section");
   scheduleSection.appendChild(el("h3", null, "Расписание комнаты"));
-  scheduleSection.appendChild(el("div", "settings-explainer", "HausmanHub будет сам переключать дневные и ночные цели в указанное время. Если автоматический режим выключен, профиль выбирается вручную."));
+  scheduleSection.appendChild(el("div", "settings-explainer", "Hausman Hub будет сам переключать дневные и ночные цели в указанное время. Если автоматический режим выключен, профиль выбирается вручную."));
   const dayStart = el("input");
   dayStart.type = "time";
   dayStart.value = this._firstRun.schedule.dayStart;
@@ -86,7 +86,7 @@ const {
 
   const profilesSection = el("section", "wizard-section");
   profilesSection.appendChild(el("h3", null, "Дневной и ночной профиль"));
-  profilesSection.appendChild(el("div", "settings-explainer", "Вы задаёте желаемый комфорт, а HausmanHub выбирает подходящее устройство. Дневные и ночные цели сохраняются отдельно."));
+  profilesSection.appendChild(el("div", "settings-explainer", "Вы задаёте желаемый комфорт, а Hausman Hub выбирает подходящее устройство. Дневные и ночные цели сохраняются отдельно."));
   profilesSection.appendChild(el("div", "muted", "Температура: 18–28 °C с шагом 0,5. Влажность: 30–70 % с шагом 1."));
   const columns = el("div", "profile-columns");
   ["day", "night"].forEach((profile) => {

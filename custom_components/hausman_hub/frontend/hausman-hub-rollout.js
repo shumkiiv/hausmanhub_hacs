@@ -28,7 +28,7 @@ export function renderRolloutReadiness(snapshot, setup, rollout, deps) {
     "span", "muted",
     ready
       ? "Проверка завершена: команды получит только выбранная пилотная комната."
-      : "HausmanHub пока только наблюдает и не отправляет команды устройствам."
+      : "Hausman Hub пока только наблюдает и не отправляет команды устройствам."
   ));
   head.appendChild(copy);
   head.appendChild(el("span", `status-badge${ready ? " is-ready" : ""}`, ready ? "Готово" : "Без команд"));

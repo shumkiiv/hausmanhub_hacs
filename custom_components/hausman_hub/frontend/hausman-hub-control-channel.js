@@ -1,7 +1,7 @@
 const CONTROL_CHANNEL_GUIDANCE = {
   direct_wifi: {
     title: "Напрямую через Home Assistant",
-    description: "Лучший вариант, если у устройства есть собственная управляемая сущность climate или humidifier. HausmanHub сможет отправить команду и проверить новое состояние.",
+    description: "Лучший вариант, если у устройства есть собственная управляемая сущность climate или humidifier. Hausman Hub сможет отправить команду и проверить новое состояние.",
   },
   yandex_remote: {
     title: "Через пульт Яндекса",
@@ -41,7 +41,7 @@ export function resolveControlChannelTest(owner, choice, channel = null) {
     return {
       ready: false,
       manual: true,
-      reason: "ИК-канал проверяется после добавления кода: HausmanHub отправит сигнал, а вы подтвердите физическую реакцию устройства.",
+      reason: "ИК-канал проверяется после добавления кода: Hausman Hub отправит сигнал, а вы подтвердите физическую реакцию устройства.",
     };
   }
   const device = matchingDashboardDevice(owner, choice);
@@ -78,7 +78,7 @@ export function resolveControlChannelTest(owner, choice, channel = null) {
   }
   return {
     ready: false,
-    reason: "У сущности нет безопасной тестовой команды. HausmanHub не будет включать или выключать устройство только ради проверки.",
+    reason: "У сущности нет безопасной тестовой команды. Hausman Hub не будет включать или выключать устройство только ради проверки.",
   };
 }
 
