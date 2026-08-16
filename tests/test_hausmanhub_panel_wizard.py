@@ -40,6 +40,7 @@ SECURITY_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-security-overview.js")
 DEVICES_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-devices-overview.js")
 TECHNICAL_LOG_JS = PANEL_JS.with_name("hausman-hub-technical-log.js")
 FEEDBACK_JS = PANEL_JS.with_name("hausman-hub-feedback.js")
+ERROR_TAXONOMY_JS = PANEL_JS.with_name("hausman-hub-error-taxonomy.js")
 KIOSK_JS = PANEL_JS.with_name("hausman-hub-kiosk.js")
 ROLLOUT_JS = PANEL_JS.with_name("hausman-hub-rollout.js")
 
@@ -431,6 +432,10 @@ def panel_script(get_table: dict, post_table: dict, assertions: str) -> str:
       vm.runInThisContext(
         fs.readFileSync({str(FEEDBACK_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(FEEDBACK_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(ERROR_TAXONOMY_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(ERROR_TAXONOMY_JS)!r} }}
       );
       const log = recordTechnicalEvent;
       vm.runInThisContext(
@@ -1298,7 +1303,7 @@ class PanelFirstRunWizardTest(unittest.TestCase):
             """
         panel._firstRunPayload = () => ({payload: {}});
         await panel._validateFirstRun();
-        if (!panel._firstRun.issues[0].message.includes("Конфигурация изменилась")) {
+        if (!panel._firstRun.issues[0].message.includes("Состояние изменилось. Обновите данные")) {
           throw new Error("revision conflict explanation missing");
         }
             """,
@@ -3269,7 +3274,7 @@ class PanelFirstRunWizardTest(unittest.TestCase):
         panel._wizardButtons.save.fire("click");
         await tick(12);
         const text = textOf(panel.shadowRoot);
-        if (!text.includes("изменились в другом окне")) throw new Error("conflict notice missing");
+        if (!text.includes("Состояние изменилось. Обновите данные")) throw new Error("conflict notice missing");
         const setupGets = calls.filter((call) =>
           call.method === "GET" && call.path === "hausman_hub/v1/admin/climate-drafts/current");
         if (setupGets.length < 2) throw new Error("current setup was not reloaded after conflict");

@@ -1,10 +1,29 @@
 /* Climate control surface shared with the tablet information architecture. */
 
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.106";
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.106";
-import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.106";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.107";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.107";
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.107";
+import { pendingOperationId, requiresSnapshotRefresh, resolveApiError, resolveClimateReceipt } from "./hausman-hub-error-taxonomy.js?v=1.52.107";
 
 const CLIMATE_ACTION_API = "hausman_hub/v1/climate/actions";
+const CLIMATE_OPERATION_API = "hausman_hub/v1/climate/operations";
+
+/* Canonical taxonomy failure flow: pending reads the stored operation, */
+/* conflict and stale first refresh the snapshot, a confirmation failure */
+/* requires a readback refresh and a new user action. No automatic retry */
+/* of a physical command ever happens here. */
+async function failClimateAction(panel, error, receipt) {
+  const policy = (receipt && resolveClimateReceipt(receipt)) || resolveApiError(error);
+  const operationId = pendingOperationId(policy);
+  if (operationId) {
+    await panel._hass.callApi("GET", `${CLIMATE_OPERATION_API}/${encodeURIComponent(operationId)}`).catch(() => null);
+    await panel._load();
+  } else if (requiresSnapshotRefresh(policy) || policy.code === "command_not_confirmed") {
+    await panel._load();
+  }
+  panel._notice = policy.safeMessage;
+  panel._error = true;
+}
 
 export async function synchronizeClimate(panel) {
   const homeControl = panel._climateRuntime && panel._climateRuntime.home_control;
@@ -25,14 +44,16 @@ export async function synchronizeClimate(panel) {
       room_id: null,
       parameters: {},
     });
-    if (!receipt || receipt.confirmed !== true) throw new Error("climate synchronization was not confirmed");
+    if (!receipt || receipt.confirmed !== true) {
+      await failClimateAction(panel, null, receipt);
+      return false;
+    }
     panel._notice = "Климат синхронизирован.";
     panel._error = false;
     await panel._load();
     return true;
   } catch (error) {
-    panel._notice = "Синхронизация не подтверждена. Обновите состояние перед повтором.";
-    panel._error = true;
+    await failClimateAction(panel, error, null);
     return false;
   } finally {
     panel._busy = false;
@@ -58,14 +79,16 @@ export async function setClimateManualMode(panel, roomId, deviceId, manual) {
         ? { device_id: deviceId, mode: manual ? "manual" : "automatic" }
         : { mode: manual ? "manual" : "automatic" },
     });
-    if (!receipt || receipt.confirmed !== true) throw new Error("climate mode was not confirmed");
+    if (!receipt || receipt.confirmed !== true) {
+      await failClimateAction(panel, null, receipt);
+      return false;
+    }
     panel._notice = manual ? "Ручной режим включён." : "Автоматическое управление восстановлено.";
     panel._error = false;
     await panel._load();
     return true;
   } catch (error) {
-    panel._notice = "Режим не изменён. Обновите состояние и повторите действие.";
-    panel._error = true;
+    await failClimateAction(panel, error, null);
     return false;
   } finally {
     panel._busy = false;
@@ -89,14 +112,16 @@ export async function setClimateRoomTarget(panel, roomId, action, parameter, val
       room_id: roomId,
       parameters: { [parameter]: value },
     });
-    if (!receipt || receipt.confirmed !== true) throw new Error("climate target was not confirmed");
+    if (!receipt || receipt.confirmed !== true) {
+      await failClimateAction(panel, null, receipt);
+      return false;
+    }
     panel._notice = action === "set_room_target" ? "Целевая температура подтверждена." : "Целевая влажность подтверждена.";
     panel._error = false;
     await panel._load();
     return true;
   } catch (error) {
-    panel._notice = "Цель не изменена. Обновите состояние и повторите действие.";
-    panel._error = true;
+    await failClimateAction(panel, error, null);
     return false;
   } finally {
     panel._busy = false;
@@ -124,13 +149,15 @@ export async function setClimateHomeTarget(panel, targetTemperature) {
       room_id: null,
       parameters: { target_temperature: targetTemperature },
     });
-    if (!receipt || receipt.confirmed !== true) throw new Error("home climate target was not confirmed");
+    if (!receipt || receipt.confirmed !== true) {
+      await failClimateAction(panel, null, receipt);
+      return false;
+    }
     panel._notice = "Общая климатическая цель подтверждена.";
     await panel._load();
     return true;
   } catch (error) {
-    panel._notice = "Общая цель не изменена. Обновите состояние и повторите действие.";
-    panel._error = true;
+    await failClimateAction(panel, error, null);
     return false;
   } finally {
     panel._busy = false;

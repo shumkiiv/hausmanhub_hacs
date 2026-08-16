@@ -1,8 +1,17 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-16 (HACS 1.52.106 copy release and production install).
+Last updated: 2026-08-16 (HACS 1.52.107 frontend error taxonomy).
 
 ## Current work
+
+- 2026-08-16 (Kimi): HACS `1.52.107` переводит панель на canonical error
+  taxonomy `hausman-hub-error-taxonomy v1` (contracts `0.34.0`): новый
+  модуль `frontend/hausman-hub-error-taxonomy.js` с pinned snapshot
+  инвентаря и fail-closed parity-тестом `tests/test_frontend_error_taxonomy.py`.
+  Toast, notice и inline-ошибки используют canonical code и safe message,
+  raw responseText и unknown details не рендерятся; conflict обновляет
+  snapshot, pending читает существующую operation, автоматический повтор
+  физических команд не добавляется. Backend не менялся.
 
 - 2026-08-16 (Codex): HACS `1.52.106` завершает copy-release: интеграция
   называется `Hausman for Home Assistant`, а панель и пользовательские

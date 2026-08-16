@@ -1,40 +1,41 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.52.106";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.52.106";
-import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.52.106";
-import { resolveControlChannelTest, summarizeControlChannelReceipts } from "./hausman-hub-control-channel.js?v=1.52.106";
-import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.52.106";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.52.106";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.52.106";
-import { closeFirstRunAreaCreator, createFirstRunArea, openFirstRunAreaCreator, renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.52.106";
-import { createKioskButton, createKioskDock, handleKioskPointerUp, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, resolveIntercomQuickAction, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.52.106";
-import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.52.106";
-import { loadEnergyMeter } from "./hausman-hub-energy-meter.js?v=1.52.106";
-import { loadDeviceDiscovery, updateDeviceDiscoveryBadge } from "./hausman-hub-device-discovery.js?v=1.52.106";
-import { redrawEnergyChartsForTheme } from "./hausman-hub-energy-chart.js?v=1.52.106";
-import { applyHomeSignalSelection, AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, homeEnvironmentSaveError, homeEnvironmentSourcePayload, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.52.106";
-import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.52.106";
-import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.52.106";
-import { renderClimateOverview, setClimateManualMode } from "./hausman-hub-climate-overview.js?v=1.52.106";
-import { renderLightingOverview } from "./hausman-hub-lighting.js?v=1.52.106";
-import { renderRoomsOverview } from "./hausman-hub-rooms.js?v=1.52.106";
-import { renderMediaOverview } from "./hausman-hub-media-overview.js?v=1.52.106";
-import { renderSecurityOverview } from "./hausman-hub-security-overview.js?v=1.52.106";
-import { renderDevicesOverview } from "./hausman-hub-devices-overview.js?v=1.52.106";
-import { buildDiagnosticChecks, diagnosticSummaryText, renderDiagnosticDetails } from "./hausman-hub-diagnostics.js?v=1.52.106";
-import { renderRolloutReadiness } from "./hausman-hub-rollout.js?v=1.52.106";
-import { overviewHeroRenderKey } from "./hausman-hub-overview-hero-state.js?v=1.52.106";
-import { formatUpcomingCountdown, renderOverviewContent, renderOverviewHero } from "./hausman-hub-overview.js?v=1.52.106";
-import { conciseDeviceActionLabel, renderPhysicalDeviceCard } from "./hausman-hub-device-card.js?v=1.52.106";
-import { recordTechnicalEvent as log, renderTechnicalLogCard } from "./hausman-hub-technical-log.js?v=1.52.106";
-import { applyFeedback } from "./hausman-hub-feedback.js?v=1.52.106";
-import { renderKiosk } from "./hausman-hub-kiosk.js?v=1.52.106";
-import { captureRoomValidation, clearFirstRunDraft, persistFirstRunDraft, reconcileRoomValidation, restoreFirstRunDraft, resumeFirstRunDraft } from "./hausman-hub-first-run-draft.js?v=1.52.106";
-import { applyTabletProfile, isIntercomQuickAccessVisible, renderAppearanceSettings, renderIntercomSettings, syncIntercomQuickAccess } from "./hausman-hub-settings-profile.js?v=1.52.106";
-import { renderSettingsRooms, saveRoomType } from "./hausman-hub-settings-rooms.js?v=1.52.106";
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.106";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.52.107";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.52.107";
+import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.52.107";
+import { resolveControlChannelTest, summarizeControlChannelReceipts } from "./hausman-hub-control-channel.js?v=1.52.107";
+import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.52.107";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.52.107";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.52.107";
+import { closeFirstRunAreaCreator, createFirstRunArea, openFirstRunAreaCreator, renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.52.107";
+import { createKioskButton, createKioskDock, handleKioskPointerUp, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, resolveIntercomQuickAction, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.52.107";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.52.107";
+import { loadEnergyMeter } from "./hausman-hub-energy-meter.js?v=1.52.107";
+import { loadDeviceDiscovery, updateDeviceDiscoveryBadge } from "./hausman-hub-device-discovery.js?v=1.52.107";
+import { redrawEnergyChartsForTheme } from "./hausman-hub-energy-chart.js?v=1.52.107";
+import { applyHomeSignalSelection, AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, homeEnvironmentSaveError, homeEnvironmentSourcePayload, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.52.107";
+import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.52.107";
+import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.52.107";
+import { renderClimateOverview, setClimateManualMode } from "./hausman-hub-climate-overview.js?v=1.52.107";
+import { renderLightingOverview } from "./hausman-hub-lighting.js?v=1.52.107";
+import { renderRoomsOverview } from "./hausman-hub-rooms.js?v=1.52.107";
+import { renderMediaOverview } from "./hausman-hub-media-overview.js?v=1.52.107";
+import { renderSecurityOverview } from "./hausman-hub-security-overview.js?v=1.52.107";
+import { renderDevicesOverview } from "./hausman-hub-devices-overview.js?v=1.52.107";
+import { buildDiagnosticChecks, diagnosticSummaryText, renderDiagnosticDetails } from "./hausman-hub-diagnostics.js?v=1.52.107";
+import { renderRolloutReadiness } from "./hausman-hub-rollout.js?v=1.52.107";
+import { overviewHeroRenderKey } from "./hausman-hub-overview-hero-state.js?v=1.52.107";
+import { formatUpcomingCountdown, renderOverviewContent, renderOverviewHero } from "./hausman-hub-overview.js?v=1.52.107";
+import { conciseDeviceActionLabel, renderPhysicalDeviceCard } from "./hausman-hub-device-card.js?v=1.52.107";
+import { recordTechnicalEvent as log, renderTechnicalLogCard } from "./hausman-hub-technical-log.js?v=1.52.107";
+import { applyFeedback } from "./hausman-hub-feedback.js?v=1.52.107";
+import { apiErrorMessage, resolveApiError } from "./hausman-hub-error-taxonomy.js?v=1.52.107";
+import { renderKiosk } from "./hausman-hub-kiosk.js?v=1.52.107";
+import { captureRoomValidation, clearFirstRunDraft, persistFirstRunDraft, reconcileRoomValidation, restoreFirstRunDraft, resumeFirstRunDraft } from "./hausman-hub-first-run-draft.js?v=1.52.107";
+import { applyTabletProfile, isIntercomQuickAccessVisible, renderAppearanceSettings, renderIntercomSettings, syncIntercomQuickAccess } from "./hausman-hub-settings-profile.js?v=1.52.107";
+import { renderSettingsRooms, saveRoomType } from "./hausman-hub-settings-rooms.js?v=1.52.107";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.107";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
-const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css?v=1.52.106";
+const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css?v=1.52.107";
 const DASHBOARD_API = "hausman_hub/v1/dashboard";
 const CLIMATE_RUNTIME_API = "hausman_hub/v1/climate/runtime";
 const DEVICE_ACTIONS_API = "hausman_hub/v1/device-actions";
@@ -824,8 +825,9 @@ class HausmanHubPanel extends HTMLElement {
       await this._load();
       return true;
     } catch (error) {
-      this._notice = "Действие не выполнено. Проверьте состояние климата.";
-      this._render();
+      const policy = resolveApiError(error);
+      this._notice = policy.safeMessage;
+      if (policy.retryPolicy === "after_refresh") await this._load();
       return false;
     } finally {
       this._busy = false;
@@ -837,7 +839,7 @@ class HausmanHubPanel extends HTMLElement {
     return setClimateManualMode(this, roomId, deviceId, manual);
   }
 
-  async _save(section, path, payload, confirmText, successText, conflictText) {
+  async _save(section, path, payload, confirmText, successText) {
     if (this._busy) return;
     if (confirmText && !window.confirm(confirmText)) return;
     this._busy = true;
@@ -850,8 +852,7 @@ class HausmanHubPanel extends HTMLElement {
       this._error = false;
     } catch (error) {
       this._dirty[section] = false;
-      this._notice = error && error.status === 409 ? conflictText
-        : "Сохранить не удалось. Проверьте значения и состояние климата.";
+      this._notice = apiErrorMessage(error);
     } finally {
       this._busy = false;
     }
@@ -1524,7 +1525,7 @@ class HausmanHubPanel extends HTMLElement {
       this._dirty.assistant = false;
       this._notice = "Настройки помощника сохранены.";
     } catch (error) {
-      this._notice = "Сохранить настройки помощника не удалось. Проверьте значения.";
+      this._notice = apiErrorMessage(error);
     } finally {
       this._busy = false;
       this._render();
@@ -1550,9 +1551,7 @@ class HausmanHubPanel extends HTMLElement {
       } catch {}
       this._notice = "Совет обновлён.";
     } catch (error) {
-      this._notice = error && error.status === 422
-        ? "Ошибка авторизации у поставщика. Проверьте ключ API."
-        : "Обновить совет не удалось. Повторите позже.";
+      this._notice = apiErrorMessage(error);
     } finally {
       this._busy = false;
       this._render();
@@ -1865,8 +1864,7 @@ class HausmanHubPanel extends HTMLElement {
           managed
             ? "Выключить управление климатом? Устройства больше не будут получать команды от Hausman Hub."
             : "Запустить пилотную комнату? Старый контур не должен одновременно управлять её устройствами.",
-          managed ? "Управление климатом остановлено." : "Пилотная комната запущена.",
-          "Режим уже изменён в другом окне. Данные обновлены, повторите действие."
+          managed ? "Управление климатом остановлено." : "Пилотная комната запущена."
         );
       });
       switchRow.appendChild(button);
@@ -2541,7 +2539,7 @@ class HausmanHubPanel extends HTMLElement {
       ir.codes = Array.isArray(codes && codes.codes) ? codes.codes : [];
       ir.scan = scan || {};
     } catch (error) {
-      ir.error = "Не удалось загрузить источники или импортированные ИК-коды.";
+      ir.error = apiErrorMessage(error);
     } finally {
       ir.loading = false;
       this._render();
@@ -2569,7 +2567,7 @@ class HausmanHubPanel extends HTMLElement {
       });
       await this._refreshFirstRunIrCodes();
     } catch (error) {
-      ir.error = "Импортировать ИК-код не удалось. Проверьте источник и повторите.";
+      ir.error = apiErrorMessage(error);
     } finally {
       ir.loading = false;
       this._render();
@@ -2590,7 +2588,7 @@ class HausmanHubPanel extends HTMLElement {
       });
       this._notice = "Тестовая отправка ИК-кода выполнена.";
     } catch (error) {
-      ir.error = "Тестовую отправку ИК-кода выполнить не удалось.";
+      ir.error = apiErrorMessage(error);
     } finally {
       ir.loading = false;
       this._render();
@@ -2607,7 +2605,7 @@ class HausmanHubPanel extends HTMLElement {
       await this._hass.callApi("POST", IR_CODES_TEST_API, { code_id: code.code_id });
       this._notice = "Тестовая отправка ИК-кода выполнена.";
     } catch (error) {
-      ir.error = "Тестовую отправку ИК-кода выполнить не удалось.";
+      ir.error = apiErrorMessage(error);
     } finally {
       ir.loading = false;
       this._render();
@@ -2624,7 +2622,7 @@ class HausmanHubPanel extends HTMLElement {
       await this._hass.callApi("POST", IR_CODES_DELETE_API, { code_id: code.code_id });
       await this._refreshFirstRunIrCodes();
     } catch (error) {
-      ir.error = "Удалить ИК-код не удалось. Повторите попытку.";
+      ir.error = apiErrorMessage(error);
     } finally {
       ir.loading = false;
       this._render();
@@ -2658,7 +2656,7 @@ class HausmanHubPanel extends HTMLElement {
     } catch (error) {
       manual.statuses[command.commandName] = error && error.status === 408 ? "timeout" : "error";
       if (manual.statuses[command.commandName] === "error") {
-        ir.error = "Обучение ИК-кода не удалось. Проверьте пульт и повторите.";
+        ir.error = apiErrorMessage(error);
       }
     } finally {
       ir.loading = false;
@@ -2750,9 +2748,7 @@ class HausmanHubPanel extends HTMLElement {
       await this._loadFirstRunOptions(true);
     } catch (error) {
       this._firstRun.areaSaveStatus = "";
-      this._firstRun.areaSaveError = error && error.status === 409
-        ? "Инвентаризация Home Assistant изменилась. Обновите список и повторите выбор."
-        : "Не удалось сохранить привязки. Выбор не потерян; проверьте области устройств в Home Assistant и повторите попытку.";
+      this._firstRun.areaSaveError = `${apiErrorMessage(error)} Выбор не потерян; проверьте области устройств в Home Assistant и повторите попытку.`;
     } finally {
       this._busy = false;
       this._render();
@@ -2802,7 +2798,7 @@ class HausmanHubPanel extends HTMLElement {
       }
     } catch (error) {
       this._firstRun.rooms[roomId].report = {
-        issues: [{ message: "Проверить комнату не удалось. Проверьте выбранные значения." }],
+        issues: [{ message: apiErrorMessage(error) }],
         save_allowed: false,
         status: "blocked",
       };
@@ -2879,9 +2875,7 @@ class HausmanHubPanel extends HTMLElement {
       this._firstRun.validation = validation;
     } catch (error) {
       this._firstRun.draft = null;
-      this._firstRun.issues = [{ message: error?.status === 409
-        ? "Конфигурация изменилась. Вернитесь назад и повторите."
-        : "Проверка недоступна. Обновите мастер." }];
+      this._firstRun.issues = [{ message: apiErrorMessage(error) }];
       this._firstRun.validation = { save_allowed: false, status: "blocked" };
     } finally {
       this._busy = false;
@@ -2930,14 +2924,15 @@ class HausmanHubPanel extends HTMLElement {
       }
       this._firstRun.step = "tablet";
     } catch (error) {
+      const policy = resolveApiError(error);
       if (contourSaved) {
         this._firstRun.completed = true;
         this._activeSection = "overview";
         this._notice = "Контур сохранён, но профили или расписание не сохранились. Откройте соответствующие вкладки и повторите сохранение.";
-      } else if (error && error.status === 409) {
+      } else if (policy.clientState === "stale") {
         this._firstRun.conflict = true;
       } else {
-        this._firstRun.issues = [{ message: "Сохранить настройку не удалось. Проверьте состояние и повторите." }];
+        this._firstRun.issues = [{ message: policy.safeMessage }];
       }
       this._firstRun.step = "completion";
     } finally {
@@ -4425,10 +4420,11 @@ class HausmanHubPanel extends HTMLElement {
       this._wizard.fingerprint = JSON.stringify(collected.payload);
       this._showWizardValidation(validation);
     } catch (error) {
-      if (error && error.status === 409) {
-        await this._resetWizardAfterConflict();
+      const policy = resolveApiError(error);
+      if (policy.clientState === "stale") {
+        await this._resetWizardAfterConflict(policy);
       } else {
-        this._showWizardMessage("Проверить контур не удалось. Проверьте значения и состояние устройств.");
+        this._showWizardMessage(policy.safeMessage);
       }
     } finally {
       this._busy = false;
@@ -4473,10 +4469,11 @@ class HausmanHubPanel extends HTMLElement {
       await this._load();
       await this._loadWizardOptions(true);
     } catch (error) {
-      if (error && error.status === 409) {
-        await this._resetWizardAfterConflict();
+      const policy = resolveApiError(error);
+      if (policy.clientState === "stale") {
+        await this._resetWizardAfterConflict(policy);
       } else {
-        this._showWizardMessage("Сохранить контур не удалось. Проверьте значения и состояние устройств.");
+        this._showWizardMessage(policy.safeMessage);
       }
     } finally {
       this._busy = false;
@@ -4485,7 +4482,7 @@ class HausmanHubPanel extends HTMLElement {
     }
   }
 
-  async _resetWizardAfterConflict() {
+  async _resetWizardAfterConflict(policy) {
     this._dirty.wizard = false;
     this._wizard.open = false;
     this._expandedWizardRooms.clear();
@@ -4498,7 +4495,7 @@ class HausmanHubPanel extends HTMLElement {
     this._wizardFields = null;
     this._wizardIssues = null;
     this._wizardButtons = null;
-    this._notice = "Настройки изменились в другом окне. Данные обновлены, откройте мастер и повторите действие.";
+    this._notice = policy && policy.safeMessage ? policy.safeMessage : apiErrorMessage(null);
     await this._load();
   }
 
@@ -4790,8 +4787,7 @@ class HausmanHubPanel extends HTMLElement {
           rooms,
         },
         "Сохранить профили «День» и «Ночь» для всех комнат?",
-        "Профили сохранены.",
-        "Настройки изменились в другом окне. Данные обновлены, повторите сохранение."
+        "Профили сохранены."
       );
     });
     const actions = el("div", "actions");
@@ -4882,8 +4878,7 @@ class HausmanHubPanel extends HTMLElement {
         enabled
           ? "Включить автоматическое переключение профилей по расписанию? В управляемом режиме устройствам будут отправляться команды."
           : "Сохранить расписание?",
-        enabled ? "Расписание сохранено и включено." : "Расписание сохранено.",
-        "Настройки изменились в другом окне. Данные обновлены, повторите сохранение."
+        enabled ? "Расписание сохранено и включено." : "Расписание сохранено."
       );
     });
     const actions = el("div", "actions schedule-actions");
@@ -5309,8 +5304,7 @@ class HausmanHubPanel extends HTMLElement {
             airConditionerMinimumValue,
         },
         "Сохранить привязки сигналов дома и пороги блокировки отопления?",
-        "Сигналы дома сохранены.",
-        "Настройки изменились в другом окне. Данные обновлены, повторите сохранение."
+        "Сигналы дома сохранены."
       );
     });
     const actions = el("div", "actions climate-form-actions");
@@ -5509,7 +5503,7 @@ class HausmanHubPanel extends HTMLElement {
       saveButton.disabled = true;
       this._notice = "";
       this._render();
-      let failed = false;
+      let saveError = null;
       try {
         await this._hass.callApi("POST", WINDOWS_API, {
           rooms: changed.map((roomId) => ({
@@ -5519,12 +5513,12 @@ class HausmanHubPanel extends HTMLElement {
           })),
         });
       } catch (error) {
-        failed = true;
+        saveError = error;
       }
       this._dirty.windows = false;
       this._busy = false;
-      this._notice = failed
-        ? "Сохранить сигналы комнат не удалось. Данные обновлены, проверьте значения."
+      this._notice = saveError
+        ? apiErrorMessage(saveError)
         : "Сигналы комнат сохранены.";
       await this._load();
     });
@@ -5645,7 +5639,7 @@ class HausmanHubPanel extends HTMLElement {
       this._error = false;
       await this._load();
     } catch (error) {
-      this._notice = "Настройку энергии сохранить не удалось. Выбранные устройства не изменены.";
+      this._notice = apiErrorMessage(error);
     } finally {
       this._energySettingsSaving = false;
       this._render();
@@ -5824,7 +5818,7 @@ class HausmanHubPanel extends HTMLElement {
       this._notice = this._receiptText(receipt);
       this._error = false;
     } catch (error) {
-      this._notice = "Команда устройству не выполнена. Откройте карточку и проверьте доступность.";
+      this._notice = apiErrorMessage(error);
       this._error = false;
     } finally {
       this._busy = false;
@@ -5849,7 +5843,7 @@ class HausmanHubPanel extends HTMLElement {
       this._notice = result && result.ok ? `Сценарий "${scenario.title}" прошёл проверку.` : "Проверка сценария не пройдена.";
       this._error = false;
     } catch (error) {
-      this._notice = "Проверить сценарий не удалось.";
+      this._notice = apiErrorMessage(error);
     } finally {
       this._busy = false;
     }
@@ -6223,7 +6217,7 @@ class HausmanHubPanel extends HTMLElement {
       this._notice = "Настройки Hausman Hub сброшены. Перезапускается мастер.";
       if (window.location?.reload) setTimeout(() => window.location.reload(), 900);
     } catch (error) {
-      this._notice = "Сброс не выполнен. Настройки оставлены без изменений.";
+      this._notice = apiErrorMessage(error);
     } finally {
       this._busy = false;
       this._render();
@@ -6240,7 +6234,7 @@ class HausmanHubPanel extends HTMLElement {
       this._notice = "Панель доступна. Проверка не отправляла команды устройствам.";
       log(this, "success", "Проверка подключения выполнена успешно");
     } catch (error) {
-      this._notice = "Панель не ответила. Проверьте Home Assistant и повторите попытку.";
+      this._notice = apiErrorMessage(error);
       log(this, "error", "Проверка подключения завершилась ошибкой");
     } finally {
       this._busy = false;
@@ -6274,7 +6268,7 @@ class HausmanHubPanel extends HTMLElement {
       this._error = false;
       log(this, "success", "Настройки подключения сохранены");
     } catch (error) {
-      this._notice = "Не удалось сохранить настройки подключения.";
+      this._notice = apiErrorMessage(error);
       log(this, "error", "Не удалось сохранить настройки подключения");
     } finally {
       this._busy = false;

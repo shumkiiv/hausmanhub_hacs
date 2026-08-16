@@ -25,6 +25,7 @@ SECURITY_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-security-overview.js")
 DEVICES_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-devices-overview.js")
 TECHNICAL_LOG_JS = PANEL_JS.with_name("hausman-hub-technical-log.js")
 FEEDBACK_JS = PANEL_JS.with_name("hausman-hub-feedback.js")
+ERROR_TAXONOMY_JS = PANEL_JS.with_name("hausman-hub-error-taxonomy.js")
 KIOSK_JS = PANEL_JS.with_name("hausman-hub-kiosk.js")
 SETTINGS_PROFILE_JS = PANEL_JS.with_name("hausman-hub-settings-profile.js")
 SETTINGS_ROOMS_JS = PANEL_JS.with_name("hausman-hub-settings-rooms.js")
@@ -649,6 +650,10 @@ def panel_script(
       vm.runInThisContext(
         fs.readFileSync({str(FEEDBACK_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(FEEDBACK_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(ERROR_TAXONOMY_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(ERROR_TAXONOMY_JS)!r} }}
       );
       const log = recordTechnicalEvent;
       vm.runInThisContext(
@@ -3301,7 +3306,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         let screen = panel._shell.settings;
         let text = textOf(screen);
         for (const label of [
-          "Настройки HausmanHub", "Обзор", "Комнаты", "Подключение", "Интерфейс", "Диагностика",
+          "Настройки Hausman Hub", "Обзор", "Комнаты", "Подключение", "Интерфейс", "Диагностика",
           "Комнаты и устройства", "Home Assistant остаётся единым источником устройств", "Версия",
         ]) {
           if (!text.includes(label)) throw new Error("settings text missing: " + label);
@@ -3409,7 +3414,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           && node.textContent === "Копировать техническую сводку")[0].fire("click");
         await tick();
         if (clipboardWrites.length !== 1
-          || !clipboardWrites[0].includes("HausmanHub — техническая сводка")
+          || !clipboardWrites[0].includes("Hausman Hub — техническая сводка")
           || !clipboardWrites[0].includes("Связь с Home Assistant: Соединение работает")
           || !clipboardWrites[0].includes("Сохранённая конфигурация: 1 комната · 0 устройств")
           || !clipboardWrites[0].includes("Климатический контур: Выключен в настройках")
@@ -3424,7 +3429,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         await tick();
         if (clipboardWrites.length !== 2
           || !clipboardWrites[1].includes("Технический журнал текущего сеанса")
-          || !clipboardWrites[1].includes("Связь с HausmanHub установлена")
+          || !clipboardWrites[1].includes("Связь с Hausman Hub установлена")
           || clipboardWrites[1].includes("homeassistant.local")
           || clipboardWrites[1].includes("entity_id")) {
           throw new Error("redacted technical log copy mismatch: " + JSON.stringify(clipboardWrites));
@@ -3690,7 +3695,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("error toast accessibility contract mismatch");
         }
         if (panel._error) throw new Error("device failure hid the otherwise available panel");
-        if (panel._notice !== "Команда устройству не выполнена. Откройте карточку и проверьте доступность.") {
+        if (panel._notice !== "HausmanHub временно недоступен. Проверьте подключение и повторите позже.") {
           throw new Error("device failure explanation missing");
         }
             """,
@@ -3879,7 +3884,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         card.fire("click");
         await tick();
         const text = textOf(screen);
-        for (const label of ["Где используется", "Не используется настройками HausmanHub", "Возможности устройства", "Показать состав", "sensor.value", "Открыть в Home Assistant", "Найти устройство", "Удалить из Home Assistant"]) {
+        for (const label of ["Где используется", "Не используется настройками Hausman Hub", "Возможности устройства", "Показать состав", "sensor.value", "Открыть в Home Assistant", "Найти устройство", "Удалить из Home Assistant"]) {
           if (!text.includes(label)) throw new Error("maintenance action missing: " + label);
         }
         const name = findAll(screen, (node) => node.tagName === "INPUT" && node.maxLength === 128)[0];
@@ -4049,7 +4054,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.106")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.107")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;
@@ -4939,7 +4944,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         save.fire("click");
         await tick();
         const text = textOf(panel.shadowRoot);
-        if (!text.includes("изменились в другом окне")) throw new Error("conflict notice missing");
+        if (!text.includes("Состояние изменилось. Обновите данные")) throw new Error("conflict notice missing");
         if (panel._dirty.schedule !== false) throw new Error("schedule dirty flag not cleared");
             """,
         )
