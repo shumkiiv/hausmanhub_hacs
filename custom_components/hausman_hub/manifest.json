@@ -1,6 +1,6 @@
 {
   "domain": "hausman_hub",
-  "name": "HausmanHub",
+  "name": "Hausman for Home Assistant",
   "codeowners": [
     "@shumkiiv"
   ],
@@ -13,5 +13,5 @@
     "recorder",
     "weather"
   ],
-  "version": "1.52.104"
+  "version": "1.52.105"
 }
