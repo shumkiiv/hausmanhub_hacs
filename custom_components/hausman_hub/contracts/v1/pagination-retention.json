@@ -1,0 +1,101 @@
+{
+  "contract": {
+    "name": "hausman-hub-pagination-retention",
+    "version": 1
+  },
+  "apiMajorVersion": 1,
+  "surfaces": [
+    {
+      "id": "event_stream",
+      "operationId": "streamHausmanHubEvents",
+      "pagination": {
+        "strategy": "last_event_id",
+        "requestHeader": "Last-Event-ID",
+        "order": "oldest_first",
+        "cursorOpaque": true,
+        "gapSignal": "snapshot_invalidated.data.replay_status=gap"
+      },
+      "retention": {
+        "mode": "memory_count",
+        "maxItems": 128,
+        "deliveryQueueLimit": 32,
+        "survivesRestart": false,
+        "retainedTypes": [
+          "snapshot_invalidated",
+          "critical_alert",
+          "attention_alert",
+          "command_receipt"
+        ],
+        "sessionOnlyTypes": ["hello", "heartbeat"]
+      }
+    },
+    {
+      "id": "energy_history",
+      "operationId": "getHausmanHubEnergyHistory",
+      "pagination": {
+        "strategy": "time_window",
+        "fromInclusive": true,
+        "toExclusive": true,
+        "order": "timestamp_asc",
+        "maxWindowDays": 31,
+        "maxSeries": 128,
+        "maxPointsPerSeries": 8928
+      },
+      "retention": {
+        "mode": "source_bound",
+        "source": "home_assistant_recorder",
+        "separateCopy": false,
+        "missingPointsAllowed": true
+      }
+    },
+    {
+      "id": "operation_journal",
+      "operationId": "getHausmanHubOperationJournal",
+      "pagination": {
+        "strategy": "keyset",
+        "cursorParameter": "before_sequence",
+        "cursorResponseField": "page.next_before_sequence",
+        "order": "sequence_desc",
+        "defaultLimit": 100,
+        "maxLimit": 512,
+        "cursorExclusive": true
+      },
+      "retention": {
+        "mode": "durable_count",
+        "maxItems": 512,
+        "survivesRestart": true,
+        "ttlSeconds": null
+      }
+    },
+    {
+      "id": "dashboard_events",
+      "operationId": "getHausmanHubDashboard",
+      "pagination": {
+        "strategy": "head_projection",
+        "order": "timestamp_desc",
+        "maxItems": 100,
+        "continuationOperationId": "getHausmanHubOperationJournal"
+      },
+      "retention": {
+        "mode": "operation_journal_projection",
+        "maxItems": 100
+      }
+    },
+    {
+      "id": "manual_energy_readings",
+      "operationId": "getHausmanHubEnergyMeter",
+      "pagination": {
+        "strategy": "head_projection",
+        "order": "timestamp_desc",
+        "maxItems": 60,
+        "continuationOperationId": null
+      },
+      "retention": {
+        "mode": "durable_count",
+        "maxItems": 60,
+        "survivesRestart": true,
+        "ttlSeconds": null
+      }
+    }
+  ]
+}

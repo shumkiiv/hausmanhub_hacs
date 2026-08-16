@@ -1,7 +1,8 @@
-import { renderEnergyHistoryChart } from "./hausman-hub-energy-chart.js?v=1.52.110";
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.110";
-import { loadEnergyMeter, meterConfigured, meterNumber, meterReminderText, renderEnergyMeterCard } from "./hausman-hub-energy-meter.js?v=1.52.110";
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.110";
+import { renderEnergyHistoryChart } from "./hausman-hub-energy-chart.js?v=1.52.111";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.111";
+import { loadEnergyMeter, meterConfigured, meterNumber, meterReminderText, renderEnergyMeterCard } from "./hausman-hub-energy-meter.js?v=1.52.111";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.111";
+import { mergeEnergyHistoryResponses, splitEnergyWindows } from "./hausman-hub-pagination.js?v=1.52.111";
 
 const number = (value, digits = 1) => Number.isFinite(Number(value))
   ? new Intl.NumberFormat("ru-RU", { maximumFractionDigits: digits }).format(Number(value))
@@ -593,15 +594,20 @@ export async function loadEnergyHistory(panel) {
     const range = ranges[period] || ranges.day;
     const end = new Date();
     const start = new Date(end.getTime() - range.days * 24 * 60 * 60 * 1000);
-    const params = new URLSearchParams({
-      from: start.toISOString(),
-      to: end.toISOString(),
-      interval: range.interval,
-    });
-    energy.sources.forEach((source) => params.append("deviceId", source.deviceId));
-    const response = await panel._hass.callApi(
-      "GET", `hausman_hub/v1/energy/history?${params.toString()}`,
-    );
+    const windows = splitEnergyWindows(start.getTime(), end.getTime());
+    const responses = [];
+    for (const window of windows) {
+      const params = new URLSearchParams({
+        from: new Date(window.fromMs).toISOString(),
+        to: new Date(window.toMs).toISOString(),
+        interval: range.interval,
+      });
+      energy.sources.forEach((source) => params.append("deviceId", source.deviceId));
+      responses.push(await panel._hass.callApi(
+        "GET", `hausman_hub/v1/energy/history?${params.toString()}`,
+      ));
+    }
+    const response = mergeEnergyHistoryResponses(responses);
     const history = {};
     const consumption = {};
     (response && Array.isArray(response.series) ? response.series : [])

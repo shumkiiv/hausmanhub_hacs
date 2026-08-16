@@ -1,8 +1,23 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-16 (HACS 1.52.110 frontend correlation ID).
+Last updated: 2026-08-16 (HACS 1.52.111 frontend pagination/retention).
 
 ## Current work
+
+- 2026-08-16 (Kimi): HACS `1.52.111` подключает панель к pagination/retention
+  `hausman-hub-pagination-retention v1` (contracts `0.36.0`): новый модуль
+  `frontend/hausman-hub-pagination.js` с pinned snapshot матрицы (5
+  поверхностей), вендорской копией `contracts/v1/pagination-retention.json`
+  и fail-closed тестом `tests/test_frontend_pagination_retention.py`.
+  SSE-клиент (fetch-транспорт с Bearer token и `Last-Event-ID`) ведёт cursor
+  последнего полностью обработанного события, очередь доставки ограничена
+  32 сообщениями с восстановлением через gap flow, backoff reconnect
+  ограничен 30 секундами, `hello`/`heartbeat` не попадают в историю.
+  Gap flow: один snapshot refresh, новый stream ID, без повтора команд.
+  Energy history разбивается на соседние окна `[from, to)` до 31 дня без
+  дубля boundary point и без нулей вместо пропусков; operation journal
+  читается keyset-pagerом (`before_sequence`, `has_more=false`). Backend не
+  менялся.
 
 - 2026-08-16 (Kimi): HACS `1.52.110` подключает панель к correlation ID
   `hausman-hub-correlation-surfaces v1` (contracts `0.35.0`): новый модуль

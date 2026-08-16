@@ -29,6 +29,7 @@ ERROR_TAXONOMY_JS = PANEL_JS.with_name("hausman-hub-error-taxonomy.js")
 UI_STATE_JS = PANEL_JS.with_name("hausman-hub-ui-state.js")
 DEVICE_FEATURES_JS = PANEL_JS.with_name("hausman-hub-device-features.js")
 CORRELATION_JS = PANEL_JS.with_name("hausman-hub-correlation.js")
+PAGINATION_JS = PANEL_JS.with_name("hausman-hub-pagination.js")
 KIOSK_JS = PANEL_JS.with_name("hausman-hub-kiosk.js")
 SETTINGS_PROFILE_JS = PANEL_JS.with_name("hausman-hub-settings-profile.js")
 SETTINGS_ROOMS_JS = PANEL_JS.with_name("hausman-hub-settings-rooms.js")
@@ -669,6 +670,10 @@ def panel_script(
       vm.runInThisContext(
         fs.readFileSync({str(CORRELATION_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(CORRELATION_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(PAGINATION_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(PAGINATION_JS)!r} }}
       );
       const log = recordTechnicalEvent;
       vm.runInThisContext(
@@ -4069,7 +4074,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.110")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.111")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

@@ -1,0 +1,22 @@
+{
+  "contract": {
+    "name": "hausman-hub-event",
+    "version": 1
+  },
+  "id": "evt-stream-demo-1",
+  "correlation_id": "corr.event.hello.1",
+  "type": "hello",
+  "occurred_at": "2026-08-15T12:00:00Z",
+  "data": {
+    "api_major_version": 1,
+    "heartbeat_seconds": 30,
+    "stream_id": "stream-demo",
+    "replay": {
+      "strategy": "last_event_id",
+      "request_header": "Last-Event-ID",
+      "max_events": 128,
+      "delivery_queue_limit": 32,
+      "survives_restart": false
+    }
+  }
+}

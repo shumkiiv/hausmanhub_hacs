@@ -1,5 +1,44 @@
 # История версий
 
+## 1.52.111 - 2026-08-16
+
+- Панель подключена к pagination/retention `hausman-hub-pagination-retention v1`
+  (contracts `0.36.0`): новый модуль
+  `frontend/hausman-hub-pagination.js` хранит pinned snapshot матрицы
+  (5 поверхностей: event stream, energy history, operation journal,
+  dashboard events, manual readings) и вендорскую копию в
+  `contracts/v1/pagination-retention.json`.
+- В панели появился SSE-клиент на `GET /api/hausman_hub/v1/events`:
+  reconnect передаёт `Last-Event-ID` с последним полностью обработанным
+  opaque event ID (fetch-транспорт с Bearer token), локальная очередь
+  доставки ограничена 32 сообщениями, reconnect использует backoff с
+  верхней границей 30 секунд. `hello` и `heartbeat` не попадают в
+  пользовательскую историю, повторный event ID не создаёт дубль
+  уведомления. Доменное событие обновляет snapshot сразу, polling каждые
+  30 секунд остаётся fallback.
+- Gap flow: при `snapshot_invalidated.data.replay_status=gap` (чужой cursor,
+  cursor вне окна replay, переполнение очереди медленным consumer) панель
+  делает ровно один snapshot refresh, принимает новый stream ID из `hello`
+  и не повторяет команды.
+- Energy history запрашивается непересекающимися окнами `[from, to)` не
+  длиннее 31 дня: период «год» разбивается на 12 соседних окон, boundary
+  point не дублируется при слиянии series, отсутствующие точки Recorder не
+  превращаются в нули. Диапазон длиннее 31 дня отклоняется до запроса и
+  отрисовки (`validateEnergyWindow`).
+- Operation journal читается keyset-pagerом: `before_sequence` из
+  `page.next_before_sequence` (cursor exclusive), порядок `sequence_desc`,
+  фильтры (`source`, `correlation_id`) сохраняются между страницами, чтение
+  завершается по `has_more=false`. Повтор sequence, нарушение порядка или
+  битый cursor прерывают чтение с ошибкой. Legacy-страница без page
+  metadata читается один раз.
+- Добавлен fail-closed parity-тест
+  `tests/test_frontend_pagination_retention.py`: parity snapshot против
+  вендорской матрицы, SSE cursor/gap flow на fake EventSource, bounded
+  queue 32, backoff до 30 секунд, energy windows и merge, journal keyset
+  без повторов, legacy fixtures без metadata и новые fixtures с metadata
+  (`fixtures/hausmanhub_pagination_retention_v1/`). Тесты не отправляют
+  физических команд. Backend не менялся.
+
 ## 1.52.110 - 2026-08-16
 
 - Панель подключена к correlation ID `hausman-hub-correlation-surfaces v1`

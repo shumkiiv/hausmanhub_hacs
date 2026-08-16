@@ -1,0 +1,51 @@
+{
+  "contract": { "name": "hausman-hub-energy-history", "version": 1 },
+  "from": "2026-07-31T11:00:00+06:00",
+  "to": "2026-07-31T12:00:00+06:00",
+  "interval": "15m",
+  "page": {
+    "strategy": "time_window",
+    "order": "timestamp_asc",
+    "fromInclusive": true,
+    "toExclusive": true,
+    "maxWindowDays": 31,
+    "maxSeries": 128,
+    "maxPointsPerSeries": 8928
+  },
+  "retention": {
+    "mode": "source_bound",
+    "source": "home_assistant_recorder",
+    "separateCopy": false,
+    "missingPointsAllowed": true
+  },
+  "series": [
+    {
+      "sourceId": "sensor_living_power",
+      "deviceId": "device_0123456789abcdef",
+      "name": "Гостиная",
+      "roomId": "living",
+      "unit": "W",
+      "metric": "power",
+      "scope": "device",
+      "aggregation": "mean",
+      "points": [
+        { "at": "2026-07-31T11:00:00+06:00", "value": 84.2 },
+        { "at": "2026-07-31T11:15:00+06:00", "value": 91.5 }
+      ]
+    },
+    {
+      "sourceId": "selection:power",
+      "deviceId": "selection",
+      "name": "Выбранные устройства · Мощность",
+      "roomId": null,
+      "unit": "W",
+      "metric": "power",
+      "scope": "selection",
+      "aggregation": "sum",
+      "points": [
+        { "at": "2026-07-31T11:00:00+06:00", "value": 84.2 },
+        { "at": "2026-07-31T11:15:00+06:00", "value": 91.5 }
+      ]
+    }
+  ]
+}

@@ -44,6 +44,7 @@ ERROR_TAXONOMY_JS = PANEL_JS.with_name("hausman-hub-error-taxonomy.js")
 UI_STATE_JS = PANEL_JS.with_name("hausman-hub-ui-state.js")
 DEVICE_FEATURES_JS = PANEL_JS.with_name("hausman-hub-device-features.js")
 CORRELATION_JS = PANEL_JS.with_name("hausman-hub-correlation.js")
+PAGINATION_JS = PANEL_JS.with_name("hausman-hub-pagination.js")
 KIOSK_JS = PANEL_JS.with_name("hausman-hub-kiosk.js")
 ROLLOUT_JS = PANEL_JS.with_name("hausman-hub-rollout.js")
 
@@ -451,6 +452,10 @@ def panel_script(get_table: dict, post_table: dict, assertions: str) -> str:
       vm.runInThisContext(
         fs.readFileSync({str(CORRELATION_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(CORRELATION_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(PAGINATION_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(PAGINATION_JS)!r} }}
       );
       const log = recordTechnicalEvent;
       vm.runInThisContext(
