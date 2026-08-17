@@ -63,6 +63,10 @@ def local_checks(python_executable: str) -> tuple[Check, ...]:
             (python_executable, "tools/check_staged_release_version.py"),
         ),
         (
+            "README version sync",
+            (python_executable, "tools/sync_readme_version.py", "--check"),
+        ),
+        (
             "HausmanHub product naming",
             (python_executable, "tools/check_product_naming.py"),
         ),

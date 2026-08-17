@@ -30,6 +30,7 @@ class LocalReleaseCheckTest(unittest.TestCase):
                 "diagnostics synthetic fixture",
                 "Android model compatibility",
                 "staged release version",
+                "README version sync",
                 "HausmanHub product naming",
                 "HACS installation package",
                 "published-file safety",
