@@ -1,8 +1,26 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-16 (HACS 1.52.111 frontend pagination/retention).
+Last updated: 2026-08-17 (HACS 1.52.112 climate interseason).
 
 ## Current work
+
+- 2026-08-17 (Kimi): HACS `1.52.112` на contracts `0.39.0` (`afd1552`)
+  добавляет межсезонный режим кондиционеров: при свежей уличной температуре
+  не выше `interseason_outdoor_max_c` (дефолт 22) работающий кондиционер
+  выключается при delta ниже `interseason_cooling_start_gap` (дефолт 2.0),
+  остановленный не стартует до превышения цели на этот запас; MINIMUM_RUN
+  сохраняет MAINTAIN до истечения минимального времени работы. Новые причины
+  стабильности `interseason_off`, `interseason_cooling_delayed`,
+  `interseason_window_open`; опциональное календарное окно MM-DD с переходом
+  через новый год; `interseason_window_open_off` глушит работающий
+  кондиционер при открытом окне. Настройки хранятся в climate registry home,
+  admin `home-environment` не затирает их у старых клиентов, новый публичный
+  `GET/PUT /api/hausman_hub/v1/climate-season-settings` с expectedRevision
+  отдаёт документ планшету. Панель: блок «Межсезонье: отдых кондиционеров»
+  в карточке сигналов дома. Release commit и tag target `9646977`; GitHub
+  Release опубликован без assets. Full pytest: 1494 passed, 4 skipped, 984
+  subtests. Deploy на живой дом не выполнялся - шаг Codex; после deploy
+  включить `interseason_enabled` и наблюдать soak.
 
 - 2026-08-16 (Kimi): HACS `1.52.111` подключает панель к pagination/retention
   `hausman-hub-pagination-retention v1` (contracts `0.36.0`): новый модуль
