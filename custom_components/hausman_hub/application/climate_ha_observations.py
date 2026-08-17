@@ -121,6 +121,7 @@ def build_native_ha_climate_observation(
     local_time: tuple[int, int] | None = None,
     previous_weather_lockout: bool | None = None,
     previous_central_heating_on: bool | None = None,
+    local_month_day: tuple[int, int] | None = None,
 ) -> ClimateObservationSnapshot:
     """Build one complete observation from registry bindings and HA states."""
 
@@ -138,6 +139,12 @@ def build_native_ha_climate_observation(
         or any(type(value) is not int for value in local_time)
     ):
         raise ClimateHaObservationViolation("local time must be an hour/minute pair")
+    if local_month_day is not None and (
+        type(local_month_day) is not tuple
+        or len(local_month_day) != 2
+        or any(type(value) is not int for value in local_month_day)
+    ):
+        raise ClimateHaObservationViolation("local date must be a month/day pair")
 
     devices = tuple(
         _device_observation(device, states, protection, observed_at)
@@ -159,6 +166,7 @@ def build_native_ha_climate_observation(
             local_time,
             previous_weather_lockout,
             previous_central_heating_on,
+            local_month_day,
         ),
         control=ClimateControlObservation(),
         rooms=rooms,
@@ -381,6 +389,7 @@ def _home_observation(
     local_time: tuple[int, int] | None,
     previous_weather_lockout: bool | None,
     previous_central_heating_on: bool | None,
+    local_month_day: tuple[int, int] | None = None,
 ) -> ClimateHomeObservation:
     home = registry.home
     outdoor_sources = home.prioritized_outdoor_temperature_entity_ids
@@ -416,6 +425,13 @@ def _home_observation(
             previous_weather_lockout,
         ),
         occupancy=_occupancy(home.presence_entity_id, states),
+        interseason_enabled=home.interseason_enabled,
+        interseason_outdoor_max_c=home.interseason_outdoor_max_c,
+        interseason_cooling_start_gap=home.interseason_cooling_start_gap,
+        interseason_window_open_off=home.interseason_window_open_off,
+        interseason_date_start=home.interseason_date_start,
+        interseason_date_end=home.interseason_date_end,
+        interseason_local_month_day=local_month_day,
     )
 
 

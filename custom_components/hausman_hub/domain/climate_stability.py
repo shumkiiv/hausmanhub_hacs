@@ -103,6 +103,9 @@ class ClimateStabilityReason(StrEnum):
     WINDOW_NOT_CLOSED = "window_not_closed"
     WINDOW_OPEN_HEATING_PERIOD = "window_open_heating_period"
     OCCUPANCY_NOT_HOME = "occupancy_not_home"
+    INTERSEASON_OFF = "interseason_off"
+    INTERSEASON_COOLING_DELAYED = "interseason_cooling_delayed"
+    INTERSEASON_WINDOW_OPEN = "interseason_window_open"
 
 
 class ClimateStabilityProtection(StrEnum):
@@ -685,6 +688,49 @@ def _air_conditioner_output(
         )
     profile_target, fan_mode, quiet = _cooling_profile(target, home)
     delta = temperature - comfort
+    if home.interseason_active:
+        start_gap = _decimal(home.interseason_cooling_start_gap)
+        if running and delta < start_gap:
+            minimum_run_remaining = _remaining_seconds(
+                observed_at,
+                device.last_started_at,
+                timing.minimum_run_minutes,
+            )
+            if minimum_run_remaining is not None:
+                return (
+                    ClimateStabilityAction.MAINTAIN,
+                    max(CLIMATE_SOFTENED_COOLING_SETPOINT, target.target_temperature),
+                    ClimateFanMode.LOW,
+                    quiet,
+                    None,
+                    None,
+                    timing,
+                    minimum_run_remaining,
+                    ClimateStabilityProtection.MINIMUM_RUN,
+                    ClimateStabilityReason.MINIMUM_RUN_HOLD,
+                )
+            return (
+                ClimateStabilityAction.OFF,
+                *empty,
+                timing,
+                None,
+                ClimateStabilityProtection.NONE,
+                (
+                    ClimateStabilityReason.INTERSEASON_WINDOW_OPEN
+                    if home.interseason_window_open_off
+                    and room.window is ClimateWindowState.OPEN
+                    else ClimateStabilityReason.INTERSEASON_OFF
+                ),
+            )
+        if stopped and delta < start_gap:
+            return (
+                ClimateStabilityAction.OFF,
+                *empty,
+                timing,
+                None,
+                ClimateStabilityProtection.NONE,
+                ClimateStabilityReason.INTERSEASON_COOLING_DELAYED,
+            )
     if running:
         minimum_run_remaining = _remaining_seconds(
             observed_at,

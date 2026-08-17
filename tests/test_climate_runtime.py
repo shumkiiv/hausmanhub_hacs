@@ -3321,3 +3321,52 @@ class ClimateRuntimeTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(1, len(store.saved))
         self.assertEqual("living_ac", result["devices"][0]["id"])
+
+    async def test_interseason_settings_document_update_and_persistence(self) -> None:
+        store = MemoryStore(ClimateRegistry())
+        runtime = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateControlMode.MANAGED),
+            registry_store=store,
+        )
+        await runtime.async_start()
+
+        document = await runtime.async_climate_season_settings_document()
+
+        self.assertEqual(
+            "hausman-hub-climate-season-settings",
+            document["contract"]["name"],
+        )
+        self.assertFalse(document["settings"]["enabled"])
+        self.assertEqual(22.0, document["settings"]["outdoorMaxTemperatureC"])
+        self.assertIsNone(document["settings"]["dateStart"])
+
+        result = await runtime.async_update_interseason_settings(
+            {
+                "interseason_enabled": True,
+                "interseason_outdoor_max_c": 21.0,
+                "interseason_cooling_start_gap": 2.5,
+                "interseason_window_open_off": True,
+                "interseason_date_start": (8, 15),
+                "interseason_date_end": (10, 1),
+            }
+        )
+        updated = runtime.climate_season_settings_document_from_result(result)
+
+        self.assertTrue(updated["settings"]["enabled"])
+        self.assertEqual(21.0, updated["settings"]["outdoorMaxTemperatureC"])
+        self.assertEqual(2.5, updated["settings"]["coolingStartGap"])
+        self.assertEqual("08-15", updated["settings"]["dateStart"])
+        self.assertEqual("10-01", updated["settings"]["dateEnd"])
+        self.assertNotEqual(document["revision"], updated["revision"])
+
+        restarted = ClimateRuntime(
+            entry_id="entry",
+            configuration=configuration(ClimateControlMode.MANAGED),
+            registry_store=store,
+        )
+        await restarted.async_start()
+        restored = await restarted.async_climate_season_settings_document()
+        self.assertTrue(restored["settings"]["enabled"])
+        self.assertEqual("08-15", restored["settings"]["dateStart"])
+        self.assertEqual(updated["revision"], restored["revision"])

@@ -82,6 +82,22 @@ def registry_to_payload(registry: ClimateRegistry) -> dict[str, object]:
         home["central_heating_temperature_off"] = (
             registry.home.central_heating_temperature_off
         )
+    if registry.home.interseason_enabled:
+        home["interseason_enabled"] = True
+    if registry.home.interseason_outdoor_max_c != 22.0:
+        home["interseason_outdoor_max_c"] = registry.home.interseason_outdoor_max_c
+    if registry.home.interseason_cooling_start_gap != 2.0:
+        home["interseason_cooling_start_gap"] = (
+            registry.home.interseason_cooling_start_gap
+        )
+    if not registry.home.interseason_window_open_off:
+        home["interseason_window_open_off"] = False
+    if registry.home.interseason_date_start is not None:
+        home["interseason_date_start"] = list(registry.home.interseason_date_start)
+    if registry.home.interseason_date_end is not None:
+        home["interseason_date_end"] = list(registry.home.interseason_date_end)
+    if registry.home.interseason_updated_at is not None:
+        home["interseason_updated_at"] = registry.home.interseason_updated_at
     return {
         "version": registry.version,
         "home": home,
@@ -136,6 +152,13 @@ def registry_from_payload(payload: object) -> ClimateRegistry:
             "air_conditioner_minimum_outdoor_temperature",
             "central_heating_temperature_on",
             "central_heating_temperature_off",
+            "interseason_enabled",
+            "interseason_outdoor_max_c",
+            "interseason_cooling_start_gap",
+            "interseason_window_open_off",
+            "interseason_date_start",
+            "interseason_date_end",
+            "interseason_updated_at",
         },
         "registry home",
         optional={
@@ -145,6 +168,13 @@ def registry_from_payload(payload: object) -> ClimateRegistry:
             "air_conditioner_minimum_outdoor_temperature",
             "central_heating_temperature_on",
             "central_heating_temperature_off",
+            "interseason_enabled",
+            "interseason_outdoor_max_c",
+            "interseason_cooling_start_gap",
+            "interseason_window_open_off",
+            "interseason_date_start",
+            "interseason_date_end",
+            "interseason_updated_at",
         },
     )
     rooms = _bounded_list(root["rooms"], "registry rooms", 128)
@@ -197,6 +227,38 @@ def registry_from_payload(payload: object) -> ClimateRegistry:
                     home.get("central_heating_temperature_off"),
                     30.0,
                     "central heating off temperature threshold",
+                ),
+                interseason_enabled=_optional_flag(
+                    home.get("interseason_enabled"),
+                    False,
+                    "interseason enabled",
+                ),
+                interseason_outdoor_max_c=_optional_threshold(
+                    home.get("interseason_outdoor_max_c"),
+                    22.0,
+                    "interseason outdoor maximum temperature",
+                ),
+                interseason_cooling_start_gap=_optional_threshold(
+                    home.get("interseason_cooling_start_gap"),
+                    2.0,
+                    "interseason cooling start gap",
+                ),
+                interseason_window_open_off=_optional_flag(
+                    home.get("interseason_window_open_off"),
+                    True,
+                    "interseason window-open off",
+                ),
+                interseason_date_start=_optional_month_day(
+                    home.get("interseason_date_start"),
+                    "interseason season start date",
+                ),
+                interseason_date_end=_optional_month_day(
+                    home.get("interseason_date_end"),
+                    "interseason season end date",
+                ),
+                interseason_updated_at=_optional_epoch(
+                    home.get("interseason_updated_at"),
+                    "interseason update time",
                 ),
             ),
             rooms=tuple(_room(value, index) for index, value in enumerate(rooms)),
@@ -377,6 +439,34 @@ def _optional_threshold(value: object, default: float, label: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ClimateRegistryViolation(f"{label} must be numeric")
     return float(value)
+
+
+def _optional_flag(value: object, default: bool, label: str) -> bool:
+    if value is None:
+        return default
+    if type(value) is not bool:
+        raise ClimateRegistryViolation(f"{label} must be boolean")
+    return value
+
+
+def _optional_month_day(value: object, label: str) -> tuple[int, int] | None:
+    if value is None:
+        return None
+    if (
+        not isinstance(value, (list, tuple))
+        or len(value) != 2
+        or any(type(part) is not int for part in value)
+    ):
+        raise ClimateRegistryViolation(f"{label} must be a month/day pair")
+    return (value[0], value[1])
+
+
+def _optional_epoch(value: object, label: str) -> int | None:
+    if value is None:
+        return None
+    if type(value) is not int or value < 0:
+        raise ClimateRegistryViolation(f"{label} must be a non-negative integer")
+    return value
 
 
 def _device(value: object, index: int) -> ClimateDevice:

@@ -15,8 +15,8 @@ def test_external_contract_pin_is_explicit_and_canonical() -> None:
 
     assert pin == {
         "repository": "shumkiiv/hausmanhub-contracts",
-        "version": "0.37.0",
-        "commit": "643e97e",
+        "version": "0.39.0",
+        "commit": "afd1552",
         "canonical": True,
         "role": "runtime-consumer",
     }

@@ -150,6 +150,7 @@ from .climate_setup import (
     update_climate_schedule,
     validate_climate_contour_draft,
 )
+from .climate_signal_settings import interseason_settings_wire
 from .climate_targets import build_climate_target_snapshot
 from .contours import (
     CLIMATE_CONTOUR_ID,
@@ -2147,6 +2148,7 @@ class ClimateRuntime:
                 local_time=(local.hour, local.minute),
                 previous_weather_lockout=self._weather_heating_lockout,
                 previous_central_heating_on=self._central_heating_on,
+                local_month_day=(local.month, local.day),
             )
             self._weather_heating_lockout = observation.home.weather_heating_lockout
             self._central_heating_on = observation.home.central_heating_on
@@ -2261,6 +2263,65 @@ class ClimateRuntime:
             await self._registry_store.async_save(registry)
             self._registry = registry
             self._central_heating_on = None
+            self.last_error = None
+            result = registry_to_payload(registry)
+            result["setup_revision"] = climate_setup_revision(registry, self._contours)
+            return result
+
+    async def async_climate_season_settings_document(self) -> dict[str, object]:
+        """Return the public interseason settings document with its revision."""
+
+        async with self._lock:
+            payload = registry_to_payload(self._registry)
+            home = payload.get("home")
+            if not isinstance(home, dict):
+                raise ClimateRegistryViolation("climate registry home is invalid")
+            return {
+                "contract": {
+                    "name": "hausman-hub-climate-season-settings",
+                    "version": 1,
+                },
+                "revision": climate_setup_revision(self._registry, self._contours),
+                "updatedAt": _season_settings_updated_at(home),
+                "settings": interseason_settings_wire(home),
+            }
+
+    @staticmethod
+    def climate_season_settings_document_from_result(
+        result: dict[str, object],
+    ) -> dict[str, object]:
+        """Render the public interseason document from an update result."""
+
+        home = result.get("home")
+        if not isinstance(home, dict):
+            raise ClimateRegistryViolation("climate registry home is invalid")
+        return {
+            "contract": {
+                "name": "hausman-hub-climate-season-settings",
+                "version": 1,
+            },
+            "revision": result["setup_revision"],
+            "updatedAt": _season_settings_updated_at(home),
+            "settings": interseason_settings_wire(home),
+        }
+
+    async def async_update_interseason_settings(
+        self,
+        fields: dict[str, object],
+    ) -> dict[str, object]:
+        """Atomically merge validated interseason settings into the saved home."""
+
+        async with self._lock:
+            payload = registry_to_payload(self._registry)
+            home = payload.get("home")
+            if not isinstance(home, dict):
+                raise ClimateRegistryViolation("climate registry home is invalid")
+            home.update(fields)
+            home["interseason_updated_at"] = self._safe_now()
+            registry = registry_from_payload(payload)
+            validate_contour_bindings(self._contours, registry)
+            await self._registry_store.async_save(registry)
+            self._registry = registry
             self.last_error = None
             result = registry_to_payload(registry)
             result["setup_revision"] = climate_setup_revision(registry, self._contours)
@@ -2924,3 +2985,14 @@ def _reconciliation_counts(reconciliation: object | None) -> dict[str, object] |
             reconciliation.unregistered_source_ids  # type: ignore[attr-defined]
         ),
     }
+
+
+def _season_settings_updated_at(home: dict[str, object]) -> str:
+    updated_at = home.get("interseason_updated_at")
+    if type(updated_at) is not int or updated_at < 0:
+        return datetime.now().astimezone().isoformat(timespec="seconds")
+    return (
+        datetime.fromtimestamp(updated_at / 1000)
+        .astimezone()
+        .isoformat(timespec="seconds")
+    )

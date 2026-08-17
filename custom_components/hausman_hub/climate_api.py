@@ -65,6 +65,7 @@ from .application.climate_signal_settings import (
     ClimateSignalSettingsViolation,
     validate_climate_mode_update,
     validate_home_environment_update,
+    validate_interseason_settings_update,
     validate_room_signal_update,
     validate_room_signal_updates,
     validate_room_window_update,
@@ -177,6 +178,17 @@ ADMIN_PANEL_APPLY_PATH = "/api/hausman_hub/v1/admin/panel/apply"
 ADMIN_PANEL_TEMPORARY_PATH = "/api/hausman_hub/v1/admin/panel/temporary-temperature"
 ADMIN_CLIMATE_MODE_PATH = "/api/hausman_hub/v1/admin/climate-mode"
 ADMIN_HOME_ENVIRONMENT_PATH = "/api/hausman_hub/v1/admin/home-environment"
+SEASON_SETTINGS_PATH = "/api/hausman_hub/v1/climate-season-settings"
+
+_INTERSEASON_HOME_FIELDS = (
+    "interseason_enabled",
+    "interseason_outdoor_max_c",
+    "interseason_cooling_start_gap",
+    "interseason_window_open_off",
+    "interseason_date_start",
+    "interseason_date_end",
+    "interseason_updated_at",
+)
 ADMIN_ROOM_SIGNALS_PATH = "/api/hausman_hub/v1/admin/climate-room-signals"
 ADMIN_AI_ASSISTANT_PATH = "/api/hausman_hub/v1/admin/ai-assistant"
 ADMIN_AI_ASSISTANT_SETTINGS_PATH = f"{ADMIN_AI_ASSISTANT_PATH}/settings"
@@ -237,6 +249,7 @@ def register_climate_api(
             DeviceDiscoveryView(hass),
             TabletProfileView(hass),
             EnergySettingsView(hass),
+            ClimateSeasonSettingsView(hass),
             DevicePowerDependenciesView(hass),
             ClimateHomeView(hass),
             ClimateRuntimeView(hass),
@@ -1040,6 +1053,77 @@ class EnergySettingsView(_PublicPreferencesView):
                 headers=NO_STORE_HEADERS,
             )
         return self.json(result, headers=NO_STORE_HEADERS)
+
+
+class ClimateSeasonSettingsView(_ClimateView):
+    """Read and atomically replace interseason cooling restraint settings."""
+
+    url = SEASON_SETTINGS_PATH
+    name = "api:hausman_hub:climate_season_settings"
+
+    async def get(self, request: Any) -> Any:
+        if not _is_exact_request(request, SEASON_SETTINGS_PATH):
+            return _not_found(self)
+        if not _is_local_dashboard_request(request):
+            return _forbidden(self)
+        runtime = self._runtime()
+        if runtime is None:
+            return self._unavailable()
+        try:
+            document = await runtime.async_climate_season_settings_document()
+        except Exception:
+            return self._unavailable()
+        return self.json(document, headers=NO_STORE_HEADERS)
+
+    async def put(self, request: Any) -> Any:
+        if not _is_exact_request(request, SEASON_SETTINGS_PATH):
+            return _not_found(self)
+        if not _is_local_dashboard_request(request):
+            return _forbidden(self)
+        runtime = self._runtime()
+        if runtime is None:
+            return self._unavailable()
+        try:
+            payload = await _request_json(request, maximum_bytes=MAX_ACTION_BODY_BYTES)
+            if not isinstance(payload, Mapping) or set(payload) != {
+                "expectedRevision",
+                "settings",
+            }:
+                raise ClimateSignalSettingsViolation("invalid_interseason_settings")
+            if (
+                type(payload["expectedRevision"]) is not int
+                or payload["expectedRevision"] < 0
+            ):
+                raise ClimateSignalSettingsViolation("invalid_interseason_settings")
+            fields = validate_interseason_settings_update(payload["settings"])
+        except ClimateSignalSettingsViolation:
+            return self.json_message(
+                "Настройки межсезонья заполнены неверно.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        except ValueError:
+            return self.json_message(
+                "Настройки межсезонья заполнены неверно.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        try:
+            document = await runtime.async_climate_season_settings_document()
+        except Exception:
+            return self._unavailable()
+        if payload["expectedRevision"] != document["revision"]:
+            return self.json_message(
+                "Настройки уже изменились на другом клиенте. Обновите данные.",
+                HTTPStatus.CONFLICT,
+                headers=NO_STORE_HEADERS,
+            )
+        try:
+            result = await runtime.async_update_interseason_settings(fields)
+            document = runtime.climate_season_settings_document_from_result(result)
+        except Exception:
+            return self._unavailable()
+        return self.json(document, headers=NO_STORE_HEADERS)
 
 
 class DevicePowerDependenciesView(_ClimateView):
@@ -2348,6 +2432,10 @@ class ClimateAdminHomeEnvironmentView(_ClimateView):
             )
         except Exception:
             return self._unavailable()
+        if isinstance(current_home, Mapping):
+            for key in _INTERSEASON_HOME_FIELDS:
+                if key not in home and key in current_home:
+                    home[key] = current_home[key]
         try:
             result = await runtime.async_update_home_environment(home)
         except Exception:

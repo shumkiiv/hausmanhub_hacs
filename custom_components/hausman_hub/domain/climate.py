@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
+import math
 import re
 
 
@@ -174,6 +175,13 @@ class ClimateHomeEnvironment:
     air_conditioner_minimum_outdoor_temperature: float = -5.0
     central_heating_temperature_on: float = 35.0
     central_heating_temperature_off: float = 30.0
+    interseason_enabled: bool = False
+    interseason_outdoor_max_c: float = 22.0
+    interseason_cooling_start_gap: float = 2.0
+    interseason_window_open_off: bool = True
+    interseason_date_start: tuple[int, int] | None = None
+    interseason_date_end: tuple[int, int] | None = None
+    interseason_updated_at: int | None = None
 
     def __post_init__(self) -> None:
         _optional_entity_domain(
@@ -242,6 +250,35 @@ class ClimateHomeEnvironment:
         if self.central_heating_temperature_off >= self.central_heating_temperature_on:
             raise ClimateModelViolation(
                 "central heating off temperature must stay below the on temperature"
+            )
+        if type(self.interseason_enabled) is not bool:
+            raise ClimateModelViolation("interseason enabled must be boolean")
+        _bounded_threshold(
+            self.interseason_outdoor_max_c,
+            5.0,
+            35.0,
+            "interseason outdoor maximum temperature",
+        )
+        _bounded_threshold(
+            self.interseason_cooling_start_gap,
+            1.0,
+            4.0,
+            "interseason cooling start gap",
+        )
+        if type(self.interseason_window_open_off) is not bool:
+            raise ClimateModelViolation("interseason window-open off must be boolean")
+        _month_day(self.interseason_date_start, "interseason season start date")
+        _month_day(self.interseason_date_end, "interseason season end date")
+        if (self.interseason_date_start is None) != (self.interseason_date_end is None):
+            raise ClimateModelViolation(
+                "interseason season dates must be configured together"
+            )
+        if self.interseason_updated_at is not None and (
+            type(self.interseason_updated_at) is not int
+            or self.interseason_updated_at < 0
+        ):
+            raise ClimateModelViolation(
+                "interseason update time must be a non-negative integer"
             )
 
     @property
@@ -479,3 +516,26 @@ def _require_unique(values: object, label: str) -> None:
     items = tuple(values)  # type: ignore[arg-type]
     if len(items) != len(set(items)):
         raise ClimateModelViolation(f"{label} must be unique")
+
+
+def _bounded_threshold(value: object, minimum: float, maximum: float, label: str) -> None:
+    if isinstance(value, bool) or type(value) not in {int, float}:
+        raise ClimateModelViolation(f"{label} must be numeric")
+    if not math.isfinite(value) or not minimum <= value <= maximum:
+        raise ClimateModelViolation(
+            f"{label} must stay within {minimum:g}..{maximum:g}"
+        )
+
+
+def _month_day(value: object, label: str) -> None:
+    if value is None:
+        return
+    if (
+        type(value) is not tuple
+        or len(value) != 2
+        or any(type(part) is not int for part in value)
+    ):
+        raise ClimateModelViolation(f"{label} must be a month/day pair")
+    month, day = value
+    if not 1 <= month <= 12 or not 1 <= day <= 31:
+        raise ClimateModelViolation(f"{label} is outside the calendar")

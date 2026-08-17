@@ -1,4 +1,4 @@
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.111";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.112";
 
 const TV_IDENTITY = /(?:\btv\b|телевиз|television|smart[ _-]?tv|pus\d|oled|qled)/i;
 

@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/climate-season-settings-document.schema.json",
+  "title": "HausmanHub persisted interseason climate settings v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "revision", "updatedAt", "settings"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "hausman-hub-climate-season-settings" },
+        "version": { "const": 1 }
+      }
+    },
+    "revision": { "type": "integer", "minimum": 0 },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "settings": { "$ref": "#/$defs/settings" }
+  },
+  "$defs": {
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "outdoorMaxTemperatureC",
+        "coolingStartGap",
+        "windowOpenOff",
+        "dateStart",
+        "dateEnd"
+      ],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "outdoorMaxTemperatureC": {
+          "type": "number",
+          "minimum": 5,
+          "maximum": 35,
+          "multipleOf": 0.5
+        },
+        "coolingStartGap": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 4,
+          "multipleOf": 0.1
+        },
+        "windowOpenOff": { "type": "boolean" },
+        "dateStart": {
+          "type": ["string", "null"],
+          "pattern": "^(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$"
+        },
+        "dateEnd": {
+          "type": ["string", "null"],
+          "pattern": "^(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$"
+        }
+      }
+    }
+  }
+}

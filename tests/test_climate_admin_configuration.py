@@ -29,9 +29,11 @@ from custom_components.hausman_hub.application.climate_signal_settings import (
     WINDOW_DOMAINS,
     WINDOW_SIGNAL,
     ClimateSignalSettingsViolation,
+    interseason_settings_wire,
     signal_candidate_is_suitable,
     validate_climate_mode_update,
     validate_home_environment_update,
+    validate_interseason_settings_update,
     validate_optional_signal_entity,
     validate_room_signal_update,
     validate_room_signal_updates,
@@ -429,6 +431,141 @@ class ClimateSignalSettingsValidationTest(unittest.TestCase):
         self.assertEqual(
             ["sensor.outdoor_temperature", "weather.home"],
             prioritized["outdoor_temperature_entity_ids"],
+        )
+
+    def test_home_environment_update_accepts_interseason_fields(self) -> None:
+        known = {"sensor.outdoor_temperature"}
+        result = validate_home_environment_update(
+            {
+                "outdoor_temperature_entity_id": "sensor.outdoor_temperature",
+                "presence_entity_id": None,
+                "central_heating_entity_id": None,
+                "heating_lockout_high": 18,
+                "heating_lockout_low": 16,
+                "interseason_enabled": True,
+                "interseason_outdoor_max_c": 21.5,
+                "interseason_cooling_start_gap": 2.5,
+                "interseason_window_open_off": False,
+                "interseason_date_start": "08-15",
+                "interseason_date_end": "10-01",
+            },
+            entity_known=known.__contains__,
+        )
+        self.assertEqual(True, result["interseason_enabled"])
+        self.assertEqual(21.5, result["interseason_outdoor_max_c"])
+        self.assertEqual(2.5, result["interseason_cooling_start_gap"])
+        self.assertEqual(False, result["interseason_window_open_off"])
+        self.assertEqual((8, 15), result["interseason_date_start"])
+        self.assertEqual((10, 1), result["interseason_date_end"])
+
+    def test_home_environment_update_rejects_bad_interseason_fields(self) -> None:
+        known = {"sensor.outdoor_temperature"}
+        base = {
+            "outdoor_temperature_entity_id": "sensor.outdoor_temperature",
+            "presence_entity_id": None,
+            "central_heating_entity_id": None,
+            "heating_lockout_high": 18,
+            "heating_lockout_low": 16,
+        }
+        for patch in (
+            {"interseason_enabled": "yes"},
+            {"interseason_outdoor_max_c": 60},
+            {"interseason_cooling_start_gap": 0.5},
+            {"interseason_window_open_off": 1},
+            {"interseason_date_start": "15-08", "interseason_date_end": "10-01"},
+            {"interseason_date_start": "08-15"},
+            {"interseason_date_start": None, "interseason_date_end": "10-01"},
+        ):
+            with self.subTest(patch=patch):
+                with self.assertRaises(ClimateSignalSettingsViolation):
+                    validate_home_environment_update(
+                        {**base, **patch},
+                        entity_known=known.__contains__,
+                    )
+
+    def test_public_interseason_settings_update_shape(self) -> None:
+        result = validate_interseason_settings_update(
+            {
+                "enabled": True,
+                "outdoorMaxTemperatureC": 21.5,
+                "coolingStartGap": 2.5,
+                "windowOpenOff": True,
+                "dateStart": "08-15",
+                "dateEnd": "10-01",
+            }
+        )
+        self.assertEqual(True, result["interseason_enabled"])
+        self.assertEqual(21.5, result["interseason_outdoor_max_c"])
+        self.assertEqual((8, 15), result["interseason_date_start"])
+
+        cleared = validate_interseason_settings_update(
+            {
+                "enabled": False,
+                "outdoorMaxTemperatureC": 22.0,
+                "coolingStartGap": 2.0,
+                "windowOpenOff": True,
+                "dateStart": None,
+                "dateEnd": None,
+            }
+        )
+        self.assertIsNone(cleared["interseason_date_start"])
+        self.assertIsNone(cleared["interseason_date_end"])
+
+        for bad in (
+            {},
+            {"enabled": True},
+            {
+                "enabled": True,
+                "outdoorMaxTemperatureC": 21.5,
+                "coolingStartGap": 2.5,
+                "windowOpenOff": True,
+                "dateStart": "2026-08-15",
+                "dateEnd": "10-01",
+            },
+            {
+                "enabled": True,
+                "outdoorMaxTemperatureC": 21.5,
+                "coolingStartGap": 2.5,
+                "windowOpenOff": True,
+                "dateStart": None,
+                "dateEnd": "10-01",
+            },
+        ):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ClimateSignalSettingsViolation):
+                    validate_interseason_settings_update(bad)
+
+    def test_interseason_wire_render_uses_camel_case_and_defaults(self) -> None:
+        self.assertEqual(
+            {
+                "enabled": False,
+                "outdoorMaxTemperatureC": 22.0,
+                "coolingStartGap": 2.0,
+                "windowOpenOff": True,
+                "dateStart": None,
+                "dateEnd": None,
+            },
+            interseason_settings_wire({}),
+        )
+        self.assertEqual(
+            {
+                "enabled": True,
+                "outdoorMaxTemperatureC": 21.5,
+                "coolingStartGap": 2.5,
+                "windowOpenOff": False,
+                "dateStart": "08-15",
+                "dateEnd": "10-01",
+            },
+            interseason_settings_wire(
+                {
+                    "interseason_enabled": True,
+                    "interseason_outdoor_max_c": 21.5,
+                    "interseason_cooling_start_gap": 2.5,
+                    "interseason_window_open_off": False,
+                    "interseason_date_start": [8, 15],
+                    "interseason_date_end": [10, 1],
+                }
+            ),
         )
 
     def test_home_environment_update_rejects_inconsistent_priority(self) -> None:

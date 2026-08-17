@@ -97,6 +97,12 @@ OPTIONAL_HOME_ENVIRONMENT_FIELDS = frozenset(
         "air_conditioner_minimum_outdoor_temperature",
         "central_heating_temperature_on",
         "central_heating_temperature_off",
+        "interseason_enabled",
+        "interseason_outdoor_max_c",
+        "interseason_cooling_start_gap",
+        "interseason_window_open_off",
+        "interseason_date_start",
+        "interseason_date_end",
     }
 )
 ROOM_WINDOW_FIELDS = frozenset({"room_id", "window_entity_id"})
@@ -300,6 +306,29 @@ def validate_home_environment_update(
         result["central_heating_temperature_off"] = heating_temperature_off
     if outdoor_sources_value is not None:
         result["outdoor_temperature_entity_ids"] = list(outdoor_sources)
+    if "interseason_enabled" in payload:
+        if type(payload["interseason_enabled"]) is not bool:
+            raise ClimateSignalSettingsViolation("invalid_interseason_enabled")
+        result["interseason_enabled"] = payload["interseason_enabled"]
+    if "interseason_outdoor_max_c" in payload:
+        result["interseason_outdoor_max_c"] = _interseason_threshold(
+            payload["interseason_outdoor_max_c"], 5.0, 35.0
+        )
+    if "interseason_cooling_start_gap" in payload:
+        result["interseason_cooling_start_gap"] = _interseason_threshold(
+            payload["interseason_cooling_start_gap"], 1.0, 4.0
+        )
+    if "interseason_window_open_off" in payload:
+        if type(payload["interseason_window_open_off"]) is not bool:
+            raise ClimateSignalSettingsViolation("invalid_interseason_window_open_off")
+        result["interseason_window_open_off"] = payload["interseason_window_open_off"]
+    if "interseason_date_start" in payload or "interseason_date_end" in payload:
+        date_start = _month_day_string(payload.get("interseason_date_start"))
+        date_end = _month_day_string(payload.get("interseason_date_end"))
+        if (date_start is None) != (date_end is None):
+            raise ClimateSignalSettingsViolation("invalid_interseason_dates")
+        result["interseason_date_start"] = date_start
+        result["interseason_date_end"] = date_end
     return result
 
 
@@ -490,3 +519,104 @@ def _finite_signal_number(value: object) -> float | None:
     except OverflowError:
         return None
     return result if isfinite(result) else None
+
+
+def _interseason_threshold(value: object, minimum: float, maximum: float) -> float:
+    """Accept one interseason temperature or gap threshold in its fixed range."""
+
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ClimateSignalSettingsViolation("invalid_interseason_threshold")
+    try:
+        result = float(value)
+    except OverflowError:
+        raise ClimateSignalSettingsViolation("invalid_interseason_threshold") from None
+    if not isfinite(result) or not minimum <= result <= maximum:
+        raise ClimateSignalSettingsViolation("invalid_interseason_threshold")
+    return result
+
+
+_MONTH_DAY_PATTERN = re.compile(r"^(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$")
+
+
+def _month_day_string(value: object) -> tuple[int, int] | None:
+    """Accept one "MM-DD" calendar date or an explicit null."""
+
+    if value is None:
+        return None
+    if not isinstance(value, str) or not _MONTH_DAY_PATTERN.match(value):
+        raise ClimateSignalSettingsViolation("invalid_interseason_dates")
+    month, day = value.split("-")
+    return (int(month), int(day))
+
+
+def _month_day_wire(value: tuple[int, int] | None) -> str | None:
+    """Render one stored month/day pair back to its "MM-DD" wire form."""
+
+    if value is None:
+        return None
+    month, day = value
+    return f"{month:02d}-{day:02d}"
+
+
+INTERSEASON_SETTINGS_FIELDS = frozenset(
+    {
+        "enabled",
+        "outdoorMaxTemperatureC",
+        "coolingStartGap",
+        "windowOpenOff",
+        "dateStart",
+        "dateEnd",
+    }
+)
+
+
+def validate_interseason_settings_update(payload: object) -> dict[str, object]:
+    """Validate the public camelCase interseason settings document."""
+
+    if not isinstance(payload, Mapping) or set(payload.keys()) != set(
+        INTERSEASON_SETTINGS_FIELDS
+    ):
+        raise ClimateSignalSettingsViolation("invalid_interseason_settings")
+    if type(payload["enabled"]) is not bool:
+        raise ClimateSignalSettingsViolation("invalid_interseason_enabled")
+    if type(payload["windowOpenOff"]) is not bool:
+        raise ClimateSignalSettingsViolation("invalid_interseason_window_open_off")
+    date_start = _month_day_string(payload["dateStart"])
+    date_end = _month_day_string(payload["dateEnd"])
+    if (date_start is None) != (date_end is None):
+        raise ClimateSignalSettingsViolation("invalid_interseason_dates")
+    return {
+        "interseason_enabled": payload["enabled"],
+        "interseason_outdoor_max_c": _interseason_threshold(
+            payload["outdoorMaxTemperatureC"], 5.0, 35.0
+        ),
+        "interseason_cooling_start_gap": _interseason_threshold(
+            payload["coolingStartGap"], 1.0, 4.0
+        ),
+        "interseason_window_open_off": payload["windowOpenOff"],
+        "interseason_date_start": date_start,
+        "interseason_date_end": date_end,
+    }
+
+
+def interseason_settings_wire(home: Mapping[str, object]) -> dict[str, object]:
+    """Render the registry payload home interseason block in camelCase wire form."""
+
+    date_start = home.get("interseason_date_start")
+    date_end = home.get("interseason_date_end")
+    return {
+        "enabled": home.get("interseason_enabled", False),
+        "outdoorMaxTemperatureC": home.get("interseason_outdoor_max_c", 22.0),
+        "coolingStartGap": home.get("interseason_cooling_start_gap", 2.0),
+        "windowOpenOff": home.get("interseason_window_open_off", True),
+        "dateStart": (
+            _month_day_wire(tuple(date_start))
+            if isinstance(date_start, (list, tuple)) and len(date_start) == 2
+            else None
+        ),
+        "dateEnd": (
+            _month_day_wire(tuple(date_end))
+            if isinstance(date_end, (list, tuple)) and len(date_end) == 2
+            else None
+        ),
+    }

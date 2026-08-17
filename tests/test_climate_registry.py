@@ -331,6 +331,46 @@ class ClimateRegistryTest(unittest.TestCase):
                 central_heating_temperature_off=30.0,
             )
 
+    def test_interseason_settings_round_trip_and_stay_validated(self) -> None:
+        configured = ClimateHomeEnvironment(
+            interseason_enabled=True,
+            interseason_outdoor_max_c=21.0,
+            interseason_cooling_start_gap=2.5,
+            interseason_window_open_off=False,
+            interseason_date_start=(8, 15),
+            interseason_date_end=(10, 1),
+            interseason_updated_at=1_800_000_000_000,
+        )
+        restored = registry_from_payload(
+            registry_to_payload(ClimateRegistry(home=configured))
+        )
+        self.assertEqual(configured, restored.home)
+
+        defaults = registry_from_payload(
+            registry_to_payload(ClimateRegistry(home=ClimateHomeEnvironment()))
+        )
+        self.assertFalse(defaults.home.interseason_enabled)
+        self.assertEqual(22.0, defaults.home.interseason_outdoor_max_c)
+        self.assertEqual(2.0, defaults.home.interseason_cooling_start_gap)
+        self.assertTrue(defaults.home.interseason_window_open_off)
+        self.assertIsNone(defaults.home.interseason_date_start)
+        self.assertIsNone(defaults.home.interseason_date_end)
+        self.assertIsNone(defaults.home.interseason_updated_at)
+
+        with self.assertRaisesRegex(ClimateModelViolation, "configured together"):
+            ClimateHomeEnvironment(interseason_date_start=(8, 15))
+        with self.assertRaisesRegex(ClimateModelViolation, "outside the calendar"):
+            ClimateHomeEnvironment(
+                interseason_date_start=(13, 15),
+                interseason_date_end=(10, 1),
+            )
+        with self.assertRaisesRegex(ClimateModelViolation, "within 1..4"):
+            ClimateHomeEnvironment(interseason_cooling_start_gap=5.0)
+        with self.assertRaisesRegex(ClimateModelViolation, "within 5..35"):
+            ClimateHomeEnvironment(interseason_outdoor_max_c=40.0)
+        with self.assertRaisesRegex(ClimateModelViolation, "must be boolean"):
+            ClimateHomeEnvironment(interseason_enabled=1)
+
     def test_passive_sensor_observation_endpoint_matches_its_kind(self) -> None:
         sensor = air_conditioner(
             device_id="living_temperature",

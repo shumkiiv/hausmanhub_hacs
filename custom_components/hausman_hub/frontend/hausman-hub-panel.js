@@ -1,45 +1,45 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.52.111";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.52.111";
-import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.52.111";
-import { resolveControlChannelTest, summarizeControlChannelReceipts } from "./hausman-hub-control-channel.js?v=1.52.111";
-import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.52.111";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.52.111";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.52.111";
-import { closeFirstRunAreaCreator, createFirstRunArea, openFirstRunAreaCreator, renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.52.111";
-import { createKioskButton, createKioskDock, handleKioskPointerUp, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, resolveIntercomQuickAction, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.52.111";
-import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.52.111";
-import { loadEnergyMeter } from "./hausman-hub-energy-meter.js?v=1.52.111";
-import { loadDeviceDiscovery, updateDeviceDiscoveryBadge } from "./hausman-hub-device-discovery.js?v=1.52.111";
-import { redrawEnergyChartsForTheme } from "./hausman-hub-energy-chart.js?v=1.52.111";
-import { applyHomeSignalSelection, AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, homeEnvironmentSaveError, homeEnvironmentSourcePayload, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.52.111";
-import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.52.111";
-import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.52.111";
-import { renderClimateOverview, setClimateManualMode } from "./hausman-hub-climate-overview.js?v=1.52.111";
-import { renderLightingOverview } from "./hausman-hub-lighting.js?v=1.52.111";
-import { renderRoomsOverview } from "./hausman-hub-rooms.js?v=1.52.111";
-import { renderMediaOverview } from "./hausman-hub-media-overview.js?v=1.52.111";
-import { renderSecurityOverview } from "./hausman-hub-security-overview.js?v=1.52.111";
-import { renderDevicesOverview } from "./hausman-hub-devices-overview.js?v=1.52.111";
-import { buildDiagnosticChecks, diagnosticSummaryText, renderDiagnosticDetails } from "./hausman-hub-diagnostics.js?v=1.52.111";
-import { renderRolloutReadiness } from "./hausman-hub-rollout.js?v=1.52.111";
-import { overviewHeroRenderKey } from "./hausman-hub-overview-hero-state.js?v=1.52.111";
-import { formatUpcomingCountdown, renderOverviewContent, renderOverviewHero } from "./hausman-hub-overview.js?v=1.52.111";
-import { conciseDeviceActionLabel, renderPhysicalDeviceCard } from "./hausman-hub-device-card.js?v=1.52.111";
-import { recordTechnicalEvent as log, renderTechnicalLogCard } from "./hausman-hub-technical-log.js?v=1.52.111";
-import { applyFeedback } from "./hausman-hub-feedback.js?v=1.52.111";
-import { apiErrorMessage, resolveApiError } from "./hausman-hub-error-taxonomy.js?v=1.52.111";
-import { canExecuteCommand, loadingUiState, offlineUiState, staleUiState } from "./hausman-hub-ui-state.js?v=1.52.111";
-import { filterCatalogActions, loadDeviceFeatureMatrix } from "./hausman-hub-device-features.js?v=1.52.111";
-import { withCorrelationId } from "./hausman-hub-correlation.js?v=1.52.111";
-import { createEventStreamClient, createFetchEventSource, EVENT_STREAM_PATH, resolveEventStreamToken } from "./hausman-hub-pagination.js?v=1.52.111";
-import { renderKiosk } from "./hausman-hub-kiosk.js?v=1.52.111";
-import { captureRoomValidation, clearFirstRunDraft, persistFirstRunDraft, reconcileRoomValidation, restoreFirstRunDraft, resumeFirstRunDraft } from "./hausman-hub-first-run-draft.js?v=1.52.111";
-import { applyTabletProfile, isIntercomQuickAccessVisible, renderAppearanceSettings, renderIntercomSettings, syncIntercomQuickAccess } from "./hausman-hub-settings-profile.js?v=1.52.111";
-import { renderSettingsRooms, saveRoomType } from "./hausman-hub-settings-rooms.js?v=1.52.111";
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.111";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.52.112";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.52.112";
+import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.52.112";
+import { resolveControlChannelTest, summarizeControlChannelReceipts } from "./hausman-hub-control-channel.js?v=1.52.112";
+import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.52.112";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.52.112";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.52.112";
+import { closeFirstRunAreaCreator, createFirstRunArea, openFirstRunAreaCreator, renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.52.112";
+import { createKioskButton, createKioskDock, handleKioskPointerUp, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, resolveIntercomQuickAction, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.52.112";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.52.112";
+import { loadEnergyMeter } from "./hausman-hub-energy-meter.js?v=1.52.112";
+import { loadDeviceDiscovery, updateDeviceDiscoveryBadge } from "./hausman-hub-device-discovery.js?v=1.52.112";
+import { redrawEnergyChartsForTheme } from "./hausman-hub-energy-chart.js?v=1.52.112";
+import { applyHomeSignalSelection, AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, homeEnvironmentSaveError, homeEnvironmentSourcePayload, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.52.112";
+import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.52.112";
+import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.52.112";
+import { renderClimateOverview, setClimateManualMode } from "./hausman-hub-climate-overview.js?v=1.52.112";
+import { renderLightingOverview } from "./hausman-hub-lighting.js?v=1.52.112";
+import { renderRoomsOverview } from "./hausman-hub-rooms.js?v=1.52.112";
+import { renderMediaOverview } from "./hausman-hub-media-overview.js?v=1.52.112";
+import { renderSecurityOverview } from "./hausman-hub-security-overview.js?v=1.52.112";
+import { renderDevicesOverview } from "./hausman-hub-devices-overview.js?v=1.52.112";
+import { buildDiagnosticChecks, diagnosticSummaryText, renderDiagnosticDetails } from "./hausman-hub-diagnostics.js?v=1.52.112";
+import { renderRolloutReadiness } from "./hausman-hub-rollout.js?v=1.52.112";
+import { overviewHeroRenderKey } from "./hausman-hub-overview-hero-state.js?v=1.52.112";
+import { formatUpcomingCountdown, renderOverviewContent, renderOverviewHero } from "./hausman-hub-overview.js?v=1.52.112";
+import { conciseDeviceActionLabel, renderPhysicalDeviceCard } from "./hausman-hub-device-card.js?v=1.52.112";
+import { recordTechnicalEvent as log, renderTechnicalLogCard } from "./hausman-hub-technical-log.js?v=1.52.112";
+import { applyFeedback } from "./hausman-hub-feedback.js?v=1.52.112";
+import { apiErrorMessage, resolveApiError } from "./hausman-hub-error-taxonomy.js?v=1.52.112";
+import { canExecuteCommand, loadingUiState, offlineUiState, staleUiState } from "./hausman-hub-ui-state.js?v=1.52.112";
+import { filterCatalogActions, loadDeviceFeatureMatrix } from "./hausman-hub-device-features.js?v=1.52.112";
+import { withCorrelationId } from "./hausman-hub-correlation.js?v=1.52.112";
+import { createEventStreamClient, createFetchEventSource, EVENT_STREAM_PATH, resolveEventStreamToken } from "./hausman-hub-pagination.js?v=1.52.112";
+import { renderKiosk } from "./hausman-hub-kiosk.js?v=1.52.112";
+import { captureRoomValidation, clearFirstRunDraft, persistFirstRunDraft, reconcileRoomValidation, restoreFirstRunDraft, resumeFirstRunDraft } from "./hausman-hub-first-run-draft.js?v=1.52.112";
+import { applyTabletProfile, isIntercomQuickAccessVisible, renderAppearanceSettings, renderIntercomSettings, syncIntercomQuickAccess } from "./hausman-hub-settings-profile.js?v=1.52.112";
+import { renderSettingsRooms, saveRoomType } from "./hausman-hub-settings-rooms.js?v=1.52.112";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.112";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
-const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css?v=1.52.111";
+const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css?v=1.52.112";
 const DASHBOARD_API = "hausman_hub/v1/dashboard";
 const CLIMATE_RUNTIME_API = "hausman_hub/v1/climate/runtime";
 const DEVICE_ACTIONS_API = "hausman_hub/v1/device-actions";
@@ -5295,6 +5295,82 @@ class HausmanHubPanel extends HTMLElement {
       "div", "muted",
       "По умолчанию −5 °C. Уточните допустимую температуру работы в паспорте конкретной модели."
     ));
+    card.appendChild(el("h3", "threshold-heading", "Межсезонье: отдых кондиционеров"));
+    card.appendChild(el(
+      "div", "muted threshold-intro",
+      "Когда на улице уже не жарко, Hausman Hub не держит кондиционер в режиме поддержания, а выключает его. Кондиционер включится снова, только когда комната нагреется выше цели на указанный запас."
+    ));
+    const interseasonEnabled = el("input");
+    interseasonEnabled.type = "checkbox";
+    interseasonEnabled.checked = values.interseason_enabled === true;
+    interseasonEnabled.addEventListener("change", () => {
+      validationError.textContent = ""; this._markDirty("home", dirtyNotice);
+    });
+    const interseasonEnabledRow = el("label", "checkbox-field");
+    interseasonEnabledRow.appendChild(interseasonEnabled);
+    interseasonEnabledRow.appendChild(el("span", null, "Межсезонный режим включён"));
+    card.appendChild(interseasonEnabledRow);
+    const monthDayWire = (value) => {
+      if (Array.isArray(value) && value.length === 2) {
+        return `${String(value[0]).padStart(2, "0")}-${String(value[1]).padStart(2, "0")}`;
+      }
+      return typeof value === "string" ? value : "";
+    };
+    const interseasonOutdoorMax = numberField(
+      values.interseason_outdoor_max_c === undefined ? 22 : values.interseason_outdoor_max_c,
+      10, 30, 0.5,
+      () => { validationError.textContent = ""; this._markDirty("home", dirtyNotice); }
+    );
+    const interseasonOutdoorMaxRow = el("label", "form-field", "Межсезонье на улице не теплее, °C");
+    interseasonOutdoorMaxRow.appendChild(interseasonOutdoorMax);
+    const interseasonGap = numberField(
+      values.interseason_cooling_start_gap === undefined ? 2 : values.interseason_cooling_start_gap,
+      1, 4, 0.1,
+      () => { validationError.textContent = ""; this._markDirty("home", dirtyNotice); }
+    );
+    const interseasonGapRow = el("label", "form-field", "Включать охлаждение при превышении цели на, °C");
+    interseasonGapRow.appendChild(interseasonGap);
+    const interseasonGrid = el("div", "home-threshold-grid");
+    interseasonGrid.appendChild(interseasonOutdoorMaxRow);
+    interseasonGrid.appendChild(interseasonGapRow);
+    card.appendChild(interseasonGrid);
+    const interseasonWindowOff = el("input");
+    interseasonWindowOff.type = "checkbox";
+    interseasonWindowOff.checked = values.interseason_window_open_off !== false;
+    interseasonWindowOff.addEventListener("change", () => {
+      validationError.textContent = ""; this._markDirty("home", dirtyNotice);
+    });
+    const interseasonWindowOffRow = el("label", "checkbox-field");
+    interseasonWindowOffRow.appendChild(interseasonWindowOff);
+    interseasonWindowOffRow.appendChild(el("span", null, "Выключать кондиционер при открытом окне"));
+    card.appendChild(interseasonWindowOffRow);
+    const monthDayPattern = /^(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$/;
+    const interseasonDateStart = el("input");
+    interseasonDateStart.type = "text";
+    interseasonDateStart.placeholder = "ММ-ДД, например 08-15";
+    interseasonDateStart.value = monthDayWire(values.interseason_date_start);
+    interseasonDateStart.addEventListener("input", () => {
+      validationError.textContent = ""; this._markDirty("home", dirtyNotice);
+    });
+    const interseasonDateStartRow = el("label", "form-field", "Начало сезона (необязательно)");
+    interseasonDateStartRow.appendChild(interseasonDateStart);
+    const interseasonDateEnd = el("input");
+    interseasonDateEnd.type = "text";
+    interseasonDateEnd.placeholder = "ММ-ДД, например 10-01";
+    interseasonDateEnd.value = monthDayWire(values.interseason_date_end);
+    interseasonDateEnd.addEventListener("input", () => {
+      validationError.textContent = ""; this._markDirty("home", dirtyNotice);
+    });
+    const interseasonDateEndRow = el("label", "form-field", "Конец сезона (необязательно)");
+    interseasonDateEndRow.appendChild(interseasonDateEnd);
+    const interseasonDates = el("div", "home-threshold-grid");
+    interseasonDates.appendChild(interseasonDateStartRow);
+    interseasonDates.appendChild(interseasonDateEndRow);
+    card.appendChild(interseasonDates);
+    card.appendChild(el(
+      "div", "muted",
+      "Если даты заданы, режим работает только внутри этого окна. Пустые даты — режим зависит только от уличной температуры."
+    ));
     const validationError = el("div", "field-error");
     setAttr(validationError, "role", "alert");
     card.appendChild(validationError);
@@ -5329,6 +5405,30 @@ class HausmanHubPanel extends HTMLElement {
         );
         return;
       }
+      const rawInterseasonOutdoorMax = interseasonOutdoorMax.value;
+      const interseasonOutdoorMaxValue = Number(rawInterseasonOutdoorMax);
+      const rawInterseasonGap = interseasonGap.value;
+      const interseasonGapValue = Number(rawInterseasonGap);
+      const rawInterseasonDateStart = interseasonDateStart.value.trim();
+      const rawInterseasonDateEnd = interseasonDateEnd.value.trim();
+      const monthDayPattern = /^(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$/;
+      const interseasonDatesEmpty = rawInterseasonDateStart === "" && rawInterseasonDateEnd === "";
+      const interseasonDatesValid = monthDayPattern.test(rawInterseasonDateStart)
+        && monthDayPattern.test(rawInterseasonDateEnd);
+      if (
+        rawInterseasonOutdoorMax === ""
+        || !Number.isFinite(interseasonOutdoorMaxValue)
+        || interseasonOutdoorMaxValue < 5 || interseasonOutdoorMaxValue > 35
+        || rawInterseasonGap === ""
+        || !Number.isFinite(interseasonGapValue)
+        || interseasonGapValue < 1 || interseasonGapValue > 4
+        || (!interseasonDatesEmpty && !interseasonDatesValid)
+      ) {
+        validationError.textContent = "Проверьте межсезонье: улица 5-35 °C, запас 1-4 °C, даты ММ-ДД обе или ни одной.";
+        this._activateSection("climate");
+        focusNode(interseasonOutdoorMax);
+        return;
+      }
       const outdoorSources = pickers.outdoor_temperature_entity_id.value();
       this._save(
         "home",
@@ -5346,6 +5446,14 @@ class HausmanHubPanel extends HTMLElement {
           heating_lockout_low: lowValue,
           air_conditioner_minimum_outdoor_temperature:
             airConditionerMinimumValue,
+          interseason_enabled: interseasonEnabled.checked,
+          interseason_outdoor_max_c: interseasonOutdoorMaxValue,
+          interseason_cooling_start_gap: interseasonGapValue,
+          interseason_window_open_off: interseasonWindowOff.checked,
+          interseason_date_start:
+            interseasonDatesEmpty ? null : rawInterseasonDateStart,
+          interseason_date_end:
+            interseasonDatesEmpty ? null : rawInterseasonDateEnd,
         },
         "Сохранить привязки сигналов дома и пороги блокировки отопления?",
         "Сигналы дома сохранены."

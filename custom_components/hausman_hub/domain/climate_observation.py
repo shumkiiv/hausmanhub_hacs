@@ -162,6 +162,13 @@ class ClimateHomeObservation:
     central_heating_configured: bool = True
     weather_heating_lockout: bool = False
     occupancy: ClimateOccupancyMode = ClimateOccupancyMode.HOME
+    interseason_enabled: bool = False
+    interseason_outdoor_max_c: float = 22.0
+    interseason_cooling_start_gap: float = 2.0
+    interseason_window_open_off: bool = True
+    interseason_date_start: tuple[int, int] | None = None
+    interseason_date_end: tuple[int, int] | None = None
+    interseason_local_month_day: tuple[int, int] | None = None
 
     def __post_init__(self) -> None:
         _require_enum(self.season, ClimateSeason, "season")
@@ -215,6 +222,34 @@ class ClimateHomeObservation:
                 "weather heating lockout must be boolean"
             )
         _require_enum(self.occupancy, ClimateOccupancyMode, "occupancy")
+        if type(self.interseason_enabled) is not bool:
+            raise ClimateObservationViolation("interseason enabled must be boolean")
+        _optional_number_in_range(
+            self.interseason_outdoor_max_c,
+            5,
+            35,
+            "interseason outdoor maximum temperature",
+        )
+        _optional_number_in_range(
+            self.interseason_cooling_start_gap,
+            1,
+            4,
+            "interseason cooling start gap",
+        )
+        if type(self.interseason_window_open_off) is not bool:
+            raise ClimateObservationViolation(
+                "interseason window-open off must be boolean"
+            )
+        _month_day(self.interseason_date_start, "interseason season start date")
+        _month_day(self.interseason_date_end, "interseason season end date")
+        if (self.interseason_date_start is None) != (self.interseason_date_end is None):
+            raise ClimateObservationViolation(
+                "interseason season dates must be configured together"
+            )
+        _month_day(
+            self.interseason_local_month_day,
+            "interseason local observation date",
+        )
 
     @property
     def air_conditioner_outdoor_lockout(self) -> bool:
@@ -228,6 +263,26 @@ class ClimateHomeObservation:
             self.air_conditioner_outdoor_guard_configured
             and self.outdoor_temperature is None
         )
+
+
+    @property
+    def interseason_active(self) -> bool:
+        """Whether weak-load cooling restraint currently applies."""
+
+        if not self.interseason_enabled or self.outdoor_temperature is None:
+            return False
+        if self.outdoor_temperature > self.interseason_outdoor_max_c:
+            return False
+        if self.interseason_date_start is None or self.interseason_date_end is None:
+            return True
+        if self.interseason_local_month_day is None:
+            return False
+        start = self.interseason_date_start
+        end = self.interseason_date_end
+        current = self.interseason_local_month_day
+        if start <= end:
+            return start <= current <= end
+        return current >= start or current <= end
 
 
 @dataclass(frozen=True, slots=True)
@@ -645,3 +700,32 @@ def _require_unique(values: object, label: str) -> None:
     items = tuple(values)  # type: ignore[arg-type]
     if len(items) != len(set(items)):
         raise ClimateObservationViolation(f"{label} must be unique")
+
+
+def _optional_number_in_range(
+    value: object,
+    minimum: float,
+    maximum: float,
+    label: str,
+) -> None:
+    if (
+        type(value) not in {int, float}
+        or not math.isfinite(value)
+        or value < minimum
+        or value > maximum
+    ):
+        raise ClimateObservationViolation(f"{label} is outside fixed bounds")
+
+
+def _month_day(value: object, label: str) -> None:
+    if value is None:
+        return
+    if (
+        type(value) is not tuple
+        or len(value) != 2
+        or any(type(part) is not int for part in value)
+    ):
+        raise ClimateObservationViolation(f"{label} must be a month/day pair")
+    month, day = value
+    if not 1 <= month <= 12 or not 1 <= day <= 31:
+        raise ClimateObservationViolation(f"{label} is outside the calendar")

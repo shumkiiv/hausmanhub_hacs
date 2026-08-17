@@ -3079,6 +3079,17 @@ class HausmanHubOptionsFlow(config_entries.OptionsFlow):
                         air_conditioner_minimum
                     ),
                 }
+                for interseason_key in (
+                    "interseason_enabled",
+                    "interseason_outdoor_max_c",
+                    "interseason_cooling_start_gap",
+                    "interseason_window_open_off",
+                    "interseason_date_start",
+                    "interseason_date_end",
+                    "interseason_updated_at",
+                ):
+                    if interseason_key in home and interseason_key not in home_update:
+                        home_update[interseason_key] = home[interseason_key]
                 try:
                     await runtime.async_update_home_environment(home_update)
                 except Exception:

@@ -783,5 +783,200 @@ class ClimateStabilityTest(unittest.TestCase):
         self.assertIs(window.action, ClimateStabilityAction.OFF)
 
 
+class ClimateInterseasonStabilityTest(unittest.TestCase):
+    """Interseason weak-load restraint for air conditioners."""
+
+    def interseason_home(self, **overrides: object) -> ClimateHomeObservation:
+        values: dict[str, object] = {
+            "interseason_enabled": True,
+            "outdoor_temperature": 18.0,
+            "interseason_outdoor_max_c": 22.0,
+            "interseason_cooling_start_gap": 2.0,
+            "interseason_window_open_off": True,
+        }
+        values.update(overrides)
+        return ClimateHomeObservation(**values)  # type: ignore[arg-type]
+
+    def test_stopped_air_conditioner_waits_for_the_interseason_gap(self) -> None:
+        stopped = device(
+            ClimateObservationDeviceKind.AIR_CONDITIONER,
+            activity=ClimateDeviceActivity.STOPPED,
+        )
+
+        waits = stable(
+            stopped,
+            room(temperature=26.4),
+            selected_target=target(temperature=25.0),
+            home=self.interseason_home(),
+        )
+        starts = stable(
+            stopped,
+            room(temperature=27.0),
+            selected_target=target(temperature=25.0),
+            home=self.interseason_home(),
+        )
+
+        self.assertIs(waits.action, ClimateStabilityAction.OFF)
+        self.assertIs(
+            waits.reason,
+            ClimateStabilityReason.INTERSEASON_COOLING_DELAYED,
+        )
+        self.assertIs(starts.action, ClimateStabilityAction.COOL)
+        self.assertIs(starts.reason, ClimateStabilityReason.COOLING_REQUIRED)
+
+    def test_running_air_conditioner_turns_off_instead_of_maintaining(self) -> None:
+        running = device(
+            ClimateObservationDeviceKind.AIR_CONDITIONER,
+            activity=ClimateDeviceActivity.RUNNING,
+            last_started_at=NOW - 900_000,
+        )
+
+        near_target = stable(
+            running,
+            room(temperature=25.4),
+            selected_target=target(temperature=25.0),
+            home=self.interseason_home(),
+        )
+        below_target = stable(
+            running,
+            room(temperature=24.6),
+            selected_target=target(temperature=25.0),
+            home=self.interseason_home(),
+        )
+
+        self.assertIs(near_target.action, ClimateStabilityAction.OFF)
+        self.assertIs(near_target.reason, ClimateStabilityReason.INTERSEASON_OFF)
+        self.assertIs(below_target.action, ClimateStabilityAction.OFF)
+        self.assertIs(below_target.reason, ClimateStabilityReason.INTERSEASON_OFF)
+
+    def test_minimum_run_still_protects_the_compressor(self) -> None:
+        running = device(
+            ClimateObservationDeviceKind.AIR_CONDITIONER,
+            activity=ClimateDeviceActivity.RUNNING,
+            last_started_at=NOW - 60_000,
+        )
+
+        result = stable(
+            running,
+            room(temperature=24.6),
+            selected_target=target(temperature=25.0),
+            home=self.interseason_home(),
+        )
+
+        self.assertIs(result.action, ClimateStabilityAction.MAINTAIN)
+        self.assertIs(
+            result.protection,
+            ClimateStabilityProtection.MINIMUM_RUN,
+        )
+        self.assertIs(result.reason, ClimateStabilityReason.MINIMUM_RUN_HOLD)
+
+    def test_open_window_turns_off_a_running_air_conditioner(self) -> None:
+        running = device(
+            ClimateObservationDeviceKind.AIR_CONDITIONER,
+            activity=ClimateDeviceActivity.RUNNING,
+            last_started_at=NOW - 900_000,
+        )
+
+        result = stable(
+            running,
+            room(temperature=25.4, window=ClimateWindowState.OPEN),
+            selected_target=target(temperature=25.0),
+            home=self.interseason_home(),
+        )
+        window_allowed = stable(
+            running,
+            room(temperature=25.4, window=ClimateWindowState.OPEN),
+            selected_target=target(temperature=25.0),
+            home=self.interseason_home(interseason_window_open_off=False),
+        )
+
+        self.assertIs(result.action, ClimateStabilityAction.OFF)
+        self.assertIs(
+            result.reason,
+            ClimateStabilityReason.INTERSEASON_WINDOW_OPEN,
+        )
+        self.assertIs(window_allowed.action, ClimateStabilityAction.OFF)
+        self.assertIs(
+            window_allowed.reason,
+            ClimateStabilityReason.INTERSEASON_OFF,
+        )
+
+    def test_real_heat_load_keeps_cooling_in_interseason(self) -> None:
+        running = device(
+            ClimateObservationDeviceKind.AIR_CONDITIONER,
+            activity=ClimateDeviceActivity.RUNNING,
+            last_started_at=NOW - 900_000,
+        )
+
+        result = stable(
+            running,
+            room(temperature=27.6),
+            selected_target=target(temperature=25.0),
+            home=self.interseason_home(),
+        )
+
+        self.assertIs(result.action, ClimateStabilityAction.COOL)
+
+    def test_inactive_interseason_keeps_previous_maintain_behavior(self) -> None:
+        running = device(
+            ClimateObservationDeviceKind.AIR_CONDITIONER,
+            activity=ClimateDeviceActivity.RUNNING,
+            last_started_at=NOW - 900_000,
+        )
+
+        warm_outdoor = stable(
+            running,
+            room(temperature=25.2),
+            selected_target=target(temperature=25.0),
+            home=self.interseason_home(outdoor_temperature=26.0),
+        )
+        unknown_outdoor = stable(
+            running,
+            room(temperature=25.2),
+            selected_target=target(temperature=25.0),
+            home=self.interseason_home(outdoor_temperature=None),
+        )
+
+        self.assertIs(warm_outdoor.action, ClimateStabilityAction.MAINTAIN)
+        self.assertIs(unknown_outdoor.action, ClimateStabilityAction.MAINTAIN)
+
+    def test_interseason_date_window_gates_the_mode(self) -> None:
+        home_inside = self.interseason_home(
+            interseason_date_start=(8, 1),
+            interseason_date_end=(9, 30),
+            interseason_local_month_day=(8, 17),
+        )
+        home_outside = self.interseason_home(
+            interseason_date_start=(8, 1),
+            interseason_date_end=(9, 30),
+            interseason_local_month_day=(10, 5),
+        )
+        home_wrap = self.interseason_home(
+            interseason_date_start=(9, 15),
+            interseason_date_end=(5, 31),
+            interseason_local_month_day=(4, 10),
+        )
+        home_unknown_date = self.interseason_home(
+            interseason_date_start=(8, 1),
+            interseason_date_end=(9, 30),
+        )
+
+        self.assertTrue(home_inside.interseason_active)
+        self.assertFalse(home_outside.interseason_active)
+        self.assertTrue(home_wrap.interseason_active)
+        self.assertFalse(home_unknown_date.interseason_active)
+
+    def test_interseason_settings_are_validated(self) -> None:
+        with self.assertRaises(Exception):
+            self.interseason_home(interseason_cooling_start_gap=9.0)
+        with self.assertRaises(Exception):
+            self.interseason_home(interseason_outdoor_max_c=60.0)
+        with self.assertRaises(Exception):
+            self.interseason_home(interseason_date_start=(8, 1))
+        with self.assertRaises(Exception):
+            self.interseason_home(interseason_date_start=(13, 1),
+                                    interseason_date_end=(9, 30))
+
+
 if __name__ == "__main__":
     unittest.main()

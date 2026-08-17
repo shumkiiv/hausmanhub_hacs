@@ -4074,7 +4074,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.111")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.112")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;
@@ -4785,6 +4785,12 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           heating_lockout_high: 18,
           heating_lockout_low: 16,
           air_conditioner_minimum_outdoor_temperature: -5,
+          interseason_enabled: false,
+          interseason_outdoor_max_c: 22,
+          interseason_cooling_start_gap: 2,
+          interseason_window_open_off: true,
+          interseason_date_start: null,
+          interseason_date_end: null,
         };
         if (JSON.stringify(post.payload) !== JSON.stringify(expected)) {
           throw new Error("home payload mismatch: " + JSON.stringify(post.payload));
