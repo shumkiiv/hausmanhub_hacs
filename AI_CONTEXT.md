@@ -1,8 +1,23 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-17 (HACS 1.52.112 climate interseason).
+Last updated: 2026-08-19 (HACS 1.52.113 brand HAUSMAN).
 
 ## Current work
+
+- 2026-08-19 (Kimi): HACS `1.52.113` - брендовая правка без смены
+  поведения. Видимый знак шапки панели (`hausman-hub-panel.js`) и
+  киоск-панорамы (`hausman-hub-kiosk.js`) переименован из технического
+  «HAUSMANHUB» в «HAUSMAN», как в планшетном приложении; проверка киоска в
+  `tests/test_hausmanhub_panel_settings.py` обновлена. README переписан:
+  вместо накопленных разделов «Что добавляется в версии» - краткое описание
+  текущей версии и возможностей; строка `Текущая версия — **X**`
+  синхронизирована с manifest.json (fail-closed `sync_readme_version.py`).
+  Технические идентификаторы (домен `hausman_hub`, пути API, имена файлов и
+  custom element) не менялись. Контрактные строки `safeMessage`
+  (`contracts/v1/error-taxonomy.json`) и метки режимов климата в
+  `public_climate_values.py` остаются «HausmanHub» - они заморожены
+  контрактом v1/v12; переименование - отдельное решение backend-трека.
+  Backend не менялся.
 
 - 2026-08-17 (Kimi): HACS `1.52.112` на contracts `0.39.0` (`afd1552`)
   добавляет межсезонный режим кондиционеров: при свежей уличной температуре

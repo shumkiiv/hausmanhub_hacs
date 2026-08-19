@@ -34,7 +34,7 @@ class ReadmeVersionSyncTest(unittest.TestCase):
             root = Path(tmp)
             write_layout(
                 root,
-                "1.52.112",
+                "1.52.113",
                 "Шапка\n\nТекущая версия — **1.52.32**.\n\nПодвал\n",
             )
 
@@ -43,17 +43,17 @@ class ReadmeVersionSyncTest(unittest.TestCase):
             synced = sync.synced_readme_text(text, version)
             (root / sync.README_PATH).write_text(synced, encoding="utf-8")
 
-            self.assertEqual(version, "1.52.112")
-            self.assertIn("Текущая версия — **1.52.112**.", synced)
+            self.assertEqual(version, "1.52.113")
+            self.assertIn("Текущая версия — **1.52.113**.", synced)
             self.assertNotIn("1.52.32", synced)
             self.assertTrue(synced.endswith("Подвал\n"))
 
     def test_readme_version_reports_drift_and_match(self) -> None:
         drifted = "Текущая версия — **1.52.32**."
-        matched = "Текущая версия — **1.52.112**."
+        matched = "Текущая версия — **1.52.113**."
 
         self.assertEqual(sync.readme_version(drifted), "1.52.32")
-        self.assertEqual(sync.readme_version(matched), "1.52.112")
+        self.assertEqual(sync.readme_version(matched), "1.52.113")
 
     def test_missing_status_line_is_an_error(self) -> None:
         with self.assertRaises(sync.ReadmeVersionSyncError):
@@ -71,7 +71,7 @@ class ReadmeVersionSyncTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             write_layout(
-                root, "1.52.112", "Текущая версия — **1.52.32**."
+                root, "1.52.113", "Текущая версия — **1.52.32**."
             )
             original_root = sync.REPOSITORY_ROOT
             sync.REPOSITORY_ROOT = root
@@ -89,7 +89,7 @@ class ReadmeVersionSyncTest(unittest.TestCase):
             self.assertEqual(applied, 0)
             self.assertEqual(clean, 0)
             self.assertIn(
-                "Текущая версия — **1.52.112**",
+                "Текущая версия — **1.52.113**",
                 (root / sync.README_PATH).read_text(encoding="utf-8"),
             )
 

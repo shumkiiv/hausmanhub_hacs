@@ -1006,7 +1006,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         }
         setKioskState(panel, true);
         const kioskCopy = textOf(panel._shell.kioskSurface).replace(/\\s+/g, " ");
-        for (const required of ["HAUSMANHUB", "Климат", "Энергия", "Воздух", "Избранные сценарии", "Погода", "Дом сейчас"]) {
+        for (const required of ["HAUSMAN", "Климат", "Энергия", "Воздух", "Избранные сценарии", "Погода", "Дом сейчас"]) {
           if (!kioskCopy.includes(required)) throw new Error("kiosk panorama is incomplete: " + required);
         }
         if (kioskCopy.includes("Открыть домофон") || kioskCopy.includes("Без подтверждения")) {
@@ -4074,7 +4074,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.112")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.113")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

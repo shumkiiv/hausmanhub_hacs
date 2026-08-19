@@ -45,7 +45,7 @@ function renderHeader(panel, root, dashboard, deps) {
   const brand = deps.el("div", "kiosk-panorama-brand");
   brand.appendChild(deps.svgIcon("home"));
   const copy = deps.el("span");
-  copy.appendChild(deps.el("strong", null, "HAUSMANHUB"));
+  copy.appendChild(deps.el("strong", null, "HAUSMAN"));
   copy.appendChild(deps.el("small", null, panel._error ? "Связь потеряна" : "Дом на связи"));
   brand.appendChild(copy);
   header.appendChild(brand);
