@@ -190,6 +190,11 @@ def build_weather_read_model(
     hourly: object = None,
     target_temperature_c: float | None = None,
     updated_at: str | None = None,
+    outdoor_sensor_value: object = None,
+    outdoor_sensor_unit: object = None,
+    outdoor_sensor_entity_id: str | None = None,
+    outdoor_sensor_updated_at: int | None = None,
+    outdoor_sensor_available: bool = False,
 ) -> dict[str, object]:
     """Return one stable weather payload without provider-specific attributes."""
 
@@ -200,6 +205,7 @@ def build_weather_read_model(
     daily_values = _forecast(daily, attrs, 10)
     hourly_values = _forecast(hourly, attrs, 24)
     first_forecast = daily_values[0] if daily_values else {}
+    sensor_available = outdoor_sensor_available is True
     return {
         "available": bool(condition) or temperature is not None,
         "condition": condition,
@@ -223,6 +229,28 @@ def build_weather_read_model(
         "cloudCoveragePercent": _bounded_percent(attrs.get("cloud_coverage")),
         "uvIndex": _number(attrs.get("uv_index")),
         "updatedAt": updated_at,
+        # A missing or silent physical sensor stays null/false, never a
+        # synthetic zero or an empty string (contracts rule).
+        "outdoorSensorTemperatureC": (
+            _temperature_c(outdoor_sensor_value, outdoor_sensor_unit)
+            if sensor_available
+            else None
+        ),
+        "outdoorSensorEntityId": (
+            outdoor_sensor_entity_id
+            if sensor_available
+            and isinstance(outdoor_sensor_entity_id, str)
+            and outdoor_sensor_entity_id
+            else None
+        ),
+        "outdoorSensorUpdatedAt": (
+            outdoor_sensor_updated_at
+            if sensor_available
+            and type(outdoor_sensor_updated_at) is int
+            and outdoor_sensor_updated_at >= 0
+            else None
+        ),
+        "outdoorSensorAvailable": sensor_available,
         "climateLoad": _climate_load(
             temperature_c=temperature,
             target_c=target_temperature_c,
@@ -240,7 +268,26 @@ def build_weather_read_model(
     }
 
 
-def unavailable_weather_read_model() -> dict[str, object]:
-    """Return the complete empty model instead of misleading defaults."""
+def unavailable_weather_read_model(
+    *,
+    outdoor_sensor_value: object = None,
+    outdoor_sensor_unit: object = None,
+    outdoor_sensor_entity_id: str | None = None,
+    outdoor_sensor_updated_at: int | None = None,
+    outdoor_sensor_available: bool = False,
+) -> dict[str, object]:
+    """Return the complete empty model instead of misleading defaults.
 
-    return build_weather_read_model(condition=None, attributes=None)
+    A configured physical outdoor sensor still reports through the same four
+    fields even when the weather provider entity itself is missing.
+    """
+
+    return build_weather_read_model(
+        condition=None,
+        attributes=None,
+        outdoor_sensor_value=outdoor_sensor_value,
+        outdoor_sensor_unit=outdoor_sensor_unit,
+        outdoor_sensor_entity_id=outdoor_sensor_entity_id,
+        outdoor_sensor_updated_at=outdoor_sensor_updated_at,
+        outdoor_sensor_available=outdoor_sensor_available,
+    )

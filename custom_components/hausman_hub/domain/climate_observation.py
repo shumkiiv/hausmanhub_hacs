@@ -130,6 +130,15 @@ class ClimateOccupancyMode(StrEnum):
     UNKNOWN = "unknown"
 
 
+class ClimateOutdoorTemperatureSource(StrEnum):
+    """Which input currently feeds the home outdoor temperature."""
+
+    NONE = "none"
+    PHYSICAL_SENSOR = "physical_sensor"
+    PHYSICAL_SENSOR_STALE = "physical_sensor_stale"
+    WEATHER_PROVIDER = "weather_provider"
+
+
 class ClimateDelayedIntentState(StrEnum):
     """State of a previously deferred abstract intent."""
 
@@ -169,6 +178,11 @@ class ClimateHomeObservation:
     interseason_date_start: tuple[int, int] | None = None
     interseason_date_end: tuple[int, int] | None = None
     interseason_local_month_day: tuple[int, int] | None = None
+    outdoor_temperature_source: ClimateOutdoorTemperatureSource = (
+        ClimateOutdoorTemperatureSource.NONE
+    )
+    outdoor_provider_temperature: float | None = None
+    outdoor_source_divergence_c: float | None = None
 
     def __post_init__(self) -> None:
         _require_enum(self.season, ClimateSeason, "season")
@@ -250,6 +264,26 @@ class ClimateHomeObservation:
             self.interseason_local_month_day,
             "interseason local observation date",
         )
+        _require_enum(
+            self.outdoor_temperature_source,
+            ClimateOutdoorTemperatureSource,
+            "outdoor temperature source",
+        )
+        _optional_number(
+            self.outdoor_provider_temperature,
+            -80,
+            80,
+            "outdoor provider temperature",
+        )
+        if self.outdoor_source_divergence_c is not None and (
+            not isinstance(self.outdoor_source_divergence_c, (int, float))
+            or isinstance(self.outdoor_source_divergence_c, bool)
+            or not math.isfinite(self.outdoor_source_divergence_c)
+            or not 0 <= self.outdoor_source_divergence_c <= 160
+        ):
+            raise ClimateObservationViolation(
+                "outdoor source divergence must stay within 0..160"
+            )
 
     @property
     def air_conditioner_outdoor_lockout(self) -> bool:

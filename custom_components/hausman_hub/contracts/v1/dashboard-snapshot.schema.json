@@ -126,6 +126,10 @@
         "cloudCoveragePercent": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
         "uvIndex": { "type": ["number", "null"], "minimum": 0 },
         "updatedAt": { "type": ["string", "null"], "format": "date-time" },
+        "outdoorSensorTemperatureC": { "type": ["number", "null"] },
+        "outdoorSensorEntityId": { "type": ["string", "null"] },
+        "outdoorSensorUpdatedAt": { "type": ["integer", "null"] },
+        "outdoorSensorAvailable": { "type": "boolean" },
         "climateLoad": {
           "type": "object",
           "additionalProperties": false,

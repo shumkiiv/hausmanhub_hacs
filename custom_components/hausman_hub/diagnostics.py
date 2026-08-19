@@ -39,6 +39,8 @@ async def async_get_config_entry_diagnostics(
             runtime_status=runtime_data.status,
             registry_rooms=runtime_data.room_count,
             registry_devices=runtime_data.device_count,
+            outdoor_temperature_source=runtime_data.outdoor_temperature_source,
+            outdoor_source_divergence_c=runtime_data.outdoor_source_divergence_c,
         )
         if isinstance(runtime_data, ClimateRuntime)
         and runtime_data.entry_id == active_entry.entry_id

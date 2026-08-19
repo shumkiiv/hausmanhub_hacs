@@ -7,6 +7,7 @@ import unittest
 
 from custom_components.hausman_hub.application.climate_ha_observations import (
     MAX_NATIVE_STATE_AGE_MS,
+    MAX_OUTDOOR_SENSOR_STATE_AGE_MS,
     MAX_ROOM_SENSOR_STATE_AGE_MS,
     ClimateHaEntityState,
     ClimateHaObservationViolation,
@@ -31,6 +32,7 @@ from custom_components.hausman_hub.domain.climate_observation import (
     ClimateDayPeriod,
     ClimateFanMode,
     ClimateOccupancyMode,
+    ClimateOutdoorTemperatureSource,
     ClimatePhysicalFeedback,
     ClimateRoomMode,
     ClimateTemperatureQuality,
@@ -389,6 +391,168 @@ class NativeHaObservationTest(unittest.TestCase):
         observation = self.build(registry=registry, states=states)
 
         self.assertEqual(30.5, observation.home.outdoor_temperature)
+
+    def test_fresh_physical_sensor_is_primary_and_the_service_cross_checks(
+        self,
+    ) -> None:
+        registry = full_registry()
+        registry = replace(
+            registry,
+            home=replace(
+                registry.home,
+                outdoor_temperature_entity_id="weather.home",
+                outdoor_temperature_entity_ids=(
+                    "weather.home",
+                    "sensor.outdoor_temperature",
+                ),
+            ),
+        )
+        states = full_states()
+        states["weather.home"] = ha_state(
+            "weather.home", "cloudy", {"temperature": 29.0}
+        )
+
+        observation = self.build(registry=registry, states=states)
+
+        self.assertEqual(30.5, observation.home.outdoor_temperature)
+        self.assertIs(
+            observation.home.outdoor_temperature_source,
+            ClimateOutdoorTemperatureSource.PHYSICAL_SENSOR,
+        )
+        self.assertEqual(29.0, observation.home.outdoor_provider_temperature)
+        self.assertEqual(1.5, observation.home.outdoor_source_divergence_c)
+
+    def test_divergence_above_three_degrees_is_reported_not_blocked(self) -> None:
+        registry = full_registry()
+        registry = replace(
+            registry,
+            home=replace(
+                registry.home,
+                outdoor_temperature_entity_id="sensor.outdoor_temperature",
+                outdoor_temperature_entity_ids=(
+                    "sensor.outdoor_temperature",
+                    "weather.home",
+                ),
+            ),
+        )
+        states = full_states()
+        states["weather.home"] = ha_state(
+            "weather.home", "cloudy", {"temperature": 25.0}
+        )
+
+        observation = self.build(registry=registry, states=states)
+
+        self.assertIs(observation.data_status, ClimateDataStatus.FRESH)
+        self.assertEqual(30.5, observation.home.outdoor_temperature)
+        self.assertEqual(5.5, observation.home.outdoor_source_divergence_c)
+        room = observation.room("living")
+        self.assertIsNotNone(room)
+        assert room is not None
+        self.assertTrue(room.authority_eligible)
+
+    def test_stale_physical_sensor_falls_back_to_the_weather_service(self) -> None:
+        registry = full_registry()
+        registry = replace(
+            registry,
+            home=replace(
+                registry.home,
+                outdoor_temperature_entity_id="sensor.outdoor_temperature",
+                outdoor_temperature_entity_ids=(
+                    "sensor.outdoor_temperature",
+                    "weather.home",
+                ),
+            ),
+        )
+        states = full_states()
+        states["sensor.outdoor_temperature"] = ha_state(
+            "sensor.outdoor_temperature",
+            "30.5",
+            updated=NOW - MAX_OUTDOOR_SENSOR_STATE_AGE_MS - 60_000,
+        )
+        states["weather.home"] = ha_state(
+            "weather.home", "cloudy", {"temperature": 27.0}
+        )
+
+        observation = self.build(registry=registry, states=states)
+
+        self.assertEqual(27.0, observation.home.outdoor_temperature)
+        self.assertIs(
+            observation.home.outdoor_temperature_source,
+            ClimateOutdoorTemperatureSource.WEATHER_PROVIDER,
+        )
+        self.assertEqual(27.0, observation.home.outdoor_provider_temperature)
+        self.assertIsNone(observation.home.outdoor_source_divergence_c)
+
+    def test_stale_sensor_without_a_service_keeps_the_historical_value(self) -> None:
+        registry = full_registry()
+        states = full_states()
+        states["sensor.outdoor_temperature"] = ha_state(
+            "sensor.outdoor_temperature",
+            "30.5",
+            updated=NOW - MAX_OUTDOOR_SENSOR_STATE_AGE_MS - 60_000,
+        )
+
+        observation = self.build(registry=registry, states=states)
+
+        self.assertEqual(30.5, observation.home.outdoor_temperature)
+        self.assertIs(
+            observation.home.outdoor_temperature_source,
+            ClimateOutdoorTemperatureSource.PHYSICAL_SENSOR_STALE,
+        )
+        self.assertIsNone(observation.home.outdoor_provider_temperature)
+        self.assertIsNone(observation.home.outdoor_source_divergence_c)
+
+    def test_missing_sources_report_an_honest_none(self) -> None:
+        observation = self.build(
+            registry=registry((), home=ClimateHomeEnvironment()),
+            states={},
+        )
+
+        self.assertIsNone(observation.home.outdoor_temperature)
+        self.assertIs(
+            observation.home.outdoor_temperature_source,
+            ClimateOutdoorTemperatureSource.NONE,
+        )
+        self.assertIsNone(observation.home.outdoor_provider_temperature)
+
+    def test_dashboard_weather_entity_cross_checks_when_unconfigured(self) -> None:
+        class DashboardStates(MemoryStates):
+            def weather_entity_state(self) -> ClimateHaEntityState | None:
+                return self._states.get("weather.home")
+
+        states = full_states()
+        states["weather.home"] = ha_state(
+            "weather.home", "cloudy", {"temperature": 28.0}
+        )
+
+        observation = build_native_ha_climate_observation(
+            full_registry(),
+            contour(),
+            DashboardStates(states),
+            observed_at=NOW,
+            protection=empty_protection(),
+        )
+
+        self.assertEqual(30.5, observation.home.outdoor_temperature)
+        self.assertIs(
+            observation.home.outdoor_temperature_source,
+            ClimateOutdoorTemperatureSource.PHYSICAL_SENSOR,
+        )
+        self.assertEqual(28.0, observation.home.outdoor_provider_temperature)
+        self.assertEqual(2.5, observation.home.outdoor_source_divergence_c)
+
+    def test_without_a_dashboard_weather_probe_the_cross_check_stays_empty(
+        self,
+    ) -> None:
+        observation = self.build()
+
+        self.assertEqual(30.5, observation.home.outdoor_temperature)
+        self.assertIs(
+            observation.home.outdoor_temperature_source,
+            ClimateOutdoorTemperatureSource.PHYSICAL_SENSOR,
+        )
+        self.assertIsNone(observation.home.outdoor_provider_temperature)
+        self.assertIsNone(observation.home.outdoor_source_divergence_c)
 
     def test_protection_memory_supplies_confirmed_transitions(self) -> None:
         protection = ClimateProtectionMemory(

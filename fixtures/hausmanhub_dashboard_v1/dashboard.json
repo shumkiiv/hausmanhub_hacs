@@ -32,6 +32,66 @@
     "statusLabel": "Отлично",
     "dataQuality": "fresh"
   },
+  "weather": {
+    "available": true,
+    "condition": "partlycloudy",
+    "temperatureC": 29.4,
+    "feelsLikeC": 30.1,
+    "humidityPercent": 52,
+    "pressureHpa": 758.1,
+    "visibilityKm": 12.0,
+    "windSpeedMps": 2.4,
+    "windGustMps": 4.1,
+    "windBearing": 230,
+    "cloudCoveragePercent": 35,
+    "uvIndex": 4.2,
+    "updatedAt": "2026-06-23T19:59:50+03:00",
+    "outdoorSensorTemperatureC": 29.1,
+    "outdoorSensorEntityId": "sensor.outdoor_temperature_demo",
+    "outdoorSensorUpdatedAt": 1782225585,
+    "outdoorSensorAvailable": true,
+    "climateLoad": {
+      "level": "weak",
+      "score": 27.4,
+      "factors": ["temperature"]
+    },
+    "dailyForecast": [
+      {
+        "at": "2026-06-24T00:00:00+03:00",
+        "condition": "partlycloudy",
+        "temperatureC": 31.0,
+        "lowTemperatureC": 19.5,
+        "feelsLikeC": 31.8,
+        "humidityPercent": 48,
+        "precipitationProbabilityPercent": 10,
+        "precipitationMm": 0.0,
+        "windSpeedMps": 3.0,
+        "windGustMps": 5.2,
+        "windBearing": 240,
+        "pressureHpa": 757.5,
+        "cloudCoveragePercent": 40,
+        "uvIndex": 5.1
+      }
+    ],
+    "hourlyForecast": [
+      {
+        "at": "2026-06-23T21:00:00+03:00",
+        "condition": "partlycloudy",
+        "temperatureC": 28.6,
+        "lowTemperatureC": 28.6,
+        "feelsLikeC": 29.2,
+        "humidityPercent": 55,
+        "precipitationProbabilityPercent": 5,
+        "precipitationMm": 0.0,
+        "windSpeedMps": 2.1,
+        "windGustMps": 3.8,
+        "windBearing": 235,
+        "pressureHpa": 758.3,
+        "cloudCoveragePercent": 38,
+        "uvIndex": 1.4
+      }
+    ]
+  },
   "rooms": [
     {
       "id": "living",

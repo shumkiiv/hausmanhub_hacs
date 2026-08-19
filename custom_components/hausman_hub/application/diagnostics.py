@@ -17,6 +17,10 @@ CLIMATE_RUNTIME_STATUSES = frozenset(
     {"disabled", "unavailable", "not_refreshed", "fresh", "stale"}
 )
 
+CLIMATE_OUTDOOR_SOURCES = frozenset(
+    {"none", "physical_sensor", "physical_sensor_stale", "weather_provider"}
+)
+
 
 @dataclass(frozen=True, slots=True)
 class ClimateDiagnosticsSummary:
@@ -25,6 +29,8 @@ class ClimateDiagnosticsSummary:
     runtime_status: str
     registry_rooms: int
     registry_devices: int
+    outdoor_temperature_source: str = "none"
+    outdoor_source_divergence_c: float | None = None
 
     def __post_init__(self) -> None:
         if self.runtime_status not in CLIMATE_RUNTIME_STATUSES:
@@ -33,6 +39,14 @@ class ClimateDiagnosticsSummary:
             raise ValueError("climate diagnostics room count is invalid")
         if type(self.registry_devices) is not int or not 0 <= self.registry_devices <= 512:
             raise ValueError("climate diagnostics device count is invalid")
+        if self.outdoor_temperature_source not in CLIMATE_OUTDOOR_SOURCES:
+            raise ValueError("climate diagnostics outdoor source is unsupported")
+        if self.outdoor_source_divergence_c is not None and (
+            not isinstance(self.outdoor_source_divergence_c, (int, float))
+            or isinstance(self.outdoor_source_divergence_c, bool)
+            or not 0 <= self.outdoor_source_divergence_c <= 160
+        ):
+            raise ValueError("climate diagnostics outdoor divergence is invalid")
 
 
 def diagnostics_snapshot(
@@ -105,6 +119,16 @@ def diagnostics_snapshot_for_configuration(
                 climate_runtime_summary.registry_devices
                 if climate_runtime_summary is not None
                 else 0
+            ),
+            "outdoor_temperature_source": (
+                climate_runtime_summary.outdoor_temperature_source
+                if climate_runtime_summary is not None
+                else "none"
+            ),
+            "outdoor_source_divergence_c": (
+                climate_runtime_summary.outdoor_source_divergence_c
+                if climate_runtime_summary is not None
+                else None
             ),
         },
         "shadow_parity": {

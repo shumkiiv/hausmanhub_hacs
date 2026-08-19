@@ -74,6 +74,7 @@ from .ai_assistant_evidence import ai_evidence_from_observation
 from .climate_ha_adapters import build_climate_ha_call_plan
 from .ir_code_service import IRCodeService
 from .climate_ha_observations import (
+    OUTDOOR_SOURCE_DIVERGENCE_ALERT_C,
     ClimateHaObservationViolation,
     ClimateHaStateView,
     build_native_ha_climate_observation,
@@ -329,6 +330,9 @@ class ClimateRuntime:
         self._protection_restart_after: int | None = None
         self._weather_heating_lockout: bool | None = None
         self._central_heating_on: bool | None = None
+        self._outdoor_temperature_source: str = "none"
+        self._outdoor_source_divergence_c: float | None = None
+        self._outdoor_divergence_alerted = False
         self._lock = asyncio.Lock()
         self._contour_applications = _ContourApplyLedger(
             operation_id_factory=operation_id_factory,
@@ -359,6 +363,57 @@ class ClimateRuntime:
         if self._registry is None:
             return "not_refreshed"
         return "fresh"
+
+    @property
+    def outdoor_temperature_source(self) -> str:
+        """Return which outdoor input the last observation used, id-free."""
+
+        return self._outdoor_temperature_source
+
+    @property
+    def outdoor_source_divergence_c(self) -> float | None:
+        """Return the last physical-vs-service outdoor gap for diagnostics."""
+
+        return self._outdoor_source_divergence_c
+
+    def _track_outdoor_source(self, observation: ClimateObservationSnapshot) -> None:
+        """Log source switches and cross-check gaps without blocking commands."""
+
+        home = observation.home
+        source = home.outdoor_temperature_source.value
+        if source != self._outdoor_temperature_source:
+            _LOGGER.info(
+                "climate outdoor temperature source: %s (service cross-check: %s)",
+                source,
+                (
+                    f"{home.outdoor_provider_temperature:.1f} C"
+                    if home.outdoor_provider_temperature is not None
+                    else "unavailable"
+                ),
+            )
+            self._outdoor_temperature_source = source
+        divergence = home.outdoor_source_divergence_c
+        self._outdoor_source_divergence_c = divergence
+        if divergence is None:
+            self._outdoor_divergence_alerted = False
+            return
+        if divergence > OUTDOOR_SOURCE_DIVERGENCE_ALERT_C:
+            if not self._outdoor_divergence_alerted:
+                _LOGGER.warning(
+                    "climate outdoor sources diverge by %.1f C: physical sensor "
+                    "%.1f C is primary, weather service reports %.1f C; "
+                    "commands stay unblocked",
+                    divergence,
+                    home.outdoor_temperature,
+                    home.outdoor_provider_temperature,
+                )
+                self._outdoor_divergence_alerted = True
+        elif self._outdoor_divergence_alerted:
+            _LOGGER.info(
+                "climate outdoor sources agree again within %.1f C",
+                divergence,
+            )
+            self._outdoor_divergence_alerted = False
 
     async def async_start(self) -> None:
         """Load local registry and best-effort initial read-only state."""
@@ -468,6 +523,12 @@ class ClimateRuntime:
                 )
                 for room in contour.rooms
             }
+
+    async def async_dashboard_outdoor_temperature_entity_ids(self) -> tuple[str, ...]:
+        """Return the configured outdoor sources in failover order for the dashboard."""
+
+        async with self._lock:
+            return self._registry.home.prioritized_outdoor_temperature_entity_ids
 
     async def async_dashboard_climate_ownership(self) -> dict[str, dict[str, str]]:
         """Return private lookup keys used to annotate shared device cards."""
@@ -2152,6 +2213,7 @@ class ClimateRuntime:
             )
             self._weather_heating_lockout = observation.home.weather_heating_lockout
             self._central_heating_on = observation.home.central_heating_on
+            self._track_outdoor_source(observation)
             return observation
         except (ClimateHaObservationViolation, ClimateObservationViolation) as error:
             self.last_error = type(error).__name__

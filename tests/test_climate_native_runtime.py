@@ -537,6 +537,49 @@ class NativeObservationRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(room)
         self.assertIs(room.status, ClimateRoomIsolationStatus.READY)
 
+    async def test_outdoor_source_divergence_is_logged_without_blocking(self) -> None:
+        class WeatherCrossCheckView(MutableStateView):
+            def weather_entity_state(self) -> ClimateHaEntityState | None:
+                return self._states.get("weather.home")
+
+        states = healthy_states()
+        states["weather.home"] = ha_state(
+            "weather.home", "cloudy", {"temperature": 12.0}
+        )
+        view = WeatherCrossCheckView(states)
+        instance = runtime(ClimateControlMode.MANAGED, view)
+        await instance.async_start()
+
+        with self.assertLogs(
+            "custom_components.hausman_hub.application.climate_runtime",
+            level="WARNING",
+        ) as logged:
+            isolation = await instance.async_native_climate_isolation()
+
+        self.assertIsNotNone(isolation)
+        self.assertIn("8.0 C", "\n".join(logged.output))
+        self.assertEqual("physical_sensor", instance.outdoor_temperature_source)
+        self.assertEqual(8.0, instance.outdoor_source_divergence_c)
+
+    async def test_outdoor_sources_within_threshold_stay_quiet(self) -> None:
+        class WeatherCrossCheckView(MutableStateView):
+            def weather_entity_state(self) -> ClimateHaEntityState | None:
+                return self._states.get("weather.home")
+
+        states = healthy_states()
+        states["weather.home"] = ha_state(
+            "weather.home", "cloudy", {"temperature": 18.5}
+        )
+        view = WeatherCrossCheckView(states)
+        instance = runtime(ClimateControlMode.MANAGED, view)
+        await instance.async_start()
+
+        await instance.async_native_climate_isolation()
+
+        self.assertEqual("physical_sensor", instance.outdoor_temperature_source)
+        self.assertEqual(1.5, instance.outdoor_source_divergence_c)
+        self.assertFalse(instance._outdoor_divergence_alerted)
+
     async def test_trial_tick_executes_native_divergence_without_bridge(
         self,
     ) -> None:

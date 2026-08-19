@@ -35,6 +35,7 @@ from ..domain.climate_observation import (
     ClimateOccupancyMode,
     ClimateObservationDeviceKind,
     ClimateObservationSnapshot,
+    ClimateOutdoorTemperatureSource,
     ClimatePhysicalFeedback,
     ClimateRoomMode,
     ClimateRoomObservation,
@@ -56,6 +57,12 @@ MAX_NATIVE_STATE_AGE_MS = 30 * 60 * 1000
 # "alive but quiet" sensors. Safety inputs (heat-load outdoor temperature,
 # physical feedback) keep the shorter native window above.
 MAX_ROOM_SENSOR_STATE_AGE_MS = 3 * 60 * 60 * 1000
+# A physical outdoor sensor earns the primary role only while it keeps
+# reporting; ten silent minutes hand the input back to the weather service.
+MAX_OUTDOOR_SENSOR_STATE_AGE_MS = 10 * 60 * 1000
+# Both outdoor sources stay visible to the owner; beyond this gap the
+# cross-check is raised in the tech log, but commands are never blocked.
+OUTDOOR_SOURCE_DIVERGENCE_ALERT_C = 3.0
 MAX_STATE_LENGTH = 64
 MAX_ATTRIBUTES = 64
 _OBSERVATION_DEVICE_KINDS = {
@@ -393,7 +400,18 @@ def _home_observation(
 ) -> ClimateHomeObservation:
     home = registry.home
     outdoor_sources = home.prioritized_outdoor_temperature_entity_ids
-    outdoor = _prioritized_home_number(outdoor_sources, states)
+    outdoor, outdoor_source, provider_temperature = _outdoor_source_selection(
+        outdoor_sources,
+        states,
+        observed_at,
+    )
+    divergence = (
+        round(abs(outdoor - provider_temperature), 1)
+        if outdoor_source is ClimateOutdoorTemperatureSource.PHYSICAL_SENSOR
+        and provider_temperature is not None
+        and outdoor is not None
+        else None
+    )
     heat_load = _prioritized_heat_load_temperature(
         outdoor_sources, states, observed_at
     )
@@ -432,6 +450,9 @@ def _home_observation(
         interseason_date_start=home.interseason_date_start,
         interseason_date_end=home.interseason_date_end,
         interseason_local_month_day=local_month_day,
+        outdoor_temperature_source=outdoor_source,
+        outdoor_provider_temperature=provider_temperature,
+        outdoor_source_divergence_c=divergence,
     )
 
 
@@ -491,6 +512,111 @@ def _prioritized_home_number(
         if value is not None:
             return value
     return None
+
+
+def _fresh_physical_outdoor_temperature(
+    entity_ids: tuple[str, ...],
+    states: ClimateHaStateView,
+    observed_at: int,
+) -> float | None:
+    """Return the first physical sensor reading that is fresh and plausible."""
+
+    for entity_id in entity_ids:
+        if entity_id.startswith("weather."):
+            continue
+        state = states.entity_state(entity_id)
+        if state is None or state.state in _UNAVAILABLE_STATES:
+            continue
+        age = max(0, observed_at - state.last_updated_ms)
+        if age > MAX_OUTDOOR_SENSOR_STATE_AGE_MS:
+            continue
+        value = _outdoor_temperature_value(state)
+        if value is None or not -80.0 <= value <= 80.0:
+            continue
+        return value
+    return None
+
+
+def _service_weather_temperature(
+    entity_ids: tuple[str, ...],
+    states: ClimateHaStateView,
+) -> float | None:
+    """Return the provider temperature used for the cross-check.
+
+    Configured ``weather.*`` sources win; when none is configured, the
+    dashboard weather entity is probed through the optional state-view
+    capability. A state view without that capability honestly yields None
+    instead of an invented value.
+    """
+
+    configured_weather = False
+    for entity_id in entity_ids:
+        if not entity_id.startswith("weather."):
+            continue
+        configured_weather = True
+        value = _home_number(entity_id, states)
+        if value is not None:
+            return value
+    if configured_weather:
+        return None
+    probe = getattr(states, "weather_entity_state", None)
+    if not callable(probe):
+        return None
+    try:
+        state = probe()
+    except Exception:
+        return None
+    if state is None or state.state in _UNAVAILABLE_STATES:
+        return None
+    value = _outdoor_temperature_value(state)
+    if value is None or not -80.0 <= value <= 80.0:
+        return None
+    return value
+
+
+def _outdoor_source_selection(
+    entity_ids: tuple[str, ...],
+    states: ClimateHaStateView,
+    observed_at: int,
+) -> tuple[float | None, ClimateOutdoorTemperatureSource, float | None]:
+    """Pick the outdoor input: fresh physical sensor wins, service cross-checks.
+
+    A configured physical sensor that turned stale or silent hands the input
+    to the weather service. Without any configured physical sensor (or without
+    a reachable service) the selection is exactly the historical prioritized
+    failover; the returned source only labels where that value came from. The
+    service temperature is always reported alongside so the owner can judge
+    which source tracks reality better.
+    """
+
+    service_temperature = _service_weather_temperature(entity_ids, states)
+    physical = _fresh_physical_outdoor_temperature(entity_ids, states, observed_at)
+    if physical is not None:
+        return (
+            physical,
+            ClimateOutdoorTemperatureSource.PHYSICAL_SENSOR,
+            service_temperature,
+        )
+    physical_configured = any(
+        not entity_id.startswith("weather.") for entity_id in entity_ids
+    )
+    if physical_configured and service_temperature is not None:
+        return (
+            service_temperature,
+            ClimateOutdoorTemperatureSource.WEATHER_PROVIDER,
+            service_temperature,
+        )
+    for entity_id in entity_ids:
+        value = _home_number(entity_id, states)
+        if value is None:
+            continue
+        source = (
+            ClimateOutdoorTemperatureSource.WEATHER_PROVIDER
+            if entity_id.startswith("weather.")
+            else ClimateOutdoorTemperatureSource.PHYSICAL_SENSOR_STALE
+        )
+        return value, source, service_temperature
+    return None, ClimateOutdoorTemperatureSource.NONE, service_temperature
 
 
 def _heat_load_temperature(

@@ -563,6 +563,12 @@ class DashboardView(_ClimateView):
             climate_ownership = (
                 await ownership_reader() if callable(ownership_reader) else None
             )
+            outdoor_reader = getattr(
+                runtime, "async_dashboard_outdoor_temperature_entity_ids", None
+            )
+            outdoor_sensor_entity_ids = (
+                await outdoor_reader() if callable(outdoor_reader) else None
+            )
             payload = await async_dashboard_snapshot(
                 self._hass,
                 scenario_service if scenario_service is not None else None,
@@ -577,6 +583,7 @@ class DashboardView(_ClimateView):
                 if isinstance(power_dependency_service, DevicePowerDependencyService)
                 else None,
                 climate_ownership,
+                outdoor_sensor_entity_ids,
             )
         except Exception:
             return self._unavailable()

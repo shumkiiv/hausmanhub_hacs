@@ -83,6 +83,32 @@ class HomeAssistantClimateStateView:
             last_updated_ms=int(reported.timestamp() * 1000),
         )
 
+    def weather_entity_state(self) -> ClimateHaEntityState | None:
+        """Return the dashboard weather entity state for the service cross-check.
+
+        The dashboard projects the first available ``weather.*`` entity; the
+        climate contour cross-checks the physical outdoor sensor against the
+        same provider value instead of inventing one.
+        """
+
+        fallback: ClimateHaEntityState | None = None
+        for state in self._hass.states.async_all():
+            if not state.entity_id.startswith("weather."):
+                continue
+            observed = self.entity_state(state.entity_id)
+            if observed is None:
+                continue
+            if fallback is None:
+                fallback = observed
+            temperature = observed.attributes.get("temperature")
+            if (
+                isinstance(temperature, (int, float))
+                and not isinstance(temperature, bool)
+                and observed.state not in {"unavailable", "unknown"}
+            ):
+                return observed
+        return fallback
+
     def entity_catalog(self) -> ClimateHaEntityCatalog:
         """Enumerate climate-relevant entities for native setup discovery."""
 

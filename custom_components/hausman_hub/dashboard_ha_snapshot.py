@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -73,6 +73,44 @@ _ACTIVITY_STATUS_MESSAGE = {
     "failed": "Операция завершилась ошибкой.",
 }
 _DATA_OPERATION_JOURNAL = "operation_journal"
+_SENSOR_UNAVAILABLE_STATES = frozenset({"", "unavailable", "unknown"})
+
+
+def _outdoor_sensor_kwargs(
+    hass: HomeAssistant,
+    entity_ids: Sequence[str] | None,
+) -> dict[str, object]:
+    """Read the first answering physical outdoor sensor without side effects.
+
+    Configured ``weather.*`` sources are provider data, not a physical sensor,
+    so they never pose as one here. A configured but silent sensor stays
+    ``available=False`` with null fields instead of raising.
+    """
+
+    for entity_id in entity_ids or ():
+        if not isinstance(entity_id, str) or entity_id.startswith("weather."):
+            continue
+        state = hass.states.get(entity_id)
+        if state is None:
+            continue
+        raw_state = getattr(state, "state", None)
+        if not isinstance(raw_state, str) or raw_state in _SENSOR_UNAVAILABLE_STATES:
+            continue
+        attributes = getattr(state, "attributes", {})
+        unit = attributes.get("unit_of_measurement") if isinstance(attributes, Mapping) else None
+        last_updated = getattr(state, "last_updated", None)
+        return {
+            "outdoor_sensor_value": raw_state,
+            "outdoor_sensor_unit": unit,
+            "outdoor_sensor_entity_id": entity_id,
+            "outdoor_sensor_updated_at": (
+                int(last_updated.timestamp())
+                if isinstance(last_updated, datetime)
+                else None
+            ),
+            "outdoor_sensor_available": True,
+        }
+    return {"outdoor_sensor_available": False}
 
 
 def _dashboard_operation_events(hass: HomeAssistant) -> tuple[DashboardEvent, ...]:
@@ -317,6 +355,7 @@ async def async_dashboard_snapshot(
     pinned_entity_ids: frozenset[str] | None = None,
     power_dependencies: Mapping[str, str] | None = None,
     climate_ownership: Mapping[str, Mapping[str, str]] | None = None,
+    outdoor_sensor_entity_ids: Sequence[str] | None = None,
 ) -> dict[str, object]:
     """Collect current HA registries and project one side-effect-free payload."""
 
@@ -401,8 +440,9 @@ async def async_dashboard_snapshot(
     weather_entity = next(
         (entity for entity in entity_values if entity.domain == "weather"), None
     )
+    outdoor_sensor = _outdoor_sensor_kwargs(hass, outdoor_sensor_entity_ids)
     if weather_entity is None:
-        weather_payload = unavailable_weather_read_model()
+        weather_payload = unavailable_weather_read_model(**outdoor_sensor)
     else:
         daily, hourly = await asyncio.gather(
             async_weather_forecast(hass, weather_entity.entity_id, "daily"),
@@ -427,6 +467,7 @@ async def async_dashboard_snapshot(
                 if isinstance(last_updated, datetime)
                 else None
             ),
+            **outdoor_sensor,
         )
     payload["weather"] = weather_payload
     summary = payload.get("summary")
