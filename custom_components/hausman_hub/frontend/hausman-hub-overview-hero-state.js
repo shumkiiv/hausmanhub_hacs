@@ -1,4 +1,4 @@
-import { roomHeroImage } from "./hausman-hub-room-icons.js?v=1.52.119";
+import { roomHeroImage } from "./hausman-hub-room-icons.js?v=1.52.121";
 
 function heroSummary(dashboard) {
   const summary = dashboard?.summary && typeof dashboard.summary === "object"
@@ -29,6 +29,40 @@ export function stableOverviewHeroImage(panel, room, dashboard) {
   return image;
 }
 
+function weatherKeyPart(panel, weather) {
+  // Partial dashboard responses omit weather or carry an empty object; keep
+  // the last known part so the stable hero image survives a refresh.
+  const hasData = weather && typeof weather === "object"
+    && (weather.condition || weather.temperatureC != null
+      || weather.humidityPercent != null || weather.windSpeedMps != null
+      || weather.outdoorSensorAvailable === true
+      || weather.outdoorSensorTemperatureC != null
+      || weather.outdoorSensorUpdatedAt != null);
+  if (hasData) {
+    const part = {
+      condition: weather.condition || "",
+      temperatureC: weather.temperatureC ?? null,
+      humidityPercent: weather.humidityPercent ?? null,
+      windSpeedMps: weather.windSpeedMps ?? null,
+      sensorAvailable: weather.outdoorSensorAvailable === true,
+      sensorTemperatureC: weather.outdoorSensorTemperatureC ?? null,
+      sensorUpdatedAt: weather.outdoorSensorUpdatedAt ?? null,
+    };
+    panel._heroWeatherKeyPart = part;
+    return part;
+  }
+  return panel._heroWeatherKeyPart || null;
+}
+
+function activeAlarmsKeyPart(panel, alarms) {
+  if (Array.isArray(alarms)) {
+    const count = alarms.filter((alarm) => alarm.active).length;
+    panel._heroActiveAlarmsKeyPart = count;
+    return count;
+  }
+  return panel._heroActiveAlarmsKeyPart ?? 0;
+}
+
 export function overviewHeroRenderKey(panel, readiness) {
   const dashboard = panel._homeDashboard || {};
   const rooms = Array.isArray(dashboard.rooms) ? dashboard.rooms : [];
@@ -49,16 +83,8 @@ export function overviewHeroRenderKey(panel, readiness) {
     physicalDevices: physicalDeviceCount(devices),
     activeDevices: activeCount(devices),
     scenarios: scenarios.length,
-    weather: {
-      condition: dashboard.weather?.condition || "",
-      temperatureC: dashboard.weather?.temperatureC ?? null,
-      humidityPercent: dashboard.weather?.humidityPercent ?? null,
-      windSpeedMps: dashboard.weather?.windSpeedMps ?? null,
-      sensorAvailable: dashboard.weather?.outdoorSensorAvailable === true,
-      sensorTemperatureC: dashboard.weather?.outdoorSensorTemperatureC ?? null,
-      sensorUpdatedAt: dashboard.weather?.outdoorSensorUpdatedAt ?? null,
-    },
-    activeAlarms: (Array.isArray(dashboard.alarms) ? dashboard.alarms : []).filter((alarm) => alarm.active).length,
+    weather: weatherKeyPart(panel, dashboard.weather),
+    activeAlarms: activeAlarmsKeyPart(panel, dashboard.alarms),
     homeRows: devices
       .filter((device) => ["presence", "occupancy", "window", "door", "opening"].includes(device.category)
         || ["lock", "alarm_control_panel"].includes(device.domain))

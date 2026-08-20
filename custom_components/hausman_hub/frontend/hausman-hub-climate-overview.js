@@ -1,10 +1,10 @@
 /* Climate control surface shared with the tablet information architecture. */
 
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.119";
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.119";
-import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.119";
-import { pendingOperationId, requiresSnapshotRefresh, resolveApiError, resolveClimateReceipt } from "./hausman-hub-error-taxonomy.js?v=1.52.119";
-import { withCorrelationId } from "./hausman-hub-correlation.js?v=1.52.119";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.121";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.121";
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.121";
+import { pendingOperationId, requiresSnapshotRefresh, resolveApiError, resolveClimateReceipt } from "./hausman-hub-error-taxonomy.js?v=1.52.121";
+import { withCorrelationId } from "./hausman-hub-correlation.js?v=1.52.121";
 
 const CLIMATE_ACTION_API = "hausman_hub/v1/climate/actions";
 const CLIMATE_OPERATION_API = "hausman_hub/v1/climate/operations";
@@ -189,6 +189,8 @@ export function renderHomeTargetCard(panel, dashboard, deps) {
     button.disabled = panel._busy || !canSetTargets || target === null;
     deps.setAttr(button, "aria-label", aria);
     button.appendChild(climateIcon(delta < 0 ? "minus" : "plus", deps));
+    const hint = deps.el("span", "visually-hidden", label);
+    button.appendChild(hint);
     button.addEventListener("click", () => {
       if (button.disabled || target === null) return;
       setClimateHomeTarget(panel, Math.round((target + delta) * 2) / 2);

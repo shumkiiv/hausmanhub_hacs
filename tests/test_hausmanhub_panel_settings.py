@@ -59,6 +59,8 @@ DEVICES_OVERVIEW_CSS = PANEL_JS.with_name("hausman-hub-devices-overview.css")
 DIAGNOSTICS_JS = PANEL_JS.with_name("hausman-hub-diagnostics.js")
 ROLLOUT_JS = PANEL_JS.with_name("hausman-hub-rollout.js")
 OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-overview.js")
+OVERVIEW_SIDE_JS = PANEL_JS.with_name("hausman-hub-overview-side.js")
+OVERVIEW_EVENTS_MODAL_JS = PANEL_JS.with_name("hausman-hub-overview-events-modal.js")
 OVERVIEW_HERO_STATE_JS = PANEL_JS.with_name("hausman-hub-overview-hero-state.js")
 ROOM_ICONS_JS = PANEL_JS.with_name("hausman-hub-room-icons.js")
 HERO_ROOM_NAVIGATION_JS = PANEL_JS.with_name("hausman-hub-hero-room-navigation.js")
@@ -642,6 +644,14 @@ def panel_script(
       vm.runInThisContext(
         fs.readFileSync({str(OVERVIEW_HERO_STATE_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(OVERVIEW_HERO_STATE_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(OVERVIEW_SIDE_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
+        {{ filename: {str(OVERVIEW_SIDE_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(OVERVIEW_EVENTS_MODAL_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
+        {{ filename: {str(OVERVIEW_EVENTS_MODAL_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(OVERVIEW_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
@@ -2272,9 +2282,9 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         }
         const steps = byClass(card, "overview-canon-target-step");
         if (steps.length !== 2) throw new Error("target step buttons are missing");
-        if (steps[0].textContent !== "−0,5" || steps[1].textContent !== "+0,5") {
+        if (!textOf(steps[0]).includes("−0,5") || !textOf(steps[1]).includes("+0,5")) {
           throw new Error("explicit step labels mismatch: "
-            + steps.map((step) => step.textContent).join("|"));
+            + steps.map((step) => textOf(step)).join("|"));
         }
         if (steps[0]["aria-label"] !== "Понизить общую цель на 0,5 °C"
           || steps[1]["aria-label"] !== "Повысить общую цель на 0,5 °C") {
@@ -4074,7 +4084,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.119")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.121")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

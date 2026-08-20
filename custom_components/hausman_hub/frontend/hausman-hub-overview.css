@@ -173,3 +173,8 @@
 @media (max-width:900px) { .overview-canon-top-grid,.overview-canon-dashboard-grid { grid-template-columns:1fr; } .overview-canon-top-side { grid-template-columns:repeat(2,minmax(0,1fr)); grid-template-rows:auto; } }
 @media (max-width:800px) { .overview-canon-primary-grid, .overview-canon-lower-main { grid-template-columns:minmax(0,1fr); } .overview-canon-primary-card.is-security { grid-column:auto; } .overview-canon-hero-copy { width:78%; } }
 @media (max-width:640px) { .overview-canon-hero { min-height:300px; } .overview-canon-hero-copy { width:100%; } .overview-canon-hero-overlay { min-height:246px; padding:18px; } .overview-canon-state { display:none; } .overview-canon-hero-edge { top:auto; bottom:132px; transform:none; height:44px; min-height:44px; } .overview-canon-hero-dots { bottom:96px; } }
+
+.visually-hidden {
+  position:absolute; width:1px; height:1px; padding:0; margin:-1px;
+  overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0;
+}
