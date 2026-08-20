@@ -21,3 +21,22 @@
   :host(.kiosk-mode) .kiosk-dock { right:12px; bottom:12px; left:12px; justify-content:stretch; }
   .kiosk-dock button { flex:1 1 auto; min-width:0; }
 }
+@container hausmanhub-panel (min-width:1050px) {
+  .sidebar-collapse { display:inline-flex; align-items:center; justify-content:center; flex:0 0 40px; width:40px; height:40px;
+    margin:0; padding:0; border:1px solid transparent; border-radius:50%; background:transparent;
+    color:var(--hmh-text-dim,#9AA7B4); box-shadow:none; cursor:pointer; }
+  .sidebar-collapse:hover { background:var(--hmh-hover,#1F2630); color:var(--hmh-text,#E7ECF3); }
+  .sidebar-collapse-icon { width:22px; height:22px; }
+  :host(.rail-collapsed) main { grid-template-columns:88px minmax(0,1fr); }
+  :host(.rail-collapsed) .sidebar-brand { justify-content:center; padding:16px 8px; }
+  :host(.rail-collapsed) .sidebar-brand-copy { display:none; }
+  :host(.rail-collapsed) .tab-bar { padding:14px 10px; }
+  :host(.rail-collapsed) .tab { justify-content:center; padding:12px 0; }
+  :host(.rail-collapsed) .tab-label { display:none; }
+  :host(.rail-collapsed) .sidebar-intercom { justify-content:center; margin:0 10px 10px; padding:11px 0; }
+  :host(.rail-collapsed) .sidebar-intercom-label { display:none; }
+  :host(.rail-collapsed) .sidebar-kiosk { justify-content:center; margin:0 10px 10px; padding:8px 0; }
+  :host(.rail-collapsed) .sidebar-kiosk .kiosk-label { display:none; }
+  :host(.rail-collapsed) .sidebar-footer { justify-content:center; padding:14px 8px; }
+  :host(.rail-collapsed) .sidebar-version { display:none; }
+}

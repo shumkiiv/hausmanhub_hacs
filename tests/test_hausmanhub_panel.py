@@ -1439,6 +1439,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             && !String(node.className).split(" ").includes("theme-switch")
             && !String(node.className).split(" ").includes("header-intercom")
             && !String(node.className).split(" ").includes("sidebar-intercom")
+            && !String(node.className).split(" ").includes("sidebar-collapse")
             && !String(node.className).split(" ").includes("kiosk-toggle")
         ))) {{
             throw new Error("climate action rendered without settings");
