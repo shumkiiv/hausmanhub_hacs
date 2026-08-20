@@ -105,8 +105,8 @@
 .overview-canon-target-head { display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; }
 .overview-canon-target-auto { padding:3px 9px; border-radius:999px; color:var(--hmh-accent-primary); background:color-mix(in srgb,var(--hmh-accent-primary) 14%,var(--hmh-surface-card)); font-size:11px; font-weight:650; letter-spacing:.04em; text-transform:uppercase; }
 .overview-canon-target-slider { width:100%; margin-top:14px; padding:0 7px; box-sizing:border-box; }
-.overview-canon-target-slider input[type="range"] { -webkit-appearance:none; appearance:none; display:block; width:100%; height:4px; margin:0; padding:0; border:none; border-radius:999px; background:linear-gradient(90deg,#4F8CFF 0%,#8E7CF3 50%,#F0664A 100%); box-shadow:none; }
-.overview-canon-target-slider input[type="range"]::-webkit-slider-runnable-track { height:4px; border:none; border-radius:999px; background:transparent; }
+.overview-canon-target-slider input[type="range"] { -webkit-appearance:none; appearance:none; display:block; width:100%; height:24px; min-height:24px; margin:0; padding:0; border:none; background:transparent; box-shadow:none; }
+.overview-canon-target-slider input[type="range"]::-webkit-slider-runnable-track { height:4px; border:none; border-radius:999px; background:linear-gradient(90deg,#4F8CFF 0%,#8E7CF3 50%,#F0664A 100%); }
 .overview-canon-target-slider input[type="range"]::-webkit-slider-thumb { -webkit-appearance:none; width:14px; height:14px; margin-top:-10px; border:5px solid var(--hmh-surface-card); border-radius:50%; background:var(--hmh-text-primary); box-shadow:0 1px 4px rgba(0,0,0,.3); cursor:pointer; }
 .overview-canon-target-slider input[type="range"]::-moz-range-track { height:4px; border:none; border-radius:999px; background:linear-gradient(90deg,#4F8CFF 0%,#8E7CF3 50%,#F0664A 100%); }
 .overview-canon-target-slider input[type="range"]::-moz-range-thumb { width:14px; height:14px; border:5px solid var(--hmh-surface-card); border-radius:50%; background:var(--hmh-text-primary); box-shadow:0 1px 4px rgba(0,0,0,.3); cursor:pointer; }

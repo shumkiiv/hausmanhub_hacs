@@ -1,4 +1,4 @@
-import { activityTimeLabel } from "./hausman-hub-pagination.js?v=1.52.122";
+import { activityTimeLabel } from "./hausman-hub-pagination.js?v=1.52.123";
 
 function weatherLabel(condition) {
   return ({
