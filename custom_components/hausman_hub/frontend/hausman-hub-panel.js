@@ -223,6 +223,7 @@ const ICON_PATHS = {
   play: "M8 5v14l11-7z",
   intercom: "M7 2h10a3 3 0 0 1 3 3v14a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3m0 2a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1zm5 2a3 3 0 1 1 0 6 3 3 0 0 1 0-6m-3 8h6v2H9zm0 4h4v2H9z",
   close: "M6.4 5 5 6.4 10.6 12 5 17.6 6.4 19l5.6-5.6 5.6 5.6 1.4-1.4-5.6-5.6L19 6.4 17.6 5 12 10.6z",
+  refresh: "M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z",
 };
 
 const ICON_STROKE_PATHS = {
@@ -235,8 +236,11 @@ const ICON_STROKE_PATHS = {
 };
 
 const THEME_MODES = ["auto", "daynight", "light", "dark"];
-const DAYNIGHT_DAY_START_HOUR = 6;
+const DAYNIGHT_DAY_START_HOUR = 7;
 const DAYNIGHT_NIGHT_START_HOUR = 22;
+const HEADER_CLOCK_REFRESH_MS = 60000;
+const HEADER_CLOCK_DATE_FORMAT = new Intl.DateTimeFormat("ru-RU", { weekday: "long", day: "numeric", month: "long" });
+const HEADER_CLOCK_TIME_FORMAT = new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit" });
 const THEME_MODE_META = {
   auto: { icon: "auto", label: "Тема: авто (следует Home Assistant)", hint: "авто" },
   daynight: { icon: "sun", label: "Тема: день/ночь (по времени суток)", hint: "день/ночь" },
@@ -508,6 +512,8 @@ class HausmanHubPanel extends HTMLElement {
     restoreNavigationFromLocation(this, false, PANEL_SECTIONS, CLIMATE_VIEWS, SETTINGS_VIEWS);
     this._timer = setInterval(() => this._load(), REFRESH_MS);
     this._upcomingTimer = setInterval(() => this._refreshUpcomingCountdowns(), REFRESH_MS);
+    if (this._clockTimer) clearInterval(this._clockTimer);
+    this._clockTimer = setInterval(() => this._updateHeaderClock(), HEADER_CLOCK_REFRESH_MS);
     document.addEventListener("visibilitychange", this._onVisible);
     if (typeof document.addEventListener === "function") {
       document.addEventListener("fullscreenchange", this._onFullscreenChange);
@@ -545,6 +551,8 @@ class HausmanHubPanel extends HTMLElement {
     this._timer = null;
     if (this._upcomingTimer) clearInterval(this._upcomingTimer);
     this._upcomingTimer = null;
+    if (this._clockTimer) clearInterval(this._clockTimer);
+    this._clockTimer = null;
     if (this._daynightTimer && typeof window !== "undefined" && typeof window.clearTimeout === "function") {
       window.clearTimeout(this._daynightTimer);
     }
@@ -1076,6 +1084,19 @@ class HausmanHubPanel extends HTMLElement {
     headerActions.appendChild(headerIntercom);
     const kioskButton = createKioskButton(this, "header-kiosk", { el, svgIcon });
     headerActions.appendChild(kioskButton);
+    const refreshButton = el("button", "theme-switch header-refresh");
+    refreshButton.type = "button";
+    setAttr(refreshButton, "aria-label", "Обновить данные");
+    refreshButton.appendChild(svgIcon("refresh", "header-refresh-icon"));
+    refreshButton.appendChild(el("span", "header-refresh-label", "Обновить"));
+    refreshButton.addEventListener("click", () => this._load());
+    headerActions.appendChild(refreshButton);
+    const headerClock = el("div", "header-clock");
+    const headerClockDate = el("span", "header-clock-date");
+    const headerClockTime = el("span", "header-clock-time");
+    headerClock.appendChild(headerClockDate);
+    headerClock.appendChild(headerClockTime);
+    headerActions.appendChild(headerClock);
     header.appendChild(headerActions);
     container.appendChild(header);
     const banner = el("div", "banner", "Данные Hausman Hub недоступны. Проверьте интеграцию и повторите.");
@@ -1199,6 +1220,7 @@ class HausmanHubPanel extends HTMLElement {
     this._shell = {
       container,
       banner, notice, loading, brandSubtitle, statusPill, versionBadge, themeButton, tabs, nav, sidebar, sidebarVersion, sidebarToggle, sectionNodes, wizard,
+      headerClockDate, headerClockTime,
       readiness, summary, rooms,
       climateNav, climateTabs, climateViews, climateOverview, contour, profiles, schedule, home, windows, assistant,
       scenarios, settings,
@@ -1207,6 +1229,15 @@ class HausmanHubPanel extends HTMLElement {
       renderKiosk: () => renderKiosk(this, kioskSurface, { el, svgIcon, setAttr, showIntercom: typeof isIntercomQuickAccessVisible === "function" && isIntercomQuickAccessVisible(this), exit: () => kioskButton.click(), openIntercom: () => openIntercomFromRail(this) }),
     };
     this._updateThemeSwitcher();
+    this._updateHeaderClock();
+  }
+
+  _updateHeaderClock() {
+    const shell = this._shell;
+    if (!shell || !shell.headerClockDate) return;
+    const now = new Date();
+    shell.headerClockDate.textContent = HEADER_CLOCK_DATE_FORMAT.format(now);
+    shell.headerClockTime.textContent = HEADER_CLOCK_TIME_FORMAT.format(now);
   }
 
   _clearDynamic() {
