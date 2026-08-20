@@ -34,6 +34,27 @@ _DEFAULT_DEVICE_READBACK_WINDOW_SECONDS = 8.0
 _DEFAULT_DEVICE_READBACK_INTERVAL_SECONDS = 0.25
 
 
+def _display_device_name(raw: str) -> str:
+    """Свернуть задвоения имён из реестра HA для человеческих сообщений.
+
+    Каталог собирает имя как «<устройство> · <сущность>», а friendly_name
+    Zigbee2MQTT часто уже повторяет имя устройства: «Люстра тамбур · Люстра
+    тамбур Люстра тамбур». Для квитанций и ленты оставляем один экземпляр.
+    """
+
+    text = " ".join(raw.split())
+    if " · " in text:
+        left, right = text.split(" · ", 1)
+        if right.startswith(left):
+            text = right
+    words = text.split()
+    if len(words) >= 2 and len(words) % 2 == 0:
+        half = len(words) // 2
+        if words[:half] == words[half:]:
+            text = " ".join(words[:half])
+    return text or raw
+
+
 def _value_parameter_name(action_id: str, domain: str, service: str) -> str | None:
     """Return the Home Assistant service-data key for an action value."""
 
@@ -395,7 +416,9 @@ class ScenarioExecutor:
         # Решение владельца 2026-08-20: в ленте активности и квитанциях должно
         # быть видно, о каком устройстве речь, а не безликое «Устройство».
         device_name = (
-            device.name if device is not None and device.name else "Устройство"
+            _display_device_name(device.name)
+            if device is not None and device.name
+            else "Устройство"
         )
         read_back = receipt.get("read_back")
         if not isinstance(read_back, dict):
