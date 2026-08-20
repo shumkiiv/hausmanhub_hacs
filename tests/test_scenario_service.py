@@ -314,7 +314,7 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
 
         await service._async_catalog_warmup()
 
-        self.assertEqual([1.0, 3.0, 8.0], delays)
+        self.assertEqual([1.0, 3.0, 8.0, 300.0], delays)
         self.assertEqual(3, refreshes)
         self.assertEqual(
             {

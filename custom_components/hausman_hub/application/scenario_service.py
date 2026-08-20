@@ -38,6 +38,7 @@ _LOGGER = logging.getLogger(__name__)
 INTERCOM_RELEASE_SECONDS = 15
 CATALOG_WARMUP_DELAYS_SECONDS = (1.0, 3.0, 8.0)
 CATALOG_WARMUP_MAX_ATTEMPTS = 1 + len(CATALOG_WARMUP_DELAYS_SECONDS)
+SYSTEM_SEED_RETRY_DELAY_SECONDS = 300.0
 
 
 def _default_call_later(
@@ -461,9 +462,18 @@ class ScenarioService:
                 "device_state triggers inactive"
             )
             return
-        # Прогретый каталог есть: один раз за запуск досеиваем системные
-        # сценарии (перенос остатков Node-RED). Сидирование идемпотентно и
-        # не затирает пользовательские правки.
+        # Прогретый каталог есть: досеиваем системные сценарии (перенос
+        # остатков Node-RED). Сидирование идемпотентно и не затирает
+        # пользовательские правки. Поздние Zigbee2MQTT датчики могут быть
+        # недоступны в первые минуты (их свойства тогда не проходят
+        # валидацию), поэтому через 5 минут одна контрольная попытка.
+        await self._async_seed_system_scenarios_guarded()
+        await self._sleep(SYSTEM_SEED_RETRY_DELAY_SECONDS)
+        await self._async_seed_system_scenarios_guarded()
+
+    async def _async_seed_system_scenarios_guarded(self) -> None:
+        """Seed missing system scenarios, logging instead of failing warm-up."""
+
         try:
             created = await async_seed_system_scenarios(self)
         except asyncio.CancelledError:

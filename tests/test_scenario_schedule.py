@@ -98,6 +98,15 @@ class ComputeUpcomingRunsTest(unittest.TestCase):
         self.assertEqual(len(runs), 1)
         self.assertEqual(runs[0].run_at, datetime(2026, 8, 9, 19, 45, tzinfo=TZ))
 
+    def test_sunset_without_offset_means_zero(self) -> None:
+        # Триггер заката без смещения: системный сценарий «Сумерки» от
+        # 2026-08-20 именно такой; раньше адаптеры падали на None.
+        scenario = _scenario("s1", [{"id": "t1", "type": "sunset"}])
+        next_sunset = datetime(2026, 8, 9, 20, 0, tzinfo=TZ)
+        runs = compute_upcoming_runs([scenario], NOW, None, next_sunset)
+        self.assertEqual(len(runs), 1)
+        self.assertEqual(runs[0].run_at, datetime(2026, 8, 9, 20, 0, tzinfo=TZ))
+
     def test_sun_base_converted_to_local_tz(self) -> None:
         scenario = _scenario("s1", [{"id": "t1", "type": "sunset", "value": 0}])
         next_sunset_utc = datetime(2026, 8, 9, 14, 0, tzinfo=timezone.utc)

@@ -527,8 +527,15 @@ def _integer_minutes(value: object, label: str) -> int:
 
 
 def _offset_minutes(value: object, label: str) -> int:
-    """Accept integer offset or numeric string for Android compatibility."""
+    """Accept integer offset or numeric string for Android compatibility.
 
+    ``None`` means "no offset" (plain sunrise/sunset trigger) and maps to 0;
+    the domain model validates offsets only when a value is present, while
+    the schedule adapters call this helper unconditionally.
+    """
+
+    if value is None:
+        return 0
     if isinstance(value, bool):
         raise ScenarioViolation(f"{label} must be an integer")
     if isinstance(value, int):
