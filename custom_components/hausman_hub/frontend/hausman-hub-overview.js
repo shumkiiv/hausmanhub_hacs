@@ -88,6 +88,14 @@ function appendMetric(deps, card, label, value, supporting) {
   card.appendChild(deps.el("span", "overview-canon-supporting", supporting));
 }
 
+export function overviewGreeting(now = new Date()) {
+  const hour = now.getHours();
+  if (hour >= 5 && hour < 12) return "Доброе утро";
+  if (hour >= 12 && hour < 18) return "Добрый день";
+  if (hour >= 18 && hour < 23) return "Добрый вечер";
+  return "Доброй ночи";
+}
+
 export function renderOverviewHero(panel, container, readiness, deps) {
   const { el, svgIcon, setAttr } = deps;
   const readinessStatus = readiness?.status || "not_ready";
@@ -96,6 +104,11 @@ export function renderOverviewHero(panel, container, readiness, deps) {
   const devices = Array.isArray(dashboard.devices) ? dashboard.devices : [];
   const scenarios = Array.isArray(dashboard.scenarios) ? dashboard.scenarios : [];
   container.innerHTML = "";
+  const greeting = el("div", "overview-canon-greeting");
+  greeting.appendChild(el("h2", null, overviewGreeting()));
+  greeting.appendChild(el("span", "overview-canon-greeting-status",
+    readinessStatus === "ready" ? "Все системы работают штатно" : "Требуется внимание"));
+  container.appendChild(greeting);
   const selectedRoom = rooms.find((room) => room.id === panel._overviewHeroRoomId) || null;
   if (panel._overviewHeroRoomId && !selectedRoom) panel._overviewHeroRoomId = null;
   const hero = el("section", "overview-canon-hero");

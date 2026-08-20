@@ -175,13 +175,20 @@ export function renderHomeTargetCard(panel, dashboard, deps) {
   const target = raw !== null && raw !== undefined && raw !== "" && Number.isFinite(Number(raw))
     ? Number(raw) : null;
   const card = deps.el("section", `overview-canon-primary-card is-target${target === null ? " is-empty" : ""}`);
-  card.appendChild(deps.el("span", "overview-canon-label", "Цель климата"));
+  const head = deps.el("div", "overview-canon-target-head");
+  head.appendChild(deps.el("span", "overview-canon-label", "Цель климата"));
+  if (panel._climateRuntime && panel._climateRuntime.phase === "managed") {
+    head.appendChild(deps.el("span", "overview-canon-target-auto", "Авто"));
+  }
+  card.appendChild(head);
+  const formatTarget = (value) => `${value.toFixed(1).replace(".0", "").replace(".", ",")} °C`;
   const dial = deps.el("div", "overview-canon-target-dial");
   const stepButton = (label, delta, aria) => {
-    const button = deps.el("button", "overview-canon-target-step", label);
+    const button = deps.el("button", "overview-canon-target-step");
     button.type = "button";
     button.disabled = panel._busy || !canSetTargets || target === null;
     deps.setAttr(button, "aria-label", aria);
+    button.appendChild(climateIcon(delta < 0 ? "minus" : "plus", deps));
     button.addEventListener("click", () => {
       if (button.disabled || target === null) return;
       setClimateHomeTarget(panel, Math.round((target + delta) * 2) / 2);
@@ -189,10 +196,49 @@ export function renderHomeTargetCard(panel, dashboard, deps) {
     return button;
   };
   dial.appendChild(stepButton("−0,5", -0.5, "Понизить общую цель на 0,5 °C"));
-  dial.appendChild(deps.el("strong", "overview-canon-target-value", target === null
-    ? "Нет данных" : `${target.toFixed(1).replace(".0", "").replace(".", ",")} °C`));
+  const value = deps.el("strong", "overview-canon-target-value", target === null
+    ? "Нет данных" : formatTarget(target));
+  dial.appendChild(value);
   dial.appendChild(stepButton("+0,5", 0.5, "Повысить общую цель на 0,5 °C"));
   card.appendChild(dial);
+  if (target !== null) {
+    const sliderWrap = deps.el("div", "overview-canon-target-slider");
+    const slider = deps.el("input");
+    slider.type = "range";
+    slider.min = "16";
+    slider.max = "30";
+    slider.step = "0.5";
+    slider.value = String(target);
+    slider.disabled = panel._busy || !canSetTargets;
+    deps.setAttr(slider, "aria-label", "Общая целевая температура дома");
+    slider.addEventListener("input", () => {
+      const next = Number(slider.value);
+      if (Number.isFinite(next)) value.textContent = formatTarget(next);
+    });
+    slider.addEventListener("change", () => {
+      const next = Math.round(Number(slider.value) * 2) / 2;
+      if (!slider.disabled && Number.isFinite(next) && next !== target) {
+        setClimateHomeTarget(panel, next);
+      }
+    });
+    sliderWrap.appendChild(slider);
+    card.appendChild(sliderWrap);
+  }
+  const presets = deps.el("div", "overview-canon-target-presets");
+  [["Прохладно", 24], ["Комфорт", 25], ["Тепло", 26]].forEach(([name, preset]) => {
+    const chip = deps.el("button", `overview-canon-target-preset${target === preset ? " is-active" : ""}`);
+    chip.type = "button";
+    chip.disabled = panel._busy || !canSetTargets || target === null;
+    chip.appendChild(deps.el("strong", null, name));
+    chip.appendChild(deps.el("small", null, `${preset}°`));
+    deps.setAttr(chip, "aria-label", `Установить общую цель ${preset} °C`);
+    chip.addEventListener("click", () => {
+      if (chip.disabled || target === preset) return;
+      setClimateHomeTarget(panel, preset);
+    });
+    presets.appendChild(chip);
+  });
+  card.appendChild(presets);
   const footer = deps.el("div", "overview-canon-target-footer");
   const details = deps.el("button", "overview-canon-link", "Настроить");
   details.type = "button";
@@ -223,6 +269,8 @@ const CATEGORY_DEFINITIONS = [
 ];
 
 const CATEGORY_ICON_PATHS = {
+  minus: "M5 11h14v2H5z",
+  plus: "M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z",
   snow: "M11 2h2v3.17l2.83-1.63 1 1.73L14 6.9l2.75 1.58 2.75-1.58 1 1.73-2.75 1.59v3.56l2.75 1.59-1 1.73-2.75-1.58L14 17.1l2.83 1.63-1 1.73L13 18.83V22h-2v-3.17l-2.83 1.63-1-1.73L10 17.1l-2.75-1.58-2.75 1.58-1-1.73 2.75-1.59v-3.56L3.5 8.63l1-1.73 2.75 1.58L10 6.9 7.17 5.27l1-1.73L11 5.17z",
   air: "M4 10h10.5a2.5 2.5 0 1 0-2.45-3H10a4.5 4.5 0 1 1 4.5 5H4zm0 4h13.5a4.5 4.5 0 1 1-4.5 4.5h2a2.5 2.5 0 1 0 2.5-2.5H4zm0-8h4v2H4z",
   sync: "M12 4V1L8 5l4 4V6a6 6 0 0 1 5.65 4h2.1A8 8 0 0 0 12 4zm-5.65 6H4.25A8 8 0 0 0 12 20v3l4-4-4-4v3a6 6 0 0 1-5.65-8z",
