@@ -32,10 +32,58 @@ export function createHeroRoomNavigation(panel, rooms, deps) {
   element.appendChild(strip);
   element.appendChild(next);
 
+  const slides = [null, ...rooms];
+  let selectHeroRoom = null;
+  const move = (direction) => {
+    if (!selectHeroRoom) return;
+    const currentId = panel._overviewHeroRoomId || null;
+    const index = Math.max(0, slides.findIndex((room) => (room?.id || null) === currentId));
+    selectHeroRoom(slides[(index + direction + slides.length) % slides.length]);
+  };
+  previous.addEventListener("click", () => move(-1));
+  next.addEventListener("click", () => move(1));
+  const carouselDots = [];
+
   return {
     element,
     home,
     roomButtons,
+    slides,
+    move,
+    attachCarouselChrome(hero) {
+      const edgePrevious = el("button", "overview-canon-hero-edge is-previous");
+      edgePrevious.type = "button";
+      edgePrevious.appendChild(svgIcon("chevron-left"));
+      setAttr(edgePrevious, "aria-label", "Предыдущий слайд");
+      edgePrevious.addEventListener("click", () => move(-1));
+      hero.appendChild(edgePrevious);
+      const edgeNext = el("button", "overview-canon-hero-edge is-next");
+      edgeNext.type = "button";
+      edgeNext.appendChild(svgIcon("chevron-right"));
+      setAttr(edgeNext, "aria-label", "Следующий слайд");
+      edgeNext.addEventListener("click", () => move(1));
+      hero.appendChild(edgeNext);
+      const dots = el("div", "overview-canon-hero-dots");
+      slides.forEach((room) => {
+        const dot = el("button", "overview-canon-hero-dot");
+        dot.type = "button";
+        setAttr(dot, "aria-label", room ? `Показать комнату ${room.name}` : "Показать весь дом");
+        dot.addEventListener("click", () => selectHeroRoom?.(room));
+        dots.appendChild(dot);
+        carouselDots.push(dot);
+      });
+      hero.appendChild(dots);
+      setAttr(hero, "tabindex", "0");
+      hero.addEventListener("keydown", (event) => {
+        if (event.key === "ArrowLeft") {
+          if (typeof event.preventDefault === "function") event.preventDefault();
+          move(-1);
+        } else if (event.key === "ArrowRight") {
+          if (typeof event.preventDefault === "function") event.preventDefault();
+          move(1);
+        }
+      });
+    },
     setActive(room, animate) {
       home.classList.toggle("is-active", !room);
       if (!room) setAttr(home, "aria-current", "page"); else home.removeAttribute("aria-current");
@@ -44,20 +92,16 @@ export function createHeroRoomNavigation(panel, rooms, deps) {
         button.classList.toggle("is-active", active);
         if (active) setAttr(button, "aria-current", "page"); else button.removeAttribute("aria-current");
       });
+      carouselDots.forEach((dot, index) => {
+        dot.classList.toggle("is-active", (slides[index]?.id || null) === (room?.id || null));
+      });
       const activeButton = room ? roomButtons.get(room.id) : home;
       activeButton?.scrollIntoView?.({ behavior: animate ? "smooth" : "auto", block: "nearest", inline: "center" });
     },
-    bind(selectHeroRoom) {
-      home.addEventListener("click", () => selectHeroRoom(null));
-      rooms.forEach((room) => roomButtons.get(room.id)?.addEventListener("click", () => selectHeroRoom(room)));
-      const slides = [null, ...rooms];
-      const move = (direction) => {
-        const currentId = panel._overviewHeroRoomId || null;
-        const index = Math.max(0, slides.findIndex((room) => (room?.id || null) === currentId));
-        selectHeroRoom(slides[(index + direction + slides.length) % slides.length]);
-      };
-      previous.addEventListener("click", () => move(-1));
-      next.addEventListener("click", () => move(1));
+    bind(select) {
+      selectHeroRoom = select;
+      home.addEventListener("click", () => select(null));
+      rooms.forEach((room) => roomButtons.get(room.id)?.addEventListener("click", () => select(room)));
     },
   };
 }
