@@ -1,8 +1,23 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-20 (HACS 1.52.118 фикс числового каталога сценариев).
+Last updated: 2026-08-20 (HACS 1.52.119 управление яркостью и температурой света).
 
 ## Current work
+
+- 2026-08-20 (Kimi): HACS `1.52.119` - ползунки света в диалоге устройства.
+  Каталог и executor получили `set_brightness_percent` (0-100%, масштаб в
+  HA-native 0-255) и `set_color_temperature` (кельвины, read-back с допуском
+  75 на округление mireds). `dashboard_snapshot._light_control_details`
+  объявляет контролы по `supported_color_modes`, а не по живому атрибуту:
+  выключенная Zigbee-люстра (brightness=None у off) тоже показывает
+  «Яркость» и «Температура света». Корень дефекта: люстра тамбура
+  `light.0xa4c138784e5cbcd1` умеет color_temp, но details приходили без
+  control. Схема `dashboard-snapshot` v1: `deviceRangeControl.actionId`
+  расширен до enum (contracts 0.42.0), матрица v1 получила контролы
+  `brightness_percent`/`color_temperature` (contracts 0.41.0), vendored
+  frontend JS и пиннутые счётчики обновлены синхронно. Тесты: snapshot
+  (off-свет с color_temp, 158→«62%», onoff без контролов), executor
+  (50%→brightness 128 с read-back, kelvin 3000→3003 confirmed).
 
 - 2026-08-20 (Kimi): HACS `1.52.115`-`1.52.118` - прогрев каталога после
   старта (1.52.115: повторные refresh через 1/3/8 с, warning при пустом

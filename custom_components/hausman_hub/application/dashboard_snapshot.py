@@ -716,7 +716,93 @@ def _device_details(
         if control is not None:
             detail["control"] = control
         details.append(detail)
+        if member.domain == "light":
+            details.extend(_light_control_details(member, details))
     return details
+
+
+_BRIGHTNESS_COLOR_MODES = frozenset(
+    {"brightness", "color_temp", "hs", "xy", "rgb", "rgbw", "rgbww", "white"}
+)
+
+
+def _light_control_details(
+    member: DashboardEntity, existing: list[dict[str, object]]
+) -> list[dict[str, object]]:
+    """Slider rows for a light: brightness percent and color temperature.
+
+    Zigbee/Tuya люстры отдают brightness=None, пока свет выключен, и карточка
+    управления теряла ползунок (замечание владельца 2026-08-20 по люстре
+    тамбура). Контрол объявляется по supported_color_modes, а не по текущему
+    атрибуту: выключенная люстра тоже принимает яркость (turn_on с ней).
+    """
+
+    attributes = member.attributes
+    modes = attributes.get("supported_color_modes")
+    if not isinstance(modes, (list, tuple)):
+        modes = ()
+    mode_set = {str(mode) for mode in modes}
+    supports_brightness = bool(_BRIGHTNESS_COLOR_MODES & mode_set) or isinstance(
+        attributes.get("brightness"), (int, float)
+    )
+    target_id = _opaque_id("entity", member.entity_id)
+    labels = {str(row.get("label", "")).casefold() for row in existing}
+    rows: list[dict[str, object]] = []
+    if supports_brightness and not any("ярк" in label for label in labels):
+        brightness = attributes.get("brightness")
+        percent = (
+            round(float(brightness) * 100 / 255)
+            if isinstance(brightness, (int, float))
+            and not isinstance(brightness, bool)
+            else None
+        )
+        rows.append(
+            {
+                "label": "Яркость",
+                "value": f"{percent}%" if percent is not None else "—",
+                "entityId": member.entity_id,
+                "domain": member.domain,
+                "state": str(percent) if percent is not None else None,
+                "control": {
+                    "kind": "range",
+                    "minimum": 0,
+                    "maximum": 100,
+                    "step": 1,
+                    "unit": "%",
+                    "targetId": target_id,
+                    "actionId": "set_brightness_percent",
+                },
+            }
+        )
+    if "color_temp" in mode_set and not any("температур" in label for label in labels):
+        minimum = _number(attributes.get("min_color_temp_kelvin"))
+        maximum = _number(attributes.get("max_color_temp_kelvin"))
+        if minimum is not None and maximum is not None and minimum < maximum:
+            kelvin = attributes.get("color_temp_kelvin")
+            current = (
+                int(kelvin)
+                if isinstance(kelvin, (int, float)) and not isinstance(kelvin, bool)
+                else None
+            )
+            rows.append(
+                {
+                    "label": "Температура света",
+                    "value": f"{current} K" if current is not None else "—",
+                    "entityId": member.entity_id,
+                    "domain": member.domain,
+                    "state": str(current) if current is not None else None,
+                    "control": {
+                        "kind": "range",
+                        "minimum": minimum,
+                        "maximum": maximum,
+                        "step": 100,
+                        "unit": "K",
+                        "targetId": target_id,
+                        "actionId": "set_color_temperature",
+                    },
+                }
+            )
+    return rows
 
 
 def _media_identity_tokens(device: DashboardDevice) -> frozenset[str]:

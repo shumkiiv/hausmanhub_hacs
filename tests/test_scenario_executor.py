@@ -85,6 +85,20 @@ class _FakeCatalog:
                         service="turn_on",
                         allowed_fields=frozenset({"value"}),
                     ),
+                    ScenarioDeviceAction(
+                        action_id="set_brightness_percent",
+                        title="Яркость, %",
+                        domain="light",
+                        service="turn_on",
+                        allowed_fields=frozenset({"value"}),
+                    ),
+                    ScenarioDeviceAction(
+                        action_id="set_color_temperature",
+                        title="Температура света",
+                        domain="light",
+                        service="turn_on",
+                        allowed_fields=frozenset({"value"}),
+                    ),
                 ),
             ),
             "climate_1": ScenarioDeviceEntry(
@@ -535,6 +549,70 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(receipt["confirmed"])
         self.hass.services.async_call.assert_awaited_once_with(
             "light", "turn_on", {"entity_id": "light.living_room", "brightness": 50}, blocking=True
+        )
+
+    async def test_brightness_percent_scales_to_native_brightness(self) -> None:
+        definition = _definition((
+            ScenarioAction(
+                id="a1",
+                type=ScenarioActionType.DEVICE_ACTION,
+                target_id="device_1",
+                action_id="set_brightness_percent",
+                value=50,
+            ),
+        ))
+        await self.executor.async_execute(definition, "run-1", scenario_id="sc-1")
+        self.hass.services.async_call.assert_awaited_once_with(
+            "light", "turn_on", {"entity_id": "light.living_room", "brightness": 128}, blocking=True
+        )
+
+    async def test_brightness_percent_is_confirmed_against_read_back(self) -> None:
+        self.hass.states.get = lambda entity_id: SimpleNamespace(
+            state="on", attributes={"brightness": 128}
+        )
+
+        receipt = await self.executor.async_execute_device_action(
+            "device_1", "set_brightness_percent", "50"
+        )
+
+        self.assertTrue(receipt["confirmed"])
+        self.hass.services.async_call.assert_awaited_once_with(
+            "light", "turn_on", {"entity_id": "light.living_room", "brightness": 128}, blocking=True
+        )
+
+    async def test_color_temperature_action_uses_kelvin_parameter(self) -> None:
+        definition = _definition((
+            ScenarioAction(
+                id="a1",
+                type=ScenarioActionType.DEVICE_ACTION,
+                target_id="device_1",
+                action_id="set_color_temperature",
+                value=3000,
+            ),
+        ))
+        await self.executor.async_execute(definition, "run-1", scenario_id="sc-1")
+        self.hass.services.async_call.assert_awaited_once_with(
+            "light",
+            "turn_on",
+            {"entity_id": "light.living_room", "color_temp_kelvin": 3000},
+            blocking=True,
+        )
+
+    async def test_color_temperature_readback_tolerates_mired_rounding(self) -> None:
+        self.hass.states.get = lambda entity_id: SimpleNamespace(
+            state="on", attributes={"color_temp_kelvin": 3003}
+        )
+
+        receipt = await self.executor.async_execute_device_action(
+            "device_1", "set_color_temperature", 3000
+        )
+
+        self.assertTrue(receipt["confirmed"])
+        self.hass.services.async_call.assert_awaited_once_with(
+            "light",
+            "turn_on",
+            {"entity_id": "light.living_room", "color_temp_kelvin": 3000},
+            blocking=True,
         )
 
     async def test_adaptive_brightness_uses_solar_curve_and_minimum_percent(self) -> None:

@@ -45,7 +45,9 @@ const MATRIX_SNAPSHOT = {
     {"type": "light", "title": "Освещение", "category": "lighting", "readOnly": false, "controls": [
       {"id": "power", "kind": "binary", "actionIds": ["turn_on", "turn_off", "toggle"], "valueType": "none", "valueSource": "none", "receiptRequired": true},
       {"id": "brightness", "kind": "range", "actionIds": ["set_brightness"], "valueType": "number", "valueSource": "contract_bounds", "minimum": 0, "maximum": 255, "receiptRequired": true},
-      {"id": "adaptive_brightness", "kind": "range", "actionIds": ["set_adaptive_brightness"], "valueType": "number", "valueSource": "contract_bounds", "minimum": 1, "maximum": 100, "receiptRequired": true}
+      {"id": "adaptive_brightness", "kind": "range", "actionIds": ["set_adaptive_brightness"], "valueType": "number", "valueSource": "contract_bounds", "minimum": 1, "maximum": 100, "receiptRequired": true},
+      {"id": "brightness_percent", "kind": "range", "actionIds": ["set_brightness_percent"], "valueType": "number", "valueSource": "contract_bounds", "minimum": 0, "maximum": 100, "receiptRequired": true},
+      {"id": "color_temperature", "kind": "range", "actionIds": ["set_color_temperature"], "valueType": "number", "valueSource": "contract_bounds", "minimum": 1000, "maximum": 10000, "receiptRequired": true}
     ]},
     {"type": "lock", "title": "Замки", "category": "security", "readOnly": false, "controls": [
       {"id": "lock", "kind": "binary", "actionIds": ["lock", "unlock"], "valueType": "none", "valueSource": "none", "receiptRequired": true}

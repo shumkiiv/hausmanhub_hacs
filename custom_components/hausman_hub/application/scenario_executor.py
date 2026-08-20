@@ -43,6 +43,18 @@ def _value_parameter_name(action_id: str, domain: str, service: str) -> str | No
         and action_id in {"set_brightness", "set_adaptive_brightness"}
     ):
         return "brightness"
+    if (
+        domain == "light"
+        and service == "turn_on"
+        and action_id == "set_brightness_percent"
+    ):
+        return "brightness"
+    if (
+        domain == "light"
+        and service == "turn_on"
+        and action_id == "set_color_temperature"
+    ):
+        return "color_temp_kelvin"
     if domain == "cover" and service == "set_cover_position" and action_id == "set_position":
         return "position"
     if domain == "valve" and service == "set_valve_position" and action_id == "set_position":
@@ -64,6 +76,15 @@ def _value_parameter_name(action_id: str, domain: str, service: str) -> str | No
         if service == "set_operation_mode" and action_id == "set_operation_mode":
             return "operation_mode"
     return None
+
+
+def _normalize_light_action_value(action_id: str, param: str, value: object) -> object:
+    """Scale tablet light controls (percent/kelvin) to HA-native values."""
+
+    if action_id == "set_brightness_percent":
+        percent = _normalize_action_value("position", value)
+        return _normalize_action_value("brightness", round(percent * 255 / 100))
+    return _normalize_action_value(param, value)
 
 
 def _normalize_action_value(param: str, value: object) -> object:
@@ -90,6 +111,18 @@ def _normalize_action_value(param: str, value: object) -> object:
         if numeric > maximum:
             numeric = maximum
         return numeric
+    if param == "color_temp_kelvin":
+        if isinstance(value, str):
+            value = value.strip()
+            try:
+                kelvin = int(value)
+            except ValueError as error:
+                raise ValueError(f"{param} must be an integer") from error
+        elif isinstance(value, (int, float)) and not isinstance(value, bool):
+            kelvin = int(value)
+        else:
+            raise ValueError(f"{param} must be an integer")
+        return min(max(kelvin, 1000), 10000)
     if param in ("temperature", "value"):
         if isinstance(value, str):
             value = value.strip()
@@ -366,7 +399,7 @@ class ScenarioExecutor:
             if value is not None and allowed is not None:
                 param = _value_parameter_name(action_id, allowed.domain, allowed.service)
                 if param is not None:
-                    confirmation_value = _normalize_action_value(param, value)
+                    confirmation_value = _normalize_light_action_value(action_id, param, value)
             read_back = await self._read_back_device(
                 getattr(device, "entity_id", None), action_id, confirmation_value
             )
@@ -694,7 +727,9 @@ class ScenarioExecutor:
                         self._hass, action.value
                     )
                 else:
-                    normalized = _normalize_action_value(param, action.value)
+                    normalized = _normalize_light_action_value(
+                        action.action_id, param, action.value
+                    )
             except ValueError as error:
                 return {
                     **base,
@@ -914,6 +949,8 @@ def _device_action_confirmed(state: object, action_id: str, value: object | None
     expected_attribute = {
         "set_brightness": "brightness",
         "set_adaptive_brightness": "brightness",
+        "set_brightness_percent": "brightness",
+        "set_color_temperature": "color_temp_kelvin",
         "set_position": "current_position",
         "set_temperature": "temperature",
         "set_hvac_mode": "hvac_mode",
@@ -925,7 +962,10 @@ def _device_action_confirmed(state: object, action_id: str, value: object | None
         return False
     actual = attributes.get(expected_attribute)
     if isinstance(actual, (int, float)) and isinstance(value, (int, float)):
-        return abs(float(actual) - float(value)) <= 0.1
+        # Кельвины гуляют на округление mireds (3000K -> 333 mired -> 3003K),
+        # поэтому для температуры света допуск шире числового zero-tolerance.
+        tolerance = 75.0 if action_id == "set_color_temperature" else 0.1
+        return abs(float(actual) - float(value)) <= tolerance
     return str(actual) == str(value)
 
 

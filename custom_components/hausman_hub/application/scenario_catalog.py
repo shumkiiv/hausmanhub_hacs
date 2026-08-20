@@ -169,6 +169,20 @@ def _domain_actions(domain: str) -> tuple[ScenarioDeviceAction, ...]:
                 service="turn_on",
                 allowed_fields=frozenset({"value"}),
             ),
+            ScenarioDeviceAction(
+                action_id="set_brightness_percent",
+                title="Яркость, %",
+                domain="light",
+                service="turn_on",
+                allowed_fields=frozenset({"value"}),
+            ),
+            ScenarioDeviceAction(
+                action_id="set_color_temperature",
+                title="Температура света",
+                domain="light",
+                service="turn_on",
+                allowed_fields=frozenset({"value"}),
+            ),
         )
     if domain == "switch":
         return (

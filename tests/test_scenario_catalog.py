@@ -53,6 +53,8 @@ class ScenarioCatalogPureTest(unittest.TestCase):
                 "toggle",
                 "set_brightness",
                 "set_adaptive_brightness",
+                "set_brightness_percent",
+                "set_color_temperature",
             },
         )
         brightness = next(action for action in actions if action.action_id == "set_brightness")

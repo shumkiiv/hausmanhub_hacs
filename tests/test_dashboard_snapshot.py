@@ -372,6 +372,116 @@ class DashboardSnapshotTest(unittest.TestCase):
 
         self.assertNotIn("control", snapshot["devices"][0]["details"][0])
 
+    def test_off_light_with_color_temp_advertises_percent_and_kelvin_controls(self) -> None:
+        snapshot = build_dashboard_snapshot(
+            areas=(DashboardArea("hall", "Тамбур"),),
+            devices=(DashboardDevice("chandelier", "Люстра тамбур", "hall"),),
+            entities=(
+                DashboardEntity(
+                    "light.chandelier",
+                    "light",
+                    "off",
+                    "Люстра тамбур",
+                    {
+                        "supported_color_modes": ["color_temp"],
+                        "min_color_temp_kelvin": 2702,
+                        "max_color_temp_kelvin": 6535,
+                    },
+                    "chandelier",
+                    "hall",
+                ),
+            ),
+            generated_at_ms=1,
+            local_iso="2026-08-20T12:00:00+03:00",
+        )
+
+        details = snapshot["devices"][0]["details"]
+        brightness = next(row for row in details if row["label"] == "Яркость")
+        self.assertEqual("—", brightness["value"])
+        self.assertIsNone(brightness["state"])
+        self.assertEqual(
+            {
+                "kind": "range",
+                "minimum": 0,
+                "maximum": 100,
+                "step": 1,
+                "unit": "%",
+                "targetId": brightness["control"]["targetId"],
+                "actionId": "set_brightness_percent",
+            },
+            brightness["control"],
+        )
+        temperature = next(row for row in details if row["label"] == "Температура света")
+        self.assertEqual("—", temperature["value"])
+        self.assertEqual(
+            {
+                "kind": "range",
+                "minimum": 2702.0,
+                "maximum": 6535.0,
+                "step": 100,
+                "unit": "K",
+                "targetId": temperature["control"]["targetId"],
+                "actionId": "set_color_temperature",
+            },
+            temperature["control"],
+        )
+
+    def test_lit_light_reports_brightness_as_percent(self) -> None:
+        snapshot = build_dashboard_snapshot(
+            areas=(DashboardArea("hall", "Тамбур"),),
+            devices=(DashboardDevice("chandelier", "Люстра тамбур", "hall"),),
+            entities=(
+                DashboardEntity(
+                    "light.chandelier",
+                    "light",
+                    "on",
+                    "Люстра тамбур",
+                    {
+                        "supported_color_modes": ["color_temp"],
+                        "brightness": 158,
+                        "color_temp_kelvin": 4000,
+                        "min_color_temp_kelvin": 2702,
+                        "max_color_temp_kelvin": 6535,
+                    },
+                    "chandelier",
+                    "hall",
+                ),
+            ),
+            generated_at_ms=1,
+            local_iso="2026-08-20T12:00:00+03:00",
+        )
+
+        details = snapshot["devices"][0]["details"]
+        brightness = next(row for row in details if row["label"] == "Яркость")
+        self.assertEqual("62%", brightness["value"])
+        self.assertEqual("62", brightness["state"])
+        temperature = next(row for row in details if row["label"] == "Температура света")
+        self.assertEqual("4000 K", temperature["value"])
+        self.assertEqual("4000", temperature["state"])
+
+    def test_onoff_light_without_color_modes_gets_no_extra_controls(self) -> None:
+        snapshot = build_dashboard_snapshot(
+            areas=(DashboardArea("hall", "Тамбур"),),
+            devices=(DashboardDevice("relay", "Подсветка", "hall"),),
+            entities=(
+                DashboardEntity(
+                    "light.relay",
+                    "light",
+                    "on",
+                    "Подсветка",
+                    {"supported_color_modes": ["onoff"]},
+                    "relay",
+                    "hall",
+                ),
+            ),
+            generated_at_ms=1,
+            local_iso="2026-08-20T12:00:00+03:00",
+        )
+
+        labels = [row["label"] for row in snapshot["devices"][0]["details"]]
+        self.assertNotIn("Яркость", labels)
+        self.assertNotIn("Температура света", labels)
+
     def test_current_numeric_device_labels_are_fully_localized(self) -> None:
         translations = {
             "Frost protection temperature": "Температура защиты от замерзания",

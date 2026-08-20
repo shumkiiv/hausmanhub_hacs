@@ -486,7 +486,7 @@
         "step": { "type": "number", "exclusiveMinimum": 0 },
         "unit": { "type": ["string", "null"], "maxLength": 32 },
         "targetId": { "type": "string", "pattern": "^entity_[0-9a-f]{16}$" },
-        "actionId": { "const": "set_value" }
+        "actionId": { "enum": ["set_value", "set_brightness_percent", "set_color_temperature"] }
       }
     }
   },
