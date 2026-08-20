@@ -611,7 +611,7 @@ label.signal-option > input[type="radio"] { grid-column:1; width:18px; min-heigh
   .tab { width:100%; min-height:48px; margin:0; padding:12px 14px; border:1px solid transparent;
     border-radius:13px; font-size:14px; text-align:left; }
   .tab:hover { background:var(--hmh-hover,#1F2630); color:var(--hmh-text,#E7ECF3); }
-  .tab[aria-current="page"] { border-color:transparent; background:var(--hmh-surface-active,#172232); color:var(--hmh-text,#E7ECF3); }
+  .tab[aria-current="page"] { border-color:transparent; background:var(--hmh-surface-active,#172232); color:var(--hmh-text,#E7ECF3); font-weight:700; }
   .tab[aria-current="page"] .tab-icon { color:var(--hmh-accent,#4F8CFF); }
   .sidebar-intercom { display:flex; min-height:48px; margin:0 12px 12px; padding:11px 13px; align-items:center; gap:10px;
     border:1px solid color-mix(in srgb,var(--hmh-border,#2F3845) 72%,transparent); border-radius:13px;
@@ -620,7 +620,7 @@ label.signal-option > input[type="radio"] { grid-column:1; width:18px; min-heigh
     background:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 8%,var(--hmh-raised,#181E26)); }
   .sidebar-intercom-icon { width:21px; height:21px; color:var(--hmh-text-dim,#9AA7B4); }
   .sidebar-intercom-label { min-width:0; flex:1 1 auto; font-size:14px; font-weight:600; text-align:left; }
-  .sidebar-footer { display:flex; min-height:58px; align-items:center; padding:14px 18px;
+  .sidebar-footer { display:flex; min-height:58px; align-items:center; justify-content:space-between; gap:10px; padding:14px 18px;
     border-top:1px solid color-mix(in srgb,var(--hmh-border,#2F3845) 72%,transparent); color:var(--hmh-text-dim,#9AA7B4); }
   .sidebar-version { font-size:12px; }
   .page-header { display:none; }

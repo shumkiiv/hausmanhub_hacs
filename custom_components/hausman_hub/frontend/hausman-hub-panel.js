@@ -348,7 +348,7 @@ class HausmanHubPanel extends HTMLElement {
     this._scenarioEditor = null;
     this._settingsData = { connection_mode: "home_assistant", smart_home_center_url: "", home_assistant_url: "" };
     this._settingsBaseline = { ...this._settingsData };
-    this._settingsPrefs = { large_text: false, reduced_motion: false, show_hints: true };
+    this._settingsPrefs = { large_text: false, reduced_motion: false, show_hints: true, rail_collapsed: false };
     this._settingsDirty = false;
     this._energyDraft = null;
     this._energySettingsOpen = false;
@@ -631,7 +631,22 @@ class HausmanHubPanel extends HTMLElement {
       this.classList.toggle("reduced-motion", this._settingsPrefs.reduced_motion);
       this.classList.toggle("hide-hints", !this._settingsPrefs.show_hints);
       this.classList.toggle("large-interface-text", this._settingsPrefs.large_text);
+      this.classList.toggle("rail-collapsed", this._settingsPrefs.rail_collapsed);
     }
+    const toggle = this._shell && this._shell.sidebarToggle;
+    if (toggle) {
+      const collapsed = this._settingsPrefs.rail_collapsed === true;
+      setAttr(toggle, "aria-label", collapsed ? "Развернуть боковое меню" : "Свернуть боковое меню");
+      setAttr(toggle, "title", collapsed ? "Развернуть боковое меню" : "Свернуть боковое меню");
+      toggle.innerHTML = "";
+      toggle.appendChild(svgIcon(collapsed ? "chevron-right" : "chevron-left", "sidebar-collapse-icon"));
+    }
+  }
+
+  _toggleRailCollapsed() {
+    this._settingsPrefs.rail_collapsed = !this._settingsPrefs.rail_collapsed;
+    this._persistUserPreferences();
+    this._applyLocalPreferences();
   }
 
   async _loadUserPreferences() {
@@ -648,7 +663,7 @@ class HausmanHubPanel extends HTMLElement {
         return;
       }
       if (THEME_MODES.includes(saved.theme_mode)) this._themeMode = saved.theme_mode;
-      ["large_text", "reduced_motion", "show_hints"].forEach((key) => {
+      ["large_text", "reduced_motion", "show_hints", "rail_collapsed"].forEach((key) => {
         if (typeof saved[key] === "boolean") this._settingsPrefs[key] = saved[key];
       });
     } catch (error) {
@@ -1118,6 +1133,12 @@ class HausmanHubPanel extends HTMLElement {
     const sidebarFooter = el("div", "sidebar-footer");
     const sidebarVersion = el("span", "sidebar-version", "Версия —");
     sidebarFooter.appendChild(sidebarVersion);
+    const sidebarToggle = el("button", "sidebar-collapse");
+    sidebarToggle.type = "button";
+    setAttr(sidebarToggle, "aria-label", "Свернуть боковое меню");
+    sidebarToggle.appendChild(svgIcon("chevron-left", "sidebar-collapse-icon"));
+    sidebarToggle.addEventListener("click", () => this._toggleRailCollapsed());
+    sidebarFooter.appendChild(sidebarToggle);
     sidebar.appendChild(sidebarFooter);
     container.appendChild(sidebar);
     const kioskDock = createKioskDock(this, { el, svgIcon, setAttr });
@@ -1177,7 +1198,7 @@ class HausmanHubPanel extends HTMLElement {
     });
     this._shell = {
       container,
-      banner, notice, loading, brandSubtitle, statusPill, versionBadge, themeButton, tabs, nav, sidebar, sidebarVersion, sectionNodes, wizard,
+      banner, notice, loading, brandSubtitle, statusPill, versionBadge, themeButton, tabs, nav, sidebar, sidebarVersion, sidebarToggle, sectionNodes, wizard,
       readiness, summary, rooms,
       climateNav, climateTabs, climateViews, climateOverview, contour, profiles, schedule, home, windows, assistant,
       scenarios, settings,
@@ -6360,7 +6381,7 @@ class HausmanHubPanel extends HTMLElement {
     try {
       await this._hass.callApi("POST", RESET_API, { confirmation: "RESET_HAUSMANHUB" });
       this._themeMode = "auto";
-      this._settingsPrefs = { large_text: false, reduced_motion: false, show_hints: true };
+      this._settingsPrefs = { large_text: false, reduced_motion: false, show_hints: true, rail_collapsed: false };
       this._persistUserPreferences();
       this._applyThemeMode();
       this._settingsData = { connection_mode: "home_assistant", smart_home_center_url: "", home_assistant_url: "" };
