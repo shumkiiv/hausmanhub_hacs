@@ -14,6 +14,7 @@ from .scenario_schedule import (
     prune_skip_keys,
     skip_key_for,
 )
+from .system_scenario_seeds import async_seed_system_scenarios
 from .scenarios import (
     ScenarioCatalog,
     ScenarioDefinitionViolation,
@@ -375,6 +376,11 @@ class ScenarioService:
 
         return dict(self._catalog_readiness)
 
+    def current_catalog(self) -> ScenarioCatalog:
+        """Return the live catalog snapshot without triggering a rescan."""
+
+        return self._catalog
+
     def start_catalog_warmup(self) -> Callable[[], None]:
         """Start one managed, bounded refresh sequence after HA setup."""
 
@@ -454,6 +460,24 @@ class ScenarioService:
                 "HausmanHub device catalog still empty after warm-up; "
                 "device_state triggers inactive"
             )
+            return
+        # Прогретый каталог есть: один раз за запуск досеиваем системные
+        # сценарии (перенос остатков Node-RED). Сидирование идемпотентно и
+        # не затирает пользовательские правки.
+        try:
+            created = await async_seed_system_scenarios(self)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            _LOGGER.warning(
+                "HausmanHub system scenario seeding failed", exc_info=True
+            )
+        else:
+            if created:
+                _LOGGER.info(
+                    "HausmanHub system scenarios seeded: %s",
+                    ", ".join(created),
+                )
 
     async def _async_replace_catalog(self) -> ScenarioCatalog:
         """Run one serialized scan and atomically replace all consumers."""
