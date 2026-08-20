@@ -19,7 +19,7 @@
 .rooms-canon-filters { display:flex; flex-wrap:wrap; gap:8px; }
 .rooms-canon-filters button { min-height:44px; border-color:var(--hmh-border); background:transparent; color:var(--hmh-text-dim); }
 .rooms-canon-filters button.is-active { border-color:color-mix(in srgb,var(--hmh-accent) 55%,transparent); background:color-mix(in srgb,var(--hmh-accent) 14%,transparent); color:var(--hmh-text); }
-.rooms-canon-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+.rooms-canon-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
 .rooms-canon-card { display:grid; grid-template-columns:auto minmax(0,1fr) auto auto; align-items:center; gap:14px; min-height:112px; padding:18px; border:1px solid var(--hmh-border); border-radius:18px; background:var(--hmh-raised); color:var(--hmh-text); text-align:left; box-shadow:none; }
 .rooms-canon-card:hover,.rooms-canon-card:focus-visible { transform:translateY(-1px); border-color:color-mix(in srgb,var(--hmh-accent) 55%,var(--hmh-border)); background:color-mix(in srgb,var(--hmh-accent) 7%,var(--hmh-raised)); }
 .rooms-canon-card.has-warning { border-color:color-mix(in srgb,#d99a25 42%,var(--hmh-border)); }
@@ -33,7 +33,7 @@
 .rooms-canon-card-climate strong { font-size:18px; }
 .rooms-canon-card-chevron { color:var(--hmh-text-dim); font-size:26px; }
 .rooms-detail-backdrop { position:fixed; z-index:1010; inset:0; display:grid; place-items:center; padding:32px; background:var(--hmh-modal-backdrop); backdrop-filter:blur(12px); }
-.rooms-detail-sheet { position:relative; width:min(1180px,calc(100vw - 64px)); max-height:calc(100vh - 64px); overflow:auto; padding:30px; border:1px solid var(--hmh-modal-border); border-radius:28px; background:var(--hmh-modal-surface); box-shadow:var(--hmh-modal-shadow); color:var(--hmh-text); }
+.rooms-detail-sheet { position:relative; width:min(1180px,calc(100vw - 64px)); max-height:calc(100vh - 64px); overflow:auto; padding:30px; border:1px solid var(--hmh-modal-border); border-radius:26px; background:var(--hmh-modal-surface); box-shadow:var(--hmh-modal-shadow); color:var(--hmh-text); }
 .rooms-detail-close { position:sticky; z-index:2; top:0; float:right; width:48px; min-width:48px; height:48px; padding:0; border-radius:50%; background:var(--hmh-raised); color:var(--hmh-text); font-size:30px; }
 .rooms-detail-head { display:flex; align-items:center; gap:18px; padding-right:64px; }
 .rooms-detail-icon { display:grid; place-items:center; width:64px; height:64px; border-radius:20px; background:color-mix(in srgb,var(--hmh-accent) 14%,transparent); color:var(--hmh-accent); }

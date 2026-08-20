@@ -1,21 +1,21 @@
 .lighting-dashboard { display:grid; gap:22px; min-width:0; }
-.lighting-dashboard-hero { position:relative; display:grid; grid-template-columns:minmax(320px,1.15fr) minmax(420px,.85fr); gap:28px; align-items:end;
-  min-height:238px; overflow:hidden; padding:28px 30px; border:1px solid color-mix(in srgb,var(--hmh-warning,#E5A84B) 36%,var(--hmh-border,#2F3845)); border-radius:22px;
-  background:linear-gradient(90deg,rgba(7,11,16,.9),rgba(7,11,16,.38)),url("./assets/dashboard-hero-living-room-day.png") center 53%/cover no-repeat; box-shadow:0 14px 36px rgba(0,0,0,.24); }
+.lighting-dashboard-hero { position:relative; display:grid; grid-template-columns:minmax(320px,1.15fr) minmax(420px,.85fr); gap:24px; align-items:end;
+  min-height:180px; overflow:hidden; padding:22px 24px; border:1px solid color-mix(in srgb,var(--hmh-warning,#E5A84B) 36%,var(--hmh-border,#2F3845)); border-radius:22px;
+  background:linear-gradient(90deg,rgba(7,11,16,.9),rgba(7,11,16,.38)),url("./assets/dashboard-hero-living-room-day.png") center 53%/cover no-repeat; box-shadow:0 6px 20px rgba(0,0,0,.22); }
 .lighting-dashboard-hero-copy { display:flex; align-items:center; gap:18px; color:#F3F5F8; }
 .lighting-dashboard-hero-icon { display:grid; flex:0 0 64px; place-items:center; width:64px; height:64px; border-radius:18px; color:#FFB72E; background:rgba(15,19,24,.74); }
 .lighting-dashboard-hero-icon .icon { width:32px; height:32px; }
-.lighting-dashboard-hero h2 { margin:0; font-size:clamp(31px,3vw,43px); line-height:1.06; }
-.lighting-dashboard-hero p { max-width:620px; margin:8px 0 0; color:#D4DAE3; font-size:17px; line-height:1.4; }
+.lighting-dashboard-hero h2 { margin:0; font-size:clamp(22px,2.2vw,26px); line-height:1.15; }
+.lighting-dashboard-hero p { max-width:620px; margin:6px 0 0; color:#D4DAE3; font-size:15px; line-height:1.4; }
 .lighting-dashboard-hero-facts { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; align-self:end; }
-.lighting-dashboard-hero-fact { display:grid; gap:5px; min-width:0; padding:15px 16px; border:1px solid rgba(255,255,255,.14); border-radius:14px; color:#F2F4F7; background:rgba(12,16,21,.72); backdrop-filter:blur(12px); }
-.lighting-dashboard-hero-fact strong { font-size:24px; line-height:1.1; }
+.lighting-dashboard-hero-fact { display:grid; gap:5px; min-width:0; padding:11px 13px; border:1px solid rgba(255,255,255,.14); border-radius:14px; color:#F2F4F7; background:rgba(12,16,21,.72); backdrop-filter:blur(12px); }
+.lighting-dashboard-hero-fact strong { font-size:20px; line-height:1.1; }
 .lighting-dashboard-hero-fact small { color:#B9C1CC; font-size:13px; }
 .lighting-room-section,.lighting-device-section { min-width:0; padding:22px; border:1px solid var(--hmh-border,#2F3845); border-radius:20px; background:var(--hmh-surface,#12171D); box-shadow:0 10px 26px rgba(0,0,0,.14); }
 .lighting-section-heading { display:flex; align-items:center; justify-content:space-between; gap:18px; margin-bottom:16px; }
 .lighting-section-heading h3 { margin:0; font-size:23px; line-height:1.2; }
 .lighting-section-heading p { margin:5px 0 0; color:var(--hmh-text-dim,#9AA7B4); font-size:14px; }
-.lighting-room-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+.lighting-room-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
 .lighting-room-card { display:grid; grid-template-columns:48px minmax(0,1fr) auto; gap:13px; align-items:center; min-height:96px; margin:0; padding:15px; border:1px solid var(--hmh-border,#2F3845); border-radius:16px; color:var(--hmh-text,#E7ECF3); background:var(--hmh-raised,#181E26); box-shadow:none; text-align:left; }
 .lighting-room-card:hover,.lighting-room-card:focus-visible { border-color:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 55%,var(--hmh-border,#2F3845)); background:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 7%,var(--hmh-raised,#181E26)); }
 .lighting-room-card.is-active { border-color:color-mix(in srgb,#FFB72E 48%,var(--hmh-border,#2F3845)); }
