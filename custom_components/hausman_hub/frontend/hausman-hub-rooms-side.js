@@ -1,6 +1,6 @@
 /* Right column of the rooms section: home overview, offline rooms, quick access, history. */
 
-import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.124";
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.125";
 
 const ROOMS_SIDE_SVG_NAMESPACE = "http" + "://www.w3.org/2000/svg";
 
