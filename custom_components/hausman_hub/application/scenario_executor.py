@@ -392,6 +392,11 @@ class ScenarioExecutor:
             }
 
         device = self._catalog.device(target_id)
+        # Решение владельца 2026-08-20: в ленте активности и квитанциях должно
+        # быть видно, о каком устройстве речь, а не безликое «Устройство».
+        device_name = (
+            device.name if device is not None and device.name else "Устройство"
+        )
         read_back = receipt.get("read_back")
         if not isinstance(read_back, dict):
             confirmation_value = value
@@ -418,9 +423,9 @@ class ScenarioExecutor:
             "observedState": observed_state,
             "appliedAt": int(time.time() * 1000),
             "message": (
-                "Устройство подтвердило новое состояние."
+                f"{device_name}: новое состояние подтверждено."
                 if confirmed
-                else "Команда принята; устройство ещё не подтвердило новое состояние."
+                else f"{device_name}: команда принята, состояние ещё не подтверждено."
             ),
             "confirmationWindowMs": self._confirmation_window_ms,
             "readBack": read_back,

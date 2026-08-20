@@ -792,6 +792,8 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(receipt["confirmed"])
         self.assertEqual("confirmed", receipt["status"])
         self.assertEqual("on", receipt["observedState"])
+        # Решение владельца 2026-08-20: квитанция называет устройство по имени.
+        self.assertEqual("Light: новое состояние подтверждено.", receipt["message"])
         self.hass.services.async_call.assert_awaited_once_with(
             "light", "turn_on", {"entity_id": "light.living_room"}, blocking=True
         )
@@ -819,6 +821,10 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(receipt["confirmed"])
         self.assertEqual("accepted", receipt["status"])
         self.assertEqual("Проверяется", receipt["statusName"])
+        self.assertEqual(
+            "Light: команда принята, состояние ещё не подтверждено.",
+            receipt["message"],
+        )
         self.assertEqual(20, receipt["confirmationWindowMs"])
         self.assertTrue(receipt["readBack"]["attempted"])
         self.assertFalse(receipt["readBack"]["matched"])

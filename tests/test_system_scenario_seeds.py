@@ -137,6 +137,30 @@ class SystemScenarioSeedsTest(unittest.IsolatedAsyncioTestCase):
         scenarios = await service.async_list_scenarios()
         self.assertEqual(len(scenarios), len(first))
 
+    async def test_seed_fills_target_names_from_live_catalog(self) -> None:
+        # Решение владельца 2026-08-20: шаги системных сценариев несут имена
+        # устройств, чтобы лента и редактор не показывали безликое «Устройство».
+        catalog = _catalog(_all_seed_entities())
+        service = await self._make_service(catalog)
+        await async_seed_system_scenarios(service)
+        scenarios = await service.async_list_scenarios()
+        named = 0
+        for scenario in scenarios:
+            steps = (
+                *scenario.definition.triggers,
+                *scenario.definition.conditions,
+                *scenario.definition.actions,
+            )
+            for step in steps:
+                target_id = getattr(step, "target_id", None)
+                if target_id is None:
+                    continue
+                device = catalog.devices.get(target_id)
+                self.assertIsNotNone(device)
+                self.assertEqual(device.name, getattr(step, "target_name", None))
+                named += 1
+        self.assertGreater(named, 0)
+
     async def test_seed_skips_missing_required_entities(self) -> None:
         entities = tuple(
             e for e in _all_seed_entities() if not e.startswith("cover.")
