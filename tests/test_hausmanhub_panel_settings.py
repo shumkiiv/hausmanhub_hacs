@@ -2287,7 +2287,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         }
         const values = byClass(card, "overview-canon-target-value");
         if (values.length !== 1 || values[0].tagName !== "STRONG"
-          || values[0].textContent !== "22,5 °C") {
+          || values[0].textContent !== "22,5°") {
           throw new Error("dominant target value mismatch: " + textOf(card));
         }
         const steps = byClass(card, "overview-canon-target-step");
@@ -4094,7 +4094,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.121")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.122")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

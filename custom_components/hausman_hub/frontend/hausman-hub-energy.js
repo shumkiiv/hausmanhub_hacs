@@ -1,8 +1,8 @@
-import { renderEnergyHistoryChart } from "./hausman-hub-energy-chart.js?v=1.52.121";
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.121";
-import { loadEnergyMeter, meterConfigured, meterNumber, meterReminderText, renderEnergyMeterCard } from "./hausman-hub-energy-meter.js?v=1.52.121";
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.121";
-import { mergeEnergyHistoryResponses, splitEnergyWindows } from "./hausman-hub-pagination.js?v=1.52.121";
+import { renderEnergyHistoryChart } from "./hausman-hub-energy-chart.js?v=1.52.122";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.122";
+import { loadEnergyMeter, meterConfigured, meterNumber, meterReminderText, renderEnergyMeterCard } from "./hausman-hub-energy-meter.js?v=1.52.122";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.122";
+import { mergeEnergyHistoryResponses, splitEnergyWindows } from "./hausman-hub-pagination.js?v=1.52.122";
 
 const number = (value, digits = 1) => Number.isFinite(Number(value))
   ? new Intl.NumberFormat("ru-RU", { maximumFractionDigits: digits }).format(Number(value))
@@ -132,24 +132,37 @@ export function renderEnergyOverviewCard(panel, container, deps) {
   const { el, svgIcon, setAttr } = deps;
   const energy = panel._homeDashboard && panel._homeDashboard.energy;
   const card = el("section", "energy-overview-card");
+  const head = el("div", "energy-overview-head");
   const icon = el("span", "energy-overview-icon");
   icon.appendChild(svgIcon("energy"));
-  card.appendChild(icon);
-  const copy = el("span", "energy-overview-copy");
-  copy.appendChild(el("span", "assistant-field-label", "Показания энергии"));
+  head.appendChild(icon);
+  head.appendChild(el("span", "assistant-field-label", "Показания энергии"));
+  card.appendChild(head);
   const meter = panel._energyMeter;
-  copy.appendChild(el("strong", null, meterConfigured(meter)
-    ? `${meterNumber(meter.reading.currentKwh)} кВт·ч`
-    : (energy && energy.available ? primaryEnergyValue(energy) : "Нет данных")));
-  const voltage = energy && energy.settings && energy.settings.showVoltage
-    ? ` · ${sourceMetric(energy, "voltageV", "В")}` : "";
+  const tile = (label, value, caption) => {
+    const node = el("span", "energy-overview-metric");
+    node.appendChild(el("small", null, label));
+    node.appendChild(el("strong", null, value));
+    if (caption) node.appendChild(el("small", "energy-overview-metric-caption", caption));
+    return node;
+  };
+  const metrics = el("div", "energy-overview-metrics");
+  if (meterConfigured(meter)) {
+    metrics.appendChild(tile("Счётчик", `${meterNumber(meter.reading.currentKwh)} кВт·ч`,
+      meter.reading.estimated ? "Расчётное значение" : "Переданное значение"));
+    const cycleKnown = meter.cycle && meter.cycle.consumptionKwh !== null && meter.cycle.consumptionKwh !== undefined;
+    metrics.appendChild(tile("Расход цикла", cycleKnown ? `${meterNumber(meter.cycle.consumptionKwh)} кВт·ч` : "не определён",
+      "С последней передачи"));
+  } else {
+    const voltage = energy && energy.settings && energy.settings.showVoltage
+      ? ` · ${sourceMetric(energy, "voltageV", "В")}` : "";
+    metrics.appendChild(tile("Сейчас", energy && energy.available ? primaryEnergyValue(energy) : "Нет данных",
+      `${selectedSources(energy).length} источников${voltage}`));
+  }
+  card.appendChild(metrics);
   const reminder = meterReminderText(panel._energyMeter);
-  copy.appendChild(el("small", null, meterConfigured(meter)
-    ? `Расход цикла ${meter.cycle && meter.cycle.consumptionKwh !== null && meter.cycle.consumptionKwh !== undefined ? `${meterNumber(meter.cycle.consumptionKwh)} кВт·ч` : "не определён"}`
-    : `${selectedSources(energy).length} источников${voltage}`));
-  if (reminder) copy.appendChild(el("small", "energy-overview-reminder", reminder));
-  card.appendChild(copy);
-  const actions = el("span", "energy-overview-actions");
+  if (reminder) card.appendChild(el("small", "energy-overview-reminder", reminder));
+  const actions = el("div", "energy-overview-actions");
   const open = el("button", "energy-overview-open", "Энергия");
   open.type = "button";
   open.addEventListener("click", () => panel._activateSection("energy"));

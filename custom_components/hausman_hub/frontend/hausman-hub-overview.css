@@ -76,9 +76,7 @@
 .overview-canon-dashboard-grid { display:grid; grid-template-columns:minmax(0,3fr) minmax(250px,1fr); gap:16px; margin-top:16px; }
 .overview-canon-dashboard-main { min-width:0; }
 .overview-canon-dashboard-side { display:grid; gap:16px; align-content:start; }
-.overview-canon-dashboard-energy .energy-overview-card { min-height:150px; margin:0; align-items:flex-start; flex-wrap:wrap; box-shadow:0 8px 24px rgba(30,47,70,.1); }
-.overview-canon-dashboard-energy .energy-overview-copy { flex-basis:calc(100% - 72px); }
-.overview-canon-dashboard-energy .energy-overview-copy > strong { font-size:28px; }
+.overview-canon-dashboard-energy .energy-overview-card { min-height:0; margin:0; box-shadow:0 8px 24px rgba(30,47,70,.1); }
 .overview-canon-dashboard-panel { min-height:140px; }
 .overview-canon-primary-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
 .overview-canon-primary-card, .overview-canon-bottom-card, .overview-canon-side-card { min-width:0; margin:0; padding:20px; border:1px solid var(--hmh-border-default); border-radius:var(--hmh-radius-card); color:var(--hmh-text-primary); background:var(--hmh-surface-card); text-align:left; box-shadow:0 8px 24px rgba(0,0,0,.2); }
@@ -101,15 +99,17 @@
 .overview-canon-target-dial { display:grid; grid-template-columns:48px minmax(0,1fr) 48px; align-items:center; gap:12px; width:100%; margin-top:auto; padding-top:14px; }
 .overview-canon-target-value { display:block; font-size:34px; line-height:40px; letter-spacing:-.02em; text-align:center; overflow-wrap:anywhere; }
 .overview-canon-primary-card.is-empty .overview-canon-target-value { color:var(--hmh-text-secondary); font-size:20px; line-height:26px; }
-.overview-canon-target-step { display:grid; place-items:center; width:48px; min-width:48px; height:48px; min-height:48px; margin:0; padding:0; border:1px solid var(--hmh-border-default); border-radius:50%; color:var(--hmh-text-primary); background:var(--hmh-surface-raised); box-shadow:none; }
+.overview-canon-target-step { display:grid; place-items:center; width:48px; min-width:48px; height:48px; min-height:48px; margin:0; padding:0; border:1px solid color-mix(in srgb,var(--hmh-accent-primary) 22%,var(--hmh-border-default)); border-radius:50%; color:var(--hmh-text-primary); background:color-mix(in srgb,var(--hmh-accent-primary) 9%,var(--hmh-surface-card)); box-shadow:none; }
 .overview-canon-target-step .icon { width:18px; height:18px; }
 .overview-canon-target-step:not(:disabled):hover { border-color:color-mix(in srgb,var(--hmh-accent-primary) 55%,var(--hmh-border-default)); background:color-mix(in srgb,var(--hmh-accent-primary) 10%,var(--hmh-surface-raised)); }
 .overview-canon-target-head { display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; }
 .overview-canon-target-auto { padding:3px 9px; border-radius:999px; color:var(--hmh-accent-primary); background:color-mix(in srgb,var(--hmh-accent-primary) 14%,var(--hmh-surface-card)); font-size:11px; font-weight:650; letter-spacing:.04em; text-transform:uppercase; }
-.overview-canon-target-slider { width:100%; margin-top:14px; }
-.overview-canon-target-slider input[type="range"] { -webkit-appearance:none; appearance:none; width:100%; height:6px; margin:0; padding:0; border:none; border-radius:999px; background:linear-gradient(90deg,#4F8CFF 0%,#8E7CF3 50%,#F0664A 100%); box-shadow:none; }
-.overview-canon-target-slider input[type="range"]::-webkit-slider-thumb { -webkit-appearance:none; width:20px; height:20px; border:3px solid var(--hmh-surface-card); border-radius:50%; background:var(--hmh-text-primary); box-shadow:0 1px 4px rgba(0,0,0,.35); cursor:pointer; }
-.overview-canon-target-slider input[type="range"]::-moz-range-thumb { width:14px; height:14px; border:3px solid var(--hmh-surface-card); border-radius:50%; background:var(--hmh-text-primary); box-shadow:0 1px 4px rgba(0,0,0,.35); cursor:pointer; }
+.overview-canon-target-slider { width:100%; margin-top:14px; padding:0 7px; box-sizing:border-box; }
+.overview-canon-target-slider input[type="range"] { -webkit-appearance:none; appearance:none; display:block; width:100%; height:4px; margin:0; padding:0; border:none; border-radius:999px; background:linear-gradient(90deg,#4F8CFF 0%,#8E7CF3 50%,#F0664A 100%); box-shadow:none; }
+.overview-canon-target-slider input[type="range"]::-webkit-slider-runnable-track { height:4px; border:none; border-radius:999px; background:transparent; }
+.overview-canon-target-slider input[type="range"]::-webkit-slider-thumb { -webkit-appearance:none; width:14px; height:14px; margin-top:-10px; border:5px solid var(--hmh-surface-card); border-radius:50%; background:var(--hmh-text-primary); box-shadow:0 1px 4px rgba(0,0,0,.3); cursor:pointer; }
+.overview-canon-target-slider input[type="range"]::-moz-range-track { height:4px; border:none; border-radius:999px; background:linear-gradient(90deg,#4F8CFF 0%,#8E7CF3 50%,#F0664A 100%); }
+.overview-canon-target-slider input[type="range"]::-moz-range-thumb { width:14px; height:14px; border:5px solid var(--hmh-surface-card); border-radius:50%; background:var(--hmh-text-primary); box-shadow:0 1px 4px rgba(0,0,0,.3); cursor:pointer; }
 .overview-canon-target-slider input[type="range"]:disabled { opacity:.45; cursor:default; }
 .overview-canon-target-presets { display:grid; width:100%; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-top:12px; }
 .overview-canon-target-preset { display:grid; gap:2px; justify-items:center; margin:0; padding:8px 6px; border:1px solid var(--hmh-border-default); border-radius:12px; color:var(--hmh-text-primary); background:var(--hmh-surface-raised); box-shadow:none; }
@@ -147,8 +147,6 @@
 .overview-canon-lower-main .energy-overview-icon { width:38px; height:38px; border-radius:10px; }
 .overview-canon-lower-main .energy-overview-icon .icon { width:20px; height:20px; }
 .overview-canon-lower-main .energy-overview-card .assistant-field-label { display:block; color:var(--hmh-text-secondary); font-size:14px; font-weight:600; }
-.overview-canon-lower-main .energy-overview-copy > strong { margin-top:10px; font-size:28px; line-height:34px; letter-spacing:-.02em; }
-.overview-canon-lower-main .energy-overview-copy > small { margin-top:7px; color:var(--hmh-text-secondary); font-size:14px; line-height:20px; }
 .overview-canon-side-card.is-alert { border-color:color-mix(in srgb,var(--hmh-status-danger) 55%,var(--hmh-border-default)); }
 .overview-canon-event { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding:11px 0; border-top:1px solid var(--hmh-border-default); }
 .overview-canon-event:first-of-type { margin-top:8px; }
