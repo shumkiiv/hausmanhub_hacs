@@ -1,6 +1,7 @@
 import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.121";
 import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.121";
 import { canonicalRoomMdiIcon, ROOM_TYPE_OPTIONS, roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.121";
+import { renderRoomsSide } from "./hausman-hub-rooms-side.js?v=1.52.121";
 
 function roomNormalized(value) {
   return String(value || "").trim().toLocaleLowerCase("ru");
@@ -36,6 +37,23 @@ function roomTemperature(value) {
 
 function roomHumidity(value) {
   return typeof value === "number" && Number.isFinite(value) ? `${Math.round(value)} %` : "Нет данных";
+}
+
+function roomLightDevice(device) {
+  const domain = roomNormalized(device && device.domain);
+  const category = roomNormalized(device && device.category);
+  return domain === "light" || category === "lighting";
+}
+
+function roomClimateChip(room) {
+  const temp = typeof room.temp === "number" && Number.isFinite(room.temp)
+    ? `${String(room.temp).replace(/\.0$/, "")}°`
+    : null;
+  const humidity = typeof room.humidity === "number" && Number.isFinite(room.humidity)
+    ? `${Math.round(room.humidity)}%`
+    : null;
+  const parts = [temp, humidity].filter(Boolean);
+  return parts.length ? `Климат · ${parts.join(" · ")}` : "Климат · нет данных";
 }
 
 function roomsCanonCountWord(count) {
@@ -167,7 +185,7 @@ function roomMatchesFilter(room, devices, filter) {
   return true;
 }
 
-function renderRoomCards(panel, container, rooms, grouped, deps) {
+function renderRoomCards(panel, container, dialogHost, rooms, grouped, deps) {
   const { el, svgIcon, setAttr } = deps;
   if (!panel._roomsUi) panel._roomsUi = { query: "", filter: "all" };
   const section = el("section", "rooms-canon-section");
@@ -220,14 +238,24 @@ function renderRoomCards(panel, container, rooms, grouped, deps) {
       card.appendChild(icon);
       const copy = el("span", "rooms-canon-card-copy");
       copy.appendChild(el("strong", null, room.name));
-      copy.appendChild(el("small", null, `${devices.length} ${roomDeviceWord(devices.length)}${unavailable ? ` · ${unavailable} без связи` : ""}`));
+      copy.appendChild(el("small", null, `${devices.length} ${roomDeviceWord(devices.length)}`));
       card.appendChild(copy);
-      const climate = el("span", "rooms-canon-card-climate");
-      climate.appendChild(el("strong", null, roomTemperature(room.temp)));
-      climate.appendChild(el("small", null, typeof room.humidity === "number" ? `Влажность ${Math.round(room.humidity)} %` : "Климат без данных"));
-      card.appendChild(climate);
-      card.appendChild(el("span", "rooms-canon-card-chevron", "›"));
-      card.addEventListener("click", () => openRoomOverview(panel, container, room, devices, deps));
+      const chevron = el("span", "rooms-canon-card-chevron");
+      chevron.appendChild(svgIcon("chevron-right"));
+      card.appendChild(chevron);
+      const chips = el("span", "rooms-canon-card-chips");
+      chips.appendChild(el("span", "rooms-canon-chip", roomClimateChip(room)));
+      const lights = devices.filter(roomLightDevice);
+      if (lights.length) {
+        const lightsOn = lights.filter(roomDeviceActive).length;
+        chips.appendChild(el("span", "rooms-canon-chip", `Свет · ${lightsOn} из ${lights.length}`));
+      }
+      if (unavailable) {
+        chips.appendChild(el("span", "rooms-canon-chip is-warning", `Офлайн · ${unavailable}`));
+      }
+      card.appendChild(chips);
+      card.appendChild(el("span", "rooms-canon-card-open", "Открыть устройства и все возможности"));
+      card.addEventListener("click", () => openRoomOverview(panel, dialogHost, room, devices, deps));
       grid.appendChild(card);
     });
     if (!visible.length) grid.appendChild(el("div", "empty-state", "Комнаты по выбранному фильтру не найдены."));
@@ -259,8 +287,20 @@ export function renderRoomsOverview(panel, container, deps) {
     if (room) grouped.get(room.id).push(device);
   });
   const page = deps.el("div", "rooms-canon-page");
-  renderRoomsHero(panel, page, rooms, devices, deps);
-  renderRoomCards(panel, page, rooms, grouped, deps);
+  const layout = deps.el("div", "rooms-canon-layout");
+  const main = deps.el("div", "rooms-canon-main");
+  renderRoomsHero(panel, main, rooms, devices, deps);
+  renderRoomCards(panel, main, page, rooms, grouped, deps);
+  layout.appendChild(main);
+  layout.appendChild(renderRoomsSide(panel, page, {
+    rooms,
+    devices,
+    grouped,
+    isActive: roomDeviceActive,
+    isUnavailable: roomDeviceUnavailable,
+    openRoom: (room) => openRoomOverview(panel, page, room, grouped.get(room.id) || [], deps),
+  }, deps));
+  page.appendChild(layout);
   const requested = panel._roomOverviewOverlay
     || rooms.find((room) => panel._openHomeCards && panel._openHomeCards.has(`room:${room.id}`))?.id;
   const selected = rooms.find((room) => room.id === requested);
