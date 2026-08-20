@@ -1,4 +1,5 @@
 import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.121";
+import { lightingSideIcon, openLightingTurnOffConfirm, renderLightingSide } from "./hausman-hub-lighting-side.js?v=1.52.121";
 import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.121";
 import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.121";
 
@@ -110,42 +111,154 @@ function openRoomSheet(panel, container, roomName, devices, deps) {
   enhanceAppendedModal(backdrop, sheet, () => closeSheet(panel, container));
 }
 
-function renderLightingRooms(panel, container, rooms, devices, deps) {
-  const { el, svgIcon, setAttr } = deps;
-  const section = el("section", "lighting-room-section");
-  const heading = el("div", "lighting-section-heading");
-  const copy = el("div");
-  copy.appendChild(el("h3", null, "Комнаты"));
-  copy.appendChild(el("p", null, "Откройте комнату, затем выберите устройство или отдельную клавишу"));
-  heading.appendChild(copy);
-  section.appendChild(heading);
+function lightingRoomsGrouped(rooms, devices) {
   const byRoom = new Map();
   devices.forEach((device) => {
     const name = roomNameFor(device, rooms);
     if (!byRoom.has(name)) byRoom.set(name, []);
     byRoom.get(name).push(device);
   });
-  const grid = el("div", "lighting-room-grid");
-  [...byRoom.entries()].sort(([left], [right]) => left.localeCompare(right, "ru")).forEach(([name, roomDevices]) => {
-    const active = roomDevices.filter(deviceIsActive).length;
-    const unavailable = roomDevices.filter((device) => device.unavailable || device.state === "unavailable").length;
-    const card = el("button", `lighting-room-card${active ? " is-active" : ""}${unavailable ? " has-warning" : ""}`);
-    card.type = "button";
-    setAttr(card, "aria-label", `Открыть освещение комнаты ${name}`);
-    const icon = el("span", "lighting-room-icon");
-    const room = rooms.find((candidate) => candidate.name === name) || { name };
-    icon.appendChild(roomSvgIcon(roomIconName(room)));
-    card.appendChild(icon);
-    const cardCopy = el("span", "lighting-room-copy");
-    cardCopy.appendChild(el("strong", null, name));
-    cardCopy.appendChild(el("small", null, `${roomDevices.length} ${deviceCountWord(roomDevices.length)}${unavailable ? ` · ${unavailable} без связи` : ""}`));
-    card.appendChild(cardCopy);
-    card.appendChild(el("span", "lighting-room-state", active ? `${active} вкл` : "Выключено"));
-    card.addEventListener("click", () => openRoomSheet(panel, container, name, roomDevices, deps));
-    grid.appendChild(card);
+  return [...byRoom.entries()].sort(([left], [right]) => left.localeCompare(right, "ru"));
+}
+
+function lightingRoomMatches(name, roomDevices, query, filter) {
+  if (query && !normalized(name).includes(query)) return false;
+  const active = roomDevices.filter(deviceIsActive).length;
+  if (filter === "on") return active > 0;
+  if (filter === "off") return active === 0;
+  if (filter === "offline") {
+    return roomDevices.some((device) => device.unavailable || device.state === "unavailable");
+  }
+  return true;
+}
+
+function renderLightingRoomCard(panel, page, rooms, name, roomDevices, deps) {
+  const { el, svgIcon, setAttr } = deps;
+  const activeDevices = roomDevices.filter(deviceIsActive);
+  const unavailable = roomDevices.filter((device) => device.unavailable || device.state === "unavailable").length;
+  const card = el("button", `lighting-room-card${activeDevices.length ? " is-active" : ""}${unavailable ? " has-warning" : ""}`);
+  card.type = "button";
+  setAttr(card, "aria-label", `Открыть устройства и линии комнаты ${name}`);
+  const head = el("span", "lighting-room-head");
+  const icon = el("span", "lighting-room-icon");
+  const room = rooms.find((candidate) => candidate.name === name) || { name };
+  icon.appendChild(roomSvgIcon(roomIconName(room)));
+  head.appendChild(icon);
+  const cardCopy = el("span", "lighting-room-copy");
+  cardCopy.appendChild(el("strong", null, name));
+  cardCopy.appendChild(el("span", `lighting-room-status${activeDevices.length ? " is-on" : ""}`,
+    activeDevices.length ? "Свет включён" : "Свет выключен"));
+  head.appendChild(cardCopy);
+  const chevron = el("span", "lighting-room-chevron");
+  chevron.appendChild(svgIcon("chevron-right"));
+  head.appendChild(chevron);
+  card.appendChild(head);
+  card.appendChild(el("span", "lighting-room-pill",
+    `${roomDevices.length} физ. устройств${unavailable ? ` · ${unavailable} без связи` : ""}`));
+  const footer = el("span", "lighting-room-footer");
+  footer.appendChild(el("span", "lighting-room-open", "Открыть устройства и линии"));
+  if (activeDevices.length) {
+    const power = el("span", "lighting-room-power");
+    setAttr(power, "role", "button");
+    setAttr(power, "tabindex", "0");
+    setAttr(power, "aria-label", `Выключить весь свет в комнате ${name}`);
+    power.appendChild(lightingSideIcon("power"));
+    const turnOff = (event) => {
+      if (event && typeof event.preventDefault === "function") event.preventDefault();
+      if (event && typeof event.stopPropagation === "function") event.stopPropagation();
+      openLightingTurnOffConfirm(panel, page, `Свет в комнате «${name}»`, activeDevices, deps);
+    };
+    power.addEventListener("click", turnOff);
+    power.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") turnOff(event);
+    });
+    footer.appendChild(power);
+  }
+  card.appendChild(footer);
+  card.addEventListener("click", () => openRoomSheet(panel, page, name, roomDevices, deps));
+  return card;
+}
+
+const ROOM_FILTERS = [
+  ["all", "Все комнаты"],
+  ["on", "Свет включён"],
+  ["off", "Свет выключен"],
+  ["offline", "Без связи"],
+];
+
+function renderLightingRooms(panel, sectionHost, page, rooms, devices, deps) {
+  const { el, svgIcon, setAttr } = deps;
+  const section = el("section", "lighting-room-section");
+  const byRoom = lightingRoomsGrouped(rooms, devices);
+  const heading = el("div", "lighting-section-heading");
+  const copy = el("div");
+  copy.appendChild(el("h3", null, "Комнаты"));
+  const counter = el("p", null, "");
+  copy.appendChild(counter);
+  heading.appendChild(copy);
+  const allDevices = el("button", "overview-canon-link lighting-section-link");
+  allDevices.type = "button";
+  allDevices.appendChild(el("span", null, "Все устройства"));
+  allDevices.appendChild(svgIcon("chevron-right"));
+  allDevices.addEventListener("click", () => {
+    const target = page.querySelector && page.querySelector(".lighting-device-section");
+    if (target && typeof target.scrollIntoView === "function") {
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   });
+  heading.appendChild(allDevices);
+  section.appendChild(heading);
+  const grid = el("div", "lighting-room-grid");
+  const applyFilters = () => {
+    const query = normalized(panel._lightingRoomQuery || "");
+    const filter = panel._lightingRoomFilter || "all";
+    grid.innerHTML = "";
+    let shown = 0;
+    byRoom.forEach(([name, roomDevices]) => {
+      if (!lightingRoomMatches(name, roomDevices, query, filter)) return;
+      shown += 1;
+      grid.appendChild(renderLightingRoomCard(panel, page, rooms, name, roomDevices, deps));
+    });
+    if (!shown) grid.appendChild(el("div", "empty-state", "Комнаты по этому фильтру не найдены."));
+    counter.textContent = `Показано ${shown} из ${byRoom.length} · карточка открывает все устройства комнаты`;
+  };
+  const toolbar = el("div", "lighting-room-toolbar");
+  const search = el("label", "lighting-room-search");
+  search.appendChild(lightingSideIcon("search"));
+  const input = el("input");
+  input.type = "search";
+  input.value = panel._lightingRoomQuery || "";
+  setAttr(input, "placeholder", "Найти комнату");
+  setAttr(input, "aria-label", "Найти комнату");
+  input.addEventListener("input", () => {
+    panel._lightingRoomQuery = input.value;
+    applyFilters();
+  });
+  search.appendChild(input);
+  toolbar.appendChild(search);
+  const chips = el("div", "lighting-room-chips");
+  const chipButtons = new Map();
+  ROOM_FILTERS.forEach(([id, label]) => {
+    const selected = (panel._lightingRoomFilter || "all") === id;
+    const chip = el("button", `lighting-room-chip${selected ? " is-active" : ""}`, label);
+    chip.type = "button";
+    setAttr(chip, "aria-pressed", selected ? "true" : "false");
+    chip.addEventListener("click", () => {
+      panel._lightingRoomFilter = id;
+      chipButtons.forEach((node, key) => {
+        node.classList.toggle("is-active", key === id);
+        setAttr(node, "aria-pressed", key === id ? "true" : "false");
+      });
+      applyFilters();
+    });
+    chipButtons.set(id, chip);
+    chips.appendChild(chip);
+  });
+  toolbar.appendChild(chips);
+  section.appendChild(toolbar);
+  applyFilters();
   section.appendChild(grid);
-  container.appendChild(section);
+  sectionHost.appendChild(section);
 }
 
 function renderLightingDevices(panel, container, rooms, devices, deps) {
@@ -193,13 +306,24 @@ export function renderLightingOverview(panel, container, deps) {
   source.filter(isLightingDevice).forEach((device) => unique.set(deviceKey(device), device));
   const devices = [...unique.values()];
   const page = deps.el("div", "lighting-dashboard");
-  page.appendChild(createLightingHero(panel, rooms, devices, deps));
+  const layout = deps.el("div", "lighting-layout");
+  const main = deps.el("div", "lighting-main");
+  main.appendChild(createLightingHero(panel, rooms, devices, deps));
   if (!devices.length) {
-    page.appendChild(deps.el("div", "card empty-state", "Физические устройства освещения пока не найдены."));
+    main.appendChild(deps.el("div", "card empty-state", "Физические устройства освещения пока не найдены."));
   } else {
-    renderLightingRooms(panel, page, rooms, devices, deps);
-    renderLightingDevices(panel, page, rooms, devices, deps);
+    renderLightingRooms(panel, main, page, rooms, devices, deps);
+    renderLightingDevices(panel, main, rooms, devices, deps);
   }
+  layout.appendChild(main);
+  if (devices.length) {
+    layout.appendChild(renderLightingSide(panel, page, {
+      devices,
+      isActive: deviceIsActive,
+      roomName: (device) => roomNameFor(device, rooms),
+    }, deps));
+  }
+  page.appendChild(layout);
   if (panel._lightingRoomOverlay) {
     const keys = new Set(panel._lightingRoomOverlay.deviceKeys || []);
     openRoomSheet(panel, page, panel._lightingRoomOverlay.roomName, devices.filter((device) => keys.has(deviceKey(device))), deps);
