@@ -1,6 +1,6 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-20 (HACS 1.52.120 управление яркостью и температурой света).
+Last updated: 2026-08-20 (HACS 1.52.120 свет + 1.52.119 паритет панели).
 
 ## Current work
 
@@ -18,6 +18,13 @@ Last updated: 2026-08-20 (HACS 1.52.120 управление яркостью и
   frontend JS и пиннутые счётчики обновлены синхронно. Тесты: snapshot
   (off-свет с color_temp, 158→«62%», onoff без контролов), executor
   (50%→brightness 128 с read-back, kelvin 3000→3003 confirmed).
+
+- 2026-08-20 (Kimi): HACS `1.52.119` - этап 1 паритета интерфейса панели
+  с планшетом (план `docs/design/HACS_TABLET_PARITY_PLAN_2026-08-20.md`,
+  ветка `kimi/hacs-tablet-parity-2026-08-20`, только frontend/): палитра
+  обеих тем по токенам Android, лёгкие тени, компактные hero, сетки в 2
+  колонки, navigation rail со сворачиванием (профиль HA), часы и кнопка
+  «Обновить» в шапке, daynight 07:00-22:00. Backend не затронут.
 
 - 2026-08-20 (Kimi): HACS `1.52.115`-`1.52.118` - прогрев каталога после
   старта (1.52.115: повторные refresh через 1/3/8 с, warning при пустом
