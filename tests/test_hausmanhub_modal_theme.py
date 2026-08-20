@@ -70,7 +70,7 @@ class ModalTokensTest(unittest.TestCase):
                       "--hmh-modal-border", "--hmh-modal-shadow"):
             self.assertIn(token, dark_block)
         self.assertIn("--hmh-modal-backdrop:rgba(22,28,38,.30)", light_tail)
-        self.assertIn("--hmh-modal-shadow:0 22px 64px rgba(22,28,38,.18)", light_tail)
+        self.assertIn("--hmh-modal-shadow:0 16px 44px rgba(22,28,38,.16)", light_tail)
         self.assertIn("--hmh-modal-backdrop:rgba(3,8,12,.72)", dark_block)
         self.assertIn("--hmh-modal-surface:var(--hmh-surface)", dark_block)
         self.assertIn("--hmh-modal-raised:var(--hmh-raised)", dark_block)
