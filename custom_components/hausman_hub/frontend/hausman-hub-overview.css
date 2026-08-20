@@ -41,6 +41,22 @@
 .overview-canon-status-list small { color:var(--hmh-text-secondary); font-size:12px; }
 .overview-canon-status-list b { font-size:12px; text-align:right; }
 .overview-canon-top-card.is-alert,.overview-canon-dashboard-panel.is-alert { border-color:color-mix(in srgb,var(--hmh-status-danger) 50%,var(--hmh-border-default)); }
+.overview-canon-panel-footnote { margin-top:8px; color:var(--hmh-text-secondary); font-size:12px; line-height:1.4; }
+.overview-canon-home-rows { display:grid; width:100%; gap:8px; margin-top:12px; }
+.overview-canon-home-row { display:flex; align-items:center; gap:10px; padding-top:8px; border-top:1px solid var(--hmh-border-default); }
+.overview-canon-home-row .icon { width:18px; height:18px; flex:none; color:var(--hmh-text-secondary); }
+.overview-canon-home-row small { flex:1; color:var(--hmh-text-secondary); font-size:13px; }
+.overview-canon-home-row b { font-size:13px; text-align:right; }
+.overview-canon-home-row.is-empty b { color:var(--hmh-text-secondary); font-weight:400; }
+.overview-canon-activity-list { display:grid; width:100%; gap:8px; margin-top:12px; }
+.overview-canon-activity-row { display:flex; align-items:flex-start; gap:10px; padding-top:8px; border-top:1px solid var(--hmh-border-default); }
+.overview-canon-activity-row .icon { width:18px; height:18px; flex:none; margin-top:1px; color:var(--hmh-text-secondary); }
+.overview-canon-activity-row.is-alert .icon { color:var(--hmh-status-danger); }
+.overview-canon-activity-copy { display:grid; min-width:0; flex:1; gap:2px; }
+.overview-canon-activity-copy strong { font-size:13px; line-height:1.3; overflow-wrap:anywhere; }
+.overview-canon-activity-copy small { color:var(--hmh-text-secondary); font-size:12px; line-height:1.3; overflow-wrap:anywhere; }
+.overview-canon-activity-time { flex:none; color:var(--hmh-text-secondary); font-size:12px; }
+.overview-canon-top-card .overview-canon-link { align-self:flex-end; margin-top:10px; }
 .overview-canon-dashboard-grid { display:grid; grid-template-columns:minmax(0,3fr) minmax(250px,1fr); gap:16px; margin-top:16px; }
 .overview-canon-dashboard-main { min-width:0; }
 .overview-canon-dashboard-side { display:grid; gap:16px; align-content:start; }

@@ -49,5 +49,21 @@ export function overviewHeroRenderKey(panel, readiness) {
     physicalDevices: physicalDeviceCount(devices),
     activeDevices: activeCount(devices),
     scenarios: scenarios.length,
+    weather: {
+      condition: dashboard.weather?.condition || "",
+      temperatureC: dashboard.weather?.temperatureC ?? null,
+      humidityPercent: dashboard.weather?.humidityPercent ?? null,
+      windSpeedMps: dashboard.weather?.windSpeedMps ?? null,
+      sensorAvailable: dashboard.weather?.outdoorSensorAvailable === true,
+      sensorTemperatureC: dashboard.weather?.outdoorSensorTemperatureC ?? null,
+      sensorUpdatedAt: dashboard.weather?.outdoorSensorUpdatedAt ?? null,
+    },
+    activeAlarms: (Array.isArray(dashboard.alarms) ? dashboard.alarms : []).filter((alarm) => alarm.active).length,
+    homeRows: devices
+      .filter((device) => ["presence", "occupancy", "window", "door", "opening"].includes(device.category)
+        || ["lock", "alarm_control_panel"].includes(device.domain))
+      .map((device) => `${device.id}:${device.state}:${device.unavailable === true}`),
+    activity: (Array.isArray(panel._activityFeed) ? panel._activityFeed : []).slice(0, 5)
+      .map((entry) => `${entry.at}:${entry.title}:${entry.text || ""}`),
   });
 }

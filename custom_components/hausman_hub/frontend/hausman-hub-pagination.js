@@ -620,6 +620,65 @@ export function headProjection(items, maxItems) {
   return items.slice(0, limit);
 }
 
+const ACTIVITY_FEED_LIMIT = 10;
+
+const ACTIVITY_ALERT_ICONS = { leak: "water", smoke: "warning", gas: "warning", low_battery: "device" };
+
+const ACTIVITY_OPERATION_LABELS = {
+  device_action: "Команда устройства",
+  contour_apply: "Климатический контур",
+  home_climate_targets: "Цели климата",
+};
+
+const ACTIVITY_STATUS_LABELS = {
+  confirmed: "подтверждена",
+  accepted: "принята",
+  failed: "не выполнена",
+};
+
+export function activityTimeLabel(at) {
+  const date = new Date(at);
+  if (!Number.isFinite(date.getTime())) return "";
+  return new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit" }).format(date);
+}
+
+/* Live feed from the SSE stream only: no history endpoint is polled, so the */
+/* overview card shows what arrived while the panel was open. */
+export function activityEntryFromEvent(event, now = Date.now()) {
+  if (!pagIsObject(event)) return null;
+  const data = pagIsObject(event.data) ? event.data : {};
+  if (event.type === "critical_alert" || event.type === "attention_alert") {
+    const title = typeof data.title === "string" && data.title ? data.title : "Событие";
+    const message = typeof data.message === "string" && data.message && data.message !== title ? data.message : "";
+    return {
+      icon: ACTIVITY_ALERT_ICONS[data.kind] || "warning",
+      title, text: message, at: now,
+      alert: event.type === "critical_alert" && data.active !== false,
+    };
+  }
+  if (event.type === "command_receipt") {
+    const operation = ACTIVITY_OPERATION_LABELS[data.operation] || "Команда";
+    const status = ACTIVITY_STATUS_LABELS[data.status] || "в работе";
+    const reason = typeof data.reason === "string" && data.reason ? data.reason : "";
+    return {
+      icon: "bolt", title: operation, text: reason ? `${status}: ${reason}` : status,
+      at: now, alert: data.status === "failed",
+    };
+  }
+  return null;
+}
+
+export function recordActivityEvent(panel, event, now = Date.now()) {
+  const entry = activityEntryFromEvent(event, now);
+  if (!entry) return false;
+  if (!Array.isArray(panel._activityFeed)) panel._activityFeed = [];
+  panel._activityFeed.unshift(entry);
+  if (panel._activityFeed.length > ACTIVITY_FEED_LIMIT) {
+    panel._activityFeed.length = ACTIVITY_FEED_LIMIT;
+  }
+  return true;
+}
+
 export const PAGINATION_RETENTION_SNAPSHOT = PAGINATION_SNAPSHOT;
 export const SSE_REPLAY_RETENTION = SSE_REPLAY_MAX_EVENTS;
 export const SSE_QUEUE_LIMIT = SSE_DELIVERY_QUEUE_LIMIT;

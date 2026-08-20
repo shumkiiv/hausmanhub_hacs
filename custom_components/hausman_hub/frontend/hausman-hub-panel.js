@@ -31,7 +31,7 @@ import { apiErrorMessage, resolveApiError } from "./hausman-hub-error-taxonomy.j
 import { canExecuteCommand, loadingUiState, offlineUiState, staleUiState } from "./hausman-hub-ui-state.js?v=1.52.119";
 import { filterCatalogActions, loadDeviceFeatureMatrix } from "./hausman-hub-device-features.js?v=1.52.119";
 import { withCorrelationId } from "./hausman-hub-correlation.js?v=1.52.119";
-import { createEventStreamClient, createFetchEventSource, EVENT_STREAM_PATH, resolveEventStreamToken } from "./hausman-hub-pagination.js?v=1.52.119";
+import { createEventStreamClient, createFetchEventSource, EVENT_STREAM_PATH, recordActivityEvent, resolveEventStreamToken } from "./hausman-hub-pagination.js?v=1.52.119";
 import { renderKiosk } from "./hausman-hub-kiosk.js?v=1.52.119";
 import { captureRoomValidation, clearFirstRunDraft, persistFirstRunDraft, reconcileRoomValidation, restoreFirstRunDraft, resumeFirstRunDraft } from "./hausman-hub-first-run-draft.js?v=1.52.119";
 import { applyTabletProfile, isIntercomQuickAccessVisible, renderAppearanceSettings, renderIntercomSettings, syncIntercomQuickAccess } from "./hausman-hub-settings-profile.js?v=1.52.119";
@@ -202,6 +202,8 @@ const ICON_PATHS = {
   media: "M4 6h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2m0 2v10h16V8zm6 2 5 3-5 3z",
   shield: "M12 2 4 5v6c0 5.05 3.41 9.74 8 11 4.59-1.26 8-5.95 8-11V5zm0 2.18L18 6.43V11c0 3.93-2.55 7.76-6 8.92C8.55 18.76 6 14.93 6 11V6.43z",
   lock: "M17 8h-1V6a4 4 0 0 0-8 0v2H7a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2m-7-2a2 2 0 1 1 4 0v2h-4zm7 13H7v-9h10z",
+  window: "M3 3h18v18H3zm1 1v7h7V4zm9 0v7h7V4zM4 12v7h7v-7zm9 0v7h7v-7z",
+  door: "M6 3h12v18H6zm8 7a1.2 1.2 0 1 0 .1 0z",
   alarm: "M6 18h12v2H6zm2-2V9a4 4 0 0 1 8 0v7zm2-2h4V9a2 2 0 0 0-4 0zM3 8l3-3 1.4 1.4-3 3zm18 0-1.4 1.4-3-3L18 5z",
   camera: "M9 4 7.17 6H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-3.17L15 4zm3 13a4 4 0 1 1 0-8 4 4 0 0 1 0 8m0-2a2 2 0 1 0 0-4 2 2 0 0 0 0 4",
   settings: "M19.43 12.98c.04-.32.07-.65.07-.98s-.03-.66-.08-.98l2.11-1.65-2-3.46-2.49 1a7.2 7.2 0 0 0-1.69-.98L15 3.27h-4l-.35 2.66c-.61.25-1.17.59-1.69.98l-2.49-1-2 3.46 2.11 1.65c-.05.32-.08.66-.08.98s.03.66.08.98l-2.11 1.65 2 3.46 2.49-1c.52.4 1.08.73 1.69.98L11 20.73h4l.35-2.66c.61-.25 1.17-.58 1.69-.98l2.49 1 2-3.46zM13 17a5 5 0 1 1 0-10 5 5 0 0 1 0 10m0-3a2 2 0 1 0 0-4 2 2 0 0 0 0 4",
@@ -534,7 +536,7 @@ class HausmanHubPanel extends HTMLElement {
     if (this._eventStreamClient || !this._hass || !resolveEventStreamToken(this._hass)) return;
     this._eventStreamClient = createEventStreamClient({
       connect: createFetchEventSource(EVENT_STREAM_PATH, () => resolveEventStreamToken(this._hass)),
-      onDomainEvent: () => this._load(),
+      onDomainEvent: (event) => { recordActivityEvent(this, event); this._load(); },
       onGap: () => this._load(),
     });
     this._eventStreamClient.start();
