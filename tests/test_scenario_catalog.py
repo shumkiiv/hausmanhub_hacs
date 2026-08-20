@@ -174,6 +174,39 @@ class ScenarioCatalogPureTest(unittest.TestCase):
         )
         self.assertEqual(("equals", "not_equals", "changed"), prop.comparisons)
 
+    def test_unavailable_numeric_sensor_keeps_numeric_comparisons(self) -> None:
+        state = type(
+            "State",
+            (),
+            {
+                "state": "unavailable",
+                "attributes": {
+                    "device_class": "humidity",
+                    "state_class": "measurement",
+                    "unit_of_measurement": "%",
+                },
+            },
+        )()
+        prop = _state_property(state, "sensor", "humidity", "Влажность")
+        self.assertEqual("number", prop.value_type)
+        self.assertEqual(
+            ("equals", "not_equals", "above", "below", "changed"),
+            prop.comparisons,
+        )
+
+    def test_unavailable_timestamp_sensor_stays_textual(self) -> None:
+        state = type(
+            "State",
+            (),
+            {
+                "state": "unavailable",
+                "attributes": {"device_class": "timestamp"},
+            },
+        )()
+        prop = _state_property(state, "sensor", "timestamp", "Время")
+        self.assertEqual("text", prop.value_type)
+        self.assertEqual(("equals", "not_equals", "changed"), prop.comparisons)
+
     def test_repeated_device_name_becomes_concise_capability(self) -> None:
         self.assertEqual(
             "Освещение",

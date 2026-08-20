@@ -576,6 +576,19 @@ def _state_property(
     raw_state = getattr(state, "state", None)
     unit = attributes.get("unit_of_measurement")
     numeric = domain == "number"
+    if domain == "sensor":
+        # Числовость сенсора определяется атрибутами, а не живым состоянием:
+        # пока Zigbee2MQTT датчик unavailable после рестарта, state_class и
+        # unit_of_measurement уже на месте, а строка состояния не парсится.
+        state_class = attributes.get("state_class")
+        if state_class in {"measurement", "total", "total_increasing"}:
+            numeric = True
+        elif (
+            isinstance(unit, str)
+            and bool(unit)
+            and device_class not in {"timestamp", "date"}
+        ):
+            numeric = True
     if isinstance(raw_state, str) and raw_state not in {"unknown", "unavailable", ""}:
         try:
             numeric = math.isfinite(float(raw_state))

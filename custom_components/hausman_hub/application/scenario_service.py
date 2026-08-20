@@ -386,7 +386,11 @@ class ScenarioService:
         """Start one managed, bounded refresh sequence after HA setup."""
 
         if self._catalog_warmup_task is None or self._catalog_warmup_task.done():
-            create_task = getattr(self._hass, "async_create_task", None)
+            # Background-задача, чтобы bootstrap HA не ждал 5-минутную
+            # контрольную попытку сидирования внутри прогрева.
+            create_task = getattr(
+                self._hass, "async_create_background_task", None
+            ) or getattr(self._hass, "async_create_task", None)
             coroutine = self._async_catalog_warmup()
             if callable(create_task):
                 self._catalog_warmup_task = create_task(
