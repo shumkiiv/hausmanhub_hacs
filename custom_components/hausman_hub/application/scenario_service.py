@@ -35,6 +35,8 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 INTERCOM_RELEASE_SECONDS = 15
+CATALOG_WARMUP_DELAYS_SECONDS = (1.0, 3.0, 8.0)
+CATALOG_WARMUP_MAX_ATTEMPTS = 1 + len(CATALOG_WARMUP_DELAYS_SECONDS)
 
 
 def _default_call_later(
@@ -105,6 +107,7 @@ class ScenarioService:
         sun_times_provider: Callable[[], tuple[datetime | None, datetime | None]] | None = None,
         now_provider: Callable[[], datetime] | None = None,
         schedule_store: object | None = None,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ):
         self._hass = hass
         self._store = store
@@ -116,6 +119,7 @@ class ScenarioService:
         self._sun_times_provider = sun_times_provider
         self._now_provider = now_provider
         self._schedule_store = schedule_store
+        self._sleep = sleep
         self._skipped_runs: set[str] = set()
         self._intercom_release_cancel: Callable[[], None] | None = None
         self._intercom_release_entity: str | None = None
@@ -124,6 +128,18 @@ class ScenarioService:
         self._run_lock = asyncio.Lock()
         self._run_tasks: dict[str, asyncio.Task[dict[str, Any]]] = {}
         self._queue_locks: dict[str, asyncio.Lock] = {}
+        self._catalog_refresh_lock = asyncio.Lock()
+        self._catalog_warmup_task: asyncio.Task[None] | None = None
+        # Внутреннее состояние прогрева; публикация в dashboard-снапшот -
+        # отдельное изменение контракта, в этот релиз не входит.
+        self._catalog_readiness: dict[str, object] = {
+            "status": "warming",
+            "attempt": 1,
+            "maxAttempts": CATALOG_WARMUP_MAX_ATTEMPTS,
+            "deviceCount": len(catalog.devices),
+            "updatedAt": int(time.time() * 1000),
+            "reason": "initial_scan",
+        }
 
     async def async_load(self) -> None:
         """Load persisted scenarios; fall back to an empty registry."""
@@ -353,18 +369,115 @@ class ScenarioService:
 
         self._executor = executor
 
-    async def async_refresh_catalog(self) -> ScenarioCatalog:
-        """Refresh controllable HA entities without reloading the integration."""
+    @property
+    def catalog_readiness(self) -> dict[str, object]:
+        """Return a redacted snapshot of startup catalog readiness."""
+
+        return dict(self._catalog_readiness)
+
+    def start_catalog_warmup(self) -> Callable[[], None]:
+        """Start one managed, bounded refresh sequence after HA setup."""
+
+        if self._catalog_warmup_task is None or self._catalog_warmup_task.done():
+            create_task = getattr(self._hass, "async_create_task", None)
+            coroutine = self._async_catalog_warmup()
+            if callable(create_task):
+                self._catalog_warmup_task = create_task(
+                    coroutine,
+                    "HausmanHub device catalog warm-up",
+                )
+            else:
+                self._catalog_warmup_task = asyncio.create_task(coroutine)
+        return self.cancel_catalog_warmup
+
+    def cancel_catalog_warmup(self) -> None:
+        """Cancel only the pending HausmanHub catalog warm-up task."""
+
+        task = self._catalog_warmup_task
+        self._catalog_warmup_task = None
+        if task is not None and not task.done():
+            task.cancel()
+
+    async def _async_catalog_warmup(self) -> None:
+        """Refresh after late integrations without an unbounded polling loop."""
+
+        for attempt, delay in enumerate(CATALOG_WARMUP_DELAYS_SECONDS, start=2):
+            try:
+                await self._sleep(delay)
+                catalog = await self._async_replace_catalog()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                _LOGGER.warning(
+                    "HausmanHub device catalog warm-up attempt %s failed",
+                    attempt,
+                    exc_info=True,
+                )
+                self._catalog_readiness = {
+                    **self._catalog_readiness,
+                    "status": (
+                        "degraded"
+                        if attempt == CATALOG_WARMUP_MAX_ATTEMPTS
+                        else "warming"
+                    ),
+                    "attempt": attempt,
+                    "updatedAt": int(time.time() * 1000),
+                    "reason": (
+                        "warmup_failed"
+                        if attempt == CATALOG_WARMUP_MAX_ATTEMPTS
+                        else "initial_scan"
+                    ),
+                }
+                continue
+            self._catalog_readiness = {
+                "status": (
+                    "ready"
+                    if attempt == CATALOG_WARMUP_MAX_ATTEMPTS
+                    else "warming"
+                ),
+                "attempt": attempt,
+                "maxAttempts": CATALOG_WARMUP_MAX_ATTEMPTS,
+                "deviceCount": len(catalog.devices),
+                "updatedAt": int(time.time() * 1000),
+                "reason": (
+                    "warmup_complete"
+                    if attempt == CATALOG_WARMUP_MAX_ATTEMPTS
+                    else "initial_scan"
+                ),
+            }
+        final_count = len(self._catalog.devices)
+        if final_count == 0:
+            # После всех попыток каталог пуст: device_state триггеры молчат,
+            # как в инциденте 19.08 после рестарта HA. Это не ошибка запроса,
+            # поэтому отдельный читаемый warning для журнала.
+            _LOGGER.warning(
+                "HausmanHub device catalog still empty after warm-up; "
+                "device_state triggers inactive"
+            )
+
+    async def _async_replace_catalog(self) -> ScenarioCatalog:
+        """Run one serialized scan and atomically replace all consumers."""
 
         if self._catalog_loader is None:
             return self._catalog
-        catalog = await self._catalog_loader()
-        if not isinstance(catalog, ScenarioCatalog):
-            raise ScenarioServiceError("Catalog refresh returned invalid data", status=500)
-        self._catalog = catalog
-        replace_catalog = getattr(self._executor, "replace_catalog", None)
-        if callable(replace_catalog):
-            replace_catalog(catalog)
+        async with self._catalog_refresh_lock:
+            catalog = await self._catalog_loader()
+            if not isinstance(catalog, ScenarioCatalog):
+                raise ScenarioServiceError(
+                    "Catalog refresh returned invalid data", status=500
+                )
+            self._catalog = catalog
+            replace_catalog = getattr(self._executor, "replace_catalog", None)
+            if callable(replace_catalog):
+                replace_catalog(catalog)
+            return catalog
+
+    async def async_refresh_catalog(self) -> ScenarioCatalog:
+        """Refresh controllable HA entities without reloading the integration."""
+
+        catalog = await self._async_replace_catalog()
+        self._catalog_readiness["deviceCount"] = len(catalog.devices)
+        self._catalog_readiness["updatedAt"] = int(time.time() * 1000)
         return catalog
 
     async def async_list_scenarios(self) -> tuple[Scenario, ...]:

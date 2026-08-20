@@ -291,6 +291,153 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([("late_light", "turn_on", None)], self.executor.device_actions)
         self.assertTrue(receipt["confirmed"])
 
+    async def test_catalog_warmup_is_bounded_and_publishes_ready(self) -> None:
+        refreshes = 0
+        delays: list[float] = []
+
+        async def skip_delay(delay: float) -> None:
+            delays.append(delay)
+
+        async def load_catalog() -> ScenarioCatalog:
+            nonlocal refreshes
+            refreshes += 1
+            return self.catalog
+
+        service = ScenarioService(
+            None,
+            self.store,
+            ScenarioCatalog(devices={}, scenarios={}),
+            self.executor,
+            catalog_loader=load_catalog,
+            sleep=skip_delay,
+        )
+
+        await service._async_catalog_warmup()
+
+        self.assertEqual([1.0, 3.0, 8.0], delays)
+        self.assertEqual(3, refreshes)
+        self.assertEqual(
+            {
+                "status": "ready",
+                "attempt": 4,
+                "maxAttempts": 4,
+                "deviceCount": 1,
+                "reason": "warmup_complete",
+            },
+            {
+                key: value
+                for key, value in service.catalog_readiness.items()
+                if key != "updatedAt"
+            },
+        )
+
+    async def test_catalog_warmup_exhaustion_is_degraded(self) -> None:
+        refreshes = 0
+
+        async def skip_delay(_: float) -> None:
+            return None
+
+        async def load_catalog() -> ScenarioCatalog:
+            nonlocal refreshes
+            refreshes += 1
+            raise RuntimeError("late integration unavailable")
+
+        service = ScenarioService(
+            None,
+            self.store,
+            self.catalog,
+            self.executor,
+            catalog_loader=load_catalog,
+            sleep=skip_delay,
+        )
+
+        await service._async_catalog_warmup()
+
+        self.assertEqual(3, refreshes)
+        self.assertEqual("degraded", service.catalog_readiness["status"])
+        self.assertEqual(4, service.catalog_readiness["attempt"])
+        self.assertEqual("warmup_failed", service.catalog_readiness["reason"])
+        self.assertEqual(1, service.catalog_readiness["deviceCount"])
+
+    async def test_catalog_warmup_cancel_stops_pending_refreshes(self) -> None:
+        refreshes = 0
+
+        async def load_catalog() -> ScenarioCatalog:
+            nonlocal refreshes
+            refreshes += 1
+            return self.catalog
+
+        service = ScenarioService(
+            None,
+            self.store,
+            self.catalog,
+            self.executor,
+            catalog_loader=load_catalog,
+        )
+        cancel = service.start_catalog_warmup()
+        task = service._catalog_warmup_task
+        self.assertIsNotNone(task)
+
+        cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+
+        self.assertEqual(0, refreshes)
+        self.assertIsNone(service._catalog_warmup_task)
+
+    async def test_catalog_warmup_does_not_start_twice(self) -> None:
+        async def load_catalog() -> ScenarioCatalog:
+            return self.catalog
+
+        service = ScenarioService(
+            None,
+            self.store,
+            self.catalog,
+            self.executor,
+            catalog_loader=load_catalog,
+        )
+        service.start_catalog_warmup()
+        first = service._catalog_warmup_task
+
+        service.start_catalog_warmup()
+
+        self.assertIs(first, service._catalog_warmup_task)
+        service.cancel_catalog_warmup()
+        with self.assertRaises(asyncio.CancelledError):
+            await first
+
+    async def test_catalog_warmup_warns_when_catalog_stays_empty(self) -> None:
+        async def skip_delay(_: float) -> None:
+            return None
+
+        async def load_catalog() -> ScenarioCatalog:
+            return ScenarioCatalog(devices={}, scenarios={})
+
+        service = ScenarioService(
+            None,
+            self.store,
+            ScenarioCatalog(devices={}, scenarios={}),
+            self.executor,
+            catalog_loader=load_catalog,
+            sleep=skip_delay,
+        )
+
+        with self.assertLogs(
+            "custom_components.hausman_hub.application.scenario_service",
+            level="WARNING",
+        ) as logs:
+            await service._async_catalog_warmup()
+
+        self.assertTrue(
+            any(
+                "device catalog still empty after warm-up" in line
+                for line in logs.output
+            ),
+            logs.output,
+        )
+        self.assertEqual("ready", service.catalog_readiness["status"])
+        self.assertEqual(0, service.catalog_readiness["deviceCount"])
+
     async def test_device_action_can_be_resolved_without_execution(self) -> None:
         resolved = await self.service.async_resolve_device_action(
             "device_abc", "turn_on"
