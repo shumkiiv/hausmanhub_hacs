@@ -1,10 +1,10 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-20 (HACS 1.52.119 управление яркостью и температурой света).
+Last updated: 2026-08-20 (HACS 1.52.120 управление яркостью и температурой света).
 
 ## Current work
 
-- 2026-08-20 (Kimi): HACS `1.52.119` - ползунки света в диалоге устройства.
+- 2026-08-20 (Kimi): HACS `1.52.120` - ползунки света в диалоге устройства.
   Каталог и executor получили `set_brightness_percent` (0-100%, масштаб в
   HA-native 0-255) и `set_color_temperature` (кельвины, read-back с допуском
   75 на округление mireds). `dashboard_snapshot._light_control_details`
