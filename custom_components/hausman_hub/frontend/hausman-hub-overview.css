@@ -1,17 +1,17 @@
 .overview-canon-top-grid { display:grid; grid-template-columns:minmax(0,3fr) minmax(250px,1fr); gap:16px; }
-.overview-canon-hero { position:relative; min-height:330px; overflow:hidden; border:1px solid var(--hmh-border-default); border-radius:var(--hmh-radius-section);
-  background:var(--hmh-surface-card); box-shadow:0 16px 44px rgba(0,0,0,.32); }
+.overview-canon-hero { position:relative; min-height:230px; overflow:hidden; border:1px solid var(--hmh-border-default); border-radius:var(--hmh-radius-section);
+  background:var(--hmh-surface-card); box-shadow:0 6px 20px rgba(0,0,0,.24); }
 .overview-canon-hero-media { position:absolute; inset:0; z-index:0; background-position:center; background-size:cover; opacity:1; transform:scale(1); transition:opacity .28s ease,transform .5s ease; }
 .overview-canon-hero-media.is-changing { opacity:.42; transform:scale(1.008); }
-.overview-canon-hero-overlay { position:relative; z-index:1; display:flex; min-height:276px; align-items:flex-start; justify-content:space-between; gap:24px; padding:28px;
+.overview-canon-hero-overlay { position:relative; z-index:1; display:flex; min-height:176px; align-items:flex-start; justify-content:space-between; gap:20px; padding:22px;
   background:linear-gradient(90deg,rgba(11,15,20,.88) 0%,rgba(11,15,20,.62) 32%,rgba(11,15,20,.06) 68%); }
 .overview-canon-hero-copy { width:min(440px,58%); color:#E6EAF2; }
 .overview-canon-eyebrow { display:block; margin-bottom:6px; color:#A3AAB7; font-size:14px; font-weight:600; }
-.overview-canon-hero h1 { color:#E6EAF2; font-size:40px; line-height:46px; }
-.overview-canon-hero-facts { display:flex; flex-wrap:wrap; gap:18px; margin-top:14px; }
+.overview-canon-hero h1 { color:#E6EAF2; font-size:26px; line-height:32px; }
+.overview-canon-hero-facts { display:flex; flex-wrap:wrap; gap:14px; margin-top:10px; }
 .overview-canon-hero-fact { display:grid; grid-template-columns:18px auto; grid-template-rows:auto auto; column-gap:7px; min-width:68px; }
-.overview-canon-hero-fact .icon { grid-row:1 / span 2; width:18px; height:18px; margin-top:4px; color:#A3AAB7; }
-.overview-canon-hero-fact strong { font-size:24px; line-height:28px; }
+.overview-canon-hero-fact .icon { grid-row:1 / span 2; width:18px; height:18px; margin-top:3px; color:#A3AAB7; }
+.overview-canon-hero-fact strong { font-size:20px; line-height:24px; }
 .overview-canon-hero-fact small { color:#A3AAB7; font-size:12px; }
 .overview-canon-hero-action { margin-top:16px; border:1px solid rgba(230,234,242,.18); background:rgba(18,23,29,.72); backdrop-filter:blur(12px); }
 .overview-canon-state { align-self:flex-start; padding:8px 12px; border:1px solid rgba(230,234,242,.15); border-radius:999px; color:#E6EAF2; background:rgba(18,23,29,.66); backdrop-filter:blur(12px); font-size:13px; font-weight:650; }
@@ -122,4 +122,4 @@
 @media (max-width:1200px) { .overview-canon-favorite-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .overview-canon-lower-grid { grid-template-columns:minmax(0,1fr); } .overview-canon-lower-main { grid-template-columns:repeat(3,minmax(0,1fr)); } }
 @media (max-width:900px) { .overview-canon-top-grid,.overview-canon-dashboard-grid { grid-template-columns:1fr; } .overview-canon-top-side { grid-template-columns:repeat(2,minmax(0,1fr)); grid-template-rows:auto; } }
 @media (max-width:800px) { .overview-canon-primary-grid, .overview-canon-lower-main { grid-template-columns:minmax(0,1fr); } .overview-canon-primary-card.is-security { grid-column:auto; } .overview-canon-hero-copy { width:78%; } }
-@media (max-width:640px) { .overview-canon-hero { min-height:380px; } .overview-canon-hero-copy { width:100%; } .overview-canon-hero-overlay { min-height:326px; padding:20px; } .overview-canon-state { display:none; } .overview-canon-favorite-grid { grid-template-columns:minmax(0,1fr); } }
+@media (max-width:640px) { .overview-canon-hero { min-height:300px; } .overview-canon-hero-copy { width:100%; } .overview-canon-hero-overlay { min-height:246px; padding:18px; } .overview-canon-state { display:none; } .overview-canon-favorite-grid { grid-template-columns:minmax(0,1fr); } }
