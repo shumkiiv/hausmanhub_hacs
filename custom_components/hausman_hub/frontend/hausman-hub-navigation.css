@@ -6,6 +6,14 @@
 .banner::before { content:"!"; position:absolute; left:17px; top:50%; display:grid; place-items:center; width:18px; height:18px;
   border-radius:50%; background:var(--error-color,#E5534B); color:#fff; transform:translateY(-50%); font-size:12px; font-weight:800; }
 .kiosk-dock { display:none; }
+.header-refresh { display:inline-flex; align-items:center; gap:8px; min-height:40px; margin:0; padding:8px 12px;
+  border:1px solid var(--hmh-border,#D8DFE9); border-radius:999px; background:var(--hmh-surface,#FFFFFF);
+  color:var(--hmh-text,#18212D); font-size:13px; font-weight:650; box-shadow:none; white-space:nowrap; cursor:pointer; }
+.header-refresh:hover { background:var(--hmh-hover,#1F2630); }
+.header-refresh-icon { width:19px; height:19px; }
+.header-clock { display:flex; align-items:baseline; gap:10px; margin-left:6px; white-space:nowrap; }
+.header-clock-date { color:var(--hmh-text-dim,#9AA7B4); font-size:14px; font-weight:600; }
+.header-clock-time { color:var(--hmh-text,#E7ECF3); font-size:20px; font-weight:750; font-variant-numeric:tabular-nums; }
 :host(.kiosk-mode) .kiosk-dock { position:fixed; z-index:90; right:32px; bottom:30px; display:flex; align-items:center; gap:10px;
   padding:9px; border:1px solid color-mix(in srgb,var(--hmh-border,#2F3845) 78%,transparent); border-radius:20px;
   background:color-mix(in srgb,var(--hmh-surface,#12171D) 88%,transparent); box-shadow:0 18px 48px rgba(0,0,0,.34); backdrop-filter:blur(22px); }
