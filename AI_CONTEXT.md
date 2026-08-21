@@ -1,8 +1,21 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-21 (HACS 1.52.129 паритет климата, merge backend 1.52.121-1.52.127).
+Last updated: 2026-08-21 (HACS 1.52.132, Hero «Дом» и P0 Dashboard).
 
 ## Current work
+
+- 2026-08-21 (Codex): HACS `v1.52.132` опубликован и установлен в production.
+  Release commit/tag `d17ccb0`, GitHub Release без assets. Hero больше не
+  выводит техническое стандартное имя `Home Assistant`: оно безопасно
+  заменяется на «Дом», пользовательские имена сохраняются. В выпуск также
+  вошёл P0 Dashboard (`7d48306`): спокойный Hero без служебных счётчиков,
+  единый attention-блок и объединённая карточка климата. Full staged
+  release-gate: 1546 passed, 4 skipped. Перед deploy создан full backup
+  `c04771be`; после одного restart Core update entity сообщает
+  installed/latest `v1.52.132`, панель отвечает 200 с новым cache version,
+  10 сущностей интеграции доступны. Ошибок интеграции в журнале нет;
+  остаётся одно штатное WARNING о расхождении физической и сервисной
+  температуры на 3.5 C, команды не блокируются.
 
 - 2026-08-21 (Codex): P0 визуального аудита Dashboard реализован только в
   HACS frontend, commit `7d48306`. Hero больше не показывает технические
@@ -10,8 +23,8 @@ Last updated: 2026-08-21 (HACS 1.52.129 паритет климата, merge bac
   attention-блок, а климат и управление общей целью объединены в одну
   карточку. Вторичный текст увеличен, мягкий amber используется для attention.
   Проверки: `python3 -m pytest -q tests/test_hausmanhub_panel.py` - 31 passed,
-  50 subtests; ключевые UI-сценарии Dashboard зелёные. Release, push и deploy
-  не выполнялись.
+  50 subtests; ключевые UI-сценарии Dashboard зелёные. Вошло в опубликованный
+  и развёрнутый HACS `v1.52.132`.
 
 - 2026-08-21 (Codex): HACS `v1.52.131` опубликован и установлен в production.
   Release commit/tag `6094da0`, GitHub Release без assets. Выпуск возвращает

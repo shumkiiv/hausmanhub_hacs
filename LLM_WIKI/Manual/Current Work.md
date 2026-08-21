@@ -1,4 +1,25 @@
-# Current Work - релиз 1.27.0 (IR-learning), далее roadmap 39/40
+# Current Work
+
+## 2026-08-21: HACS 1.52.132, Hero вкладки «Дом»
+
+- Причина технического заголовка: Hero без нормализации использовал
+  `dashboard.summary.homeName`, а production Home Assistant отдавал в нём
+  стандартное `Home Assistant`.
+- Frontend HACS теперь заменяет только `Home Assistant` и `HomeAssistant` на
+  «Дом». Любое заданное пользователем название не меняется. Backend, API,
+  Android и пользовательские настройки не трогались.
+- Release commit/tag `d17ccb0`, GitHub Release:
+  https://github.com/shumkiiv/hausmanhub_hacs/releases/tag/v1.52.132.
+  В тот же выпуск вошёл P0 Dashboard: спокойный Hero, единый блок внимания и
+  объединённая карточка климата.
+- Full staged `python3 tools/check_local_release.py`: 1546 passed, 4 skipped.
+  Перед deploy создан full backup `c04771be`; HACS установлен явной версией,
+  Core перезапущен один раз. Проверка: installed/latest `v1.52.132`, панель
+  200 с cache version `1.52.132`, 10 сущностей доступны, ошибок интеграции
+  нет. Нефатальное WARNING о расхождении источников температуры на 3.5 C
+  относится к живым данным и не блокирует команды.
+
+## 2026-07-28: релиз 1.27.0 - обучение IR-кодов в мастере
 
 ## 2026-07-28: релиз 1.27.0 - обучение IR-кодов в мастере
 - Release commit `f22df48` на `origin/main` (30 файлов, +4021/-57); tag
