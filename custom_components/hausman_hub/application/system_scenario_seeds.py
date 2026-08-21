@@ -110,6 +110,8 @@ LEAK_EXTRA = "binary_sensor.0x983268fffe63cb6c_water_leak"
 MOTION_TOILET = "binary_sensor.datchik_dvizheniia_tualet_zaniatost"
 MOTION_TOILET_TUYA = "binary_sensor.0xa4c13889c39443d5_occupancy"
 MOTION_HALLWAY = "binary_sensor.0xf044d3fffe1b8e57_occupancy"
+AWAY_A100 = "binary_sensor.a100_away_zaniatost"
+SUN = "sun.sun"
 
 SWITCH_TOILET_LIGHT_1 = "switch.0xacbac0fffebde2d3_1"
 SWITCH_TOILET_LIGHT_2 = "switch.0xacbac0fffebde2d3_2"
@@ -304,10 +306,10 @@ SYSTEM_SCENARIO_SEEDS: tuple[SystemScenarioSeed, ...] = (
     ),
     SystemScenarioSeed(
         scenario_id="system-toilet-light-motion",
-        title="Туалет: свет по движению",
+        title="Туалет: основной свет днём",
         description=(
-            "Перенос из Node-RED: движение включает свет, через 8 минут без "
-            "нового движения свет выключается (перезапуск таймера)."
+            "Движение днём включает только основной свет. Через 8 минут без "
+            "нового движения оба канала выключаются, таймер перезапускается."
         ),
         icon="mdi:motion-sensor",
         execution_mode="restart",
@@ -315,19 +317,89 @@ SYSTEM_SCENARIO_SEEDS: tuple[SystemScenarioSeed, ...] = (
             _device_trigger("t1", MOTION_TOILET, "equals", "on"),
             _device_trigger("t2", MOTION_TOILET_TUYA, "equals", "on"),
         ),
-        conditions=(),
+        conditions=(
+            _device_condition("c1", SUN, "equals", "above_horizon"),
+            _device_condition("c2", AWAY_A100, "equals", "off"),
+        ),
         actions=(
-            _device_action("a1", SWITCH_TOILET_LIGHT_1, "turn_on"),
-            _device_action("a2", SWITCH_TOILET_LIGHT_2, "turn_on"),
-            _delay("a3", 480),
-            _device_action("a4", SWITCH_TOILET_LIGHT_1, "turn_off"),
-            _device_action("a5", SWITCH_TOILET_LIGHT_2, "turn_off"),
+            _device_action("a1", SWITCH_TOILET_LIGHT_2, "turn_on"),
+            _delay("a2", 480),
+            _device_action("a3", SWITCH_TOILET_LIGHT_1, "turn_off"),
+            _device_action("a4", SWITCH_TOILET_LIGHT_2, "turn_off"),
         ),
         required_entities=(
             MOTION_TOILET,
             MOTION_TOILET_TUYA,
             SWITCH_TOILET_LIGHT_1,
             SWITCH_TOILET_LIGHT_2,
+            AWAY_A100,
+            SUN,
+        ),
+    ),
+    SystemScenarioSeed(
+        scenario_id="system-toilet-light-motion-evening",
+        title="Туалет: основной свет вечером",
+        description=(
+            "После заката и до 23:00 движение включает только основной свет. "
+            "Через 8 минут без нового движения оба канала выключаются."
+        ),
+        icon="mdi:motion-sensor",
+        execution_mode="restart",
+        triggers=(
+            _device_trigger("t1", MOTION_TOILET, "equals", "on"),
+            _device_trigger("t2", MOTION_TOILET_TUYA, "equals", "on"),
+        ),
+        conditions=(
+            {"id": "c1", "type": "time_window", "value": "12:00-22:59"},
+            _device_condition("c2", SUN, "equals", "below_horizon"),
+            _device_condition("c3", AWAY_A100, "equals", "off"),
+        ),
+        actions=(
+            _device_action("a1", SWITCH_TOILET_LIGHT_2, "turn_on"),
+            _delay("a2", 480),
+            _device_action("a3", SWITCH_TOILET_LIGHT_1, "turn_off"),
+            _device_action("a4", SWITCH_TOILET_LIGHT_2, "turn_off"),
+        ),
+        required_entities=(
+            MOTION_TOILET,
+            MOTION_TOILET_TUYA,
+            SWITCH_TOILET_LIGHT_1,
+            SWITCH_TOILET_LIGHT_2,
+            AWAY_A100,
+            SUN,
+        ),
+    ),
+    SystemScenarioSeed(
+        scenario_id="system-toilet-light-motion-night",
+        title="Туалет: дополнительный свет ночью",
+        description=(
+            "С 23:00 и до рассвета движение включает только дополнительный "
+            "свет. Через 8 минут без нового движения оба канала выключаются."
+        ),
+        icon="mdi:weather-night",
+        execution_mode="restart",
+        triggers=(
+            _device_trigger("t1", MOTION_TOILET, "equals", "on"),
+            _device_trigger("t2", MOTION_TOILET_TUYA, "equals", "on"),
+        ),
+        conditions=(
+            {"id": "c1", "type": "time_window", "value": "23:00-12:00"},
+            _device_condition("c2", SUN, "equals", "below_horizon"),
+            _device_condition("c3", AWAY_A100, "equals", "off"),
+        ),
+        actions=(
+            _device_action("a1", SWITCH_TOILET_LIGHT_1, "turn_on"),
+            _delay("a2", 480),
+            _device_action("a3", SWITCH_TOILET_LIGHT_1, "turn_off"),
+            _device_action("a4", SWITCH_TOILET_LIGHT_2, "turn_off"),
+        ),
+        required_entities=(
+            MOTION_TOILET,
+            MOTION_TOILET_TUYA,
+            SWITCH_TOILET_LIGHT_1,
+            SWITCH_TOILET_LIGHT_2,
+            AWAY_A100,
+            SUN,
         ),
     ),
     SystemScenarioSeed(

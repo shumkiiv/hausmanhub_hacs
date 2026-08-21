@@ -213,6 +213,79 @@ class SystemScenarioSeedsTest(unittest.IsolatedAsyncioTestCase):
         scenario = await service.async_get_scenario("system-leak-toilet-alert")
         self.assertEqual(scenario.title, "Моя протечка")
 
+    def test_toilet_light_seeds_split_channels_by_time_and_sun(self) -> None:
+        seeds = {
+            seed.scenario_id: seed
+            for seed in SYSTEM_SCENARIO_SEEDS
+            if seed.scenario_id.startswith("system-toilet-light-motion")
+        }
+        self.assertEqual(
+            set(seeds),
+            {
+                "system-toilet-light-motion",
+                "system-toilet-light-motion-evening",
+                "system-toilet-light-motion-night",
+            },
+        )
+
+        expected_turn_on = {
+            "system-toilet-light-motion": "switch.0xacbac0fffebde2d3_2",
+            "system-toilet-light-motion-evening": "switch.0xacbac0fffebde2d3_2",
+            "system-toilet-light-motion-night": "switch.0xacbac0fffebde2d3_1",
+        }
+        expected_windows = {
+            "system-toilet-light-motion": None,
+            "system-toilet-light-motion-evening": "12:00-22:59",
+            "system-toilet-light-motion-night": "23:00-12:00",
+        }
+        expected_sun = {
+            "system-toilet-light-motion": "above_horizon",
+            "system-toilet-light-motion-evening": "below_horizon",
+            "system-toilet-light-motion-night": "below_horizon",
+        }
+
+        for scenario_id, seed in seeds.items():
+            turn_on = [
+                action
+                for action in seed.actions
+                if action.get("actionId") == "turn_on"
+            ]
+            self.assertEqual(len(turn_on), 1)
+            self.assertEqual(
+                turn_on[0]["targetId"],
+                _stable_target_id_from_entity(expected_turn_on[scenario_id]),
+            )
+            time_windows = [
+                condition.get("value")
+                for condition in seed.conditions
+                if condition.get("type") == "time_window"
+            ]
+            self.assertEqual(
+                time_windows,
+                []
+                if expected_windows[scenario_id] is None
+                else [expected_windows[scenario_id]],
+            )
+            sun_conditions = [
+                condition
+                for condition in seed.conditions
+                if condition.get("targetId")
+                == _stable_target_id_from_entity("sun.sun")
+            ]
+            self.assertEqual(len(sun_conditions), 1)
+            self.assertEqual(sun_conditions[0]["value"], expected_sun[scenario_id])
+            away_conditions = [
+                condition
+                for condition in seed.conditions
+                if condition.get("targetId")
+                == _stable_target_id_from_entity(
+                    "binary_sensor.a100_away_zaniatost"
+                )
+            ]
+            self.assertEqual(len(away_conditions), 1)
+            self.assertEqual(away_conditions[0]["value"], "off")
+            self.assertEqual(seed.execution_mode, "restart")
+
     async def test_seed_empty_catalog_creates_nothing(self) -> None:
         service = await self._make_service(_catalog(()))
         created = await async_seed_system_scenarios(service)
