@@ -15,6 +15,18 @@
 .energy-overview-actions > button { flex:1 1 0; min-height:40px; margin:0; padding:8px 14px; border-radius:12px; }
 .energy-overview-open { color:var(--hmh-text); background:var(--hmh-raised); }
 .energy-overview-settings { color:var(--hmh-accent); border-color:color-mix(in srgb,var(--hmh-accent) 48%,var(--hmh-border)); }
+.energy-overview-meter { display:grid; gap:8px; padding:14px; border:1px solid color-mix(in srgb,var(--hmh-accent) 30%,var(--hmh-border)); border-radius:15px; background:linear-gradient(135deg,color-mix(in srgb,var(--hmh-accent) 7%,var(--hmh-raised)),var(--hmh-raised)); }
+.energy-overview-meter-label { color:var(--hmh-text-dim); font-size:12px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
+.energy-overview-meter-display { display:flex; align-items:flex-end; gap:9px; min-width:0; }
+.energy-odometer { display:flex; align-items:center; gap:2px; padding:5px; border:2px solid color-mix(in srgb,var(--hmh-text) 18%,var(--hmh-border)); border-radius:7px; color:#f7fafc; background:#111820; box-shadow:inset 0 1px 0 rgba(255,255,255,.16),0 3px 8px rgba(0,0,0,.18); font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace; font-variant-numeric:tabular-nums; letter-spacing:0; }
+.energy-odometer-wheel { display:grid; place-items:center; width:22px; height:31px; overflow:hidden; border-radius:2px; background:linear-gradient(180deg,#29333d 0%,#151d25 46%,#0a0f14 54%,#1c2630 100%); box-shadow:inset 0 1px 0 rgba(255,255,255,.11),inset 0 -1px 0 rgba(0,0,0,.72); }
+.energy-odometer-wheel.is-decimal { margin-left:5px; color:#fff; background:linear-gradient(180deg,#e74747 0%,#ba252d 46%,#8c1820 54%,#cb3038 100%); }
+.energy-odometer-digit { display:block; font-size:25px; font-weight:700; line-height:31px; text-shadow:0 1px 0 rgba(0,0,0,.8); animation:energy-meter-roll .56s cubic-bezier(.2,.78,.25,1) var(--meter-digit-delay) both; }
+.energy-odometer-unit { flex:0 0 auto; padding-bottom:3px; color:var(--hmh-text); font-size:14px; font-weight:700; }
+.energy-odometer-empty { color:var(--hmh-text-dim); font-size:24px; }
+.energy-overview-meter-note,.energy-overview-meter-estimated { color:var(--hmh-text-dim); font-size:12px; line-height:1.35; }
+.energy-overview-meter-estimated { color:var(--hmh-status-warning,#9A5F0B); }
+@keyframes energy-meter-roll { from { opacity:.15; transform:translateY(-125%); } to { opacity:1; transform:translateY(0); } }
 
 .energy-meter-reading-strip { display:grid; width:100%; min-height:92px; margin:12px 0; padding:12px 16px; grid-template-columns:48px minmax(0,1.25fr) minmax(0,1fr) auto; align-items:center; gap:16px; border:1px solid var(--hmh-border); border-radius:18px; color:var(--hmh-text); text-align:left; white-space:normal; background:var(--hmh-surface); box-shadow:0 8px 24px rgba(24,39,61,.08); }
 .energy-meter-reading-strip:hover { border-color:color-mix(in srgb,var(--hmh-accent) 52%,var(--hmh-border)); }

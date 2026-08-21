@@ -268,8 +268,14 @@ class EnergyLayoutTest(unittest.TestCase):
             '"Нет показаний"',
             "energy-meter-reading-strip",
             "openEnergyDetails(panel)",
+            "appendMeterOdometer(deps, display, meter.reading.currentKwh)",
+            '"Передайте следующее показание, чтобы увидеть расход."',
         ):
             self.assertIn(snippet, js)
+        self.assertNotIn('"Расход цикла"', js.split("export function renderEnergyOverviewCard", 1)[1].split("function renderEnergyHistory", 1)[0])
+        css = read(ENERGY_CSS)
+        self.assertIn("energy-odometer-wheel", css)
+        self.assertIn("energy-meter-roll", css)
 
     def test_energy_details_open_as_accessible_modal(self) -> None:
         js = read(ENERGY_JS)
