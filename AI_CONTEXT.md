@@ -4,6 +4,14 @@ Last updated: 2026-08-21 (HACS 1.52.129 паритет климата, merge bac
 
 ## Current work
 
+- 2026-08-21 (Codex): HACS `v1.52.131` опубликован и установлен в production.
+  Release commit/tag `6094da0`, GitHub Release без assets. Выпуск возвращает
+  белые карточки меню в светлой теме, активный пункт остаётся светло-голубым.
+  Полный `check_local_release.py` зелёный. Перед deploy создан full backup
+  `aba7f6a4`; после одного restart Core update entity сообщает
+  installed/latest `v1.52.131`, панель отвечает 200, 10 сущностей интеграции
+  доступны, ошибок `custom_components.hausman_hub` в системном журнале нет.
+
 - 2026-08-21 (Codex): commit `8ad91de` возвращает светлой теме белые
   карточки пунктов меню. Активный пункт остаётся светло-голубым. Два
   профильных теста панели зелёные. Релиз, push и deploy не выполнялись.
