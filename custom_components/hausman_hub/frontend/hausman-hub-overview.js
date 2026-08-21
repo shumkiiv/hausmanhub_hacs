@@ -1,9 +1,9 @@
-import { createHeroRoomNavigation } from "./hausman-hub-hero-room-navigation.js?v=1.52.131";
-import { overviewHeroRenderKey, stableOverviewHeroImage } from "./hausman-hub-overview-hero-state.js?v=1.52.131";
-import { renderHomeTargetCard } from "./hausman-hub-climate-overview.js?v=1.52.131";
-import { scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.131";
-import { openUpcomingEventsModal } from "./hausman-hub-overview-events-modal.js?v=1.52.131";
-import { renderOverviewSideCards } from "./hausman-hub-overview-side.js?v=1.52.131";
+import { createHeroRoomNavigation } from "./hausman-hub-hero-room-navigation.js?v=1.52.132";
+import { overviewHeroRenderKey, overviewHomeName, stableOverviewHeroImage } from "./hausman-hub-overview-hero-state.js?v=1.52.132";
+import { renderHomeTargetCard } from "./hausman-hub-climate-overview.js?v=1.52.132";
+import { scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.132";
+import { openUpcomingEventsModal } from "./hausman-hub-overview-events-modal.js?v=1.52.132";
+import { renderOverviewSideCards } from "./hausman-hub-overview-side.js?v=1.52.132";
 
 const CLIMATE_DOMAINS = new Set(["climate", "humidifier", "fan"]);
 
@@ -117,7 +117,7 @@ export function renderOverviewHero(panel, container, readiness, deps) {
   hero.appendChild(media);
   const overlay = el("div", "overview-canon-hero-overlay");
   const copy = el("div", "overview-canon-hero-copy");
-  const homeName = dashboard.summary && dashboard.summary.homeName || "Дом";
+  const homeName = overviewHomeName(dashboard);
   const eyebrow = el("span", "overview-canon-eyebrow");
   const title = el("h1");
   copy.appendChild(eyebrow);

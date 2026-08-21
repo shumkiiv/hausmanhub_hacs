@@ -1795,6 +1795,34 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
+    def test_overview_replaces_generic_home_assistant_name_with_home(self) -> None:
+        payloads = dict(GET_PATHS)
+        payloads["hausman_hub/v1/admin/panel"] = {
+            **PANEL_PAYLOAD,
+            "readiness": {"status": "ready", "bridge_mode": "native", "reasons": []},
+        }
+        payloads["hausman_hub/v1/dashboard"] = {
+            "summary": {"homeName": "Home Assistant"},
+            "rooms": [],
+            "devices": [],
+            "alarms": [],
+            "scenarios": [],
+            "weather": {},
+        }
+        script = panel_script(
+            payloads,
+            {},
+            """
+        const overview = panel._shell.sectionNodes.overview;
+        const heroTitle = findAll(overview, (node) => node.tagName === "H1")[0];
+        if (!heroTitle || heroTitle.textContent !== "Дом") {
+          throw new Error("generic Home Assistant name leaked into Hero");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
     def test_overview_groups_offline_devices_into_one_attention_action(self) -> None:
         payloads = dict(GET_PATHS)
         payloads["hausman_hub/v1/admin/panel"] = {
@@ -4182,7 +4210,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.131")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.132")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

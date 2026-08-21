@@ -1,10 +1,15 @@
-import { roomHeroImage } from "./hausman-hub-room-icons.js?v=1.52.131";
+import { roomHeroImage } from "./hausman-hub-room-icons.js?v=1.52.132";
 
 function heroSummary(dashboard) {
   const summary = dashboard?.summary && typeof dashboard.summary === "object"
     ? dashboard.summary : {};
   const weatherCondition = summary.weatherCondition || dashboard?.weather?.condition || "";
   return { ...summary, weatherCondition };
+}
+
+export function overviewHomeName(dashboard) {
+  const homeName = String(dashboard?.summary?.homeName || "").trim();
+  return /^(home\s*assistant|homeassistant)$/i.test(homeName) ? "Дом" : (homeName || "Дом");
 }
 
 export function stableOverviewHeroImage(panel, room, dashboard) {
@@ -62,7 +67,7 @@ export function overviewHeroRenderKey(panel, readiness) {
   const selectedRoom = rooms.find((room) => room.id === panel._overviewHeroRoomId) || null;
   return JSON.stringify({
     readiness: readiness?.status || "not_ready",
-    homeName: dashboard.summary?.homeName || "Дом",
+    homeName: overviewHomeName(dashboard),
     image: stableOverviewHeroImage(panel, selectedRoom, dashboard),
     selectedRoomId: selectedRoom?.id || null,
     rooms: rooms.map((room) => ({
