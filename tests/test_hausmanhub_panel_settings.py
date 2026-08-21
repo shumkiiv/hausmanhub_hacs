@@ -18,6 +18,7 @@ PANEL_JS = (
 PANEL_CSS = PANEL_JS.with_name("hausman-hub-panel.css")
 HOME_SECTIONS_JS = PANEL_JS.with_name("hausman-hub-home-sections.js")
 CLIMATE_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-climate-overview.js")
+CLIMATE_SIDE_JS = PANEL_JS.with_name("hausman-hub-climate-side.js")
 LIGHTING_SIDE_JS = PANEL_JS.with_name("hausman-hub-lighting-side.js")
 LIGHTING_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-lighting.js")
 ROOMS_SIDE_JS = PANEL_JS.with_name("hausman-hub-rooms-side.js")
@@ -526,6 +527,10 @@ def panel_script(
       vm.runInThisContext(
         fs.readFileSync({str(MODAL_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(MODAL_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(CLIMATE_SIDE_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
+        {{ filename: {str(CLIMATE_SIDE_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(CLIMATE_OVERVIEW_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
@@ -2012,20 +2017,27 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         for (const label of [
           "Климат по комнатам", "Комнаты и цели",
           "Кондиционеры", "Термоголовки", "Тёплый пол", "Увлажнители",
-          "Очистители", "Вытяжки", "Гостиная", "Детская", "24.5 °C", "46 %",
+          "Очистители", "Вытяжки", "Гостиная", "Детская", "24.5°", "46% влажн.",
           "Кабинет",
         ]) {
           if (!text.includes(label)) throw new Error("climate tablet text missing: " + label + " :: " + text);
         }
-        const roomTabs = findAll(climate, (node) =>
-          String(node.className).split(" ").includes("climate-room-tab"));
-        if (roomTabs.length !== 3) throw new Error("climate room tabs mismatch: " + roomTabs.length);
-        roomTabs.find((node) => textOf(node).includes("Кабинет")).fire("click");
-        const officeText = textOf(climate);
-        if (!officeText.includes("Нет данных") || !officeText.includes("Цель не задана")) {
-          throw new Error("climate room tab did not switch the focus card: " + officeText);
+        const roomCards = findAll(climate, (node) =>
+          String(node.className).split(" ").includes("hh-climate-room-card"));
+        if (roomCards.length !== 3) throw new Error("climate room cards mismatch: " + roomCards.length);
+        const office = roomCards.find((node) => textOf(node).includes("Кабинет"));
+        const officeText = textOf(office);
+        if (!officeText.includes("Нет данных") || !officeText.includes("Цели · не заданы")) {
+          throw new Error("climate room card did not render the office without readings: " + officeText);
         }
-        roomTabs.find((node) => textOf(node).includes("Гостиная")).fire("click");
+        const searchField = findAll(climate, (node) =>
+          String(node.className).split(" ").includes("hh-climate-room-search"))[0];
+        if (!searchField) throw new Error("climate room search is missing");
+        const filterTabs = findAll(climate, (node) =>
+          String(node.className).split(" ").includes("climate-mode-tab"));
+        if (filterTabs.length !== 4 || !filterTabs.some((node) => textOf(node) === "Без связи")) {
+          throw new Error("climate room filters mismatch");
+        }
         if (text.includes("0 °C") || text.includes("0 %")) {
           throw new Error("null climate reading was coerced to zero: " + text);
         }
@@ -2129,7 +2141,17 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         await tick();
         panel._shell.tabs.climate.fire("click");
         const climate = panel._shell.climateOverview;
-        const toggles = findAll(climate, (node) =>
+        const roomCard = findAll(climate, (node) =>
+          String(node.className).split(" ").includes("hh-climate-room-card")
+          && textOf(node).includes("Гостиная"))[0];
+        if (!roomCard) throw new Error("climate room card is missing");
+        roomCard.fire("click");
+        const sheet = findAll(climate, (node) =>
+          String(node.className).split(" ").includes("climate-device-sheet"))[0];
+        if (!sheet || !textOf(sheet).includes("Климатический контур")) {
+          throw new Error("room climate sheet did not open the contour section");
+        }
+        const toggles = findAll(sheet, (node) =>
           String(node.className).split(" ").includes("climate-device-mode"));
         if (toggles.length !== 2) throw new Error("device mode actions are missing");
         const manualList = findAll(climate, (node) =>
@@ -2157,7 +2179,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
         source = CLIMATE_OVERVIEW_JS.read_text(encoding="utf-8")
-        self.assertIn("Комната «${room.name}» полностью перейдёт", source)
+        self.assertIn("Комната «${roomName}» полностью перейдёт", source)
         self.assertIn("Сначала верните датчик", source)
         self.assertIn('svgIcon("manual")', source)
         self.assertIn("Есть ручное устройство", source)
@@ -4094,7 +4116,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.125")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.128")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

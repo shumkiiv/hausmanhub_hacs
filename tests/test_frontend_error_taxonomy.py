@@ -204,6 +204,7 @@ class FrontendErrorTaxonomyTest(unittest.TestCase):
             .replace(/^import .*library-hero.*$/m, "const createLibraryHero = () => null;")
             .replace(/^import .*modal.*$/m, "const enhanceAppendedModal = () => null;")
             .replace(/^import .*room-icons.*$/m, 'const roomIconName = () => ""; const roomSvgIcon = () => null;')
+            .replace(/^import .*climate-side.*$/m, "const renderClimateSide = () => null;")
             .replace(/^import .*correlation.*$/m,
               `import { withCorrelationId } from "${correlationUrl}";`)
             .replace(/^import .*error-taxonomy.*$/m,
