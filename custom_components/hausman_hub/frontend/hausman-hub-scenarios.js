@@ -1,10 +1,10 @@
 /* Scenario library and editor shared with the Hausman Hub tablet contract. */
 
-import { activeElementWithin, trapModalTabKey } from "./hausman-hub-modal.js?v=1.52.129";
-import { scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.129";
-import { eventDataFromDraft, scenarioEditorIssues, scenarioEventFields, scenarioField, scenarioIconField, scenarioSelectField, scenarioToggle } from "./hausman-hub-scenario-fields.js?v=1.52.129";
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.129";
-import { scenarioCapabilityLabel, scenarioDeviceButton, scenarioDeviceFields, scenarioGroupForTarget, scenarioPhysicalGroups } from "./hausman-hub-scenario-device-picker.js?v=1.52.129";
+import { activeElementWithin, trapModalTabKey } from "./hausman-hub-modal.js?v=1.52.130";
+import { scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.130";
+import { eventDataFromDraft, scenarioEditorIssues, scenarioEventFields, scenarioField, scenarioIconField, scenarioSelectField, scenarioToggle } from "./hausman-hub-scenario-fields.js?v=1.52.130";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.130";
+import { scenarioCapabilityLabel, scenarioDeviceButton, scenarioDeviceFields, scenarioGroupForTarget, scenarioPhysicalGroups } from "./hausman-hub-scenario-device-picker.js?v=1.52.130";
 
 const TRIGGER_TYPES = [
   ["manual", "Ручной запуск"], ["time", "По времени"],

@@ -276,6 +276,8 @@ class EnergyLayoutTest(unittest.TestCase):
         css = read(ENERGY_CSS)
         self.assertIn("energy-odometer-wheel", css)
         self.assertIn("energy-meter-roll", css)
+        self.assertIn(".energy-overview-settings { color:#fff", css)
+        self.assertIn(".energy-overview-settings:not(:disabled):hover { color:#fff", css)
 
     def test_energy_details_open_as_accessible_modal(self) -> None:
         js = read(ENERGY_JS)
