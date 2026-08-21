@@ -4,6 +4,15 @@ Last updated: 2026-08-21 (HACS 1.52.129 паритет климата, merge bac
 
 ## Current work
 
+- 2026-08-21 (Codex): P0 визуального аудита Dashboard реализован только в
+  HACS frontend, commit `7d48306`. Hero больше не показывает технические
+  счётчики комнат и устройств, offline и readiness собраны в один явный
+  attention-блок, а климат и управление общей целью объединены в одну
+  карточку. Вторичный текст увеличен, мягкий amber используется для attention.
+  Проверки: `python3 -m pytest -q tests/test_hausmanhub_panel.py` - 31 passed,
+  50 subtests; ключевые UI-сценарии Dashboard зелёные. Release, push и deploy
+  не выполнялись.
+
 - 2026-08-21 (Codex): HACS `v1.52.131` опубликован и установлен в production.
   Release commit/tag `6094da0`, GitHub Release без assets. Выпуск возвращает
   белые карточки меню в светлой теме, активный пункт остаётся светло-голубым.
