@@ -1,10 +1,9 @@
 # Current Work
 
-## 2026-08-21: главная и киоск HACS как на планшете
+## 2026-08-21: HACS 1.52.133, главная и киоск как на планшете
 
 - Изменён только HACS frontend. Android использовался как read-only
-  визуальный эталон; backend, API, contracts, storage и production не
-  затрагивались.
+  визуальный эталон; backend, API, contracts и storage не затрагивались.
 - Главная повторяет планшетную геометрию на 1280x800: раскрытый rail 176 px,
   свёрнутый 72 px, правая колонка 194 px, шапка 88 px, Hero 225 px,
   метрики 196 px, сценарии 119 px и нижние карточки 124 px. На 1600x1000
@@ -25,7 +24,21 @@
   совпадают, overflow и runtime errors отсутствуют. `git diff --check` и
   `node --check` зелёные. Full `python3 -m pytest -q`: 1548 passed,
   4 skipped, 984 subtests.
-- Версия остаётся `1.52.132`. Release, push и deploy не выполнялись.
+- Feature commits `e69d482`, `c24b339`; release commit/tag `b69d84c`.
+  GitHub Release без assets:
+  https://github.com/shumkiiv/hausmanhub_hacs/releases/tag/v1.52.133.
+- Полный pytest до выпуска: 1548 passed, 4 skipped, 984 subtests. Staged
+  `python3 tools/check_local_release.py`: 1546 passed, 4 skipped. GitHub
+  Actions `32507160930` завершён успешно.
+- Перед deploy создан защищённый full backup `a2c07631` одновременно в
+  local и KeeneticSSD. HACS установлен явной `v1.52.133`, `check_config`
+  успешен, Core перезапущен один раз.
+- После restart installed/latest равны `v1.52.133`, panel отвечает 200 и
+  содержит cache version `1.52.133`. Все 31 изменённый frontend asset на
+  production побайтово совпадает с release. Доступны 10 сущностей
+  интеграции, unavailable среди них нет, ошибок интеграции в журнале нет.
+  Два WARNING являются штатным сообщением Home Assistant о custom
+  integration. Откат доступен через backup `a2c07631`.
 
 ## 2026-08-21: Dashboard HACS по новому референсу
 
