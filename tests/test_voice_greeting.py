@@ -24,6 +24,7 @@ from custom_components.hausman_hub.application.voice_greeting_service import (
 from custom_components.hausman_hub.application.voice_summary import (
     air_quality_label,
     build_greeting_speech,
+    split_speech,
 )
 
 
@@ -76,6 +77,13 @@ class _Gateway:
         }
         self.conversation_answer: str | None = "Ответ от Home Assistant"
         self.conversation_fail = False
+        self.outdoor: dict[str, object] | None = {
+            "temperatureC": -14.0,
+            "condition": "snow",
+        }
+
+    async def async_outdoor_weather(self) -> dict[str, object] | None:
+        return deepcopy(self.outdoor)
 
     async def async_stations(self) -> list[dict[str, object]]:
         return deepcopy(self.stations)
@@ -159,6 +167,56 @@ class VoiceGreetingServiceTest(unittest.IsolatedAsyncioTestCase):
         settings["delaySeconds"] = 61
         with self.assertRaises(VoiceGreetingViolation):
             validate_voice_greeting_settings(settings)
+
+        settings = default_voice_greeting_settings()
+        settings["summaryStyle"] = "poetic"
+        with self.assertRaises(VoiceGreetingViolation):
+            validate_voice_greeting_settings(settings)
+
+        settings = default_voice_greeting_settings()
+        settings["summaryItems"] = [
+            "temperature", "humidity", "air_quality", "security", "outdoor",
+            "low_battery",
+        ]
+        validated = validate_voice_greeting_settings(settings)
+        self.assertEqual(6, len(validated["summaryItems"]))
+
+        settings["summaryItems"].append("temperature")
+        with self.assertRaises(VoiceGreetingViolation):
+            validate_voice_greeting_settings(settings)
+
+    async def test_stored_document_without_style_gets_human_default(self) -> None:
+        legacy = default_voice_greeting_settings()
+        del legacy["summaryStyle"]
+        validated = validate_voice_greeting_settings(legacy)
+        self.assertEqual("human", validated["summaryStyle"])
+
+        document = {
+            "contract": {"name": "hausman-hub-voice-greeting-config", "version": 1},
+            "revision": 2,
+            "updatedAt": "2026-08-05T06:30:00Z",
+            "settings": legacy,
+        }
+        stored = validate_stored_document(document)
+        self.assertEqual("human", stored["settings"]["summaryStyle"])
+
+    async def test_watcher_speaks_long_summary_in_chunks(self) -> None:
+        settings = self._enabled_settings()
+        settings["greetingText"] = "Добро пожаловать домой, " + "очень " * 24
+        settings["summaryItems"] = [
+            "temperature", "humidity", "air_quality", "security", "outdoor",
+            "low_battery",
+        ]
+        await self.service.async_replace(0, settings)
+        self.gateway.security["lowBatteries"] = ["Датчик двери 12 процентов"]
+
+        receipt = await self.service.async_home_mode_changed("on", "off")
+        self.assertEqual("spoken", receipt["code"])
+        self.assertGreater(len(self.gateway.spoken), 1)
+        for _, chunk in self.gateway.spoken:
+            self.assertLessEqual(len(chunk), 180)
+        # Chunk pauses follow the initial delaySeconds wait.
+        self.assertEqual([3.0] + [0.6] * (len(self.gateway.spoken) - 1), self.sleeps)
 
     async def test_replace_is_atomic_and_emits_saved_receipt(self) -> None:
         saved = await self.service.async_replace(0, self._enabled_settings())
@@ -255,10 +313,11 @@ class VoiceGreetingServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("spoken", receipt["code"])
         self.assertEqual([3.0], self.sleeps)
         self.assertEqual(1, len(self.gateway.spoken))
-        entity_id, text = self.gateway.spoken[0]
+        entity_id = self.gateway.spoken[0][0]
+        text = " ".join(part for _, part in self.gateway.spoken)
         self.assertEqual("media_player.yandex_station_demo", entity_id)
         self.assertIn("Добро пожаловать домой", text)
-        self.assertIn("24,5", text)
+        self.assertIn("В доме тепло", text)
         operations = [op for _, op in self.receipts]
         self.assertEqual(
             ["voice.yandexGreeting.scheduled", "voice.yandexGreeting.run"], operations
@@ -376,6 +435,7 @@ class VoiceGreetingServiceTest(unittest.IsolatedAsyncioTestCase):
 class VoiceSummaryTest(unittest.TestCase):
     def test_summary_blocks_and_follow_up(self) -> None:
         settings = default_voice_greeting_settings()
+        settings["summaryStyle"] = "numbers"
         settings["followUpEnabled"] = True
         settings["homeQuestionsEnabled"] = True
         speech = build_greeting_speech(
@@ -392,6 +452,90 @@ class VoiceSummaryTest(unittest.TestCase):
         self.assertIn("612 ppm", speech)
         self.assertIn("Безопасность в порядке", speech)
         self.assertTrue(speech.endswith("Что ещё рассказать."))
+
+    def test_human_style_speaks_plain_phrases(self) -> None:
+        settings = default_voice_greeting_settings()
+        settings["summaryItems"] = ["temperature", "humidity", "air_quality"]
+        speech = build_greeting_speech(
+            settings,
+            rooms=[
+                {"roomName": "Гостиная", "temperatureC": 24.5, "humidityPercent": 44.0},
+                {"roomName": "Кухня", "temperatureC": 25.1, "humidityPercent": 41.0},
+            ],
+            co2_ppm=612,
+            leaks=[],
+            openings=[],
+            hazards=[],
+        )
+        self.assertIn("В доме тепло", speech)
+        self.assertIn("Влажность в норме", speech)
+        self.assertIn("Воздух свежий", speech)
+        self.assertNotIn("612 ppm", speech)
+
+        speech = build_greeting_speech(
+            settings,
+            rooms=[{"roomName": "Гостиная", "temperatureC": 27.2, "humidityPercent": 35.0}],
+            co2_ppm=1500,
+            leaks=[],
+            openings=[],
+            hazards=[],
+        )
+        self.assertIn("в Гостиная 27,2", speech.replace("в Гостиной", "в Гостиная"))
+        self.assertIn("Воздух сухой", speech)
+        self.assertIn("Стоит проветрить", speech)
+
+    def test_outdoor_and_low_battery_blocks(self) -> None:
+        settings = default_voice_greeting_settings()
+        settings["summaryItems"] = ["outdoor", "low_battery"]
+        speech = build_greeting_speech(
+            settings,
+            rooms=[],
+            co2_ppm=None,
+            leaks=[],
+            openings=[],
+            hazards=[],
+            outdoor={"temperatureC": -14.0, "condition": "snow"},
+            low_batteries=["Датчик двери 12 процентов"],
+        )
+        self.assertIn("На улице минус 14 градусов, снег", speech)
+        self.assertIn("Пора заменить батареи: Датчик двери 12 процентов", speech)
+
+        speech = build_greeting_speech(
+            settings,
+            rooms=[],
+            co2_ppm=None,
+            leaks=[],
+            openings=[],
+            hazards=[],
+            outdoor={"temperatureC": 21.5, "condition": "clear-night"},
+            low_batteries=[],
+        )
+        self.assertIn("На улице 21,5 градуса, ясно", speech)
+        self.assertIn("Батареи устройств в норме", speech)
+
+        speech = build_greeting_speech(
+            settings,
+            rooms=[],
+            co2_ppm=None,
+            leaks=[],
+            openings=[],
+            hazards=[],
+            outdoor=None,
+            include_greeting=False,
+        )
+        self.assertNotIn("На улице", speech)
+
+    def test_split_speech_chunks_long_text_on_sentences(self) -> None:
+        text = ". ".join(f"Фраза номер {index} " + "x" * 60 for index in range(8)) + "."
+        chunks = split_speech(text, 180)
+        self.assertGreater(len(chunks), 1)
+        for chunk in chunks:
+            self.assertLessEqual(len(chunk), 180)
+        self.assertEqual(text, " ".join(chunks))
+
+        single = " ".join(["длинное"] * 60)
+        for chunk in split_speech(single, 180):
+            self.assertLessEqual(len(chunk), 180)
 
     def test_security_problems_are_spoken_first_class(self) -> None:
         settings = default_voice_greeting_settings()

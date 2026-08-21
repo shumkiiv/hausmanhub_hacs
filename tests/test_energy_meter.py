@@ -190,3 +190,95 @@ class EnergyMeterServiceTest(unittest.IsolatedAsyncioTestCase):
         await restored.async_load()
         self.assertEqual(43.25, restored.document(11.25)["reading"]["currentKwh"])
         self.assertEqual(1, restored.document(11.25)["revision"])
+
+    async def test_multi_source_binding_sums_totals_and_mirrors_first(self) -> None:
+        first = "device_0123456789abcdef"
+        second = "device_fedcba9876543210"
+        configured = await self.service.async_action(
+            {
+                "expectedRevision": 0,
+                "action": "configure",
+                "settings": {
+                    "enabled": True,
+                    "submissionDayOfMonth": 25,
+                    "reminderDaysBefore": 3,
+                    "sourceDeviceIds": [first, second],
+                },
+            },
+            327.49,
+            f"{first}|{second}",
+            first,
+            "Вводной автомат",
+            [
+                {"deviceId": first, "name": "Вводной автомат", "available": True,
+                 "currentTotalKwh": 276.46},
+                {"deviceId": second, "name": "Гараж", "available": True,
+                 "currentTotalKwh": 51.03},
+            ],
+        )
+        self.assertEqual([first, second], configured["settings"]["sourceDeviceIds"])
+        self.assertEqual(first, configured["settings"]["sourceDeviceId"])
+        self.assertEqual([first, second], self.service.source_device_ids)
+        sources = configured["source"]["sources"]
+        self.assertEqual(2, len(sources))
+        self.assertEqual("Гараж", sources[1]["name"])
+        self.assertEqual(51.03, sources[1]["currentTotalKwh"])
+
+        submitted = await self.service.async_action(
+            {"expectedRevision": 1, "action": "submit", "readingKwh": 18342.4},
+            327.49,
+            f"{first}|{second}",
+            first,
+            "Вводной автомат",
+        )
+        projected = self.service.document(340.0, f"{first}|{second}")
+        self.assertEqual(18354.91, projected["reading"]["currentKwh"])
+        self.assertEqual(12.51, projected["cycle"]["consumptionKwh"])
+        self.assertEqual("available", submitted["source"]["state"])
+
+        # Изменение состава источников - это смена сигнатуры, честный reset.
+        changed = self.service.document(340.0, f"{first}|device_0000000000000001")
+        self.assertEqual("reset_detected", changed["source"]["state"])
+        self.assertIsNone(changed["cycle"]["consumptionKwh"])
+
+    async def test_multi_source_settings_validation_fails_closed(self) -> None:
+        for broken in (
+            {"sourceDeviceIds": "device_0123456789abcdef"},
+            {"sourceDeviceIds": ["device_0123456789abcdef"] * 2},
+            {"sourceDeviceIds": ["not_a_device"]},
+            {"sourceDeviceIds": [f"device_{index:016x}" for index in range(17)]},
+        ):
+            settings = {
+                "enabled": True,
+                "submissionDayOfMonth": 25,
+                "reminderDaysBefore": 3,
+                **broken,
+            }
+            with self.assertRaises(EnergyMeterViolation):
+                await self.service.async_action(
+                    {"expectedRevision": 0, "action": "configure", "settings": settings},
+                    None,
+                )
+
+    async def test_legacy_single_source_migrates_into_the_ids_list(self) -> None:
+        legacy = {
+            "revision": 1,
+            "updatedAt": "2026-08-11T01:02:00Z",
+            "settings": {
+                "enabled": True,
+                "submissionDayOfMonth": 25,
+                "reminderDaysBefore": 3,
+                "sourceDeviceId": "device_0123456789abcdef",
+            },
+            "anchor": None,
+            "cycle": None,
+            "lastSubmissionDate": None,
+            "history": [],
+        }
+        restored = EnergyMeterService(_Store(legacy), local_today=lambda: self.today)
+        await restored.async_load()
+        self.assertEqual(
+            ["device_0123456789abcdef"],
+            restored.document(None)["settings"]["sourceDeviceIds"],
+        )
+        self.assertEqual(["device_0123456789abcdef"], restored.source_device_ids)

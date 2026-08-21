@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, patch
 from custom_components.hausman_hub.application.scenario_executor import (
     ScenarioExecutor,
     _device_action_confirmed,
+    _display_device_name,
     _normalize_action_value,
     _number_range_error,
     _solar_curve_brightness,
@@ -792,6 +793,8 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(receipt["confirmed"])
         self.assertEqual("confirmed", receipt["status"])
         self.assertEqual("on", receipt["observedState"])
+        # Решение владельца 2026-08-20: квитанция называет устройство по имени.
+        self.assertEqual("Light: новое состояние подтверждено.", receipt["message"])
         self.hass.services.async_call.assert_awaited_once_with(
             "light", "turn_on", {"entity_id": "light.living_room"}, blocking=True
         )
@@ -819,10 +822,31 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(receipt["confirmed"])
         self.assertEqual("accepted", receipt["status"])
         self.assertEqual("Проверяется", receipt["statusName"])
+        self.assertEqual(
+            "Light: команда принята, состояние ещё не подтверждено.",
+            receipt["message"],
+        )
         self.assertEqual(20, receipt["confirmationWindowMs"])
         self.assertTrue(receipt["readBack"]["attempted"])
         self.assertFalse(receipt["readBack"]["matched"])
         self.assertEqual("state_not_confirmed", receipt["reason"])
+
+    def test_display_device_name_collapses_registry_duplicates(self) -> None:
+        # Zigbee2MQTT повторяет имя устройства в friendly_name, а каталог
+        # добавляет его же через « · » - в сообщениях остаётся один экземпляр.
+        self.assertEqual(
+            "Люстра тамбур",
+            _display_device_name("Люстра тамбур · Люстра тамбур Люстра тамбур"),
+        )
+        self.assertEqual(
+            "Люстра тамбур",
+            _display_device_name("Люстра тамбур Люстра тамбур"),
+        )
+        self.assertEqual(
+            "Датчик протечки · Ванная",
+            _display_device_name("Датчик протечки · Ванная"),
+        )
+        self.assertEqual("Устройство", _display_device_name("Устройство"))
 
     def test_extended_value_actions_use_typed_ha_parameters(self) -> None:
         self.assertEqual(

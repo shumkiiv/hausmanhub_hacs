@@ -80,6 +80,23 @@ def _notify(rule_id: str, message: str) -> dict[str, object]:
     return {"id": rule_id, "type": "notification", "message": message}
 
 
+def _with_target_names(
+    items: tuple[Mapping[str, object], ...] | list[Mapping[str, object]],
+    catalog: ScenarioCatalog,
+) -> list[Mapping[str, object]]:
+    """Подставить targetName из живого каталога в шаги с targetId."""
+
+    enriched: list[Mapping[str, object]] = []
+    for item in items:
+        target_id = item.get("targetId")
+        if isinstance(target_id, str) and "targetName" not in item:
+            device = catalog.device(target_id)
+            if device is not None and device.name:
+                item = {**item, "targetName": device.name}
+        enriched.append(item)
+    return enriched
+
+
 # --- Каталог сущностей этого дома (снимок 2026-08-20) ---
 
 COVER_LIVING = "cover.shtory_gostinaia"
@@ -177,9 +194,12 @@ class SystemScenarioSeed:
             "definition": {
                 "version": 1,
                 "executionMode": self.execution_mode,
-                "triggers": list(self.triggers),
-                "conditions": list(self.conditions),
-                "actions": actions,
+                # Решение владельца 2026-08-20: имена устройств подставляются из
+                # живого каталога, чтобы лента активности и редактор показывали
+                # «Люстра кухни: выключить», а не безликое «Устройство: ...».
+                "triggers": _with_target_names(self.triggers, catalog),
+                "conditions": _with_target_names(self.conditions, catalog),
+                "actions": _with_target_names(actions, catalog),
             },
         }
 
