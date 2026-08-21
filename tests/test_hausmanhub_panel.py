@@ -104,7 +104,8 @@ MAX_NAVIGATION_JS_BYTES = 16 * 1024
 MAX_ENERGY_JS_BYTES = 37 * 1024
 MAX_MEDIA_DEVICE_JS_BYTES = 14 * 1024
 MAX_SCENARIOS_JS_BYTES = 42 * 1024
-MAX_PANEL_CSS_BYTES = 56 * 1024
+# Navigation rail and tablet-parity surfaces are split into imported modules.
+MAX_PANEL_CSS_BYTES = 57 * 1024
 MAX_SETTINGS_CSS_BYTES = 24 * 1024
 
 
@@ -880,6 +881,8 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn(".page-header { display:none; }", styles)
         self.assertIn("main.setup-shell { grid-template-columns:minmax(0,1fr); }", styles)
         self.assertIn("main.setup-shell > :not(.app-sidebar) { grid-column:1; }", styles)
+        self.assertIn(":host(.theme-light) .tab { border-color:#E1E8F1; background:#FFFFFF", styles)
+        self.assertIn(":host(.theme-light) .tab[aria-current=\"page\"] { border-color:#D8E8F8; background:#E4F0FC", styles)
         self.assertIn("main.setup-shell .page-header { display:flex; }", styles)
         self.assertIn(".inventory-device-card { container-type:inline-size;", catalog_styles)
         self.assertIn(".device-value-action > span { grid-column:1 / -1;", catalog_styles)
