@@ -15,6 +15,7 @@ from typing import Any, Awaitable, Callable, Protocol, Sequence
 
 from .voice_dialog import dialog_answer
 from .voice_greeting import (
+    MAX_TEXT_LENGTH,
     VoiceGreetingViolation,
     default_voice_greeting_settings,
     greeting_document,
@@ -23,7 +24,10 @@ from .voice_greeting import (
     validate_voice_test_request,
     voice_receipt,
 )
-from .voice_summary import build_greeting_speech
+from .voice_summary import build_greeting_speech, split_speech
+
+
+CHUNK_PAUSE_SECONDS = 0.6
 
 
 class VoiceGateway(Protocol):
@@ -40,6 +44,9 @@ class VoiceGateway(Protocol):
 
     async def async_security_state(self) -> dict[str, list[str]]:
         """Return leaks, openings, hazards, and lowBatteries name lists."""
+
+    async def async_outdoor_weather(self) -> dict[str, Any] | None:
+        """Return ``{"temperatureC": float|None, "condition": str|None}``."""
 
     async def async_conversation(self, text: str) -> str | None:
         """Answer ``text`` through Home Assistant conversation, or None."""
@@ -168,7 +175,7 @@ class VoiceGreetingService:
                 correlation_id=correlation_id,
             )
         try:
-            await self._gateway.async_say_text(station_id, validated["speechText"])
+            await self._speak(station_id, validated["speechText"])
         except Exception:
             return self._finish(
                 accepted=True, confirmed=False, code="provider_error",
@@ -281,7 +288,7 @@ class VoiceGreetingService:
                 operation="voice.yandexGreeting.run",
             )
         try:
-            await self._gateway.async_say_text(station_id, speech)
+            await self._speak(station_id, speech)
         except Exception:
             return self._finish(
                 accepted=True, confirmed=False, code="provider_error",
@@ -332,12 +339,30 @@ class VoiceGreetingService:
             leaks=snapshot["leaks"],
             openings=snapshot["openings"],
             hazards=snapshot["hazards"],
+            outdoor=snapshot["outdoor"],
+            low_batteries=snapshot["lowBatteries"],
             include_follow_up=include_follow_up,
         )
+
+    async def _speak(self, station_id: str, text: str) -> None:
+        """Speak ``text`` in chunks so the station never clips a long phrase."""
+
+        chunks = split_speech(text, MAX_TEXT_LENGTH)
+        for index, chunk in enumerate(chunks):
+            if index:
+                await self._sleep(CHUNK_PAUSE_SECONDS)
+            await self._gateway.async_say_text(station_id, chunk)
 
     async def _snapshot(self) -> dict[str, Any]:
         climate = await self._gateway.async_home_climate()
         security = await self._gateway.async_security_state()
+        outdoor = None
+        weather_probe = getattr(self._gateway, "async_outdoor_weather", None)
+        if weather_probe is not None:
+            try:
+                outdoor = await weather_probe()
+            except Exception:  # pragma: no cover - live diagnostics
+                outdoor = None
         return {
             "rooms": climate.get("rooms", ()),
             "co2Ppm": climate.get("co2Ppm"),
@@ -345,6 +370,7 @@ class VoiceGreetingService:
             "openings": security.get("openings", ()),
             "hazards": security.get("hazards", ()),
             "lowBatteries": security.get("lowBatteries", ()),
+            "outdoor": outdoor,
         }
 
     async def _station(self, entity_id: str) -> dict[str, Any] | None:

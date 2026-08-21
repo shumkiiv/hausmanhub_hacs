@@ -132,6 +132,21 @@ class HomeAssistantVoiceGateway:
             "lowBatteries": sorted(low_batteries),
         }
 
+    async def async_outdoor_weather(self) -> dict[str, Any] | None:
+        weather_states = sorted(
+            self._domain_states("weather"), key=lambda state: state.entity_id
+        )
+        for state in weather_states:
+            if state.state in _UNAVAILABLE:
+                continue
+            temperature = state.attributes.get("temperature")
+            try:
+                temperature_c = float(temperature) if temperature is not None else None
+            except (TypeError, ValueError):
+                temperature_c = None
+            return {"temperatureC": temperature_c, "condition": state.state}
+        return None
+
     async def async_conversation(self, text: str) -> str | None:
         response = await self._hass.services.async_call(
             "conversation",

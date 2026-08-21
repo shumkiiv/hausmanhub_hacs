@@ -4,24 +4,57 @@
   "title": "HausmanHub voice greeting config v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["contract", "revision", "updatedAt", "settings"],
+  "required": [
+    "contract",
+    "revision",
+    "updatedAt",
+    "settings"
+  ],
   "properties": {
     "contract": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "version"],
+      "required": [
+        "name",
+        "version"
+      ],
       "properties": {
-        "name": { "const": "hausman-hub-voice-greeting-config" },
-        "version": { "const": 1 }
+        "name": {
+          "const": "hausman-hub-voice-greeting-config"
+        },
+        "version": {
+          "const": 1
+        }
       }
     },
-    "revision": { "type": "integer", "minimum": 0 },
-    "updatedAt": { "type": "string", "format": "date-time" },
-    "settings": { "$ref": "#/$defs/settings" }
+    "revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "settings": {
+      "$ref": "#/$defs/settings"
+    }
   },
   "$defs": {
     "summaryItem": {
-      "enum": ["temperature", "humidity", "air_quality", "security"]
+      "enum": [
+        "temperature",
+        "humidity",
+        "air_quality",
+        "security",
+        "outdoor",
+        "low_battery"
+      ]
+    },
+    "summaryStyle": {
+      "enum": [
+        "numbers",
+        "human"
+      ]
     },
     "settings": {
       "type": "object",
@@ -37,29 +70,64 @@
         "homeQuestionsEnabled"
       ],
       "properties": {
-        "enabled": { "type": "boolean" },
+        "enabled": {
+          "type": "boolean"
+        },
         "stationEntityId": {
           "type": "string",
           "pattern": "^media_player\\.[a-z0-9_]+$",
           "maxLength": 128
         },
-        "delaySeconds": { "type": "integer", "minimum": 0, "maximum": 60 },
-        "greetingText": { "type": "string", "minLength": 1, "maxLength": 180 },
+        "delaySeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60
+        },
+        "greetingText": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 180
+        },
         "summaryItems": {
           "type": "array",
-          "items": { "$ref": "#/$defs/summaryItem" },
+          "items": {
+            "$ref": "#/$defs/summaryItem"
+          },
           "minItems": 1,
-          "maxItems": 4,
+          "maxItems": 6,
           "uniqueItems": true
         },
-        "followUpEnabled": { "type": "boolean" },
-        "followUpText": { "type": "string", "minLength": 1, "maxLength": 180 },
-        "homeQuestionsEnabled": { "type": "boolean" }
+        "summaryStyle": {
+          "$ref": "#/$defs/summaryStyle"
+        },
+        "followUpEnabled": {
+          "type": "boolean"
+        },
+        "followUpText": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 180
+        },
+        "homeQuestionsEnabled": {
+          "type": "boolean"
+        }
       },
       "allOf": [
         {
-          "if": { "properties": { "followUpEnabled": { "const": true } } },
-          "then": { "properties": { "homeQuestionsEnabled": { "const": true } } }
+          "if": {
+            "properties": {
+              "followUpEnabled": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "homeQuestionsEnabled": {
+                "const": true
+              }
+            }
+          }
         }
       ]
     }

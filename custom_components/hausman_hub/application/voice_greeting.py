@@ -25,7 +25,12 @@ VOICE_RECEIPT_CONTRACT_VERSION = 1
 DEFAULT_AWAY_ENTITY_ID = "input_boolean.away_from_home"
 MAX_TEXT_LENGTH = 180
 MAX_SPEECH_LENGTH = 512
-SUMMARY_ITEMS = frozenset({"temperature", "humidity", "air_quality", "security"})
+MAX_SUMMARY_ITEMS = 6
+SUMMARY_ITEMS = frozenset(
+    {"temperature", "humidity", "air_quality", "security", "outdoor", "low_battery"}
+)
+SUMMARY_STYLES = frozenset({"numbers", "human"})
+DEFAULT_SUMMARY_STYLE = "human"
 RECEIPT_CODES = frozenset(
     {
         "saved",
@@ -60,6 +65,7 @@ def default_voice_greeting_settings() -> dict[str, Any]:
         "delaySeconds": 3,
         "greetingText": "Добро пожаловать домой",
         "summaryItems": ["temperature", "humidity", "air_quality", "security"],
+        "summaryStyle": DEFAULT_SUMMARY_STYLE,
         "followUpEnabled": False,
         "followUpText": "Что ещё рассказать?",
         "homeQuestionsEnabled": False,
@@ -67,7 +73,7 @@ def default_voice_greeting_settings() -> dict[str, Any]:
 
 
 def validate_voice_greeting_settings(value: object) -> dict[str, Any]:
-    if not isinstance(value, dict) or set(value) != {
+    required = {
         "enabled",
         "stationEntityId",
         "delaySeconds",
@@ -76,9 +82,19 @@ def validate_voice_greeting_settings(value: object) -> dict[str, Any]:
         "followUpEnabled",
         "followUpText",
         "homeQuestionsEnabled",
-    }:
+    }
+    if (
+        not isinstance(value, dict)
+        or not required <= set(value)
+        or set(value) - required > {"summaryStyle"}
+    ):
         raise VoiceGreetingViolation("voice greeting settings fields are invalid")
     result = deepcopy(value)
+    # Documents saved before contracts 0.43.0 carry no summaryStyle; reading
+    # them must not fail, the default keeps the human phrasing.
+    style = result.setdefault("summaryStyle", DEFAULT_SUMMARY_STYLE)
+    if style not in SUMMARY_STYLES:
+        raise VoiceGreetingViolation("summaryStyle is invalid")
     for key in ("enabled", "followUpEnabled", "homeQuestionsEnabled"):
         _boolean(result[key], key)
     station = result["stationEntityId"]
@@ -95,7 +111,7 @@ def validate_voice_greeting_settings(value: object) -> dict[str, Any]:
     if (
         not isinstance(items, list)
         or not items
-        or len(items) > 4
+        or len(items) > MAX_SUMMARY_ITEMS
         or len(items) != len(set(items))
         or any(item not in SUMMARY_ITEMS for item in items)
     ):
@@ -141,7 +157,7 @@ def validate_voice_test_request(value: object) -> dict[str, Any]:
     items = result["summaryItems"]
     if (
         not isinstance(items, list)
-        or len(items) > 4
+        or len(items) > MAX_SUMMARY_ITEMS
         or len(items) != len(set(items))
         or any(item not in SUMMARY_ITEMS for item in items)
     ):
