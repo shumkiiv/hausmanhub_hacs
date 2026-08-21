@@ -9,7 +9,16 @@ function weatherLabel(condition) {
   })[String(condition || "").toLowerCase()] || "Погода уточняется";
 }
 
-/* Side column of the overview hero: weather, home state and latest activity cards. */
+function appendWeatherGlyph(card, condition, deps) {
+  const normalized = String(condition || "").toLowerCase();
+  const cloudy = !["sunny", "clear-night"].includes(normalized);
+  const glyph = deps.el("span", `overview-canon-weather-glyph${cloudy ? " is-cloudy" : ""}`);
+  glyph.appendChild(deps.svgIcon(normalized === "clear-night" ? "moon" : "sun"));
+  if (cloudy) glyph.appendChild(deps.el("span", "overview-canon-weather-cloud"));
+  card.appendChild(glyph);
+}
+
+/* Side column of the overview hero: weather and current home state. */
 export function renderOverviewSideCards(panel, dashboard, devices, deps) {
   const { el, svgIcon } = deps;
   const side = el("aside", "overview-canon-top-side");
@@ -18,8 +27,10 @@ export function renderOverviewSideCards(panel, dashboard, devices, deps) {
   weatherCard.type = "button";
   weatherCard.addEventListener("click", () => panel._activateSection("climate"));
   weatherCard.appendChild(el("span", "overview-canon-panel-label", "Погода"));
-  weatherCard.appendChild(el("strong", null, Number.isFinite(Number(weather.temperatureC)) ? panel._temp(weather.temperatureC) : "Нет данных"));
-  const weatherSupporting = [weatherLabel(weather.condition)];
+  appendWeatherGlyph(weatherCard, weather.condition, deps);
+  weatherCard.appendChild(el("strong", "overview-canon-weather-value", Number.isFinite(Number(weather.temperatureC)) ? panel._temp(weather.temperatureC) : "Нет данных"));
+  weatherCard.appendChild(el("span", "overview-canon-weather-condition", weatherLabel(weather.condition)));
+  const weatherSupporting = [];
   if (Number.isFinite(Number(weather.humidityPercent))) weatherSupporting.push(`влажность ${Math.round(Number(weather.humidityPercent))} %`);
   weatherSupporting.push(`ветер ${Number.isFinite(Number(weather.windSpeedMps)) ? `${Number(weather.windSpeedMps).toLocaleString("ru-RU")} м/с` : "—"}`);
   weatherCard.appendChild(el("span", "overview-canon-panel-supporting", weatherSupporting.join(" · ")));
@@ -55,8 +66,8 @@ export function renderOverviewSideCards(panel, dashboard, devices, deps) {
   const homeRows = el("span", "overview-canon-home-rows");
   [
     ["home", "Режим", (() => { const p = byCategory("presence", "occupancy")[0]; return p ? (p.state === "on" ? "Дома" : "Не дома") : "нет данных"; })()],
-    ["window", "Окна", openingsLabel(byCategory("window"))],
     ["door", "Двери", openingsLabel(byCategory("door", "opening"), locks)],
+    ["window", "Окна", openingsLabel(byCategory("window"))],
     ["shield", "Охрана", securityLabel],
   ].forEach(([icon, label, value]) => {
     const homeRow = el("span", `overview-canon-home-row${value === "нет данных" ? " is-empty" : ""}`);
@@ -67,27 +78,5 @@ export function renderOverviewSideCards(panel, dashboard, devices, deps) {
   });
   homeCard.appendChild(homeRows);
   side.appendChild(homeCard);
-  const activityEntries = Array.isArray(panel._activityFeed) ? panel._activityFeed.slice(0, 5) : [];
-  if (activityEntries.length) {
-    const activityCard = el("section", "overview-canon-top-card is-activity");
-    activityCard.appendChild(el("span", "overview-canon-panel-label", "Последняя активность"));
-    const activityList = el("span", "overview-canon-activity-list");
-    activityEntries.forEach((entry) => {
-      const activityRow = el("span", `overview-canon-activity-row${entry.alert ? " is-alert" : ""}`);
-      activityRow.appendChild(svgIcon(entry.icon || "bolt"));
-      const activityCopy = el("span", "overview-canon-activity-copy");
-      activityCopy.appendChild(el("strong", null, entry.title));
-      if (entry.text) activityCopy.appendChild(el("small", null, entry.text));
-      activityRow.appendChild(activityCopy);
-      activityRow.appendChild(el("small", "overview-canon-activity-time", activityTimeLabel(entry.at)));
-      activityList.appendChild(activityRow);
-    });
-    activityCard.appendChild(activityList);
-    const activityAll = el("button", "overview-canon-link", "Вся активность");
-    activityAll.type = "button";
-    activityAll.addEventListener("click", () => panel._activateSection("settings"));
-    activityCard.appendChild(activityAll);
-    side.appendChild(activityCard);
-  }
   return side;
 }

@@ -1,6 +1,6 @@
 import { renderEnergyHistoryChart } from "./hausman-hub-energy-chart.js?v=1.52.132";
 import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.132";
-import { loadEnergyMeter, meterConfigured, meterNumber, meterReminderText, renderEnergyMeterCard } from "./hausman-hub-energy-meter.js?v=1.52.132";
+import { loadEnergyMeter, meterConfigured, meterNumber, renderEnergyMeterCard } from "./hausman-hub-energy-meter.js?v=1.52.132";
 import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.132";
 import { mergeEnergyHistoryResponses, splitEnergyWindows } from "./hausman-hub-pagination.js?v=1.52.132";
 
@@ -50,11 +50,14 @@ function appendMeterOdometer(deps, container, readingKwh) {
   }
   const tenths = Math.round(value * 10);
   const whole = Math.floor(tenths / 10);
-  const digits = `${String(whole).padStart(6, "0")}${Math.abs(tenths % 10)}`;
+  const hasDecimal = Math.abs(value - Math.round(value)) > 0.0001;
+  const digits = hasDecimal
+    ? `${String(whole).padStart(6, "0")}${Math.abs(tenths % 10)}`
+    : String(Math.round(value)).padStart(6, "0");
   const counter = el("span", "energy-odometer");
   setAttr(counter, "aria-label", `${meterNumber(value, 1)} киловатт-часа`);
   [...digits].forEach((digit, index) => {
-    const wheel = el("span", `energy-odometer-wheel${index === digits.length - 1 ? " is-decimal" : ""}`);
+    const wheel = el("span", `energy-odometer-wheel${hasDecimal && index === digits.length - 1 ? " is-decimal" : ""}`);
     wheel.style.setProperty("--meter-digit-delay", `${index * 42}ms`);
     wheel.appendChild(el("span", "energy-odometer-digit", digit));
     counter.appendChild(wheel);
@@ -158,7 +161,7 @@ export function renderEnergyOverviewCard(panel, container, deps) {
   const icon = el("span", "energy-overview-icon");
   icon.appendChild(svgIcon("energy"));
   head.appendChild(icon);
-  head.appendChild(el("span", "assistant-field-label", "Показания энергии"));
+  head.appendChild(el("span", "assistant-field-label", "Энергия"));
   card.appendChild(head);
   const meter = panel._energyMeter;
   if (meterConfigured(meter)) {
@@ -167,11 +170,8 @@ export function renderEnergyOverviewCard(panel, container, deps) {
     const display = el("div", "energy-overview-meter-display");
     appendMeterOdometer(deps, display, meter.reading.currentKwh);
     reading.appendChild(display);
-    const cycleKnown = meter.cycle && meter.cycle.consumptionKwh !== null && meter.cycle.consumptionKwh !== undefined;
-    reading.appendChild(el("small", "energy-overview-meter-note", cycleKnown
-      ? `С последней передачи: ${meterNumber(meter.cycle.consumptionKwh)} кВт·ч`
-      : "Передайте следующее показание, чтобы увидеть расход."));
-    if (meter.reading.estimated) reading.appendChild(el("small", "energy-overview-meter-estimated", "Расчётное значение"));
+    reading.appendChild(el("small", "energy-overview-meter-note",
+      meter.reading.estimated ? "Расчётное значение" : "Переданное значение"));
     card.appendChild(reading);
   } else {
     const tile = (label, value, caption) => {
@@ -188,10 +188,8 @@ export function renderEnergyOverviewCard(panel, container, deps) {
       `${selectedSources(energy).length} источников${voltage}`));
     card.appendChild(metrics);
   }
-  const reminder = meterReminderText(panel._energyMeter);
-  if (reminder) card.appendChild(el("small", "energy-overview-reminder", reminder));
   const actions = el("div", "energy-overview-actions");
-  const open = el("button", "energy-overview-open", "Энергия");
+  const open = el("button", "energy-overview-open", "Подробнее");
   open.type = "button";
   open.addEventListener("click", () => panel._activateSection("energy"));
   actions.appendChild(open);

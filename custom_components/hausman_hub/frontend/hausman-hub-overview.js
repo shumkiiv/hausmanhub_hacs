@@ -75,11 +75,36 @@ function cardButton(deps, className, target, panel) {
   return card;
 }
 
-function appendMetric(deps, card, label, value, supporting) {
+function appendMetric(deps, card, label, value, supporting, iconMeta = null) {
   if (value === "Нет данных") card.classList.add("is-empty");
   card.appendChild(deps.el("span", "overview-canon-label", label));
+  if (iconMeta) {
+    const icon = deps.el("span", `overview-canon-card-icon is-${iconMeta.tone || "accent"}`);
+    icon.appendChild(deps.svgIcon(iconMeta.glyph));
+    card.appendChild(icon);
+  }
   card.appendChild(deps.el("strong", "overview-canon-value", value));
   card.appendChild(deps.el("span", "overview-canon-supporting", supporting));
+}
+
+function appendRoomChips(deps, card, devices) {
+  const names = Array.from(new Set(devices
+    .filter((device) => device.active === true && !device.unavailable)
+    .map((device) => String(device.roomName || "").trim())
+    .filter(Boolean))).slice(0, 2);
+  if (!names.length) return;
+  const chips = deps.el("span", "overview-canon-room-chips");
+  names.forEach((name) => chips.appendChild(deps.el("small", null, name)));
+  card.appendChild(chips);
+}
+
+function overviewCompactTemperature(value) {
+  if (!validNumber(value)) return "нет данных";
+  return `${Number(value).toFixed(1).replace(".0", "").replace(".", ",")}°`;
+}
+
+function overviewCompactHumidity(value) {
+  return validNumber(value) ? `${Math.round(Number(value))}%` : "нет данных";
 }
 
 export function overviewGreeting(now = new Date()) {
@@ -98,16 +123,20 @@ export function renderOverviewHero(panel, container, readiness, deps) {
   const devices = Array.isArray(dashboard.devices) ? dashboard.devices : [];
   container.innerHTML = "";
   const greeting = el("div", "overview-canon-greeting");
-  greeting.appendChild(el("h2", null, overviewGreeting()));
-  greeting.appendChild(el("span", "overview-canon-greeting-status",
+  const greetingCopy = el("div", "overview-canon-greeting-copy");
+  greetingCopy.appendChild(el("h2", null, overviewGreeting()));
+  greetingCopy.appendChild(el("span", `overview-canon-greeting-status is-${readinessStatus === "ready" ? "ready" : "attention"}`,
     readinessStatus === "ready" ? "Все системы работают штатно" : "Состояние обновляется"));
+  greeting.appendChild(greetingCopy);
   const upcomingTotal = upcomingEventsSorted(panel._upcomingEvents, 100).visible.length;
   const eventsButton = el("button", "overview-canon-events-button", `События · ${upcomingTotal}`);
   eventsButton.type = "button";
   eventsButton.addEventListener("click", () => openUpcomingEventsModal(panel, container, deps,
     upcomingEventsSorted(panel._upcomingEvents, 20).visible, appendUpcomingEventRow));
   greeting.appendChild(eventsButton);
-  container.appendChild(greeting);
+  const heading = el("div", "overview-canon-heading-grid");
+  heading.appendChild(greeting);
+  container.appendChild(heading);
   const selectedRoom = rooms.find((room) => room.id === panel._overviewHeroRoomId) || null;
   if (panel._overviewHeroRoomId && !selectedRoom) panel._overviewHeroRoomId = null;
   const hero = el("section", "overview-canon-hero");
@@ -160,10 +189,11 @@ export function renderOverviewHero(panel, container, readiness, deps) {
     }
     roomNavigation.setActive(room, animate);
     if (!room) {
-      eyebrow.textContent = "Дом";
+      eyebrow.textContent = "";
+      eyebrow.hidden = true;
       title.textContent = homeName;
       summary.textContent = readinessStatus === "ready"
-        ? "Главные состояния и быстрые действия собраны ниже."
+        ? "Комфорт и безопасность вашего дома"
         : "Обновляем состояние дома."
       details.hidden = false;
       details.textContent = "Подробнее о доме";
@@ -171,6 +201,7 @@ export function renderOverviewHero(panel, container, readiness, deps) {
       panel._overviewHeroRenderKey = overviewHeroRenderKey(panel, readiness);
       return;
     }
+    eyebrow.hidden = false;
     eyebrow.textContent = "Комната";
     title.textContent = room.name;
     summary.textContent = [
@@ -194,21 +225,36 @@ function renderPrimaryCards(panel, container, dashboard, deps) {
   const row = deps.el("div", "overview-canon-primary-grid");
   const climateCard = deps.el("section", "overview-canon-primary-card is-climate");
   const climateSummary = deps.el("div", "overview-canon-climate-summary");
+  const homeTemperature = average(rooms.map((room) => room.temp));
+  const homeTarget = average(rooms.map((room) => room.targetTemp));
+  const homeHumidity = average(rooms.map((room) => room.humidity));
   appendMetric(deps, climateSummary, "Климат", panel._temp(average(rooms.map((room) => room.temp))),
-    `Цель ${panel._temp(average(rooms.map((room) => room.targetTemp)))} · влажность ${panel._humidity(average(rooms.map((room) => room.humidity)))}`);
-  climateSummary.appendChild(deps.el("span", "overview-canon-climate-running",
-    activeCount(climate) ? `Работает: ${activeCount(climate)}` : "Оборудование в ожидании"));
+    `Цель ${overviewCompactTemperature(homeTarget)} · влажность ${overviewCompactHumidity(homeHumidity)}`);
+  const climateFacts = deps.el("span", "overview-canon-climate-facts");
+  const appendFact = (value, label) => {
+    const fact = deps.el("span");
+    fact.appendChild(deps.el("strong", null, value));
+    fact.appendChild(deps.el("small", null, label));
+    climateFacts.appendChild(fact);
+  };
+  appendFact(String(activeCount(climate)), "работает");
+  const outdoor = dashboard.weather?.outdoorSensorTemperatureC;
+  appendFact(validNumber(outdoor) ? overviewCompactTemperature(outdoor) : overviewCompactTemperature(homeTemperature),
+    validNumber(outdoor) ? "улица" : "средняя");
+  climateSummary.appendChild(climateFacts);
   climateCard.appendChild(climateSummary);
   climateCard.appendChild(renderHomeTargetCard(panel, dashboard, deps, { embedded: true }));
   row.appendChild(climateCard);
   const lights = devices.filter((device) => device.domain === "light" || device.category === "lighting");
   const lightingCard = cardButton(deps, "overview-canon-primary-card is-lighting", "lighting", panel);
-  appendMetric(deps, lightingCard, "Освещение", String(activeCount(lights)), `из ${physicalDeviceCount(lights)} устройств включено`);
+  appendMetric(deps, lightingCard, "Освещение", `${activeCount(lights)} из ${physicalDeviceCount(lights)}`,
+    "включено", { glyph: "lightbulb", tone: "warning" });
+  appendRoomChips(deps, lightingCard, lights);
   row.appendChild(lightingCard);
   const alarms = Array.isArray(dashboard.alarms) ? dashboard.alarms.filter((alarm) => alarm.active) : [];
   const securityCard = cardButton(deps, `overview-canon-primary-card is-security${alarms.length ? " is-alert" : ""}`, "security", panel);
   appendMetric(deps, securityCard, "Безопасность", alarms.length ? `${alarms.length} тревог` : "Спокойно",
-    alarms.length ? "Требуется внимание" : "Активных тревог нет");
+    alarms.length ? "Требуется внимание" : "Все системы в норме", { glyph: "shield", tone: alarms.length ? "danger" : "success" });
   row.appendChild(securityCard);
   container.appendChild(row);
 }
@@ -232,12 +278,10 @@ function renderAttentionCard(panel, container, dashboard, deps) {
   const target = offline ? "devices" : "settings";
   card.addEventListener("click", () => panel._activateSection(target));
   card.appendChild(deps.el("span", "overview-canon-attention-label", "Требуется внимание"));
-  const title = offline
-    ? `${offline} ${plural(offline, "устройство не в сети", "устройства не в сети", "устройств не в сети")}`
-    : "Проверьте состояние Home Assistant";
+  const title = offline ? String(offline) : "Проверьте состояние";
   card.appendChild(deps.el("strong", null, title));
   card.appendChild(deps.el("span", "overview-canon-attention-supporting", offline
-    ? "Открыть устройства"
+    ? `${plural(offline, "устройство", "устройства", "устройств")} не в сети`
     : "Открыть настройки"));
   container.appendChild(card);
 }
@@ -267,7 +311,6 @@ function renderFavorites(panel, container, dashboard, deps) {
     copy.appendChild(deps.el("strong", null, scenario.title));
     copy.appendChild(deps.el("small", null, scenario.description || scenario.group || "Готов к запуску"));
     item.appendChild(copy);
-    const chevron = deps.el("span", "overview-canon-favorite-chevron"); chevron.appendChild(deps.svgIcon("chevron-right")); item.appendChild(chevron);
     item.addEventListener("click", () => panel._post(deps.runApi, { scenario_id: scenario.id },
       scenario.requiresConfirmation ? `Запустить сценарий «${scenario.title}»?` : null));
     list.appendChild(item);
@@ -326,24 +369,14 @@ export function renderUpcomingEvents(panel, container, deps) {
 function renderDashboardGrid(panel, container, dashboard, deps) {
   const layout = deps.el("div", "overview-canon-dashboard-grid");
   const main = deps.el("div", "overview-canon-dashboard-main");
-  renderAttentionCard(panel, main, dashboard, deps);
   renderPrimaryCards(panel, main, dashboard, deps);
   renderFavorites(panel, main, dashboard, deps);
-  renderUpcomingEvents(panel, main, deps);
   layout.appendChild(main);
   const side = deps.el("aside", "overview-canon-dashboard-side");
-  const devices = Array.isArray(dashboard.devices) ? dashboard.devices : [];
-  const offline = devices.filter((device) => device.unavailable === true || device.state === "unavailable").length;
   const energyWrap = deps.el("div", "overview-canon-dashboard-energy");
   deps.renderEnergyOverviewCard(panel, energyWrap);
   side.appendChild(energyWrap);
-  if (offline) {
-    const devicesCard = deps.el("button", "overview-canon-dashboard-panel is-devices is-alert");
-    devicesCard.type = "button";
-    devicesCard.addEventListener("click", () => panel._activateSection("devices"));
-    appendMetric(deps, devicesCard, "Требуют внимания", String(offline), "Устройства без связи");
-    side.appendChild(devicesCard);
-  }
+  renderAttentionCard(panel, side, dashboard, deps);
   const rooms = Array.isArray(dashboard.rooms) ? dashboard.rooms : [];
   const deviations = rooms.map((room) => validNumber(room.temp) && validNumber(room.targetTemp)
     ? Math.abs(Number(room.temp) - Number(room.targetTemp)) : null).filter(Number.isFinite);

@@ -261,7 +261,7 @@ export function renderHomeTargetCard(panel, dashboard, deps, options = {}) {
     });
     footer.appendChild(sync);
   }
-  card.appendChild(footer);
+  if (!embedded) card.appendChild(footer);
   return card;
 }
 

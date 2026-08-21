@@ -1713,11 +1713,13 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("home slide must be the active selectable hero state");
         }
         const climateCard = byClass("overview-canon-primary-card")[0];
-        const climateDetails = findAll(climateCard, (node) => node.tagName === "BUTTON"
-          && node.textContent === "Настроить")[0];
-        climateDetails.fire("click");
+        if (findAll(climateCard, (node) => node.tagName === "BUTTON"
+          && ["Настроить", "Синхронизировать"].includes(node.textContent)).length !== 0) {
+          throw new Error("reference Dashboard duplicated secondary climate actions");
+        }
+        panel._shell.tabs.climate.fire("click");
         if (panel._activeSection !== "climate") {
-          throw new Error("climate details did not open climate");
+          throw new Error("climate navigation did not open climate");
         }
         panel._shell.tabs.overview.fire("click");
         const roomCard = findAll(panel._shell.sectionNodes.overview, (node) =>
@@ -1784,7 +1786,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const overview = panel._shell.sectionNodes.overview;
         const attention = findAll(overview, (node) =>
           String(node.className).split(" ").includes("overview-canon-attention-card"));
-        if (attention.length !== 1 || !textOf(attention[0]).includes("Проверьте состояние Home Assistant")) {
+        if (attention.length !== 1 || !textOf(attention[0]).includes("Проверьте состояние")) {
           throw new Error("Dashboard did not render one actionable attention block");
         }
         if (panel._shell.statusPill.textContent !== "Состояние уточняется") {
@@ -1846,7 +1848,9 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const overview = panel._shell.sectionNodes.overview;
         const attention = findAll(overview, (node) =>
           String(node.className).split(" ").includes("overview-canon-attention-card"));
-        if (attention.length !== 1 || !textOf(attention[0]).includes("2 устройства не в сети")) {
+        if (attention.length !== 1
+          || !textOf(attention[0]).includes("2")
+          || !textOf(attention[0]).includes("устройства не в сети")) {
           throw new Error("offline devices were not grouped into one attention action");
         }
         if (textOf(panel._shell.readiness).includes("Требуется внимание")) {
@@ -2418,22 +2422,14 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           || !String(post.payload.request_id).startsWith("hacs.climate.home.")) {
           throw new Error("typed action envelope mismatch: " + JSON.stringify(post));
         }
-        const links = byClass(card, "overview-canon-link");
-        const tertiary = links.filter((node) =>
-          String(node.className).split(" ").includes("is-tertiary"));
-        if (tertiary.length !== 1 || tertiary[0].textContent !== "Синхронизировать") {
-          throw new Error("tertiary synchronization link is missing");
-        }
-        const secondary = links.filter((node) =>
-          !String(node.className).split(" ").includes("is-tertiary"));
-        if (secondary.length !== 1 || secondary[0].textContent !== "Настроить") {
-          throw new Error("secondary details link is missing");
+        if (byClass(card, "overview-canon-link").length !== 0) {
+          throw new Error("embedded target duplicated secondary climate actions");
         }
         panel._climateRuntime.home_control.allowed_actions = ["set_home_targets"];
         panel._render();
         const withoutSync = byClass(overview, "overview-canon-climate-controls")[0];
-        if (byClass(withoutSync, "overview-canon-link").length !== 1) {
-          throw new Error("synchronization stayed visible without synchronize_home capability");
+        if (byClass(withoutSync, "overview-canon-link").length !== 0) {
+          throw new Error("embedded target rendered secondary actions");
         }
         panel._climateRuntime.home_control.allowed_actions = [];
         panel._render();
@@ -2457,10 +2453,8 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         if (targetPosts().length !== 1) throw new Error("busy step sent an action");
         panel._busy = false;
         panel._render();
-        const finalLinks = byClass(byClass(overview, "overview-canon-climate-controls")[0], "overview-canon-link");
-        finalLinks.find((node) => node.textContent === "Настроить").fire("click");
-        if (panel._activeSection !== "climate") {
-          throw new Error("secondary details link did not open the climate section");
+        if (byClass(byClass(overview, "overview-canon-climate-controls")[0], "overview-canon-link").length !== 0) {
+          throw new Error("embedded target restored secondary actions after busy state");
         }
             """,
         )
@@ -2468,8 +2462,8 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         self.assertEqual(0, completed.returncode, completed.stderr)
         css = OVERVIEW_CSS.read_text(encoding="utf-8")
         self.assertIn(".overview-canon-target-dial", css)
-        self.assertIn("grid-template-columns:48px minmax(0,1fr) 48px", css)
-        self.assertIn("min-width:48px; height:48px; min-height:48px", css)
+        self.assertIn("grid-template-columns:42px minmax(0,1fr) 42px", css)
+        self.assertIn("min-width:42px; height:42px; min-height:42px", css)
         self.assertIn(".overview-canon-target-value", css)
         self.assertIn(".overview-canon-link.is-tertiary", css)
         self.assertIn("var(--hmh-text-disabled)", css)
@@ -3625,7 +3619,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
             overview_css,
         )
         self.assertIn("flex-direction:column; white-space:normal", overview_css)
-        self.assertIn(".overview-canon-primary-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr))", overview_css)
+        self.assertIn(".overview-canon-primary-grid { display:grid; grid-template-columns:minmax(0,2.35fr) minmax(150px,.9fr) minmax(180px,1fr)", overview_css)
         self.assertIn("flex-direction:column", security_css)
         self.assertIn("white-space:normal", security_css)
         self.assertIn("flex-direction:column", devices_css)

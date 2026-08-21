@@ -19,6 +19,7 @@ TOKENS_CSS = FRONTEND / "hausman-hub-tokens.css"
 MODAL_JS = FRONTEND / "hausman-hub-modal.js"
 ENERGY_JS = FRONTEND / "hausman-hub-energy.js"
 ENERGY_CSS = FRONTEND / "hausman-hub-energy.css"
+OVERVIEW_CSS = FRONTEND / "hausman-hub-overview.css"
 ENERGY_METER_JS = FRONTEND / "hausman-hub-energy-meter.js"
 ENERGY_CHART_JS = FRONTEND / "hausman-hub-energy-chart.js"
 PANEL_JS = FRONTEND / "hausman-hub-panel.js"
@@ -269,15 +270,19 @@ class EnergyLayoutTest(unittest.TestCase):
             "energy-meter-reading-strip",
             "openEnergyDetails(panel)",
             "appendMeterOdometer(deps, display, meter.reading.currentKwh)",
-            '"Передайте следующее показание, чтобы увидеть расход."',
+            '"Переданное значение"',
+            "const hasDecimal",
         ):
             self.assertIn(snippet, js)
         self.assertNotIn('"Расход цикла"', js.split("export function renderEnergyOverviewCard", 1)[1].split("function renderEnergyHistory", 1)[0])
         css = read(ENERGY_CSS)
         self.assertIn("energy-odometer-wheel", css)
         self.assertIn("energy-meter-roll", css)
-        self.assertIn(".energy-overview-settings { color:#fff", css)
-        self.assertIn(".energy-overview-settings:not(:disabled):hover { color:#fff", css)
+        self.assertIn(".energy-overview-settings { color:var(--hmh-text)", css)
+        self.assertIn("text-shadow:none", css)
+        overview_css = read(OVERVIEW_CSS)
+        self.assertIn(".overview-canon-dashboard-energy .energy-overview-actions > button", overview_css)
+        self.assertIn("background:var(--hmh-surface-card); box-shadow:none; text-shadow:none", overview_css)
 
     def test_energy_details_open_as_accessible_modal(self) -> None:
         js = read(ENERGY_JS)
@@ -321,7 +326,8 @@ class EnergyLayoutTest(unittest.TestCase):
             self.assertIn(snippet, js)
         main = read(ENERGY_JS)
         self.assertIn("energy-meter-reading-strip", main)
-        self.assertIn("energy-overview-reminder", main)
+        overview = main.split("export function renderEnergyOverviewCard", 1)[1].split("function energyPeriodButtons", 1)[0]
+        self.assertNotIn("energy-overview-reminder", overview)
 
     def test_meter_loading_is_wired_into_panel(self) -> None:
         js = read(PANEL_JS)
