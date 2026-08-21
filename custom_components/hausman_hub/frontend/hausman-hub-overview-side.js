@@ -1,82 +1,147 @@
 import { activityTimeLabel } from "./hausman-hub-pagination.js?v=1.52.132";
 
-function weatherLabel(condition) {
-  return ({
-    "clear-night": "Ясно", cloudy: "Облачно", fog: "Туман", hail: "Град",
-    lightning: "Гроза", "lightning-rainy": "Гроза с дождём", partlycloudy: "Переменная облачность",
-    pouring: "Ливень", rainy: "Дождь", snowy: "Снег", "snowy-rainy": "Снег с дождём",
-    sunny: "Ясно", windy: "Ветрено", "windy-variant": "Ветрено",
-  })[String(condition || "").toLowerCase()] || "Погода уточняется";
+function plural(count, one, few, many) {
+  const mod100 = count % 100;
+  const mod10 = count % 10;
+  if (mod100 >= 11 && mod100 <= 14) return many;
+  if (mod10 === 1) return one;
+  if (mod10 >= 2 && mod10 <= 4) return few;
+  return many;
 }
 
-function appendWeatherGlyph(card, condition, deps) {
-  const normalized = String(condition || "").toLowerCase();
-  const cloudy = !["sunny", "clear-night"].includes(normalized);
-  const glyph = deps.el("span", `overview-canon-weather-glyph${cloudy ? " is-cloudy" : ""}`);
-  glyph.appendChild(deps.svgIcon(normalized === "clear-night" ? "moon" : "sun"));
-  if (cloudy) glyph.appendChild(deps.el("span", "overview-canon-weather-cloud"));
-  card.appendChild(glyph);
+function isOffline(device) {
+  return device?.unavailable === true || device?.state === "unavailable";
 }
 
-/* Side column of the overview hero: weather and current home state. */
-export function renderOverviewSideCards(panel, dashboard, devices, deps) {
-  const { el, svgIcon } = deps;
-  const side = el("aside", "overview-canon-top-side");
-  const weather = dashboard.weather || {};
-  const weatherCard = el("button", "overview-canon-top-card is-weather");
-  weatherCard.type = "button";
-  weatherCard.addEventListener("click", () => panel._activateSection("climate"));
-  weatherCard.appendChild(el("span", "overview-canon-panel-label", "Погода"));
-  appendWeatherGlyph(weatherCard, weather.condition, deps);
-  weatherCard.appendChild(el("strong", "overview-canon-weather-value", Number.isFinite(Number(weather.temperatureC)) ? panel._temp(weather.temperatureC) : "Нет данных"));
-  weatherCard.appendChild(el("span", "overview-canon-weather-condition", weatherLabel(weather.condition)));
-  const weatherSupporting = [];
-  if (Number.isFinite(Number(weather.humidityPercent))) weatherSupporting.push(`влажность ${Math.round(Number(weather.humidityPercent))} %`);
-  weatherSupporting.push(`ветер ${Number.isFinite(Number(weather.windSpeedMps)) ? `${Number(weather.windSpeedMps).toLocaleString("ru-RU")} м/с` : "—"}`);
-  weatherCard.appendChild(el("span", "overview-canon-panel-supporting", weatherSupporting.join(" · ")));
-  const sensorTemp = Number(weather.outdoorSensorTemperatureC);
-  if (weather.outdoorSensorAvailable === true && Number.isFinite(sensorTemp)) {
-    const updatedSec = Number(weather.outdoorSensorUpdatedAt);
-    const updatedLabel = Number.isFinite(updatedSec) && updatedSec > 0
-      ? ` · обновлено ${activityTimeLabel(updatedSec * 1000)}` : "";
-    weatherCard.appendChild(el("span", "overview-canon-panel-footnote",
-      `Датчик: ${sensorTemp.toFixed(1).replace(".", ",")}°${updatedLabel}`));
-  }
-  side.appendChild(weatherCard);
-  const alarms = Array.isArray(dashboard.alarms) ? dashboard.alarms.filter((alarm) => alarm.active) : [];
-  const reachable = devices.filter((device) => device.unavailable !== true && device.state !== "unavailable");
-  const byCategory = (...categories) => reachable.filter((device) => categories.includes(device.category));
-  const locks = reachable.filter((device) => device.domain === "lock");
-  const alarmPanels = reachable.filter((device) => device.domain === "alarm_control_panel");
-  const openCount = (items) => items.filter((device) => ["on", "open", "unlocked"].includes(device.state)).length;
-  const openingsLabel = (...groups) => {
-    const items = groups.flat();
-    if (!items.length) return "нет данных";
-    const open = openCount(items);
-    return open ? `открыто: ${open}` : "все закрыты";
-  };
-  const securityLabel = alarms.length ? `тревог: ${alarms.length}`
-    : alarmPanels.some((device) => device.state === "triggered") ? "тревога"
-    : alarmPanels.some((device) => String(device.state || "").startsWith("armed")) ? "включена"
-    : alarmPanels.length ? "выключена" : "не настроена";
-  const homeCard = el("button", `overview-canon-top-card is-home${alarms.length ? " is-alert" : ""}`);
-  homeCard.type = "button";
-  homeCard.addEventListener("click", () => panel._activateSection("security"));
-  homeCard.appendChild(el("span", "overview-canon-panel-label", "Дом сейчас"));
-  const homeRows = el("span", "overview-canon-home-rows");
+function isOpen(device) {
+  return ["on", "open", "opened", "unlocked"].includes(String(device?.state || "").toLowerCase());
+}
+
+function physicalCount(devices) {
+  return new Set(devices.map((device) => device?.physicalId || device?.id).filter(Boolean)).size;
+}
+
+function formatPower(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? `${Math.round(number).toLocaleString("ru-RU")} Вт` : "нет данных";
+}
+
+function eventTimestamp(entry) {
+  const raw = entry?.at ?? entry?.ts ?? entry?.timestamp;
+  const numeric = Number(raw);
+  return Number.isFinite(numeric) && numeric > 0 && numeric < 1e12 ? numeric * 1000 : raw;
+}
+
+function eventIcon(entry) {
+  const explicit = String(entry?.icon || "").toLowerCase();
+  if (["warning", "bolt", "settings", "history", "lightbulb", "shield"].includes(explicit)) return explicit;
+  const identity = `${entry?.title || ""} ${entry?.message || entry?.text || ""}`.toLowerCase();
+  if (/сценар|голос|настрой/.test(identity)) return "settings";
+  if (/свет|ламп/.test(identity)) return "lightbulb";
+  if (/тревог|охран|двер|окн/.test(identity)) return "shield";
+  return "history";
+}
+
+function activityEntries(panel, dashboard) {
+  const live = Array.isArray(panel._activityFeed) ? panel._activityFeed : [];
+  const snapshot = Array.isArray(dashboard.events) ? dashboard.events : [];
+  return (live.length ? live : snapshot).slice(0, 4).map((entry) => ({
+    icon: eventIcon(entry),
+    title: String(entry?.title || "Событие"),
+    text: String(entry?.text || entry?.message || "").trim(),
+    at: eventTimestamp(entry),
+    alert: entry?.alert === true || entry?.level === "bad",
+  }));
+}
+
+function appendCompactHome(card, state, deps) {
+  const grid = deps.el("div", "overview-tablet-home-compact");
   [
-    ["home", "Режим", (() => { const p = byCategory("presence", "occupancy")[0]; return p ? (p.state === "on" ? "Дома" : "Не дома") : "нет данных"; })()],
-    ["door", "Двери", openingsLabel(byCategory("door", "opening"), locks)],
-    ["window", "Окна", openingsLabel(byCategory("window"))],
-    ["shield", "Охрана", securityLabel],
-  ].forEach(([icon, label, value]) => {
-    const homeRow = el("span", `overview-canon-home-row${value === "нет данных" ? " is-empty" : ""}`);
-    homeRow.appendChild(svgIcon(icon));
-    homeRow.appendChild(el("small", null, label));
-    homeRow.appendChild(el("b", null, value));
-    homeRows.appendChild(homeRow);
+    ["door", state.open.length, "Открыто", state.open.length ? "warning" : "neutral"],
+    ["warning", state.offline.length, "Офлайн", state.offline.length ? "warning" : "neutral"],
+    ["lightbulb", state.activeLights, "Свет", state.activeLights ? "warning" : "neutral"],
+    ["energy", Number.isFinite(Number(state.power)) ? Math.round(Number(state.power)) : "—", "Вт", "neutral"],
+  ].forEach(([iconName, value, label, tone]) => {
+    const tile = deps.el("div", `overview-tablet-home-tile is-${tone}`);
+    tile.appendChild(deps.svgIcon(iconName));
+    tile.appendChild(deps.el("strong", null, String(value)));
+    tile.appendChild(deps.el("span", null, label));
+    grid.appendChild(tile);
   });
-  homeCard.appendChild(homeRows);
-  side.appendChild(homeCard);
-  return side;
+  card.appendChild(grid);
+}
+
+function appendDetailedHome(card, state, deps) {
+  const list = deps.el("div", "overview-tablet-home-detailed");
+  const openLabel = state.open.length
+    ? `Открыто: ${state.open.map((device) => device.roomName || device.name || "проём").slice(0, 2).join(", ")}`
+    : (state.openings.length ? "Все окна и двери закрыты" : "Нет данных об окнах и дверях");
+  [
+    ["door", openLabel, state.open.length ? "warning" : "neutral"],
+    ["warning", `${state.offline.length} ${plural(state.offline.length, "устройство", "устройства", "устройств")} без связи`, state.offline.length ? "warning" : "neutral"],
+    ["lightbulb", `${state.activeLights} ${plural(state.activeLights, "светильник горит", "светильника горят", "светильников горят")}`, state.activeLights ? "warning" : "neutral"],
+    ["energy", `Потребление: ${formatPower(state.power)}`, "neutral"],
+    ["bolt", `Активные сценарии: ${state.scenarioCount}`, "neutral"],
+  ].forEach(([iconName, value, tone]) => {
+    const row = deps.el("div", `overview-tablet-home-detail is-${tone}`);
+    row.appendChild(deps.svgIcon(iconName));
+    row.appendChild(deps.el("span", null, value));
+    list.appendChild(row);
+  });
+  card.appendChild(list);
+}
+
+function appendActivityCards(card, entries, compact, deps) {
+  const list = deps.el("div", compact ? "overview-tablet-activity-compact" : "overview-tablet-activity-detailed");
+  if (!entries.length) list.appendChild(deps.el("div", "overview-tablet-activity-empty", "Событий пока нет"));
+  entries.forEach((entry) => {
+    const row = deps.el("div", `overview-tablet-activity-row${entry.alert ? " is-alert" : ""}`);
+    const icon = deps.el("span", "overview-tablet-activity-icon");
+    icon.appendChild(deps.svgIcon(entry.icon));
+    row.appendChild(icon);
+    const copy = deps.el("span", "overview-tablet-activity-copy");
+    copy.appendChild(deps.el("strong", null, entry.title));
+    if (compact) copy.appendChild(deps.el("time", null, activityTimeLabel(entry.at)));
+    else if (entry.text) copy.appendChild(deps.el("small", null, entry.text));
+    row.appendChild(copy);
+    if (!compact) row.appendChild(deps.el("time", null, activityTimeLabel(entry.at)));
+    list.appendChild(row);
+  });
+  const footer = deps.el("div", "overview-tablet-activity-footer", compact ? "История" : "Вся активность");
+  footer.appendChild(deps.svgIcon("chevron-right"));
+  list.appendChild(footer);
+  card.appendChild(list);
+}
+
+export function renderOverviewSideCards(panel, dashboard, devices, deps) {
+  const openings = devices.filter((device) => ["door", "window", "opening"].includes(device?.category)
+    || device?.domain === "lock");
+  const open = openings.filter(isOpen);
+  const offline = devices.filter(isOffline);
+  const lights = devices.filter((device) => device?.domain === "light" || device?.category === "lighting");
+  const activeLights = physicalCount(lights.filter((device) => !isOffline(device) && device.active === true));
+  const state = {
+    openings,
+    open,
+    offline,
+    activeLights,
+    power: dashboard.energy?.currentPowerW,
+    scenarioCount: Array.isArray(dashboard.scenarios) ? dashboard.scenarios.length : 0,
+  };
+  const aside = deps.el("aside", "overview-tablet-sidebar");
+  const home = deps.el("section", "overview-tablet-side-card is-home-now");
+  home.appendChild(deps.el("h2", null, "Дом сейчас"));
+  appendCompactHome(home, state, deps);
+  appendDetailedHome(home, state, deps);
+  aside.appendChild(home);
+  const activity = deps.el("section", "overview-tablet-side-card is-activity");
+  const activityTitle = deps.el("h2");
+  activityTitle.appendChild(deps.el("span", "overview-tablet-side-title-compact", "Активность"));
+  activityTitle.appendChild(deps.el("span", "overview-tablet-side-title-detailed", "Последняя активность"));
+  activity.appendChild(activityTitle);
+  const entries = activityEntries(panel, dashboard);
+  appendActivityCards(activity, entries, true, deps);
+  appendActivityCards(activity, entries, false, deps);
+  aside.appendChild(activity);
+  return aside;
 }

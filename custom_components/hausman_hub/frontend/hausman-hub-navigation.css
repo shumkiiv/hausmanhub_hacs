@@ -43,6 +43,7 @@
   :host(.rail-collapsed) .tab-label { display:none; }
   :host(.rail-collapsed) .sidebar-intercom { justify-content:center; margin:0 10px 10px; padding:11px 0; }
   :host(.rail-collapsed) .sidebar-intercom-label { display:none; }
+  :host(.rail-collapsed) .sidebar-intercom-action { display:none; }
   :host(.rail-collapsed) .sidebar-kiosk { justify-content:center; margin:0 10px 10px; padding:8px 0; }
   :host(.rail-collapsed) .sidebar-kiosk .kiosk-label { display:none; }
   :host(.rail-collapsed) .sidebar-footer { justify-content:center; padding:14px 8px; }

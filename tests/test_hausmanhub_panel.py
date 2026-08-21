@@ -90,7 +90,7 @@ CATALOG_CSS = PANEL_JS.with_name("hausman-hub-catalog.css")
 DEVICE_MAINTENANCE_CSS = PANEL_JS.with_name("hausman-hub-device-maintenance.css")
 DEVICES_OVERVIEW_CSS = PANEL_JS.with_name("hausman-hub-devices-overview.css")
 ROOMS_CSS = PANEL_JS.with_name("hausman-hub-rooms.css")
-MAX_PANEL_JS_BYTES = 292 * 1024
+MAX_PANEL_JS_BYTES = 296 * 1024
 MAX_HOME_SECTIONS_JS_BYTES = 16 * 1024
 MAX_ROOM_SETUP_JS_BYTES = 24 * 1024
 MAX_ROOM_DEVICE_GROUPS_JS_BYTES = 12 * 1024
@@ -166,7 +166,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertLessEqual(len(content.encode("utf-8")), MAX_PANEL_JS_BYTES)
         self.assertLessEqual(len(rollout.encode("utf-8")), 8 * 1024)
         # Главная повторяет планшетную иерархию: Hero, боковая сводка и панели.
-        self.assertLessEqual(len(overview.encode("utf-8")), 24 * 1024)
+        self.assertLessEqual(len(overview.encode("utf-8")), 28 * 1024)
         self.assertLessEqual(len(room_icons.encode("utf-8")), 12 * 1024)
         self.assertIn('hausman-hub-rollout.js?v=1.52.132', content)
         self.assertLessEqual(len(weather_sources.encode("utf-8")), 24 * 1024)
@@ -593,7 +593,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn('"Предыдущая комната"', hero_navigation)
         self.assertIn('"Следующая комната"', hero_navigation)
         self.assertIn("% slides.length", hero_navigation)
-        self.assertIn('details.hidden = true', overview)
+        self.assertIn('details.hidden = false', overview)
         self.assertNotIn('button.addEventListener("click", () => deps.openRoom(room))', overview)
         for surface in (
             PANEL_JS.with_name("hausman-hub-lighting.js"),
@@ -639,43 +639,40 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn("expected_state_revision: panel._climateRuntime.state_revision", climate_overview)
         self.assertIn("parameters: { target_temperature: targetTemperature }", climate_overview)
         self.assertIn("if (button.disabled || target === null) return;", climate_overview)
-        self.assertIn('card.classList.add("is-empty")', overview)
-        self.assertIn("renderAttentionCard(panel, side, dashboard, deps)", overview)
-        self.assertIn("overview-canon-attention-card", overview)
+        self.assertIn("renderDashboardHeader(panel, readinessStatus, container, deps)", overview)
+        self.assertIn("renderOverviewSideCards(panel, dashboard, devices, deps)", overview)
+        self.assertIn("renderWeatherCard(panel, dashboard, deps)", overview)
+        self.assertIn("renderComfortCard(panel, dashboard, deps)", overview)
+        self.assertIn("renderFavorites(panel, container, dashboard, deps)", overview)
+        self.assertIn("renderBottomRow(panel, container, dashboard, deps)", overview)
         self.assertIn("{ embedded: true }", overview)
-        self.assertNotIn("overview-canon-hero-fact", overview)
+        self.assertIn("overview-tablet-hero-fact", overview)
+        self.assertNotIn("overview-canon-attention-card", overview)
 
-        self.assertIn(".overview-canon-top-grid", overview_css)
-        self.assertIn("grid-template-columns:minmax(0,3fr) minmax(250px,1fr)", overview_css)
-        self.assertIn(".overview-canon-dashboard-side", overview_css)
-        self.assertIn("min-width:42px; height:42px; min-height:42px", overview_css)
+        self.assertIn("--hmh-tablet-rail:clamp(176px,13.75vw,220px)", overview_css)
+        self.assertIn("--hmh-tablet-side:clamp(194px,15.15625vw,242.5px)", overview_css)
+        self.assertIn("--hmh-tablet-hero:clamp(225px,17.578125vw,281.25px)", overview_css)
+        self.assertIn("grid-template-columns:repeat(3,minmax(0,1fr))", overview_css)
+        self.assertIn(".overview-tablet-sidebar", overview_css)
+        self.assertIn("min-width:48px; height:48px; min-height:48px", overview_css)
         self.assertIn(".overview-canon-target-dial", overview_css)
         self.assertIn(".overview-canon-target-value", overview_css)
-        self.assertIn(".overview-canon-link.is-tertiary", overview_css)
-        self.assertIn(".overview-canon-primary-card.is-empty", overview_css)
-        self.assertIn(".overview-canon-dashboard-energy .energy-overview-card", overview_css)
-        self.assertIn(".overview-canon-attention-card", overview_css)
-        self.assertIn(".overview-canon-primary-card.is-climate", overview_css)
+        self.assertIn(".overview-tablet-energy-sources", overview_css)
+        self.assertIn(".overview-tablet-home-compact", overview_css)
+        self.assertIn(".overview-tablet-activity-detailed", overview_css)
         self.assertIn(".overview-canon-climate-controls", overview_css)
-        self.assertIn(".overview-canon-hero-summary", overview_css)
-        self.assertIn("grid-template-columns:minmax(0,2.35fr) minmax(150px,.9fr) minmax(180px,1fr)", overview_css)
+        self.assertIn(".overview-tablet-hero-facts", overview_css)
         self.assertIn("grid-template-columns:repeat(4,minmax(0,1fr))", overview_css)
-        self.assertIn(".overview-canon-room-navigation { display:none; }", overview_css)
-        self.assertIn("@media (max-width:1200px)", overview_css)
+        self.assertIn("@container hausmanhub-panel (min-width:1050px)", overview_css)
         self.assertIn("@media (max-width:800px)", overview_css)
-        self.assertIn("@media (max-width:640px)", overview_css)
+        self.assertIn("@media (max-width:540px)", overview_css)
         self.assertIn("repeat(2,minmax(0,1fr))", overview_css)
         self.assertIn("var(--hmh-surface-card)", overview_css)
         self.assertIn("var(--hmh-text-secondary)", overview_css)
         self.assertIn("var(--hmh-border-default)", overview_css)
         self.assertIn("var(--hmh-radius-card)", overview_css)
-        primary_card_rule = overview_css.split(".overview-canon-primary-card, .overview-canon-bottom-card")[1]
+        primary_card_rule = overview_css.split(".overview-canon-primary-card,.overview-canon-favorites")[1]
         self.assertIn("min-width:0", primary_card_rule)
-        self.assertIn(
-            ".overview-canon-primary-card.is-empty, .overview-canon-bottom-card.is-empty, "
-            ".overview-canon-side-card.is-empty { min-height:0; align-self:start; }",
-            overview_css,
-        )
 
     def test_frontend_module_cache_versions_match_manifest(self) -> None:
         content = PANEL_JS.read_text(encoding="utf-8")
@@ -826,7 +823,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertLessEqual(len(switch_styles.encode("utf-8")), 4 * 1024)
         self.assertLessEqual(len(notice_styles.encode("utf-8")), 4 * 1024)
         self.assertLessEqual(len(navigation_styles.encode("utf-8")), 8 * 1024)
-        self.assertLessEqual(len(kiosk_styles.encode("utf-8")), 12 * 1024)
+        self.assertLessEqual(len(kiosk_styles.encode("utf-8")), 18 * 1024)
         self.assertLessEqual(len(wizard_validation_styles.encode("utf-8")), 8 * 1024)
         self.assertLessEqual(len(catalog_styles.encode("utf-8")), 8 * 1024)
         # 30 KiB: tablet-parity meter uses dedicated odometer presentation.

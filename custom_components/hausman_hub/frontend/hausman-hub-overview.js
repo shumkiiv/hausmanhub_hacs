@@ -5,22 +5,12 @@ import { scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.132";
 import { openUpcomingEventsModal } from "./hausman-hub-overview-events-modal.js?v=1.52.132";
 import { renderOverviewSideCards } from "./hausman-hub-overview-side.js?v=1.52.132";
 
-const CLIMATE_DOMAINS = new Set(["climate", "humidifier", "fan"]);
-
-function validNumbers(values) {
-  return values
-    .filter((value) => value !== null && value !== undefined && value !== "")
-    .map(Number)
-    .filter(Number.isFinite);
-}
-
 function validNumber(value) {
-  return value !== null && value !== undefined && value !== ""
-    && Number.isFinite(Number(value));
+  return value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
 }
 
 function average(values) {
-  const valid = validNumbers(values);
+  const valid = values.filter(validNumber).map(Number);
   return valid.length ? valid.reduce((sum, value) => sum + value, 0) / valid.length : null;
 }
 
@@ -28,8 +18,61 @@ function physicalDeviceCount(devices) {
   return new Set(devices.map((device) => device.physicalId || device.id).filter(Boolean)).size;
 }
 
-function activeCount(devices, predicate = () => true) {
-  return devices.filter((device) => predicate(device) && !device.unavailable && device.active === true).length;
+function activeDeviceCount(devices) {
+  return physicalDeviceCount(devices.filter((device) => device.active === true
+    && device.unavailable !== true && device.state !== "unavailable"));
+}
+
+function compactNumber(value, digits = 1) {
+  if (!validNumber(value)) return "—";
+  return Number(value).toLocaleString("ru-RU", { maximumFractionDigits: digits });
+}
+
+function compactTemperature(value) {
+  return validNumber(value) ? `${compactNumber(value)}°` : "—";
+}
+
+function compactPercent(value) {
+  return validNumber(value) ? `${compactNumber(value)}%` : "—";
+}
+
+function plural(count, one, few, many) {
+  const mod100 = count % 100;
+  const mod10 = count % 10;
+  if (mod100 >= 11 && mod100 <= 14) return many;
+  if (mod10 === 1) return one;
+  if (mod10 >= 2 && mod10 <= 4) return few;
+  return many;
+}
+
+function weatherLabel(condition) {
+  return ({
+    "clear-night": "Ясно", cloudy: "Облачно", fog: "Туман", hail: "Град",
+    lightning: "Гроза", "lightning-rainy": "Гроза с дождём", partlycloudy: "Переменная облачность",
+    pouring: "Ливень", rainy: "Дождь", snowy: "Снег", "snowy-rainy": "Снег с дождём",
+    sunny: "Ясно", windy: "Ветрено", "windy-variant": "Ветрено",
+  })[String(condition || "").toLowerCase()] || "Погода уточняется";
+}
+
+function weatherSnapshot(dashboard) {
+  const weather = dashboard.weather || {};
+  const summary = dashboard.summary || {};
+  return {
+    condition: weather.condition || summary.weatherCondition,
+    temperature: weather.temperatureC ?? summary.outdoorTemp,
+    sensorTemperature: weather.outdoorSensorTemperatureC,
+    humidity: weather.humidityPercent ?? summary.weatherHumidity,
+    wind: weather.windSpeedMps ?? summary.weatherWindSpeed,
+  };
+}
+
+function appendWeatherGlyph(container, condition, deps) {
+  const normalized = String(condition || "").toLowerCase();
+  const cloudy = !["sunny", "clear-night"].includes(normalized);
+  const glyph = deps.el("span", `overview-tablet-weather-glyph${cloudy ? " is-cloudy" : ""}`);
+  glyph.appendChild(deps.svgIcon(normalized === "clear-night" ? "moon" : "sun"));
+  if (cloudy) glyph.appendChild(deps.el("span", "overview-tablet-weather-cloud"));
+  container.appendChild(glyph);
 }
 
 export function upcomingTriggerLabel(triggerType) {
@@ -68,45 +111,6 @@ export function upcomingEventsSorted(payload, limit = 5) {
   return { visible: sorted.slice(0, limit), remaining: Math.max(0, sorted.length - limit) };
 }
 
-function cardButton(deps, className, target, panel) {
-  const card = deps.el("button", className);
-  card.type = "button";
-  card.addEventListener("click", () => panel._activateSection(target));
-  return card;
-}
-
-function appendMetric(deps, card, label, value, supporting, iconMeta = null) {
-  if (value === "Нет данных") card.classList.add("is-empty");
-  card.appendChild(deps.el("span", "overview-canon-label", label));
-  if (iconMeta) {
-    const icon = deps.el("span", `overview-canon-card-icon is-${iconMeta.tone || "accent"}`);
-    icon.appendChild(deps.svgIcon(iconMeta.glyph));
-    card.appendChild(icon);
-  }
-  card.appendChild(deps.el("strong", "overview-canon-value", value));
-  card.appendChild(deps.el("span", "overview-canon-supporting", supporting));
-}
-
-function appendRoomChips(deps, card, devices) {
-  const names = Array.from(new Set(devices
-    .filter((device) => device.active === true && !device.unavailable)
-    .map((device) => String(device.roomName || "").trim())
-    .filter(Boolean))).slice(0, 2);
-  if (!names.length) return;
-  const chips = deps.el("span", "overview-canon-room-chips");
-  names.forEach((name) => chips.appendChild(deps.el("small", null, name)));
-  card.appendChild(chips);
-}
-
-function overviewCompactTemperature(value) {
-  if (!validNumber(value)) return "нет данных";
-  return `${Number(value).toFixed(1).replace(".0", "").replace(".", ",")}°`;
-}
-
-function overviewCompactHumidity(value) {
-  return validNumber(value) ? `${Math.round(Number(value))}%` : "нет данных";
-}
-
 export function overviewGreeting(now = new Date()) {
   const hour = now.getHours();
   if (hour >= 5 && hour < 12) return "Доброе утро";
@@ -115,46 +119,88 @@ export function overviewGreeting(now = new Date()) {
   return "Доброй ночи";
 }
 
+function iconButton(deps, className, iconName, label, onClick) {
+  const button = deps.el("button", className);
+  button.type = "button";
+  deps.setAttr(button, "aria-label", label);
+  button.appendChild(deps.svgIcon(iconName));
+  if (onClick) button.addEventListener("click", onClick);
+  return button;
+}
+
+function renderDashboardHeader(panel, readinessStatus, container, deps) {
+  const now = new Date();
+  const header = deps.el("header", "overview-tablet-header");
+  const copy = deps.el("div", "overview-tablet-header-copy");
+  copy.appendChild(deps.el("h2", null, overviewGreeting(now)));
+  copy.appendChild(deps.el("span", `overview-tablet-header-status is-${readinessStatus === "ready" ? "ready" : "attention"}`,
+    readinessStatus === "ready" ? "Все системы работают штатно" : "Состояние обновляется"));
+  header.appendChild(copy);
+  const pager = deps.el("span", "overview-tablet-page-dots");
+  for (let index = 0; index < 3; index += 1) pager.appendChild(deps.el("i"));
+  header.appendChild(pager);
+  const clock = deps.el("div", "overview-tablet-header-clock");
+  clock.appendChild(deps.el("span", null, now.toLocaleDateString("ru-RU", {
+    weekday: "long", day: "numeric", month: "long",
+  })));
+  clock.appendChild(deps.el("strong", null, now.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })));
+  header.appendChild(clock);
+  const actions = deps.el("div", "overview-tablet-header-actions");
+  const upcoming = upcomingEventsSorted(panel._upcomingEvents, 100).visible.length;
+  const events = deps.el("button", "overview-tablet-events");
+  events.type = "button";
+  events.appendChild(deps.svgIcon("history"));
+  events.appendChild(deps.el("span", null, `События · ${upcoming}`));
+  events.addEventListener("click", () => openUpcomingEventsModal(panel, container, deps,
+    upcomingEventsSorted(panel._upcomingEvents, 20).visible, appendUpcomingEventRow));
+  actions.appendChild(events);
+  actions.appendChild(iconButton(deps, "overview-tablet-header-icon", "fullscreen",
+    "Открыть режим киоска", deps.enterKiosk));
+  actions.appendChild(iconButton(deps, "overview-tablet-header-icon is-refresh", "refresh",
+    "Обновить главную", deps.refresh));
+  const system = deps.el("span", `overview-tablet-system-state is-${readinessStatus === "ready" ? "ready" : "attention"}`);
+  system.appendChild(deps.svgIcon("wifi"));
+  system.appendChild(deps.svgIcon("cloud"));
+  deps.setAttr(system, "aria-label", readinessStatus === "ready" ? "Система на связи" : "Связь уточняется");
+  actions.appendChild(system);
+  header.appendChild(actions);
+  container.appendChild(header);
+}
+
+function renderHeroFacts(row, facts, deps) {
+  row.innerHTML = "";
+  facts.forEach(([iconName, value, label]) => {
+    const fact = deps.el("span", "overview-tablet-hero-fact");
+    fact.appendChild(deps.svgIcon(iconName));
+    fact.appendChild(deps.el("strong", null, String(value)));
+    fact.appendChild(deps.el("small", null, label));
+    row.appendChild(fact);
+  });
+}
+
 export function renderOverviewHero(panel, container, readiness, deps) {
-  const { el, svgIcon, setAttr } = deps;
   const readinessStatus = readiness?.status || "not_ready";
   const dashboard = panel._homeDashboard || {};
   const rooms = Array.isArray(dashboard.rooms) ? dashboard.rooms : [];
   const devices = Array.isArray(dashboard.devices) ? dashboard.devices : [];
   container.innerHTML = "";
-  const greeting = el("div", "overview-canon-greeting");
-  const greetingCopy = el("div", "overview-canon-greeting-copy");
-  greetingCopy.appendChild(el("h2", null, overviewGreeting()));
-  greetingCopy.appendChild(el("span", `overview-canon-greeting-status is-${readinessStatus === "ready" ? "ready" : "attention"}`,
-    readinessStatus === "ready" ? "Все системы работают штатно" : "Состояние обновляется"));
-  greeting.appendChild(greetingCopy);
-  const upcomingTotal = upcomingEventsSorted(panel._upcomingEvents, 100).visible.length;
-  const eventsButton = el("button", "overview-canon-events-button", `События · ${upcomingTotal}`);
-  eventsButton.type = "button";
-  eventsButton.addEventListener("click", () => openUpcomingEventsModal(panel, container, deps,
-    upcomingEventsSorted(panel._upcomingEvents, 20).visible, appendUpcomingEventRow));
-  greeting.appendChild(eventsButton);
-  const heading = el("div", "overview-canon-heading-grid");
-  heading.appendChild(greeting);
-  container.appendChild(heading);
+  renderDashboardHeader(panel, readinessStatus, container, deps);
   const selectedRoom = rooms.find((room) => room.id === panel._overviewHeroRoomId) || null;
   if (panel._overviewHeroRoomId && !selectedRoom) panel._overviewHeroRoomId = null;
-  const hero = el("section", "overview-canon-hero");
-  const media = el("div", "overview-canon-hero-media");
+  const hero = deps.el("section", "overview-canon-hero");
+  const media = deps.el("div", "overview-canon-hero-media");
   let currentImage = stableOverviewHeroImage(panel, selectedRoom, dashboard);
   media.style.backgroundImage = `url("${currentImage}")`;
   hero.appendChild(media);
-  const overlay = el("div", "overview-canon-hero-overlay");
-  const copy = el("div", "overview-canon-hero-copy");
-  const homeName = overviewHomeName(dashboard);
-  const eyebrow = el("span", "overview-canon-eyebrow");
-  const title = el("h1");
-  copy.appendChild(eyebrow);
+  const overlay = deps.el("div", "overview-canon-hero-overlay");
+  const copy = deps.el("div", "overview-canon-hero-copy");
+  const title = deps.el("h1");
   copy.appendChild(title);
-  const summary = el("p", "overview-canon-hero-summary");
-  copy.appendChild(summary);
-  const details = el("button", "overview-canon-hero-action", "Подробнее о доме");
+  const facts = deps.el("div", "overview-tablet-hero-facts");
+  copy.appendChild(facts);
+  const details = deps.el("button", "overview-canon-hero-action", "Подробнее о доме");
   details.type = "button";
+  details.appendChild(deps.svgIcon("chevron-right"));
   details.addEventListener("click", () => {
     const room = rooms.find((candidate) => candidate.id === panel._overviewHeroRoomId);
     if (room) deps.openRoom(room);
@@ -162,19 +208,25 @@ export function renderOverviewHero(panel, container, readiness, deps) {
   });
   copy.appendChild(details);
   overlay.appendChild(copy);
-  const status = el("span", "overview-canon-state is-ready",
-    readinessStatus === "ready" ? "Всё в порядке" : "Статус обновляется");
-  overlay.appendChild(status);
   hero.appendChild(overlay);
-  const roomNavigation = createHeroRoomNavigation(panel, rooms, { el, setAttr, svgIcon });
+  const controls = deps.el("div", "overview-tablet-hero-controls");
+  const pin = iconButton(deps, `overview-tablet-hero-control${panel._overviewHeroPinned ? " is-active" : ""}`,
+    "star", "Закрепить слайд");
+  pin.addEventListener("click", () => {
+    panel._overviewHeroPinned = !panel._overviewHeroPinned;
+    pin.classList.toggle("is-active", panel._overviewHeroPinned);
+  });
+  controls.appendChild(pin);
+  controls.appendChild(iconButton(deps, "overview-tablet-hero-control", "more",
+    "Открыть настройки главной", () => panel._activateSection("settings")));
+  hero.appendChild(controls);
+  const roomNavigation = createHeroRoomNavigation(panel, rooms, deps);
   hero.appendChild(roomNavigation.element);
-  const top = el("div", "overview-canon-top-grid");
-  top.appendChild(hero);
-  top.appendChild(renderOverviewSideCards(panel, dashboard, devices, { el, svgIcon, setAttr }));
-  container.appendChild(top);
+  const homeControl = iconButton(deps, "overview-tablet-hero-home", "home-filled", "Показать весь дом");
+  hero.appendChild(homeControl);
+  container.appendChild(hero);
+  container.appendChild(renderOverviewSideCards(panel, dashboard, devices, deps));
 
-  const formatTemperature = (value) => validNumber(value) ? `${Number(value).toFixed(1).replace(".0", "").replace(".", ",")} °C` : "Нет данных";
-  const formatHumidity = (value) => validNumber(value) ? `${Math.round(Number(value))} %` : null;
   const selectHeroRoom = (room, animate = true) => {
     panel._overviewHeroRoomId = room?.id || null;
     const nextImage = stableOverviewHeroImage(panel, room, dashboard);
@@ -182,108 +234,115 @@ export function renderOverviewHero(panel, container, readiness, deps) {
       if (animate) media.classList.add("is-changing");
       media.style.backgroundImage = `url("${nextImage}")`;
       currentImage = nextImage;
-      if (animate) {
-        const scheduleFrame = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (callback) => callback();
-        scheduleFrame(() => media.classList.remove("is-changing"));
-      }
+      const frame = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (callback) => callback();
+      if (animate) frame(() => media.classList.remove("is-changing"));
     }
     roomNavigation.setActive(room, animate);
     if (!room) {
-      eyebrow.textContent = "";
-      eyebrow.hidden = true;
-      title.textContent = homeName;
-      summary.textContent = readinessStatus === "ready"
-        ? "Комфорт и безопасность вашего дома"
-        : "Обновляем состояние дома."
+      title.textContent = overviewHomeName(dashboard);
+      renderHeroFacts(facts, [
+        ["rooms", rooms.length, plural(rooms.length, "комната", "комнаты", "комнат")],
+        ["device", physicalDeviceCount(devices), "устройства"],
+        ["check", activeDeviceCount(devices), "активно"],
+        ["bolt", Array.isArray(dashboard.scenarios) ? dashboard.scenarios.length : 0, "автоматизации"],
+      ], deps);
       details.hidden = false;
-      details.textContent = "Подробнее о доме";
-      status.textContent = readinessStatus === "ready" ? "Всё в порядке" : "Статус обновляется";
-      panel._overviewHeroRenderKey = overviewHeroRenderKey(panel, readiness);
-      return;
+    } else {
+      title.textContent = room.name;
+      renderHeroFacts(facts, [
+        ["thermometer", compactTemperature(room.temp), "температура"],
+        ["auto", compactTemperature(room.targetTemp), "цель"],
+        ["water", compactPercent(room.humidity), "влажность"],
+      ], deps);
+      details.hidden = false;
     }
-    eyebrow.hidden = false;
-    eyebrow.textContent = "Комната";
-    title.textContent = room.name;
-    summary.textContent = [
-      formatTemperature(room.temp),
-      `цель ${formatTemperature(room.targetTemp)}`,
-      formatHumidity(room.humidity) ? `влажность ${formatHumidity(room.humidity)}` : null,
-    ].filter(Boolean).join(" · ");
-    details.hidden = true;
-    status.textContent = room.climateRunning ? "Климат работает" : (room.status || "Обычный режим");
     panel._overviewHeroRenderKey = overviewHeroRenderKey(panel, readiness);
   };
   roomNavigation.attachCarouselChrome(hero);
   roomNavigation.bind(selectHeroRoom);
+  homeControl.addEventListener("click", () => selectHeroRoom(null));
   selectHeroRoom(selectedRoom, false);
 }
 
-function renderPrimaryCards(panel, container, dashboard, deps) {
+function renderWeatherCard(panel, dashboard, deps) {
+  const weather = weatherSnapshot(dashboard);
+  const card = deps.el("button", "overview-canon-primary-card is-weather");
+  card.type = "button";
+  card.addEventListener("click", () => panel._activateSection("climate"));
+  const head = deps.el("span", "overview-tablet-card-head");
+  head.appendChild(deps.el("strong", null, "Погода"));
+  head.appendChild(deps.el("span", null, weatherLabel(weather.condition)));
+  card.appendChild(head);
+  const body = deps.el("span", "overview-tablet-weather-body");
+  appendWeatherGlyph(body, weather.condition, deps);
+  const outside = deps.el("span", "overview-tablet-weather-main");
+  outside.appendChild(deps.el("strong", null, compactTemperature(weather.temperature)));
+  outside.appendChild(deps.el("small", null, "на улице"));
+  body.appendChild(outside);
+  const sensor = deps.el("span", "overview-tablet-weather-sensor");
+  sensor.appendChild(deps.el("strong", null, compactTemperature(weather.sensorTemperature)));
+  sensor.appendChild(deps.el("small", null, "датчик"));
+  body.appendChild(sensor);
+  card.appendChild(body);
+  const footer = deps.el("span", "overview-tablet-weather-footer");
+  [["water", compactPercent(weather.humidity), "Влажность"],
+    ["air", validNumber(weather.wind) ? `${compactNumber(weather.wind)} м/с` : "—", "Ветер"]]
+    .forEach(([iconName, value, label]) => {
+      const metric = deps.el("span");
+      metric.appendChild(deps.svgIcon(iconName));
+      const metricCopy = deps.el("span");
+      metricCopy.appendChild(deps.el("strong", null, value));
+      metricCopy.appendChild(deps.el("small", null, label));
+      metric.appendChild(metricCopy);
+      footer.appendChild(metric);
+    });
+  card.appendChild(footer);
+  return card;
+}
+
+function renderComfortCard(panel, dashboard, deps) {
   const rooms = Array.isArray(dashboard.rooms) ? dashboard.rooms : [];
-  const devices = Array.isArray(dashboard.devices) ? dashboard.devices : [];
-  const climate = devices.filter((device) => CLIMATE_DOMAINS.has(device.domain) || device.category === "climate" || device.category === "air_quality");
-  const row = deps.el("div", "overview-canon-primary-grid");
-  const climateCard = deps.el("section", "overview-canon-primary-card is-climate");
-  const climateSummary = deps.el("div", "overview-canon-climate-summary");
-  const homeTemperature = average(rooms.map((room) => room.temp));
-  const homeTarget = average(rooms.map((room) => room.targetTemp));
-  const homeHumidity = average(rooms.map((room) => room.humidity));
-  appendMetric(deps, climateSummary, "Климат", panel._temp(average(rooms.map((room) => room.temp))),
-    `Цель ${overviewCompactTemperature(homeTarget)} · влажность ${overviewCompactHumidity(homeHumidity)}`);
-  const climateFacts = deps.el("span", "overview-canon-climate-facts");
-  const appendFact = (value, label) => {
+  const comfort = dashboard.comfort || {};
+  const available = comfort.available === true && validNumber(comfort.score);
+  const card = deps.el("button", `overview-canon-primary-card is-comfort${available ? "" : " is-empty"}`);
+  card.type = "button";
+  card.addEventListener("click", () => panel._activateSection("climate"));
+  const head = deps.el("span", "overview-tablet-comfort-head");
+  head.appendChild(deps.svgIcon("leaf"));
+  head.appendChild(deps.el("strong", null, "Комфорт в доме"));
+  card.appendChild(head);
+  const score = deps.el("span", "overview-tablet-comfort-score");
+  score.appendChild(deps.el("strong", null, available ? String(Math.round(Number(comfort.score))) : "—"));
+  score.appendChild(deps.el("small", null, "из 100"));
+  const primary = deps.el("span", "overview-tablet-comfort-primary");
+  primary.appendChild(score);
+  primary.appendChild(deps.el("span", "overview-tablet-comfort-status",
+    available ? (comfort.statusLabel || "Нет оценки") : "Нет данных"));
+  card.appendChild(primary);
+  const facts = deps.el("span", "overview-tablet-comfort-facts");
+  [
+    ["thermometer", compactTemperature(dashboard.summary?.avgTemp ?? average(rooms.map((room) => room.temp))), "Темп."],
+    ["water", compactPercent(average(rooms.map((room) => room.humidity))), "Влажн."],
+    ["leaf", validNumber(dashboard.summary?.co2) ? compactNumber(dashboard.summary.co2, 0) : "—", "CO₂ ppm"],
+  ].forEach(([iconName, value, label]) => {
     const fact = deps.el("span");
+    fact.appendChild(deps.svgIcon(iconName));
     fact.appendChild(deps.el("strong", null, value));
     fact.appendChild(deps.el("small", null, label));
-    climateFacts.appendChild(fact);
-  };
-  appendFact(String(activeCount(climate)), "работает");
-  const outdoor = dashboard.weather?.outdoorSensorTemperatureC;
-  appendFact(validNumber(outdoor) ? overviewCompactTemperature(outdoor) : overviewCompactTemperature(homeTemperature),
-    validNumber(outdoor) ? "улица" : "средняя");
-  climateSummary.appendChild(climateFacts);
-  climateCard.appendChild(climateSummary);
-  climateCard.appendChild(renderHomeTargetCard(panel, dashboard, deps, { embedded: true }));
-  row.appendChild(climateCard);
-  const lights = devices.filter((device) => device.domain === "light" || device.category === "lighting");
-  const lightingCard = cardButton(deps, "overview-canon-primary-card is-lighting", "lighting", panel);
-  appendMetric(deps, lightingCard, "Освещение", `${activeCount(lights)} из ${physicalDeviceCount(lights)}`,
-    "включено", { glyph: "lightbulb", tone: "warning" });
-  appendRoomChips(deps, lightingCard, lights);
-  row.appendChild(lightingCard);
-  const alarms = Array.isArray(dashboard.alarms) ? dashboard.alarms.filter((alarm) => alarm.active) : [];
-  const securityCard = cardButton(deps, `overview-canon-primary-card is-security${alarms.length ? " is-alert" : ""}`, "security", panel);
-  appendMetric(deps, securityCard, "Безопасность", alarms.length ? `${alarms.length} тревог` : "Спокойно",
-    alarms.length ? "Требуется внимание" : "Все системы в норме", { glyph: "shield", tone: alarms.length ? "danger" : "success" });
-  row.appendChild(securityCard);
+    facts.appendChild(fact);
+  });
+  card.appendChild(facts);
+  return card;
+}
+
+function renderPrimaryCards(panel, container, dashboard, deps) {
+  const row = deps.el("div", "overview-canon-primary-grid");
+  row.appendChild(renderWeatherCard(panel, dashboard, deps));
+  const target = deps.el("section", "overview-canon-primary-card is-target");
+  target.appendChild(renderHomeTargetCard(panel, dashboard, deps, { embedded: true }));
+  row.appendChild(target);
+  row.appendChild(renderComfortCard(panel, dashboard, deps));
   container.appendChild(row);
-}
-
-function plural(count, one, few, many) {
-  const mod100 = count % 100;
-  const mod10 = count % 10;
-  if (mod100 >= 11 && mod100 <= 14) return many;
-  if (mod10 === 1) return one;
-  if (mod10 >= 2 && mod10 <= 4) return few;
-  return many;
-}
-
-function renderAttentionCard(panel, container, dashboard, deps) {
-  const devices = Array.isArray(dashboard.devices) ? dashboard.devices : [];
-  const offline = devices.filter((device) => device.unavailable === true || device.state === "unavailable").length;
-  const readinessStatus = panel._data?.readiness?.status || "not_ready";
-  if (!offline && readinessStatus === "ready") return;
-  const card = deps.el("button", "overview-canon-attention-card");
-  card.type = "button";
-  const target = offline ? "devices" : "settings";
-  card.addEventListener("click", () => panel._activateSection(target));
-  card.appendChild(deps.el("span", "overview-canon-attention-label", "Требуется внимание"));
-  const title = offline ? String(offline) : "Проверьте состояние";
-  card.appendChild(deps.el("strong", null, title));
-  card.appendChild(deps.el("span", "overview-canon-attention-supporting", offline
-    ? `${plural(offline, "устройство", "устройства", "устройств")} не в сети`
-    : "Открыть настройки"));
-  container.appendChild(card);
 }
 
 function renderFavorites(panel, container, dashboard, deps) {
@@ -292,51 +351,148 @@ function renderFavorites(panel, container, dashboard, deps) {
   const favorites = source.filter((scenario) => scenario.favorite === true).slice(0, 4);
   const section = deps.el("section", "overview-canon-favorites");
   const head = deps.el("div", "overview-canon-section-head");
-  head.appendChild(deps.el("h2", null, "Избранные сценарии"));
+  const title = deps.el("h2");
+  title.appendChild(deps.svgIcon("star"));
+  title.appendChild(deps.el("span", null, "Избранное"));
+  head.appendChild(title);
   const all = deps.el("button", "overview-canon-link", "Все сценарии");
-  all.type = "button"; all.addEventListener("click", () => panel._activateSection("scenarios")); head.appendChild(all);
+  all.type = "button";
+  all.appendChild(deps.svgIcon("chevron-right"));
+  all.addEventListener("click", () => panel._activateSection("scenarios"));
+  head.appendChild(all);
   section.appendChild(head);
   const list = deps.el("div", "overview-canon-favorite-grid");
   if (!favorites.length) {
     const empty = deps.el("button", "overview-canon-favorite is-empty", "Добавьте сценарии в избранное");
-    empty.type = "button"; empty.addEventListener("click", () => panel._activateSection("scenarios")); list.appendChild(empty);
-  } else favorites.forEach((scenario) => {
-    const item = deps.el("button", "overview-canon-favorite");
-    item.type = "button";
-    item.disabled = panel._busy || scenario.enabled === false;
-    deps.setAttr(item, "aria-label", `Запустить сценарий «${scenario.title}»`);
-    const meta = scenarioIconMeta(scenario.icon, scenario.title);
-    const icon = deps.el("span", "overview-canon-favorite-icon"); icon.appendChild(deps.svgIcon(meta.glyph)); item.appendChild(icon);
-    const copy = deps.el("span", "overview-canon-favorite-copy");
-    copy.appendChild(deps.el("strong", null, scenario.title));
-    copy.appendChild(deps.el("small", null, scenario.description || scenario.group || "Готов к запуску"));
-    item.appendChild(copy);
-    item.addEventListener("click", () => panel._post(deps.runApi, { scenario_id: scenario.id },
-      scenario.requiresConfirmation ? `Запустить сценарий «${scenario.title}»?` : null));
-    list.appendChild(item);
-  });
-  section.appendChild(list); container.appendChild(section);
+    empty.type = "button";
+    empty.addEventListener("click", () => panel._activateSection("scenarios"));
+    list.appendChild(empty);
+  } else {
+    favorites.forEach((scenario) => {
+      const item = deps.el("button", "overview-canon-favorite");
+      item.type = "button";
+      item.disabled = panel._busy || scenario.enabled === false;
+      deps.setAttr(item, "aria-label", `Запустить сценарий «${scenario.title}»`);
+      const meta = scenarioIconMeta(scenario.icon, scenario.title);
+      const icon = deps.el("span", "overview-canon-favorite-icon");
+      icon.appendChild(deps.svgIcon(meta.glyph));
+      item.appendChild(icon);
+      const copy = deps.el("span", "overview-canon-favorite-copy");
+      copy.appendChild(deps.el("strong", null, scenario.title));
+      copy.appendChild(deps.el("small", null, scenario.description || scenario.group || "Ручной запуск"));
+      item.appendChild(copy);
+      item.appendChild(deps.svgIcon("play"));
+      item.addEventListener("click", () => panel._post(deps.runApi, { scenario_id: scenario.id },
+        scenario.requiresConfirmation ? `Запустить сценарий «${scenario.title}»?` : null));
+      list.appendChild(item);
+    });
+  }
+  section.appendChild(list);
+  container.appendChild(section);
+}
+
+function energySourceValue(source, units) {
+  const power = validNumber(source.currentPowerW) ? `${compactNumber(source.currentPowerW, 0)} Вт` : null;
+  const current = validNumber(source.currentA) ? `${Number(source.currentA).toLocaleString("ru-RU", {
+    minimumFractionDigits: 2, maximumFractionDigits: 2,
+  })} А` : null;
+  if (units === "amps") return current || "Нет данных";
+  if (units === "both") return [power, current].filter(Boolean).join(" · ") || "Нет данных";
+  return power || (validNumber(source.todayKwh) ? `${compactNumber(source.todayKwh)} кВт·ч` : "Нет данных");
+}
+
+function selectedEnergySources(energy) {
+  const sources = Array.isArray(energy?.sources) ? energy.sources : [];
+  if (energy?.settings?.useAllDevices === true) return sources;
+  const selected = new Set(Array.isArray(energy?.selectedSourceIds) ? energy.selectedSourceIds : []);
+  return sources.filter((source) => selected.has(source.id) || selected.has(source.deviceId));
+}
+
+function renderEnergySources(panel, dashboard, deps) {
+  const energy = dashboard.energy || {};
+  const units = String(energy.settings?.displayUnits || "watts").toLowerCase();
+  const sources = selectedEnergySources(energy);
+  const card = deps.el("section", "overview-tablet-bottom-card is-energy");
+  const head = deps.el("div", "overview-tablet-bottom-head");
+  const title = deps.el("h2");
+  title.appendChild(deps.svgIcon("energy"));
+  title.appendChild(deps.el("span", null, "Показания энергии"));
+  head.appendChild(title);
+  const settings = deps.el("button", null, "Настройки");
+  settings.type = "button";
+  settings.appendChild(deps.svgIcon("chevron-right"));
+  settings.addEventListener("click", () => panel._activateSection("energy"));
+  head.appendChild(settings);
+  card.appendChild(head);
+  const list = deps.el("div", "overview-tablet-energy-sources");
+  if (!sources.length) {
+    list.appendChild(deps.el("div", "overview-tablet-energy-empty", "Нет выбранных источников"));
+  } else {
+    sources.slice(0, 2).forEach((source) => {
+      const item = deps.el("button", "overview-tablet-energy-source");
+      item.type = "button";
+      item.addEventListener("click", () => panel._activateSection("energy"));
+      const name = deps.el("span", "overview-tablet-energy-name");
+      name.appendChild(deps.el("strong", null, source.name || "Источник энергии"));
+      name.appendChild(deps.el("i", source.available === false ? "is-offline" : "is-online"));
+      item.appendChild(name);
+      item.appendChild(deps.el("span", "overview-tablet-energy-value", energySourceValue(source, units)));
+      list.appendChild(item);
+    });
+    if (sources.length > 2) list.appendChild(deps.el("span", "overview-tablet-energy-more", `+${sources.length - 2}`));
+  }
+  card.appendChild(list);
+  return card;
+}
+
+function renderLighting(panel, dashboard, deps) {
+  const devices = Array.isArray(dashboard.devices) ? dashboard.devices : [];
+  const lights = devices.filter((device) => device.domain === "light" || device.category === "lighting");
+  const active = physicalDeviceCount(lights.filter((device) => device.active === true
+    && device.unavailable !== true && device.state !== "unavailable"));
+  const card = deps.el("button", "overview-tablet-bottom-card is-lighting");
+  card.type = "button";
+  card.addEventListener("click", () => panel._activateSection("lighting"));
+  const head = deps.el("span", "overview-tablet-bottom-head");
+  head.appendChild(deps.el("h2", null, "Освещение"));
+  head.appendChild(deps.svgIcon("lightbulb"));
+  card.appendChild(head);
+  const bulbs = deps.el("span", "overview-tablet-light-bulbs");
+  const visible = active ? Math.min(active, 3) : 1;
+  for (let index = 0; index < visible; index += 1) bulbs.appendChild(deps.svgIcon("lightbulb"));
+  card.appendChild(bulbs);
+  card.appendChild(deps.el("span", "overview-tablet-light-label",
+    active ? `${active} сейчас ${plural(active, "горит", "горят", "горят")}` : "Свет выключен"));
+  return card;
+}
+
+function renderBottomRow(panel, container, dashboard, deps) {
+  const row = deps.el("div", "overview-tablet-bottom-grid");
+  row.appendChild(renderEnergySources(panel, dashboard, deps));
+  row.appendChild(renderLighting(panel, dashboard, deps));
+  container.appendChild(row);
 }
 
 function appendUpcomingEventRow(panel, list, event, deps) {
-  const { el, svgIcon, setAttr } = deps;
-  const row = el("div", "overview-canon-upcoming-event");
-  const icon = el("span", "overview-canon-favorite-icon"); icon.appendChild(svgIcon("play")); row.appendChild(icon);
-  const copy = el("span", "overview-canon-upcoming-copy");
-  copy.appendChild(el("strong", null, event.scenarioTitle || "Сценарий"));
-  copy.appendChild(el("small", null, upcomingTriggerLabel(event.triggerType)));
+  const row = deps.el("div", "overview-canon-upcoming-event");
+  const icon = deps.el("span", "overview-canon-favorite-icon");
+  icon.appendChild(deps.svgIcon("play"));
+  row.appendChild(icon);
+  const copy = deps.el("span", "overview-canon-upcoming-copy");
+  copy.appendChild(deps.el("strong", null, event.scenarioTitle || "Сценарий"));
+  copy.appendChild(deps.el("small", null, upcomingTriggerLabel(event.triggerType)));
   row.appendChild(copy);
-  const timing = el("span", "overview-canon-upcoming-time");
-  timing.appendChild(el("strong", null, formatUpcomingRunTime(event.runAt)));
-  const countdown = el("small", "overview-canon-upcoming-countdown", formatUpcomingCountdown(event.runAt, Date.now()));
-  setAttr(countdown, "data-upcoming-run-at", event.runAt || "");
+  const timing = deps.el("span", "overview-canon-upcoming-time");
+  timing.appendChild(deps.el("strong", null, formatUpcomingRunTime(event.runAt)));
+  const countdown = deps.el("small", "overview-canon-upcoming-countdown",
+    formatUpcomingCountdown(event.runAt, Date.now()));
+  deps.setAttr(countdown, "data-upcoming-run-at", event.runAt || "");
   timing.appendChild(countdown);
   row.appendChild(timing);
   if (event.cancellable === true && deps.upcomingCancelApi) {
-    const cancel = el("button", "overview-canon-upcoming-cancel", "Пропустить");
+    const cancel = deps.el("button", "overview-canon-upcoming-cancel", "Пропустить");
     cancel.type = "button";
     cancel.disabled = panel._busy === true;
-    setAttr(cancel, "aria-label", `Пропустить запуск сценария «${event.scenarioTitle || "Сценарий"}»`);
     cancel.addEventListener("click", () => panel._post(deps.upcomingCancelApi,
       { scenarioId: event.scenarioId, triggerId: event.triggerId, runAt: event.runAt },
       `Пропустить запуск «${event.scenarioTitle || "Сценарий"}» ${formatUpcomingRunTime(event.runAt)}?`));
@@ -346,51 +502,27 @@ function appendUpcomingEventRow(panel, list, event, deps) {
 }
 
 export function renderUpcomingEvents(panel, container, deps) {
-  const { el, svgIcon, setAttr } = deps;
   const { visible, remaining } = upcomingEventsSorted(panel._upcomingEvents);
-  const section = el("section", "overview-canon-upcoming");
-  const head = el("div", "overview-canon-section-head");
-  head.appendChild(el("h2", null, "Ближайшие события"));
-  const all = el("button", "overview-canon-link", "Все сценарии");
-  all.type = "button"; all.addEventListener("click", () => panel._activateSection("scenarios")); head.appendChild(all);
+  const section = deps.el("section", "overview-canon-upcoming");
+  const head = deps.el("div", "overview-canon-section-head");
+  head.appendChild(deps.el("h2", null, "Ближайшие события"));
   section.appendChild(head);
   if (!visible.length) {
-    section.appendChild(el("div", "card empty-state muted", "Нет запланированных событий"));
+    section.appendChild(deps.el("div", "card empty-state muted", "Нет запланированных событий"));
     container.appendChild(section);
     return;
   }
-  const list = el("div", "overview-canon-upcoming-list");
+  const list = deps.el("div", "overview-canon-upcoming-list");
   visible.forEach((event) => appendUpcomingEventRow(panel, list, event, deps));
   section.appendChild(list);
-  if (remaining > 0) section.appendChild(el("div", "overview-canon-upcoming-more", `и ещё ${remaining}`));
+  if (remaining > 0) section.appendChild(deps.el("div", "overview-canon-upcoming-more", `и ещё ${remaining}`));
   container.appendChild(section);
-}
-
-function renderDashboardGrid(panel, container, dashboard, deps) {
-  const layout = deps.el("div", "overview-canon-dashboard-grid");
-  const main = deps.el("div", "overview-canon-dashboard-main");
-  renderPrimaryCards(panel, main, dashboard, deps);
-  renderFavorites(panel, main, dashboard, deps);
-  layout.appendChild(main);
-  const side = deps.el("aside", "overview-canon-dashboard-side");
-  const energyWrap = deps.el("div", "overview-canon-dashboard-energy");
-  deps.renderEnergyOverviewCard(panel, energyWrap);
-  side.appendChild(energyWrap);
-  renderAttentionCard(panel, side, dashboard, deps);
-  const rooms = Array.isArray(dashboard.rooms) ? dashboard.rooms : [];
-  const deviations = rooms.map((room) => validNumber(room.temp) && validNumber(room.targetTemp)
-    ? Math.abs(Number(room.temp) - Number(room.targetTemp)) : null).filter(Number.isFinite);
-  const stable = deviations.length && Math.max(...deviations) <= 1.5;
-  const comfortCard = cardButton(deps, "overview-canon-dashboard-panel is-comfort", "climate", panel);
-  appendMetric(deps, comfortCard, "Комфорт в доме", stable ? "В порядке" : (deviations.length ? "Выравнивается" : "Нет данных"),
-    stable ? "Температура близка к целям комнат" : "Откройте климат для подробностей");
-  side.appendChild(comfortCard);
-  layout.appendChild(side);
-  container.appendChild(layout);
 }
 
 export function renderOverviewContent(panel, container, deps) {
   container.innerHTML = "";
   const dashboard = panel._homeDashboard || {};
-  renderDashboardGrid(panel, container, dashboard, deps);
+  renderPrimaryCards(panel, container, dashboard, deps);
+  renderFavorites(panel, container, dashboard, deps);
+  renderBottomRow(panel, container, dashboard, deps);
 }

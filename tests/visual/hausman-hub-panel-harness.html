@@ -178,6 +178,7 @@
             { target_id: "humidifier-bedroom", entity_id: "humidifier.bedroom", name: "Увлажнитель спальня", actions: [{ action_id: "turn_on", title: "Включить", allowed_fields: [] }, { action_id: "set_humidity", title: "Влажность", allowed_fields: ["value"] }] },
             { target_id: "breaker-232", entity_id: "switch.breaker_232", name: "Автомат 232", actions: [{ action_id: "turn_on", title: "Включить", allowed_fields: [] }, { action_id: "turn_off", title: "Отключить", allowed_fields: [] }] },
             { target_id: "breaker-233", entity_id: "switch.breaker_233", name: "Автомат 233", actions: [{ action_id: "turn_on", title: "Включить", allowed_fields: [] }, { action_id: "turn_off", title: "Отключить", allowed_fields: [] }] },
+            { target_id: "intercom-entry", entity_id: "button.intercom_entry", name: "Домофон", actions: [{ action_id: "open", title: "Открыть", allowed_fields: [] }] },
           ],
         },
         list: {
@@ -187,6 +188,9 @@
             { id: "scenario.night_mode", title: "Ночной режим", icon: "mdi:weather-night", enabled: false, requiresConfirmation: false },
           ],
         },
+      };
+      panel._tabletProfile = {
+        settings: { intercom: { showQuickAccess: true, deviceId: "intercom-entry" } },
       };
       const harnessScenarioList = panel._scenarios.list;
       window.__hausmanHubHarnessCalls = [];
@@ -284,7 +288,11 @@
         },
       };
       panel._homeDashboard = {
-        summary: { homeName: "Дом", targetTemp: 25 },
+        summary: {
+          homeName: "Дом", mode: "home", targetTemp: 25, avgTemp: 26.6,
+          co2: 722, activeLights: 2, activeClimate: 4,
+        },
+        comfort: { available: true, score: 89, statusLabel: "Хорошо", dataQuality: "fresh" },
         rooms: [
           { id: "living", name: "Гостиная", temp: 26.6, humidity: 52, targetTemp: 25, targetHumidity: 45 },
           { id: "bedroom", name: "Спальня", temp: 26.5, humidity: 54, targetTemp: 25, targetHumidity: 48 },
@@ -315,6 +323,7 @@
           currentPowerW: 226,
           currentA: 1.6,
           voltageV: 225.5,
+          todayKwh: 3.8,
           totalKwh: 13.51,
           selectedSourceIds: ["breaker-233", "breaker-232"],
           settings: { displayUnits: "both", showVoltage: true, aggregation: "combined", useAllDevices: false },
@@ -454,6 +463,7 @@
         control_channels: ["direct_wifi", "universal_ir", "yandex_remote"],
       };
       panel._activeSection = params.get("section") || "overview";
+      if (params.get("rail") === "collapsed") panel._settingsPrefs.rail_collapsed = true;
       const screen = params.get("screen");
       if (["contour", "wizard", "profiles", "schedule", "home", "windows", "assistant"].includes(screen)) {
         panel._activeClimateView = screen === "wizard" ? "contour" : screen;
@@ -516,8 +526,10 @@
         panel._activeSettingsView = settingsView;
       }
       panel._render();
+      panel._applyLocalPreferences();
       panel.shadowRoot.querySelector("link").href =
         "../../custom_components/hausman_hub/frontend/hausman-hub-panel.css?v=1.52.72";
+      if (params.get("kiosk") === "1") panel._shell.kioskButton.click();
       const deviceName = params.get("openDevice");
       if (deviceName) {
         requestAnimationFrame(() => {

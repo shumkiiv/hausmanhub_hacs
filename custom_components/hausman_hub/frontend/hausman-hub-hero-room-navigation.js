@@ -11,7 +11,7 @@ export function createHeroRoomNavigation(panel, rooms, deps) {
   const strip = el("div", "overview-canon-room-strip");
   const home = el("button");
   home.type = "button";
-  home.appendChild(svgIcon("home"));
+  home.appendChild(svgIcon("home-filled"));
   home.appendChild(el("span", null, "Дом"));
   strip.appendChild(home);
   const roomButtons = new Map();

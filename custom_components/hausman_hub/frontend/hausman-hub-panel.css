@@ -624,6 +624,7 @@ label.signal-option > input[type="radio"] { grid-column:1; width:18px; min-heigh
     background:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 8%,var(--hmh-raised,#181E26)); }
   .sidebar-intercom-icon { width:21px; height:21px; color:var(--hmh-text-dim,#9AA7B4); }
   .sidebar-intercom-label { min-width:0; flex:1 1 auto; font-size:14px; font-weight:600; text-align:left; }
+  .sidebar-intercom-action { color:var(--hmh-text-dim,#9AA7B4); font-size:12px; font-weight:500; }
   .sidebar-footer { display:flex; min-height:58px; align-items:center; justify-content:space-between; gap:10px; padding:14px 18px;
     border-top:1px solid color-mix(in srgb,var(--hmh-border,#2F3845) 72%,transparent); color:var(--hmh-text-dim,#9AA7B4); }
   .sidebar-version { font-size:12px; }

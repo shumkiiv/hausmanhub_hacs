@@ -459,7 +459,8 @@ def panel_script(get_table: dict, post_table: dict, assertions: str) -> str:
       );
       const log = recordTechnicalEvent;
       vm.runInThisContext(
-        fs.readFileSync({str(KIOSK_JS)!r}, "utf8").replace(/export /g, ""),
+        fs.readFileSync({str(KIOSK_JS)!r}, "utf8")
+          .replace(/^import .*;\\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(KIOSK_JS)!r} }}
       );
       vm.runInThisContext(

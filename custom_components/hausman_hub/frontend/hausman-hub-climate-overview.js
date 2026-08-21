@@ -180,7 +180,7 @@ export function renderHomeTargetCard(panel, dashboard, deps, options = {}) {
     ? `overview-canon-climate-controls${target === null ? " is-empty" : ""}`
     : `overview-canon-primary-card is-target${target === null ? " is-empty" : ""}`);
   const head = deps.el("div", "overview-canon-target-head");
-  head.appendChild(deps.el("span", "overview-canon-label", embedded ? "Цель" : "Цель климата"));
+  head.appendChild(deps.el("span", "overview-canon-label", "Цель климата"));
   if (panel._climateRuntime && panel._climateRuntime.phase === "managed") {
     head.appendChild(deps.el("span", "overview-canon-target-auto", "Авто"));
   }

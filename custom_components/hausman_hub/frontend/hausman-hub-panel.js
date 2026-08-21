@@ -201,6 +201,7 @@ const ICON_PATHS = {
   rooms: "M3 21V3h10v4h8v14h-2v-2h-4v2h-2v-8H5v8zm2-10h6V5H5zm10 6h4v-2h-4zm0-4h4v-2h-4z",
   media: "M4 6h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2m0 2v10h16V8zm6 2 5 3-5 3z",
   shield: "M12 2 4 5v6c0 5.05 3.41 9.74 8 11 4.59-1.26 8-5.95 8-11V5zm0 2.18L18 6.43V11c0 3.93-2.55 7.76-6 8.92C8.55 18.76 6 14.93 6 11V6.43z",
+  check: "M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z",
   lock: "M17 8h-1V6a4 4 0 0 0-8 0v2H7a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2m-7-2a2 2 0 1 1 4 0v2h-4zm7 13H7v-9h10z",
   window: "M3 3h18v18H3zm1 1v7h7V4zm9 0v7h7V4zM4 12v7h7v-7zm9 0v7h7v-7z",
   door: "M6 3h12v18H6zm8 7a1.2 1.2 0 1 0 .1 0z",
@@ -218,6 +219,7 @@ const ICON_PATHS = {
   auto: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18V4c4.41 0 8 3.59 8 8s-3.59 8-8 8z",
   manual: "M9 11V5a1 1 0 0 1 2 0v5h1V3a1 1 0 0 1 2 0v7h1V4a1 1 0 0 1 2 0v8h1V7a1 1 0 0 1 2 0v7a5 5 0 0 1-5 5h-2a5 5 0 0 1-5-5v-3a1 1 0 0 1 2 0z",
   home: "M12 3 2 12h3v9h6v-6h2v6h6v-9h3L12 3zm0 2.69L18 11v8h-3v-6H9v6H6v-8l6-5.31z",
+  "home-filled": "M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z",
   thermometer: "M15 13V5a3 3 0 0 0-6 0v8a5 5 0 1 0 6 0zm-3 6a3 3 0 0 1-1-5.83V5a1 1 0 0 1 2 0v8.17A3 3 0 0 1 12 19z",
   water: "M12 2.69 6.35 8.34A8 8 0 0 0 4 14a8 8 0 0 0 16 0c0-2.21-.9-4.21-2.35-5.66L12 2.69zM12 20a6 6 0 0 1-4.24-10.24L12 5.52l4.24 4.24A6 6 0 0 1 12 20z",
   bolt: "M11 21h-1l1-7H7.5c-.88 0-.33-.75-.31-.78C8.46 10.97 10.37 7.63 13 3h1l-1 7h3.5c.4 0 .62.19.4.66C12.97 17.53 11 21 11 21z",
@@ -226,6 +228,15 @@ const ICON_PATHS = {
   intercom: "M7 2h10a3 3 0 0 1 3 3v14a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3m0 2a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1zm5 2a3 3 0 1 1 0 6 3 3 0 0 1 0-6m-3 8h6v2H9zm0 4h4v2H9z",
   close: "M6.4 5 5 6.4 10.6 12 5 17.6 6.4 19l5.6-5.6 5.6 5.6 1.4-1.4-5.6-5.6L19 6.4 17.6 5 12 10.6z",
   refresh: "M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z",
+  star: "M12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z",
+  more: "M12 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4m0 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4m0 6a2 2 0 1 0 0 4 2 2 0 0 0 0-4",
+  fullscreen: "M7 14H5v5h5v-2H7zm-2-4h2V7h3V5H5zm12 7h-3v2h5v-5h-2zm-3-12v2h3v3h2V5z",
+  history: "M13 3a9 9 0 0 0-8.95 8H1l4 4 4-4H6.06A7 7 0 1 1 8 16.9l-1.42 1.42A9 9 0 1 0 13 3m-1 5v5l4.25 2.52 1-1.64-3.25-1.93V8z",
+  air: "M4 10h10.5a2.5 2.5 0 1 0-2.45-3H10a4.5 4.5 0 1 1 4.5 5H4zm0 4h13.5a4.5 4.5 0 1 1-4.5 4.5h2a2.5 2.5 0 1 0 2.5-2.5H4zm0-8h4v2H4z",
+  leaf: "M17.5 3C12 3 7 6.58 7 12c0 1.57.45 3.04 1.24 4.28L5 19.5 6.5 21l3.2-3.2A8.9 8.9 0 0 0 13 18c5.42 0 9-5 9-10.5V3zm-4.33 12.93c-.75 0-1.47-.13-2.13-.38 1.13-2.38 3-4.42 5.35-5.73-2.83.66-5.24 2.3-6.87 4.55A6.2 6.2 0 0 1 9 12c0-3.78 3.35-6.73 8.5-7H20v2.5c0 5.15-2.95 8.43-6.83 8.43",
+  wifi: "M12 18.5 9.5 16a3.54 3.54 0 0 1 5 0zM7.05 13.55l-2.5-2.5a10.54 10.54 0 0 1 14.9 0l-2.5 2.5a7 7 0 0 0-9.9 0M2.5 9 0 6.5a16.97 16.97 0 0 1 24 0L21.5 9a13.44 13.44 0 0 0-19 0",
+  cloud: "M19.35 10.04A7.5 7.5 0 0 0 5.3 8.04 6 6 0 0 0 6 20h13a5 5 0 0 0 .35-9.96M19 18H6a4 4 0 0 1-.15-8A5.5 5.5 0 0 1 16.9 11.1 3 3 0 1 1 19 18",
+  battery: "M17 5H3a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-3h2v-4h-2V7a2 2 0 0 0-2-2m0 12H3V7h14z",
 };
 
 const ICON_STROKE_PATHS = {
@@ -1149,6 +1160,7 @@ class HausmanHubPanel extends HTMLElement {
     setAttr(intercom, "aria-label", "Открыть домофон");
     intercom.appendChild(svgIcon("intercom", "sidebar-intercom-icon"));
     intercom.appendChild(el("span", "sidebar-intercom-label", "Домофон"));
+    intercom.appendChild(el("small", "sidebar-intercom-action", "Открыть"));
     intercom.addEventListener("click", () => openIntercomFromRail(this));
     sidebar.appendChild(intercom);
     const sidebarKiosk = createKioskButton(this, "sidebar-kiosk", { el, svgIcon });
@@ -1178,9 +1190,9 @@ class HausmanHubPanel extends HTMLElement {
       container.appendChild(node);
       sectionNodes[section.id] = node;
     });
-    const readiness = el("div");
-    const summary = el("div");
-    const rooms = el("div");
+    const readiness = el("div", "overview-tablet-readiness");
+    const summary = el("div", "overview-tablet-content");
+    const rooms = el("div", "overview-tablet-legacy-rooms");
     sectionNodes.overview.appendChild(readiness);
     sectionNodes.overview.appendChild(summary);
     sectionNodes.overview.appendChild(rooms);
@@ -1341,6 +1353,7 @@ class HausmanHubPanel extends HTMLElement {
   _syncSectionVisibility() {
     if (!this._shell) return;
     if (this._kioskMode) this._shell.renderKiosk();
+    this.classList?.toggle?.("overview-active", !this._kioskMode && this._activeSection === "overview");
     const climateView = CLIMATE_VIEWS.find((view) => view.id === this._activeClimateView);
     this._shell.brandSubtitle.textContent = this._activeSection === "climate" && climateView
       ? climateView.subtitle
@@ -1880,6 +1893,8 @@ class HausmanHubPanel extends HTMLElement {
       renderOverviewHero(this, container, readiness, {
         el, svgIcon, setAttr,
         openRoom: (room) => openRoomFromOverview(this, room),
+        enterKiosk: () => this._shell?.kioskButton?.click?.(),
+        refresh: () => this._load(),
       });
       this._overviewHeroRenderKey = renderKey;
       return;

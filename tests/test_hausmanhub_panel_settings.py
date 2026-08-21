@@ -707,7 +707,7 @@ def panel_script(
       );
       const log = recordTechnicalEvent;
       vm.runInThisContext(
-        fs.readFileSync({str(KIOSK_JS)!r}, "utf8").replace(/export /g, ""),
+        fs.readFileSync({str(KIOSK_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(KIOSK_JS)!r} }}
       );
       vm.runInThisContext(
@@ -946,7 +946,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           "security", "devices", "energy", "scenarios", "settings",
         ];
         const expectedCopy = {
-          overview: ["Управление климатом"],
+          overview: ["Цель климата", "Управление климатом"],
           lighting: ["Освещение"],
           climate: ["Климат"],
           rooms: ["Комнаты"],
@@ -1036,7 +1036,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         }
         setKioskState(panel, true);
         const kioskCopy = textOf(panel._shell.kioskSurface).replace(/\\s+/g, " ");
-        for (const required of ["HAUSMAN", "Климат", "Энергия", "Воздух", "Избранные сценарии", "Погода", "Дом сейчас"]) {
+        for (const required of ["HAUSMAN", "Климат", "Показания энергии", "Воздух", "Избранные сценарии", "Погода", "Дом сейчас"]) {
           if (!kioskCopy.includes(required)) throw new Error("kiosk panorama is incomplete: " + required);
         }
         if (kioskCopy.includes("Открыть домофон") || kioskCopy.includes("Без подтверждения")) {
@@ -1669,9 +1669,9 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const overview = panel._shell.sectionNodes.overview;
         const text = textOf(overview);
         for (const label of [
-          "Дом", "Гостиная", "Спальня", "Кабинет", "Климат", "Цель",
-          "Освещение", "Безопасность", "Комфорт в доме",
-          "Избранные сценарии", "Доброе утро", "Погода",
+          "Дом", "Гостиная", "Спальня", "Кабинет", "Цель климата",
+          "Освещение", "Комфорт в доме", "Избранное", "Доброе утро",
+          "Погода", "Дом сейчас", "Активность", "Показания энергии",
         ]) {
           if (!text.includes(label)) throw new Error("overview text missing: " + label);
         }
@@ -1683,9 +1683,9 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         }
         const byClass = (name) => findAll(overview, (node) =>
           String(node.className).split(" ").includes(name));
-        if (byClass("overview-canon-hero-fact").length !== 0
-          || byClass("overview-canon-hero-summary").length !== 1) {
-          throw new Error("Hero must keep one calm status summary without technical counters");
+        if (byClass("overview-tablet-hero-fact").length !== 4
+          || byClass("overview-canon-hero-summary").length !== 0) {
+          throw new Error("Hero must match the four tablet counters");
         }
         if (byClass("overview-canon-primary-card").length !== 3) {
           throw new Error("climate target must be merged into the three primary cards");
@@ -1732,7 +1732,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const heroTitle = findAll(currentOverview, (node) => node.tagName === "H1")[0];
         const heroMedia = byClass("overview-canon-hero-media")[0];
         if (!heroTitle || heroTitle.textContent !== "Спальня"
-          || !textOf(currentOverview).includes("23,5 °C")
+          || !textOf(currentOverview).includes("23,5°")
           || !String(heroMedia?.style?.backgroundImage).includes("hero_room_bedroom_")) {
           throw new Error("selected room did not replace the hero content and image");
         }
@@ -1780,14 +1780,16 @@ class PanelSettingsSectionsTest(unittest.TestCase):
             """
         const hero = panel._shell.readiness;
         const text = textOf(hero);
-        if (!text.includes("Статус обновляется")) {
+        if (!text.includes("Состояние обновляется")) {
           throw new Error("overview did not render safe fallback for missing readiness: " + text);
         }
         const overview = panel._shell.sectionNodes.overview;
         const attention = findAll(overview, (node) =>
           String(node.className).split(" ").includes("overview-canon-attention-card"));
-        if (attention.length !== 1 || !textOf(attention[0]).includes("Проверьте состояние")) {
-          throw new Error("Dashboard did not render one actionable attention block");
+        const homeNow = findAll(overview, (node) =>
+          String(node.className).split(" ").includes("overview-tablet-home-compact"));
+        if (attention.length !== 0 || homeNow.length !== 1) {
+          throw new Error("Dashboard did not keep the safe tablet sidebar fallback");
         }
         if (panel._shell.statusPill.textContent !== "Состояние уточняется") {
           throw new Error("header did not render unknown readiness safely");
@@ -1848,17 +1850,17 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const overview = panel._shell.sectionNodes.overview;
         const attention = findAll(overview, (node) =>
           String(node.className).split(" ").includes("overview-canon-attention-card"));
-        if (attention.length !== 1
-          || !textOf(attention[0]).includes("2")
-          || !textOf(attention[0]).includes("устройства не в сети")) {
-          throw new Error("offline devices were not grouped into one attention action");
+        const compactTiles = findAll(overview, (node) =>
+          String(node.className).split(" ").includes("overview-tablet-home-tile"));
+        const offlineTile = compactTiles.find((node) => textOf(node).includes("Офлайн"));
+        const detailedRows = findAll(overview, (node) =>
+          String(node.className).split(" ").includes("overview-tablet-home-detail"));
+        if (attention.length !== 0 || !offlineTile || !textOf(offlineTile).includes("2")
+          || !detailedRows.some((node) => textOf(node).includes("2 устройства без связи"))) {
+          throw new Error("offline devices were not grouped in the tablet Home now panel");
         }
         if (textOf(panel._shell.readiness).includes("Требуется внимание")) {
           throw new Error("Hero duplicated the offline attention state");
-        }
-        attention[0].fire("click");
-        if (panel._activeSection !== "devices") {
-          throw new Error("offline attention action did not open devices");
         }
             """,
         )
@@ -2100,7 +2102,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         for (const label of [
           "Климат по комнатам", "Комнаты и цели",
           "Кондиционеры", "Термоголовки", "Тёплый пол", "Увлажнители",
-          "Очистители", "Вытяжки", "Гостиная", "Детская", "24.5°", "46% влажн.",
+          "Очистители", "Вытяжки", "Гостиная", "Детская", "24,5°", "46% влажн.",
           "Кабинет",
         ]) {
           if (!text.includes(label)) throw new Error("climate tablet text missing: " + label + " :: " + text);
@@ -2110,7 +2112,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         if (roomCards.length !== 3) throw new Error("climate room cards mismatch: " + roomCards.length);
         const office = roomCards.find((node) => textOf(node).includes("Кабинет"));
         const officeText = textOf(office);
-        if (!officeText.includes("Нет данных") || !officeText.includes("Цели · не заданы")) {
+        if (!officeText.includes("Нет данных") || !officeText.includes("Цели · —")) {
           throw new Error("climate room card did not render the office without readings: " + officeText);
         }
         const searchField = findAll(climate, (node) =>
@@ -2462,11 +2464,11 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         self.assertEqual(0, completed.returncode, completed.stderr)
         css = OVERVIEW_CSS.read_text(encoding="utf-8")
         self.assertIn(".overview-canon-target-dial", css)
-        self.assertIn("grid-template-columns:42px minmax(0,1fr) 42px", css)
-        self.assertIn("min-width:42px; height:42px; min-height:42px", css)
+        self.assertIn("grid-template-columns:48px minmax(0,1fr) 48px", css)
+        self.assertIn("min-width:48px; height:48px; min-height:48px", css)
         self.assertIn(".overview-canon-target-value", css)
-        self.assertIn(".overview-canon-link.is-tertiary", css)
-        self.assertIn("var(--hmh-text-disabled)", css)
+        self.assertIn(".overview-canon-target-presets", css)
+        self.assertIn("min-height:64px", css)
 
     def test_television_card_uses_tablet_presentation_not_entity_dump(self) -> None:
         payloads = dict(GET_PATHS)
@@ -3615,11 +3617,12 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         self.assertIn("container-name:hausmanhub-panel", panel_css)
         self.assertIn("@container hausmanhub-panel (min-width:1050px)", panel_css)
         self.assertIn(
-            ".overview-canon-primary-card, .overview-canon-bottom-card, .overview-canon-side-card",
+            ".overview-canon-primary-card,.overview-canon-favorites,.overview-tablet-bottom-card,.overview-tablet-side-card",
             overview_css,
         )
-        self.assertIn("flex-direction:column; white-space:normal", overview_css)
-        self.assertIn(".overview-canon-primary-grid { display:grid; grid-template-columns:minmax(0,2.35fr) minmax(150px,.9fr) minmax(180px,1fr)", overview_css)
+        self.assertIn(".overview-canon-primary-card { display:flex; height:100%; flex-direction:column", overview_css)
+        self.assertIn("text-align:left; white-space:normal", overview_css)
+        self.assertIn(".overview-canon-primary-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr))", overview_css)
         self.assertIn("flex-direction:column", security_css)
         self.assertIn("white-space:normal", security_css)
         self.assertIn("flex-direction:column", devices_css)

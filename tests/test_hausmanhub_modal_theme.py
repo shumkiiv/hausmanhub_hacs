@@ -281,8 +281,8 @@ class EnergyLayoutTest(unittest.TestCase):
         self.assertIn(".energy-overview-settings { color:var(--hmh-text)", css)
         self.assertIn("text-shadow:none", css)
         overview_css = read(OVERVIEW_CSS)
-        self.assertIn(".overview-canon-dashboard-energy .energy-overview-actions > button", overview_css)
-        self.assertIn("background:var(--hmh-surface-card); box-shadow:none; text-shadow:none", overview_css)
+        self.assertIn(".overview-tablet-energy-sources", overview_css)
+        self.assertIn(".overview-tablet-energy-source", overview_css)
 
     def test_energy_details_open_as_accessible_modal(self) -> None:
         js = read(ENERGY_JS)
