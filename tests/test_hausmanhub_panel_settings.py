@@ -1669,7 +1669,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const overview = panel._shell.sectionNodes.overview;
         const text = textOf(overview);
         for (const label of [
-          "Дом", "Гостиная", "Спальня", "Кабинет", "Климат", "Цель климата",
+          "Дом", "Гостиная", "Спальня", "Кабинет", "Климат", "Цель",
           "Освещение", "Безопасность", "Комфорт в доме",
           "Избранные сценарии", "Доброе утро", "Погода",
         ]) {
@@ -1683,16 +1683,16 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         }
         const byClass = (name) => findAll(overview, (node) =>
           String(node.className).split(" ").includes(name));
-        if (byClass("overview-canon-hero-fact").length !== 4) {
-          throw new Error("canonical hero must contain four facts");
+        if (byClass("overview-canon-hero-fact").length !== 0
+          || byClass("overview-canon-hero-summary").length !== 1) {
+          throw new Error("Hero must keep one calm status summary without technical counters");
         }
-        const heroFacts = byClass("overview-canon-hero-fact");
-        const activeValue = findAll(heroFacts[2], (node) => node.tagName === "STRONG")[0];
-        if (!activeValue || activeValue.textContent !== "2") {
-          throw new Error("numeric sensors were counted as active devices: " + JSON.stringify(heroFacts.map(textOf)));
+        if (byClass("overview-canon-primary-card").length !== 3) {
+          throw new Error("climate target must be merged into the three primary cards");
         }
-        if (byClass("overview-canon-primary-card").length !== 4) {
-          throw new Error("canonical first row must contain four Android-parity cards");
+        if (byClass("overview-canon-climate-controls").length !== 1
+          || byClass("overview-canon-attention-card").length !== 0) {
+          throw new Error("ready Dashboard must keep one embedded climate control and no attention duplicate");
         }
         const stableHero = byClass("overview-canon-hero")[0];
         const stableMedia = byClass("overview-canon-hero-media")[0];
@@ -1713,9 +1713,11 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("home slide must be the active selectable hero state");
         }
         const climateCard = byClass("overview-canon-primary-card")[0];
-        climateCard.fire("click");
+        const climateDetails = findAll(climateCard, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Настроить")[0];
+        climateDetails.fire("click");
         if (panel._activeSection !== "climate") {
-          throw new Error("climate card did not open climate");
+          throw new Error("climate details did not open climate");
         }
         panel._shell.tabs.overview.fire("click");
         const roomCard = findAll(panel._shell.sectionNodes.overview, (node) =>
@@ -1776,11 +1778,55 @@ class PanelSettingsSectionsTest(unittest.TestCase):
             """
         const hero = panel._shell.readiness;
         const text = textOf(hero);
-        if (!text.includes("Проверьте настройки") || !text.includes("Требуется внимание")) {
+        if (!text.includes("Статус обновляется")) {
           throw new Error("overview did not render safe fallback for missing readiness: " + text);
+        }
+        const overview = panel._shell.sectionNodes.overview;
+        const attention = findAll(overview, (node) =>
+          String(node.className).split(" ").includes("overview-canon-attention-card"));
+        if (attention.length !== 1 || !textOf(attention[0]).includes("Проверьте состояние Home Assistant")) {
+          throw new Error("Dashboard did not render one actionable attention block");
         }
         if (panel._shell.statusPill.textContent !== "Состояние уточняется") {
           throw new Error("header did not render unknown readiness safely");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_overview_groups_offline_devices_into_one_attention_action(self) -> None:
+        payloads = dict(GET_PATHS)
+        payloads["hausman_hub/v1/admin/panel"] = {
+            **PANEL_PAYLOAD,
+            "readiness": {"status": "ready", "bridge_mode": "native", "reasons": []},
+        }
+        payloads["hausman_hub/v1/dashboard"] = {
+            "summary": {"homeName": "Дом", "targetTemp": 25},
+            "rooms": [{"id": "living", "name": "Гостиная", "temp": 24.5, "humidity": 45, "targetTemp": 25}],
+            "devices": [
+                {"id": "offline-1", "domain": "light", "state": "unavailable", "unavailable": True},
+                {"id": "offline-2", "domain": "switch", "state": "unavailable", "unavailable": True},
+                {"id": "online", "domain": "light", "state": "on", "active": True},
+            ],
+            "alarms": [], "scenarios": [], "weather": {},
+        }
+        script = panel_script(
+            payloads,
+            {},
+            """
+        const overview = panel._shell.sectionNodes.overview;
+        const attention = findAll(overview, (node) =>
+          String(node.className).split(" ").includes("overview-canon-attention-card"));
+        if (attention.length !== 1 || !textOf(attention[0]).includes("2 устройства не в сети")) {
+          throw new Error("offline devices were not grouped into one attention action");
+        }
+        if (textOf(panel._shell.readiness).includes("Требуется внимание")) {
+          throw new Error("Hero duplicated the offline attention state");
+        }
+        attention[0].fire("click");
+        if (panel._activeSection !== "devices") {
+          throw new Error("offline attention action did not open devices");
         }
             """,
         )
@@ -2275,7 +2321,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         self.assertIn("var(--hmh-surface", css)
         self.assertIn("button.climate-sync-button:focus-visible", css)
 
-    def test_overview_home_target_card_is_a_full_climate_control(self) -> None:
+    def test_overview_climate_card_keeps_full_home_target_control(self) -> None:
         payloads = dict(GET_PATHS)
         payloads["hausman_hub/v1/dashboard"] = {
             "summary": {"targetTemp": 22.5},
@@ -2304,9 +2350,9 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const overview = panel._shell.sectionNodes.overview;
         const byClass = (root, name) => findAll(root, (node) =>
           String(node.className).split(" ").includes(name));
-        const cards = byClass(overview, "is-target");
-        if (cards.length !== 1 || cards[0].tagName !== "SECTION") {
-          throw new Error("home target control card is missing");
+        const cards = byClass(overview, "overview-canon-climate-controls");
+        if (cards.length !== 1 || cards[0].tagName !== "DIV") {
+          throw new Error("embedded home target control is missing");
         }
         const card = cards[0];
         if (byClass(card, "overview-canon-target-dial").length !== 1) {
@@ -2357,13 +2403,13 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         }
         panel._climateRuntime.home_control.allowed_actions = ["set_home_targets"];
         panel._render();
-        const withoutSync = byClass(overview, "is-target")[0];
+        const withoutSync = byClass(overview, "overview-canon-climate-controls")[0];
         if (byClass(withoutSync, "overview-canon-link").length !== 1) {
           throw new Error("synchronization stayed visible without synchronize_home capability");
         }
         panel._climateRuntime.home_control.allowed_actions = [];
         panel._render();
-        const disabledCard = byClass(overview, "is-target")[0];
+        const disabledCard = byClass(overview, "overview-canon-climate-controls")[0];
         const disabledSteps = byClass(disabledCard, "overview-canon-target-step");
         if (disabledSteps.length !== 2 || !disabledSteps.every((node) => node.disabled)) {
           throw new Error("steps are not disabled without set_home_targets capability");
@@ -2374,7 +2420,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         panel._climateRuntime.home_control.allowed_actions = ["set_home_targets"];
         panel._busy = true;
         panel._render();
-        const busySteps = byClass(byClass(overview, "is-target")[0], "overview-canon-target-step");
+        const busySteps = byClass(byClass(overview, "overview-canon-climate-controls")[0], "overview-canon-target-step");
         if (!busySteps.every((node) => node.disabled)) {
           throw new Error("steps are not disabled while busy");
         }
@@ -2383,7 +2429,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         if (targetPosts().length !== 1) throw new Error("busy step sent an action");
         panel._busy = false;
         panel._render();
-        const finalLinks = byClass(byClass(overview, "is-target")[0], "overview-canon-link");
+        const finalLinks = byClass(byClass(overview, "overview-canon-climate-controls")[0], "overview-canon-link");
         finalLinks.find((node) => node.textContent === "Настроить").fire("click");
         if (panel._activeSection !== "climate") {
           throw new Error("secondary details link did not open the climate section");

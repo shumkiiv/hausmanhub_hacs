@@ -96,12 +96,11 @@ export function renderOverviewHero(panel, container, readiness, deps) {
   const dashboard = panel._homeDashboard || {};
   const rooms = Array.isArray(dashboard.rooms) ? dashboard.rooms : [];
   const devices = Array.isArray(dashboard.devices) ? dashboard.devices : [];
-  const scenarios = Array.isArray(dashboard.scenarios) ? dashboard.scenarios : [];
   container.innerHTML = "";
   const greeting = el("div", "overview-canon-greeting");
   greeting.appendChild(el("h2", null, overviewGreeting()));
   greeting.appendChild(el("span", "overview-canon-greeting-status",
-    readinessStatus === "ready" ? "Все системы работают штатно" : "Требуется внимание"));
+    readinessStatus === "ready" ? "Все системы работают штатно" : "Состояние обновляется"));
   const upcomingTotal = upcomingEventsSorted(panel._upcomingEvents, 100).visible.length;
   const eventsButton = el("button", "overview-canon-events-button", `События · ${upcomingTotal}`);
   eventsButton.type = "button";
@@ -123,8 +122,8 @@ export function renderOverviewHero(panel, container, readiness, deps) {
   const title = el("h1");
   copy.appendChild(eyebrow);
   copy.appendChild(title);
-  const facts = el("div", "overview-canon-hero-facts");
-  copy.appendChild(facts);
+  const summary = el("p", "overview-canon-hero-summary");
+  copy.appendChild(summary);
   const details = el("button", "overview-canon-hero-action", "Подробнее о доме");
   details.type = "button";
   details.addEventListener("click", () => {
@@ -134,8 +133,8 @@ export function renderOverviewHero(panel, container, readiness, deps) {
   });
   copy.appendChild(details);
   overlay.appendChild(copy);
-  const status = el("span", `overview-canon-state${readinessStatus === "ready" ? " is-ready" : " is-attention"}`,
-    readinessStatus === "ready" ? "Всё в порядке" : "Проверьте настройки");
+  const status = el("span", "overview-canon-state is-ready",
+    readinessStatus === "ready" ? "Всё в порядке" : "Статус обновляется");
   overlay.appendChild(status);
   hero.appendChild(overlay);
   const roomNavigation = createHeroRoomNavigation(panel, rooms, { el, setAttr, svgIcon });
@@ -147,13 +146,6 @@ export function renderOverviewHero(panel, container, readiness, deps) {
 
   const formatTemperature = (value) => validNumber(value) ? `${Number(value).toFixed(1).replace(".0", "").replace(".", ",")} °C` : "Нет данных";
   const formatHumidity = (value) => validNumber(value) ? `${Math.round(Number(value))} %` : null;
-  const renderFact = (iconName, value, label) => {
-    const fact = el("span", "overview-canon-hero-fact");
-    fact.appendChild(svgIcon(iconName));
-    fact.appendChild(el("strong", null, value));
-    fact.appendChild(el("small", null, label));
-    facts.appendChild(fact);
-  };
   const selectHeroRoom = (room, animate = true) => {
     panel._overviewHeroRoomId = room?.id || null;
     const nextImage = stableOverviewHeroImage(panel, room, dashboard);
@@ -167,26 +159,25 @@ export function renderOverviewHero(panel, container, readiness, deps) {
       }
     }
     roomNavigation.setActive(room, animate);
-    facts.innerHTML = "";
     if (!room) {
-      eyebrow.textContent = readinessStatus === "ready" ? "Дом работает штатно" : "Требуется внимание";
+      eyebrow.textContent = "Дом";
       title.textContent = homeName;
-      renderFact("rooms", String(rooms.length), "комнат");
-      renderFact("device", String(physicalDeviceCount(devices)), "устройств");
-      renderFact("energy", String(activeCount(devices)), "активно");
-      renderFact("play", String(scenarios.length), "сценариев");
+      summary.textContent = readinessStatus === "ready"
+        ? "Главные состояния и быстрые действия собраны ниже."
+        : "Обновляем состояние дома."
       details.hidden = false;
       details.textContent = "Подробнее о доме";
-      status.textContent = readinessStatus === "ready" ? "Всё в порядке" : "Проверьте настройки";
+      status.textContent = readinessStatus === "ready" ? "Всё в порядке" : "Статус обновляется";
       panel._overviewHeroRenderKey = overviewHeroRenderKey(panel, readiness);
       return;
     }
-    eyebrow.textContent = "Состояние комнаты";
+    eyebrow.textContent = "Комната";
     title.textContent = room.name;
-    renderFact("thermometer", formatTemperature(room.temp), "температура");
-    renderFact("water", formatHumidity(room.humidity) || "Нет данных", "влажность");
-    renderFact("thermometer", formatTemperature(room.targetTemp), "цель");
-    renderFact("device", String(Array.isArray(room.deviceIds) ? room.deviceIds.length : 0), "устройств");
+    summary.textContent = [
+      formatTemperature(room.temp),
+      `цель ${formatTemperature(room.targetTemp)}`,
+      formatHumidity(room.humidity) ? `влажность ${formatHumidity(room.humidity)}` : null,
+    ].filter(Boolean).join(" · ");
     details.hidden = true;
     status.textContent = room.climateRunning ? "Климат работает" : (room.status || "Обычный режим");
     panel._overviewHeroRenderKey = overviewHeroRenderKey(panel, readiness);
@@ -201,18 +192,15 @@ function renderPrimaryCards(panel, container, dashboard, deps) {
   const devices = Array.isArray(dashboard.devices) ? dashboard.devices : [];
   const climate = devices.filter((device) => CLIMATE_DOMAINS.has(device.domain) || device.category === "climate" || device.category === "air_quality");
   const row = deps.el("div", "overview-canon-primary-grid");
-  const climateCard = cardButton(deps, "overview-canon-primary-card is-climate", "climate", panel);
-  appendMetric(deps, climateCard, "Климат", panel._temp(average(rooms.map((room) => room.temp))),
+  const climateCard = deps.el("section", "overview-canon-primary-card is-climate");
+  const climateSummary = deps.el("div", "overview-canon-climate-summary");
+  appendMetric(deps, climateSummary, "Климат", panel._temp(average(rooms.map((room) => room.temp))),
     `Цель ${panel._temp(average(rooms.map((room) => room.targetTemp)))} · влажность ${panel._humidity(average(rooms.map((room) => room.humidity)))}`);
-  const climateFacts = deps.el("span", "overview-canon-card-facts");
-  [["Цель", panel._temp(average(rooms.map((room) => room.targetTemp)))],
-    ["Влажность", panel._humidity(average(rooms.map((room) => room.humidity)))],
-    ["Работает", String(activeCount(climate))]].forEach(([label, value]) => {
-    const fact = deps.el("span"); fact.appendChild(deps.el("strong", null, value)); fact.appendChild(deps.el("small", null, label)); climateFacts.appendChild(fact);
-  });
-  climateCard.appendChild(climateFacts);
+  climateSummary.appendChild(deps.el("span", "overview-canon-climate-running",
+    activeCount(climate) ? `Работает: ${activeCount(climate)}` : "Оборудование в ожидании"));
+  climateCard.appendChild(climateSummary);
+  climateCard.appendChild(renderHomeTargetCard(panel, dashboard, deps, { embedded: true }));
   row.appendChild(climateCard);
-  row.appendChild(renderHomeTargetCard(panel, dashboard, deps));
   const lights = devices.filter((device) => device.domain === "light" || device.category === "lighting");
   const lightingCard = cardButton(deps, "overview-canon-primary-card is-lighting", "lighting", panel);
   appendMetric(deps, lightingCard, "Освещение", String(activeCount(lights)), `из ${physicalDeviceCount(lights)} устройств включено`);
@@ -223,6 +211,35 @@ function renderPrimaryCards(panel, container, dashboard, deps) {
     alarms.length ? "Требуется внимание" : "Активных тревог нет");
   row.appendChild(securityCard);
   container.appendChild(row);
+}
+
+function plural(count, one, few, many) {
+  const mod100 = count % 100;
+  const mod10 = count % 10;
+  if (mod100 >= 11 && mod100 <= 14) return many;
+  if (mod10 === 1) return one;
+  if (mod10 >= 2 && mod10 <= 4) return few;
+  return many;
+}
+
+function renderAttentionCard(panel, container, dashboard, deps) {
+  const devices = Array.isArray(dashboard.devices) ? dashboard.devices : [];
+  const offline = devices.filter((device) => device.unavailable === true || device.state === "unavailable").length;
+  const readinessStatus = panel._data?.readiness?.status || "not_ready";
+  if (!offline && readinessStatus === "ready") return;
+  const card = deps.el("button", "overview-canon-attention-card");
+  card.type = "button";
+  const target = offline ? "devices" : "settings";
+  card.addEventListener("click", () => panel._activateSection(target));
+  card.appendChild(deps.el("span", "overview-canon-attention-label", "Требуется внимание"));
+  const title = offline
+    ? `${offline} ${plural(offline, "устройство не в сети", "устройства не в сети", "устройств не в сети")}`
+    : "Проверьте состояние Home Assistant";
+  card.appendChild(deps.el("strong", null, title));
+  card.appendChild(deps.el("span", "overview-canon-attention-supporting", offline
+    ? "Открыть устройства"
+    : "Открыть настройки"));
+  container.appendChild(card);
 }
 
 function renderFavorites(panel, container, dashboard, deps) {
@@ -309,6 +326,7 @@ export function renderUpcomingEvents(panel, container, deps) {
 function renderDashboardGrid(panel, container, dashboard, deps) {
   const layout = deps.el("div", "overview-canon-dashboard-grid");
   const main = deps.el("div", "overview-canon-dashboard-main");
+  renderAttentionCard(panel, main, dashboard, deps);
   renderPrimaryCards(panel, main, dashboard, deps);
   renderFavorites(panel, main, dashboard, deps);
   renderUpcomingEvents(panel, main, deps);

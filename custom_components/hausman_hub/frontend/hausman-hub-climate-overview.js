@@ -168,16 +168,19 @@ export async function setClimateHomeTarget(panel, targetTemperature) {
   }
 }
 
-export function renderHomeTargetCard(panel, dashboard, deps) {
+export function renderHomeTargetCard(panel, dashboard, deps, options = {}) {
+  const embedded = options.embedded === true;
   const control = panel._climateRuntime?.home_control || {};
   const allowed = Array.isArray(control.allowed_actions) ? control.allowed_actions : [];
   const canSetTargets = allowed.includes("set_home_targets");
   const raw = dashboard.summary && dashboard.summary.targetTemp;
   const target = raw !== null && raw !== undefined && raw !== "" && Number.isFinite(Number(raw))
     ? Number(raw) : null;
-  const card = deps.el("section", `overview-canon-primary-card is-target${target === null ? " is-empty" : ""}`);
+  const card = deps.el(embedded ? "div" : "section", embedded
+    ? `overview-canon-climate-controls${target === null ? " is-empty" : ""}`
+    : `overview-canon-primary-card is-target${target === null ? " is-empty" : ""}`);
   const head = deps.el("div", "overview-canon-target-head");
-  head.appendChild(deps.el("span", "overview-canon-label", "Цель климата"));
+  head.appendChild(deps.el("span", "overview-canon-label", embedded ? "Цель" : "Цель климата"));
   if (panel._climateRuntime && panel._climateRuntime.phase === "managed") {
     head.appendChild(deps.el("span", "overview-canon-target-auto", "Авто"));
   }
