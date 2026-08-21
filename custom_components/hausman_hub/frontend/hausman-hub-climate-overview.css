@@ -52,7 +52,7 @@ button.climate-category-card:hover { transform:translateY(-1px); border-color:co
 input.hh-climate-room-search { width:100%; min-height:44px; margin:0; padding:10px 14px; border:1px solid var(--hmh-border,#2F3845); border-radius:12px; color:var(--hmh-text,#E7ECF3); font:inherit; background:var(--hmh-raised,#181E26); box-sizing:border-box; }
 input.hh-climate-room-search:focus-visible { outline:2px solid color-mix(in srgb,var(--hmh-accent,#4F8CFF) 58%,transparent); outline-offset:-2px; }
 .hh-climate-room-toolbar .climate-mode-tabs { margin-bottom:0; }
-.hh-climate-room-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:13px; }
+.hh-climate-room-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(268px,1fr)); gap:13px; }
 .hh-climate-room-card { cursor:pointer; }
 .hh-climate-room-card:hover { border-color:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 45%,var(--hmh-border,#2F3845)); }
 .hh-climate-room-card.is-offline { border-color:color-mix(in srgb,var(--hmh-warning,#E5A84B) 48%,var(--hmh-border,#2F3845)); }
@@ -67,7 +67,7 @@ input.hh-climate-room-search:focus-visible { outline:2px solid color-mix(in srgb
 .hh-climate-room-status.is-manual { color:var(--hmh-warning,#E5A84B); border-color:color-mix(in srgb,var(--hmh-warning,#E5A84B) 50%,var(--hmh-border,#2F3845)); background:color-mix(in srgb,var(--hmh-warning,#E5A84B) 10%,transparent); }
 .hh-climate-room-status.is-offline { color:var(--hmh-text-dim,#9AA7B4); border-color:var(--hmh-border,#2F3845); background:transparent; }
 .hh-climate-room-target { grid-column:3; grid-row:1 / span 2; align-self:start; font-size:26px; line-height:1; white-space:nowrap; }
-.hh-climate-room-lines { display:grid; gap:4px; margin-top:12px; }
+.hh-climate-room-lines { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:4px 10px; margin-top:12px; }
 .hh-climate-room-lines p { margin:0; color:var(--hmh-text-dim,#9AA7B4); font-size:13px; line-height:1.4; }
 .hh-climate-room-steppers { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; margin-top:14px; }
 .hh-climate-room-stepper { display:grid; grid-template-columns:40px minmax(0,1fr) 40px; align-items:center; gap:6px; padding:6px; border:1px solid var(--hmh-border,#2F3845); border-radius:12px; background:var(--hmh-surface,#12171D); }
