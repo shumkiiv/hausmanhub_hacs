@@ -152,6 +152,13 @@ function openMediaDeviceSheet(owner, device, deps) {
   owner._activeDeviceModalClose = finish;
 }
 
+function mediaCommandWord(count) {
+  if (count % 100 >= 11 && count % 100 <= 14) return "команд";
+  if (count % 10 === 1) return "команда";
+  if (count % 10 >= 2 && count % 10 <= 4) return "команды";
+  return "команд";
+}
+
 export function renderMediaDeviceCard(owner, device, deps) {
   if (!isMediaDevice(device)) return null;
   const { el } = deps;
@@ -182,5 +189,24 @@ export function renderMediaDeviceCard(owner, device, deps) {
   footer.appendChild(connection);
   summary.appendChild(footer);
   card.appendChild(summary);
+  const target = canonicalMediaTarget(owner, device);
+  const actionCount = target && Array.isArray(target.actions) ? target.actions.length : 0;
+  const extras = el("div", "media-device-card-extras");
+  const capabilities = el("span", "media-device-capabilities");
+  capabilities.appendChild(el("small", null, "Возможности"));
+  capabilities.appendChild(el("strong", null, `${actionCount} ${mediaCommandWord(actionCount)}`));
+  extras.appendChild(capabilities);
+  if (target) {
+    const isOn = !["off", "standby", "unavailable", "unknown"].includes(String(device.state || "").toLowerCase());
+    extras.appendChild(actionButton(
+      owner,
+      target,
+      isOn ? "turn_off" : "turn_on",
+      isOn ? "Выключить" : "Включить",
+      `media-card-power${isOn ? " is-on" : ""}`,
+      el,
+    ));
+  }
+  card.appendChild(extras);
   return card;
 }

@@ -23,6 +23,7 @@ LIGHTING_SIDE_JS = PANEL_JS.with_name("hausman-hub-lighting-side.js")
 LIGHTING_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-lighting.js")
 ROOMS_SIDE_JS = PANEL_JS.with_name("hausman-hub-rooms-side.js")
 ROOMS_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-rooms.js")
+MEDIA_SIDE_JS = PANEL_JS.with_name("hausman-hub-media-side.js")
 MEDIA_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-media-overview.js")
 SECURITY_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-security-overview.js")
 DEVICES_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-devices-overview.js")
@@ -551,6 +552,10 @@ def panel_script(
       vm.runInThisContext(
         fs.readFileSync({str(ROOMS_OVERVIEW_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(ROOMS_OVERVIEW_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(MEDIA_SIDE_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
+        {{ filename: {str(MEDIA_SIDE_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(MEDIA_OVERVIEW_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
@@ -2454,13 +2459,21 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           || !mediaText.includes("Кинопоиск")) {
           throw new Error("canonical media hierarchy is incomplete: " + mediaText);
         }
-        const zone = findAll(media, (node) =>
-          String(node.className).split(" ").includes("media-zone-card"))[0];
-        if (!zone || zone.tagName !== "BUTTON"
-            || !String(zone["aria-label"] || "").startsWith("Открыть медиоустройства комнаты")) {
+        const roomChip = findAll(media, (node) =>
+          String(node.className).split(" ").includes("hh-media-room-chip"))[0];
+        if (!roomChip || roomChip.tagName !== "BUTTON"
+            || !String(roomChip["aria-label"] || "").startsWith("Показать медиоустройства комнаты")) {
+          throw new Error("media room chip is not an accessible filter control");
+        }
+        roomChip.fire("click");
+        await tick();
+        const roomLink = findAll(media, (node) =>
+          String(node.className).split(" ").includes("hh-media-side-room"))[0];
+        if (!roomLink || roomLink.tagName !== "BUTTON"
+            || !String(roomLink["aria-label"] || "").startsWith("Открыть медиоустройства комнаты")) {
           throw new Error("media room is not an accessible drill-down control");
         }
-        zone.fire("click");
+        roomLink.fire("click");
         await tick();
         media = panel._shell.homeSections.media;
         const zoneSheet = findAll(media, (node) =>
@@ -2566,6 +2579,13 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           || !types.some((node) => textOf(node).includes("Двери и замки"))
           || !types.some((node) => textOf(node).includes("Охрана"))) {
           throw new Error("security contours are incomplete: " + types.map(textOf));
+        }
+        const quickFilters = findAll(security, (node) =>
+          String(node.className).split(" ").includes("security-quick-filter"));
+        if (quickFilters.length !== 4 || !quickFilters.some((node) => textOf(node) === "Требует внимания")
+          || !quickFilters.some((node) => textOf(node) === "Доступ")
+          || !quickFilters.some((node) => textOf(node) === "Без связи")) {
+          throw new Error("security quick filters are incomplete: " + quickFilters.map(textOf));
         }
         const cards = findAll(security, (node) =>
           String(node.className).split(" ").includes("inventory-device-card"));

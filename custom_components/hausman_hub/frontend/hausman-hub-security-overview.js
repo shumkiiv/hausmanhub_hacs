@@ -79,6 +79,46 @@ function securityStatus(device) {
   return device.stateLabel || "Состояние неизвестно";
 }
 
+const SECURITY_QUICK_FILTERS = [
+  ["all", "Все"],
+  ["attention", "Требует внимания"],
+  ["access", "Доступ"],
+  ["offline", "Без связи"],
+];
+
+function securityMatchesQuickFilter(device, filter) {
+  if (filter === "attention") return securityNeedsAttention(device);
+  if (filter === "access") return ["access", "windows"].includes(securityType(device));
+  if (filter === "offline") return securityUnavailable(device);
+  return true;
+}
+
+function renderLeakEmergency(panel, container, devices, deps) {
+  const { el, setAttr } = deps;
+  const leaks = devices.filter((device) => securityType(device) === "leaks" && securityNeedsAttention(device));
+  if (!leaks.length || panel._securityLeakDismissed === true) return;
+  const overlay = el("section", "security-leak-emergency");
+  setAttr(overlay, "role", "alertdialog");
+  setAttr(overlay, "aria-label", "Обнаружена протечка");
+  const card = el("div", "security-leak-emergency-card");
+  card.appendChild(el("span", "security-leak-emergency-eyebrow", "АВАРИЯ ВОДЫ"));
+  card.appendChild(el("h2", null, "Обнаружена протечка"));
+  card.appendChild(el("p", null, `${leaks.length} ${leaks.length === 1 ? "датчик сообщает" : "датчиков сообщают"} о воде. Проверьте помещение и состояние клапана.`));
+  const list = el("ul", "security-leak-emergency-list");
+  leaks.slice(0, 4).forEach((device) => list.appendChild(el("li", null, `${device.roomName || "Без комнаты"} · ${device.name || "Датчик протечки"}`)));
+  card.appendChild(list);
+  const dismiss = el("button", "security-leak-emergency-dismiss", "Понятно");
+  dismiss.type = "button";
+  dismiss.addEventListener("click", () => {
+    panel._securityLeakDismissed = true;
+    panel._notice = "Аварийное уведомление скрыто. Проверьте воду в помещении.";
+    panel._renderHomeSection("security", panel._shell.homeSections.security);
+  });
+  card.appendChild(dismiss);
+  overlay.appendChild(card);
+  container.appendChild(overlay);
+}
+
 function renderSecurityHero(panel, container, devices, alarms, deps) {
   const activeAlarms = alarms.filter((alarm) => alarm.active === true);
   const attentionDevices = devices.filter(securityNeedsAttention);
@@ -126,6 +166,19 @@ function renderSecurityTypes(panel, container, devices, selected, choose, deps) 
   container.appendChild(section);
 }
 
+function renderSecurityQuickFilters(container, selected, choose, deps) {
+  const { el, setAttr } = deps;
+  const row = el("div", "security-quick-filters");
+  SECURITY_QUICK_FILTERS.forEach(([id, label]) => {
+    const button = el("button", `security-quick-filter${selected === id ? " is-active" : ""}`, label);
+    button.type = "button";
+    setAttr(button, "aria-pressed", selected === id ? "true" : "false");
+    button.addEventListener("click", () => choose(id));
+    row.appendChild(button);
+  });
+  container.appendChild(row);
+}
+
 function renderSecurityAttention(panel, container, devices, alarms, deps) {
   const { el } = deps;
   const items = devices.filter(securityNeedsAttention);
@@ -167,18 +220,19 @@ function renderSecurityAttention(panel, container, devices, alarms, deps) {
   return aside;
 }
 
-function renderSecurityDeviceCatalog(panel, container, devices, selected, deps) {
+function renderSecurityDeviceCatalog(panel, container, devices, selectedType, quickFilter, deps) {
   const { el } = deps;
-  const filtered = selected ? devices.filter((device) => securityType(device) === selected) : devices;
+  const filtered = devices.filter((device) => (!selectedType || securityType(device) === selectedType)
+    && securityMatchesQuickFilter(device, quickFilter));
   const deviceKey = (device) => String(device.id || device.physicalId || device.entityId || "");
   const anyCardOpen = filtered.some((device) => panel._openHomeCards.has(`device:${deviceKey(device)}`));
   const section = el("details", "security-canon-section security-canon-devices");
-  section.open = Boolean(selected) || anyCardOpen || panel._securityCatalogOpen === true;
+  section.open = Boolean(selectedType) || quickFilter !== "all" || anyCardOpen || panel._securityCatalogOpen === true;
   section.addEventListener("toggle", () => {
     panel._securityCatalogOpen = section.open;
   });
   const heading = el("summary", "security-canon-heading security-canon-devices-summary");
-  heading.appendChild(el("h3", null, selected ? TYPE_META[selected].label : "Датчики и доступ"));
+  heading.appendChild(el("h3", null, selectedType ? TYPE_META[selectedType].label : "Датчики и доступ"));
   heading.appendChild(el("span", null, `${filtered.length} физических устройств`));
   section.appendChild(heading);
   if (!filtered.length) {
@@ -207,15 +261,22 @@ export function renderSecurityOverview(panel, container, deps) {
   const devices = securityDevices(panel);
   const alarms = Array.isArray(panel._homeDashboard.alarms) ? panel._homeDashboard.alarms : [];
   if (panel._securityTypeFilter === undefined) panel._securityTypeFilter = null;
+  if (!panel._securityQuickFilter) panel._securityQuickFilter = "all";
   renderSecurityHero(panel, container, devices, alarms, deps);
+  renderLeakEmergency(panel, container, devices, deps);
   const layout = deps.el("div", "security-canon-layout");
   const main = deps.el("div", "security-canon-main");
   const choose = (value) => {
     panel._securityTypeFilter = value;
     panel._renderHomeSection("security", panel._shell.homeSections.security);
   };
+  const chooseQuick = (value) => {
+    panel._securityQuickFilter = value;
+    panel._renderHomeSection("security", panel._shell.homeSections.security);
+  };
+  renderSecurityQuickFilters(main, panel._securityQuickFilter, chooseQuick, deps);
   renderSecurityTypes(panel, main, devices, panel._securityTypeFilter, choose, deps);
-  renderSecurityDeviceCatalog(panel, main, devices, panel._securityTypeFilter, deps);
+  renderSecurityDeviceCatalog(panel, main, devices, panel._securityTypeFilter, panel._securityQuickFilter, deps);
   layout.appendChild(main);
   layout.appendChild(renderSecurityAttention(panel, layout, devices, alarms, deps));
   container.appendChild(layout);

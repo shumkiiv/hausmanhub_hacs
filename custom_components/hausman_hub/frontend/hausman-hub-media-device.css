@@ -33,3 +33,15 @@
   .media-device-sheet { grid-template-columns:1fr; gap:14px; }
   .media-device-visual { min-height:150px; }
 }
+
+.media-device-card-extras { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 15px 15px; border-top:1px solid var(--hmh-border,#2F3845); }
+
+.media-device-capabilities { display:grid; gap:2px; min-width:0; }
+
+.media-device-capabilities small { color:var(--hmh-text-dim,#9AA7B4); font-size:11px; }
+
+.media-device-capabilities strong { color:var(--hmh-text,#E7ECF3); font-size:15px; }
+
+.media-card-power { min-width:104px; min-height:38px; margin:0; background:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 18%,var(--hmh-raised,#181E26)); color:var(--hmh-text,#E7ECF3); }
+
+.media-card-power.is-on { border:1px solid color-mix(in srgb,var(--hmh-accent,#4F8CFF) 48%,var(--hmh-border,#2F3845)); background:transparent; }
