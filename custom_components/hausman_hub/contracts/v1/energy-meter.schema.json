@@ -33,7 +33,26 @@
         "name": { "type": ["string", "null"], "minLength": 1, "maxLength": 120 },
         "available": { "type": "boolean" },
         "currentTotalKwh": { "type": ["number", "null"], "minimum": 0 },
-        "state": { "enum": ["available", "unavailable", "reset_detected"] }
+        "state": { "enum": ["available", "unavailable", "reset_detected"] },
+        "sources": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["deviceId", "name", "available", "currentTotalKwh", "state"],
+            "properties": {
+              "deviceId": {
+                "type": "string",
+                "pattern": "^device_[0-9a-f]{16}$"
+              },
+              "name": { "type": ["string", "null"], "minLength": 1, "maxLength": 120 },
+              "available": { "type": "boolean" },
+              "currentTotalKwh": { "type": ["number", "null"], "minimum": 0 },
+              "state": { "enum": ["available", "unavailable"] }
+            }
+          }
+        }
       }
     },
     "reading": {
@@ -85,6 +104,15 @@
         "sourceDeviceId": {
           "type": ["string", "null"],
           "pattern": "^device_[0-9a-f]{16}$"
+        },
+        "sourceDeviceIds": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^device_[0-9a-f]{16}$"
+          }
         }
       }
     },

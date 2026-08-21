@@ -29,6 +29,7 @@ def default_energy_meter_settings() -> dict[str, object]:
         "submissionDayOfMonth": 25,
         "reminderDaysBefore": 3,
         "sourceDeviceId": None,
+        "sourceDeviceIds": [],
     }
 
 
@@ -70,12 +71,20 @@ class EnergyMeterService:
         source_device_id = settings["sourceDeviceId"]
         return source_device_id if isinstance(source_device_id, str) else None
 
+    @property
+    def source_device_ids(self) -> list[str]:
+        """Return every selected energy device (multi-source binding)."""
+
+        settings = _validate_settings(self._require_state()["settings"])
+        return list(settings["sourceDeviceIds"])
+
     def document(
         self,
         source_total_kwh: object,
         source_signature: str | None = None,
         source_device_id: str | None = None,
         source_name: str | None = None,
+        source_readings: list[dict[str, object]] | None = None,
     ) -> dict[str, object]:
         state = self._require_state()
         source_total = _optional_number(source_total_kwh, "source total")
@@ -129,18 +138,34 @@ class EnergyMeterService:
             _optional_date(state["lastSubmissionDate"], "last submission date"),
             self._local_today(),
         )
+        source_block: dict[str, object] = {
+            "deviceId": source_device_id,
+            "name": source_name,
+            "available": source_total is not None,
+            "currentTotalKwh": round(source_total, 3) if source_total is not None else None,
+            "state": source_state,
+        }
+        if source_readings is not None:
+            source_block["sources"] = [
+                {
+                    "deviceId": reading["deviceId"],
+                    "name": reading["name"],
+                    "available": reading["available"] is True,
+                    "currentTotalKwh": _optional_number(
+                        reading["currentTotalKwh"], "source reading"
+                    ),
+                    "state": "available"
+                    if reading["available"] is True
+                    else "unavailable",
+                }
+                for reading in source_readings
+            ]
         return {
             "contract": {"name": ENERGY_METER_CONTRACT, "version": 1},
             "revision": state["revision"],
             "updatedAt": state["updatedAt"],
             "settings": deepcopy(state["settings"]),
-            "source": {
-                "deviceId": source_device_id,
-                "name": source_name,
-                "available": source_total is not None,
-                "currentTotalKwh": round(source_total, 3) if source_total is not None else None,
-                "state": source_state,
-            },
+            "source": source_block,
             "reading": {
                 "currentKwh": reading,
                 "adjustedAt": adjusted_at,
@@ -162,6 +187,7 @@ class EnergyMeterService:
         source_signature: str | None = None,
         source_device_id: str | None = None,
         source_name: str | None = None,
+        source_readings: list[dict[str, object]] | None = None,
     ) -> dict[str, object]:
         request = _validate_action(payload)
         source_total = _optional_number(source_total_kwh, "source total")
@@ -216,6 +242,7 @@ class EnergyMeterService:
             source_signature,
             source_device_id,
             source_name,
+            source_readings,
         )
 
     def _timestamp(self) -> str:
@@ -292,6 +319,9 @@ def _migrate_state(value: object) -> object:
     settings = migrated.get("settings")
     if isinstance(settings, dict):
         settings.setdefault("sourceDeviceId", None)
+        if "sourceDeviceIds" not in settings:
+            single = settings["sourceDeviceId"]
+            settings["sourceDeviceIds"] = [single] if isinstance(single, str) else []
     history = migrated.get("history")
     if isinstance(history, list):
         for record in history:
@@ -348,7 +378,8 @@ def _validate_state(value: object) -> dict[str, object]:
 
 def _validate_settings(value: object) -> dict[str, object]:
     if not isinstance(value, dict) or not set(value).issubset(
-        {"enabled", "submissionDayOfMonth", "reminderDaysBefore", "sourceDeviceId"}
+        {"enabled", "submissionDayOfMonth", "reminderDaysBefore", "sourceDeviceId",
+         "sourceDeviceIds"}
     ) or not {"enabled", "submissionDayOfMonth", "reminderDaysBefore"}.issubset(value):
         raise EnergyMeterViolation("energy meter settings are invalid")
     enabled = value["enabled"]
@@ -358,13 +389,31 @@ def _validate_settings(value: object) -> dict[str, object]:
         raise EnergyMeterViolation("energy meter settings are invalid")
     if type(reminder) is not int or not 0 <= reminder <= 14:
         raise EnergyMeterViolation("energy meter reminder is invalid")
+    source_ids = value.get("sourceDeviceIds")
+    if source_ids is None:
+        # Legacy payloads carry only the single-source mirror.
+        single = _optional_device_id(value.get("sourceDeviceId"), "energy meter source device")
+        source_ids = [single] if single is not None else []
+    if (
+        not isinstance(source_ids, list)
+        or len(source_ids) > 16
+        or len(source_ids) != len(set(source_ids))
+    ):
+        raise EnergyMeterViolation("energy meter source devices are invalid")
+    validated_ids = [
+        _optional_device_id(candidate, "energy meter source device")
+        for candidate in source_ids
+    ]
+    if any(candidate is None for candidate in validated_ids):
+        raise EnergyMeterViolation("energy meter source devices are invalid")
     return {
         "enabled": enabled,
         "submissionDayOfMonth": day,
         "reminderDaysBefore": reminder,
-        "sourceDeviceId": _optional_device_id(
-            value.get("sourceDeviceId"), "energy meter source device"
-        ),
+        # The single-source field stays as a mirror of the first binding so
+        # older clients keep working unchanged.
+        "sourceDeviceId": validated_ids[0] if validated_ids else None,
+        "sourceDeviceIds": validated_ids,
     }
 
 

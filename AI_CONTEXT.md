@@ -1,8 +1,18 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-21 (HACS 1.52.126 человеческие фразы приветствия).
+Last updated: 2026-08-21 (HACS 1.52.127 мультипривязка источников счётчика).
 
 ## Current work
+
+- 2026-08-21 (Kimi): HACS `1.52.127` - счётчик энергии с несколькими
+  источниками (contracts 0.44.0). `settings.sourceDeviceIds` (до 16,
+  уникальные) побеждает legacy `sourceDeviceId`, при чтении старых
+  документов список дополняется из одиночного id. `source.sources[]`
+  несёт по каждому источнику deviceId/name/available/currentTotalKwh/
+  state, агрегат суммирует доступные накопительные значения и зеркалит
+  первый доступный в `source.deviceId`/`name`. Состав источников входит
+  в signature reset_detected. Тесты: test_energy_meter (мультисумма,
+  fail-closed валидация, миграция одиночного id).
 
 - 2026-08-21 (Kimi): HACS `1.52.126` - приветствие дома по-человечески
   (contracts 0.43.0). `summaryStyle` human/numbers (human по умолчанию,
