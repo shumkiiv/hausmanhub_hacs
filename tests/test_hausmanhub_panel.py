@@ -664,6 +664,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn(".overview-tablet-hero-facts", overview_css)
         self.assertIn("grid-template-columns:repeat(4,minmax(0,1fr))", overview_css)
         self.assertIn("@container hausmanhub-panel (min-width:1050px)", overview_css)
+        self.assertIn("width:100%; max-width:1600px; min-height:100vh; margin:0 auto; padding:var(--hmh-tablet-outer) 34px", overview_css)
         self.assertIn("@media (max-width:800px)", overview_css)
         self.assertIn("@media (max-width:540px)", overview_css)
         self.assertIn("repeat(2,minmax(0,1fr))", overview_css)

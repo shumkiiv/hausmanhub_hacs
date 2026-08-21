@@ -272,7 +272,7 @@ button.overview-tablet-bottom-card { align-items:stretch; }
 @container hausmanhub-panel (min-width:1050px) {
   :host(.overview-active) main {
     display:grid; grid-template-columns:var(--hmh-tablet-rail) minmax(0,1fr); align-items:stretch;
-    row-gap:0; column-gap:var(--hmh-tablet-gap); width:100%; max-width:none; min-height:100vh; margin:0; padding:var(--hmh-tablet-outer);
+    row-gap:0; column-gap:var(--hmh-tablet-gap); width:100%; max-width:1600px; min-height:100vh; margin:0 auto; padding:var(--hmh-tablet-outer) 34px;
   }
   :host(.overview-active.rail-collapsed) main { grid-template-columns:var(--hmh-tablet-rail-compact) minmax(0,1fr); }
   :host(.overview-active) main > :not(.app-sidebar) { grid-column:2; }
