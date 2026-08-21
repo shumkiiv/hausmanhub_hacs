@@ -1,4 +1,5 @@
 import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.134";
+import { appendDeviceRangeControls, appendDeviceVisual, localizedDeviceState, openPhysicalDeviceSheet } from "./hausman-hub-device-card.js?v=1.52.134";
 import { lightingSideIcon, openLightingTurnOffConfirm, renderLightingSide } from "./hausman-hub-lighting-side.js?v=1.52.134";
 import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.134";
 import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.134";
@@ -55,6 +56,143 @@ function deviceCountWord(count) {
   return "устройств";
 }
 
+function physicalDeviceCountLabel(count) {
+  const word = deviceCountWord(count);
+  const adjective = word === "устройство" ? "физическое" : "физических";
+  return `${count} ${adjective} ${word}`;
+}
+
+function lightingChannelDetail(detail) {
+  if (!detail || detail.control != null) return false;
+  const entity = normalized(detail.entityId);
+  const domain = normalized(detail.domain) || entity.split(".")[0];
+  if (!["light", "switch"].includes(domain)) return false;
+  const identity = `${normalized(detail.label)} ${entity}`;
+  if (/(индикатор|indicator|learn|permit|bridge)/.test(identity)) return false;
+  return /_(?:1|2|3)$/.test(entity)
+    || /(клавиш|линия|свет|подсвет|left|right|center|_l1|_l2)/.test(identity);
+}
+
+function channelIsOn(channel) {
+  return ["on", "true", "1", "вкл", "включено", "включен", "включена"]
+    .includes(normalized(channel && (channel.state ?? channel.value)));
+}
+
+function channelName(channel, device, count) {
+  const label = String(channel && channel.label || "").trim();
+  if (/^[1-3]$/.test(label)) return `Линия ${label}`;
+  if (count === 1) return device.name || label || "Освещение";
+  return label || "Линия";
+}
+
+export function lightingDeviceChannels(device) {
+  const details = (Array.isArray(device && device.details) ? device.details : [])
+    .filter(lightingChannelDetail);
+  const unique = new Map();
+  details.forEach((detail) => {
+    const key = detail.entityId || `${detail.label}:${detail.state ?? detail.value}`;
+    if (!unique.has(key)) unique.set(key, detail);
+  });
+  if (!unique.size && ["light", "switch"].includes(normalized(device && device.domain))) {
+    unique.set(device.entityId || device.id, {
+      entityId: device.entityId,
+      domain: device.domain,
+      label: device.name,
+      state: device.state,
+      value: device.stateLabel,
+    });
+  }
+  const channels = [...unique.values()];
+  return channels.map((channel) => ({
+    ...channel,
+    name: channelName(channel, device, channels.length),
+    isOn: channelIsOn(channel),
+  }));
+}
+
+function ceilingLightPresentation(device, channels) {
+  const identity = normalized([device && device.name, device && device.model, device && device.domain]
+    .filter(Boolean).join(" "));
+  const wallSwitch = channels.length > 1 || /(выключател|реле|wall switch)/.test(identity);
+  return !wallSwitch && (normalized(device && device.domain) === "light"
+    || /(люстр|точки|потолоч|ceiling light|downlight)/.test(identity));
+}
+
+function channelTarget(panel, device, channel) {
+  return panel._catalogTargets(device).find((target) => target.entity_id === channel.entityId) || null;
+}
+
+function renderLightingChannel(panel, device, channel, deps) {
+  const target = channelTarget(panel, device, channel);
+  const actionId = channel.isOn ? "turn_off" : "turn_on";
+  const action = target && (target.actions || []).find((candidate) => candidate.action_id === actionId);
+  const disabled = Boolean(device.unavailable || panel._busy || !target || !action);
+  const control = deps.el("button", `lighting-channel-control${channel.isOn ? " is-on" : ""}`);
+  control.type = "button";
+  control.disabled = disabled;
+  deps.setAttr(control, "aria-label", `${channel.name}: ${channel.isOn ? "включена" : "выключена"}`);
+  const icon = deps.el("span", "lighting-channel-icon");
+  icon.appendChild(deps.svgIcon("lightbulb"));
+  control.appendChild(icon);
+  const copy = deps.el("span", "lighting-channel-copy");
+  copy.appendChild(deps.el("strong", null, channel.name));
+  copy.appendChild(deps.el("small", null, channel.isOn ? "Включена" : "Выключена"));
+  control.appendChild(copy);
+  control.appendChild(deps.el("span", "lighting-channel-toggle"));
+  control.addEventListener("click", (event) => {
+    event.preventDefault();
+    if (disabled) return;
+    panel._executeDeviceAction(target.target_id, action.action_id, null);
+  });
+  return control;
+}
+
+function renderLightingPhysicalDevice(panel, device, deps) {
+  const channels = lightingDeviceChannels(device);
+  const ceilingLight = ceilingLightPresentation(device, channels);
+  const card = deps.el("article", `lighting-physical-device${device.unavailable ? " is-unavailable" : ""}`);
+  const presentation = deps.el("div", "lighting-physical-presentation");
+  const visualButton = deps.el("button", "lighting-physical-visual-button");
+  visualButton.type = "button";
+  deps.setAttr(visualButton, "aria-label", `Открыть подробности: ${device.name || "устройство"}`);
+  visualButton.addEventListener("click", () => openPhysicalDeviceSheet(panel, device, deps));
+  appendDeviceVisual(visualButton, ceilingLight ? { ...device, imageUrl: null } : device,
+    ceilingLight ? "ceiling-light" : panel._deviceIcon(device), deps, "lighting-physical-visual");
+  presentation.appendChild(visualButton);
+  const identity = deps.el("div", "lighting-physical-identity");
+  identity.appendChild(deps.el("h3", null, device.name || "Устройство"));
+  identity.appendChild(deps.el("p", null, [device.manufacturer, device.model]
+    .filter(Boolean).filter((value, index, values) => values.indexOf(value) === index).join(" · ") || "Освещение"));
+  const connection = deps.el("span", `lighting-physical-connection${device.unavailable ? " is-offline" : ""}`);
+  connection.appendChild(deps.svgIcon("lightbulb"));
+  connection.appendChild(deps.el("span", null, device.unavailable ? "Нет связи" : "На связи"));
+  identity.appendChild(connection);
+  const facts = deps.el("div", "lighting-physical-channel-facts");
+  channels.forEach((channel) => {
+    const row = deps.el("span");
+    row.appendChild(deps.el("small", null, channel.name));
+    row.appendChild(deps.el("strong", null, channel.isOn ? "включена" : "выключена"));
+    facts.appendChild(row);
+  });
+  identity.appendChild(facts);
+  presentation.appendChild(identity);
+  card.appendChild(presentation);
+
+  const controls = deps.el("div", "lighting-physical-controls");
+  controls.appendChild(deps.el("h3", null, "Управление"));
+  const channelList = deps.el("div", "lighting-channel-list");
+  channels.forEach((channel) => channelList.appendChild(renderLightingChannel(panel, device, channel, deps)));
+  controls.appendChild(channelList);
+  const ranges = deps.el("div", "lighting-range-grid");
+  const rangeCount = appendDeviceRangeControls(ranges, device, panel, deps, { compact: true });
+  if (rangeCount) controls.appendChild(ranges);
+  if (!channels.length && !rangeCount) {
+    controls.appendChild(deps.el("p", "muted", localizedDeviceState(device)));
+  }
+  card.appendChild(controls);
+  return card;
+}
+
 function createLightingHero(panel, rooms, devices, deps) {
   const active = devices.filter(deviceIsActive).length;
   const unavailable = devices.filter((device) => device.unavailable || device.state === "unavailable").length;
@@ -96,11 +234,11 @@ function openRoomSheet(panel, container, roomName, devices, deps) {
   sheet.appendChild(close);
   const body = el("div", "lighting-room-sheet-body");
   body.appendChild(el("span", "lighting-room-sheet-eyebrow", "ОСВЕЩЕНИЕ КОМНАТЫ"));
-  body.appendChild(el("h2", null, roomName));
-  body.appendChild(el("p", "muted", "Одно реальное устройство показано одной карточкой. Клавиши и функции доступны внутри."));
+  body.appendChild(el("h2", null, `Освещение · ${roomName}`));
+  body.appendChild(el("p", "muted", `${physicalDeviceCountLabel(devices.length)} · каждая линия управляется отдельно`));
   const grid = el("div", "lighting-room-sheet-grid");
   if (!devices.length) grid.appendChild(el("div", "empty-state", "Устройства освещения в комнате не найдены."));
-  devices.forEach((device) => grid.appendChild(panel._deviceInventoryCard(device)));
+  devices.forEach((device) => grid.appendChild(renderLightingPhysicalDevice(panel, device, deps)));
   body.appendChild(grid);
   sheet.appendChild(body);
   backdrop.appendChild(sheet);

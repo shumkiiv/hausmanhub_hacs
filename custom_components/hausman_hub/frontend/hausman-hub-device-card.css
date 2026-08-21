@@ -238,6 +238,16 @@
 .device-range-slider:disabled { cursor:not-allowed; }
 .device-range-scale { display:flex; justify-content:space-between; gap:12px; margin-top:6px; color:var(--hmh-text-dim); font-size:13px; line-height:1.3; }
 .device-range-apply { min-height:48px; margin:18px 0 0; padding:12px 26px; border-radius:15px; }
+.device-range-card.is-compact { margin:0; padding:12px; border-radius:14px; }
+.device-range-card.is-compact .device-range-head { gap:10px; }
+.device-range-card.is-compact .device-range-label { overflow:hidden; color:var(--hmh-text); font-size:14px; text-overflow:ellipsis; white-space:nowrap; }
+.device-range-card.is-compact .device-range-value { font-size:25px; }
+.device-range-card.is-compact .device-range-slider-row { grid-template-columns:42px minmax(0,1fr) 42px; gap:8px; margin-top:10px; }
+.device-range-card.is-compact .device-range-step { width:42px; height:42px; min-height:42px; border-radius:12px; font-size:22px; }
+.device-range-card.is-compact .device-range-slider { height:42px; }
+.device-range-card.is-compact .device-range-scale { gap:8px; margin-top:2px; font-size:11px; }
+.device-range-actions { display:grid; grid-template-columns:minmax(0,.55fr) minmax(0,1fr); gap:8px; margin-top:10px; }
+.device-range-card.is-compact .device-range-reset,.device-range-card.is-compact .device-range-apply { min-height:42px; margin:0; padding:9px 12px; border-radius:12px; }
 .device-sheet-note { margin:16px 0 0; color:var(--hmh-text-dim); font-size:15px; line-height:1.5; }
 .device-sheet-controls .device-target-controls { padding:16px 0 0; }
 .device-sheet-controls .device-target-name { font-size:16px; }

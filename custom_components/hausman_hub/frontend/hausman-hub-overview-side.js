@@ -63,8 +63,12 @@ function appendCompactHome(card, state, deps) {
     ["energy", Number.isFinite(Number(state.power)) ? Math.round(Number(state.power)) : "—", "Вт", "neutral"],
   ].forEach(([iconName, value, label, tone]) => {
     const tile = deps.el("div", `overview-tablet-home-tile is-${tone}`);
-    tile.appendChild(deps.svgIcon(iconName));
-    tile.appendChild(deps.el("strong", null, String(value)));
+    const main = deps.el("div", "overview-tablet-home-tile-main");
+    main.appendChild(deps.svgIcon(iconName));
+    const valueZone = deps.el("span", "overview-tablet-home-value-zone");
+    valueZone.appendChild(deps.el("strong", null, String(value)));
+    main.appendChild(valueZone);
+    tile.appendChild(main);
     tile.appendChild(deps.el("span", null, label));
     grid.appendChild(tile);
   });

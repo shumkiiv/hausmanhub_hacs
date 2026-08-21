@@ -1852,10 +1852,15 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           String(node.className).split(" ").includes("overview-canon-attention-card"));
         const compactTiles = findAll(overview, (node) =>
           String(node.className).split(" ").includes("overview-tablet-home-tile"));
+        const compactMains = findAll(overview, (node) =>
+          String(node.className).split(" ").includes("overview-tablet-home-tile-main"));
+        const compactValueZones = findAll(overview, (node) =>
+          String(node.className).split(" ").includes("overview-tablet-home-value-zone"));
         const offlineTile = compactTiles.find((node) => textOf(node).includes("Офлайн"));
         const detailedRows = findAll(overview, (node) =>
           String(node.className).split(" ").includes("overview-tablet-home-detail"));
-        if (attention.length !== 0 || !offlineTile || !textOf(offlineTile).includes("2")
+        if (attention.length !== 0 || compactMains.length !== 4 || compactValueZones.length !== 4
+          || !offlineTile || !textOf(offlineTile).includes("2")
           || !detailedRows.some((node) => textOf(node).includes("2 устройства без связи"))) {
           throw new Error("offline devices were not grouped in the tablet Home now panel");
         }
@@ -2024,6 +2029,170 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const roomText = textOf(panel._shell.homeSections.rooms);
         if (!roomText.includes("Гостиная") || !roomText.includes("2 устройства")) {
           throw new Error("room inventory does not match tablet navigation");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_lighting_room_matches_latest_tablet_channels_and_range_controls(self) -> None:
+        payloads = dict(GET_PATHS)
+        payloads["hausman_hub/v1/dashboard"] = {
+            "rooms": [{"id": "office", "name": "Кабинет", "temp": 24.5, "humidity": 46}],
+            "devices": [
+                {
+                    "id": "device-office-switch",
+                    "physicalId": "office-switch",
+                    "entityId": "switch.office_1",
+                    "name": "Выключатель кабинет",
+                    "roomId": "office",
+                    "roomName": "Кабинет",
+                    "manufacturer": "Yandex",
+                    "model": "Double gang switch",
+                    "domain": "switch",
+                    "category": "lighting",
+                    "state": "off",
+                    "stateLabel": "Выключен",
+                    "unavailable": False,
+                    "details": [
+                        {"entityId": "switch.office_1", "domain": "switch", "label": "1", "state": "off", "value": "выключено"},
+                        {"entityId": "switch.office_2", "domain": "switch", "label": "2", "state": "on", "value": "включено"},
+                    ],
+                },
+                {
+                    "id": "device-office-chandelier",
+                    "physicalId": "office-chandelier",
+                    "entityId": "light.office_chandelier",
+                    "name": "Люстра кабинет",
+                    "roomId": "office",
+                    "roomName": "Кабинет",
+                    "manufacturer": "Tuya",
+                    "model": "Light controller",
+                    "domain": "light",
+                    "category": "lighting",
+                    "state": "on",
+                    "stateLabel": "Включена",
+                    "active": True,
+                    "unavailable": False,
+                    "imageUrl": "https://www.zigbee2mqtt.io/images/devices/TS0502B.png",
+                    "details": [
+                        {"entityId": "light.office_chandelier", "domain": "light", "label": "Освещение", "state": "on", "value": "включено"},
+                        {
+                            "entityId": "light.office_chandelier", "domain": "light", "label": "Яркость", "state": "62", "value": "62%",
+                            "control": {"kind": "range", "minimum": 0, "maximum": 100, "step": 1, "unit": "%", "targetId": "entity_0123456789abcdef", "actionId": "set_brightness_percent"},
+                        },
+                        {
+                            "entityId": "light.office_chandelier", "domain": "light", "label": "Температура света", "state": "4000", "value": "4000 K",
+                            "control": {"kind": "range", "minimum": 2000, "maximum": 6535, "step": 100, "unit": "K", "targetId": "entity_fedcba9876543210", "actionId": "set_color_temperature"},
+                        },
+                    ],
+                },
+            ],
+            "alarms": [],
+        }
+        payloads["hausman_hub/v1/admin/scenarios/catalog"] = {
+            "devices": [
+                {
+                    "target_id": "target-office-1", "entity_id": "switch.office_1", "name": "Линия 1",
+                    "actions": [
+                        {"action_id": "turn_on", "title": "Включить", "allowed_fields": []},
+                        {"action_id": "turn_off", "title": "Выключить", "allowed_fields": []},
+                    ],
+                },
+                {
+                    "target_id": "target-office-2", "entity_id": "switch.office_2", "name": "Линия 2",
+                    "actions": [
+                        {"action_id": "turn_on", "title": "Включить", "allowed_fields": []},
+                        {"action_id": "turn_off", "title": "Выключить", "allowed_fields": []},
+                    ],
+                },
+                {
+                    "target_id": "target-office-light", "entity_id": "light.office_chandelier", "name": "Люстра кабинет",
+                    "actions": [
+                        {"action_id": "turn_on", "title": "Включить", "allowed_fields": []},
+                        {"action_id": "turn_off", "title": "Выключить", "allowed_fields": []},
+                    ],
+                },
+            ]
+        }
+        script = panel_script(
+            payloads,
+            {"hausman_hub/v1/device-actions": {"status": "confirmed"}},
+            """
+        await tick();
+        panel._shell.tabs.lighting.fire("click");
+        const lighting = panel._shell.homeSections.lighting;
+        const roomCard = findAll(lighting, (node) => node.tagName === "BUTTON"
+          && String(node.className).split(" ").includes("lighting-room-card")
+          && textOf(node).includes("Кабинет"))[0];
+        if (!roomCard) throw new Error("office lighting room is missing");
+        roomCard.fire("click");
+        let sheet = findAll(lighting, (node) =>
+          String(node.className).split(" ").includes("lighting-room-sheet"))[0];
+        if (!sheet || !textOf(sheet).includes("Освещение · Кабинет")
+          || !textOf(sheet).includes("2 физических устройства")) {
+          throw new Error("latest tablet room header is missing");
+        }
+        const physicalCards = findAll(sheet, (node) =>
+          String(node.className).split(" ").includes("lighting-physical-device"));
+        if (physicalCards.length !== 2) throw new Error("physical lighting cards are not grouped");
+        const switchCard = physicalCards.find((node) => textOf(node).includes("Выключатель кабинет"));
+        const chandelierCard = physicalCards.find((node) => textOf(node).includes("Люстра кабинет"));
+        const switchChannels = findAll(switchCard, (node) =>
+          String(node.className).split(" ").includes("lighting-channel-control"));
+        if (switchChannels.length !== 2
+          || !switchChannels.some((node) => textOf(node).includes("Линия 1"))
+          || !switchChannels.some((node) => textOf(node).includes("Линия 2"))) {
+          throw new Error("numbered Yandex channels are not exposed separately");
+        }
+        const chandelierChannels = findAll(chandelierCard, (node) =>
+          String(node.className).split(" ").includes("lighting-channel-control"));
+        if (chandelierChannels.length !== 1 || textOf(chandelierChannels[0]).includes("Температура света")) {
+          throw new Error("range detail leaked into binary chandelier channels");
+        }
+        const chandelierVisual = findAll(chandelierCard, (node) =>
+          String(node.className).split(" ").includes("lighting-physical-visual"))[0];
+        if (!chandelierVisual || !String(chandelierVisual.className).split(" ").includes("is-fallback")
+          || findAll(chandelierVisual, (node) => node.tagName === "IMG").length) {
+          throw new Error("controller photo was not replaced by the standard ceiling-light visual");
+        }
+        const ranges = findAll(chandelierCard, (node) =>
+          String(node.className).split(" ").includes("device-range-card"));
+        if (ranges.length !== 2 || ranges.some((node) => !String(node.className).split(" ").includes("is-compact"))) {
+          throw new Error("brightness and color temperature are not compact tablet controls");
+        }
+        const brightness = ranges.find((node) => textOf(node).includes("Яркость"));
+        const slider = findAll(brightness, (node) => node.tagName === "INPUT" && node.type === "range")[0];
+        const reset = findAll(brightness, (node) => node.tagName === "BUTTON" && node.textContent === "Сброс")[0];
+        const apply = findAll(brightness, (node) => node.tagName === "BUTTON" && node.textContent === "Применить")[0];
+        if (!slider || !reset || !apply || !reset.disabled) throw new Error("compact range actions are incomplete");
+        slider.value = "73";
+        slider.fire("input");
+        if (reset.disabled) throw new Error("reset did not activate after brightness draft change");
+        apply.fire("click", { preventDefault() {} });
+        await tick(10);
+        const brightnessPost = calls.find((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/device-actions"
+          && call.payload.actionId === "set_brightness_percent");
+        if (!brightnessPost || brightnessPost.payload.targetId !== "entity_0123456789abcdef"
+          || brightnessPost.payload.value !== 73) {
+          throw new Error("brightness command does not use the snapshot range control");
+        }
+        sheet = findAll(panel._shell.homeSections.lighting, (node) =>
+          String(node.className).split(" ").includes("lighting-room-sheet"))[0];
+        const refreshedSwitch = findAll(sheet, (node) =>
+          String(node.className).split(" ").includes("lighting-physical-device")
+          && textOf(node).includes("Выключатель кабинет"))[0];
+        const lineTwo = findAll(refreshedSwitch, (node) => node.tagName === "BUTTON"
+          && String(node.className).split(" ").includes("lighting-channel-control")
+          && textOf(node).includes("Линия 2"))[0];
+        lineTwo.fire("click", { preventDefault() {} });
+        await tick(10);
+        const linePost = calls.find((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/device-actions"
+          && call.payload.targetId === "target-office-2");
+        if (!linePost || linePost.payload.actionId !== "turn_off") {
+          throw new Error("second switch line did not receive its own command");
         }
             """,
         )

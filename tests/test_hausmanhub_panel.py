@@ -415,6 +415,11 @@ class PanelJavaScriptContractTest(unittest.TestCase):
 
           const foreignAction = { ...rangeDetail, control: { ...rangeDetail.control, actionId: "turn_on" } };
           if (validRangeControl(foreignAction) !== null) fail("foreign action passed validation");
+          const brightnessAction = { ...rangeDetail, control: { ...rangeDetail.control, minimum: 0, maximum: 100, step: 1, unit: "%", actionId: "set_brightness_percent" } };
+          const colorTemperatureAction = { ...rangeDetail, control: { ...rangeDetail.control, minimum: 2000, maximum: 6500, step: 100, unit: "K", actionId: "set_color_temperature" } };
+          if (validRangeControl(brightnessAction) === null || validRangeControl(colorTemperatureAction) === null) {
+            fail("dashboard snapshot lighting range actions were rejected");
+          }
           const rawTarget = { ...rangeDetail, control: { ...rangeDetail.control, targetId: "climate.living" } };
           if (validRangeControl(rawTarget) !== null) fail("raw entity id passed validation");
           const shortTarget = { ...rangeDetail, control: { ...rangeDetail.control, targetId: "entity_0123abcd" } };
@@ -457,6 +462,19 @@ class PanelJavaScriptContractTest(unittest.TestCase):
           if (unevenValue.textContent !== "0,6") {
             fail(`stepper exceeded maximum: ${unevenValue.textContent}`);
           }
+
+          const compactSheet = makeNode("section");
+          appendDeviceRangeControls(compactSheet, { ...device, details: [brightnessAction] }, owner, deps, { compact: true });
+          const compactNodes = walk(compactSheet);
+          const compactCard = compactNodes.find((node) => String(node.className).includes("is-compact"));
+          const compactSlider = compactNodes.find((node) => node.className === "device-range-slider");
+          const reset = compactNodes.find((node) => node.attributes["aria-label"] === "Сбросить: Целевая температура");
+          if (!compactCard || !compactSlider || !reset || !reset.disabled) fail("compact range control is incomplete");
+          compactSlider.value = "70";
+          compactSlider.dispatch("input");
+          if (reset.disabled) fail("compact reset stayed disabled after draft change");
+          reset.dispatch("click");
+          if (compactSlider.value !== "21") fail(`compact reset did not restore the initial value: ${compactSlider.value}`);
         """
         completed = subprocess.run(
             ["node", "--input-type=module", "-e", script, str(DEVICE_CARD_JS)],
@@ -468,7 +486,9 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertEqual(0, completed.returncode, completed.stderr)
         device_card_js = DEVICE_CARD_JS.read_text(encoding="utf-8")
         self.assertIn("owner._executeDeviceAction(range.targetId, range.actionId, draft)", device_card_js)
-        self.assertIn('if (actionId !== "set_value") return null;', device_card_js)
+        self.assertIn('"set_brightness_percent"', device_card_js)
+        self.assertIn('"set_color_temperature"', device_card_js)
+        self.assertIn("if (!RANGE_ACTIONS.has(actionId)) return null;", device_card_js)
         self.assertIn("if (step > maximum - minimum) return null;", device_card_js)
         self.assertIn("/^entity_[0-9a-f]{16}$/", device_card_js)
         self.assertIn("Math.floor((range.maximum - range.minimum) / range.step", device_card_js)

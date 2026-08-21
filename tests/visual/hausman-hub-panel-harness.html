@@ -176,6 +176,9 @@
           devices: [
             { target_id: "ac-living", entity_id: "climate.living_ac", name: "Кондиционер гостиная", actions: [{ action_id: "turn_off", title: "Выключить", allowed_fields: [] }, { action_id: "set_temperature", title: "Температура", allowed_fields: ["value"] }] },
             { target_id: "humidifier-bedroom", entity_id: "humidifier.bedroom", name: "Увлажнитель спальня", actions: [{ action_id: "turn_on", title: "Включить", allowed_fields: [] }, { action_id: "set_humidity", title: "Влажность", allowed_fields: ["value"] }] },
+            { target_id: "target-office-1", entity_id: "switch.office_1", name: "Линия 1", actions: [{ action_id: "turn_on", title: "Включить", allowed_fields: [] }, { action_id: "turn_off", title: "Выключить", allowed_fields: [] }] },
+            { target_id: "target-office-2", entity_id: "switch.office_2", name: "Линия 2", actions: [{ action_id: "turn_on", title: "Включить", allowed_fields: [] }, { action_id: "turn_off", title: "Выключить", allowed_fields: [] }] },
+            { target_id: "target-office-light", entity_id: "light.office_chandelier", name: "Люстра кабинет", actions: [{ action_id: "turn_on", title: "Включить", allowed_fields: [] }, { action_id: "turn_off", title: "Выключить", allowed_fields: [] }] },
             { target_id: "breaker-232", entity_id: "switch.breaker_232", name: "Автомат 232", actions: [{ action_id: "turn_on", title: "Включить", allowed_fields: [] }, { action_id: "turn_off", title: "Отключить", allowed_fields: [] }] },
             { target_id: "breaker-233", entity_id: "switch.breaker_233", name: "Автомат 233", actions: [{ action_id: "turn_on", title: "Включить", allowed_fields: [] }, { action_id: "turn_off", title: "Отключить", allowed_fields: [] }] },
             { target_id: "intercom-entry", entity_id: "button.intercom_entry", name: "Домофон", actions: [{ action_id: "open", title: "Открыть", allowed_fields: [] }] },
@@ -297,11 +300,14 @@
           { id: "living", name: "Гостиная", temp: 26.6, humidity: 52, targetTemp: 25, targetHumidity: 45 },
           { id: "bedroom", name: "Спальня", temp: 26.5, humidity: 54, targetTemp: 25, targetHumidity: 48 },
           { id: "kitchen", name: "Кухня", temp: 26.7, humidity: 53, targetTemp: 25, targetHumidity: 45 },
+          { id: "office", name: "Кабинет", temp: 24.5, humidity: 46, targetTemp: 25, targetHumidity: 45 },
         ],
         devices: [
           { id: "light-living", physicalId: "light-living", entityId: "light.living", name: "Основной свет", roomId: "living", roomName: "Гостиная", domain: "light", category: "lighting", state: "on", stateLabel: "Включён", active: true, tone: "good", details: [{ entityId: "light.living", label: "Основной свет", value: "Включён" }] },
           { id: "light-kitchen", physicalId: "light-kitchen", entityId: "light.kitchen", name: "Свет кухни", roomId: "kitchen", roomName: "Кухня", domain: "light", category: "lighting", state: "on", stateLabel: "Включён", active: true, tone: "good", details: [{ entityId: "light.kitchen", label: "Свет кухни", value: "Включён" }] },
           { id: "light-bedroom", physicalId: "light-bedroom", entityId: "light.bedroom", name: "Свет спальни", roomId: "bedroom", roomName: "Спальня", domain: "light", category: "lighting", state: "off", stateLabel: "Выключен", active: false, tone: "neutral", details: [{ entityId: "light.bedroom", label: "Свет спальни", value: "Выключен" }] },
+          { id: "device-office-switch", physicalId: "office-switch", entityId: "switch.office_1", name: "Выключатель кабинет", roomId: "office", roomName: "Кабинет", domain: "switch", category: "lighting", state: "on", stateLabel: "1 из 2 включена", active: true, tone: "good", details: [{ entityId: "switch.office_1", domain: "switch", label: "1", state: "off", value: "выключено" }, { entityId: "switch.office_2", domain: "switch", label: "2", state: "on", value: "включено" }] },
+          { id: "device-office-chandelier", physicalId: "office-chandelier", entityId: "light.office_chandelier", name: "Люстра кабинет", roomId: "office", roomName: "Кабинет", domain: "light", category: "lighting", state: "on", stateLabel: "Включена", active: true, tone: "good", imageUrl: "https://www.zigbee2mqtt.io/images/devices/TS0505B_1.png", details: [{ entityId: "light.office_chandelier", domain: "light", label: "Освещение", state: "on", value: "включено" }, { entityId: "light.office_chandelier", domain: "light", label: "Яркость", state: "62", value: "62%", control: { kind: "range", minimum: 0, maximum: 100, step: 1, unit: "%", targetId: "entity_0123456789abcdef", actionId: "set_brightness_percent" } }, { entityId: "light.office_chandelier", domain: "light", label: "Температура света", state: "4000", value: "4000 K", control: { kind: "range", minimum: 2000, maximum: 6535, step: 100, unit: "K", targetId: "entity_fedcba9876543210", actionId: "set_color_temperature" } }] },
           { id: "presence-home", physicalId: "presence-home", entityId: "binary_sensor.home_presence", name: "Присутствие", roomName: "Дом", domain: "binary_sensor", category: "presence", state: "off", stateLabel: "Никого нет", active: false, tone: "neutral", details: [] },
           { id: "door-entry", physicalId: "door-entry", entityId: "binary_sensor.entry_door", name: "Входная дверь", roomName: "Тамбур", domain: "binary_sensor", category: "door", state: "open", stateLabel: "Открыта", active: true, tone: "warning", details: [] },
           { id: "door-patio", physicalId: "door-patio", entityId: "binary_sensor.patio_door", name: "Дверь террасы", roomName: "Гостиная", domain: "binary_sensor", category: "door", state: "open", stateLabel: "Открыта", active: true, tone: "warning", details: [] },
@@ -530,6 +536,15 @@
       panel.shadowRoot.querySelector("link").href =
         "../../custom_components/hausman_hub/frontend/hausman-hub-panel.css?v=1.52.72";
       if (params.get("kiosk") === "1") panel._shell.kioskButton.click();
+      const roomName = params.get("openRoom");
+      if (roomName) {
+        requestAnimationFrame(() => {
+          const cards = [...panel.shadowRoot.querySelectorAll(".lighting-room-card")];
+          const match = cards.find((card) => card.textContent.toLocaleLowerCase("ru")
+            .includes(roomName.toLocaleLowerCase("ru")));
+          if (match) match.click();
+        });
+      }
       const deviceName = params.get("openDevice");
       if (deviceName) {
         requestAnimationFrame(() => {

@@ -43,6 +43,12 @@ const DETAIL_LABELS = {
   mode: "Режим",
 };
 
+const RANGE_ACTIONS = new Set([
+  "set_value",
+  "set_brightness_percent",
+  "set_color_temperature",
+]);
+
 function normalized(value) {
   return String(value == null ? "" : value).trim().toLocaleLowerCase("ru");
 }
@@ -179,7 +185,7 @@ function controlRangeNumber(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-/** Fail-closed gate: only the fixed set_value action on an opaque hub target may render. */
+/** Fail-closed gate: only snapshot-contract range actions on an opaque hub target may render. */
 export function validRangeControl(detail) {
   const control = detail && detail.control;
   if (!control || control.kind !== "range") return null;
@@ -191,7 +197,7 @@ export function validRangeControl(detail) {
   if (step > maximum - minimum) return null;
   const targetId = String(control.targetId || "").trim();
   const actionId = String(control.actionId || "").trim();
-  if (actionId !== "set_value") return null;
+  if (!RANGE_ACTIONS.has(actionId)) return null;
   if (!/^entity_[0-9a-f]{16}$/.test(targetId)) return null;
   return { minimum, maximum, step, targetId, actionId, unit: String(control.unit || "").trim() };
 }
@@ -217,9 +223,10 @@ function formatRangeValue(value, unit) {
 }
 
 /** Range cards live in the device sheet; dragging only edits a local draft until «Применить». */
-export function appendDeviceRangeControls(container, device, owner, deps) {
+export function appendDeviceRangeControls(container, device, owner, deps, options = {}) {
   const { el, setAttr } = deps;
   const disabled = Boolean((device && device.unavailable) || (owner && owner._busy));
+  const compact = options.compact === true;
   const details = Array.isArray(device && device.details) ? device.details : [];
   let rendered = 0;
   details.forEach((detail) => {
@@ -228,8 +235,9 @@ export function appendDeviceRangeControls(container, device, owner, deps) {
     const label = detail && detail.label
       ? conciseDeviceActionLabel({ title: detail.label }, null, device)
       : localizedDetailLabel(detail);
-    let draft = initialRangeDraft(detail, range);
-    const card = el("section", "device-range-card");
+    const initialDraft = initialRangeDraft(detail, range);
+    let draft = initialDraft;
+    const card = el("section", `device-range-card${compact ? " is-compact" : ""}`);
     const head = el("div", "device-range-head");
     head.appendChild(el("span", "device-range-label", label));
     const valueEl = el("span", "device-range-value", formatRangeValue(draft, range.unit));
@@ -252,10 +260,12 @@ export function appendDeviceRangeControls(container, device, owner, deps) {
     increase.type = "button";
     setAttr(increase, "aria-label", `Увеличить: ${label}`);
     increase.disabled = disabled;
+    let reset = null;
     const syncDraft = (next) => {
       draft = quantizeRangeValue(next, range);
       slider.value = String(draft);
       valueEl.textContent = formatRangeValue(draft, range.unit);
+      if (reset) reset.disabled = disabled || draft === initialDraft;
     };
     slider.addEventListener("input", () => syncDraft(Number(slider.value)));
     decrease.addEventListener("click", (event) => {
@@ -287,7 +297,22 @@ export function appendDeviceRangeControls(container, device, owner, deps) {
       if (apply.disabled || !owner || typeof owner._executeDeviceAction !== "function") return;
       owner._executeDeviceAction(range.targetId, range.actionId, draft);
     });
-    card.appendChild(apply);
+    if (compact) {
+      const actions = el("div", "device-range-actions");
+      reset = el("button", "secondary device-range-reset", "Сброс");
+      reset.type = "button";
+      setAttr(reset, "aria-label", `Сбросить: ${label}`);
+      reset.disabled = true;
+      reset.addEventListener("click", (event) => {
+        event.preventDefault();
+        syncDraft(initialDraft);
+      });
+      actions.appendChild(reset);
+      actions.appendChild(apply);
+      card.appendChild(actions);
+    } else {
+      card.appendChild(apply);
+    }
     container.appendChild(card);
     rendered += 1;
   });
@@ -339,7 +364,7 @@ export function conciseDetails(device) {
   }).slice(0, 6);
 }
 
-function openDeviceSheet(owner, device, deps) {
+export function openPhysicalDeviceSheet(owner, device, deps) {
   const { el, setAttr } = deps;
   const iconName = owner._deviceIcon(device);
   const state = localizedDeviceState(device);
@@ -428,7 +453,7 @@ export function renderPhysicalDeviceCard(owner, device, deps) {
   const summary = el("button", "inventory-device-summary");
   summary.type = "button";
   setAttr(summary, "aria-label", `Открыть подробности устройства ${device.name || "Устройство"}. Состояние: ${state}.${climateMode ? ` ${climateMode.label}.` : ""}`);
-  summary.addEventListener("click", () => openDeviceSheet(owner, device, deps));
+  summary.addEventListener("click", () => openPhysicalDeviceSheet(owner, device, deps));
   appendDeviceVisual(summary, device, iconName, deps, "inventory-device-visual");
   const copy = el("span", "inventory-device-copy");
   copy.appendChild(el("strong", null, device.name || "Устройство"));

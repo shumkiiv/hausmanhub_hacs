@@ -230,12 +230,14 @@ button.overview-tablet-bottom-card { align-items:stretch; }
 .overview-tablet-side-card h2 { margin:0 0 9px; font-size:clamp(14px,1.125vw,18px); }
 .overview-tablet-side-title-detailed { display:none; }
 .overview-tablet-home-compact { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); grid-template-rows:repeat(2,minmax(0,1fr)); gap:5px; height:calc(100% - 32px); }
-.overview-tablet-home-tile { display:grid; grid-template-columns:1fr auto; grid-template-rows:auto 1fr; align-items:start; min-width:0; padding:8px; border:1px solid var(--hmh-border-default); border-radius:8px; background:var(--hmh-surface-raised); }
+.overview-tablet-home-tile { display:flex; flex-direction:column; align-items:stretch; min-width:0; padding:8px; border:1px solid var(--hmh-border-default); border-radius:8px; background:var(--hmh-surface-raised); }
 .overview-tablet-home-tile.is-warning { border-color:color-mix(in srgb,#E5A500 54%,var(--hmh-border-default)); }
-.overview-tablet-home-tile .icon { width:20px; height:20px; color:var(--hmh-text-secondary); }
+.overview-tablet-home-tile-main { display:flex; flex:1; min-height:0; flex-direction:column; align-items:center; }
+.overview-tablet-home-tile .icon { flex:none; width:20px; height:20px; color:var(--hmh-text-secondary); }
 .overview-tablet-home-tile.is-warning .icon { color:#E5A500; }
-.overview-tablet-home-tile strong { justify-self:end; font-size:clamp(20px,1.5625vw,25px); line-height:1; }
-.overview-tablet-home-tile span { grid-column:1 / span 2; align-self:end; overflow:hidden; color:var(--hmh-text-secondary); font-size:clamp(12px,1.2vw,19px); text-overflow:ellipsis; white-space:nowrap; }
+.overview-tablet-home-value-zone { display:grid; flex:1; width:100%; min-height:0; place-items:center; }
+.overview-tablet-home-tile strong { color:var(--hmh-text-primary); font-size:clamp(20px,1.5625vw,25px); line-height:1; }
+.overview-tablet-home-tile > span { overflow:hidden; color:var(--hmh-text-secondary); font-size:clamp(12px,1.2vw,19px); text-align:center; text-overflow:ellipsis; white-space:nowrap; }
 .overview-tablet-home-detailed { display:none; }
 .overview-tablet-home-detail { display:flex; align-items:center; gap:10px; min-width:0; min-height:40px; }
 .overview-tablet-home-detail .icon { width:20px; height:20px; flex:none; color:var(--hmh-text-secondary); }
