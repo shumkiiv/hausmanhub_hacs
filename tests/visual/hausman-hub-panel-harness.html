@@ -38,7 +38,7 @@
       document.documentElement.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       document.body.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       panel._data = {
-        integration_version: "1.52.148",
+        integration_version: "1.52.149",
         readiness: { status: "ready", bridge_mode: "native", reasons: [] },
         snapshot: {
           rooms: [
@@ -186,9 +186,11 @@
         },
         list: {
           scenarios: [
-            { id: "scenario.good_morning", title: "Доброе утро", icon: "mdi:weather-sunset-up", enabled: true, requiresConfirmation: false },
-            { id: "scenario.leaving_home", title: "Уходим из дома", icon: "mdi:home-export-outline", enabled: true, requiresConfirmation: true },
-            { id: "scenario.night_mode", title: "Ночной режим", icon: "mdi:weather-night", enabled: false, requiresConfirmation: false },
+            { id: "scenario.good_morning", title: "Доброе утро", group: "Режимы дома", description: "Открывает шторы и готовит гостиную к началу дня.", icon: "mdi:weather-sunset-up", enabled: true, favorite: true, roomId: "living", activationKind: "automatic", protected: false, requiresConfirmation: false, definition: { version: 1, executionMode: "single", triggers: [{ id: "trigger-1", type: "time", value: "07:00" }], conditions: [], actions: [{ id: "action-1", type: "notification", message: "Дом готов" }] } },
+            { id: "scenario.leaving_home", title: "Уходим из дома", group: "Режимы дома", description: "Выключает свет, климат и проверяет безопасность дома.", icon: "mdi:home-export-outline", enabled: true, favorite: true, roomId: "living", activationKind: "hybrid", protected: false, requiresConfirmation: true, definition: { version: 1, executionMode: "single", triggers: [{ id: "trigger-1", type: "manual" }, { id: "trigger-2", type: "presence", value: "away" }], conditions: [], actions: [{ id: "action-1", type: "notification", message: "Режим включён" }] } },
+            { id: "scenario.night_mode", title: "Ночной режим", group: "Климат", description: "Понижает температуру и отключает лишнее освещение.", icon: "mdi:weather-night", enabled: false, favorite: false, roomId: "bedroom", activationKind: "manual", protected: false, requiresConfirmation: false, definition: { version: 1, executionMode: "single", triggers: [{ id: "trigger-1", type: "manual" }], conditions: [], actions: [{ id: "action-1", type: "notification", message: "Ночной режим" }] } },
+            { id: "scenario.movie", title: "Кино", group: "Медиа", description: "Приглушает свет и включает оборудование для просмотра.", icon: "mdi:movie-open", enabled: true, favorite: false, roomId: "living", activationKind: "manual", protected: false, requiresConfirmation: false, definition: { version: 1, executionMode: "single", triggers: [{ id: "trigger-1", type: "manual" }], conditions: [], actions: [{ id: "action-1", type: "notification", message: "Кино" }] } },
+            { id: "system.bathroom_fan", title: "Ванная: вытяжка off после света", group: "SYSTEM", description: "Shadow-перенос Node-RED: выключение вытяжки после света.", icon: "mdi:fan-off", enabled: true, favorite: false, roomId: "bathroom", activationKind: "system", protected: true, requiresConfirmation: false, definition: { version: 1, executionMode: "restart", triggers: [{ id: "trigger-1", type: "time", value: "22:00" }], conditions: [], actions: [{ id: "action-1", type: "notification", message: "Готово" }] } },
           ],
         },
       };
@@ -578,6 +580,16 @@
       panel.shadowRoot.querySelector("link").href =
         "../../custom_components/hausman_hub/frontend/hausman-hub-panel.css?v=1.52.72";
       if (params.get("kiosk") === "1") panel._shell.kioskButton.click();
+      const scenarioName = params.get("openScenario");
+      if (scenarioName && panel._activeSection === "scenarios") {
+        requestAnimationFrame(() => {
+          const cards = [...panel.shadowRoot.querySelectorAll(".scenario-library-card")];
+          const match = cards.find((card) => card.textContent.toLocaleLowerCase("ru")
+            .includes(scenarioName.toLocaleLowerCase("ru")));
+          const open = match && match.querySelector(".scenario-library-identity");
+          if (open) open.click();
+        });
+      }
       const roomName = params.get("openRoom");
       if (roomName) {
         requestAnimationFrame(() => {

@@ -31,6 +31,7 @@ ENERGY_METER_JS = PANEL_JS.with_name("hausman-hub-energy-meter.js")
 DEVICE_DISCOVERY_JS = PANEL_JS.with_name("hausman-hub-device-discovery.js")
 WEATHER_SOURCES_JS = PANEL_JS.with_name("hausman-hub-weather-sources.js")
 SCENARIOS_JS = PANEL_JS.with_name("hausman-hub-scenarios.js")
+SCENARIO_CATALOG_JS = PANEL_JS.with_name("hausman-hub-scenario-catalog.js")
 SCENARIO_ICONS_JS = PANEL_JS.with_name("hausman-hub-scenario-icons.js")
 CLIMATE_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-climate-overview.js")
 LIGHTING_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-lighting.js")
@@ -392,6 +393,10 @@ def panel_script(get_table: dict, post_table: dict, assertions: str) -> str:
       vm.runInThisContext(
         fs.readFileSync({str(SCENARIO_ICONS_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(SCENARIO_ICONS_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(SCENARIO_CATALOG_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, "").replace(/export /g, ""),
+        {{ filename: {str(SCENARIO_CATALOG_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(SCENARIOS_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, "").replace(/export /g, ""),

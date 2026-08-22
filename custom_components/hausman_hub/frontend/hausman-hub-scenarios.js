@@ -1,10 +1,10 @@
 /* Scenario library and editor shared with the Hausman Hub tablet contract. */
 
-import { activeElementWithin, trapModalTabKey } from "./hausman-hub-modal.js?v=1.52.148";
-import { scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.148";
-import { eventDataFromDraft, scenarioEditorIssues, scenarioEventFields, scenarioField, scenarioIconField, scenarioSelectField, scenarioToggle } from "./hausman-hub-scenario-fields.js?v=1.52.148";
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.148";
-import { scenarioCapabilityLabel, scenarioDeviceButton, scenarioDeviceFields, scenarioGroupForTarget, scenarioPhysicalGroups } from "./hausman-hub-scenario-device-picker.js?v=1.52.148";
+import { activeElementWithin, trapModalTabKey } from "./hausman-hub-modal.js?v=1.52.149";
+import { eventDataFromDraft, scenarioEditorIssues, scenarioEventFields, scenarioField, scenarioIconField, scenarioSelectField, scenarioToggle } from "./hausman-hub-scenario-fields.js?v=1.52.149";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.149";
+import { scenarioCapabilityLabel, scenarioDeviceButton, scenarioDeviceFields, scenarioGroupForTarget, scenarioPhysicalGroups } from "./hausman-hub-scenario-device-picker.js?v=1.52.149";
+import { groupScenarios, renderScenarioCatalog, scenarioActivationKind, scenarioDisplayGroup, scenarioDisplayText } from "./hausman-hub-scenario-catalog.js?v=1.52.149";
 
 const TRIGGER_TYPES = [
   ["manual", "Ручной запуск"], ["time", "По времени"],
@@ -21,11 +21,12 @@ const ACTION_TYPES = [
   ["run_scenario", "Запустить сценарий"], ["notification", "Уведомление"],
 ];
 const EDITOR_STEPS = [
-  ["about", "Основное", "Название, иконка и режим выполнения"],
-  ["triggers", "Когда", "События, которые запускают сценарий"],
-  ["conditions", "Если", "Дополнительные ограничения запуска"],
-  ["actions", "Тогда", "Последовательность команд устройствам"],
-  ["publication", "Доступ", "Включение, избранное и подтверждение"],
+  ["about", "Основное"],
+  ["triggers", "Когда"],
+  ["conditions", "Если"],
+  ["actions", "Что сделать"],
+  ["review", "Проверка"],
+  ["publication", "Публикация"],
 ];
 function scenarioClone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -68,22 +69,34 @@ function normalizedScenario(source) {
   return scenario;
 }
 
+function localizeSystemScenarioDraft(scenario) {
+  if (scenarioActivationKind(scenario) !== "system") return scenario;
+  Object.defineProperties(scenario, {
+    _sourceTitle: { value: scenario.title, configurable: true },
+    _sourceDescription: { value: scenario.description, configurable: true },
+    _sourceGroup: { value: scenario.group, configurable: true },
+  });
+  scenario.title = scenarioDisplayText(scenario.title, scenario);
+  scenario.description = scenarioDisplayText(scenario.description, scenario);
+  scenario.group = scenarioDisplayGroup(scenario);
+  return scenario;
+}
+
 function duplicateScenarioDraft(source) {
   const scenario = normalizedScenario(source);
   scenario.id = scenarioId();
-  scenario.title = `${scenario.title || "Сценарий"} — копия`;
+  scenario.title = `${scenario.title || "Сценарий"} - копия`;
   scenario.favorite = false;
   delete scenario.updatedAt;
   return scenario;
 }
 
 function openScenarioEditor(panel, source) {
-  panel._scenarioEditor = normalizedScenario(source);
+  panel._scenarioEditor = localizeSystemScenarioDraft(normalizedScenario(source));
   panel._scenarioEditorOriginal = JSON.stringify(scenarioPayload(panel._scenarioEditor));
-  panel._scenarioEditorStep = "about";
+  panel._scenarioEditorExpanded = { trigger: 0, condition: 0, action: 0 };
   panel._scenarioEditorRestoreFocus = activeElementWithin(panel);
   panel._scenarioEditorJustOpened = true;
-  panel._scenarioEditorFocusBody = false;
   updateScenarioEditor(panel);
 }
 
@@ -96,9 +109,8 @@ function closeScenarioEditor(panel) {
   if (scenarioEditorDirty(panel) && !window.confirm("Закрыть редактор без сохранения изменений?")) return false;
   panel._scenarioEditor = null;
   panel._scenarioEditorOriginal = null;
-  panel._scenarioEditorStep = null;
+  panel._scenarioEditorExpanded = null;
   panel._scenarioEditorJustOpened = false;
-  panel._scenarioEditorFocusBody = false;
   const restore = panel._scenarioEditorRestoreFocus;
   panel._scenarioEditorRestoreFocus = null;
   updateScenarioEditor(panel);
@@ -124,11 +136,48 @@ function updateScenarioEditor(panel) {
   panel._renderScenarios(panel._shell.scenarios);
 }
 
+function scenarioCountLabel(value, one, few, many) {
+  const absolute = Math.abs(value);
+  const word = absolute % 100 >= 11 && absolute % 100 <= 14
+    ? many : absolute % 10 === 1 ? one : absolute % 10 >= 2 && absolute % 10 <= 4 ? few : many;
+  return `${value} ${word}`;
+}
+
+function scenarioRuleTitle(kind, rule, index) {
+  const options = kind === "trigger" ? TRIGGER_TYPES : kind === "condition" ? CONDITION_TYPES : ACTION_TYPES;
+  const title = options.find(([value]) => value === rule.type)?.[1]
+    || (rule.type === "existing_action" ? "Действие центра" : "Не настроено");
+  return kind === "action" ? `${index + 1}. ${title}` : title;
+}
+
+function scenarioRuleSummary(kind, rule) {
+  if (rule.targetName) return [rule.targetName, rule.actionTitle || rule.value].filter(Boolean).join(" · ");
+  if (kind === "trigger" && rule.type === "manual") return "Запуск с карточки или панели";
+  if (kind === "condition" && rule.type === "presence") return rule.value === "away" ? "Никого нет дома" : "Кто-то дома";
+  if (rule.type === "delay") return `Пауза ${rule.delaySeconds || 0} сек.`;
+  if (rule.type === "notification") return rule.message || "Текст не задан";
+  return String(rule.value || "Откройте, чтобы настроить");
+}
+
 function scenarioRuleCard(panel, kind, rule, index, rules, deps) {
   const { el } = deps;
-  const card = el("article", "scenario-rule-card");
+  panel._scenarioEditorExpanded = panel._scenarioEditorExpanded || { trigger: 0, condition: 0, action: 0 };
+  const expanded = panel._scenarioEditorExpanded[kind] === index;
+  const card = el("article", `scenario-rule-card${expanded ? " is-expanded" : ""}`);
   const head = el("div", "scenario-rule-head");
-  head.appendChild(el("strong", null, `${index + 1}. ${kind === "action" ? "Шаг" : kind === "trigger" ? "Триггер" : "Условие"}`));
+  const toggle = el("button", "scenario-rule-toggle");
+  toggle.type = "button";
+  const copy = el("span", "scenario-rule-title");
+  copy.appendChild(el("strong", null, scenarioRuleTitle(kind, rule, index)));
+  copy.appendChild(el("small", null, scenarioRuleSummary(kind, rule)));
+  toggle.appendChild(copy);
+  toggle.appendChild(el("span", "scenario-rule-chevron", "⌄"));
+  deps.setAttr(toggle, "aria-expanded", String(expanded));
+  toggle.addEventListener("click", () => {
+    panel._scenarioEditorExpanded[kind] = expanded ? -1 : index;
+    updateScenarioEditor(panel);
+  });
+  head.appendChild(toggle);
   const controls = el("div", "scenario-rule-order");
   const move = (direction, label) => {
     const button = el("button", "secondary scenario-rule-move", label);
@@ -139,6 +188,7 @@ function scenarioRuleCard(panel, kind, rule, index, rules, deps) {
       const target = index + direction;
       if (target < 0 || target >= rules.length) return;
       [rules[index], rules[target]] = [rules[target], rules[index]];
+      panel._scenarioEditorExpanded[kind] = target;
       updateScenarioEditor(panel);
     });
     return button;
@@ -149,6 +199,7 @@ function scenarioRuleCard(panel, kind, rule, index, rules, deps) {
   remove.type = "button";
   remove.addEventListener("click", () => {
     rules.splice(index, 1);
+    panel._scenarioEditorExpanded[kind] = rules.length ? Math.min(index, rules.length - 1) : -1;
     updateScenarioEditor(panel);
   });
   controls.appendChild(remove);
@@ -158,6 +209,7 @@ function scenarioRuleCard(panel, kind, rule, index, rules, deps) {
     rules[index] = changed;
     updateScenarioEditor(panel);
   };
+  if (!expanded) return card;
   if (kind === "trigger") {
     card.appendChild(scenarioSelectField(deps, "Тип триггера", rule.type, TRIGGER_TYPES, (type) => {
       const value = type === "time" ? "07:30" : ["sunrise", "sunset"].includes(type) ? 0 : type === "presence" ? "home" : null;
@@ -226,29 +278,30 @@ function scenarioEditorSection(deps, title, description) {
   return section;
 }
 
-function scenarioStepIssueCount(scenario, step) {
-  return scenarioEditorIssues(scenario).filter((issue) => issue.step === step).length;
-}
-
 function renderScenarioRules(panel, kind, heading, description, items, deps) {
   const { el } = deps;
-  const section = scenarioEditorSection(deps, heading, description);
+  const section = scenarioEditorSection(deps, heading);
+  const summary = el("div", "scenario-rule-list-summary");
+  summary.appendChild(el("span", null, description));
+  summary.appendChild(el("b", "scenario-editor-badge", String(items.length)));
+  section.appendChild(summary);
   const list = el("div", "scenario-rule-list");
   items.forEach((item, index) => list.appendChild(scenarioRuleCard(panel, kind, item, index, items, deps)));
   if (!items.length) {
     list.appendChild(el("div", "scenario-rule-empty", kind === "condition"
-      ? "Условия не заданы — сценарий сможет запускаться при любом состоянии дома."
+      ? "Без дополнительных условий"
       : kind === "action" ? "Добавьте первое действие, которое выполнит Hausman Hub."
         : "Добавьте хотя бы одно событие запуска."));
   }
   section.appendChild(list);
-  const add = el("button", "secondary scenario-add-rule", kind === "trigger" ? "+ Добавить триггер" : kind === "condition" ? "+ Добавить условие" : "+ Добавить действие");
+  const add = el("button", "secondary scenario-add-rule", kind === "trigger" ? "Добавить триггер" : kind === "condition" ? "Добавить условие" : "Добавить шаг");
   add.type = "button";
   add.addEventListener("click", () => {
     const id = nextScenarioRuleId(kind, items);
     if (kind === "trigger") items.push({ id, type: "manual" });
     else if (kind === "condition") items.push({ id, type: "presence", value: "home" });
     else items.push({ id, type: "device_action" });
+    panel._scenarioEditorExpanded[kind] = items.length - 1;
     updateScenarioEditor(panel);
   });
   section.appendChild(add);
@@ -268,6 +321,17 @@ function scenarioPayload(scenario) {
   result.title = String(result.title || "").trim();
   result.description = String(result.description || "").trim();
   result.group = String(result.group || "Сценарии").trim();
+  if (Object.hasOwn(scenario, "_sourceTitle")
+      && result.title === scenarioDisplayText(scenario._sourceTitle, scenario).trim()) {
+    result.title = String(scenario._sourceTitle || "").trim();
+  }
+  if (Object.hasOwn(scenario, "_sourceDescription")
+      && result.description === scenarioDisplayText(scenario._sourceDescription, scenario).trim()) {
+    result.description = String(scenario._sourceDescription || "").trim();
+  }
+  if (Object.hasOwn(scenario, "_sourceGroup") && result.group === scenarioDisplayGroup(scenario)) {
+    result.group = String(scenario._sourceGroup || "Сценарии").trim();
+  }
   result.requiresConfirmation = result.danger || result.requiresConfirmation;
   result.triggerDescription = scenarioSummary(result).split(" · ")[0];
   result.conditionDescription = result.definition.conditions.length ? `${result.definition.conditions.length} условий` : "Без дополнительных условий";
@@ -302,7 +366,7 @@ async function submitScenario(panel, deps, testOnly) {
     } else {
       panel._scenarioEditor = null;
       panel._scenarioEditorOriginal = null;
-      panel._scenarioEditorStep = null;
+      panel._scenarioEditorExpanded = null;
       panel._scenarios.list = null;
       panel._notice = `Сценарий «${scenario.title}» сохранён.`;
     }
@@ -355,111 +419,119 @@ async function deleteScenarioQuick(panel, deps, scenario) {
   }
 }
 
+function scenarioEditorStepState(scenario, issues, id) {
+  const definition = scenario.definition;
+  const stepIssues = (step) => issues.some((issue) => issue.step === step);
+  if (id === "about") return [Boolean(String(scenario.title || "").trim()), scenario.title || "Без названия"];
+  if (id === "triggers") return [definition.triggers.length > 0 && !stepIssues("triggers"), scenarioCountLabel(definition.triggers.length, "триггер", "триггера", "триггеров")];
+  if (id === "conditions") return [!stepIssues("conditions"), definition.conditions.length ? scenarioCountLabel(definition.conditions.length, "условие", "условия", "условий") : "Без условий"];
+  if (id === "actions") return [definition.actions.length > 0 && !stepIssues("actions"), scenarioCountLabel(definition.actions.length, "действие", "действия", "действий")];
+  if (id === "review") return [issues.length === 0, issues.length ? scenarioCountLabel(issues.length, "ошибка", "ошибки", "ошибок") : "Ошибок нет"];
+  return [true, scenario.enabled ? "Включён" : "Выключен"];
+}
+
+function scenarioReviewSummary(scenario) {
+  const definition = scenario.definition;
+  return `Когда: ${scenarioCountLabel(definition.triggers.length, "триггер", "триггера", "триггеров")} · Если: ${definition.conditions.length ? scenarioCountLabel(definition.conditions.length, "условие", "условия", "условий") : "без условий"} · Что сделать: ${scenarioCountLabel(definition.actions.length, "действие", "действия", "действий")}`;
+}
+
 function renderScenarioEditor(panel, container, deps) {
   const { el, setAttr } = deps;
   const scenario = panel._scenarioEditor;
-  const activeStep = EDITOR_STEPS.some(([id]) => id === panel._scenarioEditorStep)
-    ? panel._scenarioEditorStep : "about";
-  panel._scenarioEditorStep = activeStep;
+  const issues = scenarioEditorIssues(scenario);
   const overlay = el("div", "scenario-editor-overlay");
   const dialog = el("section", "scenario-editor-dialog");
   setAttr(dialog, "role", "dialog");
   setAttr(dialog, "aria-modal", "true");
   setAttr(dialog, "aria-labelledby", "scenario-editor-title");
   dialog.tabIndex = -1;
+
   const header = el("header", "scenario-editor-header");
-  const title = el("div");
-  title.appendChild(el("span", "scenario-editor-kicker", "РЕДАКТОР СЦЕНАРИЯ"));
-  const heading = el("h2", null, scenario.title || "Новый сценарий");
+  const title = el("div", "scenario-editor-heading");
+  const heading = el("h2", null, "Редактор сценария");
   setAttr(heading, "id", "scenario-editor-title");
   title.appendChild(heading);
-  title.appendChild(el("p", null, "Настройте запуск, условия и последовательность действий."));
+  title.appendChild(el("p", null, `Сценарий «${scenarioDisplayText(scenario.title, scenario) || "Без названия"}» · ${scenarioCountLabel(scenario.definition.triggers.length, "триггер", "триггера", "триггеров")} · ${scenarioCountLabel(scenario.definition.conditions.length, "условие", "условия", "условий")} · ${scenarioCountLabel(scenario.definition.actions.length, "действие", "действия", "действий")}`));
   header.appendChild(title);
-  header.appendChild(el("span", `scenario-editor-save-state${scenarioEditorDirty(panel) ? " is-dirty" : ""}`,
-    scenarioEditorDirty(panel) ? "Есть несохранённые изменения" : "Изменения сохранены"));
-  const close = el("button", "secondary scenario-editor-close");
+  const badges = el("div", "scenario-editor-header-badges");
+  if (scenario.danger || scenario.protected) badges.appendChild(el("span", "scenario-editor-badge is-warning", "Защищённый"));
+  badges.appendChild(el("span", "scenario-editor-badge", "Схема v1"));
+  header.appendChild(badges);
+  const close = el("button", "secondary scenario-editor-close", "×");
   close.type = "button";
-  close.textContent = "×";
   setAttr(close, "aria-label", "Закрыть редактор");
   close.addEventListener("click", () => closeScenarioEditor(panel));
   header.appendChild(close);
   dialog.appendChild(header);
 
-  const workspace = el("div", "scenario-editor-workspace");
-  const navigation = el("nav", "scenario-editor-nav");
-  setAttr(navigation, "aria-label", "Шаги настройки сценария");
-  const flow = el("div", "scenario-editor-flow");
-  flow.appendChild(el("strong", null, "Когда → Если → Тогда"));
-  flow.appendChild(el("small", null, scenarioSummary(scenario)));
-  navigation.appendChild(flow);
-  EDITOR_STEPS.forEach(([id, label, description], index) => {
-    const button = el("button", `scenario-editor-step${id === activeStep ? " is-active" : ""}`);
-    button.type = "button";
-    if (id === activeStep) setAttr(button, "aria-current", "step");
-    button.appendChild(el("span", "scenario-editor-step-index", String(index + 1)));
+  const steps = el("div", "scenario-editor-steps");
+  setAttr(steps, "aria-label", "Готовность сценария");
+  EDITOR_STEPS.forEach(([id, label]) => {
+    const [ready, detail] = scenarioEditorStepState(scenario, issues, id);
+    const step = el("div", `scenario-editor-step${ready ? " is-ready" : ""}`);
+    step.appendChild(el("span", "scenario-editor-step-check", "✓"));
     const copy = el("span", "scenario-editor-step-copy");
     copy.appendChild(el("b", null, label));
-    copy.appendChild(el("small", null, description));
-    button.appendChild(copy);
-    const count = scenarioStepIssueCount(scenario, id);
-    if (count) button.appendChild(el("span", "scenario-editor-step-issue", String(count)));
-    button.addEventListener("click", () => { panel._scenarioEditorStep = id; panel._scenarioEditorFocusBody = true; updateScenarioEditor(panel); });
-    navigation.appendChild(button);
+    copy.appendChild(el("small", null, detail));
+    step.appendChild(copy);
+    steps.appendChild(step);
   });
-  workspace.appendChild(navigation);
-  const body = el("div", "scenario-editor-body");
-  body.tabIndex = -1;
-  if (activeStep === "about") {
-    const about = scenarioEditorSection(deps, "Основное", "Название и визуальное обозначение на панели и планшете.");
-    const grid = el("div", "scenario-editor-grid");
-    grid.appendChild(scenarioField(deps, "Название", scenario.title, (value) => { scenario.title = value; }, { placeholder: "Например: Доброе утро", maxlength: 120 }));
-    grid.appendChild(scenarioField(deps, "Группа", scenario.group, (value) => { scenario.group = value; }, { placeholder: "Сценарии" }));
-    grid.appendChild(scenarioIconField(deps, scenario.icon, (value) => { scenario.icon = value; }));
-    grid.appendChild(scenarioField(deps, "Описание", scenario.description, (value) => { scenario.description = value; }, { multiline: true, wide: true, maxlength: 500 }));
-    about.appendChild(grid); body.appendChild(about);
-    const execution = scenarioEditorSection(deps, "Повторный запуск", "Как поступить, если сценарий запускается повторно до завершения.");
-    execution.appendChild(scenarioSelectField(deps, "Режим выполнения", scenario.definition.executionMode, [
-      ["single", "Один запуск — повтор игнорируется"], ["restart", "Перезапуск — начать заново"], ["queued", "Очередь — выполнить последовательно"],
-    ], (value) => { scenario.definition.executionMode = value; }));
-    body.appendChild(execution);
-  } else if (activeStep === "triggers") {
-    body.appendChild(renderScenarioRules(panel, "trigger", "Когда запускать", "Выберите одно или несколько событий. Любое из них сможет запустить сценарий.", scenario.definition.triggers, deps));
-  } else if (activeStep === "conditions") {
-    body.appendChild(renderScenarioRules(panel, "condition", "Дополнительные условия", "Сценарий продолжит выполнение, только если все условия соблюдены.", scenario.definition.conditions, deps));
-  } else if (activeStep === "actions") {
-    body.appendChild(renderScenarioRules(panel, "action", "Что выполнить", "Команды выполняются сверху вниз, а результат устройства подтверждается Home Assistant.", scenario.definition.actions, deps));
-  } else {
-    const publication = scenarioEditorSection(deps, "Доступ и безопасность", "Настройте доступность сценария и его отображение на главном экране.");
-    publication.appendChild(scenarioToggle(deps, "Сценарий включён", "Разрешить автоматический и ручной запуск", scenario.enabled, (value) => { scenario.enabled = value; }));
-    publication.appendChild(scenarioToggle(deps, "Показывать на главной", "Добавить сценарий в быстрый доступ", scenario.favorite, (value) => { scenario.favorite = value; }));
-    publication.appendChild(scenarioToggle(deps, "Требовать подтверждение", "Перед опасным запуском показать понятное подтверждение", scenario.requiresConfirmation, (value) => { scenario.requiresConfirmation = value; }));
-    body.appendChild(publication);
-  }
-  workspace.appendChild(body);
+  dialog.appendChild(steps);
+
+  const workspace = el("div", "scenario-editor-workspace");
+  const left = el("div", "scenario-editor-column scenario-editor-column-about");
+  const about = scenarioEditorSection(deps, "О сценарии");
+  const grid = el("div", "scenario-editor-grid is-single");
+  grid.appendChild(scenarioField(deps, "Название", scenario.title, (value) => { scenario.title = value; }, { placeholder: "Например: Доброе утро", maxlength: 120 }));
+  grid.appendChild(scenarioField(deps, "Группа", scenario.group, (value) => { scenario.group = value; }, { placeholder: "Сценарии" }));
+  grid.appendChild(scenarioIconField(deps, scenario.icon, (value) => { scenario.icon = value; }));
+  grid.appendChild(scenarioField(deps, "Что делает сценарий", scenario.description, (value) => { scenario.description = value; }, { multiline: true, wide: true, maxlength: 500 }));
+  about.appendChild(grid);
+  left.appendChild(about);
+  const execution = scenarioEditorSection(deps, "Выполнение");
+  execution.appendChild(scenarioSelectField(deps, "Повторный запуск", scenario.definition.executionMode, [
+    ["single", "Один запуск: повтор игнорируется"], ["restart", "Перезапуск: начать заново"], ["queued", "Очередь: выполнить последовательно"],
+  ], (value) => { scenario.definition.executionMode = value; }));
+  const executionHelp = {
+    single: "Новый запуск не прервёт уже выполняющийся сценарий.",
+    restart: "Новый запуск остановит текущий и начнёт сценарий заново.",
+    queued: "Новые запуски будут выполнены по очереди.",
+  };
+  execution.appendChild(el("p", "scenario-editor-panel-copy", executionHelp[scenario.definition.executionMode] || executionHelp.single));
+  left.appendChild(execution);
+  const publication = scenarioEditorSection(deps, "Публикация");
+  publication.appendChild(scenarioToggle(deps, "Сценарий включён", "Разрешить автоматический и ручной запуск", scenario.enabled, (value) => { scenario.enabled = value; }));
+  publication.appendChild(scenarioToggle(deps, "В быстром доступе", "Показывать карточку среди избранных", scenario.favorite, (value) => { scenario.favorite = value; }));
+  publication.appendChild(scenarioToggle(deps, "Подтверждать ручной запуск", scenario.danger ? "Обязательно для защищённого сценария" : "Автозапуск подтверждения не запрашивает", scenario.requiresConfirmation, (value) => { scenario.requiresConfirmation = value; }));
+  left.appendChild(publication);
+  workspace.appendChild(left);
+
+  const middle = el("div", "scenario-editor-column scenario-editor-column-rules");
+  middle.appendChild(renderScenarioRules(panel, "trigger", "Когда", "Любой из триггеров запускает сценарий", scenario.definition.triggers, deps));
+  middle.appendChild(renderScenarioRules(panel, "condition", "Только если", "Все условия должны выполняться", scenario.definition.conditions, deps));
+  workspace.appendChild(middle);
+  const right = el("div", "scenario-editor-column scenario-editor-column-actions");
+  right.appendChild(renderScenarioRules(panel, "action", "Выполнить", "Шаги идут строго сверху вниз", scenario.definition.actions, deps));
+  workspace.appendChild(right);
   dialog.appendChild(workspace);
 
   const footer = el("footer", "scenario-editor-footer");
-  const issues = scenarioEditorIssues(scenario);
-  footer.appendChild(el("div", issues.length ? "scenario-editor-status is-warning" : "scenario-editor-status is-ready",
-    issues[0]?.message || (scenarioEditorDirty(panel) ? "Готово к проверке и сохранению" : "Все изменения сохранены")));
+  footer.appendChild(el("p", "scenario-editor-review-summary", scenarioReviewSummary(scenario)));
+  const footerRow = el("div", "scenario-editor-footer-row");
+  footerRow.appendChild(el("div", issues.length ? "scenario-editor-status is-warning" : "scenario-editor-status is-ready",
+    issues.length ? `${issues[0].message}${issues.length > 1 ? ` · ещё ${issues.length - 1}` : ""}` : "Сценарий готов к сохранению"));
   const buttons = el("div", "scenario-editor-footer-actions");
-  const activeIndex = EDITOR_STEPS.findIndex(([id]) => id === activeStep);
-  const previous = el("button", "secondary scenario-editor-previous", "Назад");
-  previous.type = "button"; previous.disabled = activeIndex === 0;
-  previous.addEventListener("click", () => { panel._scenarioEditorStep = EDITOR_STEPS[Math.max(0, activeIndex - 1)][0]; panel._scenarioEditorFocusBody = true; updateScenarioEditor(panel); });
-  const next = el("button", "secondary scenario-editor-next", activeIndex === EDITOR_STEPS.length - 1 ? "К началу" : "Далее");
-  next.type = "button";
-  next.addEventListener("click", () => { panel._scenarioEditorStep = EDITOR_STEPS[(activeIndex + 1) % EDITOR_STEPS.length][0]; panel._scenarioEditorFocusBody = true; updateScenarioEditor(panel); });
-  const test = el("button", "secondary", "Проверить");
-  test.disabled = panel._busy;
+  const test = el("button", "secondary", "Пробный запуск");
+  test.disabled = panel._busy || issues.length > 0;
   test.addEventListener("click", () => submitScenario(panel, deps, true));
   const cancel = el("button", "secondary", "Отмена");
   cancel.addEventListener("click", () => closeScenarioEditor(panel));
   const save = el("button", null, panel._busy ? "Сохранение…" : "Сохранить");
-  save.disabled = panel._busy;
+  save.disabled = panel._busy || issues.length > 0;
   save.addEventListener("click", () => submitScenario(panel, deps, false));
-  buttons.appendChild(previous); buttons.appendChild(next); buttons.appendChild(test); buttons.appendChild(cancel); buttons.appendChild(save);
-  footer.appendChild(buttons);
+  buttons.appendChild(test); buttons.appendChild(cancel); buttons.appendChild(save);
+  footerRow.appendChild(buttons);
+  footer.appendChild(footerRow);
   dialog.appendChild(footer);
   overlay.appendChild(dialog);
   overlay.addEventListener("click", (event) => { if (event.target === overlay) closeScenarioEditor(panel); });
@@ -473,189 +545,53 @@ function renderScenarioEditor(panel, container, deps) {
   });
   container.appendChild(overlay);
   const shouldFocusClose = panel._scenarioEditorJustOpened === true;
-  const shouldFocusBody = panel._scenarioEditorFocusBody === true;
   panel._scenarioEditorJustOpened = false;
-  panel._scenarioEditorFocusBody = false;
   Promise.resolve().then(() => {
     if (shouldFocusClose && typeof close.focus === "function") close.focus();
-    else if (shouldFocusBody && typeof body.focus === "function") body.focus();
   });
 }
 
 export function renderScenarioSection(panel, container, deps) {
-  const { el, svgIcon, setAttr } = deps;
+  const { el } = deps;
   container.innerHTML = "";
-  panel._scenarioLibrary = panel._scenarioLibrary || { filter: "all", query: "" };
+  panel._scenarioLibrary = panel._scenarioLibrary || { filter: "all", roomId: "all", query: "" };
+  if (!panel._scenarioLibrary.roomId) panel._scenarioLibrary.roomId = "all";
   const items = panel._scenarios.list && Array.isArray(panel._scenarios.list.scenarios)
     ? panel._scenarios.list.scenarios : [];
-  const enabledCount = items.filter((item) => item.enabled !== false).length;
-  const favoriteCount = items.filter((item) => item.favorite === true).length;
+  const userItems = items.filter((item) => scenarioActivationKind(item) !== "system");
+  const logicalGroups = groupScenarios(userItems);
 
   container.appendChild(createLibraryHero(panel, {
     eyebrow: "СЦЕНАРИИ ДОМА",
     title: "Дом работает по вашим правилам",
-    subtitle: "Собирайте устройства, условия и расписание в понятные действия. Каждый запуск подтверждается Home Assistant.",
-    facts: [
-      { label: "Всего", value: items.length },
-      { label: "Включено", value: enabledCount },
-      { label: "На главной", value: favoriteCount },
-    ],
+    subtitle: `${userItems.length} сценариев · ${userItems.filter((item) => item.favorite === true).length} на главной · ${userItems.filter((item) => item.enabled === false).length} отключено`,
+    facts: logicalGroups.map((group) => ({ label: group.title, value: group.scenarios.length })),
   }, deps));
 
   const card = el("section", "card scenarios-card scenario-library");
   const heading = el("div", "scenarios-heading scenario-library-toolbar");
   const headingCopy = el("div");
-  headingCopy.appendChild(el("h2", null, "Мои сценарии"));
-  headingCopy.appendChild(el("p", "section-intro", "Быстрый запуск и полное редактирование без технических сущностей"));
+  headingCopy.appendChild(el("h2", null, "Сценарии"));
+  headingCopy.appendChild(el("p", "section-intro", `Показано ${userItems.length}`));
   heading.appendChild(headingCopy);
-  const create = el("button", "scenario-create", "+ Новый сценарий");
+  const create = el("button", "scenario-create", "Новый сценарий");
   create.type = "button";
   create.addEventListener("click", () => openScenarioEditor(panel, defaultScenarioDraft()));
   heading.appendChild(create);
   card.appendChild(heading);
-  const controls = el("div", "scenario-library-controls");
-  const search = el("input", "scenario-library-search");
-  search.type = "search";
-  search.value = panel._scenarioLibrary.query;
-  setAttr(search, "placeholder", "Найти сценарий");
-  setAttr(search, "aria-label", "Найти сценарий");
-  controls.appendChild(search);
-  const filters = el("div", "scenario-library-filters");
-  const filterOptions = [["all", "Все"], ["favorite", "На главной"], ["enabled", "Включены"], ["disabled", "Выключены"]];
-  filterOptions.forEach(([value, label]) => {
-    const button = el("button", panel._scenarioLibrary.filter === value ? "is-active" : "", label);
-    button.type = "button";
-    button.addEventListener("click", () => { panel._scenarioLibrary.filter = value; updateScenarioEditor(panel); });
-    filters.appendChild(button);
-  });
-  controls.appendChild(filters);
-  card.appendChild(controls);
   if (panel._scenarios.loading && !panel._scenarios.list) {
     card.appendChild(el("div", "muted", "Загрузка сценариев…"));
   } else if (!panel._scenarios.list || !Array.isArray(panel._scenarios.list.scenarios)) {
     card.appendChild(el("div", "muted", "Список сценариев недоступен."));
   } else {
-    const query = panel._scenarioLibrary.query.trim().toLocaleLowerCase("ru");
-    const filtered = items.filter((scenario) => {
-      const matchesQuery = !query || `${scenario.title || ""} ${scenario.group || ""} ${scenario.description || ""}`.toLocaleLowerCase("ru").includes(query);
-      const matchesFilter = panel._scenarioLibrary.filter === "all"
-        || (panel._scenarioLibrary.filter === "favorite" && scenario.favorite === true)
-        || (panel._scenarioLibrary.filter === "enabled" && scenario.enabled !== false)
-        || (panel._scenarioLibrary.filter === "disabled" && scenario.enabled === false);
-      return matchesQuery && matchesFilter;
-    });
-    if (!items.length) {
-      const empty = el("div", "scenario-empty");
-      const icon = el("span", "scenario-empty-icon");
-      icon.appendChild(svgIcon("bolt"));
-      empty.appendChild(icon);
-      empty.appendChild(el("h3", null, "Создайте первый сценарий"));
-      empty.appendChild(el("p", null, "Объедините команды устройств, расписание и условия в одно понятное действие."));
-      const emptyCreate = el("button", "secondary", "Создать сценарий");
-      emptyCreate.addEventListener("click", () => openScenarioEditor(panel, defaultScenarioDraft()));
-      empty.appendChild(emptyCreate);
-      card.appendChild(empty);
-    } else {
-      const empty = el("div", "scenario-empty scenario-empty-compact");
-      empty.appendChild(el("h3", null, "Ничего не найдено"));
-      empty.appendChild(el("p", null, "Измените запрос или выберите другой фильтр."));
-      empty.hidden = filtered.length > 0;
-      card.appendChild(empty);
-      panel._scenarioEmptySearch = empty;
-    }
-    const list = el("div", "scenario-list scenario-library-grid");
-    const visibleIds = new Set(filtered.map((item) => item.id));
-    items.forEach((source) => {
-      const scenario = normalizedScenario(source);
-      const requiresConfirmation = scenario.requiresConfirmation === true || scenario.requires_confirmation === true;
-      const meta = scenarioIconMeta(scenario.icon, scenario.title);
-      const row = el("article", `scenario-row scenario-library-card${scenario.enabled ? "" : " is-disabled"}`);
-      row.hidden = !visibleIds.has(source.id);
-      row._scenarioSearchText = `${scenario.title} ${scenario.group} ${scenario.description}`.toLocaleLowerCase("ru");
-      row._scenarioState = scenario;
-      const top = el("div", "scenario-library-card-top");
-      const icon = el("span", "scenario-icon scenario-library-icon");
-      const materialIcon = el("ha-icon", "icon scenario-material-icon");
-      setAttr(materialIcon, "icon", `mdi:${meta.mdi}`);
-      icon.appendChild(materialIcon);
-      top.appendChild(icon);
-      const favorite = el("button", `scenario-favorite${scenario.favorite ? " is-active" : ""}`);
-      favorite.type = "button";
-      favorite.textContent = scenario.favorite ? "★" : "☆";
-      setAttr(favorite, "aria-label", scenario.favorite ? "Убрать с главного экрана" : "Добавить на главный экран");
-      favorite.addEventListener("click", () => {
-        scenario.favorite = !scenario.favorite;
-        saveScenarioQuick(panel, deps, scenario, scenario.favorite ? `Сценарий «${scenario.title}» добавлен на главный экран.` : `Сценарий «${scenario.title}» убран с главного экрана.`);
-      });
-      top.appendChild(favorite);
-      row.appendChild(top);
-      const copy = el("div", "scenario-copy scenario-library-copy");
-      copy.tabIndex = 0;
-      copy.appendChild(el("span", "scenario-library-group", scenario.group));
-      copy.appendChild(el("h3", null, scenario.title || scenario.id));
-      copy.appendChild(el("p", null, scenario.description || "Сценарий готов к ручному или автоматическому запуску."));
-      copy.appendChild(el("small", "scenario-library-summary", [scenarioSummary(scenario), requiresConfirmation ? "с подтверждением" : ""].filter(Boolean).join(" · ")));
-      copy.addEventListener("click", () => openScenarioEditor(panel, scenario));
-      copy.addEventListener("keydown", (event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          openScenarioEditor(panel, scenario);
-        }
-      });
-      row.appendChild(copy);
-      const actions = el("div", "scenario-actions scenario-library-actions");
-      const enabled = el("button", `scenario-enabled${scenario.enabled ? " is-active" : ""}`, scenario.enabled ? "Включён" : "Выключен");
-      enabled.type = "button";
-      enabled.addEventListener("click", () => {
-        scenario.enabled = !scenario.enabled;
-        saveScenarioQuick(panel, deps, scenario, `Сценарий «${scenario.title}» ${scenario.enabled ? "включён" : "выключен"}.`);
-      });
-      actions.appendChild(enabled);
-      const edit = el("button", "secondary scenario-edit", "Изменить");
-      edit.type = "button";
-      edit.addEventListener("click", () => openScenarioEditor(panel, scenario));
-      actions.appendChild(edit);
-      const menu = el("details", "scenario-more");
-      const menuButton = el("summary", null, "•••");
-      setAttr(menuButton, "aria-label", `Дополнительные действия для «${scenario.title}»`);
-      menu.appendChild(menuButton);
-      const menuItems = el("div", "scenario-more-menu");
-      const test = el("button", null, "Проверить");
-      test.type = "button"; test.addEventListener("click", () => panel._scenarioTest(scenario));
-      const duplicate = el("button", null, "Создать копию");
-      duplicate.type = "button"; duplicate.addEventListener("click", () => {
-        openScenarioEditor(panel, duplicateScenarioDraft(scenario));
-      });
-      const remove = el("button", "is-danger", "Удалить");
-      remove.type = "button"; remove.addEventListener("click", () => deleteScenarioQuick(panel, deps, scenario));
-      menuItems.appendChild(test); menuItems.appendChild(duplicate); menuItems.appendChild(remove);
-      menu.appendChild(menuItems); actions.appendChild(menu);
-      const run = el("button", "scenario-run");
-      run.type = "button";
-      run.disabled = panel._busy || !scenario.enabled;
-      run.appendChild(svgIcon("play"));
-      setAttr(run, "aria-label", scenario.enabled ? `Запустить сценарий «${scenario.title}»` : `Сценарий «${scenario.title}» выключен`);
-      run.addEventListener("click", () => panel._post(deps.runApi, { scenario_id: scenario.id }, requiresConfirmation ? `Запустить сценарий «${scenario.title}»?` : null));
-      actions.appendChild(run);
-      row.appendChild(actions);
-      list.appendChild(row);
-    });
-    card.appendChild(list);
-    search.addEventListener("input", () => {
-      panel._scenarioLibrary.query = search.value;
-      const nextQuery = search.value.trim().toLocaleLowerCase("ru");
-      let visibleCount = 0;
-      Array.from(list.children).forEach((row) => {
-        const scenario = row._scenarioState;
-        const matchesQuery = !nextQuery || row._scenarioSearchText.includes(nextQuery);
-        const matchesFilter = panel._scenarioLibrary.filter === "all"
-          || (panel._scenarioLibrary.filter === "favorite" && scenario.favorite === true)
-          || (panel._scenarioLibrary.filter === "enabled" && scenario.enabled !== false)
-          || (panel._scenarioLibrary.filter === "disabled" && scenario.enabled === false);
-        row.hidden = !(matchesQuery && matchesFilter);
-        if (!row.hidden) visibleCount += 1;
-      });
-      if (panel._scenarioEmptySearch) panel._scenarioEmptySearch.hidden = visibleCount > 0;
+    renderScenarioCatalog(panel, card, items, deps, {
+      normalize: normalizedScenario,
+      open: (scenario) => openScenarioEditor(panel, scenario),
+      create: () => openScenarioEditor(panel, defaultScenarioDraft()),
+      duplicate: duplicateScenarioDraft,
+      save: (scenario, notice) => saveScenarioQuick(panel, deps, scenario, notice),
+      delete: (scenario) => deleteScenarioQuick(panel, deps, scenario),
+      refresh: () => updateScenarioEditor(panel),
     });
   }
   container.appendChild(card);

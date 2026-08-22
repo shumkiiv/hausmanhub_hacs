@@ -28,6 +28,7 @@ http://127.0.0.1:8765/tests/visual/hausman-hub-panel-harness.html
 - `settings` для раздела настроек: `overview`, `rooms`, `connection`,
   `appearance`, `system`;
 - `theme`: `light` или `dark`.
+- `openScenario`: открыть редактор сценария по части его названия.
 - `figmaCapture=1`: явно подключить скрипт импорта Figma; без параметра стенд
   полностью локален и не загружает внешний JavaScript.
 

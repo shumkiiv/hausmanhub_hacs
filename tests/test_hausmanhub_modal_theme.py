@@ -44,7 +44,8 @@ MODAL_SURFACE_INVENTORY = (
     ("hausman-hub-lighting.js", "hausman-hub-lighting.css", ("lighting-room-sheet-backdrop", "lighting-room-sheet"), ("lighting-room-sheet-backdrop", "lighting-room-sheet")),
     ("hausman-hub-rooms.js", "hausman-hub-rooms.css", ("rooms-detail-backdrop", "rooms-detail-sheet"), ("rooms-detail-backdrop", "rooms-detail-sheet")),
     ("hausman-hub-media-overview.js", "hausman-hub-media-overview.css", ("media-zone-sheet-backdrop", "media-zone-sheet"), ("media-zone-sheet-backdrop", "media-zone-sheet")),
-    ("hausman-hub-scenarios.js", "hausman-hub-scenarios.css", ("scenario-editor-overlay", "scenario-editor-dialog", "scenario-more-menu"), ("scenario-editor-overlay", "scenario-editor-dialog", "scenario-more-menu")),
+    ("hausman-hub-scenarios.js", "hausman-hub-scenarios.css", ("scenario-editor-overlay", "scenario-editor-dialog"), ("scenario-editor-overlay", "scenario-editor-dialog")),
+    ("hausman-hub-scenario-catalog.js", "hausman-hub-scenarios.css", ("scenario-more-menu",), ("scenario-more-menu",)),
     ("hausman-hub-energy.js", "hausman-hub-energy.css", ("energy-modal-backdrop", "energy-modal"), ("energy-modal-backdrop", "energy-modal")),
 )
 

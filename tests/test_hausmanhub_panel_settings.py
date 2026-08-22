@@ -55,6 +55,7 @@ MEDIA_DEVICE_JS = PANEL_JS.with_name("hausman-hub-media-device.js")
 DEVICE_CARD_JS = PANEL_JS.with_name("hausman-hub-device-card.js")
 DEVICE_CONTROLS_JS = PANEL_JS.with_name("hausman-hub-device-controls.js")
 SCENARIOS_JS = PANEL_JS.with_name("hausman-hub-scenarios.js")
+SCENARIO_CATALOG_JS = PANEL_JS.with_name("hausman-hub-scenario-catalog.js")
 SCENARIO_DEVICE_PICKER_JS = PANEL_JS.with_name("hausman-hub-scenario-device-picker.js")
 SCENARIO_ICONS_JS = PANEL_JS.with_name("hausman-hub-scenario-icons.js")
 SCENARIO_FIELDS_JS = PANEL_JS.with_name("hausman-hub-scenario-fields.js")
@@ -643,6 +644,10 @@ def panel_script(
       vm.runInThisContext(
         fs.readFileSync({str(SCENARIO_DEVICE_PICKER_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(SCENARIO_DEVICE_PICKER_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(SCENARIO_CATALOG_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, "").replace(/export /g, ""),
+        {{ filename: {str(SCENARIO_CATALOG_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(SCENARIOS_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, "").replace(/export /g, ""),
@@ -3531,7 +3536,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         await tick();
         const screen = panel._shell.scenarios;
         const text = textOf(screen);
-        for (const label of ["Дом работает по вашим правилам", "На главной", "Доброе утро", "Уходим из дома", "Ночной режим", "с подтверждением", "Выключен"]) {
+        for (const label of ["Дом работает по вашим правилам", "На главной", "Доброе утро", "Уходим из дома", "Ночной режим", "с подтверждением", "Ручной запуск"]) {
           if (!text.includes(label)) throw new Error("scenario text missing: " + label);
         }
         const search = findAll(screen, (node) => node.tagName === "INPUT" && node["placeholder"] === "Найти сценарий")[0];
@@ -3579,12 +3584,6 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         await tick();
         const refreshedRows = findAll(panel._shell.scenarios, (node) =>
           String(node.className).split(" ").includes("scenario-row"));
-        rowButtons(refreshedRows[0]).find((node) => node.textContent === "Проверить").fire("click");
-        await tick();
-        if (!calls.some((call) => call.method === "POST"
-          && call.path === "hausman_hub/v1/admin/scenarios/test")) {
-          throw new Error("scenario test API missing");
-        }
         rowButtons(refreshedRows[0]).find((node) => node.textContent === "Удалить").fire("click");
         await tick();
         if (!calls.some((call) => call.method === "POST"
@@ -3614,6 +3613,90 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         }
         if (!textOf(panel._shell.scenarios).includes("Создайте первый сценарий")) {
           throw new Error("scenario deep link did not render the empty state");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_scenario_catalog_hides_system_by_default_and_filters_by_type_room_and_group(self) -> None:
+        payloads = dict(GET_PATHS)
+        payloads["hausman_hub/v1/admin/scenarios"] = {
+            "scenarios": [
+                {
+                    "id": "manual_living", "title": "Весь свет выключить", "group": "Дом",
+                    "description": "Выключает свет в гостиной", "icon": "mdi:lightbulb-off", "enabled": True,
+                    "favorite": True, "roomId": "living", "activationKind": "manual", "protected": False,
+                    "definition": {"version": 1, "executionMode": "single", "triggers": [{"id": "t1", "type": "manual"}], "conditions": [], "actions": [{"id": "a1", "type": "notification", "message": "Готово"}]},
+                },
+                {
+                    "id": "automatic_kitchen", "title": "Климат кухни", "group": "Климат",
+                    "description": "Поддерживает комфорт", "icon": "mdi:thermometer", "enabled": True,
+                    "favorite": False, "roomId": "kitchen", "activationKind": "automatic", "protected": False,
+                    "definition": {"version": 1, "executionMode": "single", "triggers": [{"id": "t1", "type": "time", "value": "07:00"}], "conditions": [], "actions": [{"id": "a1", "type": "notification", "message": "Готово"}]},
+                },
+                {
+                    "id": "hybrid_movie", "title": "Кино", "group": "Медиа",
+                    "description": "Готовит гостиную к просмотру", "icon": "mdi:movie", "enabled": True,
+                    "favorite": False, "roomId": "living", "activationKind": "hybrid", "protected": False,
+                    "definition": {"version": 1, "executionMode": "single", "triggers": [{"id": "t1", "type": "manual"}, {"id": "t2", "type": "time", "value": "20:00"}], "conditions": [], "actions": [{"id": "a1", "type": "notification", "message": "Готово"}]},
+                },
+                {
+                    "id": "system_bathroom_fan", "title": "Ванная: вытяжка off после света", "group": "SYSTEM",
+                    "description": "Shadow-перенос Node-RED: выключение после света", "icon": "mdi:fan-off", "enabled": True,
+                    "favorite": False, "roomId": "bathroom", "activationKind": "system", "protected": True,
+                    "definition": {"version": 1, "executionMode": "restart", "triggers": [{"id": "t1", "type": "time", "value": "22:00"}], "conditions": [], "actions": [{"id": "a1", "type": "notification", "message": "Готово"}]},
+                },
+            ]
+        }
+        payloads["hausman_hub/v1/admin/scenarios/catalog"] = {"devices": []}
+        script = panel_script(
+            payloads,
+            {},
+            """
+        panel._homeDashboard = { rooms: [
+          { id: "living", name: "Гостиная" }, { id: "kitchen", name: "Кухня" },
+          { id: "bathroom", name: "Ванная" },
+        ] };
+        panel._shell.tabs.scenarios.fire("click");
+        await tick();
+        const screen = panel._shell.scenarios;
+        const rows = () => findAll(screen, (node) => String(node.className).split(" ").includes("scenario-row"));
+        const button = (label) => findAll(screen, (node) => node.tagName === "BUTTON" && node.textContent === label)[0];
+        if (rows().length !== 3) throw new Error("system scenarios are not hidden by default");
+        for (const label of ["Все", "На главной", "Включены", "Отключены", "Ручные", "Автоматика", "Гибридные", "Системные", "Все комнаты", "Гостиная", "Кухня", "Режимы дома", "Климат", "Медиа"]) {
+          if (!textOf(screen).includes(label)) throw new Error("scenario catalog label missing: " + label);
+        }
+        if (/SYSTEM|Node-RED|Shadow|\boff\b/.test(textOf(screen))) throw new Error("English system names leaked into the default catalog");
+        button("Автоматика").fire("click");
+        if (rows().length !== 1 || !textOf(rows()[0]).includes("Климат кухни")) throw new Error("automatic filter mismatch");
+        button("Системные").fire("click");
+        if (rows().length !== 1 || !textOf(rows()[0]).includes("Ванная: вытяжка выключить после света")
+            || /SYSTEM|Node-RED|Shadow|\boff\b/.test(textOf(rows()[0]))) {
+          throw new Error("system presentation is not fully localized");
+        }
+        if (findAll(rows()[0], (node) => node.tagName === "BUTTON" && node.textContent === "Удалить").length) {
+          throw new Error("protected system scenario exposes delete action");
+        }
+        findAll(rows()[0], (node) => String(node.className).split(" ").includes("scenario-library-identity"))[0].fire("click");
+        if (panel._scenarioEditor.title !== "Ванная: вытяжка выключить после света"
+            || panel._scenarioEditor.group !== "Системные"
+            || /SYSTEM|Node-RED|Shadow|\boff\b/.test(panel._scenarioEditor.description)) {
+          throw new Error("system editor fields are not localized");
+        }
+        const unchangedSystemPayload = scenarioPayload(panel._scenarioEditor);
+        if (unchangedSystemPayload.title !== "Ванная: вытяжка off после света"
+            || unchangedSystemPayload.group !== "SYSTEM"
+            || !unchangedSystemPayload.description.includes("Shadow-перенос Node-RED")) {
+          throw new Error("presentation localization changed the system source of truth");
+        }
+        panel._scenarioEditor = null;
+        panel._scenarioEditorOriginal = null;
+        updateScenarioEditor(panel);
+        button("Все").fire("click");
+        button("Гостиная").fire("click");
+        if (rows().length !== 2 || rows().some((row) => row._scenarioState.roomId !== "living")) {
+          throw new Error("room filter mismatch");
         }
             """,
         )
@@ -3654,10 +3737,10 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         await tick();
         const screen = panel._shell.scenarios;
         const create = findAll(screen, (node) => node.tagName === "BUTTON")
-          .find((node) => node.textContent === "+ Новый сценарий" || node.textContent === "Создать сценарий");
+          .find((node) => node.textContent === "Новый сценарий" || node.textContent === "Создать сценарий");
         if (!create) throw new Error("scenario create action missing from empty state");
         create.fire("click");
-        if (!panel._scenarioEditor || !textOf(screen).includes("РЕДАКТОР СЦЕНАРИЯ")) {
+        if (!panel._scenarioEditor || !textOf(screen).includes("Редактор сценария")) {
           throw new Error("full scenario editor did not open");
         }
         const iconButtons = findAll(screen, (node) => node.tagName === "BUTTON"
@@ -3685,11 +3768,11 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         title.value = "Вечерний свет";
         title.fire("input");
         const actionStep = findAll(screen, (node) => String(node.className).split(" ").includes("scenario-editor-step"))
-          .find((node) => textOf(node).includes("Тогда"));
+          .find((node) => textOf(node).includes("Что сделать"));
         if (!actionStep) throw new Error("scenario action step is missing");
         actionStep.fire("click");
         const addAction = findAll(screen, (node) => node.tagName === "BUTTON")
-          .find((node) => node.textContent === "+ Добавить действие");
+          .find((node) => node.textContent === "Добавить шаг");
         addAction.fire("click");
 
         const deviceButton = findAll(screen, (node) => String(node.className).split(" ").includes("scenario-device-select-button"))[0];
@@ -3786,7 +3869,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         await tick();
         const screen = panel._shell.scenarios;
         findAll(screen, (node) => node.tagName === "BUTTON")
-          .find((node) => node.textContent === "+ Новый сценарий" || node.textContent === "Создать сценарий")
+          .find((node) => node.textContent === "Новый сценарий" || node.textContent === "Создать сценарий")
           .fire("click");
         const field = (label) => {
           const wrapper = findAll(screen, (node) => String(node.className).split(" ").includes("scenario-editor-field"))
@@ -3871,7 +3954,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         await tick();
         const screen = panel._shell.scenarios;
         findAll(screen, (node) => node.tagName === "BUTTON")
-          .find((node) => node.textContent === "+ Новый сценарий" || node.textContent === "Создать сценарий")
+          .find((node) => node.textContent === "Новый сценарий" || node.textContent === "Создать сценарий")
           .fire("click");
         const field = (label) => {
           const wrapper = findAll(screen, (node) => String(node.className).split(" ").includes("scenario-editor-field"))
@@ -3911,7 +3994,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
-    def test_scenario_editor_has_five_clear_steps_switches_and_safe_escape(self) -> None:
+    def test_scenario_editor_matches_tablet_workspace_accordion_and_safe_escape(self) -> None:
         payloads = dict(GET_PATHS)
         payloads["hausman_hub/v1/admin/scenarios"] = {"scenarios": []}
         payloads["hausman_hub/v1/admin/scenarios/catalog"] = {"devices": []}
@@ -3923,18 +4006,22 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         await tick();
         const screen = panel._shell.scenarios;
         findAll(screen, (node) => node.tagName === "BUTTON")
-          .find((node) => node.textContent === "+ Новый сценарий" || node.textContent === "Создать сценарий")
+          .find((node) => node.textContent === "Новый сценарий" || node.textContent === "Создать сценарий")
           .fire("click");
         await tick();
         const steps = findAll(screen, (node) => String(node.className).split(" ").includes("scenario-editor-step"));
         const labels = steps.map((node) => findAll(node, (child) => child.tagName === "B")[0].textContent);
-        if (JSON.stringify(labels) !== JSON.stringify(["Основное", "Когда", "Если", "Тогда", "Доступ"])) {
+        if (JSON.stringify(labels) !== JSON.stringify(["Основное", "Когда", "Если", "Что сделать", "Проверка", "Публикация"])) {
           throw new Error("scenario editor step contract mismatch: " + JSON.stringify(labels));
         }
-        steps[3].fire("click");
-        const addAction = findAll(screen, (node) => node.tagName === "BUTTON" && node.textContent === "+ Добавить действие")[0];
+        for (const panelTitle of ["О сценарии", "Выполнение", "Публикация", "Когда", "Только если", "Выполнить"]) {
+          if (!textOf(screen).includes(panelTitle)) throw new Error("tablet editor panel missing: " + panelTitle);
+        }
+        const columns = findAll(screen, (node) => String(node.className).split(" ").includes("scenario-editor-column"));
+        if (columns.length !== 3) throw new Error("tablet editor is not a three-column workspace");
+        const addAction = findAll(screen, (node) => node.tagName === "BUTTON" && node.textContent === "Добавить шаг")[0];
         addAction.fire("click");
-        findAll(screen, (node) => node.tagName === "BUTTON" && node.textContent === "+ Добавить действие")[0].fire("click");
+        findAll(screen, (node) => node.tagName === "BUTTON" && node.textContent === "Добавить шаг")[0].fire("click");
         const originalOrder = panel._scenarioEditor.definition.actions.map((item) => item.id);
         const moveDown = findAll(screen, (node) => node.tagName === "BUTTON" && node["aria-label"] === "Опустить шаг 1")[0];
         if (!moveDown || moveDown.disabled) throw new Error("scenario action ordering control missing");
@@ -3943,15 +4030,19 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         if (movedOrder[0] !== originalOrder[1] || movedOrder[1] !== originalOrder[0]) {
           throw new Error("scenario action order did not change");
         }
-        const actionIssue = findAll(screen, (node) => String(node.className).split(" ").includes("scenario-editor-step-issue"))[0];
-        if (!actionIssue) throw new Error("incomplete scenario action is not flagged before API validation");
-        const refreshedSteps = findAll(screen, (node) => String(node.className).split(" ").includes("scenario-editor-step"));
-        refreshedSteps[4].fire("click");
+        const expandedRules = findAll(screen, (node) => String(node.className).split(" ").includes("scenario-rule-card")
+          && String(node.className).split(" ").includes("is-expanded"));
+        if (expandedRules.length !== 2) throw new Error("each populated rule column must keep only one accordion card expanded");
+        const reviewStep = findAll(screen, (node) => String(node.className).split(" ").includes("scenario-editor-step"))
+          .find((node) => textOf(node).includes("Проверка"));
+        if (String(reviewStep.className).split(" ").includes("is-ready")) {
+          throw new Error("incomplete scenario action is not flagged before API validation");
+        }
         const switches = findAll(screen, (node) => node.role === "switch");
         if (switches.length !== 3 || switches.some((node) => !["true", "false"].includes(node["aria-checked"]))) {
           throw new Error("scenario publication switches are not accessible");
         }
-        const favorite = switches.find((node) => textOf(node).includes("Показывать на главной"));
+        const favorite = switches.find((node) => textOf(node).includes("В быстром доступе"));
         favorite.fire("click");
         if (favorite["aria-checked"] !== "true" || panel._scenarioEditor.favorite !== true) {
           throw new Error("scenario favorite switch did not update the draft");
@@ -4768,7 +4859,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.148")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.149")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;
