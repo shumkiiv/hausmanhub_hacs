@@ -1,8 +1,22 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-22 (HACS 1.52.148, выровнен текст панели внимания безопасности).
+Last updated: 2026-08-22 (HACS 1.52.148, переработаны карточки управления устройствами).
 
 ## Current work
+
+- 2026-08-22 (Codex): изменён только HACS frontend. Модальные карточки
+  физических устройств и люстр собраны вокруг возможностей сущностей:
+  компактные каналы показывают состояние и только актуальное действие,
+  диапазоны яркости и температуры света размещены в плотной адаптивной сетке,
+  повторяющиеся технические блоки удалены. Для администратора добавлено
+  переименование канала или клавиши через стандартную команду Home Assistant
+  `config/entity_registry/update`; отдельная копия имени в HACS не создаётся,
+  поэтому реестр сущностей HA остаётся единственным источником истины. Проверены
+  светлая и тёмная темы, узкий экран, JS syntax и `git diff --check`. Профиль
+  frontend: 33 passed и 50 subtests; settings: 2 passed; wizard: 59 passed;
+  полный release gate: 1619 тестов выполнено, 4 skipped. Feature commit `4292d9f`.
+  Версия остаётся `1.52.148`; release, push и deploy не выполнялись. Android,
+  backend, API, contracts и storage не менялись.
 
 - 2026-08-22 (Codex): изменён только HACS frontend раздела
   «Безопасность». В строках правой панели «Требуют внимания» восстановлен
@@ -4019,5 +4033,5 @@ Engineering and review rules are in
 
 - Obsidian/context index: `LLM_WIKI/00_Index.md`.
 - Latest generated context: `LLM_WIKI/Context.md`.
-- Last sync: 2026-08-22T20:19:54+03:00.
+- Last sync: 2026-08-22T21:00:25+03:00.
 <!-- llm-wiki-sync:end -->
