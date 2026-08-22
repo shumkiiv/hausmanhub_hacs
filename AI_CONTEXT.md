@@ -1,5 +1,17 @@
 # HausmanHub AI Context
 
+- 2026-08-23: HACS `1.52.155` завершил направление 24 и развёрнут в
+  production. Исполняемый registry закрепляет общий продуктовый язык HACS и
+  Hausman Android `1.0.251` для header, card, detail, control, notice, picker
+  и empty state. Gate проверяет общую fixture, semantic tokens,
+  keyboard/focus, Esc, focus return, aria-live, 900/1280/1440/1920 px,
+  light/dark и zoom 125/150%. Визуальная компоновка не менялась, только
+  cache-bust. Commit/tag `7f98228`, Actions `32599293350` success; полный
+  gate: 1641 test, 4 skipped. Backup `b10cfc4f` находится в local и
+  KeeneticSSD, по 930068480 байт. Production installed/latest `v1.52.155`,
+  config entry loaded, 88 assets совпадают, ошибок Hausman нет. Аудит:
+  `docs/RELEASE_AUDIT_1.52.155.md`.
+
 - 2026-08-22: HACS `1.52.154` завершил backend направления 20 и развёрнут
   в production.
   Numeric catalog actions публикуют runtime bounds/unit, а scenario dry-run
