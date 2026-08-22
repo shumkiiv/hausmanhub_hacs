@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/water-meter.schema.json",
+  "title": "HausmanHub durable water meter v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract", "revision", "updatedAt", "settings", "reading",
+    "cycle", "submission", "dispatch", "history"
+  ],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "hausman-hub-water-meter" },
+        "version": { "const": 1 }
+      }
+    },
+    "revision": { "type": "integer", "minimum": 0 },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "settings": { "$ref": "#/$defs/settings" },
+    "reading": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["currentColdM3", "currentHotM3", "adjustedAt", "estimated"],
+      "properties": {
+        "currentColdM3": { "type": ["number", "null"], "minimum": 0 },
+        "currentHotM3": { "type": ["number", "null"], "minimum": 0 },
+        "adjustedAt": { "type": ["string", "null"], "format": "date-time" },
+        "estimated": { "type": "boolean" }
+      }
+    },
+    "cycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["startedAt", "baselineColdM3", "baselineHotM3", "consumptionColdM3", "consumptionHotM3"],
+      "properties": {
+        "startedAt": { "type": ["string", "null"], "format": "date-time" },
+        "baselineColdM3": { "type": ["number", "null"], "minimum": 0 },
+        "baselineHotM3": { "type": ["number", "null"], "minimum": 0 },
+        "consumptionColdM3": { "type": ["number", "null"], "minimum": 0 },
+        "consumptionHotM3": { "type": ["number", "null"], "minimum": 0 }
+      }
+    },
+    "submission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lastDate", "nextDate", "status", "daysUntil"],
+      "properties": {
+        "lastDate": { "type": ["string", "null"], "format": "date" },
+        "nextDate": { "type": ["string", "null"], "format": "date" },
+        "status": { "enum": ["disabled", "none", "upcoming", "due", "overdue"] },
+        "daysUntil": { "type": ["integer", "null"], "minimum": -3660, "maximum": 3660 }
+      }
+    },
+    "dispatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lastSentAt", "lastChannel", "lastStatus", "lastDetail"],
+      "properties": {
+        "lastSentAt": { "type": ["string", "null"], "format": "date-time" },
+        "lastChannel": { "enum": ["email", null] },
+        "lastStatus": { "enum": ["sent", "failed", null] },
+        "lastDetail": { "type": ["string", "null"], "maxLength": 200 }
+      }
+    },
+    "history": {
+      "type": "array",
+      "maxItems": 60,
+      "items": { "$ref": "#/$defs/record" }
+    }
+  },
+  "$defs": {
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled", "submissionDayOfMonth", "reminderDaysBefore",
+        "accountNumber", "coldMeterNumber", "hotMeterNumber",
+        "providerEmail", "notifyService"
+      ],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "submissionDayOfMonth": { "type": "integer", "minimum": 1, "maximum": 31 },
+        "reminderDaysBefore": { "type": "integer", "minimum": 0, "maximum": 14 },
+        "accountNumber": { "type": ["string", "null"], "minLength": 1, "maxLength": 40 },
+        "coldMeterNumber": { "type": ["string", "null"], "minLength": 1, "maxLength": 40 },
+        "hotMeterNumber": { "type": ["string", "null"], "minLength": 1, "maxLength": 40 },
+        "providerEmail": { "type": ["string", "null"], "format": "email", "maxLength": 120 },
+        "notifyService": {
+          "type": ["string", "null"],
+          "pattern": "^[a-z0-9_]+$",
+          "maxLength": 60
+        }
+      }
+    },
+    "record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "coldM3", "hotM3", "channel", "detail", "recordedAt"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^reading_[0-9]{1,10}$" },
+        "kind": { "enum": ["submission", "correction", "dispatch"] },
+        "coldM3": { "type": ["number", "null"], "minimum": 0 },
+        "hotM3": { "type": ["number", "null"], "minimum": 0 },
+        "channel": { "enum": ["email", null] },
+        "detail": { "type": ["string", "null"], "maxLength": 200 },
+        "recordedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "actionRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["expectedRevision", "action"],
+      "properties": {
+        "expectedRevision": { "type": "integer", "minimum": 0 },
+        "action": { "enum": ["configure", "submit", "correct", "dispatch"] },
+        "settings": { "$ref": "#/$defs/settings" },
+        "coldM3": { "type": "number", "minimum": 0, "maximum": 1000000 },
+        "hotM3": { "type": "number", "minimum": 0, "maximum": 1000000 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "action": { "const": "configure" } }, "required": ["action"] },
+          "then": { "required": ["settings"], "not": { "anyOf": [{ "required": ["coldM3"] }, { "required": ["hotM3"] }] } }
+        },
+        {
+          "if": { "properties": { "action": { "enum": ["submit", "correct"] } }, "required": ["action"] },
+          "then": { "required": ["coldM3", "hotM3"], "not": { "required": ["settings"] } }
+        },
+        {
+          "if": { "properties": { "action": { "const": "dispatch" } }, "required": ["action"] },
+          "then": { "not": { "anyOf": [{ "required": ["settings"] }, { "required": ["coldM3"] }, { "required": ["hotM3"] }] } }
+        }
+      ]
+    }
+  }
+}

@@ -466,6 +466,7 @@
         "entityId": { "type": ["string", "null"] },
         "domain": { "type": ["string", "null"] },
         "state": { "type": ["string", "null"] },
+        "renameable": { "type": "boolean" },
         "control": {
           "anyOf": [
             { "$ref": "#/$defs/deviceRangeControl" },
