@@ -29,6 +29,7 @@ SECURITY_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-security-overview.js")
 DEVICES_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-devices-overview.js")
 TECHNICAL_LOG_JS = PANEL_JS.with_name("hausman-hub-technical-log.js")
 FEEDBACK_JS = PANEL_JS.with_name("hausman-hub-feedback.js")
+COMMAND_FEEDBACK_JS = PANEL_JS.with_name("hausman-hub-command-feedback.js")
 ERROR_TAXONOMY_JS = PANEL_JS.with_name("hausman-hub-error-taxonomy.js")
 UI_STATE_JS = PANEL_JS.with_name("hausman-hub-ui-state.js")
 DEVICE_FEATURES_JS = PANEL_JS.with_name("hausman-hub-device-features.js")
@@ -691,6 +692,10 @@ def panel_script(
         {{ filename: {str(FEEDBACK_JS)!r} }}
       );
       vm.runInThisContext(
+        fs.readFileSync({str(COMMAND_FEEDBACK_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(COMMAND_FEEDBACK_JS)!r} }}
+      );
+      vm.runInThisContext(
         fs.readFileSync({str(ERROR_TAXONOMY_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(ERROR_TAXONOMY_JS)!r} }}
       );
@@ -828,6 +833,35 @@ def run_panel_script(script: str) -> subprocess.CompletedProcess[str]:
 
 class PanelSettingsSectionsTest(unittest.TestCase):
     """The settings sections render and post the strict admin contracts."""
+
+    def test_panel_exposes_tablet_style_command_progress(self) -> None:
+        script = panel_script(
+            dict(GET_PATHS),
+            {},
+            """
+        const control = panel._shell.tabs.overview;
+        captureCommandIntent(panel, { composedPath: () => [control, panel._shell.container] });
+        panel._busy = true;
+        panel._render();
+        await tick();
+        if (panel._shell.commandActivity.style.display !== ""
+          || panel._shell.commandActivityDetail.textContent !== "Главная"
+          || panel._shell.commandActivity.attributes["aria-busy"] !== "true") {
+          throw new Error("global command progress is not visible");
+        }
+        if (!control.classList.contains("is-command-pending") || control.attributes["aria-busy"] !== "true") {
+          throw new Error("initiating control has no local command progress");
+        }
+        panel._busy = false;
+        panel._render();
+        await tick();
+        if (panel._shell.commandActivity.style.display !== "none" || control.classList.contains("is-command-pending")) {
+          throw new Error("command progress stayed visible after completion");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
 
     def test_panel_stays_hidden_until_styles_load_and_logo_has_safe_size(self) -> None:
         script = panel_script(

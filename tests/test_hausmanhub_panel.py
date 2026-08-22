@@ -83,6 +83,7 @@ SETTINGS_CSS = PANEL_JS.with_name("hausman-hub-settings.css")
 SWITCH_CSS = PANEL_JS.with_name("hausman-hub-switch.css")
 NOTICE_CSS = PANEL_JS.with_name("hausman-hub-notice.css")
 FEEDBACK_JS = PANEL_JS.with_name("hausman-hub-feedback.js")
+COMMAND_FEEDBACK_JS = PANEL_JS.with_name("hausman-hub-command-feedback.js")
 ERROR_TAXONOMY_JS = PANEL_JS.with_name("hausman-hub-error-taxonomy.js")
 UI_STATE_JS = PANEL_JS.with_name("hausman-hub-ui-state.js")
 DEVICE_FEATURES_JS = PANEL_JS.with_name("hausman-hub-device-features.js")
@@ -187,6 +188,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         room_icons = ROOM_ICONS_JS.read_text(encoding="utf-8")
         device_maintenance_css = DEVICE_MAINTENANCE_CSS.read_text(encoding="utf-8")
         feedback = FEEDBACK_JS.read_text(encoding="utf-8")
+        command_feedback = COMMAND_FEEDBACK_JS.read_text(encoding="utf-8")
 
         self.assertLessEqual(len(content.encode("utf-8")), MAX_PANEL_JS_BYTES)
         self.assertLessEqual(len(rollout.encode("utf-8")), 8 * 1024)
@@ -246,8 +248,11 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertNotIn('placeholder: "включено / 23 / открыто"', scenarios)
         self.assertLessEqual(len(device_maintenance_css.encode("utf-8")), 8 * 1024)
         self.assertLessEqual(len(feedback.encode("utf-8")), 4 * 1024)
+        self.assertLessEqual(len(command_feedback.encode("utf-8")), 5 * 1024)
         self.assertIn("applyFeedback", feedback)
         self.assertIn("feedbackTone", feedback)
+        self.assertIn("captureCommandIntent", command_feedback)
+        self.assertIn("applyCommandActivity", command_feedback)
         self.assertIn("renderHomeSection", home_sections)
         self.assertIn("renderFirstRunRoom", room_setup)
         self.assertIn("renderFirstRunDeviceGroups", room_device_groups)
@@ -555,6 +560,68 @@ class PanelJavaScriptContractTest(unittest.TestCase):
           applyFeedback(element, message, setAttr);
           if (element.style.display === "none" || !scheduled) {{
             throw new Error("a later success message did not become visible");
+          }}
+        """
+        completed = subprocess.run(
+            ("node", "--input-type=commonjs", "--eval", script),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_command_feedback_names_and_marks_the_pending_control(self) -> None:
+        script = f"""
+          const vm = require("vm");
+          const fs = require("fs");
+          vm.runInThisContext(fs.readFileSync({str(COMMAND_FEEDBACK_JS)!r}, "utf8").replace(/export /g, ""));
+          const makeNode = (tag = "div", label = "") => {{
+            const node = {{
+              tagName: tag.toUpperCase(), children: [], className: "", style: {{}}, attributes: {{}}, parentElement: null,
+              getAttribute(name) {{ return this.attributes[name] || ""; }},
+              setAttribute(name, value) {{ this.attributes[name] = String(value); }},
+              removeAttribute(name) {{ delete this.attributes[name]; }},
+              appendChild(child) {{ child.parentElement = this; this.children.push(child); return child; }},
+              remove() {{
+                if (!this.parentElement) return;
+                this.parentElement.children = this.parentElement.children.filter((child) => child !== this);
+                this.parentElement = null;
+              }},
+            }};
+            node.classList = {{
+              add(name) {{ node.className = [...new Set([...node.className.split(" ").filter(Boolean), name])].join(" "); }},
+              remove(name) {{ node.className = node.className.split(" ").filter((item) => item && item !== name).join(" "); }},
+              contains(name) {{ return node.className.split(" ").includes(name); }},
+            }};
+            if (label) node.attributes["aria-label"] = label;
+            return node;
+          }};
+          global.document = {{ createElement: (tag) => makeNode(tag) }};
+          const setAttr = (node, name, value) => node.setAttribute(name, value);
+          const panel = {{ _commandPendingTarget: null, _commandPendingSpinner: null }};
+          const root = makeNode("main");
+          const button = makeNode("button", "Выключить свет в гостиной");
+          root.appendChild(button);
+          const intent = captureCommandIntent(panel, {{ composedPath: () => [button, root] }}, 1000);
+          if (!intent || intent.label !== "Выключить свет в гостиной") throw new Error("command label was not captured");
+          const activity = makeNode();
+          const detail = makeNode("span");
+          applyCommandActivity(activity, detail, true, intent, setAttr, 1100);
+          if (activity.style.display !== "" || detail.textContent !== intent.label || activity.attributes["aria-busy"] !== "true") {{
+            throw new Error("pending command activity is not explicit");
+          }}
+          if (applyCommandTarget(panel, root, true, intent, setAttr, 1100) !== button
+            || !button.classList.contains("is-command-pending")
+            || button.attributes["aria-busy"] !== "true"
+            || !button.children.some((child) => child.className === "command-target-spinner")) {{
+            throw new Error("pending command control is not marked");
+          }}
+          applyCommandActivity(activity, detail, false, intent, setAttr, 1200);
+          applyCommandTarget(panel, root, false, intent, setAttr, 1200);
+          if (activity.style.display !== "none" || button.classList.contains("is-command-pending")
+            || button.children.some((child) => child.className === "command-target-spinner")) {{
+            throw new Error("pending command feedback did not clear");
           }}
         """
         completed = subprocess.run(
@@ -1472,6 +1539,10 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             {{ filename: {str(FEEDBACK_JS)!r} }}
           );
           vm.runInThisContext(
+            fs.readFileSync({str(COMMAND_FEEDBACK_JS)!r}, "utf8").replace(/export /g, ""),
+            {{ filename: {str(COMMAND_FEEDBACK_JS)!r} }}
+          );
+          vm.runInThisContext(
             fs.readFileSync({str(ERROR_TAXONOMY_JS)!r}, "utf8").replace(/export /g, ""),
             {{ filename: {str(ERROR_TAXONOMY_JS)!r} }}
           );
@@ -1702,6 +1773,10 @@ THEME_TEST_HARNESS = """
     { filename: __FEEDBACK_JS__ }
   );
   vm.runInThisContext(
+    fs.readFileSync(__COMMAND_FEEDBACK_JS__, "utf8").replace(/export /g, ""),
+    { filename: __COMMAND_FEEDBACK_JS__ }
+  );
+  vm.runInThisContext(
     fs.readFileSync(__PANEL_JS__, "utf8").replace(/^import .*;\\s*/gm, ""),
     { filename: __PANEL_JS__ }
   );
@@ -1738,6 +1813,7 @@ class PanelThemeSwitcherTest(unittest.TestCase):
         script = script.replace("__SCENARIO_ICONS_JS__", repr(str(SCENARIO_ICONS_JS)))
         script = script.replace("__SCENARIOS_JS__", repr(str(SCENARIOS_JS)))
         script = script.replace("__FEEDBACK_JS__", repr(str(FEEDBACK_JS)))
+        script = script.replace("__COMMAND_FEEDBACK_JS__", repr(str(COMMAND_FEEDBACK_JS)))
         script = script.replace("__CORRELATION_JS__", repr(str(CORRELATION_JS)))
         script = script.replace("__PAGINATION_JS__", repr(str(PAGINATION_JS)))
         return subprocess.run(

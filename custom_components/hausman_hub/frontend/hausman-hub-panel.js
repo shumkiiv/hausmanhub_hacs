@@ -27,6 +27,7 @@ import { formatUpcomingCountdown, renderOverviewContent, renderOverviewHero } fr
 import { conciseDeviceActionLabel, renderPhysicalDeviceCard } from "./hausman-hub-device-card.js?v=1.52.148";
 import { recordTechnicalEvent as log, renderTechnicalLogCard } from "./hausman-hub-technical-log.js?v=1.52.148";
 import { applyFeedback } from "./hausman-hub-feedback.js?v=1.52.148";
+import { applyCommandActivity, applyCommandTarget, captureCommandIntent } from "./hausman-hub-command-feedback.js?v=1.52.148";
 import { apiErrorMessage, resolveApiError } from "./hausman-hub-error-taxonomy.js?v=1.52.148";
 import { canExecuteCommand, loadingUiState, offlineUiState, staleUiState } from "./hausman-hub-ui-state.js?v=1.52.148";
 import { filterCatalogActions, loadDeviceFeatureMatrix } from "./hausman-hub-device-features.js?v=1.52.148";
@@ -402,6 +403,9 @@ class HausmanHubPanel extends HTMLElement {
     this._error = false;
     this._busy = false;
     this._notice = "";
+    this._commandIntent = null;
+    this._commandPendingTarget = null;
+    this._commandPendingSpinner = null;
     this._loadedAt = 0;
     this._technicalLog = [];
     this._themeMode = "auto";
@@ -973,6 +977,7 @@ class HausmanHubPanel extends HTMLElement {
     shell.container.className = this._isFirstRunActive() || this._isFirstRunDeferred()
       ? "setup-shell" : "";
     applyFeedback(shell.notice, this._notice, setAttr);
+    this._syncCommandFeedback();
     if (this._error) {
       shell.banner.style.display = "";
       const uiState = this._screenUiState();
@@ -1053,6 +1058,14 @@ class HausmanHubPanel extends HTMLElement {
     const stylesheet = el("link");
     stylesheet.rel = "stylesheet";
     const container = el("main");
+    const captureIntent = (event) => {
+      if (!captureCommandIntent(this, event)) return;
+      const sync = () => this._syncCommandFeedback();
+      if (typeof queueMicrotask === "function") queueMicrotask(sync);
+      else Promise.resolve().then(sync);
+    };
+    container.addEventListener("click", captureIntent, true);
+    container.addEventListener("change", captureIntent, true);
     container.style.visibility = "hidden";
     const revealPanel = () => {
       container.style.visibility = "";
@@ -1122,6 +1135,20 @@ class HausmanHubPanel extends HTMLElement {
     setAttr(notice, "aria-live", "polite");
     notice.style.display = "none";
     container.appendChild(notice);
+    const commandActivity = el("div", "command-activity");
+    setAttr(commandActivity, "role", "status");
+    setAttr(commandActivity, "aria-live", "polite");
+    setAttr(commandActivity, "aria-atomic", "true");
+    commandActivity.style.display = "none";
+    const commandActivitySpinner = el("span", "command-activity-spinner");
+    setAttr(commandActivitySpinner, "aria-hidden", "true");
+    const commandActivityCopy = el("span", "command-activity-copy");
+    commandActivityCopy.appendChild(el("strong", null, "Команда отправляется"));
+    const commandActivityDetail = el("span", "command-activity-detail");
+    commandActivityCopy.appendChild(commandActivityDetail);
+    commandActivity.appendChild(commandActivitySpinner);
+    commandActivity.appendChild(commandActivityCopy);
+    container.appendChild(commandActivity);
     const loading = el("div", "loading muted", "Загрузка данных Hausman Hub…");
     loading.style.display = "none";
     container.appendChild(loading);
@@ -1234,7 +1261,7 @@ class HausmanHubPanel extends HTMLElement {
     });
     this._shell = {
       container,
-      banner, notice, loading, brandSubtitle, statusPill, versionBadge, themeButton, tabs, nav, sidebar, sidebarVersion, sidebarToggle, sectionNodes, wizard,
+      banner, notice, commandActivity, commandActivityDetail, loading, brandSubtitle, statusPill, versionBadge, themeButton, tabs, nav, sidebar, sidebarVersion, sidebarToggle, sectionNodes, wizard,
       headerClockDate, headerClockTime,
       readiness, summary, rooms,
       climateNav, climateTabs, climateViews, climateOverview, contour, profiles, schedule, home, windows, assistant,
@@ -1245,6 +1272,17 @@ class HausmanHubPanel extends HTMLElement {
     };
     this._updateThemeSwitcher();
     this._updateHeaderClock();
+  }
+
+  _syncCommandFeedback() {
+    const shell = this._shell;
+    if (!shell?.commandActivity) return;
+    const intent = this._commandIntent;
+    applyCommandActivity(shell.commandActivity, shell.commandActivityDetail, this._busy, intent, setAttr);
+    const syncTarget = () => applyCommandTarget(this, shell.container, this._busy, intent, setAttr);
+    if (typeof queueMicrotask === "function") queueMicrotask(syncTarget);
+    else Promise.resolve().then(syncTarget);
+    if (!this._busy) this._commandIntent = null;
   }
 
   _updateHeaderClock() {
