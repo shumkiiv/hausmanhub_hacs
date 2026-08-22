@@ -1,8 +1,23 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-22 (HACS 1.52.147, плотность интерфейса развёрнута).
+Last updated: 2026-08-22 (HACS 1.52.148, зрелое управление освещением).
 
 ## Current work
+
+- 2026-08-22 (Codex): HACS `1.52.148` завершил backend направления 15.
+  Capability-aware каталог различает relay, dimmer, CCT и RGB, добавляет
+  adaptive/night policies и закрывается fail-closed при неполном runtime.
+  Ordered batch до 64 действий возвращает receipt по каждому устройству;
+  journal сохраняет source, trigger target, recovery marker и target ID.
+  UI-компоновка 1.52.147 сохранена. Pin: contracts `0.53.0`; feature commit
+  `e80b5f8`, release/tag `e9ec853`, `v1.52.148`. Full gate: 1618 passed,
+  4 skipped, 995 subtests; Actions `32578493597` success. Backup `3a6e9bfd`
+  защищён в local и KeeneticSSD, по 922449920 байт. Три config check, install
+  и один restart успешны; config entry loaded, 88 frontend assets совпадают,
+  ошибок Hausman нет. Live matrix закрыла relay, dimmer+CCT, offline RGB и
+  shadow 24 действий без физического executor. Принудительный recovery outage
+  не создавался, marker покрыт integration-тестом. Совместимый Android:
+  `1.0.246` build `250`. Аудит: `docs/RELEASE_AUDIT_1.52.148.md`.
 
 - 2026-08-22 (Codex): HACS `1.52.147` с финальной плотностью главной и
   карточек устройств опубликован и развёрнут. Главная синхронизирует высоту
