@@ -1,10 +1,10 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-22 (HACS 1.52.143, fail-safe защита от протечек готова к релизу).
+Last updated: 2026-08-22 (HACS 1.52.143, fail-safe monitoring протечек развёрнут в production).
 
 ## Current work
 
-- 2026-08-22 (Codex): подготовлен HACS `1.52.143` для
+- 2026-08-22 (Codex): HACS `1.52.143` опубликован и развёрнут для
   направления 18. Water safety v1 хранит policy и latch, использует
   quorum/debounce, требует verified direction и notify recipient до
   автозакрытия, подтверждает physical read-back и повторяет
@@ -12,7 +12,15 @@ Last updated: 2026-08-22 (HACS 1.52.143, fail-safe защита от проте�
   Автооткрытие всегда запрещено; ручное открытие и latch clear
   блокируются при stale/unknown safety state. Критические операции
   пишутся в durable journal. Pin: contracts `0.50.0` (`92b050a`).
-  Frontend layout не менялся.
+  Frontend layout не менялся. Release commit/tag `775ec8a`, Actions
+  `32565864180` успешен. Backup `c79a46e3`: по 922449920 байт в
+  local и KeeneticSSD. Production monitoring включает 4 сухих
+  датчика, 2 открытых редуктора и notify recipient. Оба
+  direction-test: `commandSent=false`, `readBack=open`; journal sequence 827
+  не изменилась. `directionVerified=false`, `autoCloseEnabled=false`,
+  поэтому физических команд не было. Все 88 frontend assets совпали
+  с release; schemas зелёные, 9 shadow сохранены, ошибок Hausman
+  в system log нет. Аудит: `docs/RELEASE_AUDIT_1.52.143.md`.
 
 - 2026-08-22 (Codex): HACS `v1.52.142` опубликован и развёрнут в production.
   Scenario list соответствует новому contracts `0.49.0` (`5478341`) и
