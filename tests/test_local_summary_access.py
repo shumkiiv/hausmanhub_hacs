@@ -2827,7 +2827,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.144", panel.payload["integration_version"])
+        self.assertEqual("1.52.145", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
@@ -3730,7 +3730,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertFalse(hasattr(self.view, method))
 
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
-        self.assertEqual(78, len(self.hass.http.views))
+        self.assertEqual(79, len(self.hass.http.views))
         self.assertEqual(
             1,
             sum(
@@ -3738,6 +3738,33 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 for view in self.hass.http.views
             ),
         )
+
+    def test_local_admin_reads_and_updates_command_free_deviation_guard(self) -> None:
+        self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
+        path = "/api/hausman_hub/v1/admin/climate-deviation-guard"
+        view = {item.url: item for item in self.hass.http.views}[path]
+        owner = reader_user("system-admin", admin=True)
+
+        initial = asyncio.run(view.get(FakeRequest("192.168.1.20", owner, path=path)))
+        self.assertEqual(200, initial.status)
+        self.assertEqual(
+            {"name": "hausman-hub-climate-deviation-guard", "version": 1},
+            initial.payload["contract"],
+        )
+        self.assertEqual({"devices": []}, initial.payload["settings"])
+
+        updated = asyncio.run(
+            view.put(
+                FakeJsonRequest(
+                    "192.168.1.20",
+                    owner,
+                    path,
+                    {"expectedRevision": 0, "settings": {"devices": []}},
+                )
+            )
+        )
+        self.assertEqual(200, updated.status)
+        self.assertEqual(1, updated.payload["revision"])
         self.assertEqual(
             [
                 (self.entry, ("sensor", "switch")),
@@ -4204,7 +4231,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             [(closed_entry, ("sensor", "switch"))],
             closed_hass.config_entries.forwarded,
         )
-        self.assertEqual(77, len(closed_hass.http.views))
+        self.assertEqual(78, len(closed_hass.http.views))
         self.assertEqual(
             {
                 "/api/hausman_hub/v1/capabilities",
@@ -4253,6 +4280,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 "/api/hausman_hub/v1/admin/panel/apply",
                 "/api/hausman_hub/v1/admin/panel/temporary-temperature",
                 "/api/hausman_hub/v1/admin/climate-mode",
+                "/api/hausman_hub/v1/admin/climate-deviation-guard",
                 "/api/hausman_hub/v1/admin/home-environment",
                 "/api/hausman_hub/v1/admin/climate-room-signals",
                 "/api/hausman_hub/v1/admin/ai-assistant",

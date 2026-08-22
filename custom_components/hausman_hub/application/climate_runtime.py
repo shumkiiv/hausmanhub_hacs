@@ -49,6 +49,7 @@ from ..domain.native_climate import NativeClimatePolicy, preview_native_climate
 from ..domain.climate_targets import ClimateTargetSnapshot
 from .climate_application import ClimateDesiredStateChanges
 from .climate_command_guard import (
+    GuardedClimatePlan,
     GuardedDeviceCalls,
     climate_call_is_satisfied,
     clear_aligned_climate_commands,
@@ -59,6 +60,7 @@ from .climate_command_guard import (
     reserve_guarded_commands,
     reserve_scheduled_synchronization,
 )
+from .climate_deviation_guard import ClimateDeviationGuardService
 from .climate_area_assignment import (
     ClimateAreaAssignmentPort,
     climate_area_assignment_targets,
@@ -184,6 +186,7 @@ from .contour_apply import (
 
 _CLIMATE_READBACK_ATTEMPTS = 33
 _CLIMATE_READBACK_INTERVAL_SECONDS = 0.25
+_CLIMATE_DEVIATION_OFF_READBACK_ATTEMPTS = 20
 
 _LOGGER = logging.getLogger(__name__)
 from .contour_override import (
@@ -301,6 +304,7 @@ class ClimateRuntime:
         protection_store: ClimateProtectionStorage | None = None,
         manual_store: ClimateManualStorage | None = None,
         command_guard_store: ClimateCommandGuardStorage | None = None,
+        deviation_guard: ClimateDeviationGuardService | None = None,
         strict_ha_call_executor: ClimateStrictHaCallExecutor | None = None,
         ha_state_view: ClimateHaStateView | None = None,
         ha_area_assignment: ClimateAreaAssignmentPort | None = None,
@@ -316,6 +320,7 @@ class ClimateRuntime:
         self._protection_store = protection_store
         self._manual_store = manual_store
         self._command_guard_store = command_guard_store
+        self._deviation_guard = deviation_guard
         self._strict_ha_call_executor = strict_ha_call_executor
         self._ha_state_view = ha_state_view
         self._ha_area_assignment = ha_area_assignment
@@ -501,6 +506,14 @@ class ClimateRuntime:
                 self._command_guard_memory = command_guard
                 if loaded_command_guard is None or command_guard_changed:
                     await self._async_save_command_guard(command_guard)
+                if self._deviation_guard is not None:
+                    await self._deviation_guard.async_load(
+                        tuple(
+                            device.device_id
+                            for device in self._registry.devices
+                            if device.kind is ClimateDeviceKind.AIR_CONDITIONER
+                        )
+                    )
                 self.last_error = None
             except Exception as error:
                 # Base HausmanHub remains available; climate endpoints fail closed and
@@ -586,7 +599,7 @@ class ClimateRuntime:
                 )
                 if observation.data_status is ClimateDataStatus.UNAVAILABLE:
                     raise ClimateSnapshotUnavailable("climate state is unavailable")
-                return native_android_climate_snapshot(
+                snapshot = native_android_climate_snapshot(
                     self._registry,
                     observation,
                     contours=self._contours,
@@ -595,6 +608,7 @@ class ClimateRuntime:
                     manual_device_ids=self._manual_memory.manual_device_ids,
                     local_now=self._local_now(),
                 )
+                return self._with_deviation_guard_status(snapshot)
             raise ClimateSnapshotUnavailable("climate bridge is disabled")
 
     async def async_admin_import_snapshot(self) -> dict[str, object]:
@@ -1441,6 +1455,10 @@ class ClimateRuntime:
                 plan.strict_calls,
                 executed_count=completed,
             )
+            await self._async_record_deviation_off_commands(
+                plan.strict_calls,
+                executed_count=completed,
+            )
             return self._contour_applications.update(
                 request_id,
                 status=(
@@ -1458,6 +1476,10 @@ class ClimateRuntime:
             len(plan.strict_calls),
         )
         await self._async_record_direct_wifi_commands(
+            plan.strict_calls,
+            executed_count=accepted_count,
+        )
+        await self._async_record_deviation_off_commands(
             plan.strict_calls,
             executed_count=accepted_count,
         )
@@ -1820,7 +1842,12 @@ class ClimateRuntime:
                 ir_code_service=self._ir_code_service,
             )
             await self._async_rearm_command_guard(comparison)
+            deviation_device_ids = await self._async_run_deviation_guard(
+                call_plan,
+                managed_room_ids=managed_room_ids,
+            )
             guarded = self._guard_diverged_calls(call_plan, comparison)
+            guarded = _without_guarded_devices(guarded, deviation_device_ids)
             receipts: list[ClimateTrialReceipt] = []
             for room_id in managed_room_ids:
                 decision = plan_climate_trial(
@@ -1936,6 +1963,10 @@ class ClimateRuntime:
                 calls,
                 executed_count=executed,
             )
+            await self._async_record_deviation_off_commands(
+                calls,
+                executed_count=executed,
+            )
             return _ClimateSynchronizationResult(
                 status=(
                     ContourApplyStatus.PARTIAL
@@ -1947,6 +1978,10 @@ class ClimateRuntime:
             )
         executed = _bounded_completed_count(executed, len(calls))
         await self._async_record_direct_wifi_commands(
+            calls,
+            executed_count=executed,
+        )
+        await self._async_record_deviation_off_commands(
             calls,
             executed_count=executed,
         )
@@ -2103,12 +2138,20 @@ class ClimateRuntime:
                 decision.calls,
                 executed_count=executed,
             )
+            await self._async_record_deviation_off_commands(
+                decision.calls,
+                executed_count=executed,
+            )
             return climate_trial_failure_receipt(
                 decision,
                 reason=ClimateTrialReason.SERVICE_ERROR,
                 executed_count=executed,
             )
         await self._async_record_direct_wifi_commands(
+            decision.calls,
+            executed_count=executed,
+        )
+        await self._async_record_deviation_off_commands(
             decision.calls,
             executed_count=executed,
         )
@@ -2855,6 +2898,155 @@ class ClimateRuntime:
             await self._async_save_manual(updated)
             self._manual_memory = updated
 
+    async def _async_record_deviation_off_commands(
+        self,
+        calls: tuple[ClimateHaServiceCall, ...],
+        *,
+        executed_count: int,
+    ) -> None:
+        service = self._deviation_guard
+        if service is None or executed_count <= 0:
+            return
+        successful_entities = {
+            call.entity_id
+            for call in calls[:executed_count]
+            if call.service.value == "climate.set_hvac_mode"
+            and getattr(call.hvac_mode, "value", None) == "off"
+        }
+        if not successful_entities:
+            return
+        device_ids = tuple(
+            device.device_id
+            for device in self._registry.devices
+            if device.kind is ClimateDeviceKind.AIR_CONDITIONER
+            if (
+                (endpoint := device.endpoint(ClimateEndpointRole.CONTROL)) is not None
+                and endpoint.entity_id in successful_entities
+            )
+        )
+        if device_ids:
+            await service.async_note_off_commands(
+                device_ids,
+                commanded_at=self._safe_now(),
+            )
+            await self._async_confirm_deviation_off_commands(
+                successful_entities,
+            )
+
+    async def _async_confirm_deviation_off_commands(
+        self,
+        successful_entities: set[str],
+    ) -> None:
+        service = self._deviation_guard
+        view = self._ha_state_view
+        if service is None or view is None:
+            return
+        confirmed_entities: set[str] = set()
+        for attempt in range(_CLIMATE_DEVIATION_OFF_READBACK_ATTEMPTS):
+            confirmed_entities.update(
+                entity_id
+                for entity_id in successful_entities - confirmed_entities
+                if getattr(view.entity_state(entity_id), "state", None) == "off"
+            )
+            if confirmed_entities == successful_entities:
+                break
+            if attempt + 1 < _CLIMATE_DEVIATION_OFF_READBACK_ATTEMPTS:
+                await asyncio.sleep(_CLIMATE_READBACK_INTERVAL_SECONDS)
+        if not confirmed_entities:
+            return
+        confirmed_device_ids = tuple(
+            device.device_id
+            for device in self._registry.devices
+            if (
+                (endpoint := device.endpoint(ClimateEndpointRole.CONTROL)) is not None
+                and endpoint.entity_id in confirmed_entities
+            )
+        )
+        await service.async_confirm_off_commands(
+            confirmed_device_ids,
+            confirmed_at=self._safe_now(),
+        )
+
+    async def _async_run_deviation_guard(
+        self,
+        call_plan: ClimateHaCallPlanSnapshot,
+        *,
+        managed_room_ids: tuple[str, ...],
+    ) -> frozenset[str]:
+        service = self._deviation_guard
+        view = self._ha_state_view
+        if service is None or view is None:
+            return frozenset()
+        now = self._safe_now()
+        retries = await service.async_evaluate(
+            call_plan,
+            managed_room_ids=managed_room_ids,
+            state_lookup=view.entity_state,
+            now_ms=now,
+        )
+        for retry in retries:
+            accepted = False
+            if self._strict_ha_call_executor is not None:
+                try:
+                    accepted = (
+                        await self._strict_ha_call_executor.async_execute((retry.call,))
+                    ) == 1
+                except Exception as error:
+                    self.last_error = type(error).__name__
+            await service.async_record_retry(
+                retry.device_id,
+                attempted_at=now,
+                accepted=accepted,
+            )
+        return service.active_device_ids
+
+    def _with_deviation_guard_status(
+        self,
+        snapshot: dict[str, object],
+    ) -> dict[str, object]:
+        service = self._deviation_guard
+        rooms = snapshot.get("rooms")
+        if service is None or not isinstance(rooms, list):
+            return snapshot
+        for room in rooms:
+            if not isinstance(room, dict) or not isinstance(room.get("devices"), list):
+                continue
+            for device in room["devices"]:
+                if not isinstance(device, dict) or not isinstance(device.get("id"), str):
+                    continue
+                status = service.device_status(device["id"], device.get("state"))
+                if status is not None:
+                    device["deviation_guard"] = status
+                    next_retry_at = status.get("next_retry_at")
+                    generated_at = snapshot.get("observed_at")
+                    if type(generated_at) is not int:
+                        generated_at = snapshot.get("generated_at")
+                    if (
+                        type(next_retry_at) is int
+                        and type(generated_at) is int
+                        and next_retry_at > generated_at
+                    ):
+                        device["cooldown"] = {
+                            "active": True,
+                            "remaining_seconds": min(
+                                86400,
+                                max(1, (next_retry_at - generated_at + 999) // 1000),
+                            ),
+                            "reason": "rate_limit",
+                        }
+        return snapshot
+
+    async def async_deviation_guard_device_ids(self) -> tuple[str, ...]:
+        """Return stable managed AC IDs accepted by the admin settings API."""
+
+        async with self._lock:
+            return tuple(
+                device.device_id
+                for device in self._registry.devices
+                if device.kind is ClimateDeviceKind.AIR_CONDITIONER
+                and device.control_scope is ClimateControlScope.MANAGED
+            )
+
     def _native_observation_for_registry(
         self,
         registry: ClimateRegistry,
@@ -2963,6 +3155,31 @@ class ClimateRuntime:
         if contour is None:
             raise ContourApplyViolation("climate contour is not configured")
         return contour
+
+def _without_guarded_devices(
+    guarded: GuardedClimatePlan,
+    device_ids: frozenset[str],
+) -> GuardedClimatePlan:
+    """Let the deviation guard exclusively own its armed device retries."""
+
+    if not device_ids:
+        return guarded
+    rooms = tuple(
+        replace(
+            room,
+            devices=tuple(
+                device for device in room.devices if device.device_id not in device_ids
+            ),
+        )
+        for room in guarded.call_plan.rooms
+    )
+    return GuardedClimatePlan(
+        call_plan=replace(guarded.call_plan, rooms=rooms),
+        devices=tuple(
+            device for device in guarded.devices if device.device_id not in device_ids
+        ),
+    )
+
 
 def _bounded_completed_count(value: object, maximum: int) -> int:
     if type(value) is int and 0 <= value <= maximum:

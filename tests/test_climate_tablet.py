@@ -207,6 +207,33 @@ class ClimateTabletProjectionTest(unittest.TestCase):
         self.assertFalse(room["temporary_override"]["active"])
         contract_validator("climate-runtime.schema.json").validate(payload)
 
+    def test_deviation_guard_reuses_existing_cooldown_surface(self) -> None:
+        home = managed_home()
+        device = home["rooms"][0]["devices"][0]
+        device["cooldown"] = {
+            "active": True,
+            "remaining_seconds": 120,
+            "reason": "rate_limit",
+        }
+        device["deviation_guard"] = {
+            "mode": "enforce",
+            "status": "cooldown",
+            "expected_state": "off",
+            "observed_state": "working",
+            "retry_count": 1,
+            "max_retries": 3,
+            "last_deviation_at": 1_800_000_000_000,
+            "next_retry_at": 1_800_000_120_000,
+            "escalated_at": None,
+        }
+
+        payload = climate_tablet_snapshot(home, climate_mode="managed")
+        projected = payload["rooms"][0]["devices"][0]
+
+        self.assertEqual(device["cooldown"], projected["cooldown"])
+        self.assertEqual(device["deviation_guard"], projected["deviation_guard"])
+        contract_validator("climate-runtime.schema.json").validate(payload)
+
     def test_sync_stays_available_when_home_target_editing_is_blocked(self) -> None:
         home = managed_home()
         home["contours"][0]["execution"]["settings_apply"]["available"] = False

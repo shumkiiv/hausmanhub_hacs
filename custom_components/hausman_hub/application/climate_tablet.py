@@ -978,7 +978,7 @@ def _project_device(
         "manual": "Ручной режим",
         "unknown": "Режим неизвестен",
     }[mode]
-    return {
+    projected = {
         "id": device.get("id"),
         "name": device.get("name"),
         "kind": device.get("kind"),
@@ -992,7 +992,7 @@ def _project_device(
         "mode": mode,
         "mode_name": mode_name,
         "control": _project_device_control(device.get("control")),
-        "cooldown": None,
+        "cooldown": _project_cooldown(device.get("cooldown")),
         "last_confirmed_operation": (
             {
                 "operation_id": last_confirmed["operation_id"],
@@ -1003,6 +1003,10 @@ def _project_device(
             else None
         ),
     }
+    deviation_guard = device.get("deviation_guard")
+    if isinstance(deviation_guard, Mapping):
+        projected["deviation_guard"] = dict(deviation_guard)
+    return projected
 
 
 def _project_device_control(value: object) -> dict[str, object]:
@@ -1025,6 +1029,24 @@ def _project_device_control(value: object) -> dict[str, object]:
         "enabled": enabled,
         "allowed_actions": actions if enabled else [],
         "blocked_reasons": [] if enabled else (blocked or ["action_unsupported"]),
+    }
+
+
+def _project_cooldown(value: object) -> dict[str, object] | None:
+    if not isinstance(value, Mapping) or value.get("active") is not True:
+        return None
+    remaining = value.get("remaining_seconds")
+    reason = value.get("reason")
+    if (
+        type(remaining) is not int
+        or not 1 <= remaining <= 86400
+        or reason not in {"minimum_runtime", "minimum_idle", "rate_limit"}
+    ):
+        return None
+    return {
+        "active": True,
+        "remaining_seconds": remaining,
+        "reason": reason,
     }
 
 

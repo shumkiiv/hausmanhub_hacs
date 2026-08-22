@@ -50,6 +50,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .climate_protection_storage import HomeAssistantClimateProtectionStore
     from .climate_manual_storage import HomeAssistantClimateManualStore
     from .climate_command_guard_storage import HomeAssistantClimateCommandGuardStore
+    from .application.climate_deviation_guard import ClimateDeviationGuardService
+    from .climate_deviation_guard_storage import (
+        HomeAssistantClimateDeviationGuardStore,
+    )
     from .climate_storage import HomeAssistantClimateRegistryStore
     from .contour_storage import HomeAssistantContourStore
     from .application.ir_code_service import IRCodeService
@@ -124,6 +128,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     await operation_journal.async_load()
     domain_data[DATA_OPERATION_JOURNAL] = operation_journal
+    climate_deviation_guard = ClimateDeviationGuardService(
+        HomeAssistantClimateDeviationGuardStore(hass, entry.entry_id),
+        operation_journal=operation_journal,
+    )
+    domain_data["climate_deviation_guard"] = climate_deviation_guard
     if configuration.local_summary_enabled:
         register_local_summary_access(hass, entry)
     from .application.water_safety import WaterSafetyService
@@ -151,6 +160,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         command_guard_store=HomeAssistantClimateCommandGuardStore(
             hass, entry.entry_id
         ),
+        deviation_guard=climate_deviation_guard,
         strict_ha_call_executor=HomeAssistantClimateCallExecutor(hass),
         ha_state_view=HomeAssistantClimateStateView(hass),
         ha_area_assignment=HomeAssistantAreaAssignmentService(hass),

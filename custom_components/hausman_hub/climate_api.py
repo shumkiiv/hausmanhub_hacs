@@ -46,6 +46,10 @@ from .application.api_capabilities import (
 from .application.climate_area_assignment import ClimateAreaAssignmentViolation
 from .application.climate_comparison import climate_comparison_to_payload
 from .application.climate_device_bindings import ClimateDeviceBindingViolation
+from .application.climate_deviation_guard import (
+    ClimateDeviationGuardService,
+    ClimateDeviationGuardViolation,
+)
 from .application.climate_registry import ClimateRegistryViolation
 from .application.climate_runtime import (
     ClimateRuntime,
@@ -183,6 +187,9 @@ ADMIN_PANEL_PATH = "/api/hausman_hub/v1/admin/panel"
 ADMIN_PANEL_APPLY_PATH = "/api/hausman_hub/v1/admin/panel/apply"
 ADMIN_PANEL_TEMPORARY_PATH = "/api/hausman_hub/v1/admin/panel/temporary-temperature"
 ADMIN_CLIMATE_MODE_PATH = "/api/hausman_hub/v1/admin/climate-mode"
+ADMIN_CLIMATE_DEVIATION_GUARD_PATH = (
+    "/api/hausman_hub/v1/admin/climate-deviation-guard"
+)
 ADMIN_HOME_ENVIRONMENT_PATH = "/api/hausman_hub/v1/admin/home-environment"
 SEASON_SETTINGS_PATH = "/api/hausman_hub/v1/climate-season-settings"
 
@@ -289,6 +296,7 @@ def register_climate_api(
             ClimateAdminPanelApplyView(hass),
             ClimateAdminPanelTemporaryView(hass),
             ClimateAdminClimateModeView(hass),
+            ClimateAdminDeviationGuardView(hass),
             ClimateAdminHomeEnvironmentView(hass),
             ClimateAdminRoomSignalsView(hass),
             ClimateAdminAiAssistantView(hass),
@@ -334,6 +342,7 @@ def clear_climate_api(hass: HomeAssistant, entry_id: str) -> None:
         data.pop("device_discovery_service", None)
         data.pop(DATA_CLIMATE_SHADOW, None)
         data.pop(DATA_CLIMATE_TABLET, None)
+        data.pop("climate_deviation_guard", None)
 
 
 class _ClimateView(HomeAssistantView):
@@ -387,6 +396,18 @@ class _ClimateView(HomeAssistantView):
             return None
         candidate = self._hass.data.get(DOMAIN, {}).get(DATA_CLIMATE_TABLET)
         return candidate if isinstance(candidate, ClimateTabletService) else None
+
+    def _climate_deviation_guard(self) -> ClimateDeviationGuardService | None:
+        if self._runtime() is None:
+            return None
+        candidate = self._hass.data.get(DOMAIN, {}).get(
+            "climate_deviation_guard"
+        )
+        return (
+            candidate
+            if isinstance(candidate, ClimateDeviationGuardService)
+            else None
+        )
 
 
 class ClimateCapabilitiesView(_ClimateView):
@@ -2418,6 +2439,68 @@ class ClimateAdminPanelTemporaryView(_ClimateView):
         except ClimateRuntimeUnavailable:
             return self._unavailable()
         return self.json(receipt.as_payload(), headers=NO_STORE_HEADERS)
+
+
+class ClimateAdminDeviationGuardView(_ClimateView):
+    """Read or replace command-free climate deviation guard settings."""
+
+    url = ADMIN_CLIMATE_DEVIATION_GUARD_PATH
+    name = "api:hausman_hub:climate_deviation_guard"
+
+    async def get(self, request: Any) -> Any:
+        if not _is_exact_request(request, ADMIN_CLIMATE_DEVIATION_GUARD_PATH):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        service = self._climate_deviation_guard()
+        if service is None:
+            return self._unavailable()
+        return self.json(service.document, headers=NO_STORE_HEADERS)
+
+    async def put(self, request: Any) -> Any:
+        if not _is_exact_request(request, ADMIN_CLIMATE_DEVIATION_GUARD_PATH):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        runtime = self._runtime()
+        service = self._climate_deviation_guard()
+        if runtime is None or service is None:
+            return self._unavailable()
+        try:
+            payload = await _request_json(
+                request,
+                maximum_bytes=MAX_ACTION_BODY_BYTES,
+            )
+            if not isinstance(payload, Mapping) or set(payload) != {
+                "expectedRevision",
+                "settings",
+            }:
+                raise ClimateDeviationGuardViolation("guard body is invalid")
+            allowed_device_ids = await runtime.async_deviation_guard_device_ids()
+            result = await service.async_replace(
+                payload["expectedRevision"],
+                payload["settings"],
+                allowed_device_ids=allowed_device_ids,
+            )
+        except ClimateDeviationGuardViolation as error:
+            return self.json_message(
+                (
+                    "Настройки уже изменились на другом клиенте. Обновите данные."
+                    if error.stale
+                    else "Настройки защиты климата заполнены неверно."
+                ),
+                HTTPStatus.CONFLICT if error.stale else HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        except ValueError:
+            return self.json_message(
+                "Настройки защиты климата заполнены неверно.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        except Exception:
+            return self._unavailable()
+        return self.json(result, headers=NO_STORE_HEADERS)
 
 
 class ClimateAdminClimateModeView(_ClimateView):

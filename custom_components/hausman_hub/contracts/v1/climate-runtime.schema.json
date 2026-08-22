@@ -272,7 +272,34 @@
             },
             {"type": "null"}
           ]
-        }
+        },
+        "deviation_guard": {"$ref": "#/$defs/deviation_guard"}
+      }
+    },
+    "deviation_guard": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "status",
+        "expected_state",
+        "observed_state",
+        "retry_count",
+        "max_retries",
+        "last_deviation_at",
+        "next_retry_at",
+        "escalated_at"
+      ],
+      "properties": {
+        "mode": {"enum": ["monitor", "enforce"]},
+        "status": {"enum": ["armed", "grace", "observed", "cooldown", "retrying", "escalated"]},
+        "expected_state": {"const": "off"},
+        "observed_state": {"enum": ["off", "working", "idle", "unavailable", "unknown"]},
+        "retry_count": {"type": "integer", "minimum": 0, "maximum": 5},
+        "max_retries": {"type": "integer", "minimum": 1, "maximum": 5},
+        "last_deviation_at": {"type": ["integer", "null"], "minimum": 0},
+        "next_retry_at": {"type": ["integer", "null"], "minimum": 0},
+        "escalated_at": {"type": ["integer", "null"], "minimum": 0}
       }
     },
     "room": {

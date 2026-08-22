@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/climate-deviation-guard-settings.schema.json",
+  "title": "HausmanHub climate deviation guard settings v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["devices"],
+  "properties": {
+    "devices": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {"$ref": "#/$defs/devicePolicy"}
+    }
+  },
+  "$defs": {
+    "stableId": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+    "devicePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "deviceId",
+        "mode",
+        "graceSeconds",
+        "retryCooldownSeconds",
+        "maxRetries"
+      ],
+      "properties": {
+        "deviceId": {"$ref": "#/$defs/stableId"},
+        "mode": {"enum": ["monitor", "enforce"]},
+        "graceSeconds": {"type": "integer", "minimum": 20, "maximum": 600},
+        "retryCooldownSeconds": {"type": "integer", "minimum": 30, "maximum": 3600},
+        "maxRetries": {"type": "integer", "minimum": 1, "maximum": 5}
+      }
+    }
+  }
+}
