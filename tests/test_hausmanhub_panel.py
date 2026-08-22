@@ -698,6 +698,8 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn("overflow-x:hidden; overflow-y:auto; overscroll-behavior:contain", overview_css)
         self.assertIn(".overview-tablet-home-compact", overview_css)
         self.assertIn(".overview-tablet-activity-detailed", overview_css)
+        self.assertIn(".overview-tablet-side-card.is-interactive:hover", overview_css)
+        self.assertIn(".overview-tablet-side-card.is-interactive:focus-visible", overview_css)
         self.assertIn(".overview-canon-climate-controls", overview_css)
         self.assertIn(".overview-tablet-hero-facts", overview_css)
         self.assertIn("grid-template-columns:repeat(4,minmax(0,1fr))", overview_css)

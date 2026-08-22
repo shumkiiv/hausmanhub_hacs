@@ -1822,7 +1822,17 @@ class PanelSettingsSectionsTest(unittest.TestCase):
                 ],
             },
             "events": [
-                {"id": f"event-{index}", "title": f"Событие {index}", "message": "Изменение дома", "ts": 1787360000000 - index * 60000}
+                {
+                    "id": f"event-{index}",
+                    "title": "scenario_run" if index == 0 else f"Событие {index}",
+                    "message": (
+                        "scenario_failed" if index == 0
+                        else "restarted_by_new_trigger" if index == 1
+                        else "future_internal_reason" if index == 2
+                        else "Изменение дома"
+                    ),
+                    "ts": 1787360000000 - index * 60000,
+                }
                 for index in range(14)
             ],
             "alarms": [],
@@ -1894,6 +1904,31 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         }
         if (byClass("overview-tablet-activity-row").length !== 24) {
           throw new Error("activity rail must render twelve compact and twelve detailed entries");
+        }
+        const homeNow = byClass("is-home-now")[0];
+        const activity = byClass("is-activity")[0];
+        const activityText = textOf(activity);
+        if (!activityText.includes("Сценарий завершился с ошибкой")
+          || !activityText.includes("Перезапущен новым событием")
+          || !activityText.includes("Статус события обновлён")
+          || activityText.includes("scenario_failed")
+          || activityText.includes("restarted_by_new_trigger")
+          || activityText.includes("future_internal_reason")
+          || activityText.includes("scenario_run")) {
+          throw new Error("activity rail exposed an untranslated system phrase: " + activityText);
+        }
+        if (homeNow.role !== "button" || homeNow.tabindex !== "0"
+          || activity.role !== "button" || activity.tabindex !== "0") {
+          throw new Error("overview side cards are not keyboard accessible");
+        }
+        const navigation = [];
+        panel._activateSection = (section) => navigation.push(section);
+        homeNow.fire("click");
+        homeNow.fire("keydown", { key: "Enter", preventDefault() {} });
+        activity.fire("click");
+        activity.fire("keydown", { key: " ", preventDefault() {} });
+        if (JSON.stringify(navigation) !== '["rooms","rooms","scenarios","scenarios"]') {
+          throw new Error("overview side card navigation is incomplete: " + JSON.stringify(navigation));
         }
         if (byClass("overview-canon-upcoming").length !== 1) {
           throw new Error("upcoming events panel is not on the main dashboard");

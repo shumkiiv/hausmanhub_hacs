@@ -1,5 +1,84 @@
 import { activityTimeLabel } from "./hausman-hub-pagination.js?v=1.52.148";
 
+const ACTIVITY_SYSTEM_LABELS = {
+  accepted: "Принято к выполнению",
+  action_failed: "Действие завершилось с ошибкой",
+  already_effectively_off: "Устройство уже выключено",
+  already_in_target_state: "Нужное состояние уже установлено",
+  cancelled: "Отменено",
+  command_failed: "Команда завершилась с ошибкой",
+  completed: "Выполнено",
+  confirmation_timeout: "Не удалось дождаться подтверждения",
+  confirmed: "Выполнено и подтверждено",
+  device_unavailable: "Устройство недоступно",
+  failed: "Завершилось с ошибкой",
+  queued: "Добавлено в очередь",
+  restarted_by_new_trigger: "Перезапущен новым событием",
+  scenario_already_running: "Сценарий уже выполняется",
+  scenario_failed: "Сценарий завершился с ошибкой",
+  scenario_queue_full: "Очередь запусков заполнена",
+  shadow_plan: "Проверка без выполнения команд",
+  skipped: "Пропущено",
+  stale_critical_evidence: "Данные о тревоге устарели",
+  state_not_confirmed: "Изменение состояния не подтверждено",
+  target_not_found: "Устройство не найдено",
+  target_unavailable: "Устройство недоступно",
+  warmup_complete: "Подготовка завершена",
+  warmup_failed: "Не удалось завершить подготовку",
+};
+
+const ACTIVITY_TITLE_LABELS = {
+  contour_apply: "Климатический контур",
+  device_action: "Команда устройства",
+  home_climate_targets: "Цели климата",
+  scenario_run: "Сценарий",
+};
+
+const ACTIVITY_SYSTEM_CODE = /^[a-z][a-z0-9_]*$/;
+
+function activityTitleLabel(value) {
+  const text = String(value || "").trim();
+  if (!text) return "Событие";
+  const code = text.toLowerCase();
+  if (ACTIVITY_TITLE_LABELS[code]) return ACTIVITY_TITLE_LABELS[code];
+  return ACTIVITY_SYSTEM_CODE.test(code) ? "Событие" : text;
+}
+
+function activityTextLabel(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const direct = ACTIVITY_SYSTEM_LABELS[text.toLowerCase()];
+  if (direct) return direct;
+  let localized = false;
+  const parts = text.split(/\s*:\s*/).map((part) => {
+    const trimmed = part.trim();
+    const code = trimmed.toLowerCase();
+    if (ACTIVITY_SYSTEM_LABELS[code]) {
+      localized = true;
+      return ACTIVITY_SYSTEM_LABELS[code];
+    }
+    if (ACTIVITY_SYSTEM_CODE.test(code)) {
+      localized = true;
+      return "Статус события обновлён";
+    }
+    return trimmed;
+  });
+  return localized ? parts.join(": ") : text;
+}
+
+function makeSideCardInteractive(card, label, activate, deps) {
+  card.classList.add("is-interactive");
+  deps.setAttr(card, "role", "button");
+  deps.setAttr(card, "tabindex", "0");
+  deps.setAttr(card, "aria-label", label);
+  card.addEventListener("click", activate);
+  card.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    if (typeof event.preventDefault === "function") event.preventDefault();
+    activate();
+  });
+}
+
 function plural(count, one, few, many) {
   const mod100 = count % 100;
   const mod10 = count % 10;
@@ -47,8 +126,8 @@ function activityEntries(panel, dashboard) {
   const snapshot = Array.isArray(dashboard.events) ? dashboard.events : [];
   return (live.length ? live : snapshot).slice(0, 12).map((entry) => ({
     icon: eventIcon(entry),
-    title: String(entry?.title || "Событие"),
-    text: String(entry?.text || entry?.message || "").trim(),
+    title: activityTitleLabel(entry?.title),
+    text: activityTextLabel(entry?.text || entry?.message),
     at: eventTimestamp(entry),
     alert: entry?.alert === true || entry?.level === "bad",
   }));
@@ -139,6 +218,7 @@ export function renderOverviewSideCards(panel, dashboard, devices, deps) {
   home.appendChild(deps.el("h2", null, "Дом сейчас"));
   appendCompactHome(home, state, deps);
   appendDetailedHome(home, state, deps);
+  makeSideCardInteractive(home, "Открыть раздел «Комнаты»", () => panel._activateSection("rooms"), deps);
   aside.appendChild(home);
   const activity = deps.el("section", "overview-tablet-side-card is-activity");
   const activityTitle = deps.el("h2");
@@ -148,6 +228,7 @@ export function renderOverviewSideCards(panel, dashboard, devices, deps) {
   const entries = activityEntries(panel, dashboard);
   appendActivityCards(activity, entries, true, deps);
   appendActivityCards(activity, entries, false, deps);
+  makeSideCardInteractive(activity, "Открыть раздел «Сценарии»", () => panel._activateSection("scenarios"), deps);
   aside.appendChild(activity);
   return aside;
 }
