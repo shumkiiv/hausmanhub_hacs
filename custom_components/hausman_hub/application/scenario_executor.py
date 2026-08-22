@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 from datetime import datetime, time as datetime_time, timedelta
+import hashlib
 import math
 import time
 import uuid
@@ -29,9 +30,10 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
 
-_RUN_SCENARIO_DEPTH_LIMIT = 8
 _DEFAULT_DEVICE_READBACK_WINDOW_SECONDS = 8.0
 _DEFAULT_DEVICE_READBACK_INTERVAL_SECONDS = 0.25
+_CRITICAL_ACTION_DOMAINS = frozenset({"lock", "valve"})
+_UNAVAILABLE_EVIDENCE = frozenset({"unknown", "unavailable"})
 
 
 def _display_device_name(raw: str) -> str:
@@ -246,15 +248,21 @@ def _evaluate_condition(
     catalog: ScenarioCatalog,
     hass: "HomeAssistant",
     power_dependencies: Mapping[str, str] | None = None,
+    state_snapshot: Mapping[str, object | None] | None = None,
 ) -> tuple[bool, str | None]:
     if condition.type is ScenarioConditionType.DEVICE_STATE:
         device = catalog.device(condition.target_id) if condition.target_id else None
         if device is None:
             return (False, f"device {condition.target_id} is not available")
-        states = getattr(hass, "states", None)
-        if states is None:
+        live_states = getattr(hass, "states", None)
+        if state_snapshot is None and live_states is None:
             return (False, "home assistant states are not available")
-        state = states.get(device.entity_id)
+        get_state = (
+            state_snapshot.get
+            if state_snapshot is not None
+            else live_states.get
+        )
+        state = get_state(device.entity_id)
         if state is None:
             return (False, f"entity {device.entity_id} is not available")
         dependencies = power_dependencies or {}
@@ -263,7 +271,7 @@ def _evaluate_condition(
             dependencies,
             lambda entity_id: (
                 str(getattr(current, "state", "unknown"))
-                if (current := states.get(entity_id)) is not None
+                if (current := get_state(entity_id)) is not None
                 else None
             ),
         )
@@ -325,6 +333,69 @@ def _evaluate_condition(
     if condition.type is ScenarioConditionType.PRESENCE:
         return (False, "presence source is not configured")
     return (False, "unsupported condition type")
+
+
+def _condition_evidence_snapshot(
+    definition: ScenarioDefinition,
+    catalog: ScenarioCatalog,
+    hass: "HomeAssistant",
+    power_dependencies: Mapping[str, str],
+) -> tuple[dict[str, object | None], str | None, str | None]:
+    """Capture every device condition without yielding to another HA event."""
+
+    states = getattr(hass, "states", None)
+    if states is None:
+        return ({}, None, "home assistant states are not available")
+    entity_ids: set[str] = set()
+    condition_entities: list[tuple[ScenarioCondition, str]] = []
+    for condition in definition.conditions:
+        if condition.type is not ScenarioConditionType.DEVICE_STATE:
+            continue
+        device = catalog.device(condition.target_id) if condition.target_id else None
+        if device is None:
+            return ({}, None, f"device {condition.target_id} is not available")
+        entity_ids.add(device.entity_id)
+        condition_entities.append((condition, device.entity_id))
+        dependency = power_dependencies.get(device.entity_id)
+        if dependency:
+            entity_ids.add(dependency)
+    snapshot = {entity_id: states.get(entity_id) for entity_id in entity_ids}
+    for state in snapshot.values():
+        raw_state = getattr(state, "state", None) if state is not None else None
+        if raw_state is None or str(raw_state).lower() in _UNAVAILABLE_EVIDENCE:
+            return (snapshot, None, "stale critical evidence")
+    revision_parts: list[str] = []
+    for condition, entity_id in condition_entities:
+        state = snapshot.get(entity_id)
+        if state is None:
+            return (snapshot, None, f"entity {entity_id} is not available")
+        attributes = getattr(state, "attributes", {})
+        actual = (
+            getattr(state, "state", None)
+            if condition.property in {"state", "Состояние"}
+            else attributes.get(condition.property)
+            if isinstance(attributes, Mapping)
+            else None
+        )
+        if actual is None or str(actual).lower() in _UNAVAILABLE_EVIDENCE:
+            return (snapshot, None, "stale critical evidence")
+        last_updated = getattr(state, "last_updated", None)
+        revision_parts.extend(
+            (
+                condition.id,
+                entity_id,
+                str(condition.property),
+                str(actual),
+                last_updated.isoformat() if isinstance(last_updated, datetime) else "",
+            )
+        )
+    for entity_id in sorted(entity_ids):
+        state = snapshot.get(entity_id)
+        revision_parts.extend((entity_id, str(getattr(state, "state", "missing"))))
+    if not revision_parts:
+        return (snapshot, None, None)
+    revision = hashlib.sha256("\x1f".join(revision_parts).encode()).hexdigest()[:32]
+    return (snapshot, revision, None)
 
 
 class ScenarioExecutor:
@@ -541,7 +612,7 @@ class ScenarioExecutor:
                 "error": "recursive scenario call detected",
                 "receipts": [],
             }
-        if len(visited_scenarios) > _RUN_SCENARIO_DEPTH_LIMIT:
+        if len(visited_scenarios) > definition.safety_policy.nested_depth_limit:
             return {
                 "run_id": run_id,
                 "scenario_id": scenario_id,
@@ -551,20 +622,49 @@ class ScenarioExecutor:
             }
         next_visited = visited_scenarios | ({scenario_id} if scenario_id else set())
 
+        power_dependencies = (
+            self._power_dependency_resolver()
+            if self._power_dependency_resolver is not None
+            else {}
+        )
+        evidence_snapshot, evidence_revision, evidence_error = (
+            _condition_evidence_snapshot(
+                definition,
+                self._catalog,
+                self._hass,
+                power_dependencies,
+            )
+        )
+        evidence_captured_at_ms = int(time.time() * 1000)
+        if evidence_error is not None and definition.safety_policy.stop_on_stale_evidence:
+            return {
+                "run_id": run_id,
+                "scenario_id": scenario_id,
+                "execution_mode": definition.execution_mode.value,
+                "status": "failed",
+                "reason": "stale_critical_evidence",
+                "error": evidence_error,
+                "evidence_revision": evidence_revision,
+                "condition_results": [],
+                "receipts": [],
+                "accepted": False,
+                "confirmed": False,
+            }
+
         condition_results: list[dict[str, Any]] = []
         for condition in definition.conditions:
             passed, reason = _evaluate_condition(
                 condition,
                 self._catalog,
                 self._hass,
-                self._power_dependency_resolver()
-                if self._power_dependency_resolver is not None
-                else None,
+                power_dependencies,
+                evidence_snapshot,
             )
             condition_results.append(
                 {
                     "condition_id": condition.id,
                     "passed": passed,
+                    "outcome": "passed" if passed else "skipped",
                     "reason": reason,
                 }
             )
@@ -575,6 +675,7 @@ class ScenarioExecutor:
                     "status": "skipped",
                     "execution_mode": definition.execution_mode.value,
                     "condition_results": condition_results,
+                    "evidence_revision": evidence_revision,
                     "receipts": [],
                 }
 
@@ -592,6 +693,17 @@ class ScenarioExecutor:
                 dry_run=dry_run,
                 defer_device_readback=True,
                 powered_sources=frozenset(powered_sources),
+                idempotent_actions=definition.safety_policy.idempotent_actions,
+                evidence_age_seconds=(
+                    int(time.time() * 1000) - evidence_captured_at_ms
+                )
+                / 1000,
+                max_evidence_age_seconds=(
+                    definition.safety_policy.max_evidence_age_seconds
+                ),
+                stop_on_stale_evidence=(
+                    definition.safety_policy.stop_on_stale_evidence
+                ),
             )
             receipts.append(receipt)
             if receipt.get("status") == "failed":
@@ -609,6 +721,9 @@ class ScenarioExecutor:
             await self._confirm_deferred_device_receipts(receipts)
 
         completed = all(r.get("status") == "completed" for r in receipts)
+        failed_after_progress = any(
+            receipt.get("status") == "failed" for receipt in receipts
+        ) and any(receipt.get("status") == "completed" for receipt in receipts)
         confirmed = completed and all(
             r.get("type") != ScenarioActionType.DEVICE_ACTION
             or r.get("confirmed") is True
@@ -621,10 +736,11 @@ class ScenarioExecutor:
             "started_at_ms": start_ms,
             "finished_at_ms": int(time.time() * 1000),
             "condition_results": condition_results,
+            "evidence_revision": evidence_revision,
             "receipts": receipts,
             "accepted": completed,
             "confirmed": confirmed,
-            "status": "completed" if completed else "failed",
+            "status": "completed" if completed else "partial" if failed_after_progress else "failed",
         }
 
     async def _execute_action(
@@ -636,6 +752,10 @@ class ScenarioExecutor:
         dry_run: bool = False,
         defer_device_readback: bool = False,
         powered_sources: frozenset[str] = frozenset(),
+        idempotent_actions: bool = False,
+        evidence_age_seconds: float = 0.0,
+        max_evidence_age_seconds: int = 300,
+        stop_on_stale_evidence: bool = True,
     ) -> dict[str, Any]:
         base = {
             "action_id": action.id,
@@ -652,6 +772,10 @@ class ScenarioExecutor:
                     dry_run=dry_run,
                     defer_readback=defer_device_readback,
                     powered_sources=powered_sources,
+                    idempotent_actions=idempotent_actions,
+                    evidence_age_seconds=evidence_age_seconds,
+                    max_evidence_age_seconds=max_evidence_age_seconds,
+                    stop_on_stale_evidence=stop_on_stale_evidence,
                 )
             if action.type == ScenarioActionType.DELAY:
                 if not dry_run:
@@ -674,6 +798,10 @@ class ScenarioExecutor:
         dry_run: bool = False,
         defer_readback: bool = False,
         powered_sources: frozenset[str] = frozenset(),
+        idempotent_actions: bool = False,
+        evidence_age_seconds: float = 0.0,
+        max_evidence_age_seconds: int = 300,
+        stop_on_stale_evidence: bool = True,
     ) -> dict[str, Any]:
         if action.target_id is None or action.action_id is None:
             return {
@@ -705,33 +833,16 @@ class ScenarioExecutor:
                 "status": "failed",
                 "error": dependency_error,
             }
-        if allowed.domain == "cover" and action.action_id in {
-            "open_cover",
-            "close_cover",
-        }:
-            current = self._hass.states.get(device.entity_id)
-            if current is not None and _device_action_confirmed(
-                current, action.action_id, action.value
-            ):
-                observed_state = str(getattr(current, "state", "unknown"))
-                return {
-                    **base,
-                    "status": "completed",
-                    "target_id": action.target_id,
-                    "domain": allowed.domain,
-                    "service": allowed.service,
-                    "entity_id": device.entity_id,
-                    "confirmed": True,
-                    "skipped": True,
-                    "reason": "already_in_target_state",
-                    "read_back": {
-                        "attempted": False,
-                        "matched": True,
-                        "observedAt": int(time.time() * 1000),
-                        "observedState": observed_state,
-                        "attempts": 0,
-                    },
-                }
+        if (
+            stop_on_stale_evidence
+            and allowed.domain in _CRITICAL_ACTION_DOMAINS
+            and evidence_age_seconds > max_evidence_age_seconds
+        ):
+            return {
+                **base,
+                "status": "failed",
+                "error": "stale_critical_evidence",
+            }
         service_data: dict[str, Any] = {"entity_id": device.entity_id}
         confirmation_value = action.value
         adaptive_minimum: float | None = None
@@ -770,6 +881,30 @@ class ScenarioExecutor:
                     return {**base, "status": "failed", "error": error}
             service_data[param] = normalized
             confirmation_value = normalized
+        if idempotent_actions:
+            current = self._hass.states.get(device.entity_id)
+            if current is not None and _device_action_confirmed(
+                current, action.action_id, confirmation_value
+            ):
+                observed_state = str(getattr(current, "state", "unknown"))
+                return {
+                    **base,
+                    "status": "completed",
+                    "target_id": action.target_id,
+                    "domain": allowed.domain,
+                    "service": allowed.service,
+                    "entity_id": device.entity_id,
+                    "confirmed": True,
+                    "skipped": True,
+                    "reason": "already_in_target_state",
+                    "read_back": {
+                        "attempted": False,
+                        "matched": True,
+                        "observedAt": int(time.time() * 1000),
+                        "observedState": observed_state,
+                        "attempts": 0,
+                    },
+                }
         if not dry_run:
             await self._call_service(allowed.domain, allowed.service, service_data)
         receipt: dict[str, Any] = {
@@ -889,11 +1024,28 @@ class ScenarioExecutor:
                 "scenario_id": action.scenario_id,
             }
         result = await self._run_callback(action.scenario_id, visited=visited)
+        nested_outcome = result.get("status", "failed")
+        if nested_outcome == "completed":
+            status = "completed"
+            skipped = False
+        elif nested_outcome == "skipped":
+            status = "completed"
+            skipped = True
+        else:
+            status = "failed"
+            skipped = False
         return {
             **base,
-            "status": result.get("status", "completed"),
+            "status": status,
             "scenario_id": action.scenario_id,
             "nested_run_id": result.get("run_id"),
+            "nested_outcome": nested_outcome,
+            "skipped": skipped,
+            "reason": result.get("reason") or (
+                f"nested_scenario_{nested_outcome}"
+                if nested_outcome != "completed"
+                else None
+            ),
         }
 
     async def _notification_receipt(

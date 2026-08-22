@@ -25,9 +25,13 @@ from custom_components.hausman_hub.application.scenarios import (
 from custom_components.hausman_hub.domain.scenarios import (
     ScenarioAction,
     ScenarioActionType,
+    ScenarioComparison,
+    ScenarioCondition,
+    ScenarioConditionType,
     ScenarioDefinition,
     ScenarioDeviceCommand,
     ScenarioExecutionMode,
+    ScenarioSafetyPolicy,
     ScenarioTrigger,
     ScenarioTriggerType,
 )
@@ -160,7 +164,11 @@ class _FakeCatalog:
         return self._devices.get(target_id)
 
 
-def _definition(actions: tuple[ScenarioAction, ...]) -> ScenarioDefinition:
+def _definition(
+    actions: tuple[ScenarioAction, ...],
+    *,
+    idempotent_actions: bool = False,
+) -> ScenarioDefinition:
     return ScenarioDefinition(
         version=1,
         execution_mode=ScenarioExecutionMode.SINGLE,
@@ -169,6 +177,9 @@ def _definition(actions: tuple[ScenarioAction, ...]) -> ScenarioDefinition:
         ),
         conditions=(),
         actions=actions,
+        safety_policy=ScenarioSafetyPolicy(
+            idempotent_actions=idempotent_actions
+        ),
     )
 
 
@@ -222,7 +233,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
                 target_id="cover_1",
                 action_id="close_cover",
             ),
-        ))
+        ), idempotent_actions=True)
 
         result = await self.executor.async_execute(
             definition, "run-1", scenario_id="close-curtains"
@@ -235,6 +246,150 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("already_in_target_state", receipt["reason"])
         self.assertFalse(receipt["read_back"]["attempted"])
         self.hass.services.async_call.assert_not_awaited()
+
+    async def test_idempotent_climate_target_is_not_commanded_again(self) -> None:
+        definition = _definition(
+            (
+                ScenarioAction(
+                    id="a1",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="climate_1",
+                    action_id="set_temperature",
+                    value=22,
+                ),
+            ),
+            idempotent_actions=True,
+        )
+
+        result = await self.executor.async_execute(
+            definition, "run-1", scenario_id="climate-target"
+        )
+
+        self.assertEqual("completed", result["status"])
+        self.assertEqual("already_in_target_state", result["receipts"][0]["reason"])
+        self.assertTrue(result["receipts"][0]["skipped"])
+        self.hass.services.async_call.assert_not_awaited()
+
+    async def test_unavailable_condition_fails_closed_before_action(self) -> None:
+        self.catalog._devices["sensor_1"] = ScenarioDeviceEntry(
+            target_id="sensor_1",
+            name="Leak sensor",
+            entity_id="binary_sensor.leak",
+            actions=(),
+        )
+        original_get = self.hass.states.get
+        self.hass.states.get = lambda entity_id: (
+            SimpleNamespace(state="unavailable", attributes={})
+            if entity_id == "binary_sensor.leak"
+            else original_get(entity_id)
+        )
+        definition = ScenarioDefinition(
+            version=1,
+            execution_mode=ScenarioExecutionMode.SINGLE,
+            triggers=(ScenarioTrigger(id="t1", type=ScenarioTriggerType.MANUAL),),
+            conditions=(
+                ScenarioCondition(
+                    id="leak_ok",
+                    type=ScenarioConditionType.DEVICE_STATE,
+                    target_id="sensor_1",
+                    property="state",
+                    comparison=ScenarioComparison.EQUALS,
+                    value="off",
+                ),
+            ),
+            actions=(
+                ScenarioAction(
+                    id="a1",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="device_1",
+                    action_id="turn_on",
+                ),
+            ),
+        )
+
+        result = await self.executor.async_execute(
+            definition, "run-stale", scenario_id="water-safety"
+        )
+
+        self.assertEqual("failed", result["status"])
+        self.assertEqual("stale_critical_evidence", result["reason"])
+        self.hass.services.async_call.assert_not_awaited()
+
+    async def test_conditions_use_one_evidence_snapshot(self) -> None:
+        self.catalog._devices["sensor_1"] = ScenarioDeviceEntry(
+            target_id="sensor_1",
+            name="Motion sensor",
+            entity_id="binary_sensor.motion",
+            actions=(),
+        )
+        calls = 0
+        original_get = self.hass.states.get
+
+        def changing_get(entity_id: str) -> object | None:
+            nonlocal calls
+            if entity_id == "binary_sensor.motion":
+                calls += 1
+                return SimpleNamespace(
+                    state="on" if calls == 1 else "off",
+                    attributes={},
+                )
+            return original_get(entity_id)
+
+        self.hass.states.get = changing_get
+        definition = ScenarioDefinition(
+            version=1,
+            execution_mode=ScenarioExecutionMode.SINGLE,
+            triggers=(ScenarioTrigger(id="t1", type=ScenarioTriggerType.MANUAL),),
+            conditions=(
+                ScenarioCondition(
+                    id="motion_on",
+                    type=ScenarioConditionType.DEVICE_STATE,
+                    target_id="sensor_1",
+                    property="state",
+                    comparison=ScenarioComparison.EQUALS,
+                    value="on",
+                ),
+            ),
+            actions=(
+                ScenarioAction(
+                    id="notify",
+                    type=ScenarioActionType.NOTIFICATION,
+                    message="Motion",
+                ),
+            ),
+        )
+
+        result = await self.executor.async_execute(
+            definition, "run-snapshot", scenario_id="snapshot-test"
+        )
+
+        self.assertEqual("completed", result["status"])
+        self.assertEqual(1, calls)
+        self.assertEqual(32, len(result["evidence_revision"]))
+
+    async def test_failure_after_completed_action_is_partial(self) -> None:
+        definition = _definition(
+            (
+                ScenarioAction(
+                    id="notify",
+                    type=ScenarioActionType.NOTIFICATION,
+                    message="Started",
+                ),
+                ScenarioAction(
+                    id="missing",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="missing_device",
+                    action_id="turn_on",
+                ),
+            )
+        )
+
+        result = await self.executor.async_execute(
+            definition, "run-partial", scenario_id="partial-test"
+        )
+
+        self.assertEqual("partial", result["status"])
+        self.assertEqual(["completed", "failed"], [item["status"] for item in result["receipts"]])
 
     async def test_open_cover_still_receives_close_command(self) -> None:
         original_get = self.hass.states.get

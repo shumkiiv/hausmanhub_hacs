@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 import logging
+import time
 from typing import TYPE_CHECKING, Any
 
 from .domain.scenarios import ScenarioComparison
@@ -35,6 +37,8 @@ def state_trigger_matches(
     property_name: str,
     comparison: ScenarioComparison,
     expected: object | None,
+    *,
+    ignore_recovery: bool = True,
 ) -> bool:
     """Return whether an actual state transition satisfies one trigger.
 
@@ -47,7 +51,7 @@ def state_trigger_matches(
     new = _state_value(new_state, property_name)
     if old is None or new is None:
         return False
-    if str(old).lower() in _UNAVAILABLE_STATE_VALUES:
+    if ignore_recovery and str(old).lower() in _UNAVAILABLE_STATE_VALUES:
         return False
     if str(new).lower() in _UNAVAILABLE_STATE_VALUES:
         return False
@@ -68,6 +72,145 @@ def state_trigger_matches(
             return old_number <= threshold < new_number
         return old_number >= threshold > new_number
     return False
+
+
+def state_level_matches(
+    state: object | None,
+    property_name: str,
+    comparison: ScenarioComparison,
+    expected: object | None,
+) -> bool:
+    """Recheck that a delayed state trigger still holds without a transition."""
+
+    actual = _state_value(state, property_name)
+    if actual is None or str(actual).lower() in _UNAVAILABLE_STATE_VALUES:
+        return False
+    if comparison is ScenarioComparison.CHANGED:
+        return True
+    if comparison is ScenarioComparison.EQUALS:
+        return str(actual) == str(expected)
+    if comparison is ScenarioComparison.NOT_EQUALS:
+        return str(actual) != str(expected)
+    try:
+        actual_number = float(actual)
+        threshold = float(expected)
+    except (TypeError, ValueError):
+        return False
+    if comparison is ScenarioComparison.ABOVE:
+        return actual_number > threshold
+    if comparison is ScenarioComparison.BELOW:
+        return actual_number < threshold
+    return False
+
+
+class _StateTriggerCoordinator:
+    """Apply per-trigger debounce, hold duration and cooldown bounds."""
+
+    def __init__(self, hass: HomeAssistant, service: ScenarioService) -> None:
+        self._hass = hass
+        self._service = service
+        self._pending: dict[tuple[str, str], asyncio.Task[None]] = {}
+        self._cooldown_until: dict[tuple[str, str], float] = {}
+
+    async def async_handle(
+        self,
+        item: tuple[
+            str,
+            str,
+            str,
+            str,
+            ScenarioComparison,
+            object | None,
+            int,
+            int,
+            int,
+            bool,
+        ],
+        old_state: object | None,
+        new_state: object | None,
+    ) -> None:
+        (
+            scenario_id,
+            trigger_id,
+            entity_id,
+            property_name,
+            comparison,
+            expected,
+            for_seconds,
+            debounce_seconds,
+            cooldown_seconds,
+            ignore_recovery,
+        ) = item
+        key = (scenario_id, trigger_id)
+        if time.monotonic() < self._cooldown_until.get(key, 0.0):
+            return
+        matched = state_trigger_matches(
+            old_state,
+            new_state,
+            property_name,
+            comparison,
+            expected,
+            ignore_recovery=ignore_recovery,
+        )
+        existing = self._pending.get(key)
+        if not matched:
+            if existing is not None and not state_level_matches(
+                new_state, property_name, comparison, expected
+            ):
+                existing.cancel()
+                self._pending.pop(key, None)
+            return
+        if existing is not None:
+            existing.cancel()
+        delay = max(for_seconds, debounce_seconds)
+        if delay <= 0:
+            await self._async_run(key, scenario_id, cooldown_seconds)
+            return
+
+        async def _async_delayed() -> None:
+            try:
+                await asyncio.sleep(delay)
+                current = self._hass.states.get(entity_id)
+                if state_level_matches(
+                    current, property_name, comparison, expected
+                ):
+                    await self._async_run(key, scenario_id, cooldown_seconds)
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001
+                _LOGGER.warning(
+                    "delayed state trigger %s of scenario %s failed",
+                    trigger_id,
+                    scenario_id,
+                    exc_info=True,
+                )
+            finally:
+                if self._pending.get(key) is asyncio.current_task():
+                    self._pending.pop(key, None)
+
+        create_task = getattr(self._hass, "async_create_task", None)
+        coroutine = _async_delayed()
+        task = (
+            create_task(coroutine)
+            if callable(create_task)
+            else asyncio.create_task(coroutine)
+        )
+        self._pending[key] = task
+
+    async def _async_run(
+        self,
+        key: tuple[str, str],
+        scenario_id: str,
+        cooldown_seconds: int,
+    ) -> None:
+        if cooldown_seconds:
+            self._cooldown_until[key] = time.monotonic() + cooldown_seconds
+        await self._service.async_run_scenario(scenario_id)
+
+    def cancel(self) -> None:
+        for task in self._pending.values():
+            task.cancel()
+        self._pending.clear()
 
 
 def event_trigger_matches(
@@ -97,6 +240,9 @@ async def async_start_scenario_events(
 ) -> None:
     """Subscribe enabled device-state scenario triggers to HA state events."""
 
+    coordinator = _StateTriggerCoordinator(hass, service)
+    entry.async_on_unload(coordinator.cancel)
+
     async def _async_handle(event: Any) -> None:
         data = getattr(event, "data", {})
         entity_id = data.get("entity_id") if isinstance(data, dict) else None
@@ -104,17 +250,12 @@ async def async_start_scenario_events(
             return
         old_state = data.get("old_state")
         new_state = data.get("new_state")
-        for scenario_id, trigger_id, target_entity_id, property_name, comparison, expected in (
-            service.state_trigger_items()
-        ):
+        for item in service.state_trigger_items():
+            scenario_id, trigger_id, target_entity_id = item[:3]
             if entity_id != target_entity_id:
                 continue
-            if not state_trigger_matches(
-                old_state, new_state, property_name, comparison, expected
-            ):
-                continue
             try:
-                await service.async_run_scenario(scenario_id)
+                await coordinator.async_handle(item, old_state, new_state)
             except Exception:  # noqa: BLE001
                 _LOGGER.warning(
                     "state trigger %s of scenario %s failed",

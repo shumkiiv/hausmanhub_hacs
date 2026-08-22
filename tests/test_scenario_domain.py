@@ -19,6 +19,7 @@ from custom_components.hausman_hub.domain.scenarios import (
     ScenarioDeviceCommand,
     ScenarioExecutionMode,
     ScenarioRegistry,
+    ScenarioSafetyPolicy,
     ScenarioTrigger,
     ScenarioTriggerType,
     ScenarioViolation,
@@ -266,6 +267,11 @@ class ScenarioDomainTest(unittest.TestCase):
                 }
             )
 
+        payload = valid_definition().to_payload()
+        payload["triggers"][0]["unsafeField"] = True
+        with self.assertRaises(ScenarioViolation):
+            ScenarioDefinition.from_payload(payload)
+
     def test_payload_rejects_missing_definition_field(self) -> None:
         payload = scenario_registry_to_payload(ScenarioRegistry(scenarios=(valid_scenario(),)))
         del payload["scenarios"][0]["definition"]["executionMode"]
@@ -301,6 +307,58 @@ class ScenarioDomainTest(unittest.TestCase):
             dict(restored.triggers[0].event_data or {}),
             {"device_id": "button-kids", "command": "single"},
         )
+
+    def test_safety_policy_and_trigger_timing_round_trip(self) -> None:
+        definition = valid_definition(
+            execution_mode=ScenarioExecutionMode.QUEUED,
+            queue_limit=3,
+            safety_policy=ScenarioSafetyPolicy(
+                max_evidence_age_seconds=120,
+                nested_depth_limit=2,
+                stop_on_stale_evidence=True,
+                idempotent_actions=True,
+            ),
+            triggers=(
+                ScenarioTrigger(
+                    id="motion",
+                    type=ScenarioTriggerType.DEVICE_STATE,
+                    target_id="motion_living",
+                    property="state",
+                    comparison=ScenarioComparison.EQUALS,
+                    value="on",
+                    for_seconds=10,
+                    debounce_seconds=2,
+                    cooldown_seconds=60,
+                    ignore_recovery=False,
+                ),
+            ),
+        )
+
+        restored = ScenarioDefinition.from_payload(definition.to_payload())
+
+        self.assertEqual(3, restored.queue_limit)
+        self.assertEqual(120, restored.safety_policy.max_evidence_age_seconds)
+        self.assertEqual(2, restored.safety_policy.nested_depth_limit)
+        self.assertEqual(10, restored.triggers[0].for_seconds)
+        self.assertEqual(2, restored.triggers[0].debounce_seconds)
+        self.assertEqual(60, restored.triggers[0].cooldown_seconds)
+        self.assertFalse(restored.triggers[0].ignore_recovery)
+
+    def test_safety_bounds_fail_closed(self) -> None:
+        with self.assertRaises(ScenarioViolation):
+            valid_definition(queue_limit=33)
+        with self.assertRaises(ScenarioViolation):
+            ScenarioSafetyPolicy(max_evidence_age_seconds=0)
+        with self.assertRaises(ScenarioViolation):
+            ScenarioTrigger(
+                id="motion",
+                type=ScenarioTriggerType.DEVICE_STATE,
+                target_id="motion_living",
+                property="state",
+                comparison=ScenarioComparison.EQUALS,
+                value="on",
+                debounce_seconds=3601,
+            )
 
     def test_event_trigger_rejects_system_event_and_nested_filter(self) -> None:
         with self.assertRaises(ScenarioViolation):

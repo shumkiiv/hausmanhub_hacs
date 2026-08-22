@@ -24,6 +24,12 @@ MAX_DESCRIPTION_LENGTH = 500
 MAX_MESSAGE_LENGTH = 500
 MIN_DELAY_SECONDS = 1
 MAX_DELAY_SECONDS = 86400
+DEFAULT_QUEUE_LIMIT = 8
+MAX_QUEUE_LIMIT = 32
+DEFAULT_MAX_EVIDENCE_AGE_SECONDS = 300
+MAX_EVIDENCE_AGE_SECONDS = 3600
+DEFAULT_NESTED_DEPTH_LIMIT = 4
+MAX_NESTED_DEPTH_LIMIT = 8
 
 _STABLE_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _CLOCK_TIME = re.compile(r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$")
@@ -95,6 +101,34 @@ class ScenarioComparison(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class ScenarioSafetyPolicy:
+    """Fail-closed execution limits shared by every scenario adapter."""
+
+    max_evidence_age_seconds: int = DEFAULT_MAX_EVIDENCE_AGE_SECONDS
+    nested_depth_limit: int = DEFAULT_NESTED_DEPTH_LIMIT
+    stop_on_stale_evidence: bool = True
+    idempotent_actions: bool = True
+
+    def __post_init__(self) -> None:
+        _bounded_int(
+            self.max_evidence_age_seconds,
+            1,
+            MAX_EVIDENCE_AGE_SECONDS,
+            "max evidence age",
+        )
+        _bounded_int(
+            self.nested_depth_limit,
+            1,
+            MAX_NESTED_DEPTH_LIMIT,
+            "nested depth limit",
+        )
+        if type(self.stop_on_stale_evidence) is not bool:
+            raise ScenarioViolation("stop on stale evidence must be a boolean")
+        if type(self.idempotent_actions) is not bool:
+            raise ScenarioViolation("idempotent actions must be a boolean")
+
+
+@dataclass(frozen=True, slots=True)
 class ScenarioTrigger:
     """One event that can start a scenario run."""
 
@@ -107,11 +141,20 @@ class ScenarioTrigger:
     value: str | float | int | None = None
     event_type: str | None = None
     event_data: Mapping[str, str | float | int | bool] | None = None
+    for_seconds: int = 0
+    debounce_seconds: int = 0
+    cooldown_seconds: int = 0
+    ignore_recovery: bool = True
 
     def __post_init__(self) -> None:
         _stable_id(self.id, "trigger id")
         if self.event_data is not None:
             object.__setattr__(self, "event_data", MappingProxyType(dict(self.event_data)))
+        _bounded_int(self.for_seconds, 0, MAX_DELAY_SECONDS, "trigger for duration")
+        _bounded_int(self.debounce_seconds, 0, 3600, "trigger debounce")
+        _bounded_int(self.cooldown_seconds, 0, MAX_DELAY_SECONDS, "trigger cooldown")
+        if type(self.ignore_recovery) is not bool:
+            raise ScenarioViolation("trigger ignore recovery must be a boolean")
         if not isinstance(self.type, ScenarioTriggerType):
             raise ScenarioViolation("trigger type must be approved")
         # Android always emits `comparison`; ignore it for non-device_state triggers.
@@ -285,6 +328,8 @@ class ScenarioDefinition:
     triggers: tuple[ScenarioTrigger, ...]
     conditions: tuple[ScenarioCondition, ...]
     actions: tuple[ScenarioAction, ...]
+    queue_limit: int = DEFAULT_QUEUE_LIMIT
+    safety_policy: ScenarioSafetyPolicy = field(default_factory=ScenarioSafetyPolicy)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "triggers", tuple(self.triggers))
@@ -294,6 +339,9 @@ class ScenarioDefinition:
             raise ScenarioViolation("unsupported scenario definition version")
         if not isinstance(self.execution_mode, ScenarioExecutionMode):
             raise ScenarioViolation("execution mode must be approved")
+        _bounded_int(self.queue_limit, 1, MAX_QUEUE_LIMIT, "scenario queue limit")
+        if not isinstance(self.safety_policy, ScenarioSafetyPolicy):
+            raise ScenarioViolation("scenario safety policy must be validated")
         if len(self.triggers) > MAX_TRIGGERS:
             raise ScenarioViolation("too many triggers")
         if len(self.conditions) > MAX_CONDITIONS:
@@ -495,6 +543,14 @@ def _required(value: object, label: str, context: str) -> None:
         raise ScenarioViolation(f"{label} is required for {context}")
 
 
+def _bounded_int(value: object, minimum: int, maximum: int, label: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ScenarioViolation(f"{label} must be an integer")
+    if not minimum <= value <= maximum:
+        raise ScenarioViolation(f"{label} must be between {minimum} and {maximum}")
+    return value
+
+
 def _none(value: object, label: str, context: str) -> None:
     if value is not None:
         raise ScenarioViolation(f"{label} must not be set for {context}")
@@ -643,13 +699,35 @@ def _scenario_to_payload(scenario: Scenario) -> dict[str, object]:
 
 def _definition_from_payload(payload: object, label: str) -> ScenarioDefinition:
     root = _mapping(payload, label)
-    _exact_keys(root, {"version", "executionMode", "triggers", "conditions", "actions"}, label)
+    _required_allowed_keys(
+        root,
+        {"version", "executionMode", "triggers", "conditions", "actions"},
+        {
+            "version",
+            "executionMode",
+            "queueLimit",
+            "safetyPolicy",
+            "triggers",
+            "conditions",
+            "actions",
+        },
+        label,
+    )
     return ScenarioDefinition(
         version=_int(root.get("version"), f"{label} version"),
         execution_mode=_enum(
             root.get("executionMode"),
             ScenarioExecutionMode,
             f"{label} executionMode",
+        ),
+        queue_limit=_bounded_int(
+            root.get("queueLimit", DEFAULT_QUEUE_LIMIT),
+            1,
+            MAX_QUEUE_LIMIT,
+            f"{label} queueLimit",
+        ),
+        safety_policy=_safety_policy_from_payload(
+            root.get("safetyPolicy"), f"{label} safetyPolicy"
         ),
         triggers=tuple(
             _trigger_from_payload(item, f"{label} trigger {index}")
@@ -669,17 +747,83 @@ def _definition_from_payload(payload: object, label: str) -> ScenarioDefinition:
 
 
 def _definition_to_payload(definition: ScenarioDefinition) -> dict[str, object]:
-    return {
+    payload: dict[str, object] = {
         "version": definition.version,
         "executionMode": definition.execution_mode.value,
         "triggers": [_trigger_to_payload(item) for item in definition.triggers],
         "conditions": [_condition_to_payload(item) for item in definition.conditions],
         "actions": [_action_to_payload(item) for item in definition.actions],
     }
+    if definition.queue_limit != DEFAULT_QUEUE_LIMIT:
+        payload["queueLimit"] = definition.queue_limit
+    if definition.safety_policy != ScenarioSafetyPolicy():
+        payload["safetyPolicy"] = {
+            "maxEvidenceAgeSeconds": definition.safety_policy.max_evidence_age_seconds,
+            "nestedDepthLimit": definition.safety_policy.nested_depth_limit,
+            "stopOnStaleEvidence": definition.safety_policy.stop_on_stale_evidence,
+            "idempotentActions": definition.safety_policy.idempotent_actions,
+        }
+    return payload
+
+
+def _safety_policy_from_payload(payload: object, label: str) -> ScenarioSafetyPolicy:
+    if payload is None:
+        return ScenarioSafetyPolicy()
+    root = _mapping(payload, label)
+    allowed = {
+        "maxEvidenceAgeSeconds",
+        "nestedDepthLimit",
+        "stopOnStaleEvidence",
+        "idempotentActions",
+    }
+    if not set(root).issubset(allowed):
+        raise ScenarioViolation(f"{label} has unexpected fields")
+    return ScenarioSafetyPolicy(
+        max_evidence_age_seconds=_bounded_int(
+            root.get("maxEvidenceAgeSeconds", DEFAULT_MAX_EVIDENCE_AGE_SECONDS),
+            1,
+            MAX_EVIDENCE_AGE_SECONDS,
+            f"{label} maxEvidenceAgeSeconds",
+        ),
+        nested_depth_limit=_bounded_int(
+            root.get("nestedDepthLimit", DEFAULT_NESTED_DEPTH_LIMIT),
+            1,
+            MAX_NESTED_DEPTH_LIMIT,
+            f"{label} nestedDepthLimit",
+        ),
+        stop_on_stale_evidence=_bool(
+            root.get("stopOnStaleEvidence", True),
+            f"{label} stopOnStaleEvidence",
+        ),
+        idempotent_actions=_bool(
+            root.get("idempotentActions", True),
+            f"{label} idempotentActions",
+        ),
+    )
 
 
 def _trigger_from_payload(payload: object, label: str) -> ScenarioTrigger:
     root = _mapping(payload, label)
+    _required_allowed_keys(
+        root,
+        {"id", "type"},
+        {
+            "id",
+            "type",
+            "targetId",
+            "targetName",
+            "property",
+            "comparison",
+            "value",
+            "forSeconds",
+            "debounceSeconds",
+            "cooldownSeconds",
+            "ignoreRecovery",
+            "eventType",
+            "eventData",
+        },
+        label,
+    )
     return ScenarioTrigger(
         id=_str(root.get("id"), f"{label} id"),
         type=_enum(root.get("type"), ScenarioTriggerType, f"{label} type"),
@@ -690,6 +834,21 @@ def _trigger_from_payload(payload: object, label: str) -> ScenarioTrigger:
         value=root.get("value"),
         event_type=_optional_str(root.get("eventType")),
         event_data=_optional_mapping(root.get("eventData"), f"{label} eventData"),
+        for_seconds=_bounded_int(
+            root.get("forSeconds", 0), 0, MAX_DELAY_SECONDS, f"{label} forSeconds"
+        ),
+        debounce_seconds=_bounded_int(
+            root.get("debounceSeconds", 0), 0, 3600, f"{label} debounceSeconds"
+        ),
+        cooldown_seconds=_bounded_int(
+            root.get("cooldownSeconds", 0),
+            0,
+            MAX_DELAY_SECONDS,
+            f"{label} cooldownSeconds",
+        ),
+        ignore_recovery=_bool(
+            root.get("ignoreRecovery", True), f"{label} ignoreRecovery"
+        ),
     )
 
 
@@ -712,11 +871,25 @@ def _trigger_to_payload(trigger: ScenarioTrigger) -> dict[str, object]:
         payload["eventType"] = trigger.event_type
     if trigger.event_data:
         payload["eventData"] = dict(trigger.event_data)
+    if trigger.for_seconds:
+        payload["forSeconds"] = trigger.for_seconds
+    if trigger.debounce_seconds:
+        payload["debounceSeconds"] = trigger.debounce_seconds
+    if trigger.cooldown_seconds:
+        payload["cooldownSeconds"] = trigger.cooldown_seconds
+    if not trigger.ignore_recovery:
+        payload["ignoreRecovery"] = False
     return payload
 
 
 def _condition_from_payload(payload: object, label: str) -> ScenarioCondition:
     root = _mapping(payload, label)
+    _required_allowed_keys(
+        root,
+        {"id", "type"},
+        {"id", "type", "targetId", "targetName", "property", "comparison", "value"},
+        label,
+    )
     return ScenarioCondition(
         id=_str(root.get("id"), f"{label} id"),
         type=_enum(root.get("type"), ScenarioConditionType, f"{label} type"),
@@ -748,6 +921,24 @@ def _condition_to_payload(condition: ScenarioCondition) -> dict[str, object]:
 
 def _action_from_payload(payload: object, label: str) -> ScenarioAction:
     root = _mapping(payload, label)
+    _required_allowed_keys(
+        root,
+        {"id", "type"},
+        {
+            "id",
+            "type",
+            "targetId",
+            "targetName",
+            "actionId",
+            "actionTitle",
+            "value",
+            "command",
+            "delaySeconds",
+            "scenarioId",
+            "message",
+        },
+        label,
+    )
     return ScenarioAction(
         id=_str(root.get("id"), f"{label} id"),
         type=_enum(root.get("type"), ScenarioActionType, f"{label} type"),
@@ -893,4 +1084,14 @@ def _list(value: object, label: str) -> list[object]:
 
 def _exact_keys(root: Mapping[str, object], keys: set[str], label: str) -> None:
     if set(root) != keys:
+        raise ScenarioViolation(f"{label} has unexpected fields")
+
+
+def _required_allowed_keys(
+    root: Mapping[str, object],
+    required: set[str],
+    allowed: set[str],
+    label: str,
+) -> None:
+    if not required.issubset(root) or not set(root).issubset(allowed):
         raise ScenarioViolation(f"{label} has unexpected fields")

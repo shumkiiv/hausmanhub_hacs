@@ -9,6 +9,7 @@ from jsonschema import Draft202012Validator
 from custom_components.hausman_hub.application.operation_journal import (
     MAX_OPERATION_JOURNAL_RECORDS,
     OperationJournalService,
+    scenario_operation_receipt,
 )
 
 
@@ -115,6 +116,68 @@ class OperationJournalTests(unittest.IsolatedAsyncioTestCase):
             ["scenario-2", "device-1"],
             [item["correlation_id"] for item in restored.snapshot()["records"]],
         )
+
+    async def test_scenario_trace_is_redacted_persisted_and_schema_valid(self) -> None:
+        store = MemoryStore()
+        service = OperationJournalService(store, now_ms=lambda: 50)
+        normalized = scenario_operation_receipt(
+            {
+                "run_id": "run-safety-1",
+                "scenario_id": "night_light",
+                "execution_mode": "queued",
+                "status": "partial",
+                "confirmed": False,
+                "evidence_revision": "revision-1",
+                "condition_results": [
+                    {
+                        "condition_id": "presence",
+                        "passed": False,
+                        "outcome": "skipped",
+                        "reason": "entity binary_sensor.private is unavailable",
+                    }
+                ],
+                "receipts": [
+                    {
+                        "action_id": "light_on",
+                        "status": "completed",
+                        "confirmed": True,
+                        "entity_id": "light.private_room",
+                    },
+                    {
+                        "action_id": "notify",
+                        "status": "failed",
+                        "error": "notify_failed",
+                    },
+                ],
+            }
+        )
+
+        record = await service.async_append(normalized)
+
+        self.assertEqual("partial", record["scenario"]["outcome"])
+        self.assertNotIn("entity_id", json.dumps(record, ensure_ascii=False))
+        self.assertNotIn("binary_sensor.private", json.dumps(record, ensure_ascii=False))
+        self.assertEqual(
+            "condition_not_met",
+            record["scenario"]["decisions"][0]["reason"],
+        )
+        root = Path(__file__).resolve().parents[1]
+        schema = json.loads(
+            (
+                root
+                / "custom_components/hausman_hub/contracts/v1/operation-journal.schema.json"
+            ).read_text(encoding="utf-8")
+        )
+        Draft202012Validator(schema).validate(service.snapshot())
+
+    async def test_invalid_scenario_trace_fails_closed(self) -> None:
+        store = MemoryStore()
+        service = OperationJournalService(store)
+        unsafe = receipt("run-unsafe", "scenario_run")
+        unsafe["scenario"] = {"scenario_id": "../private"}
+
+        with self.assertRaises(ValueError):
+            await service.async_append(unsafe)
 
     async def test_journal_is_bounded_and_does_not_store_targets(self) -> None:
         store = MemoryStore()

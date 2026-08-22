@@ -132,6 +132,14 @@ class _QueueExecutor(_FakeExecutor):
         }
 
 
+class _FakeJournal:
+    def __init__(self) -> None:
+        self.receipts: list[dict[str, object]] = []
+
+    async def async_append(self, receipt: dict[str, object]) -> None:
+        self.receipts.append(receipt)
+
+
 def _catalog() -> ScenarioCatalog:
     entry = ScenarioDeviceEntry(
         target_id="device_abc",
@@ -552,6 +560,38 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("completed", first_result["status"])
         self.assertEqual("completed", second_result["status"])
         self.assertEqual(2, len(executor.runs))
+
+    async def test_queued_mode_rejects_when_bounded_queue_is_full(self) -> None:
+        executor = _QueueExecutor()
+        journal = _FakeJournal()
+        service = ScenarioService(
+            None,
+            self.store,
+            self.catalog,
+            executor,
+            operation_journal=journal,
+        )
+        await service.async_load()
+        payload = _valid_payload()
+        payload["definition"]["executionMode"] = "queued"
+        payload["definition"]["queueLimit"] = 1
+        await service.async_update_scenario(payload)
+
+        first = asyncio.create_task(service.async_run_scenario("scenario_1"))
+        await asyncio.wait_for(executor.first_started.wait(), timeout=0.1)
+        queued = asyncio.create_task(service.async_run_scenario("scenario_1"))
+        await asyncio.sleep(0)
+        rejected = await service.async_run_scenario("scenario_1")
+
+        self.assertEqual("skipped", rejected["status"])
+        self.assertEqual("scenario_queue_full", rejected["reason"])
+        self.assertEqual(1, len(executor.runs))
+        executor.release_first.set()
+        await asyncio.gather(first, queued)
+        self.assertEqual(2, len(executor.runs))
+        outcomes = [item["scenario"]["outcome"] for item in journal.receipts]
+        self.assertIn("skipped", outcomes)
+        self.assertEqual(2, outcomes.count("completed"))
 
     async def test_run_without_executor_raises(self) -> None:
         await self.service.async_update_scenario(_valid_payload())

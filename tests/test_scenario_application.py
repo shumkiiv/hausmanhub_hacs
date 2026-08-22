@@ -23,6 +23,7 @@ from custom_components.hausman_hub.domain.scenarios import (
     ScenarioDefinition,
     ScenarioDeviceCommand,
     ScenarioExecutionMode,
+    ScenarioSafetyPolicy,
     ScenarioTrigger,
     ScenarioTriggerType,
 )
@@ -447,6 +448,38 @@ class ScenarioApplicationValidationTest(unittest.TestCase):
         with self.assertRaises(ScenarioDefinitionViolation) as raised:
             validate_scenario_definition(outer, catalog, existing_scenario_id="self")
         self.assertEqual(raised.exception.status, HTTPStatus.CONFLICT)
+
+    def test_nested_depth_limit_is_rejected_before_save(self) -> None:
+        leaf = _valid_definition()
+        inner = _valid_definition(
+            actions=(
+                ScenarioAction(
+                    id="a1",
+                    type=ScenarioActionType.RUN_SCENARIO,
+                    scenario_id="leaf",
+                ),
+            )
+        )
+        outer = _valid_definition(
+            safety_policy=ScenarioSafetyPolicy(nested_depth_limit=1),
+            actions=(
+                ScenarioAction(
+                    id="a1",
+                    type=ScenarioActionType.RUN_SCENARIO,
+                    scenario_id="inner",
+                ),
+            ),
+        )
+        catalog = _catalog(
+            scenarios={"inner": object(), "leaf": object()},
+            scenario_definitions={"inner": inner, "leaf": leaf},
+        )
+
+        with self.assertRaises(ScenarioDefinitionViolation) as raised:
+            validate_scenario_definition(outer, catalog, existing_scenario_id="outer")
+
+        self.assertEqual(HTTPStatus.CONFLICT, raised.exception.status)
+        self.assertIn("depth limit", str(raised.exception))
 
 
 if __name__ == "__main__":

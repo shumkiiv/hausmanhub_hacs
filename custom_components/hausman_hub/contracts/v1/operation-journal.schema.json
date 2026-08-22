@@ -102,7 +102,8 @@
         "error_code": {
           "type": ["string", "null"],
           "maxLength": 128
-        }
+        },
+        "scenario": {"$ref": "#/$defs/scenario_run"}
       },
       "allOf": [
         {
@@ -117,8 +118,52 @@
         {
           "if": {"properties": {"confirmed": {"const": true}}},
           "then": {"properties": {"status": {"const": "confirmed"}}}
+        },
+        {
+          "if": {"required": ["scenario"]},
+          "then": {
+            "properties": {
+              "source": {"const": "scenario"},
+              "operation": {"const": "scenario_run"}
+            }
+          }
         }
       ]
+    },
+    "scenario_run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scenario_id", "run_id", "execution_mode", "outcome", "evidence_revision", "decisions", "actions"],
+      "properties": {
+        "scenario_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+        "run_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+        "execution_mode": {"enum": ["single", "restart", "queued"]},
+        "outcome": {"enum": ["completed", "skipped", "cancelled", "partial", "failed"]},
+        "evidence_revision": {"type": ["string", "null"], "maxLength": 128},
+        "decisions": {"type": "array", "maxItems": 64, "items": {"$ref": "#/$defs/scenario_decision"}},
+        "actions": {"type": "array", "maxItems": 64, "items": {"$ref": "#/$defs/scenario_action"}}
+      }
+    },
+    "scenario_decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rule_id", "outcome", "reason"],
+      "properties": {
+        "rule_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+        "outcome": {"enum": ["passed", "skipped", "failed"]},
+        "reason": {"type": ["string", "null"], "maxLength": 256}
+      }
+    },
+    "scenario_action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action_id", "outcome", "confirmed", "reason"],
+      "properties": {
+        "action_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+        "outcome": {"enum": ["completed", "skipped", "failed"]},
+        "confirmed": {"type": ["boolean", "null"]},
+        "reason": {"type": ["string", "null"], "maxLength": 256}
+      }
     }
   }
 }

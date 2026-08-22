@@ -189,6 +189,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             iter(tablet_preferences_service.tablet_pinned_entity_ids), None
         ),
         schedule_store=HomeAssistantScenarioScheduleStore(hass, entry.entry_id),
+        operation_journal=operation_journal,
     )
     await scenario_service.async_load()
     scenario_executor = ScenarioExecutor(

@@ -441,6 +441,7 @@ class ScenarioRunView(_ScenarioView):
                 **response,
             },
             operation="scenario_run",
+            persist_journal=False,
         )
         return self.json(
             response,
@@ -729,6 +730,7 @@ async def _run_scenario(
             **response,
         },
         operation="scenario_run",
+        persist_journal=False,
     )
     return view.json(
         response,

@@ -15,6 +15,11 @@ MAX_OPERATION_JOURNAL_RECORDS = 512
 OPERATION_SOURCES = frozenset({"device", "climate", "scenario", "voice"})
 _CORRELATION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _OPERATION_NAME = re.compile(r"^[a-z][a-z0-9._-]{0,63}$")
+_STABLE_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+_SCENARIO_OUTCOMES = frozenset(
+    {"completed", "skipped", "cancelled", "partial", "failed"}
+)
+_EXECUTION_MODES = frozenset({"single", "restart", "queued"})
 
 
 class OperationJournalStore(Protocol):
@@ -85,6 +90,11 @@ class OperationJournalService:
         source = _source_for_operation(operation)
         reason = receipt.get("reason")
         error_code = receipt.get("error_code")
+        scenario = _validated_scenario_trace(receipt.get("scenario"))
+        if receipt.get("scenario") is not None and scenario is None:
+            raise ValueError("normalized scenario trace is invalid")
+        if scenario is not None and (source != "scenario" or operation != "scenario_run"):
+            raise ValueError("scenario trace must belong to scenario_run")
         async with self._lock:
             self._sequence += 1
             record = {
@@ -101,6 +111,8 @@ class OperationJournalService:
                     error_code[:128] if isinstance(error_code, str) else None
                 ),
             }
+            if scenario is not None:
+                record["scenario"] = scenario
             self._records.insert(0, record)
             del self._records[MAX_OPERATION_JOURNAL_RECORDS:]
             await self._store.async_save(self._storage_payload())
@@ -187,7 +199,7 @@ def _source_for_operation(operation: str) -> str:
 
 
 def _validated_record(value: object) -> dict[str, object] | None:
-    if not isinstance(value, Mapping) or set(value) != {
+    required_keys = {
         "sequence",
         "correlation_id",
         "source",
@@ -198,7 +210,12 @@ def _validated_record(value: object) -> dict[str, object] | None:
         "occurred_at",
         "reason",
         "error_code",
-    }:
+    }
+    if (
+        not isinstance(value, Mapping)
+        or not required_keys.issubset(value)
+        or not set(value).issubset(required_keys | {"scenario"})
+    ):
         return None
     sequence = value.get("sequence")
     correlation_id = value.get("correlation_id")
@@ -207,6 +224,8 @@ def _validated_record(value: object) -> dict[str, object] | None:
     occurred_at = value.get("occurred_at")
     reason = value.get("reason")
     error_code = value.get("error_code")
+    scenario_present = "scenario" in value
+    scenario = _validated_scenario_trace(value.get("scenario"))
     if (
         type(sequence) is not int
         or sequence < 1
@@ -229,6 +248,215 @@ def _validated_record(value: object) -> dict[str, object] | None:
             (value.get("status") == "confirmed")
             != (value.get("confirmed") is True)
         )
+        or (scenario_present and scenario is None)
+        or (
+            scenario_present
+            and (source != "scenario" or operation != "scenario_run")
+        )
     ):
         return None
-    return dict(value)
+    record = dict(value)
+    if scenario is not None:
+        record["scenario"] = scenario
+    return record
+
+
+def scenario_operation_receipt(result: Mapping[str, object]) -> dict[str, object]:
+    """Redact one executor result into the durable scenario journal contract."""
+
+    run_id = result.get("run_id")
+    scenario_id = result.get("scenario_id")
+    execution_mode = result.get("execution_mode")
+    outcome = result.get("status")
+    if (
+        not isinstance(run_id, str)
+        or _CORRELATION_ID.fullmatch(run_id) is None
+        or not isinstance(scenario_id, str)
+        or _STABLE_ID.fullmatch(scenario_id) is None
+        or execution_mode not in _EXECUTION_MODES
+        or outcome not in _SCENARIO_OUTCOMES
+    ):
+        raise ValueError("scenario execution result is invalid")
+    decisions: list[dict[str, object]] = []
+    condition_results = result.get("condition_results")
+    if not isinstance(condition_results, list):
+        condition_results = []
+    for item in condition_results:
+        if not isinstance(item, Mapping):
+            continue
+        rule_id = item.get("condition_id")
+        if not isinstance(rule_id, str) or _STABLE_ID.fullmatch(rule_id) is None:
+            continue
+        decision_outcome = item.get("outcome")
+        if decision_outcome not in {"passed", "skipped", "failed"}:
+            decision_outcome = "passed" if item.get("passed") is True else "skipped"
+        reason = _safe_trace_reason(
+            item.get("reason"),
+            "condition_not_met" if decision_outcome != "passed" else None,
+        )
+        decisions.append(
+            {
+                "rule_id": rule_id,
+                "outcome": decision_outcome,
+                "reason": reason,
+            }
+        )
+    actions: list[dict[str, object]] = []
+    receipts = result.get("receipts")
+    if not isinstance(receipts, list):
+        receipts = []
+    for item in receipts:
+        if not isinstance(item, Mapping):
+            continue
+        action_id = item.get("action_id")
+        if not isinstance(action_id, str) or _STABLE_ID.fullmatch(action_id) is None:
+            continue
+        item_status = item.get("status")
+        action_outcome = (
+            "failed"
+            if item_status == "failed"
+            else "skipped"
+            if item.get("skipped") is True
+            else "completed"
+        )
+        confirmed = item.get("confirmed")
+        reason = _safe_trace_reason(
+            item.get("reason") or item.get("error"),
+            "action_failed" if action_outcome == "failed" else None,
+        )
+        actions.append(
+            {
+                "action_id": action_id,
+                "outcome": action_outcome,
+                "confirmed": confirmed if type(confirmed) is bool else None,
+                "reason": reason,
+            }
+        )
+    completed = outcome == "completed"
+    confirmed = completed and result.get("confirmed") is True
+    reason = _safe_trace_reason(
+        result.get("reason") or result.get("error"),
+        "scenario_failed" if not completed else None,
+    )
+    return {
+        "correlation_id": run_id,
+        "operation": "scenario_run",
+        "accepted": completed,
+        "confirmed": confirmed,
+        "status": "confirmed" if confirmed else "accepted" if completed else "failed",
+        "reason": reason,
+        "error_code": reason,
+        "scenario": {
+            "scenario_id": scenario_id,
+            "run_id": run_id,
+            "execution_mode": execution_mode,
+            "outcome": outcome,
+            "evidence_revision": (
+                result.get("evidence_revision")
+                if isinstance(result.get("evidence_revision"), str)
+                else None
+            ),
+            "decisions": decisions[:64],
+            "actions": actions[:64],
+        },
+    }
+
+
+def _safe_trace_reason(value: object, fallback: str | None) -> str | None:
+    """Keep stable reason codes, never raw entity names or exception text."""
+
+    if isinstance(value, str) and re.fullmatch(r"[a-z][a-z0-9_]{0,127}", value):
+        return value
+    return fallback
+
+
+def _validated_scenario_trace(value: object) -> dict[str, object] | None:
+    if value is None:
+        return None
+    required = {
+        "scenario_id",
+        "run_id",
+        "execution_mode",
+        "outcome",
+        "evidence_revision",
+        "decisions",
+        "actions",
+    }
+    if not isinstance(value, Mapping) or set(value) != required:
+        return None
+    scenario_id = value.get("scenario_id")
+    run_id = value.get("run_id")
+    evidence_revision = value.get("evidence_revision")
+    decisions = value.get("decisions")
+    actions = value.get("actions")
+    if (
+        not isinstance(scenario_id, str)
+        or _STABLE_ID.fullmatch(scenario_id) is None
+        or not isinstance(run_id, str)
+        or _CORRELATION_ID.fullmatch(run_id) is None
+        or value.get("execution_mode") not in _EXECUTION_MODES
+        or value.get("outcome") not in _SCENARIO_OUTCOMES
+        or (
+            evidence_revision is not None
+            and (not isinstance(evidence_revision, str) or len(evidence_revision) > 128)
+        )
+        or not isinstance(decisions, list)
+        or len(decisions) > 64
+        or not isinstance(actions, list)
+        or len(actions) > 64
+    ):
+        return None
+    normalized_decisions: list[dict[str, object]] = []
+    for item in decisions:
+        if not isinstance(item, Mapping) or set(item) != {
+            "rule_id",
+            "outcome",
+            "reason",
+        }:
+            return None
+        rule_id = item.get("rule_id")
+        reason = item.get("reason")
+        if (
+            not isinstance(rule_id, str)
+            or _STABLE_ID.fullmatch(rule_id) is None
+            or item.get("outcome") not in {"passed", "skipped", "failed"}
+            or (
+                reason is not None
+                and (not isinstance(reason, str) or len(reason) > 256)
+            )
+        ):
+            return None
+        normalized_decisions.append(dict(item))
+    normalized_actions: list[dict[str, object]] = []
+    for item in actions:
+        if not isinstance(item, Mapping) or set(item) != {
+            "action_id",
+            "outcome",
+            "confirmed",
+            "reason",
+        }:
+            return None
+        action_id = item.get("action_id")
+        confirmed = item.get("confirmed")
+        reason = item.get("reason")
+        if (
+            not isinstance(action_id, str)
+            or _STABLE_ID.fullmatch(action_id) is None
+            or item.get("outcome") not in {"completed", "skipped", "failed"}
+            or (confirmed is not None and type(confirmed) is not bool)
+            or (
+                reason is not None
+                and (not isinstance(reason, str) or len(reason) > 256)
+            )
+        ):
+            return None
+        normalized_actions.append(dict(item))
+    return {
+        "scenario_id": scenario_id,
+        "run_id": run_id,
+        "execution_mode": value.get("execution_mode"),
+        "outcome": value.get("outcome"),
+        "evidence_revision": evidence_revision,
+        "decisions": normalized_decisions,
+        "actions": normalized_actions,
+    }

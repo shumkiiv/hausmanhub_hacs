@@ -311,6 +311,7 @@ def publish_command_receipt(
     receipt: dict[str, object],
     *,
     operation: str,
+    persist_journal: bool = True,
 ) -> dict[str, object] | None:
     """Publish one normalized command outcome without exposing HA entity ids."""
 
@@ -340,7 +341,11 @@ def publish_command_receipt(
 
     journal = hass.data.get(DOMAIN, {}).get(DATA_OPERATION_JOURNAL)
     schedule = getattr(hass, "async_create_task", None)
-    if isinstance(journal, OperationJournalService) and callable(schedule):
+    if (
+        persist_journal
+        and isinstance(journal, OperationJournalService)
+        and callable(schedule)
+    ):
         schedule(journal.async_append(normalized))
     runtime = _current_runtime(hass)
     if runtime is None:

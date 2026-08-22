@@ -434,10 +434,23 @@ def _validate_no_cycles(
     if existing_scenario_id is None:
         return
 
-    def visit(scenario_id: str, path: str, visiting: set[str]) -> None:
+    depth_limit = definition.safety_policy.nested_depth_limit
+
+    def visit(
+        scenario_id: str,
+        path: str,
+        visiting: set[str],
+        depth: int,
+    ) -> None:
         if scenario_id in visiting:
             raise ScenarioDefinitionViolation(
                 "recursive scenario call detected",
+                path=path,
+                status=HTTPStatus.CONFLICT,
+            )
+        if depth > depth_limit:
+            raise ScenarioDefinitionViolation(
+                "scenario call depth limit exceeded",
                 path=path,
                 status=HTTPStatus.CONFLICT,
             )
@@ -451,6 +464,7 @@ def _validate_no_cycles(
                     action.scenario_id,
                     f"definition.actions[{index}].scenarioId",
                     visiting,
+                    depth + 1,
                 )
 
     for index, action in enumerate(definition.actions):
@@ -459,6 +473,7 @@ def _validate_no_cycles(
                 action.scenario_id,
                 f"definition.actions[{index}].scenarioId",
                 {existing_scenario_id},
+                1,
             )
 
 

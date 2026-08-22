@@ -14,6 +14,7 @@ from .scenario_schedule import (
     prune_skip_keys,
     skip_key_for,
 )
+from .operation_journal import scenario_operation_receipt
 from .system_scenario_seeds import async_seed_system_scenarios
 from .scenarios import (
     ScenarioCatalog,
@@ -110,6 +111,7 @@ class ScenarioService:
         now_provider: Callable[[], datetime] | None = None,
         schedule_store: object | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        operation_journal: object | None = None,
     ):
         self._hass = hass
         self._store = store
@@ -122,6 +124,7 @@ class ScenarioService:
         self._now_provider = now_provider
         self._schedule_store = schedule_store
         self._sleep = sleep
+        self._operation_journal = operation_journal
         self._skipped_runs: set[str] = set()
         self._intercom_release_cancel: Callable[[], None] | None = None
         self._intercom_release_entity: str | None = None
@@ -130,6 +133,7 @@ class ScenarioService:
         self._run_lock = asyncio.Lock()
         self._run_tasks: dict[str, asyncio.Task[dict[str, Any]]] = {}
         self._queue_locks: dict[str, asyncio.Lock] = {}
+        self._queue_waiters: dict[str, int] = {}
         self._catalog_refresh_lock = asyncio.Lock()
         self._catalog_warmup_task: asyncio.Task[None] | None = None
         # Внутреннее состояние прогрева; публикация в dashboard-снапшот -
@@ -197,7 +201,21 @@ class ScenarioService:
 
     def state_trigger_items(
         self,
-    ) -> tuple[tuple[str, str, str, str, ScenarioComparison, object | None], ...]:
+    ) -> tuple[
+        tuple[
+            str,
+            str,
+            str,
+            str,
+            ScenarioComparison,
+            object | None,
+            int,
+            int,
+            int,
+            bool,
+        ],
+        ...,
+    ]:
         """Return enabled device-state triggers resolved to HA entity ids.
 
         The event adapter deliberately receives only this compact, immutable
@@ -206,7 +224,20 @@ class ScenarioService:
         """
 
         registry = self._ensure_loaded()
-        items: list[tuple[str, str, str, str, ScenarioComparison, object | None]] = []
+        items: list[
+            tuple[
+                str,
+                str,
+                str,
+                str,
+                ScenarioComparison,
+                object | None,
+                int,
+                int,
+                int,
+                bool,
+            ]
+        ] = []
         for scenario in registry.scenarios:
             if not scenario.enabled:
                 continue
@@ -228,6 +259,10 @@ class ScenarioService:
                         trigger.property,
                         trigger.comparison,
                         trigger.value,
+                        trigger.for_seconds,
+                        trigger.debounce_seconds,
+                        trigger.cooldown_seconds,
+                        trigger.ignore_recovery,
                     )
                 )
         return tuple(items)
@@ -729,29 +764,73 @@ class ScenarioService:
         run_id = correlation_id or self._executor.new_run_id()
 
         async def execute() -> dict[str, Any]:
-            return await self._executor.async_execute(
+            result = await self._executor.async_execute(
                 scenario.definition,
                 run_id,
                 scenario_id=scenario.id,
                 visited_scenarios=visited,
             )
+            result.setdefault("scenario_id", scenario.id)
+            result.setdefault("run_id", run_id)
+            result.setdefault(
+                "execution_mode", scenario.definition.execution_mode.value
+            )
+            result.setdefault("evidence_revision", None)
+            result.setdefault("accepted", result.get("status") == "completed")
+            result.setdefault("confirmed", False)
+            await self._async_record_scenario_result(result)
+            return result
 
         if scenario.definition.execution_mode is ScenarioExecutionMode.QUEUED:
             queue_lock = self._queue_locks.setdefault(scenario.id, asyncio.Lock())
-            async with queue_lock:
-                return await execute()
+            queued = False
+            async with self._run_lock:
+                if queue_lock.locked():
+                    waiting = self._queue_waiters.get(scenario.id, 0)
+                    if waiting >= scenario.definition.queue_limit:
+                        result = {
+                            "scenario_id": scenario.id,
+                            "run_id": run_id,
+                            "execution_mode": scenario.definition.execution_mode.value,
+                            "status": "skipped",
+                            "reason": "scenario_queue_full",
+                            "receipts": [],
+                            "accepted": False,
+                            "confirmed": False,
+                        }
+                        await self._async_record_scenario_result(result)
+                        return result
+                    self._queue_waiters[scenario.id] = waiting + 1
+                    queued = True
+            try:
+                async with queue_lock:
+                    return await execute()
+            finally:
+                if queued:
+                    async with self._run_lock:
+                        waiting = self._queue_waiters.get(scenario.id, 0) - 1
+                        if waiting > 0:
+                            self._queue_waiters[scenario.id] = waiting
+                        else:
+                            self._queue_waiters.pop(scenario.id, None)
 
         async with self._run_lock:
             previous = self._run_tasks.get(scenario.id)
             if previous is not None and not previous.done():
                 if scenario.definition.execution_mode is ScenarioExecutionMode.SINGLE:
-                    return {
+                    result = {
                         "scenario_id": scenario.id,
                         "run_id": run_id,
+                        "execution_mode": scenario.definition.execution_mode.value,
                         "status": "skipped",
                         "reason": "scenario_already_running",
+                        "evidence_revision": None,
                         "receipts": [],
+                        "accepted": False,
+                        "confirmed": False,
                     }
+                    await self._async_record_scenario_result(result)
+                    return result
                 previous.cancel()
             task = asyncio.create_task(execute())
             self._run_tasks[scenario.id] = task
@@ -763,17 +842,34 @@ class ScenarioService:
                 replaced = self._run_tasks.get(scenario.id) is not task
             if not replaced:
                 raise
-            return {
+            result = {
                 "scenario_id": scenario.id,
                 "run_id": run_id,
+                "execution_mode": scenario.definition.execution_mode.value,
                 "status": "cancelled",
                 "reason": "restarted_by_new_trigger",
+                "evidence_revision": None,
                 "receipts": [],
+                "accepted": False,
+                "confirmed": False,
             }
+            await self._async_record_scenario_result(result)
+            return result
         finally:
             async with self._run_lock:
                 if self._run_tasks.get(scenario.id) is task:
                     self._run_tasks.pop(scenario.id, None)
+
+    async def _async_record_scenario_result(self, result: dict[str, Any]) -> None:
+        """Persist every manual, scheduled and nested run without raw HA ids."""
+
+        append = getattr(self._operation_journal, "async_append", None)
+        if not callable(append):
+            return
+        try:
+            await append(scenario_operation_receipt(result))
+        except Exception:  # noqa: BLE001
+            _LOGGER.warning("scenario run journal append failed", exc_info=True)
 
     async def async_execute_device_action(
         self,
