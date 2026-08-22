@@ -1,8 +1,25 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-22 (HACS 1.52.146, contracts consumer sync развёрнут).
+Last updated: 2026-08-22 (HACS 1.52.147, плотность интерфейса развёрнута).
 
 ## Current work
+
+- 2026-08-22 (Codex): HACS `1.52.147` с финальной плотностью главной и
+  карточек устройств опубликован и развёрнут. Главная синхронизирует высоту
+  меню, центральной ленты и правой активности, вместе раскрывает энергию и
+  освещение, увеличивает Hero до 280 px и прокручивает ближайшие события
+  внутри компактной панели. Физические карточки устройств уменьшены до
+  высоты 150 px, изображения 56 px и заголовка 16 px. Feature commits:
+  `305c83c`, `ddd6d6e`, `5a2387f`; release commit/tag `aa4ef59`,
+  `v1.52.147`. Полный gate: 1609 passed, 4 skipped; Actions `32576732490`
+  успешен. Backup `aab91cba` подтверждён в `hassio.local` и
+  `hassio.KeeneticSSD`, по 921815040 байт, обе копии защищены. Два config
+  check и один restart успешны. Production installed/latest равны
+  `v1.52.147`, config entry loaded, Dashboard и 11 ближайших событий
+  отвечают HTTP 200. Journal остался на sequence 998, climate guard сохранил
+  monitor revision 1 и не вооружён. Все 88 frontend assets совпадают с
+  release, ошибок Hausman в system log нет. Android, backend, API,
+  contracts и storage не менялись. Аудит: `docs/RELEASE_AUDIT_1.52.147.md`.
 
 - 2026-08-22 (Codex): технический HACS `1.52.146` опубликован и развёрнут.
   Pin обновлён
@@ -3903,5 +3920,5 @@ Engineering and review rules are in
 
 - Obsidian/context index: `LLM_WIKI/00_Index.md`.
 - Latest generated context: `LLM_WIKI/Context.md`.
-- Last sync: 2026-08-22T11:54:08+03:00.
+- Last sync: 2026-08-22T17:08:47+03:00.
 <!-- llm-wiki-sync:end -->

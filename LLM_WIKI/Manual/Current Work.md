@@ -1,5 +1,25 @@
 # Current Work
 
+## 2026-08-22: HACS 1.52.147, плотность главной и карточек устройств
+
+- В релиз вошли три frontend-правки. Главная заканчивает меню, центральную
+  ленту и правую активность на одной линии. Энергия и освещение раскрываются
+  вместе и заполняют доступную высоту без пустого участка. Hero увеличен до
+  280 px, ближайшие события прокручиваются внутри компактной панели, рамка
+  активной комнаты не обрезается. Карточки устройств уменьшены до 150 px.
+- Feature commits `305c83c`, `ddd6d6e`, `5a2387f`; release commit/tag
+  `aa4ef59`, `v1.52.147`. GitHub Release опубликован без assets. Local gate:
+  1609 passed, 4 skipped. Actions `32576732490` завершён успешно.
+- Full backup `aab91cba` хранится в `hassio.local` и
+  `hassio.KeeneticSSD`, размер каждой защищённой копии 921815040 байт.
+  Выполнены два config checks и один restart.
+- После deploy installed/latest `v1.52.147`, config entry loaded. Dashboard
+  и 11 ближайших событий отвечают HTTP 200. Journal остался на sequence 998,
+  climate guard сохранил monitor revision 1 и не вооружён. Все 88 frontend
+  assets совпадают с release, ошибок Hausman в system log нет.
+- Android, backend, API, contracts и storage не менялись. Физические команды
+  не отправлялись. Откат: backup `aab91cba`.
+
 ## 2026-08-22: единая высота колонок главной HACS
 
 - Изменён только HACS frontend на базе `1.52.144`. Левая навигация,
