@@ -1,8 +1,28 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-22 (HACS 1.52.138 с режимами карточек главной опубликован и развёрнут в production).
+Last updated: 2026-08-22 (HACS 1.52.141, Node-RED cutover переведён в безопасное shadow-наблюдение).
 
 ## Current work
+
+- 2026-08-22 (Codex): HACS `v1.52.139`, корректировки `v1.52.140` и
+  `v1.52.141` опубликованы и развёрнуты в production поверх UI baseline
+  `1.52.138`. Добавлен fail-safe `commandMode=shadow`, contracts pin
+  `0.48.1`, redacted journal marker и безопасный fallback уведомлений.
+  Восемь веток ванной и расширенный away из 24 действий включены только в
+  shadow; старые live-дубли ванной, away и системных сумеречных штор
+  выключены. Node-RED flows не менялись, SHA-256 остался
+  `7e2d3830ea4712531e0898a78c6c9bc53c42f80ff0b415a1831f03018a36a316`.
+  Full backup `fe727f76` хранится в `hassio.local` и `hassio.KeeneticSSD`,
+  по 914862080 байт, включает Home Assistant, базу, 10 add-ons и
+  `ssl/share/media`; agent errors отсутствуют. Финальный staged gate:
+  1574 tests, 4 skipped; Actions `32561158937` успешен. Production
+  installed/latest `v1.52.141`, config entry loaded, Dashboard, upcoming,
+  scenarios, journal и panel отвечают HTTP 200, journal schema valid, 27
+  frontend assets совпадают. Stale target теперь даёт HTTP 400 вместо 500.
+  Контрольный away shadow-run не вызвал физических сервисов и остановился
+  fail-safe на `power_source_unavailable`; journal сохранил
+  `command_mode=shadow`, confirmed false. До 7-14 суток сравнения Node-RED
+  остаётся владельцем физических веток.
 
 - 2026-08-22 (Codex): HACS `v1.52.138` опубликован и развёрнут в production.
   Главная получила независимые компактный и развёрнутый режимы энергии и
@@ -3799,5 +3819,5 @@ Engineering and review rules are in
 
 - Obsidian/context index: `LLM_WIKI/00_Index.md`.
 - Latest generated context: `LLM_WIKI/Context.md`.
-- Last sync: 2026-07-27T20:17:37+03:00.
+- Last sync: 2026-08-22T11:10:26+03:00.
 <!-- llm-wiki-sync:end -->

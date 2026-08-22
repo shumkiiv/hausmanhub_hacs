@@ -1,5 +1,34 @@
 # Current Work
 
+## 2026-08-22: HACS 1.52.141, shadow-наблюдение перед Node-RED cutover
+
+- Релизная цепочка: `v1.52.139` добавил fail-safe shadow runtime,
+  `v1.52.140` научил безопасно подтверждать `turn_off` при уже выключенном
+  источнике без HA-вызова, `v1.52.141` заменил HTTP 500 для stale target на
+  структурированный HTTP 400. Contracts pin: `0.48.1` (`2f0f919`).
+- UI baseline `1.52.138` сохранён: release-diff frontend содержит только
+  cache-bust, 27 production assets совпадают по SHA-256.
+- В production включены девять shadow-сценариев: восемь веток ванной и away
+  из 24 действий. Старые live-дубли ванной, away и системных сумеречных штор
+  выключены. Node-RED продолжает выполнять физические ветки, его flows.json
+  не изменён и совпадает с backup по SHA-256
+  `7e2d3830ea4712531e0898a78c6c9bc53c42f80ff0b415a1831f03018a36a316`.
+- Контрольный away shadow-run не отправил физических команд. В journal
+  записаны `command_mode=shadow`, confirmed false; запуск остановился partial
+  на `power_source_unavailable`, что является ожидаемым fail-safe сигналом
+  для периода сравнения.
+- Full backup `fe727f76`: по 914862080 байт в `hassio.local` и
+  `hassio.KeeneticSSD`, Home Assistant, база, 10 add-ons,
+  `ssl/share/media`, agent errors отсутствуют.
+- Финальный local gate: 1574 tests, 4 skipped. Actions `32561158937`
+  успешен. Installed/latest `v1.52.141`, config entry loaded, API и panel
+  HTTP 200, operation journal проходит JSON Schema, unavailable Hausman
+  entities нет. Ошибок Hausman в system log нет; сторонние MQTT/Xiaomi
+  ошибки и известное climate WARNING не вызваны релизом.
+- Следующий шаг: собирать journal и сравнивать его с Node-RED 7-14 суток.
+  Физическое владение ветками не переключать до успешного soak и проверки
+  fault/recovery.
+
 ## 2026-08-22: HACS 1.52.138 опубликован и развёрнут
 
 - В release вошли режимы «Показаний энергии» и «Освещения», полноразмерная
