@@ -46,6 +46,8 @@ class HausmanHubSettingsTest(unittest.TestCase):
                 "energy_aggregation",
                 "energy_use_all_devices",
                 "energy_selected_device_ids",
+                "energy_anomaly_power_threshold_w",
+                "energy_anomaly_sustain_minutes",
             },
             set(payload),
         )

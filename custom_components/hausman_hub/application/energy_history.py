@@ -4,12 +4,46 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 ENERGY_HISTORY_MAX_WINDOW_DAYS = 31
 ENERGY_HISTORY_MAX_SERIES = 128
 ENERGY_HISTORY_MAX_POINTS_PER_SERIES = 8928
+ENERGY_HISTORY_WINDOWS = frozenset({"day", "week", "month"})
+
+
+def resolve_energy_history_window(
+    window: str,
+    timezone_name: str,
+    *,
+    now: datetime,
+) -> tuple[datetime, datetime]:
+    """Resolve one local calendar window as a DST-aware half-open interval."""
+
+    if window not in ENERGY_HISTORY_WINDOWS or not isinstance(timezone_name, str):
+        raise ValueError("energy history calendar window is invalid")
+    try:
+        zone = ZoneInfo(timezone_name)
+    except (ZoneInfoNotFoundError, ValueError) as error:
+        raise ValueError("energy history timezone is invalid") from error
+    aware_now = now if now.tzinfo is not None else now.replace(tzinfo=timezone.utc)
+    local_now = aware_now.astimezone(zone)
+    start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if window == "week":
+        start -= timedelta(days=start.weekday())
+        end = start + timedelta(days=7)
+    elif window == "month":
+        start = start.replace(day=1)
+        end = (
+            start.replace(year=start.year + 1, month=1)
+            if start.month == 12
+            else start.replace(month=start.month + 1)
+        )
+    else:
+        end = start + timedelta(days=1)
+    return start, end
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +146,8 @@ def build_energy_history(
     interval: str,
     descriptors: Sequence[EnergySeriesDescriptor],
     rows_by_entity: Mapping[str, object],
+    window: str = "explicit",
+    timezone_name: str | None = None,
 ) -> dict[str, object]:
     """Build one bounded response without exposing recorder/entity identifiers."""
 
@@ -140,6 +176,8 @@ def build_energy_history(
         "from": start.isoformat(),
         "to": end.isoformat(),
         "interval": interval,
+        "window": window,
+        **({"timezone": timezone_name} if timezone_name is not None else {}),
         "page": {
             "strategy": "time_window",
             "order": "timestamp_asc",

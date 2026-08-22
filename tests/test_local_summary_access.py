@@ -720,7 +720,11 @@ class LocalSummaryAccessTest(unittest.TestCase):
             view.post(FakeJsonRequest("127.0.0.1", admin, path, payload))
         )
         self.assertEqual(200, saved.status)
-        self.assertEqual(payload, saved.payload)
+        self.assertEqual(
+            payload
+            | {"anomalyPowerThresholdW": None, "anomalySustainMinutes": None},
+            saved.payload,
+        )
         preferences = self.hass.data["hausman_hub"]["tablet_preferences_service"]
         self.assertEqual(
             ["device_0123456789abcdef"],
@@ -736,7 +740,11 @@ class LocalSummaryAccessTest(unittest.TestCase):
             )
         )
         self.assertEqual(1, public.payload["revision"])
-        self.assertEqual(payload, public.payload["settings"])
+        self.assertEqual(
+            payload
+            | {"anomalyPowerThresholdW": None, "anomalySustainMinutes": None},
+            public.payload["settings"],
+        )
         for remote, user in (
             ("203.0.113.7", admin),
             ("127.0.0.1", reader_user("system-read-only")),
@@ -950,6 +958,106 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 )
             )
             self.assertEqual(source_id, submitted.payload["history"][0]["sourceDeviceId"])
+        finally:
+            globals_["async_dashboard_snapshot"] = original
+
+    def test_energy_meters_api_keeps_named_meters_independent(self) -> None:
+        path = "/api/hausman_hub/v1/energy/meters"
+        view = next(item for item in self.hass.http.views if item.url == path)
+        source_id = "device_0123456789abcdef"
+
+        async def dashboard_snapshot(*_args: object) -> dict[str, object]:
+            return {
+                "energy": {
+                    "totalKwh": 366.65,
+                    "sources": [
+                        {"id": source_id, "name": "Гараж", "totalKwh": 51.03},
+                    ],
+                }
+            }
+
+        globals_ = view.get.__func__.__globals__
+        original = globals_["async_dashboard_snapshot"]
+        globals_["async_dashboard_snapshot"] = dashboard_snapshot
+        tablet = reader_user("system-users")
+        try:
+            initial = asyncio.run(view.get(FakeRequest("127.0.0.1", tablet, path=path)))
+            self.assertEqual(200, initial.status)
+            self.assertEqual(["meter_main"], [item["meterId"] for item in initial.payload["meters"]])
+
+            configured = asyncio.run(
+                view.post(
+                    FakeJsonRequest(
+                        "127.0.0.1",
+                        tablet,
+                        path,
+                        {
+                            "expectedRevision": 0,
+                            "action": "upsert",
+                            "meterId": "meter_garage",
+                            "name": "Гараж",
+                            "settings": {
+                                "enabled": True,
+                                "submissionDayOfMonth": 25,
+                                "reminderDaysBefore": 3,
+                                "sourceDeviceIds": [source_id],
+                            },
+                        },
+                    )
+                )
+            )
+            self.assertEqual(200, configured.status)
+            self.assertEqual(
+                ["meter_main", "meter_garage"],
+                [item["meterId"] for item in configured.payload["meters"]],
+            )
+            garage = configured.payload["meters"][1]
+            self.assertEqual(source_id, garage["source"]["deviceId"])
+            self.assertEqual(51.03, garage["source"]["currentTotalKwh"])
+
+            submitted = asyncio.run(
+                view.post(
+                    FakeJsonRequest(
+                        "127.0.0.1",
+                        tablet,
+                        path,
+                        {
+                            "expectedRevision": 1,
+                            "action": "submit",
+                            "meterId": "meter_garage",
+                            "readingKwh": 1200.5,
+                        },
+                    )
+                )
+            )
+            self.assertEqual(200, submitted.status)
+            self.assertEqual(1200.5, submitted.payload["meters"][1]["reading"]["currentKwh"])
+            stale = asyncio.run(
+                view.post(
+                    FakeJsonRequest(
+                        "127.0.0.1",
+                        tablet,
+                        path,
+                        {"expectedRevision": 1, "action": "delete", "meterId": "meter_garage"},
+                    )
+                )
+            )
+            self.assertEqual(409, stale.status)
+            primary = asyncio.run(
+                view.post(
+                    FakeJsonRequest(
+                        "127.0.0.1",
+                        tablet,
+                        path,
+                        {"expectedRevision": 2, "action": "delete", "meterId": "meter_main"},
+                    )
+                )
+            )
+            self.assertEqual(400, primary.status)
+            self.assertEqual(
+                403,
+                asyncio.run(view.get(FakeRequest("203.0.113.7", tablet, path=path))).status,
+            )
         finally:
             globals_["async_dashboard_snapshot"] = original
 
@@ -1253,6 +1361,33 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 }
             )
             self.assertEqual(400, asyncio.run(view.get(oversized_window)).status)
+
+            calendar_window = FakeRequest(
+                "127.0.0.1",
+                reader_user("system-users"),
+                path=path,
+                query_string="window=day",
+            )
+            calendar_window.query = Query(
+                {"window": "day", "timezone": "Asia/Omsk", "interval": "1h"}
+            )
+            self.assertEqual(200, asyncio.run(view.get(calendar_window)).status)
+
+            mixed_window = FakeRequest(
+                "127.0.0.1",
+                reader_user("system-users"),
+                path=path,
+                query_string="window=day",
+            )
+            mixed_window.query = Query(
+                {
+                    "window": "day",
+                    "timezone": "Asia/Omsk",
+                    "from": "2026-07-30T00:00:00+00:00",
+                    "interval": "1h",
+                }
+            )
+            self.assertEqual(400, asyncio.run(view.get(mixed_window)).status)
         finally:
             method_globals["async_dashboard_snapshot"] = original_dashboard
             method_globals["async_energy_history"] = original_history
@@ -2827,7 +2962,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.148", panel.payload["integration_version"])
+        self.assertEqual("1.52.149", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
@@ -3733,7 +3868,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertFalse(hasattr(self.view, method))
 
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
-        self.assertEqual(80, len(self.hass.http.views))
+        self.assertEqual(81, len(self.hass.http.views))
         self.assertEqual(
             1,
             sum(
@@ -4304,7 +4439,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             [(closed_entry, ("sensor", "switch"))],
             closed_hass.config_entries.forwarded,
         )
-        self.assertEqual(79, len(closed_hass.http.views))
+        self.assertEqual(80, len(closed_hass.http.views))
         self.assertEqual(
             {
                 "/api/hausman_hub/v1/capabilities",
@@ -4315,6 +4450,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 "/api/hausman_hub/v1/device-features",
                 "/api/hausman_hub/v1/energy/history",
                 "/api/hausman_hub/v1/energy/meter",
+                "/api/hausman_hub/v1/energy/meters",
                 "/api/hausman_hub/v1/energy-settings",
                 "/api/hausman_hub/v1/device-discovery",
                 "/api/hausman_hub/v1/tablet-profile",

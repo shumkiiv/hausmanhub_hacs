@@ -91,6 +91,8 @@ def energy_settings_from_legacy(settings: HausmanHubSettings) -> dict[str, objec
         "aggregation": settings.energy_aggregation,
         "useAllDevices": settings.energy_use_all_devices,
         "selectedDeviceIds": list(settings.energy_selected_device_ids),
+        "anomalyPowerThresholdW": settings.energy_anomaly_power_threshold_w,
+        "anomalySustainMinutes": settings.energy_anomaly_sustain_minutes,
     }
 
 
@@ -102,6 +104,8 @@ def energy_as_hub_settings(settings: dict[str, object]) -> HausmanHubSettings:
         energy_aggregation=validated["aggregation"],  # type: ignore[arg-type]
         energy_use_all_devices=validated["useAllDevices"],  # type: ignore[arg-type]
         energy_selected_device_ids=tuple(validated["selectedDeviceIds"]),
+        energy_anomaly_power_threshold_w=validated["anomalyPowerThresholdW"],  # type: ignore[arg-type]
+        energy_anomaly_sustain_minutes=validated["anomalySustainMinutes"],  # type: ignore[arg-type]
     )
 
 
@@ -181,12 +185,16 @@ def validate_tablet_settings(value: object) -> dict[str, object]:
 
 
 def validate_energy_settings(value: object) -> dict[str, object]:
-    if not isinstance(value, dict) or set(value) != {
+    required = {
         "displayUnits", "showVoltage", "aggregation", "useAllDevices",
         "selectedDeviceIds",
-    }:
+    }
+    allowed = required | {"anomalyPowerThresholdW", "anomalySustainMinutes"}
+    if not isinstance(value, dict) or not required.issubset(value) or not set(value) <= allowed:
         raise TabletPreferencesViolation("energy settings fields are invalid")
     result = deepcopy(value)
+    result.setdefault("anomalyPowerThresholdW", None)
+    result.setdefault("anomalySustainMinutes", None)
     if result["displayUnits"] not in _ENERGY_UNITS:
         raise TabletPreferencesViolation("energy display units are invalid")
     _boolean(result["showVoltage"], "energy voltage")
@@ -194,6 +202,18 @@ def validate_energy_settings(value: object) -> dict[str, object]:
         raise TabletPreferencesViolation("energy aggregation is invalid")
     _boolean(result["useAllDevices"], "energy all devices")
     _string_list(result["selectedDeviceIds"], 128, _DEVICE_ID, "energy devices")
+    threshold = result["anomalyPowerThresholdW"]
+    sustain = result["anomalySustainMinutes"]
+    if (threshold is None) != (sustain is None):
+        raise TabletPreferencesViolation("energy anomaly settings must be paired")
+    if threshold is not None and (
+        isinstance(threshold, bool)
+        or not isinstance(threshold, (int, float))
+        or not 100 <= float(threshold) <= 1_000_000
+    ):
+        raise TabletPreferencesViolation("energy anomaly threshold is invalid")
+    if sustain is not None:
+        _integer(sustain, 1, 1440, "energy anomaly window")
     return result
 
 
@@ -267,6 +287,13 @@ class TabletPreferencesService:
                 else self._timestamp()
             )
             loaded["rooms"] = _room_document(0, timestamp, [])
+        if isinstance(loaded, dict):
+            loaded = deepcopy(loaded)
+            energy = loaded.get("energy")
+            settings = energy.get("settings") if isinstance(energy, dict) else None
+            if isinstance(settings, dict):
+                settings.setdefault("anomalyPowerThresholdW", None)
+                settings.setdefault("anomalySustainMinutes", None)
         self._state = _validate_state(loaded)
 
     @property

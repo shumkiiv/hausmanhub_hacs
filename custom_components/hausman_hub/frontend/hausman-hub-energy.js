@@ -1,8 +1,8 @@
-import { renderEnergyHistoryChart } from "./hausman-hub-energy-chart.js?v=1.52.148";
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.148";
-import { loadEnergyMeter, meterConfigured, meterNumber, renderEnergyMeterCard } from "./hausman-hub-energy-meter.js?v=1.52.148";
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.148";
-import { mergeEnergyHistoryResponses, splitEnergyWindows } from "./hausman-hub-pagination.js?v=1.52.148";
+import { renderEnergyHistoryChart } from "./hausman-hub-energy-chart.js?v=1.52.149";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.149";
+import { loadEnergyMeter, meterConfigured, meterNumber, renderEnergyAnomalyFields, renderEnergyMeterCard } from "./hausman-hub-energy-meter.js?v=1.52.149";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.149";
+import { mergeEnergyHistoryResponses, splitEnergyWindows } from "./hausman-hub-pagination.js?v=1.52.149";
 
 const number = (value, digits = 1) => Number.isFinite(Number(value))
   ? new Intl.NumberFormat("ru-RU", { maximumFractionDigits: digits }).format(Number(value))
@@ -449,6 +449,8 @@ function compactEnergySettings(panel, container, energy, deps) {
     aggregation: energy.settings.aggregation || "combined",
     useAllDevices: energy.settings.useAllDevices !== false,
     selectedDeviceIds: [...(energy.selectedSourceIds || [])],
+    anomalyPowerThresholdW: energy.settings.anomalyPowerThresholdW ?? null,
+    anomalySustainMinutes: energy.settings.anomalySustainMinutes ?? null,
   };
   panel._energyDraft = draft;
   const card = el("section", "card energy-compact-settings");
@@ -464,6 +466,12 @@ function compactEnergySettings(panel, container, energy, deps) {
     units.appendChild(button);
   });
   card.appendChild(units);
+  let save;
+  const refreshSaveState = () => {
+    const anomalyIncomplete = (draft.anomalyPowerThresholdW === null) !== (draft.anomalySustainMinutes === null);
+    save.disabled = panel._energySettingsSaving || anomalyIncomplete
+      || (!draft.useAllDevices && !draft.selectedDeviceIds.length);
+  };
   [["Напряжение", draft.showVoltage ? "Показывать" : "Скрывать", () => { draft.showVoltage = !draft.showVoltage; }],
     ["Источники", draft.aggregation === "combined" ? "Вместе" : "Раздельно", () => { draft.aggregation = draft.aggregation === "combined" ? "separate" : "combined"; }],
     ["Все устройства", draft.useAllDevices ? "Выбраны" : "Выборочно", () => { draft.useAllDevices = !draft.useAllDevices; }],
@@ -475,6 +483,8 @@ function compactEnergySettings(panel, container, energy, deps) {
     row.addEventListener("click", () => { update(); panel._renderEnergySection(container); });
     card.appendChild(row);
   });
+  card.appendChild(el("span", "energy-settings-label", "Аномальное потребление"));
+  card.appendChild(renderEnergyAnomalyFields(draft, deps, refreshSaveState));
   card.appendChild(el("span", "energy-settings-label", "Источники на карточке"));
   const sources = el("div", "energy-compact-sources");
   energy.sources.slice(0, 5).forEach((source) => {
@@ -488,7 +498,7 @@ function compactEnergySettings(panel, container, energy, deps) {
       const selected = new Set(draft.selectedDeviceIds);
       if (checkbox.checked) selected.add(source.id); else selected.delete(source.id);
       draft.selectedDeviceIds = [...selected];
-      save.disabled = panel._energySettingsSaving || (!draft.useAllDevices && !draft.selectedDeviceIds.length);
+      refreshSaveState();
     });
     label.appendChild(checkbox);
     const copy = el("span");
@@ -498,9 +508,9 @@ function compactEnergySettings(panel, container, energy, deps) {
     sources.appendChild(label);
   });
   card.appendChild(sources);
-  const save = el("button", "energy-settings-save", "Сохранить настройки");
+  save = el("button", "energy-settings-save", "Сохранить настройки");
   save.type = "button";
-  save.disabled = panel._energySettingsSaving || (!draft.useAllDevices && !draft.selectedDeviceIds.length);
+  refreshSaveState();
   save.addEventListener("click", () => panel._saveEnergySettings());
   card.appendChild(save);
   return card;
@@ -609,6 +619,10 @@ export function renderEnergySection(panel, container, deps) {
       { label: "Сегодня", value: sourceMetric(energy, "todayKwh", "кВт·ч", 2) },
     ],
   }, deps));
+  if (energy.anomaly && energy.anomaly.active) {
+    container.appendChild(el("p", "energy-meter-warning",
+      `Потребление выше ${number(energy.anomaly.thresholdW)} Вт дольше ${energy.anomaly.sustainMinutes} минут.`));
+  }
   container.appendChild(renderMeterReadingStrip(panel, energy, deps));
   const selected = selectedSources(energy);
   container.appendChild(renderEnergyHistory(panel, energy, selected, deps));
@@ -633,14 +647,21 @@ export async function loadEnergyHistory(panel) {
     const range = ranges[period] || ranges.day;
     const end = new Date();
     const start = new Date(end.getTime() - range.days * 24 * 60 * 60 * 1000);
-    const windows = splitEnergyWindows(start.getTime(), end.getTime());
+    const calendarWindow = ["day", "week", "month"].includes(period);
+    const windows = calendarWindow ? [null] : splitEnergyWindows(start.getTime(), end.getTime());
     const responses = [];
     for (const window of windows) {
-      const params = new URLSearchParams({
-        from: new Date(window.fromMs).toISOString(),
-        to: new Date(window.toMs).toISOString(),
-        interval: range.interval,
-      });
+      const params = calendarWindow
+        ? new URLSearchParams({
+          window: period,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+          interval: range.interval,
+        })
+        : new URLSearchParams({
+          from: new Date(window.fromMs).toISOString(),
+          to: new Date(window.toMs).toISOString(),
+          interval: range.interval,
+        });
       energy.sources.forEach((source) => params.append("deviceId", source.deviceId));
       responses.push(await panel._hass.callApi(
         "GET", `hausman_hub/v1/energy/history?${params.toString()}`,

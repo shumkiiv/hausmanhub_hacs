@@ -53,6 +53,29 @@ export function meterReminderText(meter) {
   return "";
 }
 
+export function renderEnergyAnomalyFields(draft, deps, onInput) {
+  const { el } = deps;
+  const fields = el("div", "energy-meter-form-grid");
+  [["Порог, Вт", "anomalyPowerThresholdW", 100, 1000000],
+    ["Устойчивое окно, минут", "anomalySustainMinutes", 1, 1440]].forEach(([label, key, minimum, maximum]) => {
+    const field = el("label", "energy-meter-field");
+    field.appendChild(el("span", null, label));
+    const input = el("input", "energy-meter-input");
+    input.type = "number";
+    input.min = String(minimum);
+    input.max = String(maximum);
+    input.value = draft[key] ?? "";
+    input.addEventListener("input", () => {
+      const value = input.value.trim();
+      draft[key] = value === "" ? null : Number(value);
+      onInput();
+    });
+    field.appendChild(input);
+    fields.appendChild(field);
+  });
+  return fields;
+}
+
 function meterDraft(panel, meter) {
   if (!panel._energyMeterDraft) {
     panel._energyMeterDraft = {
@@ -123,6 +146,22 @@ export function renderEnergyMeterCard(panel, deps) {
   head.appendChild(title);
   head.appendChild(el("span", `energy-meter-status${status.tone ? ` ${status.tone}` : ""}`, status.label));
   card.appendChild(head);
+
+  const additionalMeters = panel._energyMeters && Array.isArray(panel._energyMeters.meters)
+    ? panel._energyMeters.meters.filter((item) => item && item.primary !== true) : [];
+  if (additionalMeters.length) {
+    const collection = el("div", "energy-meter-rows");
+    collection.appendChild(el("span", "energy-settings-label", "Другие счётчики"));
+    additionalMeters.forEach((item) => {
+      const row = el("div", "energy-meter-row");
+      row.appendChild(el("span", null, item.name || "Счётчик"));
+      const reading = item.reading && item.reading.currentKwh;
+      row.appendChild(el("strong", null, reading === null || reading === undefined
+        ? "Нет показаний" : `${meterNumber(reading)} кВт·ч`));
+      collection.appendChild(row);
+    });
+    card.appendChild(collection);
+  }
 
   if (panel._energyMeterError) {
     const error = el("div", "energy-meter-error");
@@ -300,7 +339,12 @@ export async function loadEnergyMeter(panel) {
   if (!panel._hass || panel._energyMeterLoading || typeof panel._hass.callApi !== "function") return;
   panel._energyMeterLoading = true;
   try {
-    panel._energyMeter = await panel._hass.callApi("GET", "hausman_hub/v1/energy/meter");
+    const [meter, collection] = await Promise.all([
+      panel._hass.callApi("GET", "hausman_hub/v1/energy/meter"),
+      panel._hass.callApi("GET", "hausman_hub/v1/energy/meters").catch(() => null),
+    ]);
+    panel._energyMeter = meter;
+    panel._energyMeters = collection;
     panel._energyMeterError = null;
   } catch (error) {
     panel._energyMeterError = error && error.message || "meter_unavailable";

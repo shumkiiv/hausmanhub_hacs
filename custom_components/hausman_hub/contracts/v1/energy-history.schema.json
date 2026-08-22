@@ -18,6 +18,13 @@
     "from": { "type": "string", "format": "date-time" },
     "to": { "type": "string", "format": "date-time" },
     "interval": { "enum": ["5m", "15m", "1h", "1d"] },
+    "window": { "enum": ["explicit", "day", "week", "month"] },
+    "timezone": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^(UTC|[A-Za-z_]+(?:/[A-Za-z0-9_+\\-]+)+)$"
+    },
     "page": {
       "type": "object",
       "additionalProperties": false,

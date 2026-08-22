@@ -12,10 +12,37 @@ from jsonschema import Draft202012Validator
 from custom_components.hausman_hub.application.energy_history import (
     EnergySeriesDescriptor,
     build_energy_history,
+    resolve_energy_history_window,
 )
 
 
 class EnergyHistoryTest(unittest.TestCase):
+    def test_calendar_windows_are_local_monday_based_and_dst_aware(self) -> None:
+        now = datetime(2026, 3, 29, 12, 0, tzinfo=timezone.utc)
+        day_start, day_end = resolve_energy_history_window(
+            "day", "Europe/Berlin", now=now
+        )
+        self.assertEqual("2026-03-29T00:00:00+01:00", day_start.isoformat())
+        self.assertEqual("2026-03-30T00:00:00+02:00", day_end.isoformat())
+        self.assertEqual(timedelta(hours=23), day_end.astimezone(timezone.utc) - day_start.astimezone(timezone.utc))
+
+        week_start, week_end = resolve_energy_history_window(
+            "week", "Europe/Berlin", now=now
+        )
+        self.assertEqual(0, week_start.weekday())
+        self.assertEqual(7, (week_end.date() - week_start.date()).days)
+
+        month_start, month_end = resolve_energy_history_window(
+            "month", "Asia/Omsk", now=now
+        )
+        self.assertEqual((2026, 3, 1), (month_start.year, month_start.month, month_start.day))
+        self.assertEqual((2026, 4, 1), (month_end.year, month_end.month, month_end.day))
+
+    def test_invalid_calendar_window_and_timezone_fail_closed(self) -> None:
+        for window, zone in (("year", "UTC"), ("day", "Invalid/Timezone")):
+            with self.subTest(window=window, zone=zone), self.assertRaises(ValueError):
+                resolve_energy_history_window(window, zone, now=datetime.now(timezone.utc))
+
     def test_recorder_unix_timestamps_are_kept_as_utc_points(self) -> None:
         start = datetime(2026, 8, 1, 6, 0, tzinfo=timezone.utc)
         descriptor = EnergySeriesDescriptor(

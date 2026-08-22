@@ -48,6 +48,7 @@ ROOM_SETTINGS_PATH = f"{API_BASE_PATH}/room-settings"
 ENERGY_SETTINGS_PATH = f"{API_BASE_PATH}/energy-settings"
 ENERGY_HISTORY_PATH = f"{API_BASE_PATH}/energy/history"
 ENERGY_METER_PATH = f"{API_BASE_PATH}/energy/meter"
+ENERGY_METERS_PATH = f"{API_BASE_PATH}/energy/meters"
 DEVICE_DISCOVERY_PATH = f"{API_BASE_PATH}/device-discovery"
 EVENT_STREAM_PATH = f"{API_BASE_PATH}/events"
 DEVICE_ACTIONS_PATH = f"{API_BASE_PATH}/device-actions"
@@ -267,6 +268,12 @@ def api_capabilities_snapshot(
                 "optimistic_locking": True,
                 "response_contract": {
                     "name": "hausman-hub-energy-meter",
+                    "version": 1,
+                },
+                "collection_path": ENERGY_METERS_PATH,
+                "collection_methods": ["GET", "POST"],
+                "collection_response_contract": {
+                    "name": "hausman-hub-energy-meters",
                     "version": 1,
                 },
             },

@@ -334,7 +334,8 @@
           "items": { "type": "string" },
           "uniqueItems": true
         },
-        "settings": { "$ref": "#/$defs/energySettings" }
+        "settings": { "$ref": "#/$defs/energySettings" },
+        "anomaly": { "$ref": "#/$defs/energyAnomaly" }
       },
       "additionalProperties": false
     },
@@ -362,9 +363,25 @@
         "displayUnits": { "enum": ["watts", "amps", "both"] },
         "showVoltage": { "type": "boolean" },
         "aggregation": { "enum": ["combined", "separate"] },
-        "useAllDevices": { "type": "boolean" }
+        "useAllDevices": { "type": "boolean" },
+        "anomalyPowerThresholdW": { "type": ["number", "null"], "minimum": 100, "maximum": 1000000 },
+        "anomalySustainMinutes": { "type": ["integer", "null"], "minimum": 1, "maximum": 1440 }
       },
       "additionalProperties": false
+    },
+    "energyAnomaly": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["configured", "active", "thresholdW", "sustainMinutes", "observedPowerW", "observedSince", "triggeredAt"],
+      "properties": {
+        "configured": { "type": "boolean" },
+        "active": { "type": "boolean" },
+        "thresholdW": { "type": ["number", "null"], "minimum": 100, "maximum": 1000000 },
+        "sustainMinutes": { "type": ["integer", "null"], "minimum": 1, "maximum": 1440 },
+        "observedPowerW": { "type": ["number", "null"], "minimum": 0 },
+        "observedSince": { "type": ["string", "null"], "format": "date-time" },
+        "triggeredAt": { "type": ["string", "null"], "format": "date-time" }
+      }
     },
     "inventoryDevice": {
       "type": "object",

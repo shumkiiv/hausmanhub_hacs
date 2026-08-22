@@ -35,6 +35,7 @@ from .application.api_capabilities import (
     DEVICE_DISCOVERY_PATH,
     ENERGY_HISTORY_PATH,
     ENERGY_METER_PATH,
+    ENERGY_METERS_PATH,
     ENERGY_SETTINGS_PATH,
     HOME_CLIMATE_TARGETS_PATH,
     HOME_PATH,
@@ -96,8 +97,12 @@ from .application.device_power_dependencies import (
     DevicePowerDependencyService,
     DevicePowerDependencyServiceViolation,
 )
-from .application.energy_history import ENERGY_HISTORY_MAX_WINDOW_DAYS
+from .application.energy_history import (
+    ENERGY_HISTORY_MAX_WINDOW_DAYS,
+    resolve_energy_history_window,
+)
 from .application.energy_meter import EnergyMeterService, EnergyMeterViolation
+from .application.energy_meters import EnergyMetersService, Projection
 from .application.home_climate_targets import HomeClimateTargetsViolation
 from .application.legacy_settings_apply import LegacySettingsApplyViolation
 from .application.legacy_settings_import import (
@@ -259,6 +264,7 @@ def register_climate_api(
             DashboardView(hass),
             EnergyHistoryView(hass),
             EnergyMeterView(hass),
+            EnergyMetersView(hass),
             DeviceDiscoveryView(hass),
             TabletProfileView(hass),
             RoomSettingsView(hass),
@@ -617,6 +623,21 @@ class DashboardView(_ClimateView):
                 if isinstance(preferences, TabletPreferencesService)
                 else None,
             )
+            energy = payload.get("energy") if isinstance(payload, dict) else None
+            tracker = data.get("energy_anomaly_tracker")
+            if isinstance(energy, dict) and tracker is not None:
+                observe = getattr(tracker, "observe", None)
+                settings = (
+                    preferences.energy_for_dashboard
+                    if isinstance(preferences, TabletPreferencesService)
+                    else None
+                )
+                if callable(observe):
+                    energy["anomaly"] = observe(
+                        energy.get("currentPowerW"),
+                        settings.energy_anomaly_power_threshold_w if settings else None,
+                        settings.energy_anomaly_sustain_minutes if settings else None,
+                    )
         except Exception:
             return self._unavailable()
         return self.json(payload, headers=NO_STORE_HEADERS)
@@ -642,8 +663,39 @@ class EnergyHistoryView(_ClimateView):
                 HTTPStatus.BAD_REQUEST,
                 headers=NO_STORE_HEADERS,
             )
-        start = dt_util.parse_datetime(query.get("from", ""))
-        end = dt_util.parse_datetime(query.get("to", ""))
+        explicit_from = query.get("from")
+        explicit_to = query.get("to")
+        window = query.get("window")
+        timezone_name = query.get("timezone")
+        calendar_window = isinstance(window, str) and bool(window)
+        if calendar_window:
+            if explicit_from is not None or explicit_to is not None or not isinstance(timezone_name, str):
+                return self.json_message(
+                    "Календарное окно истории энергии заполнено неверно.",
+                    HTTPStatus.BAD_REQUEST,
+                    headers=NO_STORE_HEADERS,
+                )
+            try:
+                start, end = resolve_energy_history_window(
+                    window,
+                    timezone_name,
+                    now=dt_util.now(),
+                )
+            except ValueError:
+                return self.json_message(
+                    "Часовой пояс истории энергии заполнен неверно.",
+                    HTTPStatus.BAD_REQUEST,
+                    headers=NO_STORE_HEADERS,
+                )
+        else:
+            if timezone_name is not None:
+                return self.json_message(
+                    "Часовой пояс допустим только для календарного окна.",
+                    HTTPStatus.BAD_REQUEST,
+                    headers=NO_STORE_HEADERS,
+                )
+            start = dt_util.parse_datetime(explicit_from or "")
+            end = dt_util.parse_datetime(explicit_to or "")
         interval = query.get("interval")
         if (
             start is None
@@ -651,7 +703,10 @@ class EnergyHistoryView(_ClimateView):
             or start.tzinfo is None
             or end.tzinfo is None
             or end <= start
-            or end - start > timedelta(days=ENERGY_HISTORY_MAX_WINDOW_DAYS)
+            or (
+                not calendar_window
+                and end - start > timedelta(days=ENERGY_HISTORY_MAX_WINDOW_DAYS)
+            )
             or interval not in {"5m", "15m", "1h", "1d"}
         ):
             return self.json_message(
@@ -702,6 +757,8 @@ class EnergyHistoryView(_ClimateView):
                 end=end,
                 interval=interval,
                 requested_device_ids=frozenset(requested_values),
+                window=window if calendar_window else "explicit",
+                timezone_name=timezone_name if calendar_window else None,
             )
         except Exception:
             return self._unavailable()
@@ -963,6 +1020,106 @@ class EnergyMeterView(_ClimateView):
         except (ValueError, json.JSONDecodeError):
             return self.json_message(
                 "Параметры показаний электроэнергии заполнены неверно.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        return self.json(result, headers=NO_STORE_HEADERS)
+
+
+class EnergyMetersView(_ClimateView):
+    """Read and mutate independently named utility meters."""
+
+    url = ENERGY_METERS_PATH
+    name = "api:hausman_hub:energy_meters"
+
+    def _service(self) -> EnergyMetersService | None:
+        if self._runtime() is None:
+            return None
+        service = self._hass.data.get(DOMAIN, {}).get("energy_meters_service")
+        return service if isinstance(service, EnergyMetersService) else None
+
+    async def _projections(
+        self,
+        bindings: Mapping[str, list[str]],
+    ) -> tuple[dict[str, Projection], dict[str, set[str]]]:
+        projections: dict[str, Projection] = {}
+        missing_by_meter: dict[str, set[str]] = {}
+        for meter_id, source_ids in bindings.items():
+            if source_ids:
+                total, signature, readings, missing = await _current_energy_sources(
+                    self._hass, source_ids
+                )
+                first = next(
+                    (item for item in readings if item["available"] is True), None
+                )
+                projections[meter_id] = (
+                    total,
+                    signature,
+                    source_ids[0],
+                    first["name"] if first else None,
+                    readings,
+                )
+                missing_by_meter[meter_id] = missing
+            elif meter_id == "meter_main":
+                total, signature, name, _found = await _current_energy_source(self._hass)
+                projections[meter_id] = (total, signature, None, name, None)
+            else:
+                projections[meter_id] = (None, None, None, None, None)
+        return projections, missing_by_meter
+
+    async def get(self, request: Any) -> Any:
+        if not _is_exact_request(request, self.url):
+            return _not_found(self)
+        if not _is_local_dashboard_request(request):
+            return _forbidden(self)
+        service = self._service()
+        if service is None:
+            return self._unavailable()
+        try:
+            projections, _missing = await self._projections(service.source_bindings)
+            result = await service.async_document(projections)
+        except (EnergyMeterViolation, ValueError):
+            return self._unavailable()
+        return self.json(result, headers=NO_STORE_HEADERS)
+
+    async def post(self, request: Any) -> Any:
+        if not _is_exact_request(request, self.url):
+            return _not_found(self)
+        if not _is_local_dashboard_request(request):
+            return _forbidden(self)
+        service = self._service()
+        if service is None:
+            return self._unavailable()
+        try:
+            payload = await _request_json(request, maximum_bytes=MAX_ACTION_BODY_BYTES)
+            bindings = service.source_bindings
+            meter_id = payload.get("meterId") if isinstance(payload, Mapping) else None
+            if isinstance(meter_id, str) and payload.get("action") == "upsert":
+                settings = payload.get("settings")
+                candidates = settings.get("sourceDeviceIds") if isinstance(settings, Mapping) else None
+                if candidates is None and isinstance(settings, Mapping):
+                    candidate = settings.get("sourceDeviceId")
+                    candidates = [candidate] if isinstance(candidate, str) else []
+                bindings[meter_id] = list(candidates) if isinstance(candidates, list) else []
+            projections, missing = await self._projections(bindings)
+            if (
+                isinstance(meter_id, str)
+                and payload.get("action") == "upsert"
+                and missing.get(meter_id)
+            ):
+                raise EnergyMeterViolation("energy meter source device is unknown")
+            result = await service.async_action(payload, projections)
+        except EnergyMeterViolation as error:
+            return self.json_message(
+                "Список счётчиков уже изменился на другом клиенте. Обновите данные."
+                if error.stale
+                else "Параметры счётчика электроэнергии заполнены неверно.",
+                HTTPStatus.CONFLICT if error.stale else HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        except (ValueError, json.JSONDecodeError):
+            return self.json_message(
+                "Параметры счётчика электроэнергии заполнены неверно.",
                 HTTPStatus.BAD_REQUEST,
                 headers=NO_STORE_HEADERS,
             )

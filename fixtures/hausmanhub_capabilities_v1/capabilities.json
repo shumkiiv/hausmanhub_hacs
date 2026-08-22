@@ -195,6 +195,15 @@
       "response_contract": {
         "name": "hausman-hub-energy-meter",
         "version": 1
+      },
+      "collection_path": "/api/hausman_hub/v1/energy/meters",
+      "collection_methods": [
+        "GET",
+        "POST"
+      ],
+      "collection_response_contract": {
+        "name": "hausman-hub-energy-meters",
+        "version": 1
       }
     },
     "device_discovery": {

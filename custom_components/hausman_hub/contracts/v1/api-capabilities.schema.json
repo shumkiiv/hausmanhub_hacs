@@ -498,7 +498,16 @@
               "maxItems": 2
             },
             "optimistic_locking": { "const": true },
-            "response_contract": { "$ref": "#/$defs/energy_meter_contract" }
+            "response_contract": { "$ref": "#/$defs/energy_meter_contract" },
+            "collection_path": { "const": "/api/hausman_hub/v1/energy/meters" },
+            "collection_methods": {
+              "type": "array",
+              "prefixItems": [{ "const": "GET" }, { "const": "POST" }],
+              "items": false,
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "collection_response_contract": { "$ref": "#/$defs/energy_meters_contract" }
           }
         },
         "water_meter": {
@@ -864,6 +873,15 @@
       "required": ["name", "version"],
       "properties": {
         "name": { "const": "hausman-hub-energy-meter" },
+        "version": { "const": 1 }
+      }
+    },
+    "energy_meters_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "hausman-hub-energy-meters" },
         "version": { "const": 1 }
       }
     },

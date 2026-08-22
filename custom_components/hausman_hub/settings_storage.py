@@ -54,6 +54,15 @@ class HomeAssistantSettingsStore:
                         except (TypeError, HausmanHubSettingsViolation):
                             candidate = HausmanHubSettings()
                         return hub_settings_to_payload(candidate)
+                if old_major_version == 2 and isinstance(old_data, dict):
+                    migrated = dict(old_data)
+                    migrated["version"] = HUB_SETTINGS_VERSION
+                    migrated.setdefault("energy_anomaly_power_threshold_w", None)
+                    migrated.setdefault("energy_anomaly_sustain_minutes", None)
+                    try:
+                        return hub_settings_to_payload(hub_settings_from_payload(migrated))
+                    except HausmanHubSettingsViolation:
+                        return hub_settings_to_payload(HausmanHubSettings())
                 return hub_settings_to_payload(HausmanHubSettings())
 
         self._store: Store[dict[str, object]] = _MigratingSettingsStore(

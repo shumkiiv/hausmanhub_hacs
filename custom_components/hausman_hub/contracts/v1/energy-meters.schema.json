@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/energy-meters.schema.json",
+  "title": "HausmanHub energy meter collection v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "revision", "updatedAt", "meters"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "hausman-hub-energy-meters" },
+        "version": { "const": 1 }
+      }
+    },
+    "revision": { "type": "integer", "minimum": 0 },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "meters": {
+      "type": "array",
+      "maxItems": 16,
+      "items": { "$ref": "#/$defs/meter" }
+    }
+  },
+  "$defs": {
+    "meter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["meterId", "name", "primary", "settings", "source", "reading", "cycle", "submission", "history"],
+      "properties": {
+        "meterId": { "type": "string", "pattern": "^meter_[a-z0-9_]{1,58}$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "primary": { "type": "boolean" },
+        "settings": { "$ref": "energy-meter.schema.json#/$defs/settings" },
+        "source": { "$ref": "energy-meter.schema.json#/properties/source" },
+        "reading": { "$ref": "energy-meter.schema.json#/properties/reading" },
+        "cycle": { "$ref": "energy-meter.schema.json#/properties/cycle" },
+        "submission": { "$ref": "energy-meter.schema.json#/properties/submission" },
+        "history": { "$ref": "energy-meter.schema.json#/properties/history" }
+      }
+    },
+    "actionRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["expectedRevision", "action", "meterId"],
+      "properties": {
+        "expectedRevision": { "type": "integer", "minimum": 0 },
+        "action": { "enum": ["upsert", "delete", "submit", "correct"] },
+        "meterId": { "type": "string", "pattern": "^meter_[a-z0-9_]{1,58}$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "primary": { "type": "boolean" },
+        "settings": { "$ref": "energy-meter.schema.json#/$defs/settings" },
+        "readingKwh": { "type": "number", "minimum": 0, "maximum": 1000000000 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "action": { "const": "upsert" } }, "required": ["action"] },
+          "then": { "required": ["name", "settings"], "not": { "required": ["readingKwh"] } }
+        },
+        {
+          "if": { "properties": { "action": { "const": "delete" } }, "required": ["action"] },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["name"] },
+                { "required": ["primary"] },
+                { "required": ["settings"] },
+                { "required": ["readingKwh"] }
+              ]
+            }
+          }
+        },
+        {
+          "if": { "properties": { "action": { "enum": ["submit", "correct"] } }, "required": ["action"] },
+          "then": {
+            "required": ["readingKwh"],
+            "not": { "anyOf": [{ "required": ["name"] }, { "required": ["primary"] }, { "required": ["settings"] }] }
+          }
+        }
+      ]
+    }
+  }
+}

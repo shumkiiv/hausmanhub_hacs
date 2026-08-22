@@ -69,7 +69,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         HomeAssistantDevicePowerDependencyStore,
     )
     from .application.energy_meter import EnergyMeterService
+    from .application.energy_meters import EnergyMetersService
     from .energy_meter_storage import HomeAssistantEnergyMeterStore
+    from .energy_meters_storage import HomeAssistantEnergyMetersStore
     from .application.device_discovery import DeviceDiscoveryService
     from .device_discovery_storage import HomeAssistantDeviceDiscoveryStore
     from .local_summary import register_local_summary_access
@@ -107,6 +109,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         local_today=lambda: dt_util.now().date(),
     )
     await energy_meter_service.async_load()
+    energy_meters_service = EnergyMetersService(
+        HomeAssistantEnergyMetersStore(hass, entry.entry_id),
+        energy_meter_service,
+        local_today=lambda: dt_util.now().date(),
+    )
+    await energy_meters_service.async_load()
+    from .application.energy_anomaly import EnergyAnomalyTracker
+
+    energy_anomaly_tracker = EnergyAnomalyTracker()
     device_discovery_service = DeviceDiscoveryService(
         HomeAssistantDeviceDiscoveryStore(hass, entry.entry_id)
     )
@@ -118,6 +129,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         device_power_dependency_service
     )
     domain_data["energy_meter_service"] = energy_meter_service
+    domain_data["energy_meters_service"] = energy_meters_service
+    domain_data["energy_anomaly_tracker"] = energy_anomaly_tracker
     domain_data["device_discovery_service"] = device_discovery_service
     from .application.operation_journal import OperationJournalService
     from .operation_journal_api import DATA_OPERATION_JOURNAL

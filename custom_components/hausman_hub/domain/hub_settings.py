@@ -8,7 +8,7 @@ import re
 from typing import Any
 
 
-HUB_SETTINGS_VERSION = 2
+HUB_SETTINGS_VERSION = 3
 MAX_LIGHT_PRESET_ENTITIES = 40
 MAX_TV_OFF_ENTITIES = 12
 MAX_CURTAIN_HOLIDAYS = 64
@@ -37,6 +37,8 @@ class HausmanHubSettings:
     energy_aggregation: str = "combined"
     energy_use_all_devices: bool = False
     energy_selected_device_ids: tuple[str, ...] = ()
+    energy_anomaly_power_threshold_w: float | None = None
+    energy_anomaly_sustain_minutes: int | None = None
 
     def __post_init__(self) -> None:
         _entities(
@@ -69,6 +71,21 @@ class HausmanHubSettings:
         if type(self.energy_use_all_devices) is not bool:
             raise HausmanHubSettingsViolation("energy all-devices flag must be boolean")
         _public_device_ids(self.energy_selected_device_ids)
+        if (self.energy_anomaly_power_threshold_w is None) != (
+            self.energy_anomaly_sustain_minutes is None
+        ):
+            raise HausmanHubSettingsViolation("energy anomaly settings must be paired")
+        if self.energy_anomaly_power_threshold_w is not None and (
+            isinstance(self.energy_anomaly_power_threshold_w, bool)
+            or not isinstance(self.energy_anomaly_power_threshold_w, (int, float))
+            or not 100 <= float(self.energy_anomaly_power_threshold_w) <= 1_000_000
+        ):
+            raise HausmanHubSettingsViolation("energy anomaly threshold is invalid")
+        if self.energy_anomaly_sustain_minutes is not None and (
+            type(self.energy_anomaly_sustain_minutes) is not int
+            or not 1 <= self.energy_anomaly_sustain_minutes <= 1440
+        ):
+            raise HausmanHubSettingsViolation("energy anomaly window is invalid")
 
 
 def hub_settings_to_payload(settings: HausmanHubSettings) -> dict[str, object]:
@@ -88,6 +105,8 @@ def hub_settings_to_payload(settings: HausmanHubSettings) -> dict[str, object]:
         "energy_aggregation": settings.energy_aggregation,
         "energy_use_all_devices": settings.energy_use_all_devices,
         "energy_selected_device_ids": list(settings.energy_selected_device_ids),
+        "energy_anomaly_power_threshold_w": settings.energy_anomaly_power_threshold_w,
+        "energy_anomaly_sustain_minutes": settings.energy_anomaly_sustain_minutes,
     }
 
 
@@ -108,6 +127,8 @@ def hub_settings_from_payload(payload: object) -> HausmanHubSettings:
         "energy_aggregation",
         "energy_use_all_devices",
         "energy_selected_device_ids",
+        "energy_anomaly_power_threshold_w",
+        "energy_anomaly_sustain_minutes",
     }
     if set(payload) != required:
         raise HausmanHubSettingsViolation("stored HausmanHub settings fields are invalid")
@@ -126,6 +147,8 @@ def hub_settings_from_payload(payload: object) -> HausmanHubSettings:
         energy_selected_device_ids=_string_tuple(
             payload["energy_selected_device_ids"], "energy selected devices"
         ),
+        energy_anomaly_power_threshold_w=payload["energy_anomaly_power_threshold_w"],  # type: ignore[arg-type]
+        energy_anomaly_sustain_minutes=payload["energy_anomaly_sustain_minutes"],  # type: ignore[arg-type]
     )
 
 

@@ -1526,6 +1526,8 @@ def build_dashboard_snapshot(
             "showVoltage": saved_energy.energy_show_voltage,
             "aggregation": saved_energy.energy_aggregation,
             "useAllDevices": saved_energy.energy_use_all_devices,
+            "anomalyPowerThresholdW": saved_energy.energy_anomaly_power_threshold_w,
+            "anomalySustainMinutes": saved_energy.energy_anomaly_sustain_minutes,
         },
     }
     return {
