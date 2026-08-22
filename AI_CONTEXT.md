@@ -1,8 +1,22 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-22 (HACS 1.52.148, зрелое управление освещением).
+Last updated: 2026-08-22 (HACS 1.52.151, зрелая энергетика).
 
 ## Current work
+
+- 2026-08-22 (Codex): HACS `1.52.151` завершил backend направления 16.
+  Contracts `0.54.0` добавляет коллекцию до 16 счётчиков, совместимый legacy
+  primary, календарные окна day/week/month с timezone и устойчивую аномалию
+  мощности. Feature release `1.52.149` прошёл 1626 tests, но live-проверка
+  нашла неверную передачу календарного окна и `NameError` managed climate tick
+  при deviation guard. Hotfixes `1.52.150` и `1.52.151` закрыли обе регрессии;
+  финальный gate: 1625 passed, 4 skipped, Actions `32586366768` success.
+  Production installed/latest `v1.52.151`, config entries loaded, календарная
+  история `Europe/Moscow` вернула 12 series и 237 points, все 88 assets
+  совпали. После двух климатических интервалов журнал Hausman пуст. Rollback:
+  свежий защищённый backup `74abc5cf`. Совместимый Android до клиентского
+  релиза: `1.0.246` build `250`. Аудит:
+  `docs/RELEASE_AUDIT_1.52.151.md`.
 
 - 2026-08-22 (Codex): HACS `1.52.148` завершил backend направления 15.
   Capability-aware каталог различает relay, dimmer, CCT и RGB, добавляет
