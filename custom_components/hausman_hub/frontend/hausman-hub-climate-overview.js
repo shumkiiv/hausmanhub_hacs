@@ -266,7 +266,7 @@ export function renderHomeTargetCard(panel, dashboard, deps, options = {}) {
 }
 
 const CATEGORY_DEFINITIONS = [
-  { id: "conditioner", title: "Кондиционеры", icon: "snow", pattern: /кондиционер|air.?condition|smartir|\bac\b/ },
+  { id: "conditioner", title: "Кондиционеры", icon: "conditioner", pattern: /кондиционер|air.?condition|smartir|\bac\b/ },
   { id: "trv", title: "Термоголовки", icon: "thermometer", pattern: /термоголов|радиатор|radiator|thermostatic|\btrv\b/ },
   { id: "floor", title: "Тёплый пол", icon: "thermometer", pattern: /т[её]пл.*пол|floor.?heat/ },
   { id: "humidifier", title: "Увлажнители", icon: "water", pattern: /увлажн|humidifier/ },
@@ -275,6 +275,10 @@ const CATEGORY_DEFINITIONS = [
 ];
 
 const CATEGORY_ICON_PATHS = {
+  conditioner: {
+    path: "M5 4.5h14a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2ZM6.5 10.5h11M8 16v1.5M12 15.5v2M16 16v1.5",
+    stroke: true,
+  },
   minus: "M5 11h14v2H5z",
   plus: "M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z",
   snow: "M11 2h2v3.17l2.83-1.63 1 1.73L14 6.9l2.75 1.58 2.75-1.58 1 1.73-2.75 1.59v3.56l2.75 1.59-1 1.73-2.75-1.58L14 17.1l2.83 1.63-1 1.73L13 18.83V22h-2v-3.17l-2.83 1.63-1-1.73L10 17.1l-2.75-1.58-2.75 1.58-1-1.73 2.75-1.59v-3.56L3.5 8.63l1-1.73 2.75 1.58L10 6.9 7.17 5.27l1-1.73L11 5.17z",
@@ -283,14 +287,23 @@ const CATEGORY_ICON_PATHS = {
 };
 
 function climateIcon(name, deps) {
-  if (!CATEGORY_ICON_PATHS[name]) return deps.svgIcon(name);
+  const definition = CATEGORY_ICON_PATHS[name];
+  if (!definition) return deps.svgIcon(name);
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   deps.setAttr(svg, "viewBox", "0 0 24 24");
   deps.setAttr(svg, "aria-hidden", "true");
   deps.setAttr(svg, "class", "icon");
   const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  deps.setAttr(path, "d", CATEGORY_ICON_PATHS[name]);
-  deps.setAttr(path, "fill", "currentColor");
+  deps.setAttr(path, "d", typeof definition === "string" ? definition : definition.path);
+  if (typeof definition === "object" && definition.stroke) {
+    deps.setAttr(path, "fill", "none");
+    deps.setAttr(path, "stroke", "currentColor");
+    deps.setAttr(path, "stroke-width", "1.8");
+    deps.setAttr(path, "stroke-linecap", "round");
+    deps.setAttr(path, "stroke-linejoin", "round");
+  } else {
+    deps.setAttr(path, "fill", "currentColor");
+  }
   svg.appendChild(path);
   return svg;
 }

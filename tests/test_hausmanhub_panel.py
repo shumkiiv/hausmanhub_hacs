@@ -61,6 +61,7 @@ ROOM_ICONS_JS = PANEL_JS.with_name("hausman-hub-room-icons.js")
 HERO_ROOM_NAVIGATION_JS = PANEL_JS.with_name("hausman-hub-hero-room-navigation.js")
 LIBRARY_HERO_JS = PANEL_JS.with_name("hausman-hub-library-hero.js")
 LIBRARY_HERO_CSS = PANEL_JS.with_name("hausman-hub-library-hero.css")
+CLIMATE_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-climate-overview.js")
 CLIMATE_OVERVIEW_CSS = PANEL_JS.with_name("hausman-hub-climate-overview.css")
 LIGHTING_CSS = PANEL_JS.with_name("hausman-hub-lighting.css")
 LIBRARY_HERO_CONSUMERS = (
@@ -124,6 +125,13 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertNotIn(".hmh-library-hero-overlay", styles)
         self.assertIn("min-height:104px", styles)
         self.assertIn(".hmh-library-hero-facts", styles)
+        self.assertIn(
+            ".hmh-library-hero-status.is-warning { color:var(--hmh-text",
+            styles,
+        )
+        self.assertIn("var(--hmh-status-danger", styles)
+        self.assertNotIn("#f0bd59", styles)
+        self.assertNotIn("rgba(234,174,62", styles)
         self.assertIn("hausman-hub-library-hero.css?v=1.52.148", panel_styles)
         for consumer in LIBRARY_HERO_CONSUMERS:
             source = consumer.read_text(encoding="utf-8")
@@ -135,6 +143,20 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn("grid-template-columns:44px minmax(0,1fr) auto", styles)
         self.assertIn("grid-column:2; justify-self:start", styles)
         self.assertIn("grid-column:3; grid-row:1 / span 2", styles)
+
+    def test_climate_conditioner_category_uses_device_icon(self) -> None:
+        source = CLIMATE_OVERVIEW_JS.read_text(encoding="utf-8")
+
+        self.assertIn(
+            '{ id: "conditioner", title: "Кондиционеры", icon: "conditioner"',
+            source,
+        )
+        self.assertIn("conditioner: {", source)
+        self.assertIn('stroke-linecap", "round"', source)
+        self.assertNotIn(
+            '{ id: "conditioner", title: "Кондиционеры", icon: "snow"',
+            source,
+        )
 
     def test_panel_script_exists_and_stays_bounded(self) -> None:
         content = PANEL_JS.read_text(encoding="utf-8")
