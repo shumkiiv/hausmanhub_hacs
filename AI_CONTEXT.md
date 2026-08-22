@@ -1,8 +1,20 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-22 (HACS 1.52.149, сценарии приведены к интерфейсу планшета).
+Last updated: 2026-08-22 (HACS 1.52.150, навигация Hero согласована со светлой и тёмной темой).
 
 ## Current work
+
+- 2026-08-22 (Codex): изменён только HACS frontend навигации внутри Hero.
+  Нижняя лента комнат, активная комната, стрелки, точки, верхнее меню и
+  кнопка дома используют общий полупрозрачный слой с отдельными светлым и
+  тёмным состояниями. Убрана фиксированная серо-бежевая заливка, которая
+  выглядела чужеродно ночью и слишком плотной днём. Компоновка и поведение
+  комнат сохранены, тот же стиль действует в режиме киоска. Browser QA:
+  1504x900 light/dark, 1100x900 light/dark и kiosk 1504x900 light/dark.
+  Профиль frontend: 108 тестов; полный staged local release gate: 1621 тест,
+  4 skipped. Feature commit `61e0712`, подготовлена версия `1.52.150`;
+  release, push и deploy не выполнялись. Android, backend, API, contracts и
+  storage не менялись.
 
 - 2026-08-22 (Codex): изменён только HACS frontend страницы «Сценарии».
   Каталог повторяет планшетную структуру: карточки высотой 196 px, быстрые
@@ -4067,5 +4079,5 @@ Engineering and review rules are in
 
 - Obsidian/context index: `LLM_WIKI/00_Index.md`.
 - Latest generated context: `LLM_WIKI/Context.md`.
-- Last sync: 2026-08-22T22:33:41+03:00.
+- Last sync: 2026-08-22T22:52:54+03:00.
 <!-- llm-wiki-sync:end -->
