@@ -865,6 +865,33 @@ class ScenarioExecutor:
             powered_sources=powered_sources,
         )
         if dependency_error is not None:
+            if (
+                action.action_id == "turn_off"
+                and dependency_error == "power_source_off"
+            ):
+                receipt = {
+                    **base,
+                    "status": "completed",
+                    "target_id": action.target_id,
+                    "domain": allowed.domain,
+                    "service": allowed.service,
+                    "entity_id": device.entity_id,
+                    "skipped": True,
+                    "reason": "already_effectively_off",
+                }
+                if dry_run:
+                    receipt["planned"] = True
+                    receipt["confirmed"] = None
+                else:
+                    receipt["confirmed"] = True
+                    receipt["read_back"] = {
+                        "attempted": False,
+                        "matched": True,
+                        "observedAt": int(time.time() * 1000),
+                        "observedState": "off",
+                        "attempts": 0,
+                    }
+                return receipt
             return {
                 **base,
                 "status": "failed",

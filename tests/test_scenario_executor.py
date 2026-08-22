@@ -77,6 +77,13 @@ class _FakeCatalog:
                         allowed_fields=frozenset(),
                     ),
                     ScenarioDeviceAction(
+                        action_id="turn_off",
+                        title="Off",
+                        domain="light",
+                        service="turn_off",
+                        allowed_fields=frozenset(),
+                    ),
+                    ScenarioDeviceAction(
                         action_id="set_brightness",
                         title="Brightness",
                         domain="light",
@@ -446,6 +453,49 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(receipt["accepted"])
         self.assertEqual("failed", receipt["status"])
         self.assertEqual("power_source_off", receipt["error"])
+        self.hass.services.async_call.assert_not_awaited()
+
+    async def test_unpowered_turn_off_is_already_effectively_off(self) -> None:
+        self.hass.states = SimpleNamespace(
+            get=lambda entity_id: {
+                "light.living_room": SimpleNamespace(
+                    state="unavailable", attributes={}
+                ),
+                "switch.wall": SimpleNamespace(state="off", attributes={}),
+            }.get(entity_id)
+        )
+        executor = ScenarioExecutor(
+            self.hass,
+            self.catalog,
+            self.executor._run_callback,
+            power_dependency_resolver=lambda: {"light.living_room": "switch.wall"},
+        )
+
+        live = await executor.async_execute_device_action("device_1", "turn_off")
+        shadow = await executor.async_execute(
+            _definition(
+                (
+                    ScenarioAction(
+                        id="a1",
+                        type=ScenarioActionType.DEVICE_ACTION,
+                        target_id="device_1",
+                        action_id="turn_off",
+                    ),
+                ),
+                command_mode=ScenarioCommandMode.SHADOW,
+            ),
+            "run-shadow-off",
+            scenario_id="shadow-off",
+        )
+
+        self.assertTrue(live["accepted"])
+        self.assertTrue(live["confirmed"])
+        self.assertFalse(live["readBack"]["attempted"])
+        self.assertTrue(live["readBack"]["matched"])
+        self.assertEqual("completed", shadow["status"])
+        self.assertTrue(shadow["receipts"][0]["planned"])
+        self.assertIsNone(shadow["receipts"][0]["confirmed"])
+        self.assertEqual("already_effectively_off", shadow["receipts"][0]["reason"])
         self.hass.services.async_call.assert_not_awaited()
 
     async def test_powered_device_action_uses_existing_executor_path(self) -> None:
