@@ -1,14 +1,23 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-22 (HACS 1.52.146, contracts consumer sync подготовлен).
+Last updated: 2026-08-22 (HACS 1.52.146, contracts consumer sync развёрнут).
 
 ## Current work
 
-- 2026-08-22 (Codex): подготовлен технический HACS `1.52.146`. Pin обновлён
+- 2026-08-22 (Codex): технический HACS `1.52.146` опубликован и развёрнут.
+  Pin обновлён
   до contracts `0.52.1` (`5e89ca2`), который синхронизирует Android
   production-screen consumer `1.0.245` build `249`. API, schemas, runtime,
-  storage и monitor-политика 1.52.145 не менялись. Frontend layout сохранён,
-  выполнен только cache-bust.
+  storage и monitor-политика 1.52.145 не менялись. Release commit/tag
+  `e2b103a`, `v1.52.146`; Actions `32575357359` успешен, полный gate:
+  1609 passed, 4 skipped. Backup `8e8032ca` включает Home Assistant, базу,
+  10 add-ons и `media/share/ssl`; защищённые копии по 921159680 байт
+  подтверждены в local и KeeneticSSD. Два config check и один restart
+  успешны. Production installed/latest равны `v1.52.146`, monitor revision 1
+  сохранился, guard events отсутствуют, journal sequence 981. Все 88 frontend
+  assets совпадают с release, ошибок Hausman в system log нет. Frontend
+  layout сохранён, выполнен только cache-bust. Аудит:
+  `docs/RELEASE_AUDIT_1.52.146.md`.
 
 - 2026-08-22 (Codex): HACS `1.52.145` опубликован и развёрнут в production
   для direction 14.A.
