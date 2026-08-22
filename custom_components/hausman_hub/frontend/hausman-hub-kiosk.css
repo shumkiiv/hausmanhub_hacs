@@ -38,7 +38,8 @@
 .kiosk-panorama-primary { display:grid; grid-template-rows:1.55fr .72fr .62fr; gap:var(--hmh-kiosk-gap); min-width:0; min-height:0; }
 .kiosk-panorama-side { display:grid; grid-template-rows:.8fr 1.35fr .65fr; gap:var(--hmh-kiosk-gap); min-width:0; min-height:0; }
 
-.kiosk-panorama-hero { position:relative; min-width:0; min-height:0; overflow:hidden; border:1px solid var(--hmh-border-default); border-radius:var(--hmh-radius-card); background:var(--hmh-surface-card); box-shadow:0 5px 18px rgba(0,0,0,.18); }
+.kiosk-panorama-hero { position:relative; min-width:0; min-height:0; overflow:hidden; border:1px solid var(--hmh-border-default); border-radius:var(--hmh-radius-card); background:var(--hmh-surface-card); box-shadow:0 5px 18px rgba(0,0,0,.18); --hmh-hero-glass-bg:rgba(248,250,253,.72); --hmh-hero-glass-border:rgba(255,255,255,.72); --hmh-hero-glass-text:#53647A; --hmh-hero-glass-strong:#17202B; --hmh-hero-glass-hover:rgba(255,255,255,.48); --hmh-hero-glass-active:rgba(247,251,255,.92); --hmh-hero-glass-active-border:#1689E8; --hmh-hero-glass-shadow:0 7px 22px rgba(25,43,67,.16); }
+:host(:not(.theme-light)) .kiosk-panorama-hero { --hmh-hero-glass-bg:rgba(8,15,24,.74); --hmh-hero-glass-border:rgba(219,231,245,.16); --hmh-hero-glass-text:#B7C4D4; --hmh-hero-glass-strong:#F3F7FC; --hmh-hero-glass-hover:rgba(255,255,255,.08); --hmh-hero-glass-active:rgba(46,168,255,.18); --hmh-hero-glass-active-border:#2EA8FF; --hmh-hero-glass-shadow:0 8px 26px rgba(0,0,0,.30); }
 .kiosk-panorama-hero-media { position:absolute; inset:0; background-position:center; background-size:cover; }
 .kiosk-panorama-hero-overlay { position:absolute; z-index:1; inset:0; padding:14px 28px 78px; background:linear-gradient(90deg,rgba(236,232,225,.82),rgba(236,232,225,.62) 29%,rgba(236,232,225,.07) 61%); }
 :host(:not(.theme-light)) .kiosk-panorama-hero-overlay { background:linear-gradient(90deg,rgba(11,15,20,.84),rgba(11,15,20,.63) 29%,rgba(11,15,20,.07) 61%); }
@@ -53,13 +54,15 @@
 .kiosk-panorama-hero-action { display:inline-flex; align-items:center; gap:9px; min-height:42px; margin-top:22px; padding:8px 14px; border:1px solid rgba(23,32,43,.12); border-radius:10px; color:inherit; background:rgba(247,248,250,.68); box-shadow:none; font-size:clamp(13px,1.3vw,21px); backdrop-filter:blur(10px); }
 :host(:not(.theme-light)) .kiosk-panorama-hero-action { border-color:rgba(230,234,242,.2); background:rgba(11,15,20,.68); }
 .kiosk-panorama-hero-action .icon { width:20px; height:20px; }
-.kiosk-panorama-hero-controls { position:absolute; z-index:5; top:20px; right:20px; display:flex; padding:5px; border-radius:999px; background:rgba(237,235,231,.6); backdrop-filter:blur(12px); }
-.kiosk-panorama-hero-control { display:grid; place-items:center; width:48px; min-width:48px; height:46px; min-height:46px; margin:0; padding:0; border:0; border-radius:50%; color:#253444; background:transparent; box-shadow:none; }
+.kiosk-panorama-hero-controls { position:absolute; z-index:5; top:20px; right:20px; display:flex; padding:5px; border:1px solid var(--hmh-hero-glass-border); border-radius:999px; background:var(--hmh-hero-glass-bg); box-shadow:var(--hmh-hero-glass-shadow); backdrop-filter:blur(18px) saturate(1.18); }
+.kiosk-panorama-hero-control { display:grid; place-items:center; width:48px; min-width:48px; height:46px; margin:0; padding:0; border:0; border-radius:50%; color:var(--hmh-hero-glass-strong); background:transparent; box-shadow:none; }
+.kiosk-panorama-hero-control:hover,.kiosk-panorama-hero-control:focus-visible { background:var(--hmh-hero-glass-hover); }
 .kiosk-panorama-hero-control .icon { width:25px; height:25px; }
-.kiosk-panorama-hero-home { position:absolute; z-index:5; right:24px; top:calc(50% + 3px); display:grid; place-items:center; width:40px; min-width:40px; height:40px; min-height:40px; margin:0; padding:0; border:0; border-radius:50%; color:#253444; background:rgba(237,235,231,.64); box-shadow:none; backdrop-filter:blur(10px); transform:translateY(-50%); }
+.kiosk-panorama-hero-home { position:absolute; z-index:5; right:24px; top:calc(50% + 3px); display:grid; place-items:center; width:40px; min-width:40px; height:40px; margin:0; padding:0; border:1px solid var(--hmh-hero-glass-border); border-radius:50%; color:var(--hmh-hero-glass-strong); background:var(--hmh-hero-glass-bg); box-shadow:var(--hmh-hero-glass-shadow); backdrop-filter:blur(18px) saturate(1.18); transform:translateY(-50%); }
+.kiosk-panorama-hero-home:hover,.kiosk-panorama-hero-home:focus-visible { background:var(--hmh-hero-glass-active); }
 .kiosk-panorama-hero-home .icon { width:25px; height:25px; }
-.kiosk-panorama-hero .overview-canon-room-navigation { right:12px; bottom:0; left:12px; height:52px; min-height:52px; }
-.kiosk-panorama-hero .overview-canon-hero-dots { bottom:56px; }
+.kiosk-panorama-hero .overview-canon-room-navigation { right:12px; bottom:8px; left:12px; height:50px; }
+.kiosk-panorama-hero .overview-canon-hero-dots { bottom:62px; }
 
 .kiosk-panorama-metrics { display:grid; grid-template-columns:1.1fr 1.1fr 1fr; gap:var(--hmh-kiosk-gap); min-width:0; min-height:0; }
 .kiosk-metric-card,.kiosk-panorama-card { min-width:0; min-height:0; margin:0; border:1px solid var(--hmh-border-default); border-radius:var(--hmh-radius-card); color:var(--hmh-text-primary); background:var(--hmh-surface-card); box-shadow:0 3px 12px rgba(25,43,67,.08); }

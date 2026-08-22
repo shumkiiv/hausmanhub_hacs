@@ -49,6 +49,24 @@
   position:relative; min-width:0; min-height:300px; overflow:hidden;
   border:1px solid var(--hmh-border-default); border-radius:var(--hmh-radius-card);
   background:var(--hmh-surface-card); box-shadow:0 6px 20px rgba(0,0,0,.18);
+  --hmh-hero-glass-bg:rgba(248,250,253,.72);
+  --hmh-hero-glass-border:rgba(255,255,255,.72);
+  --hmh-hero-glass-text:#53647A;
+  --hmh-hero-glass-strong:#17202B;
+  --hmh-hero-glass-hover:rgba(255,255,255,.48);
+  --hmh-hero-glass-active:rgba(247,251,255,.92);
+  --hmh-hero-glass-active-border:#1689E8;
+  --hmh-hero-glass-shadow:0 7px 22px rgba(25,43,67,.16);
+}
+:host(:not(.theme-light)) .overview-canon-hero {
+  --hmh-hero-glass-bg:rgba(8,15,24,.74);
+  --hmh-hero-glass-border:rgba(219,231,245,.16);
+  --hmh-hero-glass-text:#B7C4D4;
+  --hmh-hero-glass-strong:#F3F7FC;
+  --hmh-hero-glass-hover:rgba(255,255,255,.08);
+  --hmh-hero-glass-active:rgba(46,168,255,.18);
+  --hmh-hero-glass-active-border:#2EA8FF;
+  --hmh-hero-glass-shadow:0 8px 26px rgba(0,0,0,.30);
 }
 .overview-canon-hero-media { position:absolute; inset:0; z-index:0; background-position:center; background-size:cover; transition:opacity .28s ease,transform .5s ease; }
 .overview-canon-hero-media.is-changing { opacity:.48; transform:scale(1.008); }
@@ -77,44 +95,54 @@
 .overview-canon-hero-action .icon { width:20px; height:20px; }
 .overview-tablet-hero-controls {
   position:absolute; z-index:5; top:20px; right:20px; display:flex; gap:0; padding:5px;
-  border-radius:999px; background:rgba(237,235,231,.58); backdrop-filter:blur(12px);
+  border:1px solid var(--hmh-hero-glass-border); border-radius:999px;
+  background:var(--hmh-hero-glass-bg); box-shadow:var(--hmh-hero-glass-shadow);
+  backdrop-filter:blur(18px) saturate(1.18);
 }
 .overview-tablet-hero-control {
   display:grid; place-items:center; width:48px; min-width:48px; height:46px; min-height:46px; margin:0; padding:0;
-  border:0; border-radius:50%; color:#243140; background:transparent; box-shadow:none;
+  border:0; border-radius:50%; color:var(--hmh-hero-glass-strong); background:transparent; box-shadow:none;
 }
-.overview-tablet-hero-control.is-active { color:#1689E8; background:rgba(255,255,255,.48); }
+.overview-tablet-hero-control:hover,.overview-tablet-hero-control:focus-visible { background:var(--hmh-hero-glass-hover); }
+.overview-tablet-hero-control.is-active { color:var(--hmh-hero-glass-active-border); background:var(--hmh-hero-glass-active); }
 .overview-tablet-hero-control .icon { width:25px; height:25px; }
 .overview-tablet-hero-home {
   position:absolute; z-index:5; right:24px; top:calc(50% + 3px); display:grid; place-items:center;
   width:40px; min-width:40px; height:40px; min-height:40px; margin:0; padding:0;
-  border:0; border-radius:50%; color:#253444; background:rgba(237,235,231,.62); box-shadow:none; backdrop-filter:blur(10px);
+  border:1px solid var(--hmh-hero-glass-border); border-radius:50%; color:var(--hmh-hero-glass-strong);
+  background:var(--hmh-hero-glass-bg); box-shadow:var(--hmh-hero-glass-shadow); backdrop-filter:blur(18px) saturate(1.18);
   transform:translateY(-50%);
 }
+.overview-tablet-hero-home:hover,.overview-tablet-hero-home:focus-visible { background:var(--hmh-hero-glass-active); }
 .overview-tablet-hero-home .icon { width:25px; height:25px; }
 .overview-canon-room-navigation {
-  position:absolute; z-index:4; right:12px; bottom:2px; left:12px; display:grid;
-  grid-template-columns:44px minmax(0,1fr) 44px; align-items:center; gap:4px; height:52px; min-height:52px;
-  padding:0 8px; border-radius:12px; background:rgba(236,232,225,.62); backdrop-filter:blur(12px);
+  position:absolute; z-index:4; right:12px; bottom:10px; left:12px; display:grid;
+  grid-template-columns:40px minmax(0,1fr) 40px; align-items:center; gap:4px; height:50px; min-height:50px;
+  padding:2px 6px; border:1px solid var(--hmh-hero-glass-border); border-radius:14px;
+  background:var(--hmh-hero-glass-bg); box-shadow:var(--hmh-hero-glass-shadow);
+  backdrop-filter:blur(18px) saturate(1.18);
 }
 .overview-canon-room-strip { display:flex; box-sizing:border-box; min-width:0; height:100%; gap:4px; padding-block:2px; overflow-x:auto; overflow-y:hidden; scrollbar-width:none; scroll-behavior:smooth; }
 .overview-canon-room-strip::-webkit-scrollbar { display:none; width:0; height:0; }
 .overview-canon-room-arrow,.overview-canon-room-strip button {
-  display:flex; align-items:center; justify-content:center; height:48px; min-height:48px; margin:0;
-  border:1px solid transparent; border-radius:10px; color:#607086; background:transparent; box-shadow:none;
+  display:flex; align-items:center; justify-content:center; height:44px; min-height:44px; margin:0;
+  border:1px solid transparent; border-radius:11px; color:var(--hmh-hero-glass-text); background:transparent; box-shadow:none;
 }
-.overview-canon-room-arrow { width:40px; min-width:40px; padding:0; color:#253444; }
-.overview-canon-room-arrow .icon { width:22px; height:22px; }
-.overview-canon-room-strip button { flex:1 0 auto; min-width:128px; gap:9px; padding:2px 14px; font-size:18px; }
-.overview-canon-room-strip button.is-active { border-color:#1689E8; color:#17202B; background:rgba(226,239,252,.88); }
-.overview-canon-room-strip .icon { width:24px; height:24px; color:inherit; }
+.overview-canon-room-arrow { width:36px; min-width:36px; padding:0; color:var(--hmh-hero-glass-strong); }
+.overview-canon-room-arrow:hover,.overview-canon-room-arrow:focus-visible,.overview-canon-room-strip button:hover,.overview-canon-room-strip button:focus-visible { background:var(--hmh-hero-glass-hover); }
+.overview-canon-room-arrow .icon { width:20px; height:20px; }
+.overview-canon-room-strip button { flex:1 0 auto; min-width:112px; gap:8px; padding:2px 12px; font-size:16px; font-weight:650; }
+.overview-canon-room-strip button.is-active { border-color:var(--hmh-hero-glass-active-border); color:var(--hmh-hero-glass-strong); background:var(--hmh-hero-glass-active); box-shadow:0 2px 10px rgba(15,41,67,.12); }
+.overview-canon-room-strip .icon { width:22px; height:22px; color:inherit; }
 .overview-canon-hero-edge { display:none; }
 .overview-canon-hero-dots {
-  position:absolute; z-index:3; left:50%; bottom:62px; display:flex; gap:8px; padding:4px 7px;
-  border-radius:999px; background:rgba(40,46,54,.08); transform:translateX(-50%);
+  position:absolute; z-index:3; left:50%; bottom:64px; display:flex; gap:8px; padding:4px 7px;
+  border:1px solid var(--hmh-hero-glass-border); border-radius:999px;
+  background:color-mix(in srgb,var(--hmh-hero-glass-bg) 62%,transparent); transform:translateX(-50%);
+  backdrop-filter:blur(12px);
 }
-.overview-canon-hero-dot { width:8px; min-width:8px; height:8px; min-height:8px; margin:0; padding:0; border:0; border-radius:50%; background:rgba(38,47,57,.34); box-shadow:none; }
-.overview-canon-hero-dot.is-active { width:24px; background:#17202B; }
+.overview-canon-hero-dot { width:8px; min-width:8px; height:8px; min-height:8px; margin:0; padding:0; border:0; border-radius:50%; background:color-mix(in srgb,var(--hmh-hero-glass-text) 55%,transparent); box-shadow:none; }
+.overview-canon-hero-dot.is-active { width:24px; background:var(--hmh-hero-glass-strong); }
 
 .overview-canon-primary-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:var(--hmh-tablet-gap,8px); min-width:0; }
 .overview-canon-primary-card,.overview-canon-favorites,.overview-tablet-bottom-card,.overview-tablet-side-card {
