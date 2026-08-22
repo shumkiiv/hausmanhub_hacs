@@ -265,12 +265,12 @@ class EnergyLayoutTest(unittest.TestCase):
         js = read(ENERGY_JS)
         for snippet in (
             '"Мощность"', '"Сегодня"', '"Источники"',
-            '"Показание счётчика"', '"С последней передачи"',
-            '"Нет показаний"',
+            '"Электросчётчик"', '"Текущий цикл"',
+            '"Следующая передача"', '"Показания не настроены"',
             "energy-meter-reading-strip",
             "openEnergyDetails(panel)",
             "appendMeterOdometer(deps, display, meter.reading.currentKwh)",
-            '"Переданное значение"',
+            "meterDateLabel(meter.reading.adjustedAt)",
             "const hasDecimal",
         ):
             self.assertIn(snippet, js)

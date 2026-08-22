@@ -107,7 +107,7 @@ MAX_DEVICE_BINDINGS_JS_BYTES = 20 * 1024
 MAX_AREA_BINDING_JS_BYTES = 24 * 1024
 MAX_NAVIGATION_JS_BYTES = 16 * 1024
 # Meter presentation and source details remain isolated from panel.js.
-MAX_ENERGY_JS_BYTES = 37 * 1024
+MAX_ENERGY_JS_BYTES = 38 * 1024
 MAX_MEDIA_DEVICE_JS_BYTES = 14 * 1024
 MAX_SCENARIOS_JS_BYTES = 42 * 1024
 # Navigation rail and tablet-parity surfaces are split into imported modules.
@@ -237,7 +237,8 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn("restoreFirstRunDraft", first_run_draft)
         self.assertLessEqual(len(navigation.encode("utf-8")), MAX_NAVIGATION_JS_BYTES)
         self.assertLessEqual(len(energy.encode("utf-8")), MAX_ENERGY_JS_BYTES)
-        self.assertLessEqual(len(energy_chart.encode("utf-8")), 16 * 1024)
+        # Rich time scale, HA timezone labels and keyboard/pointer scrubber.
+        self.assertLessEqual(len(energy_chart.encode("utf-8")), 20 * 1024)
         self.assertIn('hausman-hub-energy-chart.js?v=1.52.148', energy)
         self.assertLessEqual(
             len(media_device.encode("utf-8")), MAX_MEDIA_DEVICE_JS_BYTES
@@ -861,6 +862,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn('["year", "Год"]', content)
         self.assertIn('year: { days: 365, interval: "1d" }', content)
         self.assertIn('panel._energyHistoryPeriod = value', content)
+        self.assertIn('panel._energyConsumptionHistory = {};', content)
         self.assertIn('panel._energyHistoryReloadRequested = true', content)
         self.assertIn('if (panel._energyHistoryReloadRequested)', content)
         self.assertIn('["power", "W"]', content)
@@ -871,14 +873,56 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn("series.deviceId || series.sourceId", content)
         self.assertIn("energy-history-canvas", chart)
         self.assertIn("energy-chart-metrics", chart)
-        self.assertIn('["Сейчас", latest, 1]', chart)
-        self.assertIn('["Среднее", average, 1]', chart)
-        self.assertIn('["Пик", max, 1]', chart)
-        self.assertIn('["Минимум", min, 1]', chart)
+        self.assertIn('"Последний час"', chart)
+        self.assertIn('["Среднее", average, 1,', chart)
+        self.assertIn('["Пик", max, 1,', chart)
+        self.assertIn('["Минимум", min, 1,', chart)
+        self.assertIn("energyChartScale", chart)
+        self.assertIn("energyChartTimeTicks", chart)
+        self.assertIn("energy-chart-tooltip", chart)
+        self.assertIn("panel._hass.config.time_zone", chart)
+        self.assertIn("appendMeterOdometer(deps, display", content)
+        self.assertIn("Текущий цикл", content)
+        self.assertIn("Следующая передача", content)
         self.assertIn("delete target.selection", content)
         self.assertIn('id: "selection", name: "выбранных источников"', content)
         self.assertNotIn("recorder/statistics_during_period", content)
         self.assertNotIn("detail.entityId", content)
+
+    def test_energy_chart_uses_readable_scale_and_home_timezone(self) -> None:
+        script = f"""
+          const vm = require("vm");
+          const fs = require("fs");
+          vm.runInThisContext(
+            fs.readFileSync({str(ENERGY_CHART_JS)!r}, "utf8").replace(/export /g, ""),
+            {{ filename: {str(ENERGY_CHART_JS)!r} }}
+          );
+          const scale = energyChartScale([573.6, 737.7, 1418.8, 310.7]);
+          if (scale.min !== 0 || scale.max !== 1500 || scale.step !== 500) {{
+            throw new Error(`unexpected scale: ${{JSON.stringify(scale)}}`);
+          }}
+          const points = Array.from({{ length: 24 }}, (_, index) => ({{
+            start: new Date(Date.parse("2026-08-21T19:00:00Z") + index * 3600000).toISOString(),
+            value: 300 + index * 10,
+          }}));
+          const ticks = energyChartTimeTicks(points, "day", 900, "Europe/Moscow");
+          if (ticks.length !== 5 || !ticks[0].secondary || !ticks[4].secondary) {{
+            throw new Error(`unreadable time ticks: ${{JSON.stringify(ticks)}}`);
+          }}
+          const windowLabel = energyChartWindowLabel(points, "Europe/Moscow");
+          if (!windowLabel.includes("22:00") || !windowLabel.includes("21:00")
+              || !windowLabel.includes("время дома")) {{
+            throw new Error(`wrong home time: ${{windowLabel}}`);
+          }}
+        """
+        completed = subprocess.run(
+            ("node", "--input-type=commonjs", "--eval", script),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(0, completed.returncode, completed.stderr)
 
     def test_intercom_quick_action_resolves_physical_device_without_confirmation(self) -> None:
         script = f"""
@@ -981,6 +1025,15 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         # 30 KiB: tablet-parity meter uses dedicated odometer presentation.
         self.assertLessEqual(len(energy_styles.encode("utf-8")), 30 * 1024)
         self.assertLessEqual(len(energy_chart_styles.encode("utf-8")), 8 * 1024)
+        self.assertIn(
+            ".energy-history-layout { display:grid; grid-template-columns:minmax(0,1fr)",
+            energy_chart_styles,
+        )
+        self.assertNotIn("275px", energy_chart_styles)
+        self.assertIn(
+            ".energy-summary-card.energy-meter-reading-strip { display:grid",
+            energy_styles,
+        )
         self.assertLessEqual(len(button_styles.encode("utf-8")), 8 * 1024)
         self.assertIn('hausman-hub-buttons.css?v=1.52.148', styles)
         self.assertIn('hausman-hub-energy-chart.css?v=1.52.148', styles)
@@ -1089,7 +1142,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             ".rooms-canon-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }",
             rooms_styles,
         )
-        self.assertIn("выбранные источники", ENERGY_JS.read_text(encoding="utf-8"))
+        self.assertIn("почасовые значения", ENERGY_JS.read_text(encoding="utf-8"))
         self.assertIn("Питание подключённой линии будет снято", ENERGY_JS.read_text(encoding="utf-8"))
         self.assertIn("Фактические данные Recorder Home Assistant", ENERGY_JS.read_text(encoding="utf-8"))
         self.assertIn("подтверждение|ожида", FEEDBACK_JS.read_text(encoding="utf-8"))

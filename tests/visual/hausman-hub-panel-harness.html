@@ -200,6 +200,7 @@
       const cloneHarnessValue = (value) => JSON.parse(JSON.stringify(value ?? null));
       panel._hass = {
         user: { is_admin: true },
+        config: { time_zone: "Asia/Omsk" },
         connection: {
           sendMessagePromise: async (message) => {
             window.__hausmanHubHarnessCalls.push({ method: "WS", path: message.type, payload: message });
@@ -388,9 +389,10 @@
         ],
       };
       panel._energyHistory = {
-        selection: Array.from({ length: 24 }, (_, index) => ({
+        selection: [573.6, 690, 665, 540, 490, 430, 350, 390, 385, 285, 270, 380,
+          720, 770, 730, 680, 1280, 1418.8, 1050, 1040, 820, 700, 625, 573.6].map((mean, index) => ({
           start: new Date(Date.now() - (23 - index) * 3600000).toISOString(),
-          mean: 70 + index * 6 + Math.sin(index * .85) * 18,
+          mean,
         })),
         "breaker-232": Array.from({ length: 24 }, (_, index) => ({ start: String(index), mean: 4 + Math.sin(index) * 2 })),
         "breaker-233": Array.from({ length: 24 }, (_, index) => ({ start: String(index), mean: 66 + index * 6 })),

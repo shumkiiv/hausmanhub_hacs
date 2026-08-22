@@ -84,6 +84,25 @@ function deviceWord(count) {
   return "устройств";
 }
 
+function meterDateLabel(value) {
+  if (!value) return "Не указана";
+  const raw = String(value);
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(raw)
+    ? new Date(`${raw}T12:00:00`)
+    : new Date(raw);
+  if (Number.isNaN(date.getTime())) return "Не указана";
+  return date.toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
+}
+
+function dayWord(count) {
+  const value = Math.abs(Number(count)) % 100;
+  const tail = value % 10;
+  if (value > 10 && value < 20) return "дней";
+  if (tail === 1) return "день";
+  if (tail > 1 && tail < 5) return "дня";
+  return "дней";
+}
+
 function sourceDevice(panel, source) {
   const devices = panel._homeDashboard && Array.isArray(panel._homeDashboard.devices)
     ? panel._homeDashboard.devices : [];
@@ -229,6 +248,7 @@ function energyPeriodButtons(panel, container, deps) {
         if (selected) return;
         panel._energyHistoryPeriod = value;
         panel._energyHistory = {};
+        panel._energyConsumptionHistory = {};
         if (panel._energyHistoryLoading) panel._energyHistoryReloadRequested = true;
         panel._renderEnergySection(container);
         loadEnergyHistory(panel);
@@ -331,8 +351,10 @@ function renderEnergyHistory(panel, energy, selected, deps) {
     year: "Потребление за год",
   };
   copy.appendChild(el("h3", null, periodTitles[activePeriod]));
+  const intervalLabel = activePeriod === "month" || activePeriod === "year"
+    ? "значения по дням" : "почасовые значения";
   copy.appendChild(el("small", null, selected.length
-    ? `${selected.length} ${deviceWord(selected.length)} · выбранные источники`
+    ? `${selected.length} ${deviceWord(selected.length)} · ${intervalLabel}`
     : "Источники не выбраны"));
   head.appendChild(copy);
   head.appendChild(energyPeriodButtons(panel, panel._shell.homeSections.energy, deps));
@@ -551,37 +573,51 @@ function renderEnergyModal(panel, container, energy, deps) {
 function renderMeterReadingStrip(panel, energy, deps) {
   const { el, setAttr } = deps;
   const meter = panel._energyMeter;
-  const card = el("button", "energy-summary-card energy-meter-reading-strip");
+  const configured = meterConfigured(meter);
+  const card = el("button", `energy-summary-card energy-meter-reading-strip${configured ? "" : " is-empty"}`);
   card.type = "button";
   setAttr(card, "aria-label", "Открыть счётчик, передачу показаний и настройки энергии");
   card.addEventListener("click", () => openEnergyDetails(panel));
   const icon = el("span", "energy-meter-reading-icon");
   icon.appendChild(deps.svgIcon("energy"));
   card.appendChild(icon);
-  if (meterConfigured(meter)) {
+  if (configured) {
     const reading = el("span", "energy-meter-reading-primary");
-    reading.appendChild(el("small", null, "Показание счётчика"));
-    reading.appendChild(el("strong", null, `${meterNumber(meter.reading.currentKwh)} кВт·ч`));
-    reading.appendChild(el("span", null, meter.reading.estimated ? "Расчётное значение" : "Переданное значение"));
+    reading.appendChild(el("small", null, "Электросчётчик"));
+    const display = el("span", "energy-meter-reading-display");
+    appendMeterOdometer(deps, display, meter.reading.currentKwh);
+    reading.appendChild(display);
+    reading.appendChild(el("span", null, meter.reading.estimated
+      ? "Расчётное показание"
+      : `Передано ${meterDateLabel(meter.reading.adjustedAt)}`));
     card.appendChild(reading);
-    const cycle = el("span", "energy-meter-reading-secondary");
-    cycle.appendChild(el("small", null, "Расход цикла"));
-    cycle.appendChild(el("strong", null, meter.cycle && meter.cycle.consumptionKwh !== null && meter.cycle.consumptionKwh !== undefined
-      ? `${meterNumber(meter.cycle.consumptionKwh)} кВт·ч` : "—"));
-    cycle.appendChild(el("span", null, "С последней передачи"));
-    card.appendChild(cycle);
+    const facts = el("span", "energy-meter-reading-facts");
+    const cycle = el("span", "energy-meter-reading-fact");
+    const cycleValue = meter.cycle && meter.cycle.consumptionKwh;
+    cycle.appendChild(el("small", null, "Текущий цикл"));
+    cycle.appendChild(el("strong", null, cycleValue !== null && cycleValue !== undefined
+      ? `${meterNumber(cycleValue)} кВт·ч` : "Нет данных"));
+    cycle.appendChild(el("span", null, meter.cycle && meter.cycle.startedAt
+      ? `С ${meterDateLabel(meter.cycle.startedAt)}` : "Нужно второе показание"));
+    facts.appendChild(cycle);
+    const submission = el("span", "energy-meter-reading-fact");
+    const daysUntil = Number(meter.submission && meter.submission.daysUntil);
+    submission.appendChild(el("small", null, "Следующая передача"));
+    submission.appendChild(el("strong", null, meterDateLabel(meter.submission && meter.submission.nextDate)));
+    submission.appendChild(el("span", null, Number.isInteger(daysUntil) && daysUntil >= 0
+      ? (daysUntil === 0 ? "Сегодня" : `Через ${daysUntil} ${dayWord(daysUntil)}`)
+      : "День можно изменить в настройках"));
+    facts.appendChild(submission);
+    card.appendChild(facts);
   } else {
     const reading = el("span", "energy-meter-reading-primary is-empty");
-    reading.appendChild(el("small", null, "Показание счётчика"));
-    reading.appendChild(el("strong", null, "Нет показаний"));
-    reading.appendChild(el("span", null, panel._energyMeterError ? "Временно недоступно" : "Откройте, чтобы настроить"));
+    reading.appendChild(el("small", null, "Электросчётчик"));
+    reading.appendChild(el("strong", null, "Показания не настроены"));
+    reading.appendChild(el("span", null, panel._energyMeterError ? "Временно недоступно" : "Выберите источник и день передачи"));
     card.appendChild(reading);
   }
-  const more = el("span", "energy-meter-reading-more");
-  more.appendChild(el("strong", null, "Настройки"));
-  more.appendChild(el("small", null, "Показания и источники"));
-  more.appendChild(el("b", null, "›"));
-  card.appendChild(more);
+  card.appendChild(el("span", "energy-meter-reading-open-label", "Настройки"));
+  card.appendChild(el("span", "energy-meter-reading-open", "›"));
   return card;
 }
 
