@@ -834,6 +834,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             "hausman-hub-overview.js",
             "hausman-hub-overview-hero-state.js",
             "hausman-hub-feedback.js",
+            "hausman-hub-command-feedback.js",
         ):
             self.assertIn(f'./{module}?v={manifest["version"]}', content)
         self.assertIn(
