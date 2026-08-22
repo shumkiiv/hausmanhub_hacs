@@ -62,6 +62,7 @@ HERO_ROOM_NAVIGATION_JS = PANEL_JS.with_name("hausman-hub-hero-room-navigation.j
 LIBRARY_HERO_JS = PANEL_JS.with_name("hausman-hub-library-hero.js")
 LIBRARY_HERO_CSS = PANEL_JS.with_name("hausman-hub-library-hero.css")
 CLIMATE_OVERVIEW_CSS = PANEL_JS.with_name("hausman-hub-climate-overview.css")
+LIGHTING_CSS = PANEL_JS.with_name("hausman-hub-lighting.css")
 LIBRARY_HERO_CONSUMERS = (
     PANEL_JS.with_name("hausman-hub-lighting.js"),
     PANEL_JS.with_name("hausman-hub-climate-overview.js"),
@@ -860,6 +861,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         device_card_css = DEVICE_CARD_CSS.read_text(encoding="utf-8")
         control_channel_styles = CONTROL_CHANNEL_CSS.read_text(encoding="utf-8")
         button_styles = BUTTONS_CSS.read_text(encoding="utf-8")
+        lighting_styles = LIGHTING_CSS.read_text(encoding="utf-8")
 
         self.assertLessEqual(len(styles.encode("utf-8")), MAX_PANEL_CSS_BYTES)
         self.assertLessEqual(len(weather_source_styles.encode("utf-8")), 8 * 1024)
@@ -904,6 +906,27 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn('hausman-hub-catalog.css?v=1.52.148', styles)
         self.assertIn('hausman-hub-media-device.css?v=1.52.148', styles)
         self.assertIn('hausman-hub-device-card.css?v=1.52.148', styles)
+        self.assertIn("--lighting-card-surface:", lighting_styles)
+        self.assertIn(
+            ".lighting-room-card.is-active { border-color:color-mix(in srgb,var(--hmh-accent",
+            lighting_styles,
+        )
+        self.assertIn(
+            ".lighting-room-status.is-on { color:var(--hmh-text",
+            lighting_styles,
+        )
+        self.assertIn(
+            ".lighting-room-chip.is-active { color:var(--hmh-accent",
+            lighting_styles,
+        )
+        self.assertIn(
+            ".lighting-device-section .physical-device-card",
+            lighting_styles,
+        )
+        self.assertNotIn(
+            ".lighting-room-card.is-active { border-color:color-mix(in srgb,#FFB72E",
+            lighting_styles,
+        )
         self.assertIn(".device-sheet-backdrop {", device_card_css)
         self.assertIn("position:fixed", device_card_css)
         self.assertIn("z-index:1200", device_card_css)
