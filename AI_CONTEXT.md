@@ -1,8 +1,21 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-22 (HACS 1.52.136 с safety сценариев опубликован и развёрнут в production).
+Last updated: 2026-08-22 (HACS 1.52.137 с полным contracts 0.47.0 опубликован и развёрнут в production).
 
 ## Current work
+
+- 2026-08-22 (Codex): корректирующий HACS `v1.52.137` закрывает найденный
+  release-line drift contracts `0.47.0`: синхронизированы Dashboard schema,
+  water-meter schema и multi-source energy fixture. External validator
+  подтверждает 52 schemas, 97 fixtures, 39 OpenAPI paths и точное совпадение
+  HACS source. Feature commit `e51d58f`, release commit/tag `538bcc4`.
+  Full release-gate: 1562 tests, 4 skipped; Actions `32555953795` успешен.
+  Перед deploy создан full backup `6b14607f`, 918568960 байт, Home Assistant,
+  база, 10 add-ons и `ssl`, failed-списки пусты. После явной установки,
+  двух config checks и одного restart installed/latest `v1.52.137`, config
+  entry loaded, 12 сущностей доступны, journal schema valid, 27 frontend
+  assets совпадают с release, system log чист. Runtime сценариев и UI не
+  менялись, физические команды не отправлялись.
 
 - 2026-08-22 (Codex): HACS `v1.52.136` опубликован и развёрнут в
   production поверх принятого визуального baseline `1.52.135`. Сценарии

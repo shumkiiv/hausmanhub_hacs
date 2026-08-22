@@ -1,5 +1,19 @@
 # Current Work
 
+## 2026-08-22: HACS 1.52.137, полный contracts 0.47.0
+
+- Release-line gate нашёл три несовпадения vendored contracts после
+  `1.52.136`: Dashboard `renameable`, water-meter schema и multi-source
+  energy fixture. Все три синхронизированы, hash-тест добавлен.
+- External validator подтверждает 52 schemas, 97 fixtures, 39 OpenAPI paths
+  и HACS source matches. Full release-gate: 1562 tests, 4 skipped; Actions
+  `32555953795` успешен.
+- Feature commit `e51d58f`, release commit/tag `538bcc4`, `v1.52.137`.
+- Production: backup `6b14607f`, 918568960 байт, два config checks, один
+  restart. Installed/latest `v1.52.137`, 12 сущностей доступны, journal
+  schema valid, 27 frontend assets совпадают, system log чист.
+- Runtime сценариев и UI не менялись. Физические команды не отправлялись.
+
 ## 2026-08-22: HACS 1.52.136, безопасное исполнение сценариев
 
 - Сценарии получили ограниченную очередь, явный queue-full, выдержку
