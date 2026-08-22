@@ -558,9 +558,10 @@
       const energyMode = params.get("energyMode");
       const lightingMode = params.get("lightingMode");
       if ([energyMode, lightingMode].some((mode) => mode === "expanded" || mode === "compact")) {
+        const utilityMode = energyMode === "expanded" || lightingMode === "expanded" ? "expanded" : "compact";
         panel._overviewCardModes = {
-          energy: energyMode === "expanded" ? "expanded" : "compact",
-          lighting: lightingMode === "expanded" ? "expanded" : "compact",
+          energy: utilityMode,
+          lighting: utilityMode,
         };
       }
       panel._render();

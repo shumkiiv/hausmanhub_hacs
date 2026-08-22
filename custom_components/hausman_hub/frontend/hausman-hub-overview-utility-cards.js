@@ -20,20 +20,26 @@ function utilityPlural(count, one, few, many) {
 }
 
 function utilityCardModes(panel) {
-  if (panel._overviewCardModes && typeof panel._overviewCardModes === "object") {
+  if (panel._overviewCardModeInitialized === true
+    && panel._overviewCardModes && typeof panel._overviewCardModes === "object") {
     return panel._overviewCardModes;
   }
-  let saved = null;
-  try {
-    const raw = globalThis.localStorage?.getItem(UTILITY_CARD_MODE_STORAGE_KEY);
-    saved = raw ? JSON.parse(raw) : null;
-  } catch (error) {
-    saved = null;
+  let saved = panel._overviewCardModes;
+  if (!saved || typeof saved !== "object") {
+    try {
+      const raw = globalThis.localStorage?.getItem(UTILITY_CARD_MODE_STORAGE_KEY);
+      saved = raw ? JSON.parse(raw) : null;
+    } catch (error) {
+      saved = null;
+    }
   }
+  const mode = saved?.mode === "expanded" || saved?.energy === "expanded"
+    || saved?.lighting === "expanded" ? "expanded" : "compact";
   panel._overviewCardModes = {
-    energy: saved?.energy === "expanded" ? "expanded" : "compact",
-    lighting: saved?.lighting === "expanded" ? "expanded" : "compact",
+    energy: mode,
+    lighting: mode,
   };
+  panel._overviewCardModeInitialized = true;
   return panel._overviewCardModes;
 }
 
@@ -69,11 +75,13 @@ function utilityModeToggle(panel, card, cardKey, cardLabel, deps) {
   button.addEventListener("click", (event) => {
     event?.stopPropagation?.();
     const modes = utilityCardModes(panel);
-    modes[cardKey] = modes[cardKey] === "expanded" ? "compact" : "expanded";
+    const next = modes[cardKey] === "expanded" ? "compact" : "expanded";
+    modes.energy = next;
+    modes.lighting = next;
     utilityPersistCardModes(panel);
-    apply(modes[cardKey]);
+    panel._overviewUtilityApplyMode?.(next);
   });
-  return button;
+  return { button, apply };
 }
 
 function utilityEnergySourceValue(source, units) {
@@ -172,7 +180,8 @@ function utilityRenderEnergy(panel, dashboard, deps) {
   title.appendChild(deps.el("span", null, "Показания энергии"));
   head.appendChild(title);
   const actions = deps.el("div", "overview-tablet-bottom-actions");
-  actions.appendChild(utilityModeToggle(panel, card, "energy", "Показания энергии", deps));
+  const modeControl = utilityModeToggle(panel, card, "energy", "Показания энергии", deps);
+  actions.appendChild(modeControl.button);
   const settings = deps.el("button", null, "Настройки");
   settings.type = "button";
   settings.appendChild(deps.svgIcon("chevron-right"));
@@ -202,6 +211,7 @@ function utilityRenderEnergy(panel, dashboard, deps) {
   }
   card.appendChild(list);
   utilityRenderExpandedEnergy(panel, card, energy, sources, deps);
+  card._overviewUtilityModeControl = modeControl;
   return card;
 }
 
@@ -280,7 +290,8 @@ function utilityRenderLighting(panel, dashboard, deps) {
   title.appendChild(deps.svgIcon("lightbulb"));
   title.appendChild(deps.el("span", null, "Освещение"));
   head.appendChild(title);
-  head.appendChild(utilityModeToggle(panel, card, "lighting", "Освещение", deps));
+  const modeControl = utilityModeToggle(panel, card, "lighting", "Освещение", deps);
+  head.appendChild(modeControl.button);
   card.appendChild(head);
   const compact = deps.el("button", "overview-tablet-lighting-compact");
   compact.type = "button";
@@ -293,12 +304,23 @@ function utilityRenderLighting(panel, dashboard, deps) {
     active ? `${active} сейчас ${utilityPlural(active, "горит", "горят", "горят")}` : "Свет выключен"));
   card.appendChild(compact);
   utilityRenderExpandedLighting(panel, card, lights, deps);
+  card._overviewUtilityModeControl = modeControl;
   return card;
 }
 
 export function renderOverviewUtilityCards(panel, container, dashboard, deps) {
   const row = deps.el("div", "overview-tablet-bottom-grid");
-  row.appendChild(utilityRenderEnergy(panel, dashboard, deps));
-  row.appendChild(utilityRenderLighting(panel, dashboard, deps));
+  const cards = [
+    utilityRenderEnergy(panel, dashboard, deps),
+    utilityRenderLighting(panel, dashboard, deps),
+  ];
+  cards.forEach((card) => row.appendChild(card));
+  const applyMode = (mode) => {
+    const expanded = mode === "expanded";
+    row.classList.toggle("is-expanded", expanded);
+    cards.forEach((card) => card._overviewUtilityModeControl?.apply(mode));
+  };
+  panel._overviewUtilityApplyMode = applyMode;
+  applyMode(overviewCardMode(panel, "energy"));
   container.appendChild(row);
 }

@@ -1858,8 +1858,8 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           && node["aria-label"] === "Развернуть панель «Показания энергии»")[0];
         energyToggle.fire("click", { stopPropagation() {} });
         if (!energyCard.classList.contains("is-expanded")
-          || lightingCard.classList.contains("is-expanded")) {
-          throw new Error("energy and lighting modes are not independent");
+          || !lightingCard.classList.contains("is-expanded")) {
+          throw new Error("energy and lighting must expand as one dashboard row");
         }
         const expandedEnergy = byClass("overview-tablet-energy-expanded")[0];
         if (!textOf(expandedEnergy).includes("226 Вт")
@@ -1868,18 +1868,14 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           || byClass("overview-tablet-energy-expanded-source").length !== 2) {
           throw new Error("expanded energy data is incomplete: " + textOf(expandedEnergy));
         }
-        const lightingToggle = findAll(lightingCard, (node) => node.tagName === "BUTTON"
-          && node["aria-label"] === "Развернуть панель «Освещение»")[0];
-        lightingToggle.fire("click", { stopPropagation() {} });
-        if (!lightingCard.classList.contains("is-expanded")
-          || byClass("overview-tablet-lighting-device").length !== 2
+        if (byClass("overview-tablet-lighting-device").length !== 2
           || !textOf(lightingCard).includes("Основной свет")
           || !textOf(lightingCard).includes("Свет спальни")
           || !textOf(lightingCard).includes("Нет связи")) {
           throw new Error("expanded lighting must show unique physical devices and states");
         }
-        if (modeWrites.length !== 2 || !modeWrites[1].value.includes('"energy":"expanded"')
-          || !modeWrites[1].value.includes('"lighting":"expanded"')) {
+        if (modeWrites.length !== 1 || !modeWrites[0].value.includes('"energy":"expanded"')
+          || !modeWrites[0].value.includes('"lighting":"expanded"')) {
           throw new Error("overview card modes were not persisted locally: " + JSON.stringify(modeWrites));
         }
         panel._render();
@@ -1887,6 +1883,12 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         lightingCard = byClass("is-lighting")[0];
         if (!energyCard.classList.contains("is-expanded") || !lightingCard.classList.contains("is-expanded")) {
           throw new Error("overview card modes did not survive a dashboard refresh");
+        }
+        const lightingToggle = findAll(lightingCard, (node) => node.tagName === "BUTTON"
+          && node["aria-label"] === "Свернуть панель «Освещение»")[0];
+        lightingToggle.fire("click", { stopPropagation() {} });
+        if (energyCard.classList.contains("is-expanded") || lightingCard.classList.contains("is-expanded")) {
+          throw new Error("lighting toggle must collapse both dashboard cards");
         }
         if (byClass("overview-tablet-activity-row").length !== 24) {
           throw new Error("activity rail must render twelve compact and twelve detailed entries");
