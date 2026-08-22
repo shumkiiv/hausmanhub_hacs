@@ -11,6 +11,7 @@ from homeassistant.components.http import HomeAssistantView
 
 from .application.scenario_service import (
     ScenarioNotFoundError,
+    ScenarioProtectedError,
     ScenarioReferencedError,
     ScenarioService,
     ScenarioServiceError,
@@ -36,7 +37,6 @@ from .application.api_capabilities import (
     SCENARIOS_UPCOMING_CANCEL_PATH,
     SCENARIOS_UPCOMING_PATH,
 )
-from .domain.scenarios import ScenarioDefinition, _scenario_to_payload
 from .correlation import CorrelationIdError, resolve_correlation_id
 from .realtime_api import publish_command_receipt
 
@@ -189,9 +189,8 @@ class ScenariosView(_ScenarioView):
         service = self._service_ready()
         if service is None:
             return self._unavailable()
-        scenarios = await service.async_list_scenarios()
         return self.json(
-            {"scenarios": [_scenario_to_payload(s) for s in scenarios]},
+            await service.async_scenario_list_payload(),
             headers=NO_STORE_HEADERS,
         )
 
@@ -339,7 +338,7 @@ class ScenarioDeleteView(_ScenarioView):
             )
         try:
             await service.async_delete_scenario(scenario_id)
-        except ScenarioReferencedError as error:
+        except (ScenarioProtectedError, ScenarioReferencedError) as error:
             return self.json_message(
                 error.message,
                 HTTPStatus.CONFLICT,
@@ -674,7 +673,7 @@ async def _delete_scenario(
         return view.json_message("scenario_id is required.", HTTPStatus.BAD_REQUEST, headers=NO_STORE_HEADERS)
     try:
         await service.async_delete_scenario(scenario_id)
-    except ScenarioReferencedError as error:
+    except (ScenarioProtectedError, ScenarioReferencedError) as error:
         return view.json_message(error.message, HTTPStatus.CONFLICT, headers=NO_STORE_HEADERS)
     except ScenarioNotFoundError as error:
         return view.json_message(error.message, HTTPStatus.NOT_FOUND, headers=NO_STORE_HEADERS)

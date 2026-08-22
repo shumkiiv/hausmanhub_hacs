@@ -67,6 +67,15 @@ class ScenarioCommandMode(StrEnum):
     SHADOW = "shadow"
 
 
+class ScenarioActivationKind(StrEnum):
+    """User-facing ownership class derived from triggers and policy."""
+
+    MANUAL = "manual"
+    AUTOMATIC = "automatic"
+    HYBRID = "hybrid"
+    SYSTEM = "system"
+
+
 class ScenarioTriggerType(StrEnum):
     """Supported scenario trigger kinds."""
 
@@ -404,6 +413,8 @@ class Scenario:
     action_description: str
     updated_at: int
     definition: ScenarioDefinition
+    room_id: str | None = None
+    protected: bool = False
 
     def __post_init__(self) -> None:
         _stable_id(self.id, "scenario id")
@@ -445,6 +456,32 @@ class Scenario:
             )
         if not isinstance(self.definition, ScenarioDefinition):
             raise ScenarioViolation("scenario definition must be validated")
+        if self.room_id is not None:
+            _stable_id(self.room_id, "scenario room id")
+        if type(self.protected) is not bool:
+            raise ScenarioViolation("scenario protected must be boolean")
+        if self.protected and self.activation_kind is not ScenarioActivationKind.SYSTEM:
+            raise ScenarioViolation("protected scenario must be system classified")
+
+    @property
+    def activation_kind(self) -> ScenarioActivationKind:
+        """Classify one scenario without trusting a client-side heuristic."""
+
+        if self.protected:
+            return ScenarioActivationKind.SYSTEM
+        has_manual = any(
+            trigger.type is ScenarioTriggerType.MANUAL
+            for trigger in self.definition.triggers
+        )
+        has_automatic = any(
+            trigger.type is not ScenarioTriggerType.MANUAL
+            for trigger in self.definition.triggers
+        )
+        if has_manual and has_automatic:
+            return ScenarioActivationKind.HYBRID
+        if has_manual:
+            return ScenarioActivationKind.MANUAL
+        return ScenarioActivationKind.AUTOMATIC
 
     @classmethod
     def from_definition(
@@ -464,11 +501,17 @@ class Scenario:
         condition_description: str = "None",
         action_description: str = "None",
         updated_at: int | None = None,
+        room_id: str | None = None,
+        protected: bool | None = None,
     ) -> Scenario:
         """Build a full persisted scenario from a validated definition."""
 
         if updated_at is None:
             updated_at = int(__import__("time").time())
+        if protected is None:
+            protected = group.casefold() in {"system", "системные"} or scenario_id.startswith(
+                ("system_", "system-")
+            )
         return cls(
             id=scenario_id,
             title=title,
@@ -484,6 +527,8 @@ class Scenario:
             action_description=action_description,
             updated_at=updated_at,
             definition=definition,
+            room_id=room_id,
+            protected=protected,
         )
 
 
@@ -645,30 +690,41 @@ def scenario_registry_to_payload(registry: ScenarioRegistry) -> dict[str, object
 
 def _scenario_from_payload(payload: object, label: str) -> Scenario:
     root = _mapping(payload, label)
-    _exact_keys(
+    required = {
+        "id",
+        "title",
+        "group",
+        "description",
+        "icon",
+        "enabled",
+        "favorite",
+        "danger",
+        "requiresConfirmation",
+        "triggerDescription",
+        "conditionDescription",
+        "actionDescription",
+        "updatedAt",
+        "definition",
+    }
+    _required_allowed_keys(
         root,
-        {
-            "id",
-            "title",
-            "group",
-            "description",
-            "icon",
-            "enabled",
-            "favorite",
-            "danger",
-            "requiresConfirmation",
-            "triggerDescription",
-            "conditionDescription",
-            "actionDescription",
-            "updatedAt",
-            "definition",
-        },
+        required,
+        required | {"roomId", "activationKind", "protected"},
         label,
     )
-    return Scenario(
-        id=_str(root.get("id"), f"{label} id"),
+    group = _str(root.get("group"), f"{label} group")
+    scenario_id = _str(root.get("id"), f"{label} id")
+    raw_protected = root.get("protected")
+    protected = (
+        _bool(raw_protected, f"{label} protected")
+        if raw_protected is not None
+        else group.casefold() in {"system", "системные"}
+        or scenario_id.startswith(("system_", "system-"))
+    )
+    scenario = Scenario(
+        id=scenario_id,
         title=_str(root.get("title"), f"{label} title"),
-        group=_str(root.get("group"), f"{label} group"),
+        group=group,
         description=_str(root.get("description"), f"{label} description"),
         icon=_str(root.get("icon"), f"{label} icon"),
         enabled=_bool(root.get("enabled"), f"{label} enabled"),
@@ -690,7 +746,13 @@ def _scenario_from_payload(payload: object, label: str) -> Scenario:
         definition=_definition_from_payload(
             root.get("definition"), f"{label} definition"
         ),
+        room_id=_optional_str(root.get("roomId")),
+        protected=protected,
     )
+    activation_kind = root.get("activationKind")
+    if activation_kind is not None and activation_kind != scenario.activation_kind.value:
+        raise ScenarioViolation(f"{label} activationKind does not match triggers")
+    return scenario
 
 
 def _scenario_to_payload(scenario: Scenario) -> dict[str, object]:
@@ -709,6 +771,9 @@ def _scenario_to_payload(scenario: Scenario) -> dict[str, object]:
         "actionDescription": scenario.action_description,
         "updatedAt": scenario.updated_at,
         "definition": _definition_to_payload(scenario.definition),
+        "roomId": scenario.room_id,
+        "activationKind": scenario.activation_kind.value,
+        "protected": scenario.protected,
     }
 
 

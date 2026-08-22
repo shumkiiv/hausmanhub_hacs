@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import unittest
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
+
+from jsonschema import Draft202012Validator
 
 from custom_components.hausman_hub.application.scenario_service import (
     ScenarioNotFoundError,
+    ScenarioProtectedError,
     ScenarioReferencedError,
     ScenarioService,
     ScenarioServiceError,
@@ -20,6 +25,12 @@ from custom_components.hausman_hub.application.scenarios import (
     ScenarioDeviceEntry,
 )
 from custom_components.hausman_hub.domain.scenarios import ScenarioRegistry
+
+
+SCENARIO_LIST_SCHEMA = (
+    Path(__file__).resolve().parents[1]
+    / "custom_components/hausman_hub/contracts/v1/scenario-list.schema.json"
+)
 
 
 class _FakeStore:
@@ -133,11 +144,15 @@ class _QueueExecutor(_FakeExecutor):
 
 
 class _FakeJournal:
-    def __init__(self) -> None:
+    def __init__(self, records: list[dict[str, object]] | None = None) -> None:
         self.receipts: list[dict[str, object]] = []
+        self.records = records or []
 
     async def async_append(self, receipt: dict[str, object]) -> None:
         self.receipts.append(receipt)
+
+    def snapshot(self, **_: object) -> dict[str, object]:
+        return {"records": self.records}
 
 
 def _catalog() -> ScenarioCatalog:
@@ -210,6 +225,94 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(listed), 1)
         self.assertTrue(self.store._data)
         self.assertEqual(self.store._data.version, 1)
+
+    async def test_classified_list_exposes_room_next_run_and_no_false_result(self) -> None:
+        now = datetime(2026, 8, 22, 7, 0, tzinfo=timezone.utc)
+        service = ScenarioService(
+            None,
+            self.store,
+            self.catalog,
+            self.executor,
+            now_provider=lambda: now,
+            sun_times_provider=lambda: (None, None),
+            operation_journal=_FakeJournal(),
+        )
+        await service.async_load()
+        payload = _valid_payload("morning_light")
+        payload["roomId"] = "living"
+        await service.async_update_scenario(payload)
+
+        result = await service.async_scenario_list_payload()
+        item = result["scenarios"][0]
+
+        Draft202012Validator(
+            json.loads(SCENARIO_LIST_SCHEMA.read_text(encoding="utf-8"))
+        ).validate(result)
+
+        self.assertEqual(
+            {"name": "hausman-hub-scenario-list", "version": 1},
+            result["contract"],
+        )
+        self.assertEqual("automatic", item["activationKind"])
+        self.assertEqual("living", item["roomId"])
+        self.assertEqual("2026-08-22T08:00:00+00:00", item["nextRun"])
+        self.assertIsNone(item["lastResult"])
+        self.assertIsNone(item["temporaryException"])
+
+    async def test_classified_list_exposes_durable_result_and_skip_once(self) -> None:
+        now = datetime(2026, 8, 22, 7, 0, tzinfo=timezone.utc)
+        journal = _FakeJournal(
+            [
+                {
+                    "correlation_id": "scenario.morning-light.1",
+                    "occurred_at": 1787381000000,
+                    "scenario": {
+                        "scenario_id": "morning_light",
+                        "outcome": "completed",
+                        "command_mode": "shadow",
+                    },
+                }
+            ]
+        )
+        service = ScenarioService(
+            None,
+            self.store,
+            self.catalog,
+            self.executor,
+            now_provider=lambda: now,
+            sun_times_provider=lambda: (None, None),
+            operation_journal=journal,
+        )
+        await service.async_load()
+        await service.async_update_scenario(_valid_payload("morning_light"))
+        cancelled = await service.async_cancel_upcoming(
+            "morning_light",
+            "t1",
+            "2026-08-22T08:00:00+00:00",
+        )
+
+        result = await service.async_scenario_list_payload()
+        item = result["scenarios"][0]
+
+        self.assertTrue(cancelled["cancelled"])
+        self.assertIsNone(item["nextRun"])
+        self.assertEqual(
+            {
+                "kind": "skip_once",
+                "triggerId": "t1",
+                "runAt": "2026-08-22T08:00:00+00:00",
+            },
+            item["temporaryException"],
+        )
+        self.assertEqual(
+            {
+                "outcome": "completed",
+                "occurredAt": 1787381000000,
+                "correlationId": "scenario.morning-light.1",
+                "commandMode": "shadow",
+            },
+            item["lastResult"],
+        )
 
     async def test_event_trigger_projection_contains_only_enabled_filter(self) -> None:
         payload = _valid_payload("event_button")
@@ -488,6 +591,17 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
         await self.service.async_update_scenario(_valid_payload())
         await self.service.async_delete_scenario("scenario_1")
         self.assertEqual(len(await self.service.async_list_scenarios()), 0)
+
+    async def test_delete_protected_system_scenario_raises_409(self) -> None:
+        payload = _valid_payload("system_safety")
+        payload["group"] = "system"
+        scenario = await self.service.async_update_scenario(payload)
+        self.assertTrue(scenario.protected)
+
+        with self.assertRaises(ScenarioProtectedError) as ctx:
+            await self.service.async_delete_scenario("system_safety")
+
+        self.assertEqual(409, ctx.exception.status)
 
     async def test_delete_missing_raises_404(self) -> None:
         with self.assertRaises(ScenarioNotFoundError):

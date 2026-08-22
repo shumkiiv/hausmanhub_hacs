@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/scenario-list.schema.json",
+  "title": "HausmanHub classified scenario list v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "generatedAt", "scenarios"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-scenario-list"},
+        "version": {"const": 1}
+      }
+    },
+    "generatedAt": {"type": "integer", "minimum": 0},
+    "scenarios": {
+      "type": "array",
+      "maxItems": 512,
+      "items": {"$ref": "#/$defs/scenario"}
+    }
+  },
+  "$defs": {
+    "stableId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+    },
+    "lastResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outcome", "occurredAt", "correlationId", "commandMode"],
+      "properties": {
+        "outcome": {"enum": ["completed", "skipped", "cancelled", "partial", "failed"]},
+        "occurredAt": {"type": "integer", "minimum": 0},
+        "correlationId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "commandMode": {"enum": ["live", "shadow"]}
+      }
+    },
+    "temporaryException": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "triggerId", "runAt"],
+      "properties": {
+        "kind": {"const": "skip_once"},
+        "triggerId": {"$ref": "#/$defs/stableId"},
+        "runAt": {"type": "string", "format": "date-time"}
+      }
+    },
+    "scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "title", "group", "description", "icon", "enabled",
+        "favorite", "danger", "requiresConfirmation", "triggerDescription",
+        "conditionDescription", "actionDescription", "updatedAt", "definition",
+        "roomId", "activationKind", "protected", "nextRun", "lastResult",
+        "temporaryException"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/stableId"},
+        "title": {"type": "string", "minLength": 1, "maxLength": 120},
+        "group": {"type": "string", "minLength": 1, "maxLength": 64},
+        "description": {"type": "string", "maxLength": 500},
+        "icon": {"type": "string", "maxLength": 80},
+        "enabled": {"type": "boolean"},
+        "favorite": {"type": "boolean"},
+        "danger": {"type": "boolean"},
+        "requiresConfirmation": {"type": "boolean"},
+        "triggerDescription": {"type": "string", "maxLength": 500},
+        "conditionDescription": {"type": "string", "maxLength": 500},
+        "actionDescription": {"type": "string", "maxLength": 500},
+        "updatedAt": {"type": "integer", "minimum": 0},
+        "definition": {"type": "object"},
+        "roomId": {
+          "oneOf": [
+            {"$ref": "#/$defs/stableId"},
+            {"type": "null"}
+          ]
+        },
+        "activationKind": {"enum": ["manual", "automatic", "hybrid", "system"]},
+        "protected": {"type": "boolean"},
+        "nextRun": {"type": ["string", "null"], "format": "date-time"},
+        "lastResult": {
+          "oneOf": [
+            {"$ref": "#/$defs/lastResult"},
+            {"type": "null"}
+          ]
+        },
+        "temporaryException": {
+          "oneOf": [
+            {"$ref": "#/$defs/temporaryException"},
+            {"type": "null"}
+          ]
+        }
+      }
+    }
+  }
+}

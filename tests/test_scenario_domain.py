@@ -10,6 +10,7 @@ from custom_components.hausman_hub.domain.scenarios import (
     MAX_DELAY_SECONDS,
     MAX_TRIGGERS,
     Scenario,
+    ScenarioActivationKind,
     ScenarioAction,
     ScenarioActionType,
     ScenarioCommandMode,
@@ -79,13 +80,74 @@ class ScenarioDomainTest(unittest.TestCase):
         scenario = valid_scenario()
         self.assertEqual(scenario.id, "test_scenario")
         self.assertTrue(scenario.enabled)
+        self.assertEqual(ScenarioActivationKind.MANUAL, scenario.activation_kind)
+
+    def test_activation_kind_is_derived_from_triggers_and_system_policy(self) -> None:
+        automatic = valid_scenario(
+            definition=valid_definition(
+                triggers=(
+                    ScenarioTrigger(
+                        id="clock",
+                        type=ScenarioTriggerType.TIME,
+                        value="08:00",
+                    ),
+                )
+            )
+        )
+        hybrid = valid_scenario(
+            definition=valid_definition(
+                triggers=(
+                    ScenarioTrigger(id="manual", type=ScenarioTriggerType.MANUAL),
+                    ScenarioTrigger(
+                        id="clock",
+                        type=ScenarioTriggerType.TIME,
+                        value="08:00",
+                    ),
+                )
+            )
+        )
+        system = valid_scenario(protected=True)
+
+        self.assertEqual(ScenarioActivationKind.AUTOMATIC, automatic.activation_kind)
+        self.assertEqual(ScenarioActivationKind.HYBRID, hybrid.activation_kind)
+        self.assertEqual(ScenarioActivationKind.SYSTEM, system.activation_kind)
 
     def test_round_trip_payload(self) -> None:
-        registry = ScenarioRegistry(scenarios=(valid_scenario(),))
+        registry = ScenarioRegistry(
+            scenarios=(valid_scenario(room_id="living", protected=True),)
+        )
         payload = scenario_registry_to_payload(registry)
         restored = scenario_registry_from_payload(payload)
         self.assertEqual(len(restored.scenarios), 1)
         self.assertEqual(restored.scenarios[0].id, "test_scenario")
+        self.assertEqual("living", restored.scenarios[0].room_id)
+        self.assertTrue(restored.scenarios[0].protected)
+        self.assertEqual("system", payload["scenarios"][0]["activationKind"])
+
+    def test_legacy_payload_without_classification_fields_is_migrated(self) -> None:
+        payload = scenario_registry_to_payload(
+            ScenarioRegistry(scenarios=(valid_scenario(),))
+        )
+        for key in ("roomId", "activationKind", "protected"):
+            del payload["scenarios"][0][key]
+
+        restored = scenario_registry_from_payload(payload)
+
+        self.assertIsNone(restored.scenarios[0].room_id)
+        self.assertFalse(restored.scenarios[0].protected)
+        self.assertEqual(
+            ScenarioActivationKind.MANUAL,
+            restored.scenarios[0].activation_kind,
+        )
+
+    def test_persisted_activation_kind_must_match_triggers(self) -> None:
+        payload = scenario_registry_to_payload(
+            ScenarioRegistry(scenarios=(valid_scenario(),))
+        )
+        payload["scenarios"][0]["activationKind"] = "automatic"
+
+        with self.assertRaises(ScenarioViolation):
+            scenario_registry_from_payload(payload)
 
     def test_empty_registry(self) -> None:
         registry = ScenarioRegistry()

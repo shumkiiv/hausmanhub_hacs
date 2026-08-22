@@ -3239,6 +3239,10 @@ class LocalSummaryAccessTest(unittest.TestCase):
 
         self.assertEqual(200, scenarios.status)
         self.assertIn("scenarios", scenarios.payload)
+        self.assertEqual(
+            {"name": "hausman-hub-scenario-list", "version": 1},
+            scenarios.payload["contract"],
+        )
         self.assertEqual(200, catalog.status)
         self.assertIn("devices", catalog.payload)
         self.assertIn("scenarios", catalog.payload)

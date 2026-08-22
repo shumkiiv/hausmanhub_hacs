@@ -18,6 +18,7 @@ from ..domain.scenarios import (
     ScenarioRegistry,
     ScenarioTriggerType,
     ScenarioViolation,
+    _scenario_to_payload,
 )
 from .operation_journal import scenario_operation_receipt
 from .scenario_schedule import (
@@ -84,6 +85,14 @@ class ScenarioReferencedError(ScenarioServiceError):
     def __init__(self, scenario_id: str):
         super().__init__(
             f"Scenario {scenario_id!r} is referenced by other scenarios",
+            status=409,
+        )
+
+
+class ScenarioProtectedError(ScenarioServiceError):
+    def __init__(self, scenario_id: str):
+        super().__init__(
+            f"Scenario {scenario_id!r} is protected by system policy",
             status=409,
         )
 
@@ -179,6 +188,8 @@ class ScenarioService:
     def _sun_times(self) -> tuple[datetime | None, datetime | None]:
         if self._sun_times_provider is not None:
             return self._sun_times_provider()
+        if self._hass is None:
+            return None, None
         state = self._hass.states.get("sun.sun")
         attributes = getattr(state, "attributes", {}) if state is not None else {}
         from homeassistant.util import dt as dt_util  # noqa: PLC0415
@@ -558,6 +569,90 @@ class ScenarioService:
         registry = self._ensure_loaded()
         return tuple(sorted(registry.scenarios, key=lambda scenario: scenario.title))
 
+    async def async_scenario_list_payload(self) -> dict[str, object]:
+        """Return the classified list with schedule and durable run evidence."""
+
+        scenarios = await self.async_list_scenarios()
+        now = self._now_local()
+        next_sunrise, next_sunset = self._sun_times()
+        all_runs = compute_upcoming_runs(
+            scenarios,
+            now,
+            next_sunrise,
+            next_sunset,
+            frozenset(),
+        )
+        active_by_scenario: dict[str, ScheduledRun] = {}
+        skipped_by_scenario: dict[str, ScheduledRun] = {}
+        for run in all_runs:
+            destination = (
+                skipped_by_scenario
+                if run.skip_key in self._skipped_runs
+                else active_by_scenario
+            )
+            destination.setdefault(run.scenario_id, run)
+
+        last_results: dict[str, dict[str, object]] = {}
+        snapshot = getattr(self._operation_journal, "snapshot", None)
+        if callable(snapshot):
+            journal = snapshot(limit=512, source="scenario")
+            records = journal.get("records", ()) if isinstance(journal, dict) else ()
+            if isinstance(records, list):
+                for record in records:
+                    if not isinstance(record, dict):
+                        continue
+                    trace = record.get("scenario")
+                    if not isinstance(trace, dict):
+                        continue
+                    scenario_id = trace.get("scenario_id")
+                    if not isinstance(scenario_id, str) or scenario_id in last_results:
+                        continue
+                    outcome = trace.get("outcome")
+                    occurred_at = record.get("occurred_at")
+                    correlation_id = record.get("correlation_id")
+                    command_mode = trace.get("command_mode", "live")
+                    if (
+                        outcome
+                        not in {"completed", "skipped", "cancelled", "partial", "failed"}
+                        or type(occurred_at) is not int
+                        or not isinstance(correlation_id, str)
+                        or command_mode not in {"live", "shadow"}
+                    ):
+                        continue
+                    last_results[scenario_id] = {
+                        "outcome": outcome,
+                        "occurredAt": occurred_at,
+                        "correlationId": correlation_id,
+                        "commandMode": command_mode,
+                    }
+
+        payloads: list[dict[str, object]] = []
+        for scenario in scenarios:
+            payload = _scenario_to_payload(scenario)
+            active = active_by_scenario.get(scenario.id)
+            skipped = skipped_by_scenario.get(scenario.id)
+            payload.update(
+                {
+                    "nextRun": active.run_at.isoformat() if active is not None else None,
+                    "lastResult": last_results.get(scenario.id),
+                    "temporaryException": (
+                        {
+                            "kind": "skip_once",
+                            "triggerId": skipped.trigger_id,
+                            "runAt": skipped.run_at.isoformat(),
+                        }
+                        if skipped is not None
+                        else None
+                    ),
+                }
+            )
+            payloads.append(payload)
+        return {
+            "contract": {"name": "hausman-hub-scenario-list", "version": 1},
+            "generatedAt": max(0, int(now.timestamp() * 1000)),
+            "scenarios": payloads,
+        }
+
     async def async_get_scenario(self, scenario_id: str) -> Scenario:
         """Return one scenario or raise 404."""
 
@@ -639,12 +734,26 @@ class ScenarioService:
             enabled = raw_enabled is True or (
                 isinstance(raw_enabled, str) and raw_enabled.lower() == "true"
             )
+            existing = registry.scenario(raw_id)
+            group = _str_or_default(payload, "group", "custom")
+            if existing is not None and existing.protected:
+                group = existing.group
+            room_id = payload.get("roomId")
+            if room_id is not None and not isinstance(room_id, str):
+                raise ScenarioValidationError(
+                    (
+                        ScenarioDefinitionViolation(
+                            "scenario roomId must be a string or null",
+                            path="roomId",
+                        ),
+                    )
+                )
             new_scenario = Scenario.from_definition(
                 scenario_id=raw_id,
                 title=raw_title.strip(),
                 definition=definition,
                 enabled=enabled,
-                group=_str_or_default(payload, "group", "custom"),
+                group=group,
                 description=_str_or_default(payload, "description", ""),
                 icon=_str_or_default(payload, "icon", "mdi:script"),
                 favorite=_bool_or_default(payload, "favorite", False),
@@ -658,6 +767,8 @@ class ScenarioService:
                 ),
                 action_description=_str_or_default(payload, "actionDescription", ""),
                 updated_at=int(time.time() * 1000),
+                room_id=room_id,
+                protected=(existing.protected if existing is not None else None),
             )
             scenarios = [s for s in registry.scenarios if s.id != new_scenario.id]
             scenarios.append(new_scenario)
@@ -721,6 +832,10 @@ class ScenarioService:
             registry = self._ensure_loaded()
             if not any(s.id == scenario_id for s in registry.scenarios):
                 raise ScenarioNotFoundError(scenario_id)
+
+            target = registry.scenario(scenario_id)
+            if target is not None and target.protected:
+                raise ScenarioProtectedError(scenario_id)
 
             for scenario in registry.scenarios:
                 for action in scenario.definition.actions:
