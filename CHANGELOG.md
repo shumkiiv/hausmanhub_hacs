@@ -1,5 +1,14 @@
 # История версий
 
+## 1.52.155 - 2026-08-23
+
+- Добавлен исполняемый реестр паритета HACS и Hausman Android для header,
+  card, detail, control, notice, picker и empty state.
+- Gate закрепляет общую synthetic fixture, semantic tokens, browser widths
+  900/1280/1440/1920 px, light/dark и zoom 125/150%.
+- Проверяются browser-specific keyboard/focus, Esc, возврат focus и aria-live.
+  Визуальная компоновка HACS не менялась, выполнен только cache-bust.
+
 ## 1.52.154 - 2026-08-22
 
 - Numeric entities сценарного каталога публикуют живые minimum, maximum,

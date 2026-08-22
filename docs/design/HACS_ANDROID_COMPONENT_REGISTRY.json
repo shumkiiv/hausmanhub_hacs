@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "visualReference": {
+    "platform": "Hausman Android tablet",
+    "version": "1.0.251",
+    "policy": "information hierarchy and semantics, never literal Compose dimensions"
+  },
+  "syntheticFixture": "fixtures/hausmanhub_dashboard_v1/dashboard.json",
+  "themes": ["light", "dark"],
+  "browserWidthsPx": [900, 1280, 1440, 1920],
+  "browserZoomPercent": [100, 125, 150],
+  "tokens": {
+    "source": "custom_components/hausman_hub/frontend/hausman-hub-tokens.css",
+    "groups": ["colors", "spacing", "radius", "typography", "status"]
+  },
+  "components": {
+    "header": {
+      "implementation": "hausman-hub-library-hero",
+      "requiredStates": ["default", "warning"]
+    },
+    "card": {
+      "implementation": "hausman-hub-device-card",
+      "requiredStates": ["loading", "ready", "offline", "pending", "failed", "disabled"]
+    },
+    "detail": {
+      "implementation": "hausman-hub-modal",
+      "requiredBehaviours": ["initial-focus", "tab-trap", "escape-close", "focus-return"]
+    },
+    "control": {
+      "implementation": "hausman-hub-buttons",
+      "requiredStates": ["default", "hover", "focus", "pending", "disabled"]
+    },
+    "notice": {
+      "implementation": "hausman-hub-feedback",
+      "requiredBehaviours": ["polite-receipt", "assertive-error", "non-layout-shifting"]
+    },
+    "picker": {
+      "implementation": "hausman-hub-scenario-device-picker",
+      "requiredBehaviours": ["keyboard", "escape-close", "stable-draft"]
+    },
+    "emptyState": {
+      "implementation": "hausman-hub-ui-state",
+      "requiredStates": ["loading", "stale", "offline", "failed", "disabled"]
+    }
+  },
+  "physicalDeviceEntryPoints": ["overview", "lighting", "climate", "rooms", "media", "security", "devices", "energy"],
+  "platformDifferences": [
+    "HACS keeps URL navigation, keyboard focus, hover and responsive reflow",
+    "Android keeps touch-first navigation and platform lifecycle restoration"
+  ]
+}
