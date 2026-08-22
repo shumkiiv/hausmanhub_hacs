@@ -1,6 +1,18 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-22 (HACS 1.52.151, зрелая энергетика).
+- 2026-08-22: направление 17 завершено в HACS `1.52.153`. Vendor timeout и
+  circuit breaker изолируют медленные media/remote/Yandex services. Домофон
+  требует явного подтверждения, поддерживает безопасный dry-run, bounded hold
+  15 секунд, read-back release receipt и redacted durable audit без entity ID.
+  Production dry-run `1.52.152` выявил пропущенную передачу флага через
+  `ScenarioService`; hotfix `1.52.153` исправил её и добавил прямой тест.
+  Full gate: 1639 passed, 4 skipped, 999 subtests; Actions `32591818087`
+  success. Backup `89c8919a` защищён в local и KeeneticSSD. Production
+  installed/latest `v1.52.153`, config checks зелёные, safe live dry-run
+  HTTP 200 и не отправляет физическую команду. Коммиты `59f4bcb`, `e793219`.
+  Детали: [[LLM_WIKI/Sessions/2026-08-22-codex-hacs-vendor-safety-1.52.153]].
+
+Last updated: 2026-08-22 (HACS 1.52.153, vendor safety).
 
 ## Current work
 
