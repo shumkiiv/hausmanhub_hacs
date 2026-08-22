@@ -1,5 +1,26 @@
 # Current Work
 
+## 2026-08-22: HACS 1.52.142, серверная классификация сценариев
+
+- Scenario list закреплён контрактом `hausman-hub-scenario-list` v1 из
+  contracts `0.49.0` (`5478341`). Backend возвращает `activationKind`,
+  `roomId`, `protected`, `nextRun`, `lastResult`, `temporaryException`.
+- Защищённые system-сценарии нельзя удалить. Legacy storage без новых полей
+  загружается и мигрирует безопасно. Android и HACS UI смогут убрать
+  локальные эвристики отдельными клиентскими релизами.
+- Feature commit `04064d2`, release commit/tag `3a1fb54`, `v1.52.142`.
+  Финальный staged gate: 1580 tests, 4 skipped. Actions `32562805751`
+  успешен.
+- Production backup `7a4b14cd`: по 921886720 байт в `hassio.local` и
+  `hassio.KeeneticSSD`. Выполнены два успешных config checks и один restart.
+  Installed/latest `v1.52.142`, config entry loaded.
+- Production response из 39 сценариев и operation journal проходят JSON
+  Schema. В списке 24 защищённых system, 9 manual и 6 automatic. Девять
+  shadow-сценариев сохранили `commandMode=shadow`.
+- Все 88 frontend JS/CSS файлов совпадают с release по SHA-256. Визуальный
+  baseline не менялся. Node-RED остаётся физическим владельцем до завершения
+  soak.
+
 ## 2026-08-22: HACS 1.52.141, shadow-наблюдение перед Node-RED cutover
 
 - Релизная цепочка: `v1.52.139` добавил fail-safe shadow runtime,

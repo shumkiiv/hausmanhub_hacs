@@ -1,8 +1,24 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-22 (HACS 1.52.141, Node-RED cutover переведён в безопасное shadow-наблюдение).
+Last updated: 2026-08-22 (HACS 1.52.142, серверная классификация сценариев развёрнута в production).
 
 ## Current work
+
+- 2026-08-22 (Codex): HACS `v1.52.142` опубликован и развёрнут в production.
+  Scenario list соответствует новому contracts `0.49.0` (`5478341`) и
+  возвращает серверные `activationKind`, `roomId`, `protected`, `nextRun`,
+  `lastResult`, `temporaryException`. Защищённые system-сценарии нельзя
+  удалить, legacy storage мигрирует безопасно. Feature commit `04064d2`,
+  release commit/tag `3a1fb54`, Actions `32562805751` успешен. Финальный
+  staged gate: 1580 tests, 4 skipped. Перед deploy создан full backup
+  `7a4b14cd`, по 921886720 байт в `hassio.local` и `hassio.KeeneticSSD`.
+  После двух config checks и одного restart installed/latest равны
+  `v1.52.142`, config entry loaded. Production response из 39 сценариев и
+  operation journal проходят JSON Schema; 24 сценария защищены как system,
+  9 shadow-сценариев сохранили `commandMode=shadow`. Все 88 frontend JS/CSS
+  совпадают с release по SHA-256, UI baseline не менялся. Ошибок Hausman в
+  system log нет. Node-RED не изменялся и остаётся физическим владельцем до
+  завершения soak.
 
 - 2026-08-22 (Codex): HACS `v1.52.139`, корректировки `v1.52.140` и
   `v1.52.141` опубликованы и развёрнуты в production поверх UI baseline
@@ -3819,5 +3835,5 @@ Engineering and review rules are in
 
 - Obsidian/context index: `LLM_WIKI/00_Index.md`.
 - Latest generated context: `LLM_WIKI/Context.md`.
-- Last sync: 2026-08-22T11:10:26+03:00.
+- Last sync: 2026-08-22T11:54:08+03:00.
 <!-- llm-wiki-sync:end -->
