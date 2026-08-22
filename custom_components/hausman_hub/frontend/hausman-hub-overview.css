@@ -205,7 +205,7 @@
 .overview-canon-favorite > .icon { width:22px; height:22px; color:var(--hmh-text-secondary); }
 
 .overview-tablet-bottom-grid { display:grid; grid-template-columns:3fr 2fr; align-items:stretch; gap:var(--hmh-tablet-gap,8px); min-width:0; }
-.overview-tablet-bottom-card { display:flex; height:100%; min-height:var(--hmh-tablet-bottom,124px); flex-direction:column; min-width:0; padding:10px; font-weight:400; line-height:normal; text-align:left; white-space:normal; }
+.overview-tablet-bottom-card { display:flex; height:100%; min-height:var(--hmh-tablet-bottom,124px); flex-direction:column; min-width:0; padding:10px; overflow:hidden; font-weight:400; line-height:normal; text-align:left; white-space:normal; }
 .overview-tablet-bottom-card.is-expanded { min-height:332px; }
 .overview-tablet-bottom-head { justify-content:space-between; }
 .overview-tablet-bottom-head h2 { display:flex; align-items:center; gap:9px; }
@@ -239,7 +239,7 @@
 .overview-tablet-energy-metric.is-accent strong { color:var(--hmh-accent-primary); }
 .overview-tablet-energy-metric.is-lighting strong { color:#D79B00; }
 .overview-tablet-energy-metric.is-warning strong { color:var(--hmh-status-warning); }
-.overview-tablet-energy-expanded-list,.overview-tablet-lighting-list { display:grid; grid-auto-rows:minmax(44px,1fr); align-content:stretch; gap:6px; min-height:0; }
+.overview-tablet-energy-expanded-list,.overview-tablet-lighting-list { display:grid; grid-auto-rows:minmax(44px,1fr); align-content:stretch; gap:6px; min-height:0; overflow-x:hidden; overflow-y:auto; overscroll-behavior:contain; scrollbar-width:thin; }
 .overview-tablet-energy-expanded-source { display:grid; grid-template-columns:minmax(120px,1fr) minmax(220px,1.45fr) 18px; align-items:center; gap:9px; min-width:0; margin:0; padding:8px 10px; border:1px solid var(--hmh-border-default); border-radius:8px; color:var(--hmh-text-primary); background:var(--hmh-surface-raised); box-shadow:none; text-align:left; }
 .overview-tablet-energy-expanded-copy { display:grid; gap:2px; min-width:0; }
 .overview-tablet-energy-expanded-copy small { overflow:hidden; color:var(--hmh-text-secondary); font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
@@ -355,6 +355,15 @@
   :host(.overview-active) .overview-tablet-activity-copy { gap:3px; }
   :host(.overview-active) .overview-tablet-activity-copy small { display:-webkit-box; font-size:11px; line-height:1.35; white-space:normal; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
   :host(.overview-active) .overview-tablet-activity-row > time { align-self:start; width:38px; padding-top:2px; text-align:right; }
+}
+
+@container hausmanhub-panel (min-width:1050px) and (max-width:1219px) {
+  :host(.overview-active) .overview-tablet-bottom-card.is-expanded .overview-tablet-bottom-head { align-items:flex-start; flex-wrap:wrap; }
+  :host(.overview-active) .overview-tablet-bottom-card.is-expanded .overview-tablet-energy-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  :host(.overview-active) .overview-tablet-bottom-card.is-expanded .overview-tablet-energy-expanded-source { grid-template-columns:minmax(0,1fr) 18px; }
+  :host(.overview-active) .overview-tablet-bottom-card.is-expanded .overview-tablet-energy-expanded-values { grid-column:1 / -1; }
+  :host(.overview-active) .overview-tablet-bottom-card.is-expanded .overview-tablet-lighting-device { grid-template-columns:30px minmax(0,1fr) 18px; }
+  :host(.overview-active) .overview-tablet-bottom-card.is-expanded .overview-tablet-lighting-device-state { grid-column:2; min-width:0; max-width:none; }
 }
 
 @media (max-width:1049px) {
