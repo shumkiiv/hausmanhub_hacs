@@ -1,5 +1,33 @@
 # Current Work
 
+## 2026-08-22: HACS 1.52.135, планшетные правки и единый масштаб
+
+- Главная приведена к масштабу остальных страниц: типографика, Hero,
+  карточки метрик, интервалы и правая колонка больше не увеличиваются на
+  широком viewport. Раздел «Освещение» получил актуальные планшетные
+  физические каналы, образ потолочного светильника и парные диапазоны
+  яркости и цветовой температуры.
+- Feature commits `e6e2cf4`, `0a65de4`; release commit/tag `12c4609`,
+  `v1.52.135`. Release без assets:
+  https://github.com/shumkiiv/hausmanhub_hacs/releases/tag/v1.52.135.
+- Staged `python3 tools/check_local_release.py`: 1548 tests, 4 skipped;
+  package, fixtures, Android compatibility, README sync, version gate и
+  repository safety успешны. GitHub Actions `32552485736` завершён успешно.
+- Перед deploy создан full backup `362c8bac` с Home Assistant, базой,
+  10 add-ons и папкой `ssl`. Копии по 916940800 байт подтверждены в
+  `hassio.local` и `hassio.KeeneticSSD`.
+- HACS установлен явной `v1.52.135`, `check_config` успешен, Home Assistant
+  перезапущен один раз. После restart installed/latest равны `v1.52.135`,
+  30 из 30 изменённых frontend assets совпадают с release, 10 сущностей
+  доступны, system log не содержит ошибок или traceback Hausman Hub.
+- На production viewport 2560x1306 главная и «Освещение» имеют одинаковую
+  ширину `main` 1600 px, cache version `1.52.135`, горизонтального overflow
+  нет. JS exceptions отсутствуют. Пять network 403 относятся к известному
+  scope браузерной сессии для `capabilities/events`; read token получает
+  capabilities с HTTP 200.
+- Android, backend, API, contracts и storage не менялись. Откат доступен
+  через backup `362c8bac`.
+
 ## 2026-08-22: масштаб главной HACS соответствует остальным страницам
 
 - Причина визуального увеличения была не в ширине страницы, а в отдельных

@@ -1,8 +1,25 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-22 (визуальный масштаб главной HACS приведён к остальным страницам локально).
+Last updated: 2026-08-22 (HACS 1.52.135 опубликован и развёрнут в production).
 
 ## Current work
+
+- 2026-08-22 (Codex): HACS `v1.52.135` опубликован и развёрнут в
+  production. Выпуск объединяет последние планшетные правки освещения и
+  нормализацию масштаба главной относительно остальных страниц. Feature
+  commits `e6e2cf4`, `0a65de4`, release commit/tag `12c4609`, GitHub Release
+  без assets. Staged release-gate: 1548 tests, 4 skipped; Actions
+  `32552485736` успешен. Перед установкой создан full backup `362c8bac`:
+  Home Assistant, база, 10 add-ons и папка `ssl`, копии по 916940800 байт в
+  `hassio.local` и `hassio.KeeneticSSD`. После явной установки,
+  `check_config` и одного restart installed/latest равны `v1.52.135`;
+  30 из 30 изменённых frontend assets совпадают с release, все 10 сущностей
+  доступны, ошибок и traceback Hausman Hub в system log нет. На живом
+  viewport 2560x1306 главная и «Освещение» имеют одинаковую ширину `main`
+  1600 px, cache version `1.52.135`, горизонтального overflow нет. В Chrome
+  нет JS exceptions; сессия пользователя пишет пять известных network 403
+  для scope-limited `capabilities/events`, при этом capabilities с read token
+  отвечает 200. Android, backend, API, contracts и storage не менялись.
 
 - 2026-08-22 (Codex): изменён только HACS frontend. Главная больше не
   увеличивает планшетные размеры на широком viewport до 125%: размеры
