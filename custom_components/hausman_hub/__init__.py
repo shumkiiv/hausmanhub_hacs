@@ -126,6 +126,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     domain_data[DATA_OPERATION_JOURNAL] = operation_journal
     if configuration.local_summary_enabled:
         register_local_summary_access(hass, entry)
+    from .application.water_safety import WaterSafetyService
+    from .water_safety_api import DATA_WATER_SAFETY, register_water_safety_api
+    from .water_safety_gateway import HomeAssistantWaterSafetyGateway
+    from .water_safety_storage import HomeAssistantWaterSafetyStore
+
+    water_safety = WaterSafetyService(
+        hass,
+        HomeAssistantWaterSafetyStore(hass, entry.entry_id),
+        command_gateway=HomeAssistantWaterSafetyGateway(hass),
+        operation_journal=operation_journal,
+    )
+    await water_safety.async_load()
+    domain_data[DATA_WATER_SAFETY] = water_safety
+    entry.async_on_unload(water_safety.start())
+    register_water_safety_api(hass)
     climate_runtime = ClimateRuntime(
         entry_id=entry.entry_id,
         configuration=configuration,
@@ -197,6 +212,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         scenario_catalog,
         scenario_service.async_run_scenario,
         power_dependency_resolver=lambda: device_power_dependency_service.mapping,
+        command_guard=water_safety.command_guard,
     )
     scenario_service.set_executor(scenario_executor)
     entry.async_on_unload(scenario_service.start_catalog_warmup())
@@ -246,9 +262,11 @@ async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     from .realtime_api import clear_event_stream
     from .voice_api import clear_voice_greeting
     from .operation_journal_api import clear_operation_journal
+    from .water_safety_api import clear_water_safety_api
 
     clear_event_stream(hass, entry.entry_id)
     clear_voice_greeting(hass, entry.entry_id)
+    clear_water_safety_api(hass)
     clear_operation_journal(hass)
     clear_climate_api(hass, entry.entry_id)
 
@@ -280,12 +298,14 @@ async def _close_running_duplicate_hausmanhub_entries(
     from .realtime_api import clear_event_stream
     from .voice_api import clear_voice_greeting
     from .operation_journal_api import clear_operation_journal
+    from .water_safety_api import clear_water_safety_api
 
     loaded_entries = tuple(hass.config_entries.async_loaded_entries(domain))
     for loaded_entry in loaded_entries:
         clear_local_summary_access(hass, loaded_entry)
         clear_event_stream(hass, loaded_entry.entry_id)
         clear_voice_greeting(hass, loaded_entry.entry_id)
+        clear_water_safety_api(hass)
         clear_operation_journal(hass)
         clear_climate_api(hass, loaded_entry.entry_id)
     for loaded_entry in loaded_entries:
@@ -354,6 +374,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .realtime_api import clear_event_stream
     from .voice_api import clear_voice_greeting
     from .operation_journal_api import clear_operation_journal
+    from .water_safety_api import clear_water_safety_api
 
     unloaded = await hass.config_entries.async_unload_platforms(
         entry,
@@ -364,6 +385,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         clear_local_summary_access(hass, entry)
         clear_event_stream(hass, entry.entry_id)
         clear_voice_greeting(hass, entry.entry_id)
+        clear_water_safety_api(hass)
         clear_operation_journal(hass)
         clear_climate_api(hass, entry.entry_id)
         from .panel import unregister_hausmanhub_panel

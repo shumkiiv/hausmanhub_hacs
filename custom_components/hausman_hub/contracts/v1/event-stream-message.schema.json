@@ -131,7 +131,10 @@
         "message": { "type": "string", "minLength": 1, "maxLength": 500 },
         "room": { "type": ["string", "null"], "maxLength": 120 },
         "device": { "type": ["string", "null"], "maxLength": 120 },
-        "active": { "type": "boolean" }
+        "active": { "type": "boolean" },
+        "occurred_at": { "type": "integer", "minimum": 0 },
+        "water_valve_state": { "enum": ["open", "closed", "mixed", "unknown", "unavailable"] },
+        "water_command_status": { "enum": ["idle", "accepted", "confirmed", "failed", "blocked"] }
       }
     },
     "attention_alert": {

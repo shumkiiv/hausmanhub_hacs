@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from hashlib import sha256
 import json
+import time
 from typing import TYPE_CHECKING, Any, Final
 
 from homeassistant.components.http import HomeAssistantView
@@ -98,6 +99,19 @@ class EventStreamRuntime:
         active = state == "on"
         title = active_title if active else cleared_title
         device, room = self._device_and_room(entity_id, attributes)
+        water_projection: dict[str, object] = {}
+        if kind == "leak":
+            from .application.water_safety import WaterSafetyService  # noqa: PLC0415
+            from .water_safety_api import DATA_WATER_SAFETY  # noqa: PLC0415
+
+            candidate = self.hass.data.get(DOMAIN, {}).get(DATA_WATER_SAFETY)
+            if isinstance(candidate, WaterSafetyService):
+                projection = candidate.alarm_projection(entity_id)
+                if projection is not None:
+                    water_projection = {
+                        "water_valve_state": projection["waterValveState"],
+                        "water_command_status": projection["waterCommandStatus"],
+                    }
         self.broker.publish(
             "critical_alert",
             {
@@ -111,6 +125,8 @@ class EventStreamRuntime:
                 "room": room if isinstance(room, str) and room else None,
                 "device": device if isinstance(device, str) and device else None,
                 "active": active,
+                "occurred_at": int(time.time() * 1000),
+                **water_projection,
             },
         )
 

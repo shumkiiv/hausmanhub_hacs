@@ -76,6 +76,33 @@ _DATA_OPERATION_JOURNAL = "operation_journal"
 _SENSOR_UNAVAILABLE_STATES = frozenset({"", "unavailable", "unknown"})
 
 
+def _attach_water_safety(hass: HomeAssistant, payload: dict[str, object]) -> None:
+    """Add durable leak time and shutoff read-back to configured alarms."""
+
+    from .application.water_safety import WaterSafetyService  # noqa: PLC0415
+    from .water_safety_api import DATA_WATER_SAFETY  # noqa: PLC0415
+
+    service = getattr(hass, "data", {}).get("hausman_hub", {}).get(
+        DATA_WATER_SAFETY
+    )
+    if not isinstance(service, WaterSafetyService):
+        return
+    alarms = payload.get("alarms")
+    if not isinstance(alarms, list):
+        return
+    for alarm in alarms:
+        if not isinstance(alarm, dict):
+            continue
+        entity_id = alarm.get("entityId")
+        if not isinstance(entity_id, str):
+            continue
+        projection = service.alarm_projection(entity_id)
+        if projection is None:
+            continue
+        alarm.update(projection)
+        alarm["ts"] = projection["occurredAt"]
+
+
 def _outdoor_sensor_kwargs(
     hass: HomeAssistant,
     entity_ids: Sequence[str] | None,
@@ -482,4 +509,5 @@ async def async_dashboard_snapshot(
         capabilities["weatherDetails"] = bool(weather_payload["available"])
     await _refresh_catalog_for_missing_pinned(scenario_service, pinned_entity_ids)
     _attach_catalog_actions(payload, scenario_service)
+    _attach_water_safety(hass, payload)
     return payload

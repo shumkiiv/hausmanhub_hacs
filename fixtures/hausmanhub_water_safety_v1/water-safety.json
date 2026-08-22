@@ -1,0 +1,58 @@
+{
+  "contract": {
+    "name": "hausman-hub-water-safety",
+    "version": 1
+  },
+  "revision": 4,
+  "updatedAt": "2026-08-22T09:00:00Z",
+  "configuration": {
+    "enabled": true,
+    "sensorEntityIds": [
+      "binary_sensor.example_bathroom_leak",
+      "binary_sensor.example_kitchen_leak"
+    ],
+    "actuators": [
+      {
+        "entityId": "switch.example_cold_water_reducer",
+        "closeAction": "turn_off",
+        "openStates": ["on"],
+        "closedStates": ["off"]
+      },
+      {
+        "entityId": "switch.example_hot_water_reducer",
+        "closeAction": "turn_off",
+        "openStates": ["on"],
+        "closedStates": ["off"]
+      }
+    ],
+    "requiredActiveSensors": 1,
+    "activationDebounceSeconds": 3,
+    "clearDebounceSeconds": 30,
+    "recipientServices": ["notify.mobile_app_tablet"],
+    "directionVerified": true,
+    "autoCloseEnabled": true
+  },
+  "state": {
+    "latched": true,
+    "leakDetectedAt": 1787389200000,
+    "activeSensorCount": 1,
+    "qualifying": true,
+    "automaticOpenAllowed": false,
+    "valveState": "closed",
+    "commandStatus": "confirmed",
+    "actuators": [
+      {
+        "entityId": "switch.example_cold_water_reducer",
+        "readBack": "closed",
+        "observedState": "off",
+        "observedAt": 1787389205000
+      },
+      {
+        "entityId": "switch.example_hot_water_reducer",
+        "readBack": "closed",
+        "observedState": "off",
+        "observedAt": 1787389205000
+      }
+    ]
+  }
+}

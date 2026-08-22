@@ -1,0 +1,207 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/water-safety.schema.json",
+  "title": "Hausman Hub water safety v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "revision", "updatedAt", "configuration", "state"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "hausman-hub-water-safety" },
+        "version": { "const": 1 }
+      }
+    },
+    "revision": { "type": "integer", "minimum": 0 },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "configuration": { "$ref": "#/$defs/configuration" },
+    "state": { "$ref": "#/$defs/state" }
+  },
+  "$defs": {
+    "entityId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*\\.[a-z0-9_]+$",
+      "maxLength": 255
+    },
+    "notifyService": {
+      "type": "string",
+      "pattern": "^(notify|persistent_notification)\\.[a-z0-9_]+$",
+      "maxLength": 255
+    },
+    "configuration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "sensorEntityIds",
+        "actuators",
+        "requiredActiveSensors",
+        "activationDebounceSeconds",
+        "clearDebounceSeconds",
+        "recipientServices",
+        "directionVerified",
+        "autoCloseEnabled"
+      ],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "sensorEntityIds": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/entityId" }
+        },
+        "actuators": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/actuator" }
+        },
+        "requiredActiveSensors": { "type": "integer", "minimum": 1, "maximum": 32 },
+        "activationDebounceSeconds": { "type": "integer", "minimum": 1, "maximum": 60 },
+        "clearDebounceSeconds": { "type": "integer", "minimum": 1, "maximum": 300 },
+        "recipientServices": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/notifyService" }
+        },
+        "directionVerified": { "type": "boolean" },
+        "autoCloseEnabled": { "type": "boolean" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "autoCloseEnabled": { "const": true } }, "required": ["autoCloseEnabled"] },
+          "then": {
+            "properties": {
+              "enabled": { "const": true },
+              "directionVerified": { "const": true },
+              "sensorEntityIds": { "minItems": 1 },
+              "actuators": { "minItems": 1 },
+              "recipientServices": { "minItems": 1 }
+            }
+          }
+        }
+      ]
+    },
+    "actuator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entityId", "closeAction", "openStates", "closedStates"],
+      "properties": {
+        "entityId": { "$ref": "#/$defs/entityId" },
+        "closeAction": { "enum": ["turn_off", "turn_on", "close_valve"] },
+        "openStates": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 64 }
+        },
+        "closedStates": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 64 }
+        }
+      }
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "latched",
+        "leakDetectedAt",
+        "activeSensorCount",
+        "qualifying",
+        "automaticOpenAllowed",
+        "valveState",
+        "commandStatus",
+        "actuators"
+      ],
+      "properties": {
+        "latched": { "type": "boolean" },
+        "leakDetectedAt": { "type": ["integer", "null"], "minimum": 0 },
+        "activeSensorCount": { "type": "integer", "minimum": 0, "maximum": 32 },
+        "qualifying": { "type": "boolean" },
+        "automaticOpenAllowed": { "const": false },
+        "valveState": { "enum": ["open", "closed", "mixed", "unknown", "unavailable"] },
+        "commandStatus": { "enum": ["idle", "accepted", "confirmed", "failed", "blocked"] },
+        "actuators": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/actuatorState" }
+        }
+      }
+    },
+    "actuatorState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entityId", "readBack", "observedState", "observedAt"],
+      "properties": {
+        "entityId": { "$ref": "#/$defs/entityId" },
+        "readBack": { "enum": ["open", "closed", "unknown", "unavailable"] },
+        "observedState": { "type": ["string", "null"], "maxLength": 64 },
+        "observedAt": { "type": ["integer", "null"], "minimum": 0 }
+      }
+    },
+    "updateRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["expectedRevision", "configuration"],
+      "properties": {
+        "expectedRevision": { "type": "integer", "minimum": 0 },
+        "configuration": { "$ref": "#/$defs/configuration" }
+      }
+    },
+    "clearLatchRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "expectedRevision", "confirmation"],
+      "properties": {
+        "action": { "const": "clear_latch" },
+        "expectedRevision": { "type": "integer", "minimum": 0 },
+        "confirmation": { "const": true }
+      }
+    },
+    "actionRequest": {
+      "oneOf": [
+        { "$ref": "#/$defs/updateRequest" },
+        { "$ref": "#/$defs/clearLatchRequest" }
+      ]
+    },
+    "directionTestRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entityId"],
+      "properties": {
+        "entityId": { "$ref": "#/$defs/entityId" }
+      }
+    },
+    "directionTestReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract", "entityId", "commandSent", "readBack", "observedState", "observedAt", "safeToConfirm"],
+      "properties": {
+        "contract": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "version"],
+          "properties": {
+            "name": { "const": "hausman-hub-water-direction-test" },
+            "version": { "const": 1 }
+          }
+        },
+        "entityId": { "$ref": "#/$defs/entityId" },
+        "commandSent": { "const": false },
+        "readBack": { "enum": ["open", "closed", "unknown", "unavailable"] },
+        "observedState": { "type": ["string", "null"], "maxLength": 64 },
+        "observedAt": { "type": "integer", "minimum": 0 },
+        "safeToConfirm": { "type": "boolean" }
+      }
+    }
+  }
+}

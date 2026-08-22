@@ -423,7 +423,10 @@
         "active": { "type": "boolean" },
         "roomId": { "type": ["string", "null"] },
         "entityId": { "type": ["string", "null"] },
-        "ts": { "type": ["integer", "null"] }
+        "ts": { "type": ["integer", "null"] },
+        "occurredAt": { "type": ["integer", "null"], "minimum": 0 },
+        "waterValveState": { "enum": ["open", "closed", "mixed", "unknown", "unavailable", null] },
+        "waterCommandStatus": { "enum": ["idle", "accepted", "confirmed", "failed", "blocked", null] }
       },
       "additionalProperties": true
     },

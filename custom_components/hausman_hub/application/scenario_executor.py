@@ -421,6 +421,7 @@ class ScenarioExecutor:
         readback_window_seconds: float = _DEFAULT_DEVICE_READBACK_WINDOW_SECONDS,
         readback_interval_seconds: float = _DEFAULT_DEVICE_READBACK_INTERVAL_SECONDS,
         power_dependency_resolver: Callable[[], Mapping[str, str]] | None = None,
+        command_guard: Callable[[str, str, bool], str | None] | None = None,
     ):
         if not 0.01 <= readback_window_seconds <= 30.0:
             raise ValueError("readback window must be between 0.01 and 30 seconds")
@@ -433,6 +434,7 @@ class ScenarioExecutor:
         self._readback_window_seconds = readback_window_seconds
         self._readback_interval_seconds = readback_interval_seconds
         self._power_dependency_resolver = power_dependency_resolver
+        self._command_guard = command_guard
 
     def new_run_id(self) -> str:
         """Generate a unique execution trace id."""
@@ -807,6 +809,7 @@ class ScenarioExecutor:
                     evidence_age_seconds=evidence_age_seconds,
                     max_evidence_age_seconds=max_evidence_age_seconds,
                     stop_on_stale_evidence=stop_on_stale_evidence,
+                    automatic=True,
                 )
             if action.type == ScenarioActionType.DELAY:
                 if not dry_run:
@@ -839,6 +842,7 @@ class ScenarioExecutor:
         evidence_age_seconds: float = 0.0,
         max_evidence_age_seconds: int = 300,
         stop_on_stale_evidence: bool = True,
+        automatic: bool = False,
     ) -> dict[str, Any]:
         if action.target_id is None or action.action_id is None:
             return {
@@ -860,6 +864,18 @@ class ScenarioExecutor:
                 "status": "failed",
                 "error": f"action {action.action_id} is not available for device {action.target_id}",
             }
+        if self._command_guard is not None:
+            guard_error = self._command_guard(
+                device.entity_id,
+                action.action_id,
+                automatic,
+            )
+            if guard_error is not None:
+                return {
+                    **base,
+                    "status": "failed",
+                    "error": guard_error,
+                }
         dependency_error = self._power_dependency_error(
             device.entity_id,
             powered_sources=powered_sources,

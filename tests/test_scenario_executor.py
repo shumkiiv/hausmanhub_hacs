@@ -455,6 +455,46 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("power_source_off", receipt["error"])
         self.hass.services.async_call.assert_not_awaited()
 
+    async def test_command_guard_distinguishes_manual_and_automatic_action(self) -> None:
+        executor = ScenarioExecutor(
+            self.hass,
+            self.catalog,
+            self.executor._run_callback,
+            readback_window_seconds=0.02,
+            readback_interval_seconds=0.01,
+            command_guard=lambda _entity, action, automatic: (
+                "automatic_water_open_forbidden"
+                if automatic and action == "turn_on"
+                else None
+            ),
+        )
+
+        manual = await executor.async_execute_device_action("device_1", "turn_on")
+        self.assertTrue(manual["accepted"])
+        self.hass.services.async_call.reset_mock()
+
+        automatic = await executor.async_execute(
+            _definition(
+                (
+                    ScenarioAction(
+                        id="a1",
+                        type=ScenarioActionType.DEVICE_ACTION,
+                        target_id="device_1",
+                        action_id="turn_on",
+                    ),
+                )
+            ),
+            "run-water-open",
+            scenario_id="water-open",
+        )
+
+        self.assertEqual("failed", automatic["status"])
+        self.assertEqual(
+            "automatic_water_open_forbidden",
+            automatic["receipts"][0]["error"],
+        )
+        self.hass.services.async_call.assert_not_awaited()
+
     async def test_unpowered_turn_off_is_already_effectively_off(self) -> None:
         self.hass.states = SimpleNamespace(
             get=lambda entity_id: {

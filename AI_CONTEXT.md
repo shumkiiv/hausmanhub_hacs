@@ -1,8 +1,18 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-22 (HACS 1.52.142, серверная классификация сценариев развёрнута в production).
+Last updated: 2026-08-22 (HACS 1.52.143, fail-safe защита от протечек готова к релизу).
 
 ## Current work
+
+- 2026-08-22 (Codex): подготовлен HACS `1.52.143` для
+  направления 18. Water safety v1 хранит policy и latch, использует
+  quorum/debounce, требует verified direction и notify recipient до
+  автозакрытия, подтверждает physical read-back и повторяет
+  закрытие после restart, если авария осталась latched.
+  Автооткрытие всегда запрещено; ручное открытие и latch clear
+  блокируются при stale/unknown safety state. Критические операции
+  пишутся в durable journal. Pin: contracts `0.50.0` (`92b050a`).
+  Frontend layout не менялся.
 
 - 2026-08-22 (Codex): HACS `v1.52.142` опубликован и развёрнут в production.
   Scenario list соответствует новому contracts `0.49.0` (`5478341`) и
