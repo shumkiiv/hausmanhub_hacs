@@ -1,8 +1,14 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-22 (HACS 1.52.145, защита climate deviation развёрнута в monitor).
+Last updated: 2026-08-22 (HACS 1.52.146, contracts consumer sync подготовлен).
 
 ## Current work
+
+- 2026-08-22 (Codex): подготовлен технический HACS `1.52.146`. Pin обновлён
+  до contracts `0.52.1` (`5e89ca2`), который синхронизирует Android
+  production-screen consumer `1.0.245` build `249`. API, schemas, runtime,
+  storage и monitor-политика 1.52.145 не менялись. Frontend layout сохранён,
+  выполнен только cache-bust.
 
 - 2026-08-22 (Codex): HACS `1.52.145` опубликован и развёрнут в production
   для direction 14.A.

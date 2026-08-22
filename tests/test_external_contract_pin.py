@@ -30,14 +30,14 @@ def test_external_contract_pin_is_explicit_and_canonical() -> None:
 
     assert pin == {
         "repository": "shumkiiv/hausmanhub-contracts",
-        "version": "0.52.0",
-        "commit": "da932b1ca3b1b946c4d811d553c1f541fc16b4f7",
+        "version": "0.52.1",
+        "commit": "5e89ca21b40952a82c09743de2cb1bae237bdeaf",
         "canonical": True,
         "role": "runtime-consumer",
     }
 
 
-def test_contract_0_51_0_vendored_files_match_canonical_hashes() -> None:
+def test_contract_0_52_1_vendored_files_match_canonical_hashes() -> None:
     for relative_path, expected_hash in VENDORED_CONTRACT_HASHES.items():
         payload = (REPOSITORY_ROOT / relative_path).read_bytes()
         assert hashlib.sha256(payload).hexdigest() == expected_hash, relative_path
