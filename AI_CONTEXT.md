@@ -1,8 +1,18 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-22 (HACS 1.52.148, карточки климата приведены к читаемой планшетной компоновке).
+Last updated: 2026-08-22 (HACS 1.52.148, выровнен текст панели внимания безопасности).
 
 ## Current work
+
+- 2026-08-22 (Codex): изменён только HACS frontend раздела
+  «Безопасность». В строках правой панели «Требуют внимания» восстановлен
+  внутренний отступ 12 px, поэтому название устройства и подпись состояния
+  больше не прилипают к левому краю. `box-sizing:border-box` сохраняет
+  прежнюю ширину строк. Browser QA: 1293x1057, light, до и после правки.
+  Профиль frontend: 106 passed, 50 subtests; `git diff --check` зелёный.
+  Feature commit `4c88d90`. Версия остаётся `1.52.148`; release, push и
+  deploy не выполнялись. Android, backend, API, contracts и storage не
+  менялись.
 
 - 2026-08-22 (Codex): изменён только HACS frontend раздела «Климат».
   Карточки комнат теперь идут по две в ряд, как на планшете, поэтому подписи
@@ -4009,5 +4019,5 @@ Engineering and review rules are in
 
 - Obsidian/context index: `LLM_WIKI/00_Index.md`.
 - Latest generated context: `LLM_WIKI/Context.md`.
-- Last sync: 2026-08-22T20:11:50+03:00.
+- Last sync: 2026-08-22T20:19:54+03:00.
 <!-- llm-wiki-sync:end -->
