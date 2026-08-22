@@ -1,4 +1,4 @@
-import { activityTimeLabel } from "./hausman-hub-pagination.js?v=1.52.135";
+import { activityTimeLabel } from "./hausman-hub-pagination.js?v=1.52.136";
 
 function plural(count, one, few, many) {
   const mod100 = count % 100;
