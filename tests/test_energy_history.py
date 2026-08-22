@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
+from types import SimpleNamespace
 import unittest
 
 from jsonschema import Draft202012Validator
@@ -14,9 +16,27 @@ from custom_components.hausman_hub.application.energy_history import (
     build_energy_history,
     resolve_energy_history_window,
 )
+from custom_components.hausman_hub.energy_history_ha import async_energy_history
 
 
 class EnergyHistoryTest(unittest.TestCase):
+    def test_recorder_adapter_preserves_calendar_metadata_without_series(self) -> None:
+        result = asyncio.run(
+            async_energy_history(
+                SimpleNamespace(states=SimpleNamespace(get=lambda _entity_id: None)),
+                dashboard={"energy": {"sources": []}, "devices": []},
+                start=datetime(2026, 8, 22, tzinfo=timezone.utc),
+                end=datetime(2026, 8, 23, tzinfo=timezone.utc),
+                interval="1h",
+                requested_device_ids=frozenset(),
+                window="day",
+                timezone_name="Europe/Moscow",
+            )
+        )
+        self.assertEqual("day", result["window"])
+        self.assertEqual("Europe/Moscow", result["timezone"])
+        self.assertEqual([], result["series"])
+
     def test_calendar_windows_are_local_monday_based_and_dst_aware(self) -> None:
         now = datetime(2026, 3, 29, 12, 0, tzinfo=timezone.utc)
         day_start, day_end = resolve_energy_history_window(

@@ -42,8 +42,6 @@ def _descriptors(
     hass: HomeAssistant,
     dashboard: Mapping[str, object],
     requested_device_ids: frozenset[str],
-    window: str = "explicit",
-    timezone_name: str | None = None,
 ) -> tuple[EnergySeriesDescriptor, ...]:
     sources = dashboard.get("energy", {})
     source_values = sources.get("sources", []) if isinstance(sources, Mapping) else []
@@ -118,6 +116,8 @@ async def async_energy_history(
     end: datetime,
     interval: str,
     requested_device_ids: frozenset[str],
+    window: str = "explicit",
+    timezone_name: str | None = None,
 ) -> dict[str, object]:
     """Read statistics through Recorder's public Python boundary."""
 
