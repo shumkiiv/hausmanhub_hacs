@@ -1,12 +1,19 @@
 # HausmanHub AI Context
 
-- 2026-08-22: подготовлен HACS `1.52.154` для завершения направления 20.
+- 2026-08-22: HACS `1.52.154` завершил backend направления 20 и развёрнут
+  в production.
   Numeric catalog actions публикуют runtime bounds/unit, а scenario dry-run
   формирует redacted человекочитаемый report с условиями и шагами,
   `commandSent=false` и без entity ID. Synthetic gate покрывает motion light,
   sunset curtains и humidity fan без service calls. Existing `roomId` из
   contracts 0.51.0 подтверждён тестами. Pin: contracts `0.56.0` (`078ebd0`).
-  Frontend layout не менялся, выполнен только cache-bust версии.
+  Frontend layout не менялся, выполнен только cache-bust версии. Commit/tag
+  `029e4ab`, Actions `32595001493` успешен; полный gate: 1640 passed,
+  4 skipped, 1003 subtests. Backup `80718cd9` находится в local и
+  KeeneticSSD, по 928481280 байт. Production installed/latest
+  `v1.52.154`, config entry loaded, 88 assets совпадают. Три live dry-run
+  вернули `commandSent=false`, journal sequence осталась 1394. Аудит:
+  `docs/RELEASE_AUDIT_1.52.154.md`.
 
 - 2026-08-22: направление 17 завершено в HACS `1.52.153`. Vendor timeout и
   circuit breaker изолируют медленные media/remote/Yandex services. Домофон
