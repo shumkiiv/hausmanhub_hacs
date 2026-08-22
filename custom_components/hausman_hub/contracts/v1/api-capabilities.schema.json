@@ -120,6 +120,24 @@
             },
             "batch_response_contract": {
               "$ref": "#/$defs/device_action_batch_receipt_contract"
+            },
+            "intercom_safety": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "confirmation_field",
+                "dry_run_field",
+                "default_hold_seconds",
+                "maximum_hold_seconds",
+                "release_receipt_contract"
+              ],
+              "properties": {
+                "confirmation_field": {"const": "confirmedByUser"},
+                "dry_run_field": {"const": "dryRun"},
+                "default_hold_seconds": {"type": "integer", "minimum": 1, "maximum": 20},
+                "maximum_hold_seconds": {"type": "integer", "minimum": 1, "maximum": 20},
+                "release_receipt_contract": {"$ref": "#/$defs/intercom_release_receipt_contract"}
+              }
             }
           }
         },
@@ -995,6 +1013,15 @@
         "version": {
           "const": 1
         }
+      }
+    },
+    "intercom_release_receipt_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-intercom-release-receipt"},
+        "version": {"const": 1}
       }
     },
     "device_action_batch_request_contract": {

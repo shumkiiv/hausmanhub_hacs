@@ -132,6 +132,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     domain_data["energy_meters_service"] = energy_meters_service
     domain_data["energy_anomaly_tracker"] = energy_anomaly_tracker
     domain_data["device_discovery_service"] = device_discovery_service
+    from .application.vendor_resilience import VendorCircuitBreaker
+
+    vendor_resilience = VendorCircuitBreaker()
+    domain_data["vendor_resilience"] = vendor_resilience
     from .application.operation_journal import OperationJournalService
     from .operation_journal_api import DATA_OPERATION_JOURNAL
     from .operation_journal_storage import HomeAssistantOperationJournalStore
@@ -218,6 +222,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     scenario_store = HomeAssistantScenarioStore(hass, entry.entry_id)
     scenario_catalog = await async_build_scenario_catalog(hass)
+
+    def _publish_intercom_release(receipt: dict[str, object]) -> None:
+        from .realtime_api import publish_command_receipt
+
+        publish_command_receipt(hass, receipt, operation="intercom_release")
+
     scenario_service = ScenarioService(
         hass,
         scenario_store,
@@ -228,6 +238,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ),
         schedule_store=HomeAssistantScenarioScheduleStore(hass, entry.entry_id),
         operation_journal=operation_journal,
+        intercom_release_publisher=_publish_intercom_release,
     )
     await scenario_service.async_load()
     scenario_executor = ScenarioExecutor(
@@ -236,6 +247,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         scenario_service.async_run_scenario,
         power_dependency_resolver=lambda: device_power_dependency_service.mapping,
         command_guard=water_safety.command_guard,
+        vendor_resilience=vendor_resilience,
     )
     scenario_service.set_executor(scenario_executor)
     entry.async_on_unload(scenario_service.start_catalog_warmup())

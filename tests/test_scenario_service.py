@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import unittest
+from unittest.mock import AsyncMock
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -807,8 +808,9 @@ class _FakeReleaseExecutor:
     def __init__(self) -> None:
         self.releases: list[str] = []
 
-    async def async_release_intercom_switch(self, entity_id: str) -> None:
+    async def async_release_intercom_switch(self, entity_id: str) -> bool:
         self.releases.append(entity_id)
+        return True
 
 
 class _FakeCallLater:
@@ -848,6 +850,7 @@ class ScenarioServiceIntercomReleaseTest(unittest.IsolatedAsyncioTestCase):
         self.hass = _FakeHass()
         self.call_later = _FakeCallLater()
         self.executor = _FakeReleaseExecutor()
+        self.release_receipts: list[dict[str, object]] = []
         self.service = ScenarioService(
             self.hass,
             _FakeStore(),
@@ -855,6 +858,7 @@ class ScenarioServiceIntercomReleaseTest(unittest.IsolatedAsyncioTestCase):
             self.executor,
             intercom_entity_resolver=lambda: "switch.prikhozhaia_domofon_2",
             call_later=self.call_later,
+            intercom_release_publisher=self.release_receipts.append,
         )
 
     async def test_release_scheduled_and_fires_turn_off(self) -> None:
@@ -867,6 +871,43 @@ class ScenarioServiceIntercomReleaseTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(delay, 15)
         await callback(None)
         self.assertEqual(self.executor.releases, ["switch.prikhozhaia_domofon_2"])
+        self.assertEqual("released", self.release_receipts[0]["outcome"])
+        self.assertEqual("intercom_target", self.release_receipts[0]["targetId"])
+        self.assertNotIn("entityId", self.release_receipts[0])
+
+    async def test_dry_run_receipt_does_not_touch_relay(self) -> None:
+        self.service.publish_intercom_dry_run(
+            target_id="intercom_target",
+            correlation_id="corr.intercom-dry-run",
+            request_id="request-dry-run",
+        )
+        self.assertEqual("dry_run", self.release_receipts[0]["outcome"])
+        self.assertFalse(self.release_receipts[0]["confirmed"])
+        self.assertEqual([], self.executor.releases)
+
+    async def test_unconfirmed_off_read_back_publishes_release_failure(self) -> None:
+        self.executor.async_release_intercom_switch = AsyncMock(return_value=False)
+        await self.service.async_schedule_intercom_release(
+            "intercom_target",
+            "turn_on",
+            correlation_id="corr.release-failed",
+            request_id="request-release-failed",
+        )
+        _, callback = self.call_later.calls[0]
+        await callback(None)
+        self.assertEqual("release_failed", self.release_receipts[0]["outcome"])
+        self.assertFalse(self.release_receipts[0]["confirmed"])
+        self.assertEqual("release_not_confirmed", self.release_receipts[0]["reason"])
+
+    async def test_configured_intercom_is_classified_for_confirmation(self) -> None:
+        self.assertTrue(
+            await self.service.async_is_intercom_action(
+                "intercom_target", "turn_on"
+            )
+        )
+        self.assertFalse(
+            await self.service.async_is_intercom_action("device_abc", "turn_on")
+        )
 
     async def test_release_skips_unrelated_target(self) -> None:
         self.assertIsNone(

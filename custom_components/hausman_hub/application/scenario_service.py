@@ -125,6 +125,7 @@ class ScenarioService:
         schedule_store: object | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         operation_journal: object | None = None,
+        intercom_release_publisher: Callable[[dict[str, Any]], None] | None = None,
     ):
         self._hass = hass
         self._store = store
@@ -138,9 +139,11 @@ class ScenarioService:
         self._schedule_store = schedule_store
         self._sleep = sleep
         self._operation_journal = operation_journal
+        self._intercom_release_publisher = intercom_release_publisher
         self._skipped_runs: set[str] = set()
         self._intercom_release_cancel: Callable[[], None] | None = None
         self._intercom_release_entity: str | None = None
+        self._intercom_release_context: dict[str, object] | None = None
         self._registry: ScenarioRegistry | None = None
         self._lock = asyncio.Lock()
         self._run_lock = asyncio.Lock()
@@ -1084,6 +1087,9 @@ class ScenarioService:
         self,
         target_id: str,
         action_id: str,
+        *,
+        correlation_id: str | None = None,
+        request_id: str | None = None,
     ) -> int | None:
         """Hold the intercom relay open, then always return it to off.
 
@@ -1105,22 +1111,45 @@ class ScenarioService:
             return None
         self._cancel_intercom_release()
         self._intercom_release_entity = entity_id
+        self._intercom_release_context = {
+            "correlationId": correlation_id or request_id or "intercom-release",
+            "requestId": f"{request_id or 'intercom'}.release",
+            "targetId": target_id,
+        }
 
         async def _async_release(_now: Any) -> None:
             self._intercom_release_cancel = None
             self._intercom_release_entity = None
+            context = self._intercom_release_context
+            self._intercom_release_context = None
             release = self._intercom_release_callable()
             if release is None:
                 _LOGGER.warning(
                     "intercom release for %s skipped: executor is not configured",
                     entity_id,
                 )
+                self._publish_intercom_release(
+                    context, confirmed=False, reason="release_executor_unavailable"
+                )
                 return
             try:
-                await release(entity_id)
+                released = await release(entity_id)
             except Exception:  # noqa: BLE001
                 _LOGGER.warning(
                     "intercom release turn_off failed for %s", entity_id, exc_info=True
+                )
+                self._publish_intercom_release(
+                    context, confirmed=False, reason="release_failed"
+                )
+            else:
+                self._publish_intercom_release(
+                    context,
+                    confirmed=released is True,
+                    reason=(
+                        "relay_released"
+                        if released is True
+                        else "release_not_confirmed"
+                    ),
                 )
 
         self._intercom_release_cancel = self._call_later(
@@ -1128,16 +1157,70 @@ class ScenarioService:
         )
         return INTERCOM_RELEASE_SECONDS
 
+    async def async_is_intercom_action(
+        self, target_id: str, action_id: str
+    ) -> bool:
+        """Classify only the explicitly configured intercom target."""
+
+        await self.async_refresh_catalog()
+        if self._intercom_entity_resolver is None:
+            return False
+        configured = self._intercom_entity_resolver()
+        device = self._catalog.device(target_id)
+        entity_id = getattr(device, "entity_id", None)
+        action = device.action(action_id) if device is not None else None
+        return bool(
+            configured
+            and isinstance(entity_id, str)
+            and configured in {entity_id, target_id}
+            and action is not None
+        )
+
+    def publish_intercom_dry_run(
+        self, *, target_id: str, correlation_id: str, request_id: str
+    ) -> None:
+        """Publish a redacted command-free safety receipt."""
+
+        self._publish_intercom_release(
+            {
+                "correlationId": correlation_id,
+                "requestId": f"{request_id}.release",
+                "targetId": target_id,
+            },
+            confirmed=False,
+            reason="dry_run",
+            outcome="dry_run",
+        )
+
     def cancel_intercom_release(self, *, turn_off_now: bool = False) -> None:
         """Cancel a pending intercom release, optionally switching off now."""
 
         entity_id = self._intercom_release_entity
+        context = self._intercom_release_context
         self._cancel_intercom_release()
         release = self._intercom_release_callable()
         if turn_off_now and entity_id is not None and release is not None:
-            self._hass.async_create_task(release(entity_id))
+            async def _release_now() -> None:
+                try:
+                    released = await release(entity_id)
+                except Exception:  # noqa: BLE001
+                    self._publish_intercom_release(
+                        context, confirmed=False, reason="release_failed"
+                    )
+                else:
+                    self._publish_intercom_release(
+                        context,
+                        confirmed=released is True,
+                        reason=(
+                            "relay_released"
+                            if released is True
+                            else "release_not_confirmed"
+                        ),
+                    )
 
-    def _intercom_release_callable(self) -> Callable[[str], Awaitable[None]] | None:
+            self._hass.async_create_task(_release_now())
+
+    def _intercom_release_callable(self) -> Callable[[str], Awaitable[bool]] | None:
         release = getattr(self._executor, "async_release_intercom_switch", None)
         return release if callable(release) else None
 
@@ -1145,5 +1228,32 @@ class ScenarioService:
         cancel = self._intercom_release_cancel
         self._intercom_release_cancel = None
         self._intercom_release_entity = None
+        self._intercom_release_context = None
         if cancel is not None:
             cancel()
+
+    def _publish_intercom_release(
+        self,
+        context: dict[str, object] | None,
+        *,
+        confirmed: bool,
+        reason: str,
+        outcome: str | None = None,
+    ) -> None:
+        if context is None or self._intercom_release_publisher is None:
+            return
+        self._intercom_release_publisher(
+            {
+                "contract": {
+                    "name": "hausman-hub-intercom-release-receipt",
+                    "version": 1,
+                },
+                **context,
+                "accepted": outcome != "release_failed",
+                "confirmed": confirmed,
+                "outcome": outcome or ("released" if confirmed else "release_failed"),
+                "holdSeconds": INTERCOM_RELEASE_SECONDS,
+                "occurredAt": int(time.time() * 1000),
+                "reason": reason,
+            }
+        )

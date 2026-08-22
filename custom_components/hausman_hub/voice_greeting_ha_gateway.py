@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .application.vendor_resilience import VendorCircuitBreaker
+
 from .application.voice_greeting import DEFAULT_AWAY_ENTITY_ID
 
 
@@ -26,9 +28,16 @@ _LOW_BATTERY_PERCENT = 20
 
 
 class HomeAssistantVoiceGateway:
-    def __init__(self, hass: Any, *, away_entity_id: str = DEFAULT_AWAY_ENTITY_ID) -> None:
+    def __init__(
+        self,
+        hass: Any,
+        *,
+        away_entity_id: str = DEFAULT_AWAY_ENTITY_ID,
+        vendor_resilience: VendorCircuitBreaker | None = None,
+    ) -> None:
         self._hass = hass
         self._away_entity_id = away_entity_id
+        self._vendor_resilience = vendor_resilience or VendorCircuitBreaker()
 
     @property
     def away_entity_id(self) -> str:
@@ -64,15 +73,18 @@ class HomeAssistantVoiceGateway:
         return stations
 
     async def async_say_text(self, entity_id: str, text: str) -> None:
-        await self._hass.services.async_call(
-            "media_player",
-            "play_media",
-            {
-                "entity_id": entity_id,
-                "media_content_id": text,
-                "media_content_type": "text",
-            },
-            blocking=True,
+        await self._vendor_resilience.async_execute(
+            "yandex_station.play_media",
+            lambda: self._hass.services.async_call(
+                "media_player",
+                "play_media",
+                {
+                    "entity_id": entity_id,
+                    "media_content_id": text,
+                    "media_content_type": "text",
+                },
+                blocking=True,
+            ),
         )
 
     async def async_away_state(self) -> str | None:
@@ -148,12 +160,15 @@ class HomeAssistantVoiceGateway:
         return None
 
     async def async_conversation(self, text: str) -> str | None:
-        response = await self._hass.services.async_call(
-            "conversation",
-            "process",
-            {"text": text, "language": "ru"},
-            blocking=True,
-            return_response=True,
+        response = await self._vendor_resilience.async_execute(
+            "home_assistant.conversation",
+            lambda: self._hass.services.async_call(
+                "conversation",
+                "process",
+                {"text": text, "language": "ru"},
+                blocking=True,
+                return_response=True,
+            ),
         )
         try:
             return response["response"]["speech"]["plain"]["speech"]

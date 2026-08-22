@@ -2962,7 +2962,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.151", panel.payload["integration_version"])
+        self.assertEqual("1.52.152", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
@@ -3553,7 +3553,67 @@ class LocalSummaryAccessTest(unittest.TestCase):
             )
         )
         self.assertEqual(403, forbidden.status)
-        self.assertEqual(2, len(executions))
+
+    def test_intercom_requires_confirmation_and_supports_command_free_dry_run(self) -> None:
+        path = "/api/hausman_hub/v1/device-actions"
+        view = next(item for item in self.hass.http.views if item.url == path)
+        service = self.hass.data["hausman_hub"]["scenario_service"]
+        executions: list[bool] = []
+
+        async def is_intercom(target_id: str, action_id: str) -> bool:
+            return target_id == "entry-intercom" and action_id == "turn_on"
+
+        async def execute_device_action(
+            target_id: str,
+            action_id: str,
+            value: object,
+            *,
+            correlation_id: str | None = None,
+            dry_run: bool = False,
+        ) -> dict[str, object]:
+            executions.append(dry_run)
+            return {
+                "requestId": "request-intercom",
+                "targetId": target_id,
+                "actionId": action_id,
+                "accepted": True,
+                "confirmed": not dry_run,
+                "status": "confirmed" if not dry_run else "accepted",
+            }
+
+        service.async_is_intercom_action = is_intercom
+        service.async_execute_device_action = execute_device_action
+        tablet = reader_user("system-users")
+        rejected = asyncio.run(
+            view.post(
+                FakeJsonRequest(
+                    "192.168.1.20",
+                    tablet,
+                    path,
+                    {"targetId": "entry-intercom", "actionId": "turn_on"},
+                )
+            )
+        )
+        self.assertEqual(409, rejected.status)
+        self.assertEqual([], executions)
+
+        dry_run = asyncio.run(
+            view.post(
+                FakeJsonRequest(
+                    "192.168.1.20",
+                    tablet,
+                    path,
+                    {
+                        "targetId": "entry-intercom",
+                        "actionId": "turn_on",
+                        "dryRun": True,
+                    },
+                )
+            )
+        )
+        self.assertEqual(200, dry_run.status)
+        self.assertTrue(dry_run.payload["dryRun"])
+        self.assertEqual([True], executions)
 
     def test_public_device_feature_matrix_is_read_only_and_local(self) -> None:
         path = "/api/hausman_hub/v1/device-features"

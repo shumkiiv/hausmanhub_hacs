@@ -11,7 +11,10 @@ PIN_PATH = REPOSITORY_ROOT / "hausmanhub-contracts.json"
 
 VENDORED_CONTRACT_HASHES = {
     "custom_components/hausman_hub/contracts/v1/scenario-definition.schema.json": "71ef6345732e599385522935b794d7e391875fa73bce0352642421fab35ca9bf",
-    "custom_components/hausman_hub/contracts/v1/api-capabilities.schema.json": "7ce867413700f2aecdeb83cc1ef8312ed893757d19e88b2640e649f583d83a6e",
+    "custom_components/hausman_hub/contracts/v1/api-capabilities.schema.json": "e5f6388cde7abe25244be42be2747534cacc55fc8cb571bed12ab3c8c031bd91",
+    "custom_components/hausman_hub/contracts/v1/device-action-request.schema.json": "4ff6f1cb6e7939749e14aa43799e6108c1db7309251d2b7ee5026f047c667b94",
+    "custom_components/hausman_hub/contracts/v1/device-action-receipt.schema.json": "38a710d76b1d335e22cf7c8e85907b329ab7d6952375d86756781f10fcd53a3c",
+    "custom_components/hausman_hub/contracts/v1/intercom-release-receipt.schema.json": "ea11c82a77a3fe9195513d1a915336167c81a356fa0b56cf058384daedacf947",
     "custom_components/hausman_hub/contracts/v1/scenario-catalog.schema.json": "82744824ecbbecfde6274248c2c1985558d557d8cc5392d7b71d51dc4a10fcb1",
     "custom_components/hausman_hub/contracts/v1/operation-journal.schema.json": "79ad67f0e4b7a0eeade2fbc891eb3672ee2c23feea4ef9344196d30d342fc89d",
     "custom_components/hausman_hub/contracts/v1/device-action-batch-request.schema.json": "2976c0039dfca92c5cb11c7bb7bdb419b35b355c4d2c2bb33c94a60a3483e24d",
@@ -43,14 +46,14 @@ def test_external_contract_pin_is_explicit_and_canonical() -> None:
 
     assert pin == {
         "repository": "shumkiiv/hausmanhub-contracts",
-        "version": "0.54.0",
-        "commit": "79f616a0b1d15665c76e6df11a086c30187bd449",
+        "version": "0.55.0",
+        "commit": "154d231a0405869351457d27ef53d2c5a5e9a9b1",
         "canonical": True,
         "role": "runtime-consumer",
     }
 
 
-def test_contract_0_54_0_vendored_files_match_canonical_hashes() -> None:
+def test_contract_0_55_0_vendored_files_match_canonical_hashes() -> None:
     for relative_path, expected_hash in VENDORED_CONTRACT_HASHES.items():
         payload = (REPOSITORY_ROOT / relative_path).read_bytes()
         assert hashlib.sha256(payload).hexdigest() == expected_hash, relative_path

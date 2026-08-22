@@ -28,6 +28,7 @@ from .scenarios import (
     night_light_percent,
     rgb_hex,
 )
+from .vendor_resilience import VendorCircuitBreaker, VendorServiceUnavailable
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -37,6 +38,7 @@ _DEFAULT_DEVICE_READBACK_WINDOW_SECONDS = 8.0
 _DEFAULT_DEVICE_READBACK_INTERVAL_SECONDS = 0.25
 _CRITICAL_ACTION_DOMAINS = frozenset({"lock", "valve"})
 _UNAVAILABLE_EVIDENCE = frozenset({"unknown", "unavailable"})
+_VENDOR_SERVICE_DOMAINS = frozenset({"media_player", "remote"})
 
 
 def _display_device_name(raw: str) -> str:
@@ -431,6 +433,7 @@ class ScenarioExecutor:
         readback_interval_seconds: float = _DEFAULT_DEVICE_READBACK_INTERVAL_SECONDS,
         power_dependency_resolver: Callable[[], Mapping[str, str]] | None = None,
         command_guard: Callable[[str, str, bool], str | None] | None = None,
+        vendor_resilience: VendorCircuitBreaker | None = None,
     ):
         if not 0.01 <= readback_window_seconds <= 30.0:
             raise ValueError("readback window must be between 0.01 and 30 seconds")
@@ -444,6 +447,7 @@ class ScenarioExecutor:
         self._readback_interval_seconds = readback_interval_seconds
         self._power_dependency_resolver = power_dependency_resolver
         self._command_guard = command_guard
+        self._vendor_resilience = vendor_resilience
 
     def new_run_id(self) -> str:
         """Generate a unique execution trace id."""
@@ -461,6 +465,7 @@ class ScenarioExecutor:
         value: object | None = None,
         *,
         correlation_id: str | None = None,
+        dry_run: bool = False,
     ) -> dict[str, Any]:
         """Execute one allowlisted device action and confirm its HA read-back."""
 
@@ -474,14 +479,18 @@ class ScenarioExecutor:
             action_id=action_id,
             value=value,
         )
-        receipt = await self._device_action_receipt(
-            action,
-            {
-                "action_id": execution_action_id,
-                "type": "device_action",
-                "status": "pending",
-            },
-        )
+        try:
+            receipt = await self._device_action_receipt(
+                action,
+                {
+                    "action_id": execution_action_id,
+                    "type": "device_action",
+                    "status": "pending",
+                },
+                dry_run=dry_run,
+            )
+        except VendorServiceUnavailable as error:
+            receipt = {"status": "failed", "error": error.code}
         if receipt.get("status") != "completed":
             return {
                 "correlationId": correlation_id,
@@ -512,6 +521,30 @@ class ScenarioExecutor:
             if device is not None and device.name
             else "Устройство"
         )
+        if dry_run:
+            return {
+                "correlationId": correlation_id,
+                "requestId": request_id,
+                "accepted": True,
+                "confirmed": False,
+                "status": "accepted",
+                "statusName": "Проверяется",
+                "targetId": target_id,
+                "actionId": action_id,
+                "observedState": None,
+                "appliedAt": None,
+                "message": f"{device_name}: dry-run прошёл без отправки команды.",
+                "confirmationWindowMs": self._confirmation_window_ms,
+                "readBack": {
+                    "attempted": False,
+                    "matched": False,
+                    "observedAt": None,
+                    "observedState": None,
+                    "attempts": 0,
+                },
+                "reason": "dry_run",
+                "dryRun": True,
+            }
         read_back = receipt.get("read_back")
         if not isinstance(read_back, dict):
             confirmation_value = value
@@ -1206,12 +1239,20 @@ class ScenarioExecutor:
         call = getattr(services, "async_call", None)
         if call is None:
             raise RuntimeError("Home Assistant async_call is not available")
-        await call(domain, service, service_data, blocking=True)
+        operation = lambda: call(domain, service, service_data, blocking=True)
+        if self._vendor_resilience is not None and domain in _VENDOR_SERVICE_DOMAINS:
+            await self._vendor_resilience.async_execute(
+                f"{domain}.{service}", operation
+            )
+            return
+        await operation()
 
-    async def async_release_intercom_switch(self, entity_id: str) -> None:
-        """Return the intercom relay to off after the hold window."""
+    async def async_release_intercom_switch(self, entity_id: str) -> bool:
+        """Return the relay to off and confirm the physical HA read-back."""
 
         await self._call_service("switch", "turn_off", {"entity_id": entity_id})
+        read_back = await self._read_back_device(entity_id, "turn_off", None)
+        return read_back["matched"] is True
 
 
 def _device_action_confirmed(

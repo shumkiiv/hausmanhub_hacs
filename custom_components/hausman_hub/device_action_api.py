@@ -105,6 +105,14 @@ class DeviceActionView(HomeAssistantView):
                 HTTPStatus.BAD_REQUEST,
                 headers=NO_STORE_HEADERS,
             )
+        confirmed_by_user = payload.get("confirmedByUser", False)
+        dry_run = payload.get("dryRun", False)
+        if type(confirmed_by_user) is not bool or type(dry_run) is not bool:
+            return self.json_message(
+                "confirmedByUser and dryRun must be boolean.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
         try:
             correlation_id = resolve_correlation_id(
                 payload,
@@ -121,18 +129,32 @@ class DeviceActionView(HomeAssistantView):
         mode_writer = getattr(
             climate_runtime, "async_set_device_mode_for_entity", None
         )
+        intercom_action = await service.async_is_intercom_action(
+            target_id, action_id
+        )
+        if intercom_action and not dry_run and not confirmed_by_user:
+            return self.json_message(
+                "Explicit user confirmation is required for the intercom.",
+                HTTPStatus.CONFLICT,
+                headers=NO_STORE_HEADERS,
+            )
         try:
-            if action_id == "turn_off" and callable(mode_writer):
+            if not dry_run and action_id == "turn_off" and callable(mode_writer):
                 resolved = await service.async_resolve_device_action(
                     target_id, action_id
                 )
                 if resolved is not None and resolved[1] == "climate":
                     climate_mode_change = await mode_writer(resolved[0], "manual")
+            execute_options: dict[str, Any] = {
+                "correlation_id": correlation_id
+            }
+            if dry_run:
+                execute_options["dry_run"] = True
             result = await service.async_execute_device_action(
                 target_id,
                 action_id,
                 payload.get("value"),
-                correlation_id=correlation_id,
+                **execute_options,
             )
         except Exception:
             await self._async_restore_climate_mode(
@@ -150,9 +172,19 @@ class DeviceActionView(HomeAssistantView):
             }
         release_seconds = None
         if result.get("accepted") is True:
-            release_seconds = await service.async_schedule_intercom_release(
-                target_id, action_id
-            )
+            if dry_run and intercom_action:
+                service.publish_intercom_dry_run(
+                    target_id=target_id,
+                    correlation_id=correlation_id,
+                    request_id=str(result.get("requestId")),
+                )
+            elif intercom_action:
+                release_seconds = await service.async_schedule_intercom_release(
+                    target_id,
+                    action_id,
+                    correlation_id=correlation_id,
+                    request_id=str(result.get("requestId")),
+                )
         response = {
             "contract": {
                 "name": "hausman-hub-device-action-receipt",
@@ -162,6 +194,9 @@ class DeviceActionView(HomeAssistantView):
         }
         if release_seconds is not None:
             response["autoReleaseSeconds"] = release_seconds
+            response["releaseReceiptPending"] = True
+        if dry_run:
+            response["dryRun"] = True
         publish_command_receipt(self._hass, response, operation="device_action")
         return self.json(
             response,

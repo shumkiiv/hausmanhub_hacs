@@ -64,7 +64,12 @@ async def async_start_voice_greeting(hass: HomeAssistant, entry: Any) -> VoiceGr
             operation=operation,
         )
 
-    gateway = HomeAssistantVoiceGateway(hass, away_entity_id=DEFAULT_AWAY_ENTITY_ID)
+    vendor_resilience = hass.data.get(DOMAIN, {}).get("vendor_resilience")
+    gateway = HomeAssistantVoiceGateway(
+        hass,
+        away_entity_id=DEFAULT_AWAY_ENTITY_ID,
+        vendor_resilience=vendor_resilience,
+    )
     service = VoiceGreetingService(
         HomeAssistantVoiceGreetingStore(hass, entry.entry_id),
         gateway,

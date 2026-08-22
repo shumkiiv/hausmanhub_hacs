@@ -23,6 +23,9 @@ from custom_components.hausman_hub.application.scenarios import (
     ScenarioDeviceAction,
     ScenarioDeviceEntry,
 )
+from custom_components.hausman_hub.application.vendor_resilience import (
+    VendorCircuitBreaker,
+)
 from custom_components.hausman_hub.domain.scenarios import (
     ScenarioAction,
     ScenarioActionType,
@@ -58,6 +61,7 @@ class _FakeHass:
                     },
                 ),
                 "cover.living_room": SimpleNamespace(state="closed", attributes={}),
+                "media_player.living_room": SimpleNamespace(state="off", attributes={}),
             }.get(entity_id)
         )
 
@@ -180,6 +184,20 @@ class _FakeCatalog:
                     ),
                 ),
             ),
+            "media_1": ScenarioDeviceEntry(
+                target_id="media_1",
+                name="Living room TV",
+                entity_id="media_player.living_room",
+                actions=(
+                    ScenarioDeviceAction(
+                        action_id="turn_on",
+                        title="On",
+                        domain="media_player",
+                        service="turn_on",
+                        allowed_fields=frozenset(),
+                    ),
+                ),
+            ),
         }
 
     def device(self, target_id: str) -> Any | None:
@@ -250,6 +268,59 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.hass.services.async_call.assert_awaited_once_with(
             "light", "turn_on", {"entity_id": "light.living_room"}, blocking=True
         )
+
+    async def test_direct_device_action_dry_run_sends_no_service_call(self) -> None:
+        receipt = await self.executor.async_execute_device_action(
+            "device_1", "turn_on", correlation_id="corr-dry-run", dry_run=True
+        )
+        self.assertTrue(receipt["accepted"])
+        self.assertFalse(receipt["confirmed"])
+        self.assertTrue(receipt["dryRun"])
+        self.assertEqual("dry_run", receipt["reason"])
+        self.hass.services.async_call.assert_not_awaited()
+
+    async def test_intercom_release_requires_off_read_back(self) -> None:
+        self.executor._read_back_device = AsyncMock(
+            return_value={"matched": True}
+        )
+        confirmed = await self.executor.async_release_intercom_switch(
+            "switch.entry_intercom"
+        )
+        self.assertTrue(confirmed)
+        self.hass.services.async_call.assert_awaited_once_with(
+            "switch",
+            "turn_off",
+            {"entity_id": "switch.entry_intercom"},
+            blocking=True,
+        )
+        self.executor._read_back_device.assert_awaited_once_with(
+            "switch.entry_intercom", "turn_off", None
+        )
+
+    async def test_failed_media_vendor_does_not_block_core_device_actions(self) -> None:
+        breaker = VendorCircuitBreaker(
+            timeout_seconds=1, failure_threshold=1, cooldown_seconds=60
+        )
+        executor = ScenarioExecutor(
+            self.hass,
+            self.catalog,
+            self.executor._run_callback,
+            readback_window_seconds=0.02,
+            readback_interval_seconds=0.01,
+            vendor_resilience=breaker,
+        )
+        self.hass.services.async_call.side_effect = RuntimeError("vendor offline")
+        failed = await executor.async_execute_device_action("media_1", "turn_on")
+        self.assertFalse(failed["accepted"])
+        self.assertEqual("vendor_error", failed["error"])
+        failed_fast = await executor.async_execute_device_action("media_1", "turn_on")
+        self.assertEqual("vendor_circuit_open", failed_fast["error"])
+        self.assertEqual(1, self.hass.services.async_call.await_count)
+
+        self.hass.services.async_call.side_effect = None
+        core = await executor.async_execute_device_action("device_1", "turn_on")
+        self.assertTrue(core["accepted"])
+        self.assertTrue(core["confirmed"])
 
     async def test_closed_cover_is_not_commanded_again(self) -> None:
         definition = _definition(

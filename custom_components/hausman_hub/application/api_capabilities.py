@@ -124,6 +124,16 @@ def api_capabilities_snapshot(
                     "name": "hausman-hub-device-action-batch-receipt",
                     "version": 1,
                 },
+                "intercom_safety": {
+                    "confirmation_field": "confirmedByUser",
+                    "dry_run_field": "dryRun",
+                    "default_hold_seconds": 15,
+                    "maximum_hold_seconds": 20,
+                    "release_receipt_contract": {
+                        "name": "hausman-hub-intercom-release-receipt",
+                        "version": 1,
+                    },
+                },
             },
             "dashboard_snapshot": {
                 "available": True,

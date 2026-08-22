@@ -18,6 +18,14 @@
     "correlationId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
     "targetId": { "type": "string", "minLength": 1, "maxLength": 128 },
     "actionId": { "type": "string", "minLength": 1, "maxLength": 128 },
-    "value": { "type": ["string", "number", "boolean", "null"] }
+    "value": { "type": ["string", "number", "boolean", "null"] },
+    "confirmedByUser": {
+      "type": "boolean",
+      "description": "Explicit confirmation for a server-classified dangerous action. Omission is false."
+    },
+    "dryRun": {
+      "type": "boolean",
+      "description": "Validate and resolve the action without sending a physical command."
+    }
   }
 }

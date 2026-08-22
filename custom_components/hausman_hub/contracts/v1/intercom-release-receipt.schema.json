@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hausmanhub/contracts/v1/intercom-release-receipt.schema.json",
+  "title": "HausmanHub intercom release receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "correlationId", "requestId", "targetId", "accepted", "confirmed", "outcome", "holdSeconds", "occurredAt"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "hausman-hub-intercom-release-receipt" },
+        "version": { "const": 1 }
+      }
+    },
+    "correlationId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+    "requestId": {"type": "string", "minLength": 1, "maxLength": 128},
+    "targetId": {"type": "string", "minLength": 1, "maxLength": 128},
+    "accepted": {"type": "boolean"},
+    "confirmed": {"type": "boolean"},
+    "outcome": {"enum": ["dry_run", "released", "release_failed"]},
+    "holdSeconds": {"type": "integer", "minimum": 1, "maximum": 20},
+    "occurredAt": {"type": "integer", "minimum": 0},
+    "reason": {"type": ["string", "null"], "maxLength": 500}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"outcome": {"const": "released"}}},
+      "then": {"properties": {"accepted": {"const": true}, "confirmed": {"const": true}}}
+    },
+    {
+      "if": {"properties": {"outcome": {"enum": ["dry_run", "release_failed"]}}},
+      "then": {"properties": {"confirmed": {"const": false}}}
+    }
+  ]
+}

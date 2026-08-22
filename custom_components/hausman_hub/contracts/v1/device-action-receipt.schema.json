@@ -45,6 +45,13 @@
       "minimum": 1000,
       "maximum": 30000
     },
+    "dryRun": { "type": "boolean" },
+    "autoReleaseSeconds": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 20
+    },
+    "releaseReceiptPending": { "type": "boolean" },
     "readBack": {
       "type": "object",
       "additionalProperties": false,
