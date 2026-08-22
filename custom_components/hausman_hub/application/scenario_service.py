@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -222,6 +222,7 @@ class ScenarioService:
             str,
             str,
             str,
+            str,
             ScenarioComparison,
             object | None,
             int,
@@ -241,6 +242,7 @@ class ScenarioService:
         registry = self._ensure_loaded()
         items: list[
             tuple[
+                str,
                 str,
                 str,
                 str,
@@ -267,6 +269,7 @@ class ScenarioService:
                         scenario.id,
                         trigger.id,
                         device.entity_id,
+                        device.target_id,
                         trigger.property,
                         trigger.comparison,
                         trigger.value,
@@ -856,6 +859,7 @@ class ScenarioService:
         visited: frozenset[str] | None = None,
         *,
         correlation_id: str | None = None,
+        trigger_context: Mapping[str, object] | None = None,
     ) -> dict[str, Any]:
         """Execute a scenario via the configured executor."""
 
@@ -868,6 +872,11 @@ class ScenarioService:
         if self._executor is None:
             raise ScenarioServiceError("Executor not configured", status=500)
         run_id = correlation_id or self._executor.new_run_id()
+        resolved_trigger_context = (
+            dict(trigger_context)
+            if trigger_context is not None
+            else {"source": "manual", "trigger_id": None, "recovery": False}
+        )
 
         async def execute() -> dict[str, Any]:
             result = await self._executor.async_execute(
@@ -886,6 +895,10 @@ class ScenarioService:
             )
             result.setdefault("command_mode", scenario.definition.command_mode.value)
             result.setdefault("evidence_revision", None)
+            result.setdefault(
+                "trigger_context",
+                resolved_trigger_context,
+            )
             result.setdefault("accepted", result.get("status") == "completed")
             result.setdefault("confirmed", False)
             await self._async_record_scenario_result(result)
@@ -908,6 +921,7 @@ class ScenarioService:
                             "receipts": [],
                             "accepted": False,
                             "confirmed": False,
+                            "trigger_context": resolved_trigger_context,
                         }
                         await self._async_record_scenario_result(result)
                         return result
@@ -940,6 +954,7 @@ class ScenarioService:
                         "receipts": [],
                         "accepted": False,
                         "confirmed": False,
+                        "trigger_context": resolved_trigger_context,
                     }
                     await self._async_record_scenario_result(result)
                     return result
@@ -965,6 +980,7 @@ class ScenarioService:
                 "receipts": [],
                 "accepted": False,
                 "confirmed": False,
+                "trigger_context": resolved_trigger_context,
             }
             await self._async_record_scenario_result(result)
             return result
@@ -1009,6 +1025,46 @@ class ScenarioService:
             value,
             correlation_id=correlation_id,
         )
+
+    async def async_execute_device_action_batch(
+        self,
+        actions: list[Mapping[str, object]],
+        *,
+        correlation_id: str,
+    ) -> list[dict[str, Any]]:
+        """Run one bounded ordered batch and preserve every target receipt."""
+
+        if not 1 <= len(actions) <= 64:
+            raise ScenarioServiceError("Action batch must contain 1 to 64 items")
+        action_keys: set[tuple[str, str]] = set()
+        normalized_actions: list[tuple[str, str, object | None]] = []
+        for item in actions:
+            target_id = item.get("targetId")
+            action_id = item.get("actionId")
+            if not isinstance(target_id, str) or not isinstance(action_id, str):
+                raise ScenarioServiceError("Action batch item is invalid")
+            action_key = (target_id, action_id)
+            if action_key in action_keys:
+                raise ScenarioServiceError(
+                    "Action batch contains a duplicate target and action"
+                )
+            action_keys.add(action_key)
+            normalized_actions.append((target_id, action_id, item.get("value")))
+
+        await self.async_refresh_catalog()
+        if self._executor is None:
+            raise ScenarioServiceError("Executor not configured", status=500)
+        receipts: list[dict[str, Any]] = []
+        for target_id, action_id, value in normalized_actions:
+            receipts.append(
+                await self._executor.async_execute_device_action(
+                    target_id,
+                    action_id,
+                    value,
+                    correlation_id=correlation_id,
+                )
+            )
+        return receipts
 
     async def async_resolve_device_action(
         self,

@@ -130,6 +130,7 @@ class StateTriggerCoordinatorTest(unittest.IsolatedAsyncioTestCase):
             "night_light",
             "motion",
             "binary_sensor.motion",
+            "motion_sensor",
             "state",
             ScenarioComparison.EQUALS,
             "on",
@@ -146,7 +147,17 @@ class StateTriggerCoordinatorTest(unittest.IsolatedAsyncioTestCase):
             await coordinator.async_handle(item, _state("off"), _state("on"))
             await asyncio.gather(*coordinator._pending.values())
 
-        service.async_run_scenario.assert_awaited_once_with("night_light")
+        service.async_run_scenario.assert_awaited_once_with(
+            "night_light",
+            trigger_context={
+                "source": "device_state",
+                "trigger_id": "motion",
+                "target_id": "motion_sensor",
+                "old_value": "off",
+                "new_value": "on",
+                "recovery": False,
+            },
+        )
 
     async def test_cooldown_suppresses_repeated_transition(self) -> None:
         service = SimpleNamespace(async_run_scenario=AsyncMock())
@@ -156,6 +167,7 @@ class StateTriggerCoordinatorTest(unittest.IsolatedAsyncioTestCase):
             "night_light",
             "motion",
             "binary_sensor.motion",
+            "motion_sensor",
             "state",
             ScenarioComparison.EQUALS,
             "on",
@@ -172,7 +184,49 @@ class StateTriggerCoordinatorTest(unittest.IsolatedAsyncioTestCase):
             await coordinator.async_handle(item, _state("off"), _state("on"))
             await coordinator.async_handle(item, _state("off"), _state("on"))
 
-        service.async_run_scenario.assert_awaited_once_with("night_light")
+        service.async_run_scenario.assert_awaited_once_with(
+            "night_light",
+            trigger_context={
+                "source": "device_state",
+                "trigger_id": "motion",
+                "target_id": "motion_sensor",
+                "old_value": "off",
+                "new_value": "on",
+                "recovery": False,
+            },
+        )
+
+    async def test_recovery_transition_is_marked_in_trigger_context(self) -> None:
+        service = SimpleNamespace(async_run_scenario=AsyncMock())
+        hass = SimpleNamespace(states=SimpleNamespace(get=lambda _: _state("on")))
+        coordinator = _StateTriggerCoordinator(hass, service)
+        item = (
+            "recovery_notice",
+            "availability_changed",
+            "binary_sensor.motion",
+            "motion_sensor",
+            "state",
+            ScenarioComparison.CHANGED,
+            None,
+            0,
+            0,
+            0,
+            False,
+        )
+
+        await coordinator.async_handle(item, _state("unavailable"), _state("on"))
+
+        service.async_run_scenario.assert_awaited_once_with(
+            "recovery_notice",
+            trigger_context={
+                "source": "device_state",
+                "trigger_id": "availability_changed",
+                "target_id": "motion_sensor",
+                "old_value": "unavailable",
+                "new_value": "on",
+                "recovery": True,
+            },
+        )
 
 
 class EventTriggerMatchesTest(unittest.TestCase):

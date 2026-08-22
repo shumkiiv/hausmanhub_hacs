@@ -130,6 +130,14 @@ class OperationJournalTests(unittest.IsolatedAsyncioTestCase):
                 "status": "partial",
                 "confirmed": False,
                 "evidence_revision": "revision-1",
+                "trigger_context": {
+                    "source": "device_state",
+                    "trigger_id": "motion",
+                    "target_id": "device-motion",
+                    "old_value": "off",
+                    "new_value": "on",
+                    "recovery": False,
+                },
                 "condition_results": [
                     {
                         "condition_id": "presence",
@@ -143,6 +151,7 @@ class OperationJournalTests(unittest.IsolatedAsyncioTestCase):
                         "action_id": "light_on",
                         "status": "completed",
                         "confirmed": True,
+                        "target_id": "device-light-a",
                         "entity_id": "light.private_room",
                     },
                     {
@@ -157,6 +166,11 @@ class OperationJournalTests(unittest.IsolatedAsyncioTestCase):
         record = await service.async_append(normalized)
 
         self.assertEqual("partial", record["scenario"]["outcome"])
+        self.assertEqual("device_state", record["scenario"]["trigger"]["source"])
+        self.assertFalse(record["scenario"]["trigger"]["recovery"])
+        self.assertEqual(
+            "device-light-a", record["scenario"]["actions"][0]["target_id"]
+        )
         self.assertNotIn("entity_id", json.dumps(record, ensure_ascii=False))
         self.assertNotIn(
             "binary_sensor.private", json.dumps(record, ensure_ascii=False)

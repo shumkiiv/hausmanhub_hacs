@@ -11,8 +11,17 @@ PIN_PATH = REPOSITORY_ROOT / "hausmanhub-contracts.json"
 
 VENDORED_CONTRACT_HASHES = {
     "custom_components/hausman_hub/contracts/v1/scenario-definition.schema.json": "71ef6345732e599385522935b794d7e391875fa73bce0352642421fab35ca9bf",
-    "custom_components/hausman_hub/contracts/v1/operation-journal.schema.json": "0f442ae837b519254ac3453570460de95976768125a6c7f815eb4ae9f3f861da",
-    "fixtures/hausmanhub_operation_journal_v1/journal.json": "e3d3f96011771d0a210ff7bffdb09cf7d2e9a413e844c922a105f9fb350ec45d",
+    "custom_components/hausman_hub/contracts/v1/api-capabilities.schema.json": "c2ce35e1754115a8890ee96ad9435b3f91517e6e4874b37e6e033dffd1d859ce",
+    "custom_components/hausman_hub/contracts/v1/scenario-catalog.schema.json": "82744824ecbbecfde6274248c2c1985558d557d8cc5392d7b71d51dc4a10fcb1",
+    "custom_components/hausman_hub/contracts/v1/operation-journal.schema.json": "79ad67f0e4b7a0eeade2fbc891eb3672ee2c23feea4ef9344196d30d342fc89d",
+    "custom_components/hausman_hub/contracts/v1/device-action-batch-request.schema.json": "2976c0039dfca92c5cb11c7bb7bdb419b35b355c4d2c2bb33c94a60a3483e24d",
+    "custom_components/hausman_hub/contracts/v1/device-action-batch-receipt.schema.json": "60619fbba18e1c049de9e631379298da8ce6a9dc6193a965c5d0abe1d55a04d4",
+    "custom_components/hausman_hub/contracts/v1/device-feature-matrix.json": "ef1f2784f5ffdd0bde84282816f09542e4f7aabf3e9150c1dfe5b1f8c0315455",
+    "fixtures/hausmanhub_operation_journal_v1/journal.json": "2429db40627168bb84e39411ec75b0934fe169cd21103d0b05ae0bd28b2e3340",
+    "fixtures/hausmanhub_scenario_catalog_v1/catalog.json": "0bb450fb919f4aaf99a9250974c6c5d53e5c2828f349d4ff160ba8cae1078d23",
+    "fixtures/hausmanhub_device_action_batch_v1/request.json": "e4fa3073d5de3f716cce634ccfc3248dc2a89e4371766aeab136d267379e3f1f",
+    "fixtures/hausmanhub_device_action_batch_v1/receipt.json": "4d3b40d3d89982c059e0e13c300a30a4ff3b9964c1dfc261c3295dfedca1607a",
+    "fixtures/hausmanhub_device_feature_matrix_v1/document.json": "ef1f2784f5ffdd0bde84282816f09542e4f7aabf3e9150c1dfe5b1f8c0315455",
     "custom_components/hausman_hub/contracts/v1/dashboard-snapshot.schema.json": "ec8e79a30fa13776ad4793067381ace6d455449146dc82a03b2cf03182020672",
     "custom_components/hausman_hub/contracts/v1/room-settings.schema.json": "b4903c645f91b87e64a18f672acc72256d7f90716b29bc171dfe9c6c9a540623",
     "custom_components/hausman_hub/contracts/v1/event-stream-message.schema.json": "2942fd3f3edd4e30f1cf27c659644f9f349ad86785962ea5940fcf52fdbd30c2",
@@ -30,14 +39,14 @@ def test_external_contract_pin_is_explicit_and_canonical() -> None:
 
     assert pin == {
         "repository": "shumkiiv/hausmanhub-contracts",
-        "version": "0.52.1",
-        "commit": "5e89ca21b40952a82c09743de2cb1bae237bdeaf",
+        "version": "0.53.0",
+        "commit": "0db4223d09f22830e9a434376b42ee6c9abdde25",
         "canonical": True,
         "role": "runtime-consumer",
     }
 
 
-def test_contract_0_52_1_vendored_files_match_canonical_hashes() -> None:
+def test_contract_0_53_0_vendored_files_match_canonical_hashes() -> None:
     for relative_path, expected_hash in VENDORED_CONTRACT_HASHES.items():
         payload = (REPOSITORY_ROOT / relative_path).read_bytes()
         assert hashlib.sha256(payload).hexdigest() == expected_hash, relative_path

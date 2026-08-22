@@ -307,11 +307,12 @@ def register_climate_api(
             ClimateAdminResetView(hass),
         ]
         if scenario_service is not None:
-            from .device_action_api import DeviceActionView
+            from .device_action_api import DeviceActionBatchView, DeviceActionView
             from .scenario_api import scenario_api_views
 
             views.extend(scenario_api_views(hass, scenario_service))
             views.append(DeviceActionView(hass))
+            views.append(DeviceActionBatchView(hass))
         if ir_code_service is not None:
             from .ir_code_api import ir_code_api_views
 

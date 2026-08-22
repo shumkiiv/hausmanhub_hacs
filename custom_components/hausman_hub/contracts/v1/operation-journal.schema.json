@@ -166,6 +166,7 @@
           "description": "Whether this run could call services or only evaluated the plan",
           "enum": ["live", "shadow"]
         },
+        "trigger": {"$ref": "#/$defs/scenario_trigger"},
         "outcome": {"enum": ["completed", "skipped", "cancelled", "partial", "failed"]},
         "evidence_revision": {"type": ["string", "null"], "maxLength": 128},
         "decisions": {
@@ -207,12 +208,26 @@
         "reason": {"type": ["string", "null"], "maxLength": 256}
       }
     },
+    "scenario_trigger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "trigger_id", "recovery"],
+      "properties": {
+        "source": {"enum": ["manual", "schedule", "device_state", "custom_event", "nested"]},
+        "trigger_id": {"type": ["string", "null"], "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+        "target_id": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+        "old_value": {"type": ["string", "number", "boolean", "null"]},
+        "new_value": {"type": ["string", "number", "boolean", "null"]},
+        "recovery": {"type": "boolean"}
+      }
+    },
     "scenario_action": {
       "type": "object",
       "additionalProperties": false,
       "required": ["action_id", "outcome", "confirmed", "reason"],
       "properties": {
         "action_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+        "target_id": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
         "outcome": {"enum": ["completed", "skipped", "failed"]},
         "confirmed": {"type": ["boolean", "null"]},
         "reason": {"type": ["string", "null"], "maxLength": 256}

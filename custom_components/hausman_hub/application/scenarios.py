@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from http import HTTPStatus
@@ -68,6 +69,34 @@ def adaptive_brightness_minimum(value: object) -> float:
     return numeric
 
 
+def night_light_percent(value: object) -> int:
+    """Parse a safe night-light percentage without silently accepting zero."""
+
+    if isinstance(value, str):
+        normalized = value.strip().removesuffix("%").strip()
+        try:
+            numeric = int(normalized)
+        except ValueError as error:
+            raise ValueError("night light must be a percentage from 1 to 30") from error
+    elif isinstance(value, (int, float)) and not isinstance(value, bool):
+        numeric = int(value)
+        if float(value) != numeric:
+            raise ValueError("night light must be a whole percentage from 1 to 30")
+    else:
+        raise ValueError("night light must be a percentage from 1 to 30")
+    if not 1 <= numeric <= 30:
+        raise ValueError("night light must be a percentage from 1 to 30")
+    return numeric
+
+
+def rgb_hex(value: object) -> tuple[int, int, int]:
+    """Parse one explicit RGB value used by the scenario action contract."""
+
+    if not isinstance(value, str) or re.fullmatch(r"#[0-9A-Fa-f]{6}", value) is None:
+        raise ValueError("RGB color must use #RRGGBB format")
+    return tuple(int(value[index:index + 2], 16) for index in (1, 3, 5))
+
+
 @dataclass(frozen=True, slots=True)
 class ScenarioDeviceAction:
     """One resolved action that a physical device can perform."""
@@ -77,6 +106,7 @@ class ScenarioDeviceAction:
     domain: str
     service: str
     allowed_fields: frozenset[str]
+    value_policy: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +127,8 @@ class ScenarioDeviceProperty:
     comparisons: tuple[str, ...]
     options: tuple[ScenarioPropertyOption, ...] = ()
     unit: str | None = None
+    source: str = "home_assistant_capability"
+    availability_policy: str = "exclude_unknown_unavailable"
 
 
 @dataclass(frozen=True, slots=True)
@@ -381,6 +413,16 @@ def _validate_device_action(
                 str(error),
                 path=f"{path}.value",
             ) from error
+    if action.action_id == "set_night_light":
+        try:
+            night_light_percent(action.value)
+        except ValueError as error:
+            raise ScenarioDefinitionViolation(str(error), path=f"{path}.value") from error
+    if action.action_id == "set_rgb_color":
+        try:
+            rgb_hex(action.value)
+        except ValueError as error:
+            raise ScenarioDefinitionViolation(str(error), path=f"{path}.value") from error
     if action.command is not None:
         if action.command.domain != allowed.domain:
             raise ScenarioDefinitionViolation(

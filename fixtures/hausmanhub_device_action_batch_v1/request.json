@@ -1,0 +1,11 @@
+{
+  "contract": {
+    "name": "hausman-hub-device-action-batch-request",
+    "version": 1
+  },
+  "correlationId": "lighting-room-off-demo-1",
+  "actions": [
+    {"targetId": "device-light-a", "actionId": "turn_off"},
+    {"targetId": "device-light-b", "actionId": "turn_off"}
+  ]
+}

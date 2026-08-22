@@ -14,6 +14,7 @@ from custom_components.hausman_hub.application.scenario_executor import (
     _device_action_confirmed,
     _display_device_name,
     _normalize_action_value,
+    _normalize_light_action_value,
     _number_range_error,
     _solar_curve_brightness,
     _value_parameter_name,
@@ -111,6 +112,20 @@ class _FakeCatalog:
                         service="turn_on",
                         allowed_fields=frozenset({"value"}),
                     ),
+                    ScenarioDeviceAction(
+                        action_id="set_night_light",
+                        title="Ночной свет",
+                        domain="light",
+                        service="turn_on",
+                        allowed_fields=frozenset({"value"}),
+                    ),
+                    ScenarioDeviceAction(
+                        action_id="set_rgb_color",
+                        title="Цвет",
+                        domain="light",
+                        service="turn_on",
+                        allowed_fields=frozenset({"value"}),
+                    ),
                 ),
             ),
             "climate_1": ScenarioDeviceEntry(
@@ -195,7 +210,9 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.nested_runs: list[str] = []
 
         async def run_callback(
-            scenario_id: str, visited: frozenset[str] | None = None
+            scenario_id: str,
+            visited: frozenset[str] | None = None,
+            **_kwargs: object,
         ) -> dict[str, Any]:
             self.nested_runs.append(scenario_id)
             return {
@@ -948,6 +965,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
                 25,
             ),
         )
+
         self.assertEqual(
             64,
             _solar_curve_brightness(
@@ -968,6 +986,20 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
                 25,
             ),
         )
+
+    def test_night_light_and_rgb_values_are_strictly_normalized(self) -> None:
+        self.assertEqual(
+            26,
+            _normalize_light_action_value("set_night_light", "brightness", 10),
+        )
+        self.assertEqual(
+            [255, 179, 107],
+            _normalize_light_action_value("set_rgb_color", "rgb_color", "#FFB36B"),
+        )
+        with self.assertRaises(ValueError):
+            _normalize_light_action_value("set_night_light", "brightness", 0)
+        with self.assertRaises(ValueError):
+            _normalize_light_action_value("set_rgb_color", "rgb_color", "orange")
 
     async def test_delay_action_receipt(self) -> None:
         definition = _definition(

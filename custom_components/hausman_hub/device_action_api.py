@@ -8,7 +8,11 @@ from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.http import HomeAssistantView
 
-from .application.api_capabilities import DEVICE_ACTIONS_PATH, DEVICE_FEATURES_PATH
+from .application.api_capabilities import (
+    DEVICE_ACTIONS_BATCH_PATH,
+    DEVICE_ACTIONS_PATH,
+    DEVICE_FEATURES_PATH,
+)
 from .application.device_features import device_feature_matrix_snapshot
 from .application.scenario_service import ScenarioService
 from .climate_api import (
@@ -184,3 +188,133 @@ class DeviceActionView(HomeAssistantView):
         ):
             return
         await mode_writer(change.get("entity_id"), "automatic")
+
+
+class DeviceActionBatchView(HomeAssistantView):
+    """Execute an ordered bounded batch and expose each target outcome."""
+
+    requires_auth = True
+    cors_allowed = False
+    extra_urls: tuple[str, ...] = ()
+    url = DEVICE_ACTIONS_BATCH_PATH
+    name = "api:hausman_hub:device_actions_batch"
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self._hass = hass
+
+    async def post(self, request: Any) -> Any:
+        if not _is_exact_request(request, self.url):
+            return _not_found(self)
+        if not (
+            _is_local_tablet_request(request) or _is_local_admin_request(request)
+        ):
+            return _forbidden(self)
+        service = self._hass.data.get(DOMAIN, {}).get("scenario_service")
+        if not isinstance(service, ScenarioService):
+            return self.json_message(
+                "The HausmanHub device action API is unavailable.",
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                headers=NO_STORE_HEADERS,
+            )
+        try:
+            payload = await _request_json(request)
+        except ValueError:
+            payload = None
+        if not isinstance(payload, Mapping) or payload.get("contract") != {
+            "name": "hausman-hub-device-action-batch-request",
+            "version": 1,
+        }:
+            return self.json_message(
+                "The device action batch body is invalid.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        if not isinstance(payload.get("correlationId"), str):
+            return self.json_message(
+                "correlationId is required.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        actions = payload.get("actions")
+        if not isinstance(actions, list) or not 1 <= len(actions) <= 64:
+            return self.json_message(
+                "actions must contain 1 to 64 items.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        normalized: list[Mapping[str, object]] = []
+        action_keys: set[tuple[str, str]] = set()
+        for item in actions:
+            if (
+                not isinstance(item, Mapping)
+                or not {"targetId", "actionId"}.issubset(item)
+                or not set(item).issubset({"targetId", "actionId", "value"})
+                or not isinstance(item.get("targetId"), str)
+                or not isinstance(item.get("actionId"), str)
+            ):
+                return self.json_message(
+                    "A device action batch item is invalid.",
+                    HTTPStatus.BAD_REQUEST,
+                    headers=NO_STORE_HEADERS,
+                )
+            action_key = (item["targetId"], item["actionId"])
+            if action_key in action_keys:
+                return self.json_message(
+                    "A target and action may appear only once in a batch.",
+                    HTTPStatus.BAD_REQUEST,
+                    headers=NO_STORE_HEADERS,
+                )
+            action_keys.add(action_key)
+            normalized.append(item)
+        try:
+            correlation_id = resolve_correlation_id(payload, field="correlationId")
+        except CorrelationIdError:
+            return self.json_message(
+                "correlationId is invalid.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        receipts = await service.async_execute_device_action_batch(
+            normalized,
+            correlation_id=correlation_id,
+        )
+        wrapped = [
+            {
+                "contract": {
+                    "name": "hausman-hub-device-action-receipt",
+                    "version": 1,
+                },
+                **item,
+            }
+            for item in receipts
+        ]
+        for receipt in wrapped:
+            publish_command_receipt(self._hass, receipt, operation="device_action")
+        accepted = sum(item.get("accepted") is True for item in wrapped)
+        confirmed = sum(item.get("confirmed") is True for item in wrapped)
+        failed = sum(item.get("status") == "failed" for item in wrapped)
+        status = (
+            "confirmed"
+            if confirmed == len(wrapped)
+            else "failed"
+            if failed == len(wrapped)
+            else "partial"
+            if failed
+            else "accepted"
+        )
+        return self.json(
+            {
+                "contract": {
+                    "name": "hausman-hub-device-action-batch-receipt",
+                    "version": 1,
+                },
+                "correlationId": correlation_id,
+                "status": status,
+                "total": len(wrapped),
+                "acceptedCount": accepted,
+                "confirmedCount": confirmed,
+                "failedCount": failed,
+                "receipts": wrapped,
+            },
+            headers=NO_STORE_HEADERS,
+        )

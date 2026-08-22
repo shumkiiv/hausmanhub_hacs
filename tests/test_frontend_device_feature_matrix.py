@@ -55,9 +55,9 @@ class FrontendDeviceFeatureMatrixTest(unittest.TestCase):
         controls = [control for entry in types for control in entry["controls"]]
         bindings = [action for control in controls for action in control["actionIds"]]
         self.assertEqual(19, len(types))
-        self.assertEqual(26, len(controls))
-        self.assertEqual(43, len(bindings))
-        self.assertEqual(27, len(set(bindings)))
+        self.assertEqual(28, len(controls))
+        self.assertEqual(45, len(bindings))
+        self.assertEqual(29, len(set(bindings)))
         read_only = [entry["type"] for entry in types if entry["readOnly"]]
         self.assertEqual(sorted(READ_ONLY_TYPES), sorted(read_only))
         for entry in types:
@@ -76,8 +76,8 @@ class FrontendDeviceFeatureMatrixTest(unittest.TestCase):
           assert.deepStrictEqual(snapshot, fixture, "snapshot drift");
           const stats = mod.matrixStats(mod.DEVICE_FEATURE_MATRIX_SNAPSHOT);
           assert.deepStrictEqual(stats, {
-            deviceTypes: 19, controlGroups: 26, actionBindings: 43,
-            uniqueActionIds: 27, readOnlyTypes: 6,
+            deviceTypes: 19, controlGroups: 28, actionBindings: 45,
+            uniqueActionIds: 29, readOnlyTypes: 6,
           });
         """
         result = run_node_module(script, str(DEVICE_FEATURES_JS), str(FIXTURE_JSON))

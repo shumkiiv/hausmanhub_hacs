@@ -55,6 +55,8 @@ class ScenarioCatalogPureTest(unittest.TestCase):
                 "set_adaptive_brightness",
                 "set_brightness_percent",
                 "set_color_temperature",
+                "set_night_light",
+                "set_rgb_color",
             },
         )
         brightness = next(action for action in actions if action.action_id == "set_brightness")
@@ -67,6 +69,27 @@ class ScenarioCatalogPureTest(unittest.TestCase):
         )
         self.assertEqual("Яркость по времени суток", adaptive.title)
         self.assertIn("value", adaptive.allowed_fields)
+
+    def test_light_actions_follow_live_capability(self) -> None:
+        relay = {item.action_id for item in _domain_actions(
+            "light", {"supported_color_modes": ["onoff"]}
+        )}
+        dimmer = {item.action_id for item in _domain_actions(
+            "light", {"supported_color_modes": ["brightness"]}
+        )}
+        cct = {item.action_id for item in _domain_actions(
+            "light", {"supported_color_modes": ["color_temp"]}
+        )}
+        rgb = {item.action_id for item in _domain_actions(
+            "light", {"supported_color_modes": ["rgb"]}
+        )}
+        self.assertEqual({"turn_on", "turn_off", "toggle"}, relay)
+        self.assertIn("set_night_light", dimmer)
+        self.assertNotIn("set_color_temperature", dimmer)
+        self.assertIn("set_color_temperature", cct)
+        self.assertNotIn("set_rgb_color", cct)
+        self.assertIn("set_rgb_color", rgb)
+        self.assertNotIn("set_color_temperature", rgb)
 
     def test_sun_exposes_associative_horizon_states(self) -> None:
         state = type(

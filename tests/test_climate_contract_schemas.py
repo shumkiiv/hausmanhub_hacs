@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 import unittest
 
-from jsonschema import Draft202012Validator
+from jsonschema import Draft202012Validator, RefResolver
 
 from custom_components.hausman_hub.application.api_capabilities import (
     api_capabilities_snapshot,
@@ -76,7 +76,15 @@ def load_json(path: Path) -> object:
 def validator(name: str) -> Draft202012Validator:
     schema = load_json(SCHEMAS / name)
     Draft202012Validator.check_schema(schema)
-    return Draft202012Validator(schema)
+    store = {}
+    for path in SCHEMAS.rglob("*.json"):
+        candidate = load_json(path)
+        if isinstance(candidate, dict) and isinstance(candidate.get("$id"), str):
+            store[candidate["$id"]] = candidate
+    return Draft202012Validator(
+        schema,
+        resolver=RefResolver.from_schema(schema, store=store),
+    )
 
 
 class ClimateContractSchemasTest(unittest.TestCase):
@@ -99,8 +107,11 @@ class ClimateContractSchemasTest(unittest.TestCase):
             "hausmanhub_device_discovery_v1/device-discovery.json": "v1/device-discovery.schema.json",
             "hausmanhub_device_actions_v1/request.json": "v1/device-action-request.schema.json",
             "hausmanhub_device_actions_v1/confirmed.json": "v1/device-action-receipt.schema.json",
+            "hausmanhub_device_action_batch_v1/request.json": "v1/device-action-batch-request.schema.json",
+            "hausmanhub_device_action_batch_v1/receipt.json": "v1/device-action-batch-receipt.schema.json",
             "hausmanhub_device_feature_matrix_v1/document.json": "v1/device-feature-matrix.schema.json",
             "hausmanhub_scenario_catalog_v1/catalog.json": "v1/scenario-catalog.schema.json",
+            "hausmanhub_operation_journal_v1/journal.json": "v1/operation-journal.schema.json",
             "hausmanhub_climate_runtime_v1/climate-action-request.json": "v1/climate-action-request.schema.json",
             "hausmanhub_climate_v1/operation-query.json": "v1/climate-operation-query.schema.json",
             "hausmanhub_climate_runtime_v1/climate-operation-confirmed.json": "v1/climate-operation-receipt.schema.json",

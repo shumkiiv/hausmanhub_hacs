@@ -49,6 +49,7 @@ class _FakeExecutor:
         self.runs: list[tuple[Any, str]] = []
         self.catalogs: list[ScenarioCatalog] = []
         self.device_actions: list[tuple[str, str, object]] = []
+        self.correlated_device_actions: list[tuple[str, str, object, str]] = []
         self._counter = 0
 
     def replace_catalog(self, catalog: ScenarioCatalog) -> None:
@@ -59,8 +60,14 @@ class _FakeExecutor:
         target_id: str,
         action_id: str,
         value: object | None = None,
+        *,
+        correlation_id: str | None = None,
     ) -> dict[str, Any]:
         self.device_actions.append((target_id, action_id, value))
+        if correlation_id is not None:
+            self.correlated_device_actions.append(
+                (target_id, action_id, value, correlation_id)
+            )
         return {"accepted": True, "confirmed": True, "status": "confirmed"}
 
     def new_run_id(self) -> str:
@@ -418,6 +425,39 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
             [("late_light", "turn_on", None)], self.executor.device_actions
         )
         self.assertTrue(receipt["confirmed"])
+
+    async def test_device_action_batch_preserves_each_target_receipt(self) -> None:
+        receipts = await self.service.async_execute_device_action_batch(
+            [
+                {"targetId": "device_1", "actionId": "turn_on"},
+                {"targetId": "device_1", "actionId": "turn_off"},
+            ],
+            correlation_id="room-off-1",
+        )
+
+        self.assertEqual(2, len(receipts))
+        self.assertEqual(
+            [
+                ("device_1", "turn_on", None, "room-off-1"),
+                ("device_1", "turn_off", None, "room-off-1"),
+            ],
+            self.executor.correlated_device_actions,
+        )
+
+    async def test_device_action_batch_rejects_duplicate_target_action(self) -> None:
+        with self.assertRaisesRegex(
+            ScenarioServiceError,
+            "duplicate target and action",
+        ):
+            await self.service.async_execute_device_action_batch(
+                [
+                    {"targetId": "device_1", "actionId": "turn_off"},
+                    {"targetId": "device_1", "actionId": "turn_off"},
+                ],
+                correlation_id="room-off-duplicate",
+            )
+
+        self.assertEqual([], self.executor.correlated_device_actions)
 
     async def test_catalog_warmup_is_bounded_and_publishes_ready(self) -> None:
         refreshes = 0

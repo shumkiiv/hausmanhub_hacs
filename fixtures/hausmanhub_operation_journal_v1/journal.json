@@ -40,13 +40,21 @@
         "run_id": "scenario-run-0003",
         "execution_mode": "single",
         "command_mode": "shadow",
+        "trigger": {
+          "source": "device_state",
+          "trigger_id": "evening_light",
+          "target_id": "device-light-a",
+          "old_value": "off",
+          "new_value": "on",
+          "recovery": false
+        },
         "outcome": "completed",
         "evidence_revision": "state-revision-42",
         "decisions": [
           {"rule_id": "home_only", "outcome": "passed", "reason": null}
         ],
         "actions": [
-          {"action_id": "close_cover", "outcome": "completed", "confirmed": null, "reason": "shadow_plan"}
+          {"action_id": "close_cover", "target_id": "device-cover-a", "outcome": "completed", "confirmed": null, "reason": "shadow_plan"}
         ]
       }
     },

@@ -25,6 +25,8 @@ from .scenarios import (
     ScenarioCatalog,
     ScenarioDefinition,
     adaptive_brightness_minimum,
+    night_light_percent,
+    rgb_hex,
 )
 
 if TYPE_CHECKING:
@@ -64,7 +66,7 @@ def _value_parameter_name(action_id: str, domain: str, service: str) -> str | No
     if (
         domain == "light"
         and service == "turn_on"
-        and action_id in {"set_brightness", "set_adaptive_brightness"}
+        and action_id in {"set_brightness", "set_adaptive_brightness", "set_night_light"}
     ):
         return "brightness"
     if (
@@ -79,6 +81,8 @@ def _value_parameter_name(action_id: str, domain: str, service: str) -> str | No
         and action_id == "set_color_temperature"
     ):
         return "color_temp_kelvin"
+    if domain == "light" and service == "turn_on" and action_id == "set_rgb_color":
+        return "rgb_color"
     if (
         domain == "cover"
         and service == "set_cover_position"
@@ -120,6 +124,11 @@ def _normalize_light_action_value(action_id: str, param: str, value: object) -> 
     if action_id == "set_brightness_percent":
         percent = _normalize_action_value("position", value)
         return _normalize_action_value("brightness", round(percent * 255 / 100))
+    if action_id == "set_night_light":
+        percent = night_light_percent(value)
+        return round(percent * 255 / 100)
+    if action_id == "set_rgb_color":
+        return list(rgb_hex(value))
     return _normalize_action_value(param, value)
 
 
@@ -415,7 +424,7 @@ class ScenarioExecutor:
         self,
         hass: HomeAssistant,
         catalog: ScenarioCatalog,
-        run_callback: Callable[[str, frozenset[str] | None], Awaitable[dict[str, Any]]],
+        run_callback: Callable[..., Awaitable[dict[str, Any]]],
         *,
         notify_target: str = "",
         readback_window_seconds: float = _DEFAULT_DEVICE_READBACK_WINDOW_SECONDS,
@@ -1108,7 +1117,11 @@ class ScenarioExecutor:
                 "planned": True,
                 "scenario_id": action.scenario_id,
             }
-        result = await self._run_callback(action.scenario_id, visited=visited)
+        result = await self._run_callback(
+            action.scenario_id,
+            visited=visited,
+            trigger_context={"source": "nested", "trigger_id": None, "recovery": False},
+        )
         nested_outcome = result.get("status", "failed")
         if nested_outcome == "completed":
             status = "completed"
@@ -1240,8 +1253,10 @@ def _device_action_confirmed(
     expected_attribute = {
         "set_brightness": "brightness",
         "set_adaptive_brightness": "brightness",
+        "set_night_light": "brightness",
         "set_brightness_percent": "brightness",
         "set_color_temperature": "color_temp_kelvin",
+        "set_rgb_color": "rgb_color",
         "set_position": "current_position",
         "set_temperature": "temperature",
         "set_hvac_mode": "hvac_mode",
@@ -1252,6 +1267,8 @@ def _device_action_confirmed(
     if expected_attribute is None:
         return False
     actual = attributes.get(expected_attribute)
+    if action_id == "set_rgb_color":
+        return isinstance(actual, (list, tuple)) and list(actual) == list(value or [])
     if isinstance(actual, (int, float)) and isinstance(value, (int, float)):
         # Кельвины гуляют на округление mireds (3000K -> 333 mired -> 3003K),
         # поэтому для температуры света допуск шире числового zero-tolerance.

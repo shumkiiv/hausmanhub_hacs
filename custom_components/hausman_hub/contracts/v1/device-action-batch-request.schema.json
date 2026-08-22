@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hausmanhub/contracts/v1/device-action-batch-request.schema.json",
+  "title": "HausmanHub device action batch request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "correlationId", "actions"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-device-action-batch-request"},
+        "version": {"const": 1}
+      }
+    },
+    "correlationId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+    "actions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {"$ref": "#/$defs/action"}
+    }
+  },
+  "$defs": {
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["targetId", "actionId"],
+      "properties": {
+        "targetId": {"type": "string", "minLength": 1, "maxLength": 128},
+        "actionId": {"type": "string", "minLength": 1, "maxLength": 128},
+        "value": {"type": ["string", "number", "boolean"]}
+      }
+    }
+  }
+}

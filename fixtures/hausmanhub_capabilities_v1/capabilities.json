@@ -27,6 +27,16 @@
       "feature_matrix_contract": {
         "name": "hausman-hub-device-feature-matrix",
         "version": 1
+      },
+      "batch_path": "/api/hausman_hub/v1/device-actions/batch",
+      "batch_method": "POST",
+      "batch_request_contract": {
+        "name": "hausman-hub-device-action-batch-request",
+        "version": 1
+      },
+      "batch_response_contract": {
+        "name": "hausman-hub-device-action-batch-receipt",
+        "version": 1
       }
     },
     "dashboard_snapshot": {

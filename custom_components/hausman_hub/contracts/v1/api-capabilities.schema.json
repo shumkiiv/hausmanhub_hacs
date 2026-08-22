@@ -65,7 +65,11 @@
           "dependentRequired": {
             "feature_matrix_path": ["feature_matrix_method", "feature_matrix_contract"],
             "feature_matrix_method": ["feature_matrix_path", "feature_matrix_contract"],
-            "feature_matrix_contract": ["feature_matrix_path", "feature_matrix_method"]
+            "feature_matrix_contract": ["feature_matrix_path", "feature_matrix_method"],
+            "batch_path": ["batch_method", "batch_request_contract", "batch_response_contract"],
+            "batch_method": ["batch_path", "batch_request_contract", "batch_response_contract"],
+            "batch_request_contract": ["batch_path", "batch_method", "batch_response_contract"],
+            "batch_response_contract": ["batch_path", "batch_method", "batch_request_contract"]
           },
           "required": [
             "available",
@@ -106,7 +110,30 @@
             },
             "feature_matrix_contract": {
               "$ref": "#/$defs/device_feature_matrix_contract"
+            },
+            "batch_path": {
+              "const": "/api/hausman_hub/v1/device-actions/batch"
+            },
+            "batch_method": {"const": "POST"},
+            "batch_request_contract": {
+              "$ref": "#/$defs/device_action_batch_request_contract"
+            },
+            "batch_response_contract": {
+              "$ref": "#/$defs/device_action_batch_receipt_contract"
             }
+          }
+        },
+        "device_property_names": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["available", "path", "method", "supports_reset", "request_contract", "response_contract"],
+          "properties": {
+            "available": {"type": "boolean"},
+            "path": {"const": "/api/hausman_hub/v1/device-property-names"},
+            "method": {"const": "POST"},
+            "supports_reset": {"const": true},
+            "request_contract": {"$ref": "#/$defs/device_property_name_request_contract"},
+            "response_contract": {"$ref": "#/$defs/device_property_name_receipt_contract"}
           }
         },
         "dashboard_snapshot": {
@@ -474,6 +501,24 @@
             "response_contract": { "$ref": "#/$defs/energy_meter_contract" }
           }
         },
+        "water_meter": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["available", "path", "methods", "optimistic_locking", "response_contract"],
+          "properties": {
+            "available": { "type": "boolean" },
+            "path": { "const": "/api/hausman_hub/v1/water/meter" },
+            "methods": {
+              "type": "array",
+              "prefixItems": [{ "const": "GET" }, { "const": "POST" }],
+              "items": false,
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "optimistic_locking": { "const": true },
+            "response_contract": { "$ref": "#/$defs/water_meter_contract" }
+          }
+        },
         "device_discovery": {
           "type": "object",
           "additionalProperties": false,
@@ -795,12 +840,39 @@
     }
   },
   "$defs": {
+    "device_property_name_request_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-device-property-name-request"},
+        "version": {"const": 1}
+      }
+    },
+    "device_property_name_receipt_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-device-property-name-receipt"},
+        "version": {"const": 1}
+      }
+    },
     "energy_meter_contract": {
       "type": "object",
       "additionalProperties": false,
       "required": ["name", "version"],
       "properties": {
         "name": { "const": "hausman-hub-energy-meter" },
+        "version": { "const": 1 }
+      }
+    },
+    "water_meter_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "hausman-hub-water-meter" },
         "version": { "const": 1 }
       }
     },
@@ -905,6 +977,24 @@
         "version": {
           "const": 1
         }
+      }
+    },
+    "device_action_batch_request_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-device-action-batch-request"},
+        "version": {"const": 1}
+      }
+    },
+    "device_action_batch_receipt_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-device-action-batch-receipt"},
+        "version": {"const": 1}
       }
     },
     "device_feature_matrix_contract": {

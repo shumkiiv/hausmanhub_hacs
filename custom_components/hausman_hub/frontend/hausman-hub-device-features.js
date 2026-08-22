@@ -1,5 +1,5 @@
 /* Pinned snapshot of contracts fixtures/v1/device-feature-matrix.json */
-/* (hausman-hub-device-feature-matrix v1, contracts 0.37.0). Fail-closed: the matrix */
+/* (hausman-hub-device-feature-matrix v1, contracts 0.53.0). Fail-closed: the matrix */
 /* is only an upper bound, unknown types render read-only, unknown controls stay */
 /* hidden and the client never synthesizes action IDs outside the runtime catalog. */
 
@@ -47,7 +47,9 @@ const MATRIX_SNAPSHOT = {
       {"id": "brightness", "kind": "range", "actionIds": ["set_brightness"], "valueType": "number", "valueSource": "contract_bounds", "minimum": 0, "maximum": 255, "receiptRequired": true},
       {"id": "adaptive_brightness", "kind": "range", "actionIds": ["set_adaptive_brightness"], "valueType": "number", "valueSource": "contract_bounds", "minimum": 1, "maximum": 100, "receiptRequired": true},
       {"id": "brightness_percent", "kind": "range", "actionIds": ["set_brightness_percent"], "valueType": "number", "valueSource": "contract_bounds", "minimum": 0, "maximum": 100, "receiptRequired": true},
-      {"id": "color_temperature", "kind": "range", "actionIds": ["set_color_temperature"], "valueType": "number", "valueSource": "contract_bounds", "minimum": 1000, "maximum": 10000, "receiptRequired": true}
+      {"id": "color_temperature", "kind": "range", "actionIds": ["set_color_temperature"], "valueType": "number", "valueSource": "contract_bounds", "minimum": 1000, "maximum": 10000, "receiptRequired": true},
+      {"id": "night_light", "kind": "range", "actionIds": ["set_night_light"], "valueType": "number", "valueSource": "contract_bounds", "minimum": 1, "maximum": 30, "receiptRequired": true},
+      {"id": "rgb_color", "kind": "enum", "actionIds": ["set_rgb_color"], "valueType": "string", "valueSource": "runtime_options", "receiptRequired": true}
     ]},
     {"type": "lock", "title": "Замки", "category": "security", "readOnly": false, "controls": [
       {"id": "lock", "kind": "binary", "actionIds": ["lock", "unlock"], "valueType": "none", "valueSource": "none", "receiptRequired": true}
@@ -186,7 +188,7 @@ export function normalizeDeviceFeatureMatrix(raw) {
   return clone(matrixOrSnapshot(raw));
 }
 
-/* Release counters of the matrix: 19 types, 24 control groups, 41 bindings, 25 unique action IDs. */
+/* Release counters of the matrix: 19 types, 28 control groups, 45 bindings, 29 unique action IDs. */
 export function matrixStats(matrix) {
   const source = matrixOrSnapshot(matrix);
   const controls = source.deviceTypes.flatMap((entry) => entry.controls);

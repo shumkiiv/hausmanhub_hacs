@@ -51,6 +51,7 @@ ENERGY_METER_PATH = f"{API_BASE_PATH}/energy/meter"
 DEVICE_DISCOVERY_PATH = f"{API_BASE_PATH}/device-discovery"
 EVENT_STREAM_PATH = f"{API_BASE_PATH}/events"
 DEVICE_ACTIONS_PATH = f"{API_BASE_PATH}/device-actions"
+DEVICE_ACTIONS_BATCH_PATH = f"{DEVICE_ACTIONS_PATH}/batch"
 DEVICE_FEATURES_PATH = f"{API_BASE_PATH}/device-features"
 CONTOURS_PATH = f"{API_BASE_PATH}/contours"
 CONTOUR_APPLY_PREVIEW_PATH = f"{CONTOURS_PATH}/apply-preview"
@@ -111,6 +112,16 @@ def api_capabilities_snapshot(
                 "feature_matrix_contract": {
                     "name": DEVICE_FEATURE_MATRIX_CONTRACT_NAME,
                     "version": DEVICE_FEATURE_MATRIX_CONTRACT_VERSION,
+                },
+                "batch_path": DEVICE_ACTIONS_BATCH_PATH,
+                "batch_method": "POST",
+                "batch_request_contract": {
+                    "name": "hausman-hub-device-action-batch-request",
+                    "version": 1,
+                },
+                "batch_response_contract": {
+                    "name": "hausman-hub-device-action-batch-receipt",
+                    "version": 1,
                 },
             },
             "dashboard_snapshot": {

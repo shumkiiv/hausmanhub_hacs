@@ -119,6 +119,7 @@ class _StateTriggerCoordinator:
             str,
             str,
             str,
+            str,
             ScenarioComparison,
             object | None,
             int,
@@ -133,6 +134,7 @@ class _StateTriggerCoordinator:
             scenario_id,
             trigger_id,
             entity_id,
+            target_id,
             property_name,
             comparison,
             expected,
@@ -162,9 +164,27 @@ class _StateTriggerCoordinator:
             return
         if existing is not None:
             existing.cancel()
+        old_value = _state_value(old_state, property_name)
+        new_value = _state_value(new_state, property_name)
+        trigger_context = {
+            "source": "device_state",
+            "trigger_id": trigger_id,
+            "target_id": target_id,
+            "old_value": old_value,
+            "new_value": new_value,
+            "recovery": (
+                str(old_value).casefold() in _UNAVAILABLE_STATE_VALUES
+                and str(new_value).casefold() not in _UNAVAILABLE_STATE_VALUES
+            ),
+        }
         delay = max(for_seconds, debounce_seconds)
         if delay <= 0:
-            await self._async_run(key, scenario_id, cooldown_seconds)
+            await self._async_run(
+                key,
+                scenario_id,
+                cooldown_seconds,
+                trigger_context,
+            )
             return
 
         async def _async_delayed() -> None:
@@ -174,7 +194,12 @@ class _StateTriggerCoordinator:
                 if state_level_matches(
                     current, property_name, comparison, expected
                 ):
-                    await self._async_run(key, scenario_id, cooldown_seconds)
+                    await self._async_run(
+                        key,
+                        scenario_id,
+                        cooldown_seconds,
+                        trigger_context,
+                    )
             except asyncio.CancelledError:
                 raise
             except Exception:  # noqa: BLE001
@@ -202,10 +227,14 @@ class _StateTriggerCoordinator:
         key: tuple[str, str],
         scenario_id: str,
         cooldown_seconds: int,
+        trigger_context: Mapping[str, object],
     ) -> None:
         if cooldown_seconds:
             self._cooldown_until[key] = time.monotonic() + cooldown_seconds
-        await self._service.async_run_scenario(scenario_id)
+        await self._service.async_run_scenario(
+            scenario_id,
+            trigger_context=trigger_context,
+        )
 
     def cancel(self) -> None:
         for task in self._pending.values():
@@ -273,7 +302,14 @@ async def async_start_scenario_events(
             if event_type != expected_type or not event_trigger_matches(data, expected_data):
                 continue
             try:
-                await service.async_run_scenario(scenario_id)
+                await service.async_run_scenario(
+                    scenario_id,
+                    trigger_context={
+                        "source": "custom_event",
+                        "trigger_id": trigger_id,
+                        "recovery": False,
+                    },
+                )
             except Exception:  # noqa: BLE001
                 _LOGGER.warning(
                     "event trigger %s of scenario %s failed",

@@ -106,6 +106,8 @@ class ScenarioCatalogView(_ScenarioView):
                         "label": prop.label,
                         "value_type": prop.value_type,
                         "comparisons": list(prop.comparisons),
+                        "source": prop.source,
+                        "availability_policy": prop.availability_policy,
                         **({"unit": prop.unit} if prop.unit is not None else {}),
                         **(
                             {
@@ -127,6 +129,11 @@ class ScenarioCatalogView(_ScenarioView):
                         "domain": action.domain,
                         "service": action.service,
                         "allowed_fields": sorted(action.allowed_fields),
+                        **(
+                            {"value_policy": dict(action.value_policy)}
+                            if action.value_policy is not None
+                            else {}
+                        ),
                     }
                     for action in device.actions
                 ],
@@ -396,6 +403,11 @@ class ScenarioRunView(_ScenarioView):
             result = await service.async_run_scenario(
                 scenario_id,
                 correlation_id=correlation_id,
+                trigger_context={
+                    "source": "manual",
+                    "trigger_id": None,
+                    "recovery": False,
+                },
             )
         except CorrelationIdError:
             return self.json_message(
@@ -695,6 +707,11 @@ async def _run_scenario(
         result = await service.async_run_scenario(
             scenario_id,
             correlation_id=correlation_id,
+            trigger_context={
+                "source": "manual",
+                "trigger_id": None,
+                "recovery": False,
+            },
         )
     except CorrelationIdError:
         return view.json_message(

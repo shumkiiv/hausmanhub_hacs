@@ -3292,7 +3292,10 @@ class LocalSummaryAccessTest(unittest.TestCase):
         executions: list[str] = []
 
         async def run_scenario(
-            scenario_id: str, *, correlation_id: str | None = None
+            scenario_id: str,
+            *,
+            correlation_id: str | None = None,
+            trigger_context: dict[str, object] | None = None,
         ) -> dict[str, object]:
             executions.append(scenario_id)
             return {
@@ -3730,7 +3733,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertFalse(hasattr(self.view, method))
 
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
-        self.assertEqual(79, len(self.hass.http.views))
+        self.assertEqual(80, len(self.hass.http.views))
         self.assertEqual(
             1,
             sum(
@@ -3916,6 +3919,76 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertEqual("corr.device-action.0001", record["correlation_id"])
         self.assertEqual("device", record["source"])
         self.assertNotIn("target_id", record)
+
+    def test_device_action_batch_returns_each_target_receipt(self) -> None:
+        views = {view.url: view for view in self.hass.http.views}
+        path = "/api/hausman_hub/v1/device-actions/batch"
+        tablet = reader_user("system-users")
+        service = self.hass.data["hausman_hub"]["scenario_service"]
+        calls: list[tuple[list[dict[str, object]], str]] = []
+
+        async def execute_batch(
+            actions: list[dict[str, object]],
+            *,
+            correlation_id: str,
+        ) -> list[dict[str, object]]:
+            calls.append((actions, correlation_id))
+            return [
+                {
+                    "requestId": "batch-device-1",
+                    "correlationId": correlation_id,
+                    "targetId": "light_1",
+                    "actionId": "turn_off",
+                    "accepted": True,
+                    "confirmed": True,
+                    "status": "confirmed",
+                },
+                {
+                    "requestId": "batch-device-2",
+                    "correlationId": correlation_id,
+                    "targetId": "light_2",
+                    "actionId": "turn_off",
+                    "accepted": False,
+                    "confirmed": False,
+                    "status": "failed",
+                },
+            ]
+
+        service.async_execute_device_action_batch = execute_batch
+        payload = {
+            "contract": {
+                "name": "hausman-hub-device-action-batch-request",
+                "version": 1,
+            },
+            "correlationId": "room-off-1",
+            "actions": [
+                {"targetId": "light_1", "actionId": "turn_off"},
+                {"targetId": "light_2", "actionId": "turn_off"},
+            ],
+        }
+
+        response = asyncio.run(
+            views[path].post(FakeJsonRequest("192.168.1.20", tablet, path, payload))
+        )
+
+        self.assertEqual(200, response.status)
+        self.assertEqual("partial", response.payload["status"])
+        self.assertEqual(2, response.payload["total"])
+        self.assertEqual(1, response.payload["confirmedCount"])
+        self.assertEqual(1, response.payload["failedCount"])
+        self.assertEqual([("light_1", "light_2")], [
+            tuple(item["targetId"] for item in actions) for actions, _ in calls
+        ])
+
+        duplicate = copy.deepcopy(payload)
+        duplicate["actions"] = [payload["actions"][0], payload["actions"][0]]
+        duplicate_response = asyncio.run(
+            views[path].post(
+                FakeJsonRequest("192.168.1.20", tablet, path, duplicate)
+            )
+        )
+        self.assertEqual(400, duplicate_response.status)
+        self.assertEqual(1, len(calls))
 
     def test_local_admin_reads_filtered_operation_journal(self) -> None:
         from custom_components.hausman_hub.application.operation_journal import (
@@ -4231,13 +4304,14 @@ class LocalSummaryAccessTest(unittest.TestCase):
             [(closed_entry, ("sensor", "switch"))],
             closed_hass.config_entries.forwarded,
         )
-        self.assertEqual(78, len(closed_hass.http.views))
+        self.assertEqual(79, len(closed_hass.http.views))
         self.assertEqual(
             {
                 "/api/hausman_hub/v1/capabilities",
                 "/api/hausman_hub/v1/dashboard",
                 "/api/hausman_hub/v1/events",
                 "/api/hausman_hub/v1/device-actions",
+                "/api/hausman_hub/v1/device-actions/batch",
                 "/api/hausman_hub/v1/device-features",
                 "/api/hausman_hub/v1/energy/history",
                 "/api/hausman_hub/v1/energy/meter",

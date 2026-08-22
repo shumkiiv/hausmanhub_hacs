@@ -4,6 +4,27 @@
       "target_id": "entity_0123456789abcdef",
       "name": "Свет в гостиной",
       "entity_id": "light.living_room",
+      "physical_id": "device_0123456789abcdef",
+      "physical_name": "Люстра",
+      "room_id": "living_room",
+      "room_name": "Гостиная",
+      "device_type": "light",
+      "device_type_name": "Освещение",
+      "capability_name": "Основной свет",
+      "properties": [
+        {
+          "property_id": "state",
+          "label": "Свет",
+          "value_type": "enum",
+          "source": "home_assistant_capability",
+          "availability_policy": "exclude_unknown_unavailable",
+          "comparisons": ["equals", "not_equals", "changed"],
+          "options": [
+            {"value": "on", "label": "Включено"},
+            {"value": "off", "label": "Выключено"}
+          ]
+        }
+      ],
       "actions": [
         {
           "action_id": "turn_on",
@@ -11,6 +32,53 @@
           "domain": "light",
           "service": "turn_on",
           "allowed_fields": []
+        },
+        {
+          "action_id": "set_adaptive_brightness",
+          "title": "Яркость по времени суток",
+          "domain": "light",
+          "service": "turn_on",
+          "allowed_fields": ["value"],
+          "value_policy": {
+            "kind": "percent",
+            "minimum": 1,
+            "maximum": 100,
+            "step": 1,
+            "unit": "%",
+            "default": 25,
+            "presets": [10, 25, 40],
+            "preview": true
+          }
+        },
+        {
+          "action_id": "set_night_light",
+          "title": "Ночной свет",
+          "domain": "light",
+          "service": "turn_on",
+          "allowed_fields": ["value"],
+          "value_policy": {
+            "kind": "percent",
+            "minimum": 1,
+            "maximum": 30,
+            "step": 1,
+            "unit": "%",
+            "default": 10,
+            "presets": [5, 10, 15],
+            "preview": true
+          }
+        },
+        {
+          "action_id": "set_rgb_color",
+          "title": "Цвет",
+          "domain": "light",
+          "service": "turn_on",
+          "allowed_fields": ["value"],
+          "value_policy": {
+            "kind": "rgb_hex",
+            "default": "#FFFFFF",
+            "presets": ["#FFFFFF", "#FFB36B", "#6BA8FF"],
+            "preview": true
+          }
         }
       ]
     }

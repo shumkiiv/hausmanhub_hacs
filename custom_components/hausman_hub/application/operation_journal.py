@@ -325,14 +325,16 @@ def scenario_operation_receipt(result: Mapping[str, object]) -> dict[str, object
             confirmed = None
             if action_outcome != "failed":
                 reason = "shadow_plan"
-        actions.append(
-            {
-                "action_id": action_id,
-                "outcome": action_outcome,
-                "confirmed": confirmed if type(confirmed) is bool else None,
-                "reason": reason,
-            }
-        )
+        action_trace: dict[str, object] = {
+            "action_id": action_id,
+            "outcome": action_outcome,
+            "confirmed": confirmed if type(confirmed) is bool else None,
+            "reason": reason,
+        }
+        target_id = item.get("target_id")
+        if isinstance(target_id, str) and _CORRELATION_ID.fullmatch(target_id):
+            action_trace["target_id"] = target_id
+        actions.append(action_trace)
     completed = outcome == "completed"
     confirmed = command_mode == "live" and completed and result.get("confirmed") is True
     reason = _safe_trace_reason(
@@ -343,6 +345,23 @@ def scenario_operation_receipt(result: Mapping[str, object]) -> dict[str, object
         if command_mode == "shadow"
         else None,
     )
+    scenario_trace: dict[str, object] = {
+        "scenario_id": scenario_id,
+        "run_id": run_id,
+        "execution_mode": execution_mode,
+        "command_mode": command_mode,
+        "outcome": outcome,
+        "evidence_revision": (
+            result.get("evidence_revision")
+            if isinstance(result.get("evidence_revision"), str)
+            else None
+        ),
+        "decisions": decisions[:64],
+        "actions": actions[:64],
+    }
+    trigger = _validated_scenario_trigger(result.get("trigger_context"))
+    if trigger is not None:
+        scenario_trace["trigger"] = trigger
     return {
         "correlation_id": run_id,
         "operation": "scenario_run",
@@ -351,20 +370,7 @@ def scenario_operation_receipt(result: Mapping[str, object]) -> dict[str, object
         "status": "confirmed" if confirmed else "accepted" if completed else "failed",
         "reason": reason,
         "error_code": reason,
-        "scenario": {
-            "scenario_id": scenario_id,
-            "run_id": run_id,
-            "execution_mode": execution_mode,
-            "command_mode": command_mode,
-            "outcome": outcome,
-            "evidence_revision": (
-                result.get("evidence_revision")
-                if isinstance(result.get("evidence_revision"), str)
-                else None
-            ),
-            "decisions": decisions[:64],
-            "actions": actions[:64],
-        },
+        "scenario": scenario_trace,
     }
 
 
@@ -391,7 +397,7 @@ def _validated_scenario_trace(value: object) -> dict[str, object] | None:
     if (
         not isinstance(value, Mapping)
         or not required.issubset(value)
-        or not set(value).issubset(required | {"command_mode"})
+        or not set(value).issubset(required | {"command_mode", "trigger"})
     ):
         return None
     scenario_id = value.get("scenario_id")
@@ -399,6 +405,8 @@ def _validated_scenario_trace(value: object) -> dict[str, object] | None:
     evidence_revision = value.get("evidence_revision")
     decisions = value.get("decisions")
     actions = value.get("actions")
+    trigger_present = "trigger" in value
+    trigger = _validated_scenario_trigger(value.get("trigger"))
     if (
         not isinstance(scenario_id, str)
         or _STABLE_ID.fullmatch(scenario_id) is None
@@ -415,6 +423,7 @@ def _validated_scenario_trace(value: object) -> dict[str, object] | None:
         or len(decisions) > 64
         or not isinstance(actions, list)
         or len(actions) > 64
+        or (trigger_present and trigger is None)
     ):
         return None
     normalized_decisions: list[dict[str, object]] = []
@@ -440,22 +449,30 @@ def _validated_scenario_trace(value: object) -> dict[str, object] | None:
         normalized_decisions.append(dict(item))
     normalized_actions: list[dict[str, object]] = []
     for item in actions:
-        if not isinstance(item, Mapping) or set(item) != {
-            "action_id",
-            "outcome",
-            "confirmed",
-            "reason",
-        }:
+        required_action = {"action_id", "outcome", "confirmed", "reason"}
+        if (
+            not isinstance(item, Mapping)
+            or not required_action.issubset(item)
+            or not set(item).issubset(required_action | {"target_id"})
+        ):
             return None
         action_id = item.get("action_id")
         confirmed = item.get("confirmed")
         reason = item.get("reason")
+        target_id = item.get("target_id")
         if (
             not isinstance(action_id, str)
             or _STABLE_ID.fullmatch(action_id) is None
             or item.get("outcome") not in {"completed", "skipped", "failed"}
             or (confirmed is not None and type(confirmed) is not bool)
             or (value.get("command_mode") == "shadow" and confirmed is not None)
+            or (
+                target_id is not None
+                and (
+                    not isinstance(target_id, str)
+                    or _CORRELATION_ID.fullmatch(target_id) is None
+                )
+            )
             or (
                 reason is not None
                 and (not isinstance(reason, str) or len(reason) > 256)
@@ -474,4 +491,35 @@ def _validated_scenario_trace(value: object) -> dict[str, object] | None:
     }
     if "command_mode" in value:
         normalized["command_mode"] = value.get("command_mode")
+    if trigger is not None:
+        normalized["trigger"] = trigger
     return normalized
+
+
+def _validated_scenario_trigger(value: object) -> dict[str, object] | None:
+    if not isinstance(value, Mapping):
+        return None
+    required = {"source", "trigger_id", "recovery"}
+    allowed = required | {"target_id", "old_value", "new_value"}
+    if not required.issubset(value) or not set(value).issubset(allowed):
+        return None
+    trigger_id = value.get("trigger_id")
+    target_id = value.get("target_id")
+    if (
+        value.get("source")
+        not in {"manual", "schedule", "device_state", "custom_event", "nested"}
+        or (trigger_id is not None and (
+            not isinstance(trigger_id, str) or _STABLE_ID.fullmatch(trigger_id) is None
+        ))
+        or (target_id is not None and (
+            not isinstance(target_id, str)
+            or _CORRELATION_ID.fullmatch(target_id) is None
+        ))
+        or type(value.get("recovery")) is not bool
+        or any(
+            item is not None and not isinstance(item, (str, int, float, bool))
+            for item in (value.get("old_value"), value.get("new_value"))
+        )
+    ):
+        return None
+    return dict(value)

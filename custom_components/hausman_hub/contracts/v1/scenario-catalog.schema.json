@@ -61,6 +61,8 @@
         "label": {"type": "string", "minLength": 1, "maxLength": 120},
         "value_type": {"enum": ["enum", "number", "text", "boolean"]},
         "unit": {"type": "string", "minLength": 1, "maxLength": 32},
+        "source": {"const": "home_assistant_capability"},
+        "availability_policy": {"const": "exclude_unknown_unavailable"},
         "comparisons": {
           "type": "array",
           "minItems": 1,
@@ -99,7 +101,29 @@
           "uniqueItems": true,
           "maxItems": 16,
           "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}
-        }
+        },
+        "value_policy": {"$ref": "#/$defs/value_policy"}
+      }
+    },
+    "value_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "preview"],
+      "properties": {
+        "kind": {"enum": ["percent", "kelvin", "rgb_hex"]},
+        "minimum": {"type": "number"},
+        "maximum": {"type": "number"},
+        "step": {"type": "number", "exclusiveMinimum": 0},
+        "unit": {"type": "string", "minLength": 1, "maxLength": 16},
+        "default": {"type": ["string", "number"]},
+        "presets": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {"type": ["string", "number"]}
+        },
+        "preview": {"type": "boolean"}
       }
     },
     "scenario": {

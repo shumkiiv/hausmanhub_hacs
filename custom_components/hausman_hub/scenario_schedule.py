@@ -50,7 +50,14 @@ async def async_start_scenario_schedule(
             )
             return
         try:
-            await service.async_run_scenario(scenario_id)
+            await service.async_run_scenario(
+                scenario_id,
+                trigger_context={
+                    "source": "schedule",
+                    "trigger_id": trigger_id,
+                    "recovery": False,
+                },
+            )
         except Exception as error:  # noqa: BLE001
             _LOGGER.warning(
                 "scheduled run of scenario %s failed: %s",

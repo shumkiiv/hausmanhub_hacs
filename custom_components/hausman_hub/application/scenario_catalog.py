@@ -129,61 +129,127 @@ _CAPABILITY_TRANSLATIONS = {
 }
 
 
-def _domain_actions(domain: str) -> tuple[ScenarioDeviceAction, ...]:
+def _percent_policy(
+    minimum: int,
+    maximum: int,
+    default: int,
+    presets: tuple[int, ...],
+) -> dict[str, object]:
+    return {
+        "kind": "percent",
+        "minimum": minimum,
+        "maximum": maximum,
+        "step": 1,
+        "unit": "%",
+        "default": default,
+        "presets": list(presets),
+        "preview": True,
+    }
+
+
+def _light_actions(
+    attributes: Mapping[str, object] | None,
+) -> tuple[ScenarioDeviceAction, ...]:
+    """Advertise only controls supported by the live HA light capability."""
+
+    base = [
+        ScenarioDeviceAction("turn_on", "Включить", "light", "turn_on", frozenset()),
+        ScenarioDeviceAction("turn_off", "Выключить", "light", "turn_off", frozenset()),
+        ScenarioDeviceAction("toggle", "Переключить", "light", "toggle", frozenset()),
+    ]
+    raw_modes = attributes.get("supported_color_modes") if attributes is not None else None
+    modes = {
+        str(item).casefold()
+        for item in raw_modes
+        if isinstance(item, str)
+    } if isinstance(raw_modes, (list, tuple, set, frozenset)) else set()
+    upper_bound = attributes is None
+    brightness = upper_bound or bool(modes - {"onoff"})
+    color_temperature = upper_bound or "color_temp" in modes
+    rgb = upper_bound or bool(modes & {"hs", "rgb", "rgbw", "rgbww", "xy"})
+    if brightness:
+        base.extend(
+            [
+                ScenarioDeviceAction(
+                    "set_brightness",
+                    "Яркость",
+                    "light",
+                    "turn_on",
+                    frozenset({"value"}),
+                ),
+                ScenarioDeviceAction(
+                    "set_adaptive_brightness",
+                    "Яркость по времени суток",
+                    "light",
+                    "turn_on",
+                    frozenset({"value"}),
+                    _percent_policy(1, 100, 25, (10, 25, 40)),
+                ),
+                ScenarioDeviceAction(
+                    "set_brightness_percent",
+                    "Яркость, %",
+                    "light",
+                    "turn_on",
+                    frozenset({"value"}),
+                    _percent_policy(0, 100, 50, (25, 50, 100)),
+                ),
+                ScenarioDeviceAction(
+                    "set_night_light",
+                    "Ночной свет",
+                    "light",
+                    "turn_on",
+                    frozenset({"value"}),
+                    _percent_policy(1, 30, 10, (5, 10, 15)),
+                ),
+            ]
+        )
+    if color_temperature:
+        base.append(
+            ScenarioDeviceAction(
+                "set_color_temperature",
+                "Температура света",
+                "light",
+                "turn_on",
+                frozenset({"value"}),
+                {
+                    "kind": "kelvin",
+                    "minimum": 1000,
+                    "maximum": 10000,
+                    "step": 100,
+                    "unit": "K",
+                    "default": 4000,
+                    "presets": [2700, 4000, 6500],
+                    "preview": True,
+                },
+            )
+        )
+    if rgb:
+        base.append(
+            ScenarioDeviceAction(
+                "set_rgb_color",
+                "Цвет",
+                "light",
+                "turn_on",
+                frozenset({"value"}),
+                {
+                    "kind": "rgb_hex",
+                    "default": "#FFFFFF",
+                    "presets": ["#FFFFFF", "#FFB36B", "#6BA8FF"],
+                    "preview": True,
+                },
+            )
+        )
+    return tuple(base)
+
+
+def _domain_actions(
+    domain: str,
+    attributes: Mapping[str, object] | None = None,
+) -> tuple[ScenarioDeviceAction, ...]:
     """Return the allowlisted actions for one HA domain."""
 
     if domain == "light":
-        return (
-            ScenarioDeviceAction(
-                action_id="turn_on",
-                title="Включить",
-                domain="light",
-                service="turn_on",
-                allowed_fields=frozenset(),
-            ),
-            ScenarioDeviceAction(
-                action_id="turn_off",
-                title="Выключить",
-                domain="light",
-                service="turn_off",
-                allowed_fields=frozenset(),
-            ),
-            ScenarioDeviceAction(
-                action_id="toggle",
-                title="Переключить",
-                domain="light",
-                service="toggle",
-                allowed_fields=frozenset(),
-            ),
-            ScenarioDeviceAction(
-                action_id="set_brightness",
-                title="Яркость",
-                domain="light",
-                service="turn_on",
-                allowed_fields=frozenset({"value"}),
-            ),
-            ScenarioDeviceAction(
-                action_id="set_adaptive_brightness",
-                title="Яркость по времени суток",
-                domain="light",
-                service="turn_on",
-                allowed_fields=frozenset({"value"}),
-            ),
-            ScenarioDeviceAction(
-                action_id="set_brightness_percent",
-                title="Яркость, %",
-                domain="light",
-                service="turn_on",
-                allowed_fields=frozenset({"value"}),
-            ),
-            ScenarioDeviceAction(
-                action_id="set_color_temperature",
-                title="Температура света",
-                domain="light",
-                service="turn_on",
-                allowed_fields=frozenset({"value"}),
-            ),
-        )
+        return _light_actions(attributes)
     if domain == "switch":
         return (
             ScenarioDeviceAction(
@@ -689,7 +755,10 @@ async def async_build_scenario_catalog(hass: HomeAssistant) -> ScenarioCatalog:
         domain = entity_id.split(".", 1)[0] if "." in entity_id else ""
         if domain not in SCENARIO_CATALOG_DOMAINS:
             continue
-        actions = _domain_actions(domain)
+        attributes = getattr(state, "attributes", {})
+        if not isinstance(attributes, Mapping):
+            attributes = {}
+        actions = _domain_actions(domain, attributes)
         number_range = _number_range(state) if domain == "number" else None
         if domain == "number" and number_range is None:
             continue
@@ -728,7 +797,6 @@ async def async_build_scenario_catalog(hass: HomeAssistant) -> ScenarioCatalog:
             area_entry = _registry_entry(area_registry, area_id, "areas")
             candidate = getattr(area_entry, "name", None) if area_entry else None
             room_name = candidate if isinstance(candidate, str) and candidate else None
-        attributes = getattr(state, "attributes", {})
         device_class_value = (
             attributes.get("device_class") if isinstance(attributes, Mapping) else None
         )
