@@ -254,6 +254,19 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["valid"])
         self.assertEqual(result["action_count"], 1)
 
+    async def test_test_scenario_wraps_stale_catalog_target(self) -> None:
+        payload = _valid_payload()
+        payload["definition"]["actions"][0]["targetId"] = "missing_device"
+
+        with self.assertRaises(ScenarioValidationError) as ctx:
+            await self.service.async_test_scenario(payload)
+
+        self.assertEqual(400, ctx.exception.status)
+        self.assertEqual(
+            "definition.actions[0].targetId",
+            ctx.exception.violations[0].path,
+        )
+
     async def test_device_action_refreshes_catalog_before_execution(self) -> None:
         refreshed = ScenarioCatalog(
             devices={

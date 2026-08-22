@@ -683,11 +683,14 @@ class ScenarioService:
                     ),
                 )
             ) from error
-        validate_scenario_definition(
-            definition,
-            catalog=self._validation_catalog(registry),
-            existing_scenario_id=payload.get("id") or payload.get("scenarioId"),
-        )
+        try:
+            validate_scenario_definition(
+                definition,
+                catalog=self._validation_catalog(registry),
+                existing_scenario_id=payload.get("id") or payload.get("scenarioId"),
+            )
+        except ScenarioDefinitionViolation as error:
+            raise ScenarioValidationError((error,)) from error
 
         action_count = len(definition.actions)
         referenced = {
