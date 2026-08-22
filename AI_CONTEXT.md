@@ -1,5 +1,14 @@
 # HausmanHub AI Context
 
+- 2026-08-23: HACS `1.52.156` завершил направление 25 и развёрнут в
+  production. CI запускает 119 safety tests и блокирует release при branch
+  coverage ниже 75% для water safety, scenario executor/service и climate
+  deviation guard. Полный gate: 1641 test, 4 skipped; Actions `32600039797`
+  success. UI не менялся, только cache-bust. Backup `4ad0c1ff` находится в
+  local и KeeneticSSD, по 930426880 байт. Production installed/latest
+  `v1.52.156`, config entry loaded, 88 assets совпадают, ошибок Hausman нет.
+  Commit/tag `6398765`. Аудит: `docs/RELEASE_AUDIT_1.52.156.md`.
+
 - 2026-08-23: HACS `1.52.155` завершил направление 24 и развёрнут в
   production. Исполняемый registry закрепляет общий продуктовый язык HACS и
   Hausman Android `1.0.251` для header, card, detail, control, notice, picker
