@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
 import re
 import time
-from typing import Callable, Protocol
-
+from collections.abc import Callable, Mapping
+from typing import Protocol
 
 OPERATION_JOURNAL_CONTRACT_NAME = "hausman-hub-operation-journal"
 OPERATION_JOURNAL_CONTRACT_VERSION = 1
@@ -20,6 +19,7 @@ _SCENARIO_OUTCOMES = frozenset(
     {"completed", "skipped", "cancelled", "partial", "failed"}
 )
 _EXECUTION_MODES = frozenset({"single", "restart", "queued"})
+_COMMAND_MODES = frozenset({"live", "shadow"})
 
 
 class OperationJournalStore(Protocol):
@@ -93,7 +93,9 @@ class OperationJournalService:
         scenario = _validated_scenario_trace(receipt.get("scenario"))
         if receipt.get("scenario") is not None and scenario is None:
             raise ValueError("normalized scenario trace is invalid")
-        if scenario is not None and (source != "scenario" or operation != "scenario_run"):
+        if scenario is not None and (
+            source != "scenario" or operation != "scenario_run"
+        ):
             raise ValueError("scenario trace must belong to scenario_run")
         async with self._lock:
             self._sequence += 1
@@ -144,14 +146,8 @@ class OperationJournalService:
             dict(item)
             for item in self._records
             if (source is None or item["source"] == source)
-            and (
-                correlation_id is None
-                or item["correlation_id"] == correlation_id
-            )
-            and (
-                before_sequence is None
-                or int(item["sequence"]) < before_sequence
-            )
+            and (correlation_id is None or item["correlation_id"] == correlation_id)
+            and (before_sequence is None or int(item["sequence"]) < before_sequence)
         ]
         records = eligible[:limit]
         has_more = len(eligible) > limit
@@ -244,14 +240,13 @@ def _validated_record(value: object) -> dict[str, object] | None:
         or (isinstance(reason, str) and len(reason) > 512)
         or (isinstance(error_code, str) and len(error_code) > 128)
         or (value.get("confirmed") is True and value.get("accepted") is not True)
-        or (
-            (value.get("status") == "confirmed")
-            != (value.get("confirmed") is True)
-        )
+        or ((value.get("status") == "confirmed") != (value.get("confirmed") is True))
         or (scenario_present and scenario is None)
+        or (scenario_present and (source != "scenario" or operation != "scenario_run"))
         or (
-            scenario_present
-            and (source != "scenario" or operation != "scenario_run")
+            scenario is not None
+            and scenario.get("command_mode") == "shadow"
+            and value.get("confirmed") is not False
         )
     ):
         return None
@@ -267,6 +262,7 @@ def scenario_operation_receipt(result: Mapping[str, object]) -> dict[str, object
     run_id = result.get("run_id")
     scenario_id = result.get("scenario_id")
     execution_mode = result.get("execution_mode")
+    command_mode = result.get("command_mode", "live")
     outcome = result.get("status")
     if (
         not isinstance(run_id, str)
@@ -274,6 +270,7 @@ def scenario_operation_receipt(result: Mapping[str, object]) -> dict[str, object
         or not isinstance(scenario_id, str)
         or _STABLE_ID.fullmatch(scenario_id) is None
         or execution_mode not in _EXECUTION_MODES
+        or command_mode not in _COMMAND_MODES
         or outcome not in _SCENARIO_OUTCOMES
     ):
         raise ValueError("scenario execution result is invalid")
@@ -324,6 +321,10 @@ def scenario_operation_receipt(result: Mapping[str, object]) -> dict[str, object
             item.get("reason") or item.get("error"),
             "action_failed" if action_outcome == "failed" else None,
         )
+        if command_mode == "shadow":
+            confirmed = None
+            if action_outcome != "failed":
+                reason = "shadow_plan"
         actions.append(
             {
                 "action_id": action_id,
@@ -333,10 +334,14 @@ def scenario_operation_receipt(result: Mapping[str, object]) -> dict[str, object
             }
         )
     completed = outcome == "completed"
-    confirmed = completed and result.get("confirmed") is True
+    confirmed = command_mode == "live" and completed and result.get("confirmed") is True
     reason = _safe_trace_reason(
         result.get("reason") or result.get("error"),
-        "scenario_failed" if not completed else None,
+        "scenario_failed"
+        if not completed
+        else "shadow_plan"
+        if command_mode == "shadow"
+        else None,
     )
     return {
         "correlation_id": run_id,
@@ -350,6 +355,7 @@ def scenario_operation_receipt(result: Mapping[str, object]) -> dict[str, object
             "scenario_id": scenario_id,
             "run_id": run_id,
             "execution_mode": execution_mode,
+            "command_mode": command_mode,
             "outcome": outcome,
             "evidence_revision": (
                 result.get("evidence_revision")
@@ -382,7 +388,11 @@ def _validated_scenario_trace(value: object) -> dict[str, object] | None:
         "decisions",
         "actions",
     }
-    if not isinstance(value, Mapping) or set(value) != required:
+    if (
+        not isinstance(value, Mapping)
+        or not required.issubset(value)
+        or not set(value).issubset(required | {"command_mode"})
+    ):
         return None
     scenario_id = value.get("scenario_id")
     run_id = value.get("run_id")
@@ -395,6 +405,7 @@ def _validated_scenario_trace(value: object) -> dict[str, object] | None:
         or not isinstance(run_id, str)
         or _CORRELATION_ID.fullmatch(run_id) is None
         or value.get("execution_mode") not in _EXECUTION_MODES
+        or value.get("command_mode", "live") not in _COMMAND_MODES
         or value.get("outcome") not in _SCENARIO_OUTCOMES
         or (
             evidence_revision is not None
@@ -444,6 +455,7 @@ def _validated_scenario_trace(value: object) -> dict[str, object] | None:
             or _STABLE_ID.fullmatch(action_id) is None
             or item.get("outcome") not in {"completed", "skipped", "failed"}
             or (confirmed is not None and type(confirmed) is not bool)
+            or (value.get("command_mode") == "shadow" and confirmed is not None)
             or (
                 reason is not None
                 and (not isinstance(reason, str) or len(reason) > 256)
@@ -451,7 +463,7 @@ def _validated_scenario_trace(value: object) -> dict[str, object] | None:
         ):
             return None
         normalized_actions.append(dict(item))
-    return {
+    normalized = {
         "scenario_id": scenario_id,
         "run_id": run_id,
         "execution_mode": value.get("execution_mode"),
@@ -460,3 +472,6 @@ def _validated_scenario_trace(value: object) -> dict[str, object] | None:
         "decisions": normalized_decisions,
         "actions": normalized_actions,
     }
+    if "command_mode" in value:
+        normalized["command_mode"] = value.get("command_mode")
+    return normalized

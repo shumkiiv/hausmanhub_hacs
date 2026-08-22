@@ -6,12 +6,11 @@ https://github.com/shumkiiv/hausmanhub_hacs/blob/main/docs/SCENARIO_EDITOR_API_C
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
-import re
 from types import MappingProxyType
-
 
 SCENARIO_REGISTRY_VERSION = 1
 MAX_TRIGGERS = 16
@@ -38,13 +37,15 @@ _TIME_WINDOW = re.compile(
 )
 _WEEKDAY = re.compile(r"^(?:пн|вт|ср|чт|пт|сб|вс)(?:, (?:пн|вт|ср|чт|пт|сб|вс))*$")
 _EVENT_TYPE = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
-_SYSTEM_EVENT_TRIGGERS = frozenset({
-    "state_changed",
-    "call_service",
-    "service_executed",
-    "homeassistant_start",
-    "homeassistant_stop",
-})
+_SYSTEM_EVENT_TRIGGERS = frozenset(
+    {
+        "state_changed",
+        "call_service",
+        "service_executed",
+        "homeassistant_start",
+        "homeassistant_stop",
+    }
+)
 
 
 class ScenarioViolation(ValueError):
@@ -57,6 +58,13 @@ class ScenarioExecutionMode(StrEnum):
     SINGLE = "single"
     RESTART = "restart"
     QUEUED = "queued"
+
+
+class ScenarioCommandMode(StrEnum):
+    """Whether a scenario may call physical Home Assistant services."""
+
+    LIVE = "live"
+    SHADOW = "shadow"
 
 
 class ScenarioTriggerType(StrEnum):
@@ -149,7 +157,9 @@ class ScenarioTrigger:
     def __post_init__(self) -> None:
         _stable_id(self.id, "trigger id")
         if self.event_data is not None:
-            object.__setattr__(self, "event_data", MappingProxyType(dict(self.event_data)))
+            object.__setattr__(
+                self, "event_data", MappingProxyType(dict(self.event_data))
+            )
         _bounded_int(self.for_seconds, 0, MAX_DELAY_SECONDS, "trigger for duration")
         _bounded_int(self.debounce_seconds, 0, 3600, "trigger debounce")
         _bounded_int(self.cooldown_seconds, 0, MAX_DELAY_SECONDS, "trigger cooldown")
@@ -232,9 +242,7 @@ class ScenarioCondition:
         if self.type is ScenarioConditionType.DEVICE_STATE:
             _required(self.target_id, "condition target_id", "device_state condition")
             _required(self.property, "condition property", "device_state condition")
-            _required(
-                self.comparison, "condition comparison", "device_state condition"
-            )
+            _required(self.comparison, "condition comparison", "device_state condition")
             if not isinstance(self.comparison, ScenarioComparison):
                 raise ScenarioViolation("condition comparison must be approved")
             if self.comparison is ScenarioComparison.CHANGED:
@@ -328,6 +336,7 @@ class ScenarioDefinition:
     triggers: tuple[ScenarioTrigger, ...]
     conditions: tuple[ScenarioCondition, ...]
     actions: tuple[ScenarioAction, ...]
+    command_mode: ScenarioCommandMode = ScenarioCommandMode.LIVE
     queue_limit: int = DEFAULT_QUEUE_LIMIT
     safety_policy: ScenarioSafetyPolicy = field(default_factory=ScenarioSafetyPolicy)
 
@@ -339,6 +348,8 @@ class ScenarioDefinition:
             raise ScenarioViolation("unsupported scenario definition version")
         if not isinstance(self.execution_mode, ScenarioExecutionMode):
             raise ScenarioViolation("execution mode must be approved")
+        if not isinstance(self.command_mode, ScenarioCommandMode):
+            raise ScenarioViolation("command mode must be approved")
         _bounded_int(self.queue_limit, 1, MAX_QUEUE_LIMIT, "scenario queue limit")
         if not isinstance(self.safety_policy, ScenarioSafetyPolicy):
             raise ScenarioViolation("scenario safety policy must be validated")
@@ -364,7 +375,7 @@ class ScenarioDefinition:
         )
 
     @classmethod
-    def from_payload(cls, payload: object) -> "ScenarioDefinition":
+    def from_payload(cls, payload: object) -> ScenarioDefinition:
         """Decode a scenario definition from the wire/persistence format."""
 
         return _definition_from_payload(payload, "definition")
@@ -429,7 +440,9 @@ class Scenario:
         if len(self.action_description) > MAX_DESCRIPTION_LENGTH:
             raise ScenarioViolation("action description is too long")
         if type(self.updated_at) is not int or self.updated_at < 0:
-            raise ScenarioViolation("scenario updated_at must be a non-negative integer")
+            raise ScenarioViolation(
+                "scenario updated_at must be a non-negative integer"
+            )
         if not isinstance(self.definition, ScenarioDefinition):
             raise ScenarioViolation("scenario definition must be validated")
 
@@ -451,7 +464,7 @@ class Scenario:
         condition_description: str = "None",
         action_description: str = "None",
         updated_at: int | None = None,
-    ) -> "Scenario":
+    ) -> Scenario:
         """Build a full persisted scenario from a validated definition."""
 
         if updated_at is None:
@@ -498,7 +511,7 @@ class ScenarioRegistry:
         )
 
     @classmethod
-    def from_storage(cls, payload: object) -> "ScenarioRegistry":
+    def from_storage(cls, payload: object) -> ScenarioRegistry:
         """Decode one persisted scenario registry."""
 
         return scenario_registry_from_payload(payload)
@@ -674,7 +687,9 @@ def _scenario_from_payload(payload: object, label: str) -> Scenario:
             root.get("actionDescription"), f"{label} actionDescription"
         ),
         updated_at=_int(root.get("updatedAt"), f"{label} updatedAt"),
-        definition=_definition_from_payload(root.get("definition"), f"{label} definition"),
+        definition=_definition_from_payload(
+            root.get("definition"), f"{label} definition"
+        ),
     )
 
 
@@ -705,6 +720,7 @@ def _definition_from_payload(payload: object, label: str) -> ScenarioDefinition:
         {
             "version",
             "executionMode",
+            "commandMode",
             "queueLimit",
             "safetyPolicy",
             "triggers",
@@ -720,6 +736,11 @@ def _definition_from_payload(payload: object, label: str) -> ScenarioDefinition:
             ScenarioExecutionMode,
             f"{label} executionMode",
         ),
+        command_mode=_enum(
+            root.get("commandMode", ScenarioCommandMode.LIVE.value),
+            ScenarioCommandMode,
+            f"{label} commandMode",
+        ),
         queue_limit=_bounded_int(
             root.get("queueLimit", DEFAULT_QUEUE_LIMIT),
             1,
@@ -731,7 +752,9 @@ def _definition_from_payload(payload: object, label: str) -> ScenarioDefinition:
         ),
         triggers=tuple(
             _trigger_from_payload(item, f"{label} trigger {index}")
-            for index, item in enumerate(_list(root.get("triggers"), f"{label} triggers"))
+            for index, item in enumerate(
+                _list(root.get("triggers"), f"{label} triggers")
+            )
         ),
         conditions=tuple(
             _condition_from_payload(item, f"{label} condition {index}")
@@ -754,6 +777,8 @@ def _definition_to_payload(definition: ScenarioDefinition) -> dict[str, object]:
         "conditions": [_condition_to_payload(item) for item in definition.conditions],
         "actions": [_action_to_payload(item) for item in definition.actions],
     }
+    if definition.command_mode is not ScenarioCommandMode.LIVE:
+        payload["commandMode"] = definition.command_mode.value
     if definition.queue_limit != DEFAULT_QUEUE_LIMIT:
         payload["queueLimit"] = definition.queue_limit
     if definition.safety_policy != ScenarioSafetyPolicy():

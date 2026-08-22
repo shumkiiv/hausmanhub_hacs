@@ -3,26 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
 import logging
 import time
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any
 
-from .scenario_schedule import (
-    ScheduledRun,
-    compute_upcoming_runs,
-    prune_skip_keys,
-    skip_key_for,
-)
-from .operation_journal import scenario_operation_receipt
-from .system_scenario_seeds import async_seed_system_scenarios
-from .scenarios import (
-    ScenarioCatalog,
-    ScenarioDefinitionViolation,
-    validate_scenario_definition,
-)
 from ..domain.scenarios import (
     Scenario,
+    ScenarioCommandMode,
     ScenarioComparison,
     ScenarioDefinition,
     ScenarioExecutionMode,
@@ -30,6 +19,19 @@ from ..domain.scenarios import (
     ScenarioTriggerType,
     ScenarioViolation,
 )
+from .operation_journal import scenario_operation_receipt
+from .scenario_schedule import (
+    ScheduledRun,
+    compute_upcoming_runs,
+    prune_skip_keys,
+    skip_key_for,
+)
+from .scenarios import (
+    ScenarioCatalog,
+    ScenarioDefinitionViolation,
+    validate_scenario_definition,
+)
+from .system_scenario_seeds import async_seed_system_scenarios
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -106,8 +108,10 @@ class ScenarioService:
         call_later: Callable[
             [HomeAssistant, float, Callable[[Any], Awaitable[None]]],
             Callable[[], None],
-        ] | None = None,
-        sun_times_provider: Callable[[], tuple[datetime | None, datetime | None]] | None = None,
+        ]
+        | None = None,
+        sun_times_provider: Callable[[], tuple[datetime | None, datetime | None]]
+        | None = None,
         now_provider: Callable[[], datetime] | None = None,
         schedule_store: object | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
@@ -245,11 +249,7 @@ class ScenarioService:
                 if trigger.type is not ScenarioTriggerType.DEVICE_STATE:
                     continue
                 device = self._catalog.device(trigger.target_id or "")
-                if (
-                    device is None
-                    or not trigger.property
-                    or trigger.comparison is None
-                ):
+                if device is None or not trigger.property or trigger.comparison is None:
                     continue
                 items.append(
                     (
@@ -283,7 +283,10 @@ class ScenarioService:
             if not scenario.enabled:
                 continue
             for trigger in scenario.definition.triggers:
-                if trigger.type is not ScenarioTriggerType.EVENT or not trigger.event_type:
+                if (
+                    trigger.type is not ScenarioTriggerType.EVENT
+                    or not trigger.event_type
+                ):
                     continue
                 items.append(
                     (
@@ -477,9 +480,7 @@ class ScenarioService:
                 continue
             self._catalog_readiness = {
                 "status": (
-                    "ready"
-                    if attempt == CATALOG_WARMUP_MAX_ATTEMPTS
-                    else "warming"
+                    "ready" if attempt == CATALOG_WARMUP_MAX_ATTEMPTS else "warming"
                 ),
                 "attempt": attempt,
                 "maxAttempts": CATALOG_WARMUP_MAX_ATTEMPTS,
@@ -517,10 +518,8 @@ class ScenarioService:
             created = await async_seed_system_scenarios(self)
         except asyncio.CancelledError:
             raise
-        except Exception:
-            _LOGGER.warning(
-                "HausmanHub system scenario seeding failed", exc_info=True
-            )
+        except Exception:  # noqa: BLE001
+            _LOGGER.warning("HausmanHub system scenario seeding failed", exc_info=True)
         else:
             if created:
                 _LOGGER.info(
@@ -557,9 +556,7 @@ class ScenarioService:
         """Return all stored scenarios ordered by title."""
 
         registry = self._ensure_loaded()
-        return tuple(
-            sorted(registry.scenarios, key=lambda scenario: scenario.title)
-        )
+        return tuple(sorted(registry.scenarios, key=lambda scenario: scenario.title))
 
     async def async_get_scenario(self, scenario_id: str) -> Scenario:
         """Return one scenario or raise 404."""
@@ -585,9 +582,7 @@ class ScenarioService:
             },
         )
 
-    async def async_update_scenario(
-        self, payload: dict[str, Any]
-    ) -> Scenario:
+    async def async_update_scenario(self, payload: dict[str, Any]) -> Scenario:
         """Create or replace a scenario atomically."""
 
         await self.async_refresh_catalog()
@@ -596,43 +591,43 @@ class ScenarioService:
             raw_definition = payload.get("definition")
             if not isinstance(raw_definition, dict):
                 raise ScenarioValidationError(
-                    tuple([
+                    (
                         ScenarioDefinitionViolation(
                             "definition object is required",
                             path="definition",
-                        )
-                    ])
+                        ),
+                    )
                 )
             try:
                 definition = ScenarioDefinition.from_payload(raw_definition)
             except ScenarioViolation as error:
                 raise ScenarioValidationError(
-                    tuple([
+                    (
                         ScenarioDefinitionViolation(
                             str(error),
                             path="definition",
-                        )
-                    ])
+                        ),
+                    )
                 ) from error
             raw_id = payload.get("id") or payload.get("scenarioId")
             raw_title = payload.get("title")
             if not isinstance(raw_id, str) or not raw_id:
                 raise ScenarioValidationError(
-                    tuple([
+                    (
                         ScenarioDefinitionViolation(
                             "scenario id is required",
                             path="id",
-                        )
-                    ])
+                        ),
+                    )
                 )
             if not isinstance(raw_title, str) or not raw_title.strip():
                 raise ScenarioValidationError(
-                    tuple([
+                    (
                         ScenarioDefinitionViolation(
                             "scenario title is required",
                             path="title",
-                        )
-                    ])
+                        ),
+                    )
                 )
             validate_scenario_definition(
                 definition,
@@ -657,29 +652,21 @@ class ScenarioService:
                 requires_confirmation=_bool_or_default(
                     payload, "requiresConfirmation", False
                 ),
-                trigger_description=_str_or_default(
-                    payload, "triggerDescription", ""
-                ),
+                trigger_description=_str_or_default(payload, "triggerDescription", ""),
                 condition_description=_str_or_default(
                     payload, "conditionDescription", ""
                 ),
                 action_description=_str_or_default(payload, "actionDescription", ""),
                 updated_at=int(time.time() * 1000),
             )
-            scenarios = [
-                s
-                for s in registry.scenarios
-                if s.id != new_scenario.id
-            ]
+            scenarios = [s for s in registry.scenarios if s.id != new_scenario.id]
             scenarios.append(new_scenario)
             new_registry = ScenarioRegistry(scenarios=tuple(scenarios))
             await self.async_save(new_registry)
             self._registry = new_registry
             return new_scenario
 
-    async def async_test_scenario(
-        self, payload: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def async_test_scenario(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Validate a scenario definition and return a dry-run trace."""
 
         await self.async_refresh_catalog()
@@ -689,12 +676,12 @@ class ScenarioService:
             definition = ScenarioDefinition.from_payload(raw_definition)
         except ScenarioViolation as error:
             raise ScenarioValidationError(
-                tuple([
+                (
                     ScenarioDefinitionViolation(
                         str(error),
                         path="definition",
-                    )
-                ])
+                    ),
+                )
             ) from error
         validate_scenario_definition(
             definition,
@@ -734,12 +721,13 @@ class ScenarioService:
 
             for scenario in registry.scenarios:
                 for action in scenario.definition.actions:
-                    if action.type == "run_scenario" and action.scenario_id == scenario_id:
+                    if (
+                        action.type == "run_scenario"
+                        and action.scenario_id == scenario_id
+                    ):
                         raise ScenarioReferencedError(scenario_id)
 
-            scenarios = tuple(
-                s for s in registry.scenarios if s.id != scenario_id
-            )
+            scenarios = tuple(s for s in registry.scenarios if s.id != scenario_id)
             new_registry = ScenarioRegistry(scenarios=scenarios)
             await self.async_save(new_registry)
             self._registry = new_registry
@@ -769,12 +757,16 @@ class ScenarioService:
                 run_id,
                 scenario_id=scenario.id,
                 visited_scenarios=visited,
+                dry_run=(
+                    scenario.definition.command_mode is ScenarioCommandMode.SHADOW
+                ),
             )
             result.setdefault("scenario_id", scenario.id)
             result.setdefault("run_id", run_id)
             result.setdefault(
                 "execution_mode", scenario.definition.execution_mode.value
             )
+            result.setdefault("command_mode", scenario.definition.command_mode.value)
             result.setdefault("evidence_revision", None)
             result.setdefault("accepted", result.get("status") == "completed")
             result.setdefault("confirmed", False)
@@ -792,6 +784,7 @@ class ScenarioService:
                             "scenario_id": scenario.id,
                             "run_id": run_id,
                             "execution_mode": scenario.definition.execution_mode.value,
+                            "command_mode": scenario.definition.command_mode.value,
                             "status": "skipped",
                             "reason": "scenario_queue_full",
                             "receipts": [],
@@ -822,6 +815,7 @@ class ScenarioService:
                         "scenario_id": scenario.id,
                         "run_id": run_id,
                         "execution_mode": scenario.definition.execution_mode.value,
+                        "command_mode": scenario.definition.command_mode.value,
                         "status": "skipped",
                         "reason": "scenario_already_running",
                         "evidence_revision": None,
@@ -846,6 +840,7 @@ class ScenarioService:
                 "scenario_id": scenario.id,
                 "run_id": run_id,
                 "execution_mode": scenario.definition.execution_mode.value,
+                "command_mode": scenario.definition.command_mode.value,
                 "status": "cancelled",
                 "reason": "restarted_by_new_trigger",
                 "evidence_revision": None,
@@ -868,7 +863,7 @@ class ScenarioService:
             return
         try:
             await append(scenario_operation_receipt(result))
-        except Exception:  # noqa: BLE001
+        except Exception:
             _LOGGER.warning("scenario run journal append failed", exc_info=True)
 
     async def async_execute_device_action(

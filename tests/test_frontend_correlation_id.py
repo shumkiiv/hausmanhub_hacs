@@ -352,7 +352,10 @@ class FrontendCorrelationSurfacesTest(unittest.TestCase):
           }
           const journal = read("hausmanhub_operation_journal_v1", "journal.json");
           const journalIds = mod.correlationIdsOf(journal);
-          if (journalIds.length < 4) fail("journal records lost correlation IDs");
+          if (journalIds.length < 3) fail("journal records lost correlation IDs");
+          if (!journalIds.includes("scenario-run-0003")) {
+            fail("shadow scenario journal record lost its correlation ID");
+          }
           const event = read("hausmanhub_event_stream_v1", "message.json");
           if (mod.extractCorrelationId(event, "correlation_id") !== "corr.event.42") {
             fail("event message lost its correlation ID");

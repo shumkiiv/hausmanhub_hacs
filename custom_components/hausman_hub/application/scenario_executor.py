@@ -3,14 +3,22 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
-from datetime import datetime, time as datetime_time, timedelta
 import hashlib
 import math
 import time
 import uuid
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
+from datetime import datetime, timedelta
+from datetime import time as datetime_time
+from typing import TYPE_CHECKING, Any
 
+from ..domain.device_power_dependencies import effective_device_state
+from ..domain.scenarios import (
+    ScenarioCommandMode,
+    ScenarioComparison,
+    ScenarioCondition,
+    ScenarioConditionType,
+)
 from .scenarios import (
     ScenarioAction,
     ScenarioActionType,
@@ -18,13 +26,6 @@ from .scenarios import (
     ScenarioDefinition,
     adaptive_brightness_minimum,
 )
-from ..domain.scenarios import (
-    ScenarioComparison,
-    ScenarioCondition,
-    ScenarioConditionType,
-    ScenarioExecutionMode,
-)
-from ..domain.device_power_dependencies import effective_device_state
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -78,9 +79,17 @@ def _value_parameter_name(action_id: str, domain: str, service: str) -> str | No
         and action_id == "set_color_temperature"
     ):
         return "color_temp_kelvin"
-    if domain == "cover" and service == "set_cover_position" and action_id == "set_position":
+    if (
+        domain == "cover"
+        and service == "set_cover_position"
+        and action_id == "set_position"
+    ):
         return "position"
-    if domain == "valve" and service == "set_valve_position" and action_id == "set_position":
+    if (
+        domain == "valve"
+        and service == "set_valve_position"
+        and action_id == "set_position"
+    ):
         return "position"
     if domain == "climate":
         if service == "set_temperature" and action_id == "set_temperature":
@@ -89,7 +98,11 @@ def _value_parameter_name(action_id: str, domain: str, service: str) -> str | No
             return "hvac_mode"
         if service == "set_fan_mode" and action_id == "set_fan_mode":
             return "fan_mode"
-    if domain == "humidifier" and service == "set_humidity" and action_id == "set_humidity":
+    if (
+        domain == "humidifier"
+        and service == "set_humidity"
+        and action_id == "set_humidity"
+    ):
         return "humidity"
     if domain == "number" and service == "set_value" and action_id == "set_value":
         return "value"
@@ -129,10 +142,8 @@ def _normalize_action_value(param: str, value: object) -> object:
         else:
             raise ValueError(f"{param} must be an integer")
         maximum = 255 if param == "brightness" else 100
-        if numeric < 0:
-            numeric = 0
-        if numeric > maximum:
-            numeric = maximum
+        numeric = max(numeric, 0)
+        numeric = min(numeric, maximum)
         return numeric
     if param == "color_temp_kelvin":
         if isinstance(value, str):
@@ -166,7 +177,7 @@ def _normalize_action_value(param: str, value: object) -> object:
 _RUSSIAN_WEEKDAYS = ("пн", "вт", "ср", "чт", "пт", "сб", "вс")
 
 
-def _now_local(hass: "HomeAssistant") -> Any:
+def _now_local(hass: HomeAssistant) -> Any:
     try:
         from homeassistant.util import dt as dt_util
     except ImportError:
@@ -174,12 +185,13 @@ def _now_local(hass: "HomeAssistant") -> Any:
     if dt_util is not None:
         return dt_util.now()
     import datetime
+
     return datetime.datetime.now(tz=datetime.timezone.utc)
 
 
 def _parse_solar_time(value: object, now: datetime) -> datetime:
     if not isinstance(value, str):
-        raise ValueError("solar transition time is unavailable")
+        raise ValueError("solar transition time is unavailable")  # noqa: TRY004
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError as error:
@@ -224,7 +236,7 @@ def _solar_curve_brightness(
     return round(255 * percentage / 100)
 
 
-def _adaptive_brightness(hass: "HomeAssistant", value: object) -> tuple[int, float]:
+def _adaptive_brightness(hass: HomeAssistant, value: object) -> tuple[int, float]:
     minimum_percent = adaptive_brightness_minimum(value)
     states = getattr(hass, "states", None)
     sun = states.get("sun.sun") if states is not None else None
@@ -246,7 +258,7 @@ def _adaptive_brightness(hass: "HomeAssistant", value: object) -> tuple[int, flo
 def _evaluate_condition(
     condition: ScenarioCondition,
     catalog: ScenarioCatalog,
-    hass: "HomeAssistant",
+    hass: HomeAssistant,
     power_dependencies: Mapping[str, str] | None = None,
     state_snapshot: Mapping[str, object | None] | None = None,
 ) -> tuple[bool, str | None]:
@@ -258,9 +270,7 @@ def _evaluate_condition(
         if state_snapshot is None and live_states is None:
             return (False, "home assistant states are not available")
         get_state = (
-            state_snapshot.get
-            if state_snapshot is not None
-            else live_states.get
+            state_snapshot.get if state_snapshot is not None else live_states.get
         )
         state = get_state(device.entity_id)
         if state is None:
@@ -338,7 +348,7 @@ def _evaluate_condition(
 def _condition_evidence_snapshot(
     definition: ScenarioDefinition,
     catalog: ScenarioCatalog,
-    hass: "HomeAssistant",
+    hass: HomeAssistant,
     power_dependencies: Mapping[str, str],
 ) -> tuple[dict[str, object | None], str | None, str | None]:
     """Capture every device condition without yielding to another HA event."""
@@ -496,9 +506,13 @@ class ScenarioExecutor:
             confirmation_value = value
             allowed = device.action(action_id) if device is not None else None
             if value is not None and allowed is not None:
-                param = _value_parameter_name(action_id, allowed.domain, allowed.service)
+                param = _value_parameter_name(
+                    action_id, allowed.domain, allowed.service
+                )
                 if param is not None:
-                    confirmation_value = _normalize_light_action_value(action_id, param, value)
+                    confirmation_value = _normalize_light_action_value(
+                        action_id, param, value
+                    )
             read_back = await self._read_back_device(
                 getattr(device, "entity_id", None), action_id, confirmation_value
             )
@@ -574,8 +588,7 @@ class ScenarioExecutor:
                 )
                 observed_state = effective_state
                 if (
-                    dependency_status is None
-                    or not dependency_status.blocks_commands
+                    dependency_status is None or not dependency_status.blocks_commands
                 ) and _device_action_confirmed(state, action_id, value):
                     matched = True
                     break
@@ -602,12 +615,16 @@ class ScenarioExecutor:
     ) -> dict[str, Any]:
         """Run every action sequentially and return confirmed receipts."""
 
+        dry_run = dry_run or definition.command_mode is ScenarioCommandMode.SHADOW
+        command_mode = "shadow" if dry_run else definition.command_mode.value
         if visited_scenarios is None:
             visited_scenarios = frozenset()
         if scenario_id and scenario_id in visited_scenarios:
             return {
                 "run_id": run_id,
                 "scenario_id": scenario_id,
+                "execution_mode": definition.execution_mode.value,
+                "command_mode": command_mode,
                 "status": "failed",
                 "error": "recursive scenario call detected",
                 "receipts": [],
@@ -616,6 +633,8 @@ class ScenarioExecutor:
             return {
                 "run_id": run_id,
                 "scenario_id": scenario_id,
+                "execution_mode": definition.execution_mode.value,
+                "command_mode": command_mode,
                 "status": "failed",
                 "error": "scenario call depth limit exceeded",
                 "receipts": [],
@@ -636,11 +655,15 @@ class ScenarioExecutor:
             )
         )
         evidence_captured_at_ms = int(time.time() * 1000)
-        if evidence_error is not None and definition.safety_policy.stop_on_stale_evidence:
+        if (
+            evidence_error is not None
+            and definition.safety_policy.stop_on_stale_evidence
+        ):
             return {
                 "run_id": run_id,
                 "scenario_id": scenario_id,
                 "execution_mode": definition.execution_mode.value,
+                "command_mode": command_mode,
                 "status": "failed",
                 "reason": "stale_critical_evidence",
                 "error": evidence_error,
@@ -674,6 +697,7 @@ class ScenarioExecutor:
                     "scenario_id": scenario_id,
                     "status": "skipped",
                     "execution_mode": definition.execution_mode.value,
+                    "command_mode": command_mode,
                     "condition_results": condition_results,
                     "evidence_revision": evidence_revision,
                     "receipts": [],
@@ -694,9 +718,7 @@ class ScenarioExecutor:
                 defer_device_readback=True,
                 powered_sources=frozenset(powered_sources),
                 idempotent_actions=definition.safety_policy.idempotent_actions,
-                evidence_age_seconds=(
-                    int(time.time() * 1000) - evidence_captured_at_ms
-                )
+                evidence_age_seconds=(int(time.time() * 1000) - evidence_captured_at_ms)
                 / 1000,
                 max_evidence_age_seconds=(
                     definition.safety_policy.max_evidence_age_seconds
@@ -724,15 +746,20 @@ class ScenarioExecutor:
         failed_after_progress = any(
             receipt.get("status") == "failed" for receipt in receipts
         ) and any(receipt.get("status") == "completed" for receipt in receipts)
-        confirmed = completed and all(
-            r.get("type") != ScenarioActionType.DEVICE_ACTION
-            or r.get("confirmed") is True
-            for r in receipts
+        confirmed = (
+            not dry_run
+            and completed
+            and all(
+                r.get("type") != ScenarioActionType.DEVICE_ACTION
+                or r.get("confirmed") is True
+                for r in receipts
+            )
         )
         return {
             "run_id": run_id,
             "scenario_id": scenario_id,
             "execution_mode": definition.execution_mode.value,
+            "command_mode": command_mode,
             "started_at_ms": start_ms,
             "finished_at_ms": int(time.time() * 1000),
             "condition_results": condition_results,
@@ -740,7 +767,11 @@ class ScenarioExecutor:
             "receipts": receipts,
             "accepted": completed,
             "confirmed": confirmed,
-            "status": "completed" if completed else "partial" if failed_after_progress else "failed",
+            "status": "completed"
+            if completed
+            else "partial"
+            if failed_after_progress
+            else "failed",
         }
 
     async def _execute_action(
@@ -780,9 +811,15 @@ class ScenarioExecutor:
             if action.type == ScenarioActionType.DELAY:
                 if not dry_run:
                     await asyncio.sleep(action.delay_seconds)
-                return {**base, "status": "completed", "delay_seconds": action.delay_seconds}
+                return {
+                    **base,
+                    "status": "completed",
+                    "delay_seconds": action.delay_seconds,
+                }
             if action.type == ScenarioActionType.RUN_SCENARIO:
-                return await self._run_scenario_receipt(action, base, visited, dry_run=dry_run)
+                return await self._run_scenario_receipt(
+                    action, base, visited, dry_run=dry_run
+                )
             if action.type == ScenarioActionType.NOTIFICATION:
                 return await self._notification_receipt(action, base, dry_run=dry_run)
         except Exception as exc:  # noqa: BLE001
@@ -853,7 +890,9 @@ class ScenarioExecutor:
                 "error": "value is required for a numeric control",
             }
         if action.value is not None:
-            param = _value_parameter_name(action.action_id, allowed.domain, allowed.service)
+            param = _value_parameter_name(
+                action.action_id, allowed.domain, allowed.service
+            )
             if param is None:
                 return {
                     **base,
@@ -881,7 +920,7 @@ class ScenarioExecutor:
                     return {**base, "status": "failed", "error": error}
             service_data[param] = normalized
             confirmation_value = normalized
-        if idempotent_actions:
+        if idempotent_actions and not dry_run:
             current = self._hass.states.get(device.entity_id)
             if current is not None and _device_action_confirmed(
                 current, action.action_id, confirmation_value
@@ -917,6 +956,9 @@ class ScenarioExecutor:
         }
         if dry_run:
             receipt["service_data"] = service_data
+            receipt["planned"] = True
+            receipt["confirmed"] = None
+            receipt["reason"] = "shadow_plan"
         elif defer_readback:
             receipt["_readback_action_id"] = action.action_id
             receipt["_readback_value"] = confirmation_value
@@ -1041,7 +1083,8 @@ class ScenarioExecutor:
             "nested_run_id": result.get("run_id"),
             "nested_outcome": nested_outcome,
             "skipped": skipped,
-            "reason": result.get("reason") or (
+            "reason": result.get("reason")
+            or (
                 f"nested_scenario_{nested_outcome}"
                 if nested_outcome != "completed"
                 else None
@@ -1057,20 +1100,43 @@ class ScenarioExecutor:
                 "status": "failed",
                 "error": "notification message is required",
             }
-        if not self._notify_target:
+        if dry_run:
             return {
                 **base,
-                "status": "failed",
-                "error": "notification target is not configured",
+                "status": "completed",
+                "message": action.message,
+                "planned": True,
+                "confirmed": None,
+                "reason": "shadow_plan",
             }
-        domain, service = self._notify_target.split(".", 1)
-        if not dry_run:
+        if self._notify_target:
+            domain, service = self._notify_target.split(".", 1)
             await self._call_service(
                 domain,
                 service,
                 {
                     "message": action.message,
                     "data": {"correlation_id": base["correlation_id"]},
+                },
+            )
+            return {**base, "status": "completed", "message": action.message}
+        try:
+            await self._call_service(
+                "notify",
+                "notify",
+                {
+                    "message": action.message,
+                    "data": {"correlation_id": base["correlation_id"]},
+                },
+            )
+        except Exception:  # noqa: BLE001 - bounded HA fallback, re-raised if it fails
+            await self._call_service(
+                "persistent_notification",
+                "create",
+                {
+                    "title": "Hausman",
+                    "message": action.message,
+                    "notification_id": f"hausman-scenario-{base['correlation_id']}",
                 },
             )
         return {**base, "status": "completed", "message": action.message}
@@ -1092,7 +1158,9 @@ class ScenarioExecutor:
         await self._call_service("switch", "turn_off", {"entity_id": entity_id})
 
 
-def _device_action_confirmed(state: object, action_id: str, value: object | None) -> bool:
+def _device_action_confirmed(
+    state: object, action_id: str, value: object | None
+) -> bool:
     """Compare one post-call state with the requested semantic action."""
 
     state_value = str(getattr(state, "state", "unknown"))

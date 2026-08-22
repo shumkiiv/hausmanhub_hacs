@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
 import unittest
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -25,11 +25,11 @@ from custom_components.hausman_hub.application.scenarios import (
 from custom_components.hausman_hub.domain.scenarios import (
     ScenarioAction,
     ScenarioActionType,
+    ScenarioCommandMode,
     ScenarioComparison,
     ScenarioCondition,
     ScenarioConditionType,
     ScenarioDefinition,
-    ScenarioDeviceCommand,
     ScenarioExecutionMode,
     ScenarioSafetyPolicy,
     ScenarioTrigger,
@@ -168,18 +168,16 @@ def _definition(
     actions: tuple[ScenarioAction, ...],
     *,
     idempotent_actions: bool = False,
+    command_mode: ScenarioCommandMode = ScenarioCommandMode.LIVE,
 ) -> ScenarioDefinition:
     return ScenarioDefinition(
         version=1,
         execution_mode=ScenarioExecutionMode.SINGLE,
-        triggers=(
-            ScenarioTrigger(id="t1", type=ScenarioTriggerType.MANUAL),
-        ),
+        command_mode=command_mode,
+        triggers=(ScenarioTrigger(id="t1", type=ScenarioTriggerType.MANUAL),),
         conditions=(),
         actions=actions,
-        safety_policy=ScenarioSafetyPolicy(
-            idempotent_actions=idempotent_actions
-        ),
+        safety_policy=ScenarioSafetyPolicy(idempotent_actions=idempotent_actions),
     )
 
 
@@ -210,15 +208,19 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_device_action_calls_service(self) -> None:
-        definition = _definition((
-            ScenarioAction(
-                id="a1",
-                type=ScenarioActionType.DEVICE_ACTION,
-                target_id="device_1",
-                action_id="turn_on",
-            ),
-        ))
-        result = await self.executor.async_execute(definition, "run-1", scenario_id="sc-1")
+        definition = _definition(
+            (
+                ScenarioAction(
+                    id="a1",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="device_1",
+                    action_id="turn_on",
+                ),
+            )
+        )
+        result = await self.executor.async_execute(
+            definition, "run-1", scenario_id="sc-1"
+        )
         self.assertEqual(result["status"], "completed")
         self.assertEqual(len(result["receipts"]), 1)
         self.hass.services.async_call.assert_awaited_once_with(
@@ -226,14 +228,17 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_closed_cover_is_not_commanded_again(self) -> None:
-        definition = _definition((
-            ScenarioAction(
-                id="a1",
-                type=ScenarioActionType.DEVICE_ACTION,
-                target_id="cover_1",
-                action_id="close_cover",
+        definition = _definition(
+            (
+                ScenarioAction(
+                    id="a1",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="cover_1",
+                    action_id="close_cover",
+                ),
             ),
-        ), idempotent_actions=True)
+            idempotent_actions=True,
+        )
 
         result = await self.executor.async_execute(
             definition, "run-1", scenario_id="close-curtains"
@@ -389,7 +394,9 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual("partial", result["status"])
-        self.assertEqual(["completed", "failed"], [item["status"] for item in result["receipts"]])
+        self.assertEqual(
+            ["completed", "failed"], [item["status"] for item in result["receipts"]]
+        )
 
     async def test_open_cover_still_receives_close_command(self) -> None:
         original_get = self.hass.states.get
@@ -398,14 +405,16 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             if entity_id == "cover.living_room"
             else original_get(entity_id)
         )
-        definition = _definition((
-            ScenarioAction(
-                id="a1",
-                type=ScenarioActionType.DEVICE_ACTION,
-                target_id="cover_1",
-                action_id="close_cover",
-            ),
-        ))
+        definition = _definition(
+            (
+                ScenarioAction(
+                    id="a1",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="cover_1",
+                    action_id="close_cover",
+                ),
+            )
+        )
 
         await self.executor.async_execute(
             definition, "run-1", scenario_id="close-curtains"
@@ -418,7 +427,9 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             blocking=True,
         )
 
-    async def test_unpowered_device_action_is_blocked_without_service_call(self) -> None:
+    async def test_unpowered_device_action_is_blocked_without_service_call(
+        self,
+    ) -> None:
         self.hass.states = SimpleNamespace(
             get=lambda entity_id: {
                 "light.living_room": SimpleNamespace(state="on", attributes={}),
@@ -429,9 +440,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             self.hass,
             self.catalog,
             self.executor._run_callback,
-            power_dependency_resolver=lambda: {
-                "light.living_room": "switch.wall"
-            },
+            power_dependency_resolver=lambda: {"light.living_room": "switch.wall"},
         )
         receipt = await executor.async_execute_device_action("device_1", "turn_on")
         self.assertFalse(receipt["accepted"])
@@ -452,9 +461,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             self.executor._run_callback,
             readback_window_seconds=0.02,
             readback_interval_seconds=0.01,
-            power_dependency_resolver=lambda: {
-                "light.living_room": "switch.wall"
-            },
+            power_dependency_resolver=lambda: {"light.living_room": "switch.wall"},
         )
         receipt = await executor.async_execute_device_action("device_1", "turn_on")
         self.assertTrue(receipt["accepted"])
@@ -493,25 +500,25 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             self.hass,
             self.catalog,
             self.executor._run_callback,
-            power_dependency_resolver=lambda: {
-                "light.living_room": "switch.wall"
-            },
+            power_dependency_resolver=lambda: {"light.living_room": "switch.wall"},
         )
-        definition = _definition((
-            ScenarioAction(
-                id="a1",
-                type=ScenarioActionType.DEVICE_ACTION,
-                target_id="switch_1",
-                action_id="turn_on",
-            ),
-            ScenarioAction(
-                id="a2",
-                type=ScenarioActionType.DEVICE_ACTION,
-                target_id="device_1",
-                action_id="set_adaptive_brightness",
-                value=25,
-            ),
-        ))
+        definition = _definition(
+            (
+                ScenarioAction(
+                    id="a1",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="switch_1",
+                    action_id="turn_on",
+                ),
+                ScenarioAction(
+                    id="a2",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="device_1",
+                    action_id="set_adaptive_brightness",
+                    value=25,
+                ),
+            )
+        )
 
         result = await executor.async_execute(
             definition,
@@ -522,7 +529,9 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("completed", result["status"])
         self.assertEqual("completed", result["receipts"][1]["status"])
-        self.assertEqual(25, result["receipts"][1]["adaptive_brightness"]["minimum_percent"])
+        self.assertEqual(
+            25, result["receipts"][1]["adaptive_brightness"]["minimum_percent"]
+        )
         self.hass.services.async_call.assert_not_awaited()
 
     async def test_scenario_confirms_device_actions_before_delay(self) -> None:
@@ -540,25 +549,27 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         async def fake_sleep(_: float) -> None:
             readback_counts.append(self.executor._read_back_device.await_count)
 
-        definition = _definition((
-            ScenarioAction(
-                id="a1",
-                type=ScenarioActionType.DEVICE_ACTION,
-                target_id="device_1",
-                action_id="turn_on",
-            ),
-            ScenarioAction(
-                id="a2",
-                type=ScenarioActionType.DELAY,
-                delay_seconds=1,
-            ),
-            ScenarioAction(
-                id="a3",
-                type=ScenarioActionType.DEVICE_ACTION,
-                target_id="device_1",
-                action_id="turn_on",
-            ),
-        ))
+        definition = _definition(
+            (
+                ScenarioAction(
+                    id="a1",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="device_1",
+                    action_id="turn_on",
+                ),
+                ScenarioAction(
+                    id="a2",
+                    type=ScenarioActionType.DELAY,
+                    delay_seconds=1,
+                ),
+                ScenarioAction(
+                    id="a3",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="device_1",
+                    action_id="turn_on",
+                ),
+            )
+        )
 
         with patch(
             "custom_components.hausman_hub.application.scenario_executor.asyncio.sleep",
@@ -572,7 +583,9 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([1], readback_counts)
         self.assertEqual(2, self.executor._read_back_device.await_count)
 
-    async def test_scenario_confirms_multiple_devices_in_one_shared_window(self) -> None:
+    async def test_scenario_confirms_multiple_devices_in_one_shared_window(
+        self,
+    ) -> None:
         both_readbacks_started = asyncio.Event()
         started = 0
 
@@ -632,21 +645,28 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_climate_action_uses_temperature_parameter(self) -> None:
-        definition = _definition((
-            ScenarioAction(
-                id="a1",
-                type=ScenarioActionType.DEVICE_ACTION,
-                target_id="climate_1",
-                action_id="set_temperature",
-                value=22,
-            ),
-        ))
+        definition = _definition(
+            (
+                ScenarioAction(
+                    id="a1",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="climate_1",
+                    action_id="set_temperature",
+                    value=22,
+                ),
+            )
+        )
         await self.executor.async_execute(definition, "run-1", scenario_id="sc-1")
         self.hass.services.async_call.assert_awaited_once_with(
-            "climate", "set_temperature", {"entity_id": "climate.living_room", "temperature": 22}, blocking=True
+            "climate",
+            "set_temperature",
+            {"entity_id": "climate.living_room", "temperature": 22},
+            blocking=True,
         )
 
-    async def test_number_action_uses_selected_value_and_confirms_read_back(self) -> None:
+    async def test_number_action_uses_selected_value_and_confirms_read_back(
+        self,
+    ) -> None:
         receipt = await self.executor.async_execute_device_action(
             "number_1", "set_value", 80
         )
@@ -679,21 +699,28 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.hass.services.async_call.assert_not_awaited()
 
     async def test_action_with_value_uses_brightness_parameter(self) -> None:
-        definition = _definition((
-            ScenarioAction(
-                id="a1",
-                type=ScenarioActionType.DEVICE_ACTION,
-                target_id="device_1",
-                action_id="set_brightness",
-                value=128,
-            ),
-        ))
+        definition = _definition(
+            (
+                ScenarioAction(
+                    id="a1",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="device_1",
+                    action_id="set_brightness",
+                    value=128,
+                ),
+            )
+        )
         await self.executor.async_execute(definition, "run-1", scenario_id="sc-1")
         self.hass.services.async_call.assert_awaited_once_with(
-            "light", "turn_on", {"entity_id": "light.living_room", "brightness": 128}, blocking=True
+            "light",
+            "turn_on",
+            {"entity_id": "light.living_room", "brightness": 128},
+            blocking=True,
         )
 
-    async def test_normalized_brightness_value_is_confirmed_against_read_back(self) -> None:
+    async def test_normalized_brightness_value_is_confirmed_against_read_back(
+        self,
+    ) -> None:
         self.hass.states.get = lambda entity_id: SimpleNamespace(
             state="on", attributes={"brightness": 50}
         )
@@ -704,22 +731,30 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(receipt["confirmed"])
         self.hass.services.async_call.assert_awaited_once_with(
-            "light", "turn_on", {"entity_id": "light.living_room", "brightness": 50}, blocking=True
+            "light",
+            "turn_on",
+            {"entity_id": "light.living_room", "brightness": 50},
+            blocking=True,
         )
 
     async def test_brightness_percent_scales_to_native_brightness(self) -> None:
-        definition = _definition((
-            ScenarioAction(
-                id="a1",
-                type=ScenarioActionType.DEVICE_ACTION,
-                target_id="device_1",
-                action_id="set_brightness_percent",
-                value=50,
-            ),
-        ))
+        definition = _definition(
+            (
+                ScenarioAction(
+                    id="a1",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="device_1",
+                    action_id="set_brightness_percent",
+                    value=50,
+                ),
+            )
+        )
         await self.executor.async_execute(definition, "run-1", scenario_id="sc-1")
         self.hass.services.async_call.assert_awaited_once_with(
-            "light", "turn_on", {"entity_id": "light.living_room", "brightness": 128}, blocking=True
+            "light",
+            "turn_on",
+            {"entity_id": "light.living_room", "brightness": 128},
+            blocking=True,
         )
 
     async def test_brightness_percent_is_confirmed_against_read_back(self) -> None:
@@ -733,19 +768,24 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(receipt["confirmed"])
         self.hass.services.async_call.assert_awaited_once_with(
-            "light", "turn_on", {"entity_id": "light.living_room", "brightness": 128}, blocking=True
+            "light",
+            "turn_on",
+            {"entity_id": "light.living_room", "brightness": 128},
+            blocking=True,
         )
 
     async def test_color_temperature_action_uses_kelvin_parameter(self) -> None:
-        definition = _definition((
-            ScenarioAction(
-                id="a1",
-                type=ScenarioActionType.DEVICE_ACTION,
-                target_id="device_1",
-                action_id="set_color_temperature",
-                value=3000,
-            ),
-        ))
+        definition = _definition(
+            (
+                ScenarioAction(
+                    id="a1",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="device_1",
+                    action_id="set_color_temperature",
+                    value=3000,
+                ),
+            )
+        )
         await self.executor.async_execute(definition, "run-1", scenario_id="sc-1")
         self.hass.services.async_call.assert_awaited_once_with(
             "light",
@@ -771,7 +811,9 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             blocking=True,
         )
 
-    async def test_adaptive_brightness_uses_solar_curve_and_minimum_percent(self) -> None:
+    async def test_adaptive_brightness_uses_solar_curve_and_minimum_percent(
+        self,
+    ) -> None:
         self.hass.states.get = lambda entity_id: {
             "light.living_room": SimpleNamespace(
                 state="on", attributes={"brightness": 159}
@@ -784,9 +826,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
                 },
             ),
         }.get(entity_id)
-        now = datetime(
-            2026, 8, 14, 22, 0, tzinfo=timezone(timedelta(hours=6))
-        )
+        now = datetime(2026, 8, 14, 22, 0, tzinfo=timezone(timedelta(hours=6)))
 
         with patch(
             "custom_components.hausman_hub.application.scenario_executor._now_local",
@@ -840,39 +880,49 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_delay_action_receipt(self) -> None:
-        definition = _definition((
-            ScenarioAction(
-                id="a1",
-                type=ScenarioActionType.DELAY,
-                delay_seconds=1,
-            ),
-        ))
-        result = await self.executor.async_execute(definition, "run-1", scenario_id="sc-1")
+        definition = _definition(
+            (
+                ScenarioAction(
+                    id="a1",
+                    type=ScenarioActionType.DELAY,
+                    delay_seconds=1,
+                ),
+            )
+        )
+        result = await self.executor.async_execute(
+            definition, "run-1", scenario_id="sc-1"
+        )
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["receipts"][0]["status"], "completed")
         self.assertEqual(result["receipts"][0]["delay_seconds"], 1)
 
     async def test_run_scenario_action_calls_callback(self) -> None:
-        definition = _definition((
-            ScenarioAction(
-                id="a1",
-                type=ScenarioActionType.RUN_SCENARIO,
-                scenario_id="other",
-            ),
-        ))
-        result = await self.executor.async_execute(definition, "run-1", scenario_id="sc-1")
+        definition = _definition(
+            (
+                ScenarioAction(
+                    id="a1",
+                    type=ScenarioActionType.RUN_SCENARIO,
+                    scenario_id="other",
+                ),
+            )
+        )
+        result = await self.executor.async_execute(
+            definition, "run-1", scenario_id="sc-1"
+        )
         self.assertEqual(result["status"], "completed")
         self.assertEqual(self.nested_runs, ["other"])
         self.assertEqual(result["receipts"][0]["nested_run_id"], "nested-other")
 
     async def test_run_scenario_dry_run_is_a_successful_plan(self) -> None:
-        definition = _definition((
-            ScenarioAction(
-                id="a1",
-                type=ScenarioActionType.RUN_SCENARIO,
-                scenario_id="other",
-            ),
-        ))
+        definition = _definition(
+            (
+                ScenarioAction(
+                    id="a1",
+                    type=ScenarioActionType.RUN_SCENARIO,
+                    scenario_id="other",
+                ),
+            )
+        )
 
         result = await self.executor.async_execute(
             definition,
@@ -886,14 +936,18 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([], self.nested_runs)
 
     async def test_notification_action_targets_configured_entity(self) -> None:
-        definition = _definition((
-            ScenarioAction(
-                id="a1",
-                type=ScenarioActionType.NOTIFICATION,
-                message="Hello",
-            ),
-        ))
-        result = await self.executor.async_execute(definition, "run-1", scenario_id="sc-1")
+        definition = _definition(
+            (
+                ScenarioAction(
+                    id="a1",
+                    type=ScenarioActionType.NOTIFICATION,
+                    message="Hello",
+                ),
+            )
+        )
+        result = await self.executor.async_execute(
+            definition, "run-1", scenario_id="sc-1"
+        )
         self.assertEqual(result["status"], "completed")
         self.hass.services.async_call.assert_awaited_once_with(
             "notify",
@@ -903,31 +957,104 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual("run-1", result["receipts"][0]["correlation_id"])
 
-    async def test_notification_fails_without_target(self) -> None:
-        executor = ScenarioExecutor(self.hass, self.catalog, self.executor._run_callback)
-        definition = _definition((
-            ScenarioAction(
-                id="a1",
-                type=ScenarioActionType.NOTIFICATION,
-                message="Hello",
-            ),
-        ))
+    async def test_notification_uses_safe_default_target(self) -> None:
+        executor = ScenarioExecutor(
+            self.hass, self.catalog, self.executor._run_callback
+        )
+        definition = _definition(
+            (
+                ScenarioAction(
+                    id="a1",
+                    type=ScenarioActionType.NOTIFICATION,
+                    message="Hello",
+                ),
+            )
+        )
         result = await executor.async_execute(definition, "run-1", scenario_id="sc-1")
-        self.assertEqual(result["status"], "failed")
-        self.assertIn("notification target is not configured", result["receipts"][0]["error"])
+        self.assertEqual(result["status"], "completed")
+        self.hass.services.async_call.assert_awaited_once_with(
+            "notify",
+            "notify",
+            {"message": "Hello", "data": {"correlation_id": "run-1"}},
+            blocking=True,
+        )
+
+    async def test_notification_falls_back_to_persistent_notification(self) -> None:
+        executor = ScenarioExecutor(
+            self.hass, self.catalog, self.executor._run_callback
+        )
+        self.hass.services.async_call.side_effect = [RuntimeError("missing"), None]
+        definition = _definition(
+            (
+                ScenarioAction(
+                    id="a1",
+                    type=ScenarioActionType.NOTIFICATION,
+                    message="Hello",
+                ),
+            )
+        )
+
+        result = await executor.async_execute(definition, "run-1", scenario_id="sc-1")
+
+        self.assertEqual("completed", result["status"])
+        self.assertEqual(2, self.hass.services.async_call.await_count)
+        self.hass.services.async_call.assert_any_await(
+            "persistent_notification",
+            "create",
+            {
+                "title": "Hausman",
+                "message": "Hello",
+                "notification_id": "hausman-scenario-run-1",
+            },
+            blocking=True,
+        )
+
+    async def test_shadow_mode_never_calls_services_or_confirms_state(self) -> None:
+        definition = _definition(
+            (
+                ScenarioAction(
+                    id="a1",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="device_1",
+                    action_id="turn_on",
+                ),
+                ScenarioAction(
+                    id="a2", type=ScenarioActionType.NOTIFICATION, message="План"
+                ),
+            ),
+            command_mode=ScenarioCommandMode.SHADOW,
+            idempotent_actions=True,
+        )
+
+        result = await self.executor.async_execute(
+            definition, "run-shadow-1", scenario_id="shadow-1"
+        )
+
+        self.assertEqual("shadow", result["command_mode"])
+        self.assertEqual("completed", result["status"])
+        self.assertFalse(result["confirmed"])
+        self.assertTrue(all(item["planned"] for item in result["receipts"]))
+        self.assertTrue(all(item["confirmed"] is None for item in result["receipts"]))
+        self.hass.services.async_call.assert_not_awaited()
 
     async def test_failed_service_stops_execution(self) -> None:
         self.hass.services.async_call.side_effect = RuntimeError("boom")
-        definition = _definition((
-            ScenarioAction(
-                id="a1",
-                type=ScenarioActionType.DEVICE_ACTION,
-                target_id="device_1",
-                action_id="turn_on",
-            ),
-            ScenarioAction(id="a2", type=ScenarioActionType.NOTIFICATION, message="x"),
-        ))
-        result = await self.executor.async_execute(definition, "run-1", scenario_id="sc-1")
+        definition = _definition(
+            (
+                ScenarioAction(
+                    id="a1",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="device_1",
+                    action_id="turn_on",
+                ),
+                ScenarioAction(
+                    id="a2", type=ScenarioActionType.NOTIFICATION, message="x"
+                ),
+            )
+        )
+        result = await self.executor.async_execute(
+            definition, "run-1", scenario_id="sc-1"
+        )
         self.assertEqual(result["status"], "failed")
         self.assertEqual(len(result["receipts"]), 1)
         self.assertEqual(result["receipts"][0]["status"], "failed")
@@ -940,9 +1067,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(run_id_1), 32)
 
     async def test_public_device_action_returns_confirmed_read_back(self) -> None:
-        receipt = await self.executor.async_execute_device_action(
-            "device_1", "turn_on"
-        )
+        receipt = await self.executor.async_execute_device_action("device_1", "turn_on")
 
         self.assertTrue(receipt["accepted"])
         self.assertTrue(receipt["confirmed"])
@@ -955,23 +1080,21 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_public_device_action_rejects_unknown_target(self) -> None:
-        receipt = await self.executor.async_execute_device_action(
-            "missing", "turn_on"
-        )
+        receipt = await self.executor.async_execute_device_action("missing", "turn_on")
 
         self.assertFalse(receipt["accepted"])
         self.assertFalse(receipt["confirmed"])
         self.assertEqual("failed", receipt["status"])
         self.hass.services.async_call.assert_not_awaited()
 
-    async def test_public_device_action_reports_bounded_unconfirmed_read_back(self) -> None:
+    async def test_public_device_action_reports_bounded_unconfirmed_read_back(
+        self,
+    ) -> None:
         self.hass.states.get = lambda entity_id: SimpleNamespace(
             state="off", attributes={}
         )
 
-        receipt = await self.executor.async_execute_device_action(
-            "device_1", "turn_on"
-        )
+        receipt = await self.executor.async_execute_device_action("device_1", "turn_on")
 
         self.assertTrue(receipt["accepted"])
         self.assertFalse(receipt["confirmed"])

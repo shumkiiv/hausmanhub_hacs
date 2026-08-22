@@ -162,9 +162,7 @@ def _valid_definition(scenario_id: str = "scenario_1") -> dict[str, Any]:
     return {
         "version": 1,
         "executionMode": "single",
-        "triggers": [
-            {"id": "t1", "type": "time", "value": "08:00"}
-        ],
+        "triggers": [{"id": "t1", "type": "time", "value": "08:00"}],
         "conditions": [],
         "actions": [
             {
@@ -215,21 +213,25 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_event_trigger_projection_contains_only_enabled_filter(self) -> None:
         payload = _valid_payload("event_button")
-        payload["definition"]["triggers"] = [{
-            "id": "event-1",
-            "type": "event",
-            "eventType": "zha_event",
-            "eventData": {"device_id": "kids-button", "command": "single"},
-        }]
+        payload["definition"]["triggers"] = [
+            {
+                "id": "event-1",
+                "type": "event",
+                "eventType": "zha_event",
+                "eventData": {"device_id": "kids-button", "command": "single"},
+            }
+        ]
         await self.service.async_update_scenario(payload)
         self.assertEqual(
             self.service.event_trigger_items(),
-            ((
-                "event_button",
-                "event-1",
-                "zha_event",
-                {"device_id": "kids-button", "command": "single"},
-            ),),
+            (
+                (
+                    "event_button",
+                    "event-1",
+                    "zha_event",
+                    {"device_id": "kids-button", "command": "single"},
+                ),
+            ),
         )
 
     async def test_update_overwrites_existing(self) -> None:
@@ -296,7 +298,9 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(1, refreshes)
         self.assertIs(refreshed, service._catalog)
         self.assertEqual([refreshed], self.executor.catalogs)
-        self.assertEqual([("late_light", "turn_on", None)], self.executor.device_actions)
+        self.assertEqual(
+            [("late_light", "turn_on", None)], self.executor.device_actions
+        )
         self.assertTrue(receipt["confirmed"])
 
     async def test_catalog_warmup_is_bounded_and_publishes_ready(self) -> None:
@@ -506,6 +510,27 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("corr.scenario.tablet-1", result["run_id"])
         self.assertEqual("corr.scenario.tablet-1", self.executor.runs[0][1])
+
+    async def test_shadow_scenario_uses_dry_run_and_journal_marker(self) -> None:
+        journal = _FakeJournal()
+        service = ScenarioService(
+            None,
+            self.store,
+            self.catalog,
+            self.executor,
+            operation_journal=journal,
+        )
+        await service.async_load()
+        payload = _valid_payload("shadow_scenario")
+        payload["definition"]["commandMode"] = "shadow"
+        await service.async_update_scenario(payload)
+
+        result = await service.async_run_scenario("shadow_scenario")
+
+        self.assertTrue(self.executor.runs[0][2])
+        self.assertEqual("shadow", result["command_mode"])
+        self.assertEqual("shadow", journal.receipts[0]["scenario"]["command_mode"])
+        self.assertFalse(journal.receipts[0]["confirmed"])
 
     async def test_restart_mode_restarts_the_five_minute_timer(self) -> None:
         executor = _RestartExecutor()
@@ -820,9 +845,7 @@ class ScenarioUpcomingServiceTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_cancel_upcoming_success(self) -> None:
         await self._add_time_scenario()
-        run_at = (await self.service.async_list_upcoming_events())["events"][0][
-            "runAt"
-        ]
+        run_at = (await self.service.async_list_upcoming_events())["events"][0]["runAt"]
         receipt = await self.service.async_cancel_upcoming("scenario_1", "t1", run_at)
         self.assertTrue(receipt["cancelled"])
         self.assertEqual(receipt["scenarioId"], "scenario_1")
@@ -837,9 +860,7 @@ class ScenarioUpcomingServiceTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_cancel_upcoming_not_found(self) -> None:
         await self._add_time_scenario()
-        run_at = (await self.service.async_list_upcoming_events())["events"][0][
-            "runAt"
-        ]
+        run_at = (await self.service.async_list_upcoming_events())["events"][0]["runAt"]
         with self.assertRaises(ScenarioServiceError) as ctx:
             await self.service.async_cancel_upcoming("scenario_1", "missing", run_at)
         self.assertEqual(ctx.exception.status, 404)
@@ -852,9 +873,7 @@ class ScenarioUpcomingServiceTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_cancel_upcoming_twice_is_not_found(self) -> None:
         await self._add_time_scenario()
-        run_at = (await self.service.async_list_upcoming_events())["events"][0][
-            "runAt"
-        ]
+        run_at = (await self.service.async_list_upcoming_events())["events"][0]["runAt"]
         await self.service.async_cancel_upcoming("scenario_1", "t1", run_at)
         with self.assertRaises(ScenarioServiceError) as ctx:
             await self.service.async_cancel_upcoming("scenario_1", "t1", run_at)
@@ -862,9 +881,7 @@ class ScenarioUpcomingServiceTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_consume_skip(self) -> None:
         await self._add_time_scenario()
-        run_at = (await self.service.async_list_upcoming_events())["events"][0][
-            "runAt"
-        ]
+        run_at = (await self.service.async_list_upcoming_events())["events"][0]["runAt"]
         await self.service.async_cancel_upcoming("scenario_1", "t1", run_at)
         self.assertTrue(
             await self.service.async_consume_skip("scenario_1", "t1", "2026-08-09")
@@ -880,9 +897,7 @@ class ScenarioUpcomingServiceTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_skips_survive_reload(self) -> None:
         await self._add_time_scenario()
-        run_at = (await self.service.async_list_upcoming_events())["events"][0][
-            "runAt"
-        ]
+        run_at = (await self.service.async_list_upcoming_events())["events"][0]["runAt"]
         await self.service.async_cancel_upcoming("scenario_1", "t1", run_at)
 
         reloaded = ScenarioService(

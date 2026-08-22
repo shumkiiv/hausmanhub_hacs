@@ -127,22 +127,75 @@
               "operation": {"const": "scenario_run"}
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "scenario": {
+                "properties": {"command_mode": {"const": "shadow"}},
+                "required": ["command_mode"]
+              }
+            },
+            "required": ["scenario"]
+          },
+          "then": {
+            "properties": {
+              "confirmed": {"const": false}
+            }
+          }
         }
       ]
     },
     "scenario_run": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["scenario_id", "run_id", "execution_mode", "outcome", "evidence_revision", "decisions", "actions"],
+      "required": [
+        "scenario_id",
+        "run_id",
+        "execution_mode",
+        "outcome",
+        "evidence_revision",
+        "decisions",
+        "actions"
+      ],
       "properties": {
         "scenario_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
         "run_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
         "execution_mode": {"enum": ["single", "restart", "queued"]},
+        "command_mode": {
+          "description": "Whether this run could call services or only evaluated the plan",
+          "enum": ["live", "shadow"]
+        },
         "outcome": {"enum": ["completed", "skipped", "cancelled", "partial", "failed"]},
         "evidence_revision": {"type": ["string", "null"], "maxLength": 128},
-        "decisions": {"type": "array", "maxItems": 64, "items": {"$ref": "#/$defs/scenario_decision"}},
-        "actions": {"type": "array", "maxItems": 64, "items": {"$ref": "#/$defs/scenario_action"}}
-      }
+        "decisions": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {"$ref": "#/$defs/scenario_decision"}
+        },
+        "actions": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {"$ref": "#/$defs/scenario_action"}
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"command_mode": {"const": "shadow"}},
+            "required": ["command_mode"]
+          },
+          "then": {
+            "properties": {
+              "actions": {
+                "items": {
+                  "properties": {"confirmed": {"const": null}}
+                }
+              }
+            }
+          }
+        }
+      ]
     },
     "scenario_decision": {
       "type": "object",

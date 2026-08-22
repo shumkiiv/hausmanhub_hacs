@@ -12,6 +12,7 @@ from custom_components.hausman_hub.domain.scenarios import (
     Scenario,
     ScenarioAction,
     ScenarioActionType,
+    ScenarioCommandMode,
     ScenarioComparison,
     ScenarioCondition,
     ScenarioConditionType,
@@ -119,7 +120,9 @@ class ScenarioDomainTest(unittest.TestCase):
 
     def test_too_many_conditions(self) -> None:
         conditions = tuple(
-            ScenarioCondition(id=f"c{i}", type=ScenarioConditionType.PRESENCE, value="home")
+            ScenarioCondition(
+                id=f"c{i}", type=ScenarioConditionType.PRESENCE, value="home"
+            )
             for i in range(MAX_CONDITIONS + 1)
         )
         with self.assertRaises(ScenarioViolation):
@@ -206,9 +209,7 @@ class ScenarioDomainTest(unittest.TestCase):
 
     def test_delay_bounds(self) -> None:
         with self.assertRaises(ScenarioViolation):
-            ScenarioAction(
-                id="a1", type=ScenarioActionType.DELAY, delay_seconds=0
-            )
+            ScenarioAction(id="a1", type=ScenarioActionType.DELAY, delay_seconds=0)
         with self.assertRaises(ScenarioViolation):
             ScenarioAction(
                 id="a1",
@@ -273,7 +274,9 @@ class ScenarioDomainTest(unittest.TestCase):
             ScenarioDefinition.from_payload(payload)
 
     def test_payload_rejects_missing_definition_field(self) -> None:
-        payload = scenario_registry_to_payload(ScenarioRegistry(scenarios=(valid_scenario(),)))
+        payload = scenario_registry_to_payload(
+            ScenarioRegistry(scenarios=(valid_scenario(),))
+        )
         del payload["scenarios"][0]["definition"]["executionMode"]
         with self.assertRaises(ScenarioViolation):
             scenario_registry_from_payload(payload)
@@ -311,6 +314,7 @@ class ScenarioDomainTest(unittest.TestCase):
     def test_safety_policy_and_trigger_timing_round_trip(self) -> None:
         definition = valid_definition(
             execution_mode=ScenarioExecutionMode.QUEUED,
+            command_mode=ScenarioCommandMode.SHADOW,
             queue_limit=3,
             safety_policy=ScenarioSafetyPolicy(
                 max_evidence_age_seconds=120,
@@ -337,6 +341,8 @@ class ScenarioDomainTest(unittest.TestCase):
         restored = ScenarioDefinition.from_payload(definition.to_payload())
 
         self.assertEqual(3, restored.queue_limit)
+        self.assertEqual(ScenarioCommandMode.SHADOW, restored.command_mode)
+        self.assertEqual("shadow", restored.to_payload()["commandMode"])
         self.assertEqual(120, restored.safety_policy.max_evidence_age_seconds)
         self.assertEqual(2, restored.safety_policy.nested_depth_limit)
         self.assertEqual(10, restored.triggers[0].for_seconds)
@@ -359,6 +365,19 @@ class ScenarioDomainTest(unittest.TestCase):
                 value="on",
                 debounce_seconds=3601,
             )
+        payload = valid_definition().to_payload()
+        payload["commandMode"] = "observe-and-write"
+        with self.assertRaises(ScenarioViolation):
+            ScenarioDefinition.from_payload(payload)
+
+    def test_missing_command_mode_defaults_to_live(self) -> None:
+        payload = valid_definition().to_payload()
+        payload.pop("commandMode", None)
+
+        restored = ScenarioDefinition.from_payload(payload)
+
+        self.assertEqual(ScenarioCommandMode.LIVE, restored.command_mode)
+        self.assertNotIn("commandMode", restored.to_payload())
 
     def test_event_trigger_rejects_system_event_and_nested_filter(self) -> None:
         with self.assertRaises(ScenarioViolation):
@@ -392,9 +411,7 @@ class ScenarioDomainTest(unittest.TestCase):
         self.assertEqual(trigger_with_offset.value, -30)
 
     def test_sunrise_offset_accepts_numeric_string(self) -> None:
-        trigger = ScenarioTrigger(
-            id="t1", type=ScenarioTriggerType.SUNSET, value="15"
-        )
+        trigger = ScenarioTrigger(id="t1", type=ScenarioTriggerType.SUNSET, value="15")
         self.assertEqual(trigger.value, "15")
 
     def test_android_manual_trigger_with_ignored_comparison(self) -> None:

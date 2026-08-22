@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import unittest
+from pathlib import Path
 
 from jsonschema import Draft202012Validator
 
@@ -71,7 +71,9 @@ class OperationJournalTests(unittest.IsolatedAsyncioTestCase):
 
         await service.async_append(receipt("device-1", "device_action", confirmed=True))
         await service.async_append(receipt("climate-2", "climate.tablet_action"))
-        await service.async_append(receipt("scenario-3", "scenario_run", confirmed=True))
+        await service.async_append(
+            receipt("scenario-3", "scenario_run", confirmed=True)
+        )
         await service.async_append(
             receipt("voice-4", "voice.yandexGreeting.test", accepted=False)
         )
@@ -156,7 +158,9 @@ class OperationJournalTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("partial", record["scenario"]["outcome"])
         self.assertNotIn("entity_id", json.dumps(record, ensure_ascii=False))
-        self.assertNotIn("binary_sensor.private", json.dumps(record, ensure_ascii=False))
+        self.assertNotIn(
+            "binary_sensor.private", json.dumps(record, ensure_ascii=False)
+        )
         self.assertEqual(
             "condition_not_met",
             record["scenario"]["decisions"][0]["reason"],
@@ -178,6 +182,69 @@ class OperationJournalTests(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(ValueError):
             await service.async_append(unsafe)
+
+    async def test_shadow_trace_never_claims_physical_confirmation(self) -> None:
+        store = MemoryStore()
+        service = OperationJournalService(store, now_ms=lambda: 60)
+        normalized = scenario_operation_receipt(
+            {
+                "run_id": "run-shadow-1",
+                "scenario_id": "bathroom_shadow",
+                "execution_mode": "single",
+                "command_mode": "shadow",
+                "status": "completed",
+                "confirmed": True,
+                "evidence_revision": "revision-2",
+                "condition_results": [],
+                "receipts": [
+                    {
+                        "action_id": "fan_on",
+                        "status": "completed",
+                        "confirmed": True,
+                    }
+                ],
+            }
+        )
+
+        record = await service.async_append(normalized)
+
+        self.assertEqual("accepted", record["status"])
+        self.assertFalse(record["confirmed"])
+        self.assertEqual("shadow", record["scenario"]["command_mode"])
+        self.assertIsNone(record["scenario"]["actions"][0]["confirmed"])
+        self.assertEqual("shadow_plan", record["scenario"]["actions"][0]["reason"])
+
+    async def test_skipped_shadow_trace_is_retained_as_failed_without_confirmation(
+        self,
+    ) -> None:
+        store = MemoryStore()
+        service = OperationJournalService(store, now_ms=lambda: 70)
+        normalized = scenario_operation_receipt(
+            {
+                "run_id": "run-shadow-skipped",
+                "scenario_id": "bathroom_shadow",
+                "execution_mode": "single",
+                "command_mode": "shadow",
+                "status": "skipped",
+                "confirmed": False,
+                "condition_results": [
+                    {
+                        "condition_id": "humidity",
+                        "passed": False,
+                        "outcome": "skipped",
+                        "reason": "condition_not_met",
+                    }
+                ],
+                "receipts": [],
+            }
+        )
+
+        record = await service.async_append(normalized)
+
+        self.assertEqual("failed", record["status"])
+        self.assertFalse(record["accepted"])
+        self.assertFalse(record["confirmed"])
+        self.assertEqual("skipped", record["scenario"]["outcome"])
 
     async def test_journal_is_bounded_and_does_not_store_targets(self) -> None:
         store = MemoryStore()

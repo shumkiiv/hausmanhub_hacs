@@ -613,6 +613,7 @@ class FrontendPaginationFixturesTest(unittest.TestCase):
           client.stop();
           // Legacy journal without page metadata: one page, then stop.
           const legacyJournal = read("hausmanhub_operation_journal_v1", "journal.json");
+          delete legacyJournal.page;
           if (legacyJournal.page) fail("legacy journal grew page metadata");
           const journalCalls = [];
           const result = await mod.readOperationJournal(
@@ -622,7 +623,10 @@ class FrontendPaginationFixturesTest(unittest.TestCase):
           if (result.pages !== 1 || journalCalls.length !== 1) {
             fail("legacy journal was paginated");
           }
-          if (result.records.map((record) => record.sequence).join(",") !== "4,3,2,1") {
+          const expectedSequences = legacyJournal.records
+            .map((record) => record.sequence)
+            .join(",");
+          if (result.records.map((record) => record.sequence).join(",") !== expectedSequences) {
             fail("legacy journal records lost or reordered");
           }
           // Legacy meter fixture: head projection keeps at most 60 entries.

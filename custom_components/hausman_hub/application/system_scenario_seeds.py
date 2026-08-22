@@ -16,9 +16,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import logging
-from typing import Any, Mapping, TYPE_CHECKING
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 from .scenario_catalog import _stable_target_id_from_entity
 from .scenarios import ScenarioCatalog
@@ -38,7 +39,31 @@ def _target(entity_id: str) -> str:
     return _stable_target_id_from_entity(entity_id)
 
 
-def _device_trigger(rule_id: str, entity_id: str, comparison: str, value: object) -> dict[str, object]:
+def _device_trigger(
+    rule_id: str,
+    entity_id: str,
+    comparison: str,
+    value: object | None = None,
+    *,
+    for_seconds: int = 0,
+) -> dict[str, object]:
+    trigger: dict[str, object] = {
+        "id": rule_id,
+        "type": "device_state",
+        "targetId": _target(entity_id),
+        "property": "state",
+        "comparison": comparison,
+    }
+    if value is not None:
+        trigger["value"] = value
+    if for_seconds:
+        trigger["forSeconds"] = for_seconds
+    return trigger
+
+
+def _device_condition(
+    rule_id: str, entity_id: str, comparison: str, value: object
+) -> dict[str, object]:
     return {
         "id": rule_id,
         "type": "device_state",
@@ -49,18 +74,9 @@ def _device_trigger(rule_id: str, entity_id: str, comparison: str, value: object
     }
 
 
-def _device_condition(rule_id: str, entity_id: str, comparison: str, value: object) -> dict[str, object]:
-    return {
-        "id": rule_id,
-        "type": "device_state",
-        "targetId": _target(entity_id),
-        "property": "state",
-        "comparison": comparison,
-        "value": value,
-    }
-
-
-def _device_action(rule_id: str, entity_id: str, action_id: str, value: object | None = None) -> dict[str, object]:
+def _device_action(
+    rule_id: str, entity_id: str, action_id: str, value: object | None = None
+) -> dict[str, object]:
     action: dict[str, object] = {
         "id": rule_id,
         "type": "device_action",
@@ -139,6 +155,15 @@ AWAY_OFF_ENTITIES: tuple[tuple[str, str], ...] = (
     (LIGHT_HALLWAY, "turn_off"),
     ("light.0xa4c138d69d102803", "turn_off"),
     ("light.0xa4c1385600dc0551", "turn_off"),
+    ("switch.0x54ef4410006807e0_left", "turn_off"),
+    ("switch.0x54ef4410006807e0_right", "turn_off"),
+    ("switch.0x54ef441000680683_left", "turn_off"),
+    ("switch.0x54ef441000680683_right", "turn_off"),
+    ("switch.0x54ef4410006819fc_left", "turn_off"),
+    ("switch.0x54ef4410006819fc_right", "turn_off"),
+    ("switch.0xa4c138e4e8eeb315_left", "turn_off"),
+    ("switch.0xa4c138e4e8eeb315_center", "turn_off"),
+    ("switch.0xa4c138e4e8eeb315_right", "turn_off"),
     (SWITCH_TOILET_LIGHT_1, "turn_off"),
     (SWITCH_TOILET_LIGHT_2, "turn_off"),
     (SWITCH_BATHROOM_LIGHT_1, "turn_off"),
@@ -158,6 +183,7 @@ class SystemScenarioSeed:
     conditions: tuple[Mapping[str, object], ...]
     actions: tuple[Mapping[str, object], ...]
     execution_mode: str = "single"
+    command_mode: str = "live"
     required_entities: tuple[str, ...] = ()
     optional_actions: tuple[tuple[str, str], ...] = ()
 
@@ -173,12 +199,13 @@ class SystemScenarioSeed:
                     entity_id,
                 )
                 return None
-        actions: list[Mapping[str, object]] = list(self.actions)
+        actions: list[Mapping[str, object]] = []
         for index, (entity_id, action_id) in enumerate(self.optional_actions):
             device = catalog.device(_target(entity_id))
             if device is None or device.entity_id != entity_id:
                 continue
             actions.append(_device_action(f"ax{index}", entity_id, action_id))
+        actions.extend(self.actions)
         if self.optional_actions and not any(
             item.get("type") == "device_action" for item in actions
         ):
@@ -196,6 +223,11 @@ class SystemScenarioSeed:
             "definition": {
                 "version": 1,
                 "executionMode": self.execution_mode,
+                **(
+                    {"commandMode": self.command_mode}
+                    if self.command_mode != "live"
+                    else {}
+                ),
                 # Решение владельца 2026-08-20: имена устройств подставляются из
                 # живого каталога, чтобы лента активности и редактор показывали
                 # «Люстра кухни: выключить», а не безликое «Устройство: ...».
@@ -233,9 +265,7 @@ SYSTEM_SCENARIO_SEEDS: tuple[SystemScenarioSeed, ...] = (
         ),
         icon="mdi:blinds-open",
         triggers=({"id": "t1", "type": "time", "value": "07:00"},),
-        conditions=(
-            {"id": "c1", "type": "weekday", "value": "пн, вт, ср, чт, пт"},
-        ),
+        conditions=({"id": "c1", "type": "weekday", "value": "пн, вт, ср, чт, пт"},),
         actions=(_device_action("a1", COVER_KITCHEN, "set_position", 80),),
         required_entities=(COVER_KITCHEN,),
     ),
@@ -260,7 +290,9 @@ SYSTEM_SCENARIO_SEEDS: tuple[SystemScenarioSeed, ...] = (
         triggers=(_device_trigger("t1", LEAK_TOILET, "equals", "on"),),
         conditions=(),
         actions=(
-            _notify("a1", "Протечка в туалете: датчик сообщил о воде. Проверьте сантехнику."),
+            _notify(
+                "a1", "Протечка в туалете: датчик сообщил о воде. Проверьте сантехнику."
+            ),
         ),
         required_entities=(LEAK_TOILET,),
     ),
@@ -272,7 +304,9 @@ SYSTEM_SCENARIO_SEEDS: tuple[SystemScenarioSeed, ...] = (
         triggers=(_device_trigger("t1", LEAK_BATHROOM, "equals", "on"),),
         conditions=(),
         actions=(
-            _notify("a1", "Протечка в ванной: датчик сообщил о воде. Проверьте сантехнику."),
+            _notify(
+                "a1", "Протечка в ванной: датчик сообщил о воде. Проверьте сантехнику."
+            ),
         ),
         required_entities=(LEAK_BATHROOM,),
     ),
@@ -284,7 +318,9 @@ SYSTEM_SCENARIO_SEEDS: tuple[SystemScenarioSeed, ...] = (
         triggers=(_device_trigger("t1", LEAK_KITCHEN, "equals", "on"),),
         conditions=(),
         actions=(
-            _notify("a1", "Протечка на кухне: датчик сообщил о воде. Проверьте сантехнику."),
+            _notify(
+                "a1", "Протечка на кухне: датчик сообщил о воде. Проверьте сантехнику."
+            ),
         ),
         required_entities=(LEAK_KITCHEN,),
     ),
@@ -300,7 +336,10 @@ SYSTEM_SCENARIO_SEEDS: tuple[SystemScenarioSeed, ...] = (
         triggers=(_device_trigger("t1", LEAK_EXTRA, "equals", "on"),),
         conditions=(),
         actions=(
-            _notify("a1", "Протечка (доп ванная): датчик сообщил о воде. Проверьте сантехнику."),
+            _notify(
+                "a1",
+                "Протечка (доп ванная): датчик сообщил о воде. Проверьте сантехнику.",
+            ),
         ),
         required_entities=(LEAK_EXTRA,),
     ),
@@ -414,24 +453,27 @@ SYSTEM_SCENARIO_SEEDS: tuple[SystemScenarioSeed, ...] = (
             _device_trigger("t1", SWITCH_TOILET_LIGHT_1, "equals", "on"),
             _device_trigger("t2", SWITCH_TOILET_LIGHT_2, "equals", "on"),
         ),
-        conditions=(
-            {"id": "c1", "type": "time_window", "value": "08:30-22:30"},
-        ),
+        conditions=({"id": "c1", "type": "time_window", "value": "08:30-22:30"},),
         actions=(_device_action("a1", SWITCH_TOILET_FAN, "turn_on"),),
-        required_entities=(SWITCH_TOILET_LIGHT_1, SWITCH_TOILET_LIGHT_2, SWITCH_TOILET_FAN),
+        required_entities=(
+            SWITCH_TOILET_LIGHT_1,
+            SWITCH_TOILET_LIGHT_2,
+            SWITCH_TOILET_FAN,
+        ),
     ),
     SystemScenarioSeed(
         scenario_id="system-toilet-fan-off-delay",
         title="Туалет: вытяжка off после света",
         description=(
             "Перенос из Node-RED: свет погас - вытяжка выключается через "
-            "3 минуты. Если свет включился снова, вытяжку вернёт сценарий "
-            "«вытяжка днём со светом» (отмены таймера в движке нет)."
+            "3 минуты, только если оба канала оставались выключенными весь "
+            "интервал. Новое включение отменяет отложенный запуск."
         ),
         icon="mdi:fan-off",
+        execution_mode="restart",
         triggers=(
-            _device_trigger("t1", SWITCH_TOILET_LIGHT_1, "equals", "off"),
-            _device_trigger("t2", SWITCH_TOILET_LIGHT_2, "equals", "off"),
+            _device_trigger("t1", SWITCH_TOILET_LIGHT_1, "changed"),
+            _device_trigger("t2", SWITCH_TOILET_LIGHT_2, "changed"),
         ),
         conditions=(
             _device_condition("c1", SWITCH_TOILET_LIGHT_1, "equals", "off"),
@@ -441,7 +483,11 @@ SYSTEM_SCENARIO_SEEDS: tuple[SystemScenarioSeed, ...] = (
             _delay("a1", 180),
             _device_action("a2", SWITCH_TOILET_FAN, "turn_off"),
         ),
-        required_entities=(SWITCH_TOILET_LIGHT_1, SWITCH_TOILET_LIGHT_2, SWITCH_TOILET_FAN),
+        required_entities=(
+            SWITCH_TOILET_LIGHT_1,
+            SWITCH_TOILET_LIGHT_2,
+            SWITCH_TOILET_FAN,
+        ),
     ),
     SystemScenarioSeed(
         scenario_id="system-hallway-light-motion",
@@ -464,36 +510,175 @@ SYSTEM_SCENARIO_SEEDS: tuple[SystemScenarioSeed, ...] = (
         required_entities=(MOTION_HALLWAY, LIGHT_HALLWAY),
     ),
     SystemScenarioSeed(
-        scenario_id="system-bathroom-fan-humidity-day",
-        title="Ванная: вытяжка по влажности",
+        scenario_id="system-bathroom-fan-day-light-1",
+        title="Ванная: вытяжка днём, линия 1",
         description=(
-            "Перенос из Node-RED: влажность ванной от 65% днём "
-            "(08:00-22:00) включает вытяжку."
+            "Shadow-перенос Node-RED: днём линия 1 включает вытяжку только "
+            "при влажности не ниже 65%."
         ),
         icon="mdi:fan",
-        triggers=(_device_trigger("t1", HUMIDITY_BATHROOM, "above", 65),),
+        command_mode="shadow",
+        triggers=(
+            _device_trigger("t_humidity", HUMIDITY_BATHROOM, "changed"),
+            _device_trigger("t_light", SWITCH_BATHROOM_LIGHT_1, "equals", "on"),
+            {"id": "t_start", "type": "time", "value": "08:00"},
+        ),
         conditions=(
-            {"id": "c1", "type": "time_window", "value": "08:00-22:00"},
+            {"id": "c_window", "type": "time_window", "value": "08:00-22:00"},
+            _device_condition("c_humidity", HUMIDITY_BATHROOM, "above", 64.999),
+            _device_condition("c_light", SWITCH_BATHROOM_LIGHT_1, "equals", "on"),
         ),
         actions=(_device_action("a1", SWITCH_BATHROOM_FAN, "turn_on"),),
-        required_entities=(HUMIDITY_BATHROOM, SWITCH_BATHROOM_FAN),
+        required_entities=(
+            HUMIDITY_BATHROOM,
+            SWITCH_BATHROOM_LIGHT_1,
+            SWITCH_BATHROOM_FAN,
+        ),
     ),
     SystemScenarioSeed(
-        scenario_id="system-bathroom-fan-off-after-light",
-        title="Ванная: вытяжка off после света",
+        scenario_id="system-bathroom-fan-day-light-2",
+        title="Ванная: вытяжка днём, линия 2",
         description=(
-            "Перенос из Node-RED: свет в ванной погас днём - вытяжка "
-            "выключается через 30 минут."
+            "Shadow-перенос Node-RED: днём линия 2 включает вытяжку только "
+            "при влажности не ниже 65%."
         ),
+        icon="mdi:fan",
+        command_mode="shadow",
+        triggers=(
+            _device_trigger("t_humidity", HUMIDITY_BATHROOM, "changed"),
+            _device_trigger("t_light", SWITCH_BATHROOM_LIGHT_2, "equals", "on"),
+            {"id": "t_start", "type": "time", "value": "08:00"},
+        ),
+        conditions=(
+            {"id": "c_window", "type": "time_window", "value": "08:00-22:00"},
+            _device_condition("c_humidity", HUMIDITY_BATHROOM, "above", 64.999),
+            _device_condition("c_light", SWITCH_BATHROOM_LIGHT_2, "equals", "on"),
+        ),
+        actions=(_device_action("a1", SWITCH_BATHROOM_FAN, "turn_on"),),
+        required_entities=(
+            HUMIDITY_BATHROOM,
+            SWITCH_BATHROOM_LIGHT_2,
+            SWITCH_BATHROOM_FAN,
+        ),
+    ),
+    SystemScenarioSeed(
+        scenario_id="system-bathroom-fan-night-light-1",
+        title="Ванная: вытяжка ночью, линия 1",
+        description="Shadow-перенос Node-RED: линия 1 включает вытяжку с 22:00 до 06:00.",
+        icon="mdi:fan",
+        command_mode="shadow",
+        triggers=(
+            _device_trigger("t_light", SWITCH_BATHROOM_LIGHT_1, "equals", "on"),
+            {"id": "t_start", "type": "time", "value": "22:00"},
+        ),
+        conditions=(
+            {"id": "c_window", "type": "time_window", "value": "22:00-06:00"},
+            _device_condition("c_light", SWITCH_BATHROOM_LIGHT_1, "equals", "on"),
+        ),
+        actions=(_device_action("a1", SWITCH_BATHROOM_FAN, "turn_on"),),
+        required_entities=(SWITCH_BATHROOM_LIGHT_1, SWITCH_BATHROOM_FAN),
+    ),
+    SystemScenarioSeed(
+        scenario_id="system-bathroom-fan-night-light-2",
+        title="Ванная: вытяжка ночью, линия 2",
+        description="Shadow-перенос Node-RED: линия 2 включает вытяжку с 22:00 до 06:00.",
+        icon="mdi:fan",
+        command_mode="shadow",
+        triggers=(
+            _device_trigger("t_light", SWITCH_BATHROOM_LIGHT_2, "equals", "on"),
+            {"id": "t_start", "type": "time", "value": "22:00"},
+        ),
+        conditions=(
+            {"id": "c_window", "type": "time_window", "value": "22:00-06:00"},
+            _device_condition("c_light", SWITCH_BATHROOM_LIGHT_2, "equals", "on"),
+        ),
+        actions=(_device_action("a1", SWITCH_BATHROOM_FAN, "turn_on"),),
+        required_entities=(SWITCH_BATHROOM_LIGHT_2, SWITCH_BATHROOM_FAN),
+    ),
+    SystemScenarioSeed(
+        scenario_id="system-bathroom-fan-morning-light-1",
+        title="Ванная: вытяжка утром, линия 1",
+        description=(
+            "Shadow-перенос Node-RED: с 06:00 до 08:00 линия 1 включает "
+            "вытяжку, только когда линия 2 выключена."
+        ),
+        icon="mdi:fan",
+        command_mode="shadow",
+        triggers=(
+            _device_trigger("t_light_1", SWITCH_BATHROOM_LIGHT_1, "equals", "on"),
+            _device_trigger("t_light_2", SWITCH_BATHROOM_LIGHT_2, "equals", "off"),
+            {"id": "t_start", "type": "time", "value": "06:00"},
+        ),
+        conditions=(
+            {"id": "c_window", "type": "time_window", "value": "06:00-08:00"},
+            _device_condition("c_light_1", SWITCH_BATHROOM_LIGHT_1, "equals", "on"),
+            _device_condition("c_light_2", SWITCH_BATHROOM_LIGHT_2, "equals", "off"),
+        ),
+        actions=(_device_action("a1", SWITCH_BATHROOM_FAN, "turn_on"),),
+        required_entities=(
+            SWITCH_BATHROOM_LIGHT_1,
+            SWITCH_BATHROOM_LIGHT_2,
+            SWITCH_BATHROOM_FAN,
+        ),
+    ),
+    SystemScenarioSeed(
+        scenario_id="system-bathroom-fan-morning-quiet",
+        title="Ванная: тихое утро, линия 2",
+        description="Shadow-перенос Node-RED: с 06:00 до 08:00 линия 2 не оставляет вытяжку включённой.",
         icon="mdi:fan-off",
+        command_mode="shadow",
+        triggers=(
+            _device_trigger("t_light", SWITCH_BATHROOM_LIGHT_2, "equals", "on"),
+            {"id": "t_start", "type": "time", "value": "06:00"},
+        ),
+        conditions=(
+            {"id": "c_window", "type": "time_window", "value": "06:00-08:00"},
+            _device_condition("c_light", SWITCH_BATHROOM_LIGHT_2, "equals", "on"),
+        ),
+        actions=(_device_action("a1", SWITCH_BATHROOM_FAN, "turn_off"),),
+        required_entities=(SWITCH_BATHROOM_LIGHT_2, SWITCH_BATHROOM_FAN),
+    ),
+    SystemScenarioSeed(
+        scenario_id="system-bathroom-fan-off-night",
+        title="Ванная: вытяжка off ночью",
+        description="Shadow-перенос Node-RED: ночью оба погасших канала выключают вытяжку сразу.",
+        icon="mdi:fan-off",
+        command_mode="shadow",
         triggers=(
             _device_trigger("t1", SWITCH_BATHROOM_LIGHT_1, "equals", "off"),
             _device_trigger("t2", SWITCH_BATHROOM_LIGHT_2, "equals", "off"),
+            {"id": "t_start", "type": "time", "value": "22:00"},
         ),
         conditions=(
             _device_condition("c1", SWITCH_BATHROOM_LIGHT_1, "equals", "off"),
             _device_condition("c2", SWITCH_BATHROOM_LIGHT_2, "equals", "off"),
-            {"id": "c3", "type": "time_window", "value": "08:00-22:00"},
+            {"id": "c_window", "type": "time_window", "value": "22:00-08:00"},
+        ),
+        actions=(_device_action("a1", SWITCH_BATHROOM_FAN, "turn_off"),),
+        required_entities=(
+            SWITCH_BATHROOM_LIGHT_1,
+            SWITCH_BATHROOM_LIGHT_2,
+            SWITCH_BATHROOM_FAN,
+        ),
+    ),
+    SystemScenarioSeed(
+        scenario_id="system-bathroom-fan-off-day-sustained",
+        title="Ванная: вытяжка off после света",
+        description=(
+            "Shadow-перенос Node-RED: днём вытяжка выключается, если оба "
+            "канала света оставались выключенными 30 минут."
+        ),
+        icon="mdi:fan-off",
+        command_mode="shadow",
+        execution_mode="restart",
+        triggers=(
+            _device_trigger("t1", SWITCH_BATHROOM_LIGHT_1, "changed"),
+            _device_trigger("t2", SWITCH_BATHROOM_LIGHT_2, "changed"),
+        ),
+        conditions=(
+            _device_condition("c1", SWITCH_BATHROOM_LIGHT_1, "equals", "off"),
+            _device_condition("c2", SWITCH_BATHROOM_LIGHT_2, "equals", "off"),
+            {"id": "c_window", "type": "time_window", "value": "08:00-22:00"},
         ),
         actions=(
             _delay("a1", 1800),
@@ -511,15 +696,14 @@ SYSTEM_SCENARIO_SEEDS: tuple[SystemScenarioSeed, ...] = (
         description=(
             "Перенос из Node-RED «НЕ дома»: при уходе выключаются "
             "кондиционеры, термоголовки, основной свет и свет санузлов. "
-            "Часть zigbee-светильников комнат в Node-RED шла мимо "
-            "HA-сущностей и не переносится."
+            "Все многоканальные Zigbee-выключатели адресуются через их "
+            "живые HA-сущности. До окончания сравнения команды не отправляются."
         ),
         icon="mdi:home-export-outline",
+        command_mode="shadow",
         triggers=({"id": "t1", "type": "presence", "value": "away"},),
         conditions=(),
-        actions=(
-            _notify("a99", "Режим «не дома»: свет и климат выключены."),
-        ),
+        actions=(_notify("a99", "Режим «не дома»: свет и климат выключены."),),
         optional_actions=AWAY_OFF_ENTITIES,
     ),
     # Домофон не сеется: удержание реле 15 секунд уже встроено в движок
@@ -528,7 +712,7 @@ SYSTEM_SCENARIO_SEEDS: tuple[SystemScenarioSeed, ...] = (
 )
 
 
-async def async_seed_system_scenarios(service: "ScenarioService") -> tuple[str, ...]:
+async def async_seed_system_scenarios(service: ScenarioService) -> tuple[str, ...]:
     """Создать отсутствующие системные сценарии. Идемпотентно."""
 
     catalog = service.current_catalog()

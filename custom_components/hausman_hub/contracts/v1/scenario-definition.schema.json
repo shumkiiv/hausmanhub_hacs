@@ -8,6 +8,11 @@
   "properties": {
     "version": {"const": 1},
     "executionMode": {"enum": ["single", "restart", "queued"]},
+    "commandMode": {
+      "description": "live executes actions; shadow evaluates the same trigger, evidence, conditions and plan without calling services",
+      "enum": ["live", "shadow"],
+      "default": "live"
+    },
     "queueLimit": {"type": "integer", "minimum": 1, "maximum": 32, "default": 8},
     "safetyPolicy": {"$ref": "#/$defs/safety_policy"},
     "triggers": {"type": "array", "minItems": 1, "maxItems": 16, "items": {"$ref": "#/$defs/trigger"}},
@@ -17,8 +22,6 @@
   "$defs": {
     "stable_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
     "scalar": {"type": ["string", "number", "boolean"]},
-    "event_type": {"type": "string", "pattern": "^[a-z][a-z0-9_]{1,63}$", "not": {"enum": ["state_changed", "call_service", "service_executed", "homeassistant_start", "homeassistant_stop"]}},
-    "event_data": {"type": "object", "maxProperties": 12, "propertyNames": {"pattern": "^[a-z][a-z0-9_-]{0,63}$"}, "additionalProperties": {"$ref": "#/$defs/scalar"}},
     "safety_policy": {
       "type": "object",
       "additionalProperties": false,
@@ -29,6 +32,8 @@
         "idempotentActions": {"type": "boolean", "default": true}
       }
     },
+    "event_type": {"type": "string", "pattern": "^[a-z][a-z0-9_]{1,63}$", "not": {"enum": ["state_changed", "call_service", "service_executed", "homeassistant_start", "homeassistant_stop"]}},
+    "event_data": {"type": "object", "maxProperties": 12, "propertyNames": {"pattern": "^[a-z][a-z0-9_-]{0,63}$"}, "additionalProperties": {"$ref": "#/$defs/scalar"}},
     "trigger": {
       "type": "object",
       "additionalProperties": false,

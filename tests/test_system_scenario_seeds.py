@@ -162,9 +162,7 @@ class SystemScenarioSeedsTest(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(named, 0)
 
     async def test_seed_skips_missing_required_entities(self) -> None:
-        entities = tuple(
-            e for e in _all_seed_entities() if not e.startswith("cover.")
-        )
+        entities = tuple(e for e in _all_seed_entities() if not e.startswith("cover."))
         service = await self._make_service(_catalog(entities))
         created = await async_seed_system_scenarios(service)
         self.assertNotIn("system-twilight-curtains-close", created)
@@ -188,7 +186,10 @@ class SystemScenarioSeedsTest(unittest.IsolatedAsyncioTestCase):
             {_stable_target_id_from_entity(e) for e in keep},
         )
         self.assertTrue(
-            any(action.type.value == "notification" for action in scenario.definition.actions)
+            any(
+                action.type.value == "notification"
+                for action in scenario.definition.actions
+            )
         )
 
     async def test_seed_never_overwrites_existing_scenario(self) -> None:
@@ -246,9 +247,7 @@ class SystemScenarioSeedsTest(unittest.IsolatedAsyncioTestCase):
 
         for scenario_id, seed in seeds.items():
             turn_on = [
-                action
-                for action in seed.actions
-                if action.get("actionId") == "turn_on"
+                action for action in seed.actions if action.get("actionId") == "turn_on"
             ]
             self.assertEqual(len(turn_on), 1)
             self.assertEqual(
@@ -269,8 +268,7 @@ class SystemScenarioSeedsTest(unittest.IsolatedAsyncioTestCase):
             sun_conditions = [
                 condition
                 for condition in seed.conditions
-                if condition.get("targetId")
-                == _stable_target_id_from_entity("sun.sun")
+                if condition.get("targetId") == _stable_target_id_from_entity("sun.sun")
             ]
             self.assertEqual(len(sun_conditions), 1)
             self.assertEqual(sun_conditions[0]["value"], expected_sun[scenario_id])
@@ -278,13 +276,101 @@ class SystemScenarioSeedsTest(unittest.IsolatedAsyncioTestCase):
                 condition
                 for condition in seed.conditions
                 if condition.get("targetId")
-                == _stable_target_id_from_entity(
-                    "binary_sensor.a100_away_zaniatost"
-                )
+                == _stable_target_id_from_entity("binary_sensor.a100_away_zaniatost")
             ]
             self.assertEqual(len(away_conditions), 1)
             self.assertEqual(away_conditions[0]["value"], "off")
             self.assertEqual(seed.execution_mode, "restart")
+
+    def test_bathroom_migration_is_split_into_shadow_only_branches(self) -> None:
+        seeds = {
+            seed.scenario_id: seed
+            for seed in SYSTEM_SCENARIO_SEEDS
+            if seed.scenario_id.startswith("system-bathroom-fan-")
+        }
+        self.assertEqual(
+            {
+                "system-bathroom-fan-day-light-1",
+                "system-bathroom-fan-day-light-2",
+                "system-bathroom-fan-night-light-1",
+                "system-bathroom-fan-night-light-2",
+                "system-bathroom-fan-morning-light-1",
+                "system-bathroom-fan-morning-quiet",
+                "system-bathroom-fan-off-night",
+                "system-bathroom-fan-off-day-sustained",
+            },
+            set(seeds),
+        )
+        self.assertNotIn("system-bathroom-fan-humidity-day", seeds)
+        self.assertNotIn("system-bathroom-fan-off-after-light", seeds)
+        self.assertTrue(all(seed.command_mode == "shadow" for seed in seeds.values()))
+
+        sustained = seeds["system-bathroom-fan-off-day-sustained"]
+        self.assertEqual(
+            ["changed", "changed"],
+            [item["comparison"] for item in sustained.triggers],
+        )
+        self.assertEqual(
+            ["delay", "device_action"],
+            [item["type"] for item in sustained.actions],
+        )
+        self.assertEqual(1800, sustained.actions[0]["delaySeconds"])
+        self.assertEqual("restart", sustained.execution_mode)
+
+        day = seeds["system-bathroom-fan-day-light-1"]
+        self.assertTrue(
+            any(
+                item.get("comparison") == "above" and item.get("value") == 64.999
+                for item in day.conditions
+            )
+        )
+        self.assertTrue(
+            any(item.get("value") == "08:00-22:00" for item in day.conditions)
+        )
+
+    def test_away_shadow_covers_every_live_nodered_multichannel_switch(self) -> None:
+        seed = next(
+            item
+            for item in SYSTEM_SCENARIO_SEEDS
+            if item.scenario_id == "system-away-turn-off"
+        )
+        expected = {
+            "switch.0x54ef4410006807e0_left",
+            "switch.0x54ef4410006807e0_right",
+            "switch.0x54ef441000680683_left",
+            "switch.0x54ef441000680683_right",
+            "switch.0x54ef4410006819fc_left",
+            "switch.0x54ef4410006819fc_right",
+            "switch.0xa4c138e4e8eeb315_left",
+            "switch.0xa4c138e4e8eeb315_center",
+            "switch.0xa4c138e4e8eeb315_right",
+        }
+
+        self.assertEqual("shadow", seed.command_mode)
+        self.assertTrue(
+            expected.issubset({entity_id for entity_id, _ in seed.optional_actions})
+        )
+        payload = seed.build_payload(_catalog(_all_seed_entities()))
+        self.assertIsNotNone(payload)
+        definition = payload["definition"]
+        self.assertEqual("shadow", definition["commandMode"])
+        self.assertEqual("device_action", definition["actions"][0]["type"])
+        self.assertEqual("notification", definition["actions"][-1]["type"])
+
+    def test_toilet_fan_off_waits_for_sustained_off_state(self) -> None:
+        seed = next(
+            item
+            for item in SYSTEM_SCENARIO_SEEDS
+            if item.scenario_id == "system-toilet-fan-off-delay"
+        )
+        self.assertEqual(
+            ["changed", "changed"], [item["comparison"] for item in seed.triggers]
+        )
+        self.assertEqual("restart", seed.execution_mode)
+        self.assertEqual(
+            ["delay", "device_action"], [item["type"] for item in seed.actions]
+        )
+        self.assertEqual(180, seed.actions[0]["delaySeconds"])
 
     async def test_seed_empty_catalog_creates_nothing(self) -> None:
         service = await self._make_service(_catalog(()))
