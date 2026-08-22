@@ -51,6 +51,7 @@ class _FakeExecutor:
         self.catalogs: list[ScenarioCatalog] = []
         self.device_actions: list[tuple[str, str, object]] = []
         self.correlated_device_actions: list[tuple[str, str, object, str]] = []
+        self.dry_run_device_actions: list[tuple[str, str, object]] = []
         self._counter = 0
 
     def replace_catalog(self, catalog: ScenarioCatalog) -> None:
@@ -63,13 +64,21 @@ class _FakeExecutor:
         value: object | None = None,
         *,
         correlation_id: str | None = None,
+        dry_run: bool = False,
     ) -> dict[str, Any]:
         self.device_actions.append((target_id, action_id, value))
         if correlation_id is not None:
             self.correlated_device_actions.append(
                 (target_id, action_id, value, correlation_id)
             )
-        return {"accepted": True, "confirmed": True, "status": "confirmed"}
+        if dry_run:
+            self.dry_run_device_actions.append((target_id, action_id, value))
+        return {
+            "accepted": True,
+            "confirmed": not dry_run,
+            "status": "accepted" if dry_run else "confirmed",
+            "dryRun": dry_run,
+        }
 
     def new_run_id(self) -> str:
         self._counter += 1
@@ -426,6 +435,21 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
             [("late_light", "turn_on", None)], self.executor.device_actions
         )
         self.assertTrue(receipt["confirmed"])
+
+    async def test_device_action_forwards_dry_run_to_executor(self) -> None:
+        receipt = await self.service.async_execute_device_action(
+            "device_1",
+            "turn_on",
+            correlation_id="intercom-dry-run",
+            dry_run=True,
+        )
+
+        self.assertTrue(receipt["dryRun"])
+        self.assertFalse(receipt["confirmed"])
+        self.assertEqual(
+            [("device_1", "turn_on", None)],
+            self.executor.dry_run_device_actions,
+        )
 
     async def test_device_action_batch_preserves_each_target_receipt(self) -> None:
         receipts = await self.service.async_execute_device_action_batch(

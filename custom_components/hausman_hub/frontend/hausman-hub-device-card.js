@@ -1,6 +1,6 @@
 /* Canonical physical-device card shared by all tablet-style HACS sections. */
 
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.152";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.153";
 
 const STATE_LABELS = {
   on: "Включено",

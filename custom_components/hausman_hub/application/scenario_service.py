@@ -1010,23 +1010,23 @@ class ScenarioService:
         value: object | None = None,
         *,
         correlation_id: str | None = None,
+        dry_run: bool = False,
     ) -> dict[str, Any]:
         """Execute one catalog action through the shared strict executor."""
 
         await self.async_refresh_catalog()
         if self._executor is None:
             raise ScenarioServiceError("Executor not configured", status=500)
-        if correlation_id is None:
-            return await self._executor.async_execute_device_action(
-                target_id,
-                action_id,
-                value,
-            )
+        options: dict[str, object] = {}
+        if correlation_id is not None:
+            options["correlation_id"] = correlation_id
+        if dry_run:
+            options["dry_run"] = True
         return await self._executor.async_execute_device_action(
             target_id,
             action_id,
             value,
-            correlation_id=correlation_id,
+            **options,
         )
 
     async def async_execute_device_action_batch(
