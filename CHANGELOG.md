@@ -1,5 +1,16 @@
 # История версий
 
+## 1.52.154 - 2026-08-22
+
+- Numeric entities сценарного каталога публикуют живые minimum, maximum,
+  step и unit для понятных подсказок конструктора.
+- `/scenarios/test` возвращает человекочитаемый отчёт условий и действий без
+  entity ID. Dry-run всегда фиксирует `commandSent=false` и не вызывает
+  Home Assistant services.
+- Synthetic gate создаёт motion light, sunset curtains и humidity fan только
+  по комнатам и понятным названиям. Интерфейс HACS сохранён без перестройки.
+- Контракты обновлены до `hausmanhub-contracts 0.56.0` (`078ebd0`).
+
 ## 1.52.153 - 2026-08-22
 
 - Исправлен production dry-run домофона: `ScenarioService` теперь передаёт

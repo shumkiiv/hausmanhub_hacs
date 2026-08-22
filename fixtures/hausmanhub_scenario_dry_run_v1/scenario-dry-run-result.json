@@ -1,0 +1,59 @@
+{
+  "valid": true,
+  "action_count": 3,
+  "referenced_scenario_ids": [],
+  "plan": {
+    "status": "completed",
+    "accepted": true,
+    "confirmed": false,
+    "receipts": []
+  },
+  "report": {
+    "contract": {"name": "hausman-hub-scenario-dry-run", "version": 1},
+    "status": "completed",
+    "summary": "Условия выполнены. Будут запланированы 3 действия, физические команды не отправлены.",
+    "conditionCount": 1,
+    "actionCount": 3,
+    "commandSent": false,
+    "conditions": [
+      {
+        "position": 1,
+        "title": "Влажность выше 65 %",
+        "status": "passed",
+        "reason": null
+      }
+    ],
+    "steps": [
+      {
+        "position": 1,
+        "type": "device_action",
+        "title": "Включить",
+        "targetName": "Вытяжка",
+        "roomName": "Ванная",
+        "valueLabel": null,
+        "status": "planned",
+        "reason": null
+      },
+      {
+        "position": 2,
+        "type": "delay",
+        "title": "Подождать 120 секунд",
+        "targetName": null,
+        "roomName": null,
+        "valueLabel": "120 с",
+        "status": "planned",
+        "reason": null
+      },
+      {
+        "position": 3,
+        "type": "notification",
+        "title": "Отправить уведомление",
+        "targetName": null,
+        "roomName": null,
+        "valueLabel": null,
+        "status": "planned",
+        "reason": null
+      }
+    ]
+  }
+}

@@ -81,6 +81,46 @@
           }
         }
       ]
+    },
+    {
+      "target_id": "entity_abcdef0123456789",
+      "name": "Целевая влажность",
+      "entity_id": "number.living_humidity_target",
+      "physical_id": "device_abcdef0123456789",
+      "physical_name": "Увлажнитель",
+      "room_id": "living_room",
+      "room_name": "Гостиная",
+      "device_type": "number",
+      "device_type_name": "Числовая настройка",
+      "capability_name": "Целевая влажность",
+      "properties": [
+        {
+          "property_id": "state",
+          "label": "Целевая влажность",
+          "value_type": "number",
+          "unit": "%",
+          "source": "home_assistant_capability",
+          "availability_policy": "exclude_unknown_unavailable",
+          "comparisons": ["equals", "not_equals", "above", "below", "changed"]
+        }
+      ],
+      "actions": [
+        {
+          "action_id": "set_value",
+          "title": "Установить значение",
+          "domain": "number",
+          "service": "set_value",
+          "allowed_fields": ["value"],
+          "value_policy": {
+            "kind": "number",
+            "minimum": 40,
+            "maximum": 80,
+            "step": 1,
+            "unit": "%",
+            "preview": true
+          }
+        }
+      ]
     }
   ],
   "scenarios": [

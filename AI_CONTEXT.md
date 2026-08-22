@@ -1,5 +1,13 @@
 # HausmanHub AI Context
 
+- 2026-08-22: подготовлен HACS `1.52.154` для завершения направления 20.
+  Numeric catalog actions публикуют runtime bounds/unit, а scenario dry-run
+  формирует redacted человекочитаемый report с условиями и шагами,
+  `commandSent=false` и без entity ID. Synthetic gate покрывает motion light,
+  sunset curtains и humidity fan без service calls. Existing `roomId` из
+  contracts 0.51.0 подтверждён тестами. Pin: contracts `0.56.0` (`078ebd0`).
+  Frontend layout не менялся, выполнен только cache-bust версии.
+
 - 2026-08-22: направление 17 завершено в HACS `1.52.153`. Vendor timeout и
   circuit breaker изолируют медленные media/remote/Yandex services. Домофон
   требует явного подтверждения, поддерживает безопасный dry-run, bounded hold
@@ -12,7 +20,7 @@
   HTTP 200 и не отправляет физическую команду. Коммиты `59f4bcb`, `e793219`.
   Детали: [[LLM_WIKI/Sessions/2026-08-22-codex-hacs-vendor-safety-1.52.153]].
 
-Last updated: 2026-08-22 (HACS 1.52.153, vendor safety).
+Last updated: 2026-08-22 (HACS 1.52.154, scenario editor maturity).
 
 ## Current work
 

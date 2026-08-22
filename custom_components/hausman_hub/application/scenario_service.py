@@ -67,6 +67,215 @@ def _bool_or_default(payload: dict[str, Any], key: str, default: bool) -> bool:
     return default
 
 
+_COMPARISON_LABELS = {
+    "equals": "равно",
+    "not_equals": "не равно",
+    "above": "выше",
+    "below": "ниже",
+    "changed": "изменилось",
+}
+
+
+def _display_value(value: object, unit: str | None = None) -> str:
+    if value is True:
+        rendered = "Да"
+    elif value is False:
+        rendered = "Нет"
+    elif isinstance(value, float):
+        rendered = f"{value:g}"
+    else:
+        rendered = str(value)
+    return f"{rendered} {unit}" if unit else rendered
+
+
+def _public_device_name(device: object | None, fallback: str) -> str:
+    if device is None:
+        return fallback
+    name = getattr(device, "name", None)
+    entity_id = getattr(device, "entity_id", None)
+    if not isinstance(name, str) or not name.strip() or name == entity_id:
+        return fallback
+    return name
+
+
+def _condition_report(
+    condition: object,
+    catalog: ScenarioCatalog,
+    result: Mapping[str, object] | None,
+    position: int,
+) -> dict[str, object]:
+    condition_type = str(getattr(condition, "type", "condition"))
+    target_id = getattr(condition, "target_id", None)
+    device = catalog.device(target_id) if isinstance(target_id, str) else None
+    if condition_type == "device_state":
+        property_id = getattr(condition, "property", None)
+        prop = device.property(property_id) if device is not None else None
+        unit = prop.unit if prop is not None else None
+        comparison = _COMPARISON_LABELS.get(
+            str(getattr(condition, "comparison", "")),
+            "соответствует",
+        )
+        title = " ".join(
+            part
+            for part in (
+                _public_device_name(device, "Устройство"),
+                prop.label if prop is not None else "Состояние",
+                comparison,
+                _display_value(getattr(condition, "value", ""), unit),
+            )
+            if part
+        )
+    elif condition_type == "time_window":
+        title = f"Время входит в {getattr(condition, 'value', '')}"
+    elif condition_type == "presence":
+        title = "Проверить присутствие дома"
+    elif condition_type == "weekday":
+        title = f"День недели: {getattr(condition, 'value', '')}"
+    else:
+        title = "Проверить условие"
+    passed = result is None or result.get("passed") is True
+    return {
+        "position": position,
+        "title": title[:240],
+        "status": "passed" if passed else "failed",
+        "reason": None if passed else "Условие сейчас не выполнено",
+    }
+
+
+def _action_report(
+    action: object,
+    catalog: ScenarioCatalog,
+    registry: ScenarioRegistry,
+    receipt: Mapping[str, object] | None,
+    position: int,
+    run_status: str,
+) -> dict[str, object]:
+    action_type = str(getattr(action, "type", "existing_action"))
+    target_name: str | None = None
+    room_name: str | None = None
+    value_label: str | None = None
+    if action_type == "device_action":
+        target_id = getattr(action, "target_id", None)
+        device = catalog.device(target_id) if isinstance(target_id, str) else None
+        allowed = (
+            device.action(getattr(action, "action_id", ""))
+            if device is not None
+            else None
+        )
+        title = (
+            getattr(action, "action_title", None)
+            or (allowed.title if allowed is not None else None)
+            or "Выполнить действие"
+        )
+        target_name = _public_device_name(device, "Устройство")
+        room_name = device.room_name if device is not None else None
+        value = getattr(action, "value", None)
+        if value is not None:
+            unit = None
+            if allowed is not None and allowed.value_policy is not None:
+                candidate = allowed.value_policy.get("unit")
+                unit = candidate if isinstance(candidate, str) else None
+            value_label = _display_value(value, unit)
+    elif action_type == "delay":
+        delay = getattr(action, "delay_seconds", 0)
+        title = f"Подождать {delay} секунд"
+        value_label = f"{delay} с"
+    elif action_type == "run_scenario":
+        scenario_id = getattr(action, "scenario_id", None)
+        nested = registry.scenario(scenario_id) if isinstance(scenario_id, str) else None
+        title = "Запустить сценарий"
+        target_name = nested.title if nested is not None else "Вложенный сценарий"
+    elif action_type == "notification":
+        title = "Отправить уведомление"
+    else:
+        title = "Выполнить существующее действие"
+
+    failed = receipt is not None and receipt.get("status") == "failed"
+    if failed:
+        status = "failed"
+    elif run_status in {"skipped", "failed"}:
+        status = "skipped"
+    else:
+        status = "planned"
+    return {
+        "position": position,
+        "type": action_type,
+        "title": str(title)[:240],
+        "targetName": target_name[:240] if target_name is not None else None,
+        "roomName": room_name[:120] if room_name is not None else None,
+        "valueLabel": value_label[:120] if value_label is not None else None,
+        "status": status,
+        "reason": (
+            "Шаг не может быть выполнен с текущими данными" if failed else None
+        ),
+    }
+
+
+def _dry_run_report(
+    definition: ScenarioDefinition,
+    catalog: ScenarioCatalog,
+    registry: ScenarioRegistry,
+    plan: Mapping[str, object] | None,
+) -> dict[str, object]:
+    raw_status = str(plan.get("status", "failed")) if plan is not None else "failed"
+    status = raw_status if raw_status in {"completed", "skipped", "failed"} else "failed"
+    raw_condition_results = plan.get("condition_results", []) if plan is not None else []
+    condition_results = {
+        str(item.get("condition_id")): item
+        for item in raw_condition_results
+        if isinstance(item, Mapping)
+    } if isinstance(raw_condition_results, list) else {}
+    raw_receipts = plan.get("receipts", []) if plan is not None else []
+    receipts = raw_receipts if isinstance(raw_receipts, list) else []
+    conditions = [
+        _condition_report(
+            condition,
+            catalog,
+            condition_results.get(condition.id),
+            index,
+        )
+        for index, condition in enumerate(definition.conditions, start=1)
+    ]
+    steps = [
+        _action_report(
+            action,
+            catalog,
+            registry,
+            (
+                receipts[index - 1]
+                if index <= len(receipts)
+                and isinstance(receipts[index - 1], Mapping)
+                else None
+            ),
+            index,
+            status,
+        )
+        for index, action in enumerate(definition.actions, start=1)
+    ]
+    if status == "completed":
+        summary = (
+            f"Проверка завершена. Будет запланировано {len(steps)} действий, "
+            "физические команды не отправлены."
+        )
+    elif status == "skipped":
+        summary = (
+            "Условия сейчас не выполнены. Действия пропущены, "
+            "физические команды не отправлены."
+        )
+    else:
+        summary = "Проверка нашла невыполнимый шаг. Физические команды не отправлены."
+    return {
+        "contract": {"name": "hausman-hub-scenario-dry-run", "version": 1},
+        "status": status,
+        "summary": summary,
+        "conditionCount": len(conditions),
+        "actionCount": len(steps),
+        "commandSent": False,
+        "conditions": conditions,
+        "steps": steps,
+    }
+
+
 class ScenarioServiceError(Exception):
     """Base error for scenario service operations."""
 
@@ -829,6 +1038,7 @@ class ScenarioService:
             "action_count": action_count,
             "referenced_scenario_ids": sorted(referenced),
             "plan": plan,
+            "report": _dry_run_report(definition, self._catalog, registry, plan),
         }
 
     async def async_delete_scenario(self, scenario_id: str) -> None:

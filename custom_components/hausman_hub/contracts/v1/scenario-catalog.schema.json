@@ -110,7 +110,7 @@
       "additionalProperties": false,
       "required": ["kind", "preview"],
       "properties": {
-        "kind": {"enum": ["percent", "kelvin", "rgb_hex"]},
+        "kind": {"enum": ["percent", "kelvin", "rgb_hex", "number"]},
         "minimum": {"type": "number"},
         "maximum": {"type": "number"},
         "step": {"type": "number", "exclusiveMinimum": 0},

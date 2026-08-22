@@ -19,11 +19,14 @@ from custom_components.hausman_hub.application.scenario_service import (
     ScenarioService,
     ScenarioServiceError,
     ScenarioValidationError,
+    _public_device_name,
 )
 from custom_components.hausman_hub.application.scenarios import (
     ScenarioCatalog,
     ScenarioDeviceAction,
     ScenarioDeviceEntry,
+    ScenarioDeviceProperty,
+    ScenarioPropertyOption,
 )
 from custom_components.hausman_hub.domain.scenarios import ScenarioRegistry
 
@@ -31,6 +34,10 @@ from custom_components.hausman_hub.domain.scenarios import ScenarioRegistry
 SCENARIO_LIST_SCHEMA = (
     Path(__file__).resolve().parents[1]
     / "custom_components/hausman_hub/contracts/v1/scenario-list.schema.json"
+)
+SCENARIO_DRY_RUN_SCHEMA = (
+    Path(__file__).resolve().parents[1]
+    / "custom_components/hausman_hub/contracts/v1/scenario-dry-run-result.schema.json"
 )
 
 
@@ -373,6 +380,116 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
         result = await self.service.async_test_scenario(_valid_payload())
         self.assertTrue(result["valid"])
         self.assertEqual(result["action_count"], 1)
+        Draft202012Validator(
+            json.loads(SCENARIO_DRY_RUN_SCHEMA.read_text(encoding="utf-8"))
+        ).validate(result)
+        self.assertFalse(result["report"]["commandSent"])
+        self.assertEqual("Light", result["report"]["steps"][0]["targetName"])
+        self.assertNotIn("entity", json.dumps(result["report"]).casefold())
+        technical = ScenarioDeviceEntry(
+            "technical", "light.raw_entity", "light.raw_entity", ()
+        )
+        self.assertEqual("Устройство", _public_device_name(technical, "Устройство"))
+
+    async def test_editor_golden_journeys_dry_run_without_technical_ids(self) -> None:
+        state_property = ScenarioDeviceProperty(
+            property_id="state",
+            label="Состояние",
+            value_type="enum",
+            comparisons=("equals", "not_equals", "changed"),
+            options=(
+                ScenarioPropertyOption("on", "Включено"),
+                ScenarioPropertyOption("off", "Выключено"),
+            ),
+        )
+        humidity_property = ScenarioDeviceProperty(
+            property_id="state",
+            label="Влажность",
+            value_type="number",
+            comparisons=("equals", "not_equals", "above", "below", "changed"),
+            unit="%",
+        )
+        devices = {
+            "motion": ScenarioDeviceEntry(
+                "motion", "Датчик движения", "binary_sensor.motion", (),
+                room_name="Коридор", properties=(state_property,),
+            ),
+            "light": ScenarioDeviceEntry(
+                "light", "Дополнительный свет", "light.corridor",
+                (ScenarioDeviceAction("turn_on", "Включить", "light", "turn_on", frozenset()),),
+                room_name="Коридор", properties=(state_property,),
+            ),
+            "curtain": ScenarioDeviceEntry(
+                "curtain", "Шторы", "cover.living",
+                (
+                    ScenarioDeviceAction(
+                        "close_cover", "Закрыть", "cover", "close_cover", frozenset()
+                    ),
+                ),
+                room_name="Гостиная", properties=(state_property,),
+            ),
+            "humidity": ScenarioDeviceEntry(
+                "humidity", "Датчик влажности", "sensor.bathroom_humidity", (),
+                room_name="Ванная", properties=(humidity_property,),
+            ),
+            "fan": ScenarioDeviceEntry(
+                "fan", "Вытяжка", "fan.bathroom",
+                (ScenarioDeviceAction("turn_on", "Включить", "fan", "turn_on", frozenset()),),
+                room_name="Ванная", properties=(state_property,),
+            ),
+        }
+        service = ScenarioService(
+            None,
+            _FakeStore(),
+            ScenarioCatalog(devices=devices, scenarios={}),
+            _FakeExecutor(),
+        )
+        await service.async_load()
+        definitions = (
+            {
+                "version": 1, "executionMode": "single",
+                "triggers": [{
+                    "id": "motion_on", "type": "device_state",
+                    "targetId": "motion", "property": "state",
+                    "comparison": "equals", "value": "on",
+                }],
+                "conditions": [],
+                "actions": [{
+                    "id": "light_on", "type": "device_action",
+                    "targetId": "light", "actionId": "turn_on",
+                }],
+            },
+            {
+                "version": 1, "executionMode": "single",
+                "triggers": [{"id": "sunset", "type": "sunset"}],
+                "conditions": [],
+                "actions": [{
+                    "id": "curtains_close", "type": "device_action",
+                    "targetId": "curtain", "actionId": "close_cover",
+                }],
+            },
+            {
+                "version": 1, "executionMode": "single",
+                "triggers": [{
+                    "id": "humid", "type": "device_state",
+                    "targetId": "humidity", "property": "state",
+                    "comparison": "above", "value": 65,
+                }],
+                "conditions": [],
+                "actions": [{
+                    "id": "fan_on", "type": "device_action",
+                    "targetId": "fan", "actionId": "turn_on",
+                }],
+            },
+        )
+        for definition in definitions:
+            result = await service.async_test_scenario({"definition": definition})
+            with self.subTest(definition=definition["triggers"][0]["type"]):
+                self.assertFalse(result["report"]["commandSent"])
+                self.assertEqual("planned", result["report"]["steps"][0]["status"])
+                serialized = json.dumps(result["report"]).casefold()
+                self.assertNotIn("entity_id", serialized)
+                self.assertNotIn("binary_sensor.", serialized)
 
     async def test_test_scenario_wraps_stale_catalog_target(self) -> None:
         payload = _valid_payload()

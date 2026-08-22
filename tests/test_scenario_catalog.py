@@ -7,6 +7,7 @@ import unittest
 from custom_components.hausman_hub.application.scenario_catalog import (
     SCENARIO_CATALOG_DOMAINS,
     _domain_actions,
+    _number_actions_with_policy,
     _number_range,
     _relative_capability_name,
     _stable_physical_id,
@@ -120,6 +121,22 @@ class ScenarioCatalogPureTest(unittest.TestCase):
             {"attributes": {"min": 40, "max": 100, "step": 1}},
         )()
         self.assertEqual((40.0, 100.0, 1.0), _number_range(state))
+        bounded = _number_actions_with_policy(
+            actions,
+            (40.0, 100.0, 1.0),
+            "%",
+        )
+        self.assertEqual(
+            {
+                "kind": "number",
+                "minimum": 40.0,
+                "maximum": 100.0,
+                "step": 1.0,
+                "unit": "%",
+                "preview": True,
+            },
+            bounded[0].value_policy,
+        )
 
     def test_number_range_rejects_missing_or_invalid_bounds(self) -> None:
         for attributes in (

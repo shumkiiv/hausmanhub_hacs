@@ -729,6 +729,36 @@ def _number_range(state: object) -> tuple[float, float, float] | None:
     return minimum, maximum, step
 
 
+def _number_actions_with_policy(
+    actions: tuple[ScenarioDeviceAction, ...],
+    number_range: tuple[float, float, float],
+    unit: str | None,
+) -> tuple[ScenarioDeviceAction, ...]:
+    """Attach the live numeric bounds to the only value action."""
+
+    minimum, maximum, step = number_range
+    policy: dict[str, object] = {
+        "kind": "number",
+        "minimum": minimum,
+        "maximum": maximum,
+        "step": step,
+        "preview": True,
+    }
+    if unit is not None:
+        policy["unit"] = unit
+    return tuple(
+        ScenarioDeviceAction(
+            action_id=action.action_id,
+            title=action.title,
+            domain=action.domain,
+            service=action.service,
+            allowed_fields=action.allowed_fields,
+            value_policy=policy if "value" in action.allowed_fields else action.value_policy,
+        )
+        for action in actions
+    )
+
+
 def _registry_entry(registry: object, key: str, collection_name: str) -> object | None:
     collection = getattr(registry, collection_name, None)
     if collection is None:
@@ -809,6 +839,12 @@ async def async_build_scenario_catalog(hass: HomeAssistant) -> ScenarioCatalog:
         state_property = _state_property(
             state, domain, device_class, capability_name
         )
+        if number_range is not None:
+            actions = _number_actions_with_policy(
+                actions,
+                number_range,
+                state_property.unit,
+            )
 
         devices[target_id] = ScenarioDeviceEntry(
             target_id=target_id,

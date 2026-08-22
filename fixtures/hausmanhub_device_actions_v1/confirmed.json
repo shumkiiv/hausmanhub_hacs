@@ -17,6 +17,9 @@
   "appliedAt": 1785268800000,
   "message": "Устройство подтвердило новое состояние.",
   "confirmationWindowMs": 8000,
+  "dryRun": false,
+  "autoReleaseSeconds": 15,
+  "releaseReceiptPending": true,
   "readBack": {
     "attempted": true,
     "matched": true,
