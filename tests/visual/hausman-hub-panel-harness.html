@@ -199,6 +199,13 @@
       window.__hausmanHubHarnessCalls = [];
       const cloneHarnessValue = (value) => JSON.parse(JSON.stringify(value ?? null));
       panel._hass = {
+        user: { is_admin: true },
+        connection: {
+          sendMessagePromise: async (message) => {
+            window.__hausmanHubHarnessCalls.push({ method: "WS", path: message.type, payload: message });
+            return { entity_id: message.entity_id, name: message.name };
+          },
+        },
         callApi: async (method, path, payload = null) => {
           window.__hausmanHubHarnessCalls.push({ method, path, payload });
           if (method === "GET" && path === "hausman_hub/v1/admin/panel") {

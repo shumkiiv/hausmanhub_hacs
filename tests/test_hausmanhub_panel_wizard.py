@@ -40,6 +40,8 @@ SECURITY_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-security-overview.js")
 DEVICES_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-devices-overview.js")
 TECHNICAL_LOG_JS = PANEL_JS.with_name("hausman-hub-technical-log.js")
 FEEDBACK_JS = PANEL_JS.with_name("hausman-hub-feedback.js")
+COMMAND_FEEDBACK_JS = PANEL_JS.with_name("hausman-hub-command-feedback.js")
+DEVICE_CONTROLS_JS = PANEL_JS.with_name("hausman-hub-device-controls.js")
 ERROR_TAXONOMY_JS = PANEL_JS.with_name("hausman-hub-error-taxonomy.js")
 UI_STATE_JS = PANEL_JS.with_name("hausman-hub-ui-state.js")
 DEVICE_FEATURES_JS = PANEL_JS.with_name("hausman-hub-device-features.js")
@@ -436,6 +438,14 @@ def panel_script(get_table: dict, post_table: dict, assertions: str) -> str:
       vm.runInThisContext(
         fs.readFileSync({str(FEEDBACK_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(FEEDBACK_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(COMMAND_FEEDBACK_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(COMMAND_FEEDBACK_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(DEVICE_CONTROLS_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(DEVICE_CONTROLS_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(ERROR_TAXONOMY_JS)!r}, "utf8").replace(/export /g, ""),

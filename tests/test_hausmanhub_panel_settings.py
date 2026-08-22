@@ -53,6 +53,7 @@ DEVICE_DISCOVERY_JS = PANEL_JS.with_name("hausman-hub-device-discovery.js")
 WEATHER_SOURCES_JS = PANEL_JS.with_name("hausman-hub-weather-sources.js")
 MEDIA_DEVICE_JS = PANEL_JS.with_name("hausman-hub-media-device.js")
 DEVICE_CARD_JS = PANEL_JS.with_name("hausman-hub-device-card.js")
+DEVICE_CONTROLS_JS = PANEL_JS.with_name("hausman-hub-device-controls.js")
 SCENARIOS_JS = PANEL_JS.with_name("hausman-hub-scenarios.js")
 SCENARIO_DEVICE_PICKER_JS = PANEL_JS.with_name("hausman-hub-scenario-device-picker.js")
 SCENARIO_ICONS_JS = PANEL_JS.with_name("hausman-hub-scenario-icons.js")
@@ -620,6 +621,10 @@ def panel_script(
         {{ filename: {str(WEATHER_SOURCES_JS)!r} }}
       );
       vm.runInThisContext(
+        fs.readFileSync({str(DEVICE_CONTROLS_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(DEVICE_CONTROLS_JS)!r} }}
+      );
+      vm.runInThisContext(
         fs.readFileSync({str(DEVICE_CARD_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(DEVICE_CARD_JS)!r} }}
       );
@@ -759,9 +764,16 @@ def panel_script(
                 icon: message.icon,
               }});
             }}
+            if (message.type === "config/entity_registry/update") {{
+              return Promise.resolve({{
+                entity_id: message.entity_id,
+                name: message.name,
+              }});
+            }}
             return Promise.reject(new Error("unexpected WS " + message.type));
           }},
         }},
+        user: {{ is_admin: true }},
         callApi: (method, path, payload) => {{
           calls.push({{ method, path, payload }});
           if (method === "GET") {{
@@ -2217,7 +2229,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           || !textOf(deviceDialog).includes("Мощность") || !textOf(deviceDialog).includes("12 Вт")) {
           throw new Error("device details are missing from the dialog");
         }
-        const valueInput = findAll(deviceDialog, (node) => node.tagName === "INPUT" && node.type !== "search")[0];
+        const valueInput = findAll(deviceDialog, (node) => node.tagName === "INPUT" && node.type === "number")[0];
         if (!valueInput || valueInput.value !== "178") {
           throw new Error("device action did not use current brightness");
         }
@@ -2240,7 +2252,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           && String(node.className).includes("inventory-device-summary"))[0].fire("click");
         const refreshedDialog = findAll(panel.shadowRoot, (node) => node.role === "dialog"
           && node["aria-label"] === "Выключатель гостиная")[0];
-        const refreshedInput = findAll(refreshedDialog, (node) => node.tagName === "INPUT" && node.type !== "search")[0];
+        const refreshedInput = findAll(refreshedDialog, (node) => node.tagName === "INPUT" && node.type === "number")[0];
         const apply = findAll(refreshedDialog, (node) =>
           node.tagName === "BUTTON" && node.textContent === "Применить")[0];
         if (!refreshedInput || !apply || apply.disabled) {
@@ -2422,6 +2434,61 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           && call.payload.targetId === "target-office-2");
         if (!linePost || linePost.payload.actionId !== "turn_off") {
           throw new Error("second switch line did not receive its own command");
+        }
+        const switchVisual = findAll(refreshedSwitch, (node) => node.tagName === "BUTTON"
+          && String(node.className).split(" ").includes("lighting-physical-visual-button"))[0];
+        switchVisual.fire("click");
+        let deviceSheet = findAll(panel.shadowRoot, (node) => node.role === "dialog"
+          && node["aria-label"] === "Выключатель кабинет")[0];
+        const targetCards = findAll(deviceSheet, (node) =>
+          String(node.className).split(" ").includes("device-target-controls"));
+        if (targetCards.length !== 2
+          || !targetCards.some((node) => textOf(node).includes("Линия 1") && textOf(node).includes("Включить"))
+          || !targetCards.some((node) => textOf(node).includes("Линия 2") && textOf(node).includes("Выключить"))
+          || textOf(deviceSheet).includes("Переключить")) {
+          throw new Error("device sheet does not expose concise state-aware channel controls");
+        }
+        if (findAll(deviceSheet, (node) =>
+          String(node.className).split(" ").includes("device-sheet-facts")).length) {
+          throw new Error("channel state is duplicated in oversized device facts");
+        }
+        const rename = findAll(targetCards[0], (node) => node.tagName === "BUTTON"
+          && node.textContent === "Переименовать")[0];
+        rename.fire("click", { preventDefault() {} });
+        const renameInput = findAll(targetCards[0], (node) =>
+          String(node.className).split(" ").includes("device-target-name-input"))[0];
+        const renameSave = findAll(targetCards[0], (node) => node.tagName === "BUTTON"
+          && node.textContent === "Сохранить")[0];
+        renameInput.value = "Свет у зеркала";
+        renameInput.fire("input");
+        renameSave.fire("click", { preventDefault() {} });
+        await tick(10);
+        const renameMessage = wsMessages.find((message) =>
+          message.type === "config/entity_registry/update");
+        if (!renameMessage || renameMessage.entity_id !== "switch.office_1"
+          || renameMessage.name !== "Свет у зеркала"
+          || !textOf(targetCards[0]).includes("Сохранено в Home Assistant")) {
+          throw new Error("channel name was not saved in the Home Assistant entity registry");
+        }
+        panel._activeDeviceModalClose();
+        const chandelierVisualButton = findAll(chandelierCard, (node) => node.tagName === "BUTTON"
+          && String(node.className).split(" ").includes("lighting-physical-visual-button"))[0];
+        chandelierVisualButton.fire("click");
+        deviceSheet = findAll(panel.shadowRoot, (node) => node.role === "dialog"
+          && node["aria-label"] === "Люстра кабинет")[0];
+        const featureGrid = findAll(deviceSheet, (node) =>
+          String(node.className).split(" ").includes("device-sheet-feature-grid"))[0];
+        const modalRanges = findAll(featureGrid, (node) =>
+          String(node.className).split(" ").includes("device-range-card"));
+        if (modalRanges.length !== 2 || modalRanges.some((node) =>
+          !String(node.className).split(" ").includes("is-compact"))) {
+          throw new Error("light ranges are not grouped into compact feature cards");
+        }
+        const lightTargets = findAll(deviceSheet, (node) =>
+          String(node.className).split(" ").includes("device-target-controls"));
+        if (lightTargets.length !== 1 || !textOf(lightTargets[0]).includes("Основное управление")
+          || !textOf(lightTargets[0]).includes("Выключить")) {
+          throw new Error("light sheet does not prioritize its current power action");
         }
             """,
         )

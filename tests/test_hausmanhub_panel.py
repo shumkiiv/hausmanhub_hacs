@@ -48,6 +48,8 @@ ENERGY_CHART_CSS = PANEL_JS.with_name("hausman-hub-energy-chart.css")
 WEATHER_SOURCES_JS = PANEL_JS.with_name("hausman-hub-weather-sources.js")
 MEDIA_DEVICE_JS = PANEL_JS.with_name("hausman-hub-media-device.js")
 DEVICE_CARD_JS = PANEL_JS.with_name("hausman-hub-device-card.js")
+DEVICE_CONTROLS_JS = PANEL_JS.with_name("hausman-hub-device-controls.js")
+DEVICE_CONTROLS_CSS = PANEL_JS.with_name("hausman-hub-device-controls.css")
 DEVICE_CARD_CSS = PANEL_JS.with_name("hausman-hub-device-card.css")
 SCENARIOS_JS = PANEL_JS.with_name("hausman-hub-scenarios.js")
 SCENARIO_DEVICE_PICKER_JS = PANEL_JS.with_name("hausman-hub-scenario-device-picker.js")
@@ -180,6 +182,8 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         weather_sources = WEATHER_SOURCES_JS.read_text(encoding="utf-8")
         media_device = MEDIA_DEVICE_JS.read_text(encoding="utf-8")
         device_card = DEVICE_CARD_JS.read_text(encoding="utf-8")
+        device_controls = DEVICE_CONTROLS_JS.read_text(encoding="utf-8")
+        device_controls_css = DEVICE_CONTROLS_CSS.read_text(encoding="utf-8")
         device_card_css = DEVICE_CARD_CSS.read_text(encoding="utf-8")
         scenarios = SCENARIOS_JS.read_text(encoding="utf-8")
         scenario_device_picker = SCENARIO_DEVICE_PICKER_JS.read_text(encoding="utf-8")
@@ -239,6 +243,8 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             len(media_device.encode("utf-8")), MAX_MEDIA_DEVICE_JS_BYTES
         )
         self.assertLessEqual(len(device_card.encode("utf-8")), 24 * 1024)
+        self.assertLessEqual(len(device_controls.encode("utf-8")), 12 * 1024)
+        self.assertLessEqual(len(device_controls_css.encode("utf-8")), 6 * 1024)
         self.assertLessEqual(len(device_card_css.encode("utf-8")), 14 * 1024)
         self.assertLessEqual(len(scenarios.encode("utf-8")), MAX_SCENARIOS_JS_BYTES)
         self.assertLessEqual(len(scenario_device_picker.encode("utf-8")), 16 * 1024)
@@ -284,8 +290,9 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn("grid-template-columns:56px minmax(0,1fr) 18px", device_card_css)
         self.assertIn("font-size:16px", device_card_css)
         self.assertIn("width:56px;\n  height:56px", device_card_css)
-        self.assertIn("conciseDeviceActionLabel(action, target, device)", content)
-        self.assertIn('const accessibleLabel=`${label}, ${device.name', content)
+        self.assertIn("renderDeviceTargetControls", device_card)
+        self.assertIn("config/entity_registry/update", device_controls)
+        self.assertIn("deviceActionInitialValue(device, target, action)", content)
         self.assertIn('"К устройствам"', content)
         self.assertIn("renderEnergySection", energy)
         self.assertIn("renderScenarioSection", scenarios)
@@ -315,7 +322,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         script = r"""
           import fs from "node:fs";
           const path = process.argv[1];
-          const source = fs.readFileSync(path, "utf8").replace(/^import .*$/m, "");
+          const source = fs.readFileSync(path, "utf8").replace(/^import .*$/gm, "");
           const moduleUrl = `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`;
           const { conciseDeviceActionLabel } = await import(moduleUrl);
           const device = { name: "Увлажнитель детская" };
@@ -325,6 +332,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             "Увлажнитель детская · Увлажнитель детская Humidifier · Выключить",
             "Увлажнитель детская · Увлажнитель детская Humidifier · Целевая влажность",
             "Увлажнитель детская · Увлажнитель детская Звук уведомления · Включить",
+            "turn_off",
           ].map((title) => conciseDeviceActionLabel({ title }, target, device));
           process.stdout.write(JSON.stringify(titles));
         """
@@ -336,7 +344,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         )
 
         self.assertEqual(
-            ["Включить", "Выключить", "Целевая влажность", "Звук уведомления: включить"],
+            ["Включить", "Выключить", "Целевая влажность", "Звук уведомления: включить", "Выключить"],
             json.loads(result.stdout),
         )
 
@@ -344,7 +352,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         script = r"""
           import fs from "node:fs";
           const path = process.argv[1];
-          const source = fs.readFileSync(path, "utf8").replace(/^import .*$/m, "");
+          const source = fs.readFileSync(path, "utf8").replace(/^import .*$/gm, "");
           const moduleUrl = `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`;
           const { appendDeviceRangeControls, validRangeControl, conciseDetails } = await import(moduleUrl);
 
@@ -531,8 +539,8 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn("if (step > maximum - minimum) return null;", device_card_js)
         self.assertIn("/^entity_[0-9a-f]{16}$/", device_card_js)
         self.assertIn("Math.floor((range.maximum - range.minimum) / range.step", device_card_js)
-        self.assertIn("const rangeCount = appendDeviceRangeControls(sheet, device, owner, deps);", device_card_js)
-        self.assertIn("} else if (!rangeCount) {", device_card_js)
+        self.assertIn("appendDeviceRangeControls(featureGrid, device, owner, deps, { compact: true })", device_card_js)
+        self.assertIn("if (!targets.length && !rangeCount) {", device_card_js)
         device_card_css = DEVICE_CARD_CSS.read_text(encoding="utf-8")
         self.assertIn(".device-range-card {", device_card_css)
         self.assertIn("min-height:48px", device_card_css)
@@ -1000,6 +1008,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn('hausman-hub-catalog.css?v=1.52.148', styles)
         self.assertIn('hausman-hub-media-device.css?v=1.52.148', styles)
         self.assertIn('hausman-hub-device-card.css?v=1.52.148', styles)
+        self.assertIn('hausman-hub-device-controls.css?v=1.52.148', styles)
         self.assertIn("--lighting-card-surface:", lighting_styles)
         self.assertIn(
             ".lighting-room-card.is-active { border-color:color-mix(in srgb,var(--hmh-accent",
@@ -1524,6 +1533,10 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             {{ filename: {str(MODAL_JS)!r} }}
           );
           vm.runInThisContext(
+            fs.readFileSync({str(DEVICE_CONTROLS_JS)!r}, "utf8").replace(/export /g, ""),
+            {{ filename: {str(DEVICE_CONTROLS_JS)!r} }}
+          );
+          vm.runInThisContext(
             fs.readFileSync({str(DEVICE_CARD_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
             {{ filename: {str(DEVICE_CARD_JS)!r} }}
           );
@@ -1758,6 +1771,10 @@ THEME_TEST_HARNESS = """
     { filename: __MODAL_JS__ }
   );
   vm.runInThisContext(
+    fs.readFileSync(__DEVICE_CONTROLS_JS__, "utf8").replace(/export /g, ""),
+    { filename: __DEVICE_CONTROLS_JS__ }
+  );
+  vm.runInThisContext(
     fs.readFileSync(__DEVICE_CARD_JS__, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
     { filename: __DEVICE_CARD_JS__ }
   );
@@ -1813,6 +1830,7 @@ class PanelThemeSwitcherTest(unittest.TestCase):
         script = script.replace("__ENERGY_METER_JS__", repr(str(ENERGY_METER_JS)))
         script = script.replace("__DEVICE_DISCOVERY_JS__", repr(str(DEVICE_DISCOVERY_JS)))
         script = script.replace("__MODAL_JS__", repr(str(MODAL_JS)))
+        script = script.replace("__DEVICE_CONTROLS_JS__", repr(str(DEVICE_CONTROLS_JS)))
         script = script.replace("__DEVICE_CARD_JS__", repr(str(DEVICE_CARD_JS)))
         script = script.replace("__MEDIA_DEVICE_JS__", repr(str(MEDIA_DEVICE_JS)))
         script = script.replace("__SCENARIO_ICONS_JS__", repr(str(SCENARIO_ICONS_JS)))

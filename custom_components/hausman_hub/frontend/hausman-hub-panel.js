@@ -24,7 +24,8 @@ import { buildDiagnosticChecks, diagnosticSummaryText, renderDiagnosticDetails }
 import { renderRolloutReadiness } from "./hausman-hub-rollout.js?v=1.52.148";
 import { overviewHeroRenderKey } from "./hausman-hub-overview-hero-state.js?v=1.52.148";
 import { formatUpcomingCountdown, renderOverviewContent, renderOverviewHero } from "./hausman-hub-overview.js?v=1.52.148";
-import { conciseDeviceActionLabel, renderPhysicalDeviceCard } from "./hausman-hub-device-card.js?v=1.52.148";
+import { renderPhysicalDeviceCard } from "./hausman-hub-device-card.js?v=1.52.148";
+import { deviceActionInitialValue } from "./hausman-hub-device-controls.js?v=1.52.148";
 import { recordTechnicalEvent as log, renderTechnicalLogCard } from "./hausman-hub-technical-log.js?v=1.52.148";
 import { applyFeedback } from "./hausman-hub-feedback.js?v=1.52.148";
 import { applyCommandActivity, applyCommandTarget, captureCommandIntent } from "./hausman-hub-command-feedback.js?v=1.52.148";
@@ -5985,93 +5986,7 @@ class HausmanHubPanel extends HTMLElement {
   }
 
   _deviceActionInitialValue(device, target, action) {
-    const details = Array.isArray(device && device.details) ? device.details : [];
-    const detail = details.find((item) => item.entityId === target.entity_id);
-    const attributes = device && device.entityId === target.entity_id && device.attributes
-      ? device.attributes : {};
-    const numeric = (...values) => {
-      const value = values.find((candidate) => (
-        candidate !== null && candidate !== undefined && candidate !== ""
-        && Number.isFinite(Number(candidate))
-      ));
-      return value === undefined ? null : Number(value);
-    };
-    if (action.action_id === "set_temperature") {
-      return numeric(attributes.temperature, device && device.primaryValue, detail && detail.state);
-    }
-    if (action.action_id === "set_brightness") {
-      return numeric(attributes.brightness, detail && detail.state);
-    }
-    if (action.action_id === "set_position") {
-      return numeric(attributes.current_position, detail && detail.state);
-    }
-    if (action.action_id === "set_hvac_mode") {
-      return String((detail && detail.state) || (device && device.state) || "").trim() || null;
-    }
-    if (action.action_id === "set_fan_mode") {
-      return String(attributes.fan_mode || "").trim() || null;
-    }
-    if (action.action_id === "set_humidity") {
-      return numeric(attributes.humidity, device && device.primaryValue, detail && detail.state);
-    }
-    return null;
-  }
-
-  _deviceTargetControls(target, device) {
-    const row = el("div", "device-target-controls");
-    row.appendChild(el("strong", "device-target-name", target.name || "Управление"));
-    const actions = el("div", "device-action-list");
-    (target.actions || []).forEach((action) => {
-      const fields = Array.isArray(action.allowed_fields) ? action.allowed_fields : [];
-      if (!fields.includes("value")) {
-        const label=conciseDeviceActionLabel(action, target, device);
-        const accessibleLabel=`${label}, ${device.name || target.name || "устройство"}`;
-        const button = el("button", "secondary device-action", label);
-        button.type = "button";
-        setAttr(button, "aria-label", accessibleLabel);
-        button.disabled = this._busy;
-        button.addEventListener("click", (event) => {
-          event.preventDefault();
-          this._executeDeviceAction(target.target_id, action.action_id, null);
-        });
-        actions.appendChild(button);
-        return;
-      }
-      const valueRow = el("label", "device-value-action");
-      valueRow.appendChild(el("span", null, conciseDeviceActionLabel(action, target, device)));
-      const input = el("input");
-      const numericAction = ["set_temperature", "set_brightness", "set_position"]
-        .includes(action.action_id);
-      input.type = numericAction ? "number" : "text";
-      if (numericAction) {
-        input.min = action.action_id === "set_temperature" ? "10" : "0";
-        input.max = action.action_id === "set_brightness" ? "255"
-          : (action.action_id === "set_temperature" ? "35" : "100");
-        input.step = action.action_id === "set_temperature" ? "0.5" : "1";
-      }
-      const initialValue = this._deviceActionInitialValue(device, target, action);
-      input.value = initialValue === null ? "" : String(initialValue);
-      input.placeholder = numericAction ? "Укажите значение" : "Укажите режим";
-      valueRow.appendChild(input);
-      const apply = el("button", "secondary", "Применить");
-      apply.type = "button";
-      const syncApplyState = () => {
-        apply.disabled = this._busy || (numericAction
-          ? !Number.isFinite(Number(input.value)) || input.value === ""
-          : !String(input.value || "").trim());
-      };
-      syncApplyState();
-      input.addEventListener("input", syncApplyState);
-      apply.addEventListener("click", (event) => {
-        event.preventDefault();
-        const value = numericAction ? Number(input.value) : String(input.value).trim();
-        this._executeDeviceAction(target.target_id, action.action_id, value);
-      });
-      valueRow.appendChild(apply);
-      actions.appendChild(valueRow);
-    });
-    row.appendChild(actions);
-    return row;
+    return deviceActionInitialValue(device, target, action);
   }
 
   async _executeDeviceAction(targetId, actionId, value) {
