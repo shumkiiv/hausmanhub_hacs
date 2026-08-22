@@ -1,5 +1,13 @@
 # История версий
 
+## 1.52.156 - 2026-08-23
+
+- Release CI измеряет branch coverage water safety, scenario executor,
+  scenario service и climate deviation guard.
+- 119 safety tests и минимальный порог 75% блокируют релиз при регрессии.
+- Зафиксирован реестр domain, state-machine, restart, fault, contract и
+  Home Assistant harness проверок. Интерфейс не менялся, только cache-bust.
+
 ## 1.52.155 - 2026-08-23
 
 - Добавлен исполняемый реестр паритета HACS и Hausman Android для header,
