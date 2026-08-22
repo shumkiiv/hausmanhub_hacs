@@ -4,6 +4,20 @@ Last updated: 2026-08-22 (HACS 1.52.137 с полным contracts 0.47.0 опу�
 
 ## Current work
 
+- 2026-08-22 (Codex): только HACS frontend главной получил два локальных
+  режима для карточек «Показания энергии» и «Освещение». Компактный режим
+  сохранён по умолчанию, развёрнутый показывает уже загруженные реальные
+  метрики, источники энергии и физические световые устройства. Выбор каждой
+  карточки независим и хранится только в localStorage браузера. Панель
+  «Активность» имеет ширину и высоту левого меню, содержит до 12 записей и
+  собственную прокрутку. Ниже основных карточек подключены ближайшие события
+  с действием «Пропустить» для cancellable-запусков. Исправлена стартовая
+  прокрутка Hero при появлении содержимого ниже fold. Feature commit
+  `2921547` поверх HACS `1.52.137`. Browser QA: 1440x1400, rail и Activity
+  238x1360 px, overflow и runtime errors отсутствуют. Full pytest: 1566
+  passed, 4 skipped, 985 subtests. Release, push и deploy не выполнялись;
+  Android, backend, API, contracts и storage не менялись.
+
 - 2026-08-22 (Codex): корректирующий HACS `v1.52.137` закрывает найденный
   release-line drift contracts `0.47.0`: синхронизированы Dashboard schema,
   water-meter schema и multi-source energy fixture. External validator
