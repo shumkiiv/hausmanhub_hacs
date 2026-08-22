@@ -1,10 +1,11 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-22 (HACS 1.52.145, защита climate deviation подготовлена к release).
+Last updated: 2026-08-22 (HACS 1.52.145, защита climate deviation развёрнута в monitor).
 
 ## Current work
 
-- 2026-08-22 (Codex): подготовлен HACS `1.52.145` для direction 14.A.
+- 2026-08-22 (Codex): HACS `1.52.145` опубликован и развёрнут в production
+  для direction 14.A.
   Restart-safe guard вооружается только после принятого `off` и наблюдаемого
   read-back `off`; первый снимок не может создать ожидание. Monitor фиксирует
   отклонение без executor, enforce ждёт grace, делает не более 1-5 точных
@@ -12,7 +13,18 @@ Last updated: 2026-08-22 (HACS 1.52.145, защита climate deviation подг
   operation journal. Настройки по stable managed AC IDs сохраняются через
   command-free local-admin API с optimistic locking, default devices пуст.
   Runtime отдаёт guard status и существующий cooldown surface. Pin: contracts
-  `0.52.0` (`da932b1`). Frontend layout не менялся, только cache-bust.
+  `0.52.0` (`da932b1`). Feature commit/tag `459b2c2`, `v1.52.145`; Actions
+  `32573556407` успешен, полный gate: 1609 passed, 4 skipped. Backup
+  `87e95767` включает Home Assistant, базу, 10 add-ons и `ssl/share/media`;
+  защищённые копии по 920258560 байт подтверждены в `hassio.local` и
+  `hassio.KeeneticSSD`. Два config check и один restart успешны. Production
+  installed/latest равны `v1.52.145`; для `detskaia_air_conditioner`
+  сохранён только `monitor` с grace 120 s, cooldown 300 s и max retries 3.
+  Он не владеет executor и не отправляет повторный `off`. Journal sequence
+  до и после deploy равна 977, ошибок Hausman в system log нет. Все 88
+  frontend assets, три contract schema и guard service совпадают с release.
+  Frontend layout не менялся, только cache-bust. Аудит:
+  `docs/RELEASE_AUDIT_1.52.145.md`.
 
 - 2026-08-22 (Codex): HACS `1.52.144` опубликован и развёрнут в production для направлений 12-13.
   Room settings v1 хранит canonical type/icon, порядок и видимость с
