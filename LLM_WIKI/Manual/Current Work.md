@@ -1,5 +1,31 @@
 # Current Work
 
+## 2026-08-22: HACS 1.52.138 опубликован и развёрнут
+
+- В release вошли режимы «Показаний энергии» и «Освещения», полноразмерная
+  «Активность», ближайшие события с действием «Пропустить» и исправление
+  стартовой прокрутки Hero.
+- Feature commit `2921547`, context commit `57b30c4`, release commit/tag
+  `1596a74`, `v1.52.138`. GitHub Release без assets:
+  https://github.com/shumkiiv/hausmanhub_hacs/releases/tag/v1.52.138.
+- Local release-gate: 1563 tests, 4 skipped. GitHub Actions `32558198896`
+  завершён успешно.
+- Preflight: installed/latest `v1.52.137`, update idle, config check HTTP 200.
+  Backup `22410676` завершён в local и KeeneticSSD, размер каждой копии
+  919613440 байт. Включены Home Assistant, база, 10 add-ons и `ssl`, ошибок
+  агентов нет.
+- Явная `v1.52.138` установлена без второго backup. Повторный config check
+  успешен, Home Assistant перезапущен один раз.
+- После restart installed/latest `v1.52.138`, config entry loaded, 12
+  релевантных сущностей доступны. Admin panel, Dashboard, upcoming events и
+  operation journal отвечают HTTP 200; journal schema valid. Все 29
+  изменённых frontend assets совпадают с release по SHA-256.
+- В system log нет ошибок и traceback. Остаётся одно известное WARNING о
+  расхождении физического уличного датчика и погодного сервиса. Физические
+  команды не отправлялись.
+- Android, backend, API, contracts и storage не менялись. Откат: backup
+  `22410676`.
+
 ## 2026-08-22: режимы карточек и ближайшие события на главной HACS
 
 - Карточки «Показания энергии» и «Освещение» по умолчанию остаются

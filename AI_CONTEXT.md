@@ -1,8 +1,24 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-22 (HACS 1.52.137 с полным contracts 0.47.0 опубликован и развёрнут в production).
+Last updated: 2026-08-22 (HACS 1.52.138 с режимами карточек главной опубликован и развёрнут в production).
 
 ## Current work
+
+- 2026-08-22 (Codex): HACS `v1.52.138` опубликован и развёрнут в production.
+  Главная получила независимые компактный и развёрнутый режимы энергии и
+  освещения, полноразмерную панель «Активность», ближайшие события с
+  пропуском cancellable-запусков и исправление стартовой прокрутки Hero.
+  Feature commit `2921547`, release commit/tag `1596a74`, GitHub Release без
+  assets. Local release-gate: 1563 tests, 4 skipped; Actions `32558198896`
+  успешен. До установки создан full backup `22410676`, по 919613440 байт в
+  `hassio.local` и `hassio.KeeneticSSD`, с Home Assistant, базой, 10 add-ons
+  и `ssl`. Выполнены два успешных config checks и один restart. После deploy
+  installed/latest равны `v1.52.138`, config entry loaded, все 12
+  релевантных сущностей доступны, journal schema valid, 29 frontend assets
+  совпадают с release. Ошибок и traceback нет, остаётся одно известное
+  предупреждение о расхождении уличных источников температуры. Физические
+  команды не отправлялись. Android, backend, API, contracts и storage не
+  менялись.
 
 - 2026-08-22 (Codex): только HACS frontend главной получил два локальных
   режима для карточек «Показания энергии» и «Освещение». Компактный режим
