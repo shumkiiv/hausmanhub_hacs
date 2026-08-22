@@ -45,7 +45,7 @@ function eventIcon(entry) {
 function activityEntries(panel, dashboard) {
   const live = Array.isArray(panel._activityFeed) ? panel._activityFeed : [];
   const snapshot = Array.isArray(dashboard.events) ? dashboard.events : [];
-  return (live.length ? live : snapshot).slice(0, 4).map((entry) => ({
+  return (live.length ? live : snapshot).slice(0, 12).map((entry) => ({
     icon: eventIcon(entry),
     title: String(entry?.title || "Событие"),
     text: String(entry?.text || entry?.message || "").trim(),
@@ -97,7 +97,8 @@ function appendDetailedHome(card, state, deps) {
 
 function appendActivityCards(card, entries, compact, deps) {
   const list = deps.el("div", compact ? "overview-tablet-activity-compact" : "overview-tablet-activity-detailed");
-  if (!entries.length) list.appendChild(deps.el("div", "overview-tablet-activity-empty", "Событий пока нет"));
+  const rows = deps.el("div", "overview-tablet-activity-rows");
+  if (!entries.length) rows.appendChild(deps.el("div", "overview-tablet-activity-empty", "Событий пока нет"));
   entries.forEach((entry) => {
     const row = deps.el("div", `overview-tablet-activity-row${entry.alert ? " is-alert" : ""}`);
     const icon = deps.el("span", "overview-tablet-activity-icon");
@@ -109,8 +110,9 @@ function appendActivityCards(card, entries, compact, deps) {
     else if (entry.text) copy.appendChild(deps.el("small", null, entry.text));
     row.appendChild(copy);
     if (!compact) row.appendChild(deps.el("time", null, activityTimeLabel(entry.at)));
-    list.appendChild(row);
+    rows.appendChild(row);
   });
+  list.appendChild(rows);
   const footer = deps.el("div", "overview-tablet-activity-footer", compact ? "История" : "Вся активность");
   footer.appendChild(deps.svgIcon("chevron-right"));
   list.appendChild(footer);

@@ -4,6 +4,7 @@ import { renderHomeTargetCard } from "./hausman-hub-climate-overview.js?v=1.52.1
 import { scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.137";
 import { openUpcomingEventsModal } from "./hausman-hub-overview-events-modal.js?v=1.52.137";
 import { renderOverviewSideCards } from "./hausman-hub-overview-side.js?v=1.52.137";
+import { renderOverviewUtilityCards } from "./hausman-hub-overview-utility-cards.js?v=1.52.137";
 
 function validNumber(value) {
   return value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
@@ -391,88 +392,6 @@ function renderFavorites(panel, container, dashboard, deps) {
   container.appendChild(section);
 }
 
-function energySourceValue(source, units) {
-  const power = validNumber(source.currentPowerW) ? `${compactNumber(source.currentPowerW, 0)} Вт` : null;
-  const current = validNumber(source.currentA) ? `${Number(source.currentA).toLocaleString("ru-RU", {
-    minimumFractionDigits: 2, maximumFractionDigits: 2,
-  })} А` : null;
-  if (units === "amps") return current || "Нет данных";
-  if (units === "both") return [power, current].filter(Boolean).join(" · ") || "Нет данных";
-  return power || (validNumber(source.todayKwh) ? `${compactNumber(source.todayKwh)} кВт·ч` : "Нет данных");
-}
-
-function selectedEnergySources(energy) {
-  const sources = Array.isArray(energy?.sources) ? energy.sources : [];
-  if (energy?.settings?.useAllDevices === true) return sources;
-  const selected = new Set(Array.isArray(energy?.selectedSourceIds) ? energy.selectedSourceIds : []);
-  return sources.filter((source) => selected.has(source.id) || selected.has(source.deviceId));
-}
-
-function renderEnergySources(panel, dashboard, deps) {
-  const energy = dashboard.energy || {};
-  const units = String(energy.settings?.displayUnits || "watts").toLowerCase();
-  const sources = selectedEnergySources(energy);
-  const card = deps.el("section", "overview-tablet-bottom-card is-energy");
-  const head = deps.el("div", "overview-tablet-bottom-head");
-  const title = deps.el("h2");
-  title.appendChild(deps.svgIcon("energy"));
-  title.appendChild(deps.el("span", null, "Показания энергии"));
-  head.appendChild(title);
-  const settings = deps.el("button", null, "Настройки");
-  settings.type = "button";
-  settings.appendChild(deps.svgIcon("chevron-right"));
-  settings.addEventListener("click", () => panel._activateSection("energy"));
-  head.appendChild(settings);
-  card.appendChild(head);
-  const list = deps.el("div", "overview-tablet-energy-sources");
-  if (!sources.length) {
-    list.appendChild(deps.el("div", "overview-tablet-energy-empty", "Нет выбранных источников"));
-  } else {
-    sources.slice(0, 2).forEach((source) => {
-      const item = deps.el("button", "overview-tablet-energy-source");
-      item.type = "button";
-      item.addEventListener("click", () => panel._activateSection("energy"));
-      const name = deps.el("span", "overview-tablet-energy-name");
-      name.appendChild(deps.el("strong", null, source.name || "Источник энергии"));
-      name.appendChild(deps.el("i", source.available === false ? "is-offline" : "is-online"));
-      item.appendChild(name);
-      item.appendChild(deps.el("span", "overview-tablet-energy-value", energySourceValue(source, units)));
-      list.appendChild(item);
-    });
-    if (sources.length > 2) list.appendChild(deps.el("span", "overview-tablet-energy-more", `+${sources.length - 2}`));
-  }
-  card.appendChild(list);
-  return card;
-}
-
-function renderLighting(panel, dashboard, deps) {
-  const devices = Array.isArray(dashboard.devices) ? dashboard.devices : [];
-  const lights = devices.filter((device) => device.domain === "light" || device.category === "lighting");
-  const active = physicalDeviceCount(lights.filter((device) => device.active === true
-    && device.unavailable !== true && device.state !== "unavailable"));
-  const card = deps.el("button", "overview-tablet-bottom-card is-lighting");
-  card.type = "button";
-  card.addEventListener("click", () => panel._activateSection("lighting"));
-  const head = deps.el("span", "overview-tablet-bottom-head");
-  head.appendChild(deps.el("h2", null, "Освещение"));
-  head.appendChild(deps.svgIcon("lightbulb"));
-  card.appendChild(head);
-  const bulbs = deps.el("span", "overview-tablet-light-bulbs");
-  const visible = active ? Math.min(active, 3) : 1;
-  for (let index = 0; index < visible; index += 1) bulbs.appendChild(deps.svgIcon("lightbulb"));
-  card.appendChild(bulbs);
-  card.appendChild(deps.el("span", "overview-tablet-light-label",
-    active ? `${active} сейчас ${plural(active, "горит", "горят", "горят")}` : "Свет выключен"));
-  return card;
-}
-
-function renderBottomRow(panel, container, dashboard, deps) {
-  const row = deps.el("div", "overview-tablet-bottom-grid");
-  row.appendChild(renderEnergySources(panel, dashboard, deps));
-  row.appendChild(renderLighting(panel, dashboard, deps));
-  container.appendChild(row);
-}
-
 function appendUpcomingEventRow(panel, list, event, deps) {
   const row = deps.el("div", "overview-canon-upcoming-event");
   const icon = deps.el("span", "overview-canon-favorite-icon");
@@ -524,5 +443,6 @@ export function renderOverviewContent(panel, container, deps) {
   const dashboard = panel._homeDashboard || {};
   renderPrimaryCards(panel, container, dashboard, deps);
   renderFavorites(panel, container, dashboard, deps);
-  renderBottomRow(panel, container, dashboard, deps);
+  renderOverviewUtilityCards(panel, container, dashboard, deps);
+  renderUpcomingEvents(panel, container, deps);
 }

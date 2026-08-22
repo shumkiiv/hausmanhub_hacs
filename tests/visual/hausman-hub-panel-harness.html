@@ -222,6 +222,9 @@
           if (method === "GET" && path === "hausman_hub/v1/dashboard") {
             return cloneHarnessValue(panel._homeDashboard);
           }
+          if (method === "GET" && path === "hausman_hub/v1/scenarios/upcoming") {
+            return cloneHarnessValue(panel._upcomingEvents);
+          }
           if (method === "GET" && path.startsWith("hausman_hub/v1/energy/history?")) {
             const at = (index) => new Date(Date.now() - (23 - index) * 3600000).toISOString();
             const points = (base, wave, slope = 1.8) => Array.from({ length: 24 }, (_, index) => ({
@@ -282,6 +285,14 @@
             return { valid: true, issues: [] };
           }
           if (method === "POST" && path === "hausman_hub/v1/admin/scenarios/run") {
+            return { status: "confirmed", receipt: { confirmed: true } };
+          }
+          if (method === "POST" && path === "hausman_hub/v1/scenarios/upcoming/cancel") {
+            if (panel._upcomingEvents) {
+              panel._upcomingEvents.events = panel._upcomingEvents.events.filter((event) =>
+                event.scenarioId !== payload.scenarioId || event.triggerId !== payload.triggerId
+                  || event.runAt !== payload.runAt);
+            }
             return { status: "confirmed", receipt: { confirmed: true } };
           }
           if (method === "POST" && path === "hausman_hub/v1/device-actions") {
@@ -354,6 +365,19 @@
         events: [
           { id: "event-1", title: "Климат гостиной", message: "Цель изменена до 25 °C", ts: Date.now() - 180000 },
           { id: "event-2", title: "Свет на кухне", message: "Выключен", ts: Date.now() - 720000 },
+          { id: "event-3", title: "Ночной режим", message: "Сценарий выполнен", ts: Date.now() - 1200000 },
+          { id: "event-4", title: "Входная дверь", message: "Дверь открыта", ts: Date.now() - 1680000 },
+          { id: "event-5", title: "Охрана", message: "Режим снят", ts: Date.now() - 2400000 },
+          { id: "event-6", title: "Свет в спальне", message: "Выключен", ts: Date.now() - 3000000 },
+          { id: "event-7", title: "Климат спальни", message: "Цель изменена до 24 °C", ts: Date.now() - 3900000 },
+          { id: "event-8", title: "Уходим из дома", message: "Сценарий выполнен", ts: Date.now() - 4800000 },
+        ],
+      };
+      panel._upcomingEvents = {
+        events: [
+          { scenarioId: "scenario.evening_lights", triggerId: "sunset", scenarioTitle: "Вечерний свет", triggerType: "sunset", runAt: new Date(Date.now() + 34 * 60000).toISOString(), cancellable: true },
+          { scenarioId: "scenario.night_mode", triggerId: "night", scenarioTitle: "Ночной режим", triggerType: "time", runAt: new Date(Date.now() + 145 * 60000).toISOString(), cancellable: true },
+          { scenarioId: "scenario.morning", triggerId: "sunrise", scenarioTitle: "Доброе утро", triggerType: "sunrise", runAt: new Date(Date.now() + 510 * 60000).toISOString(), cancellable: false },
         ],
       };
       panel._energyHistory = {
@@ -530,6 +554,14 @@
       const settingsView = params.get("settings");
       if (["overview", "rooms", "connection", "appearance", "system"].includes(settingsView)) {
         panel._activeSettingsView = settingsView;
+      }
+      const energyMode = params.get("energyMode");
+      const lightingMode = params.get("lightingMode");
+      if ([energyMode, lightingMode].some((mode) => mode === "expanded" || mode === "compact")) {
+        panel._overviewCardModes = {
+          energy: energyMode === "expanded" ? "expanded" : "compact",
+          lighting: lightingMode === "expanded" ? "expanded" : "compact",
+        };
       }
       panel._render();
       panel._applyLocalPreferences();

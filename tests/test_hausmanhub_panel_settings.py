@@ -63,6 +63,7 @@ DEVICES_OVERVIEW_CSS = PANEL_JS.with_name("hausman-hub-devices-overview.css")
 DIAGNOSTICS_JS = PANEL_JS.with_name("hausman-hub-diagnostics.js")
 ROLLOUT_JS = PANEL_JS.with_name("hausman-hub-rollout.js")
 OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-overview.js")
+OVERVIEW_UTILITY_CARDS_JS = PANEL_JS.with_name("hausman-hub-overview-utility-cards.js")
 OVERVIEW_SIDE_JS = PANEL_JS.with_name("hausman-hub-overview-side.js")
 OVERVIEW_EVENTS_MODAL_JS = PANEL_JS.with_name("hausman-hub-overview-events-modal.js")
 OVERVIEW_HERO_STATE_JS = PANEL_JS.with_name("hausman-hub-overview-hero-state.js")
@@ -672,6 +673,10 @@ def panel_script(
       vm.runInThisContext(
         fs.readFileSync({str(OVERVIEW_EVENTS_MODAL_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(OVERVIEW_EVENTS_MODAL_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(OVERVIEW_UTILITY_CARDS_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
+        {{ filename: {str(OVERVIEW_UTILITY_CARDS_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(OVERVIEW_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
@@ -1755,6 +1760,157 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         if (heroTitle.textContent !== "Дом" || panel._overviewHeroRoomId !== null) {
           throw new Error("previous room arrow did not cycle back to Home");
         }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_overview_expandable_utility_cards_activity_rail_and_upcoming_actions(self) -> None:
+        payloads = dict(GET_PATHS)
+        payloads["hausman_hub/v1/dashboard"] = {
+            "summary": {"homeName": "Дом"},
+            "rooms": [],
+            "devices": [
+                {
+                    "id": "light-kitchen-main",
+                    "physicalId": "light-kitchen-main",
+                    "name": "Основной свет",
+                    "roomName": "Кухня",
+                    "domain": "light",
+                    "category": "lighting",
+                    "state": "on",
+                    "stateLabel": "Включён",
+                    "active": True,
+                    "unavailable": False,
+                },
+                {
+                    "id": "light-kitchen-level",
+                    "physicalId": "light-kitchen-main",
+                    "name": "Яркость основного света",
+                    "roomName": "Кухня",
+                    "domain": "light",
+                    "category": "lighting",
+                    "state": "75",
+                    "stateLabel": "75%",
+                    "active": True,
+                    "unavailable": False,
+                },
+                {
+                    "id": "light-bedroom",
+                    "physicalId": "light-bedroom",
+                    "name": "Свет спальни",
+                    "roomName": "Спальня",
+                    "domain": "light",
+                    "category": "lighting",
+                    "state": "unavailable",
+                    "stateLabel": "Нет связи",
+                    "active": False,
+                    "unavailable": True,
+                },
+            ],
+            "energy": {
+                "available": True,
+                "currentPowerW": 226,
+                "currentA": 1.6,
+                "voltageV": 225.5,
+                "totalKwh": 70.86,
+                "selectedSourceIds": ["breaker-232", "breaker-233"],
+                "settings": {"displayUnits": "both", "showVoltage": True, "aggregation": "combined", "useAllDevices": False},
+                "sources": [
+                    {"id": "breaker-232", "deviceId": "breaker-232", "name": "Автомат 232", "roomName": "Дом", "available": True, "currentPowerW": 6, "currentA": 0.06, "voltageV": 226, "totalKwh": 8.59},
+                    {"id": "breaker-233", "deviceId": "breaker-233", "name": "Автомат 233", "roomName": "Дом", "available": True, "currentPowerW": 220, "currentA": 1.54, "voltageV": 225, "totalKwh": 62.27},
+                ],
+            },
+            "events": [
+                {"id": f"event-{index}", "title": f"Событие {index}", "message": "Изменение дома", "ts": 1787360000000 - index * 60000}
+                for index in range(14)
+            ],
+            "alarms": [],
+            "scenarios": [],
+            "weather": {},
+        }
+        payloads["hausman_hub/v1/scenarios/upcoming"] = {
+            "events": [
+                {
+                    "scenarioId": "scenario.night",
+                    "triggerId": "night-time",
+                    "scenarioTitle": "Ночной режим",
+                    "triggerType": "time",
+                    "runAt": "2026-08-22T23:00:00+03:00",
+                    "cancellable": True,
+                }
+            ]
+        }
+        script = panel_script(
+            payloads,
+            {"hausman_hub/v1/scenarios/upcoming/cancel": {"status": "confirmed", "receipt": {"confirmed": True}}},
+            """
+        const overview = panel._shell.sectionNodes.overview;
+        const byClass = (name) => findAll(overview, (node) =>
+          String(node.className).split(" ").includes(name));
+        let energyCard = byClass("is-energy")[0];
+        let lightingCard = byClass("is-lighting")[0];
+        if (!energyCard || !lightingCard || energyCard.classList.contains("is-expanded")
+          || lightingCard.classList.contains("is-expanded")) {
+          throw new Error("overview utility cards must start compact");
+        }
+        const energyToggle = findAll(energyCard, (node) => node.tagName === "BUTTON"
+          && node["aria-label"] === "Развернуть панель «Показания энергии»")[0];
+        energyToggle.fire("click", { stopPropagation() {} });
+        if (!energyCard.classList.contains("is-expanded")
+          || lightingCard.classList.contains("is-expanded")) {
+          throw new Error("energy and lighting modes are not independent");
+        }
+        const expandedEnergy = byClass("overview-tablet-energy-expanded")[0];
+        if (!textOf(expandedEnergy).includes("226 Вт")
+          || !textOf(expandedEnergy).includes("225,5 В")
+          || !textOf(expandedEnergy).includes("70,86 кВт·ч")
+          || byClass("overview-tablet-energy-expanded-source").length !== 2) {
+          throw new Error("expanded energy data is incomplete: " + textOf(expandedEnergy));
+        }
+        const lightingToggle = findAll(lightingCard, (node) => node.tagName === "BUTTON"
+          && node["aria-label"] === "Развернуть панель «Освещение»")[0];
+        lightingToggle.fire("click", { stopPropagation() {} });
+        if (!lightingCard.classList.contains("is-expanded")
+          || byClass("overview-tablet-lighting-device").length !== 2
+          || !textOf(lightingCard).includes("Основной свет")
+          || !textOf(lightingCard).includes("Свет спальни")
+          || !textOf(lightingCard).includes("Нет связи")) {
+          throw new Error("expanded lighting must show unique physical devices and states");
+        }
+        if (modeWrites.length !== 2 || !modeWrites[1].value.includes('"energy":"expanded"')
+          || !modeWrites[1].value.includes('"lighting":"expanded"')) {
+          throw new Error("overview card modes were not persisted locally: " + JSON.stringify(modeWrites));
+        }
+        panel._render();
+        energyCard = byClass("is-energy")[0];
+        lightingCard = byClass("is-lighting")[0];
+        if (!energyCard.classList.contains("is-expanded") || !lightingCard.classList.contains("is-expanded")) {
+          throw new Error("overview card modes did not survive a dashboard refresh");
+        }
+        if (byClass("overview-tablet-activity-row").length !== 24) {
+          throw new Error("activity rail must render twelve compact and twelve detailed entries");
+        }
+        if (byClass("overview-canon-upcoming").length !== 1) {
+          throw new Error("upcoming events panel is not on the main dashboard");
+        }
+        const skip = findAll(overview, (node) => node.tagName === "BUTTON"
+          && node.textContent === "Пропустить")[0];
+        skip.fire("click");
+        await tick(10);
+        const skipped = calls.find((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/scenarios/upcoming/cancel");
+        if (!skipped || skipped.payload.scenarioId !== "scenario.night"
+          || skipped.payload.triggerId !== "night-time") {
+          throw new Error("upcoming event skip action is incomplete: " + JSON.stringify(skipped));
+        }
+            """,
+            before_panel="""
+        const modeWrites = [];
+        globalThis.localStorage = {
+          getItem: () => null,
+          setItem: (key, value) => modeWrites.push({ key, value }),
+        };
             """,
         )
         completed = run_panel_script(script)

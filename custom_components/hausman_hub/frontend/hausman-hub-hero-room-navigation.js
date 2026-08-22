@@ -34,6 +34,17 @@ export function createHeroRoomNavigation(panel, rooms, deps) {
 
   const slides = [null, ...rooms];
   let selectHeroRoom = null;
+  const centerStripButton = (button, animate) => {
+    if (!button || typeof strip.scrollTo !== "function"
+      || typeof strip.getBoundingClientRect !== "function"
+      || typeof button.getBoundingClientRect !== "function") return;
+    const stripRect = strip.getBoundingClientRect();
+    const buttonRect = button.getBoundingClientRect();
+    const current = Number(strip.scrollLeft) || 0;
+    const left = current + buttonRect.left - stripRect.left
+      - (stripRect.width - buttonRect.width) / 2;
+    strip.scrollTo({ left: Math.max(0, left), behavior: animate ? "smooth" : "auto" });
+  };
   const move = (direction) => {
     if (!selectHeroRoom) return;
     const currentId = panel._overviewHeroRoomId || null;
@@ -96,7 +107,7 @@ export function createHeroRoomNavigation(panel, rooms, deps) {
         dot.classList.toggle("is-active", (slides[index]?.id || null) === (room?.id || null));
       });
       const activeButton = room ? roomButtons.get(room.id) : home;
-      activeButton?.scrollIntoView?.({ behavior: animate ? "smooth" : "auto", block: "nearest", inline: "center" });
+      centerStripButton(activeButton, animate);
     },
     bind(select) {
       selectHeroRoom = select;
