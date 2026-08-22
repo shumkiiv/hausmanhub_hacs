@@ -654,9 +654,9 @@ function climateDeviceKindLabel(kind) {
   })[kind] || "Устройство климата";
 }
 
-function compactTemperature(value) {
+function climateRoomTemperatureText(value) {
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
-  return `${Number.isInteger(value) ? value : value.toFixed(1)}°`;
+  return `${value.toLocaleString("ru-RU", { maximumFractionDigits: 1 })}°`;
 }
 
 function roomIsOffline(room, devices) {
@@ -665,23 +665,20 @@ function roomIsOffline(room, devices) {
 }
 
 function roomCurrentSummary(room) {
-  const parts = [];
-  const temp = compactTemperature(room.temp);
-  if (temp !== null) parts.push(temp);
   if (typeof room.humidity === "number" && Number.isFinite(room.humidity)) {
-    parts.push(`${Math.round(room.humidity)}% влажн.`);
+    return `${Math.round(room.humidity)}%`;
   }
-  return parts.length ? `Сейчас · ${parts.join(" · ")}` : "Сейчас · нет данных";
+  return "Нет данных";
 }
 
 function roomTargetSummary(room) {
   const parts = [];
-  const temp = compactTemperature(room.targetTemp);
+  const temp = climateRoomTemperatureText(room.targetTemp);
   if (temp !== null) parts.push(temp);
   if (typeof room.targetHumidity === "number" && Number.isFinite(room.targetHumidity)) {
     parts.push(`${Math.round(room.targetHumidity)}%`);
   }
-  return parts.length ? `Цели · ${parts.join(" · ")}` : "Цели · не заданы";
+  return parts.length ? parts.join(" · ") : "Не заданы";
 }
 
 function roomTargetSpec(panel, room, action, parameter) {
@@ -697,13 +694,17 @@ function roomTargetSpec(panel, room, action, parameter) {
 
 function renderRoomStepper(panel, room, deps, options) {
   const { el, setAttr } = deps;
-  const { action, parameter, field, label, icon, current } = options;
+  const { action, parameter, field, label, icon, current, formatValue } = options;
   const wrap = el("div", "hh-climate-room-stepper");
   const found = roomTargetSpec(panel, room, action, parameter);
   const controllable = Boolean(found) && typeof current === "number" && Number.isFinite(current);
   const busy = Boolean(panel._busy || panel._climateModePendingKey);
   const pending = panel._climateModePendingKey === `${room.id}:${action}`;
-  if (!controllable) wrap.classList.add("is-disabled");
+  if (!controllable) wrap.classList.add("is-readonly");
+  setAttr(wrap, "role", "group");
+  const displayedValue = typeof current === "number" && Number.isFinite(current)
+    ? formatValue(current) : "Не задана";
+  setAttr(wrap, "aria-label", `${label}: ${displayedValue}${controllable ? "" : ", только просмотр"}`);
   const stepButton = (direction, aria) => {
     const button = el("button", "hh-climate-room-step");
     button.type = "button";
@@ -725,16 +726,26 @@ function renderRoomStepper(panel, room, deps, options) {
     });
     return button;
   };
-  wrap.appendChild(stepButton(-1, `Понизить цель «${label}» в комнате ${room.name || "Комната"}`));
   const caption = el("span", "hh-climate-room-stepper-label");
   const captionIcon = el("span", "hh-climate-room-stepper-icon");
   captionIcon.appendChild(climateIcon(icon, deps));
   caption.appendChild(captionIcon);
-  caption.appendChild(el("span", null, pending ? "Сохраняем..." : label));
+  caption.appendChild(el("span", null, label));
   wrap.appendChild(caption);
-  wrap.appendChild(stepButton(1, `Повысить цель «${label}» в комнате ${room.name || "Комната"}`));
-  if (!controllable) wrap.appendChild(el("small", "hh-climate-room-stepper-hint", "Недоступно"));
+  const actions = el("span", `hh-climate-room-stepper-actions${controllable ? "" : " is-readonly"}`);
+  if (controllable) actions.appendChild(stepButton(-1, `Понизить цель «${label}» в комнате ${room.name || "Комната"}`));
+  actions.appendChild(el("strong", `hh-climate-room-stepper-value${pending ? " is-pending" : ""}`,
+    pending ? "Сохраняем..." : displayedValue));
+  if (controllable) actions.appendChild(stepButton(1, `Повысить цель «${label}» в комнате ${room.name || "Комната"}`));
+  wrap.appendChild(actions);
   return wrap;
+}
+
+function appendRoomFact(container, label, value, el) {
+  const fact = el("p", "hh-climate-room-fact");
+  fact.appendChild(el("small", null, label));
+  fact.appendChild(el("strong", null, value));
+  container.appendChild(fact);
 }
 
 function renderRoomCard(panel, room, devices, deps) {
@@ -760,22 +771,23 @@ function renderRoomCard(panel, room, devices, deps) {
   const status = el("span", `hh-climate-room-status ${offline ? "is-offline" : (manual ? "is-manual" : "is-auto")}`,
     offline ? "Без связи" : (manual ? "Ручной режим" : "Авто"));
   head.appendChild(status);
-  head.appendChild(el("b", "hh-climate-room-target", compactTemperature(room.targetTemp) || "-"));
+  head.appendChild(el("b", "hh-climate-room-temperature", climateRoomTemperatureText(room.temp) || "—"));
   card.appendChild(head);
   const lines = el("div", "hh-climate-room-lines");
-  lines.appendChild(el("p", null, roomCurrentSummary(room)));
-  lines.appendChild(el("p", null, roomTargetSummary(room)));
+  appendRoomFact(lines, "Влажность", roomCurrentSummary(room), el);
+  appendRoomFact(lines, "Цели", roomTargetSummary(room), el);
   card.appendChild(lines);
   const managedRoom = runtimeRoom(panel, room.id);
   const steppers = el("div", "hh-climate-room-steppers");
   steppers.appendChild(renderRoomStepper(panel, room, deps, {
     action: "set_room_target", parameter: "target_temperature", field: "target_temperature",
-    label: "Темп.", icon: "thermometer",
+    label: "Температура", icon: "thermometer",
+    formatValue: (value) => climateRoomTemperatureText(value) || "Не задана",
     current: typeof managedRoom?.target_temperature === "number" ? managedRoom.target_temperature : room.targetTemp,
   }));
   steppers.appendChild(renderRoomStepper(panel, room, deps, {
     action: "set_room_humidity_target", parameter: "target_humidity", field: "target_humidity",
-    label: "Влажн.", icon: "water",
+    label: "Влажность", icon: "water", formatValue: (value) => `${Math.round(value)}%`,
     current: typeof managedRoom?.target_humidity === "number" ? managedRoom.target_humidity : room.targetHumidity,
   }));
   card.appendChild(steppers);

@@ -2500,7 +2500,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         for (const label of [
           "Климат по комнатам", "Комнаты и цели",
           "Кондиционеры", "Термоголовки", "Тёплый пол", "Увлажнители",
-          "Очистители", "Вытяжки", "Гостиная", "Детская", "24,5°", "46% влажн.",
+          "Очистители", "Вытяжки", "Гостиная", "Детская", "24,5°", "46%",
           "Кабинет",
         ]) {
           if (!text.includes(label)) throw new Error("climate tablet text missing: " + label + " :: " + text);
@@ -2510,8 +2510,28 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         if (roomCards.length !== 3) throw new Error("climate room cards mismatch: " + roomCards.length);
         const office = roomCards.find((node) => textOf(node).includes("Кабинет"));
         const officeText = textOf(office);
-        if (!officeText.includes("Нет данных") || !officeText.includes("Цели · —")) {
+        if (!officeText.includes("Нет данных") || !officeText.includes("Цели") || !officeText.includes("Не заданы")) {
           throw new Error("climate room card did not render the office without readings: " + officeText);
+        }
+        const living = roomCards.find((node) => textOf(node).includes("Гостиная"));
+        const currentTemperature = findAll(living, (node) =>
+          String(node.className).split(" ").includes("hh-climate-room-temperature"))[0];
+        if (!currentTemperature || currentTemperature.textContent !== "24,5°") {
+          throw new Error("room header does not show current temperature");
+        }
+        const facts = findAll(living, (node) =>
+          String(node.className).split(" ").includes("hh-climate-room-fact"));
+        if (facts.length !== 2 || textOf(facts[0]).includes("24,5°")
+          || !textOf(facts[0]).includes("Влажность") || !textOf(facts[1]).includes("Цели")) {
+          throw new Error("room facts duplicate or hide the main readings");
+        }
+        const readonlyControls = findAll(living, (node) =>
+          String(node.className).split(" ").includes("hh-climate-room-stepper"));
+        if (readonlyControls.length !== 2
+          || !textOf(readonlyControls[0]).includes("Температура")
+          || !textOf(readonlyControls[1]).includes("Влажность")
+          || readonlyControls.some((control) => textOf(control).includes("Недоступно"))) {
+          throw new Error("read-only room targets remain cramped or repetitive");
         }
         const searchField = findAll(climate, (node) =>
           String(node.className).split(" ").includes("hh-climate-room-search"))[0];
@@ -2562,6 +2582,81 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         if (!roomSheet || findAll(roomSheet, (node) =>
           String(node.className).split(" ").includes("climate-product-card")).length !== 2) {
           throw new Error("room climate drill-down did not show its physical devices");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_climate_room_target_controls_show_values_and_preserve_actions(self) -> None:
+        payloads = dict(GET_PATHS)
+        payloads["hausman_hub/v1/dashboard"] = {
+            "rooms": [{
+                "id": "living", "name": "Гостиная", "temp": 24.5,
+                "humidity": 46, "targetTemp": 25.0, "targetHumidity": 52,
+            }],
+            "devices": [],
+            "alarms": [],
+        }
+        payloads["hausman_hub/v1/climate/runtime"] = {
+            "state_revision": 52,
+            "rooms": [{
+                "id": "living", "mode": "automatic",
+                "target_temperature": 25.0,
+                "target_humidity": 52,
+                "control": {
+                    "enabled": True,
+                    "allowed_actions": ["set_room_target", "set_room_humidity_target"],
+                    "blocked_reasons": [],
+                    "action_inputs": {
+                        "set_room_target": {
+                            "target_temperature": {"minimum": 16, "maximum": 30, "step": 0.5},
+                        },
+                        "set_room_humidity_target": {
+                            "target_humidity": {"minimum": 30, "maximum": 70, "step": 1},
+                        },
+                    },
+                },
+                "devices": [],
+            }],
+        }
+        script = panel_script(
+            payloads,
+            {
+                "hausman_hub/v1/climate/actions": {
+                    "status": "confirmed", "confirmed": True,
+                }
+            },
+            """
+        await tick();
+        panel._shell.tabs.climate.fire("click");
+        const climate = panel._shell.climateOverview;
+        const card = findAll(climate, (node) =>
+          String(node.className).split(" ").includes("hh-climate-room-card"))[0];
+        const controls = findAll(card, (node) =>
+          String(node.className).split(" ").includes("hh-climate-room-stepper"));
+        const values = findAll(card, (node) =>
+          String(node.className).split(" ").includes("hh-climate-room-stepper-value"));
+        const buttons = findAll(card, (node) =>
+          String(node.className).split(" ").includes("hh-climate-room-step"));
+        if (controls.length !== 2 || values.length !== 2 || buttons.length !== 4) {
+          throw new Error("room target controls lost their tablet structure");
+        }
+        if (textOf(controls[0]).includes("Темп.") || textOf(controls[1]).includes("Влажн.")) {
+          throw new Error("room target labels remain abbreviated");
+        }
+        if (values[0].textContent !== "25°" || values[1].textContent !== "52%") {
+          throw new Error("room target values are not visible: " + values.map((node) => node.textContent).join("|"));
+        }
+        buttons[1].fire("click", { stopPropagation() {} });
+        await tick(10);
+        const post = calls.find((call) => call.method === "POST"
+          && call.path === "hausman_hub/v1/climate/actions"
+          && call.payload.action === "set_room_target");
+        if (!post || post.payload.room_id !== "living"
+          || post.payload.expected_state_revision !== 52
+          || post.payload.parameters.target_temperature !== 25.5) {
+          throw new Error("temperature target action changed: " + JSON.stringify(post));
         }
             """,
         )

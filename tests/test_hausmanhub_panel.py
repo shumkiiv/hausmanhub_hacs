@@ -144,6 +144,9 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn("grid-template-columns:44px minmax(0,1fr) auto", styles)
         self.assertIn("grid-column:2; justify-self:start", styles)
         self.assertIn("grid-column:3; grid-row:1 / span 2", styles)
+        self.assertIn(".hh-climate-room-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr))", styles)
+        self.assertIn(".hh-climate-room-stepper-actions { display:grid; grid-template-columns:40px minmax(54px,1fr) 40px", styles)
+        self.assertNotIn(".hh-climate-room-stepper.is-disabled { opacity", styles)
 
     def test_climate_conditioner_category_uses_device_icon(self) -> None:
         source = CLIMATE_OVERVIEW_JS.read_text(encoding="utf-8")
@@ -186,6 +189,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         overview = OVERVIEW_JS.read_text(encoding="utf-8")
         overview_utility_cards = OVERVIEW_UTILITY_CARDS_JS.read_text(encoding="utf-8")
         room_icons = ROOM_ICONS_JS.read_text(encoding="utf-8")
+        self.assertIn('rooms: "M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"', room_icons)
         device_maintenance_css = DEVICE_MAINTENANCE_CSS.read_text(encoding="utf-8")
         feedback = FEEDBACK_JS.read_text(encoding="utf-8")
         command_feedback = COMMAND_FEEDBACK_JS.read_text(encoding="utf-8")
