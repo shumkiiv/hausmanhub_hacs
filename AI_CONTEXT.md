@@ -1,8 +1,19 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-22 (HACS 1.52.148, карточки освещения визуально очищены локально).
+Last updated: 2026-08-22 (HACS 1.52.148, иконка кондиционеров и контраст предупреждений исправлены локально).
 
 ## Current work
+
+- 2026-08-22 (Codex): изменён только HACS frontend. В категории
+  «Кондиционеры» снежинка режима охлаждения заменена на узнаваемый настенный
+  блок с решёткой и потоками воздуха. В общем Hero библиотечных страниц
+  удалены оранжевые рамка и текст предупреждения: поверхность остаётся
+  нейтральной, подпись использует основной цвет текста, проблема отмечается
+  компактным красным индикатором и контрастным числом. Browser QA:
+  1504x900 light/dark и 900x1100 light. Профиль frontend: 142 passed,
+  50 subtests; JS syntax и `git diff --check` зелёные. Feature commit
+  `0952098`. Версия остаётся `1.52.148`; release, push и deploy не
+  выполнялись. Android, backend, API, contracts и storage не менялись.
 
 - 2026-08-22 (Codex): изменён только HACS frontend раздела «Освещение».
   Карточки комнат, правой колонки и физических устройств получили чистые
@@ -3974,5 +3985,5 @@ Engineering and review rules are in
 
 - Obsidian/context index: `LLM_WIKI/00_Index.md`.
 - Latest generated context: `LLM_WIKI/Context.md`.
-- Last sync: 2026-08-22T19:20:56+03:00.
+- Last sync: 2026-08-22T19:32:30+03:00.
 <!-- llm-wiki-sync:end -->
