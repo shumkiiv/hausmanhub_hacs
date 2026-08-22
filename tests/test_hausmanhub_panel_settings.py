@@ -4118,6 +4118,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         self.assertIn(".overview-canon-primary-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr))", overview_css)
         self.assertIn("flex-direction:column", security_css)
         self.assertIn("white-space:normal", security_css)
+        self.assertIn(".security-canon-attention{display:block;box-sizing:border-box;width:100%;padding:12px", security_css)
         self.assertIn("flex-direction:column", devices_css)
         self.assertIn("white-space:normal", devices_css)
         self.assertIn("repeat(auto-fit,minmax(min(100%,420px),1fr))", settings_css)
