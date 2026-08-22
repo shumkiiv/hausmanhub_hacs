@@ -1,9 +1,9 @@
-import { createHeroRoomNavigation } from "./hausman-hub-hero-room-navigation.js?v=1.52.136";
-import { overviewHeroRenderKey, overviewHomeName, stableOverviewHeroImage } from "./hausman-hub-overview-hero-state.js?v=1.52.136";
-import { renderHomeTargetCard } from "./hausman-hub-climate-overview.js?v=1.52.136";
-import { scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.136";
-import { openUpcomingEventsModal } from "./hausman-hub-overview-events-modal.js?v=1.52.136";
-import { renderOverviewSideCards } from "./hausman-hub-overview-side.js?v=1.52.136";
+import { createHeroRoomNavigation } from "./hausman-hub-hero-room-navigation.js?v=1.52.137";
+import { overviewHeroRenderKey, overviewHomeName, stableOverviewHeroImage } from "./hausman-hub-overview-hero-state.js?v=1.52.137";
+import { renderHomeTargetCard } from "./hausman-hub-climate-overview.js?v=1.52.137";
+import { scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.137";
+import { openUpcomingEventsModal } from "./hausman-hub-overview-events-modal.js?v=1.52.137";
+import { renderOverviewSideCards } from "./hausman-hub-overview-side.js?v=1.52.137";
 
 function validNumber(value) {
   return value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
