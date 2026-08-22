@@ -1,8 +1,24 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-22 (HACS 1.52.135 опубликован и развёрнут в production).
+Last updated: 2026-08-22 (HACS 1.52.136 с safety сценариев опубликован и развёрнут в production).
 
 ## Current work
+
+- 2026-08-22 (Codex): HACS `v1.52.136` опубликован и развёрнут в
+  production поверх принятого визуального baseline `1.52.135`. Сценарии
+  получили bounded queue, trigger timing, единый snapshot условий,
+  fail-closed проверку критичных действий, идемпотентность, partial-исходы,
+  ограничение вложенности и редактированный operation journal. Контракты
+  закреплены на `0.47.0` (`57a1b04`). Feature commit `e4bca0a`, release
+  commit/tag `02206a7`, GitHub Release без assets. Full release-gate: 1562
+  tests, 4 skipped; Actions `32554721280` успешен. Перед deploy создан full
+  backup `f86830d3`, 917975040 байт, Home Assistant, база, 10 add-ons и
+  `ssl`, failed-списки пусты. После явной установки, двух успешных
+  `check_config` и одного restart installed/latest равны `v1.52.136`,
+  config entry loaded, 12 сущностей доступны, журнал проходит JSON Schema,
+  27 из 27 frontend assets совпадают с release. В system log нет ошибок и
+  traceback, остаётся одно известное climate WARNING. Физические команды не
+  отправлялись.
 
 - 2026-08-22 (Codex): HACS `v1.52.135` опубликован и развёрнут в
   production. Выпуск объединяет последние планшетные правки освещения и

@@ -1,5 +1,29 @@
 # Current Work
 
+## 2026-08-22: HACS 1.52.136, безопасное исполнение сценариев
+
+- Сценарии получили ограниченную очередь, явный queue-full, выдержку
+  состояния, debounce, cooldown и управляемую обработку recovery-событий.
+- Условия запуска читаются единым snapshot. Неизвестные данные и устаревшие
+  доказательства для критичных lock/valve-команд блокируют выполнение.
+  Идемпотентность, partial-исходы, nested depth и проверка циклов действуют
+  единообразно.
+- Operation journal хранит редактированный trace решений, действий и исходов.
+  Сырые entity ID, пользовательские имена и исключения наружу не выходят.
+- HACS закреплён на contracts `0.47.0`, commit `57a1b04`. Feature commit
+  `e4bca0a`, release commit/tag `02206a7`, `v1.52.136`. Release:
+  https://github.com/shumkiiv/hausmanhub_hacs/releases/tag/v1.52.136.
+- Профиль safety: 158 tests и 3 subtests. Полный release-gate: 1562 tests,
+  4 skipped. GitHub Actions `32554721280` завершён успешно.
+- Перед deploy создан full backup `f86830d3`, 917975040 байт, с Home
+  Assistant, базой, 10 add-ons и `ssl`; failed-списки пусты. После явной
+  установки, успешных config checks и одного restart installed/latest равны
+  `v1.52.136`, config entry loaded, 12 сущностей доступны, journal schema
+  valid, 27 frontend assets совпадают с release.
+- Визуальная компоновка 1.52.135 сохранена: frontend release diff содержит
+  только cache/version bump. Физические команды при проверке не
+  отправлялись. Откат: backup `f86830d3`.
+
 ## 2026-08-22: HACS 1.52.135, планшетные правки и единый масштаб
 
 - Главная приведена к масштабу остальных страниц: типографика, Hero,
