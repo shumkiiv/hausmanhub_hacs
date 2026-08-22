@@ -1858,7 +1858,8 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           && node["aria-label"] === "Развернуть панель «Показания энергии»")[0];
         energyToggle.fire("click", { stopPropagation() {} });
         if (!energyCard.classList.contains("is-expanded")
-          || !lightingCard.classList.contains("is-expanded")) {
+          || !lightingCard.classList.contains("is-expanded")
+          || !overview.classList.contains("overview-utility-expanded")) {
           throw new Error("energy and lighting must expand as one dashboard row");
         }
         const expandedEnergy = byClass("overview-tablet-energy-expanded")[0];
@@ -1887,7 +1888,8 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const lightingToggle = findAll(lightingCard, (node) => node.tagName === "BUTTON"
           && node["aria-label"] === "Свернуть панель «Освещение»")[0];
         lightingToggle.fire("click", { stopPropagation() {} });
-        if (energyCard.classList.contains("is-expanded") || lightingCard.classList.contains("is-expanded")) {
+        if (energyCard.classList.contains("is-expanded") || lightingCard.classList.contains("is-expanded")
+          || overview.classList.contains("overview-utility-expanded")) {
           throw new Error("lighting toggle must collapse both dashboard cards");
         }
         if (byClass("overview-tablet-activity-row").length !== 24) {

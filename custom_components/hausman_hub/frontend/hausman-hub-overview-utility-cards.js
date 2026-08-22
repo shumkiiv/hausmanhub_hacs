@@ -318,6 +318,7 @@ export function renderOverviewUtilityCards(panel, container, dashboard, deps) {
   const applyMode = (mode) => {
     const expanded = mode === "expanded";
     row.classList.toggle("is-expanded", expanded);
+    container.parentElement?.classList?.toggle("overview-utility-expanded", expanded);
     cards.forEach((card) => card._overviewUtilityModeControl?.apply(mode));
   };
   panel._overviewUtilityApplyMode = applyMode;
