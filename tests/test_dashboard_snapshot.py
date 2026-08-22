@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import unittest
+from pathlib import Path
 
 from jsonschema import Draft202012Validator
 
@@ -17,7 +17,6 @@ from custom_components.hausman_hub.application.dashboard_snapshot import (
     build_dashboard_snapshot,
 )
 from custom_components.hausman_hub.domain.hub_settings import HausmanHubSettings
-
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -1420,6 +1419,69 @@ class DashboardSnapshotTest(unittest.TestCase):
         self.assertEqual("сухо", leak["details"][0]["value"])
         self.assertNotEqual(lock["state"], lock["stateLabel"])
         self.assertNotEqual(alarm["state"], alarm["stateLabel"])
+
+    def test_room_presentation_air_quality_and_scenario_room_are_server_owned(self) -> None:
+        snapshot = build_dashboard_snapshot(
+            areas=(
+                DashboardArea("living", "Гостиная", "mdi:sofa"),
+                DashboardArea("kitchen", "Кухня", "mdi:fridge-outline"),
+            ),
+            devices=(),
+            entities=(
+                DashboardEntity(
+                    "sensor.living_co2",
+                    "sensor",
+                    "735",
+                    "CO2",
+                    {"device_class": "carbon_dioxide", "unit_of_measurement": "ppm"},
+                    area_id="living",
+                ),
+                DashboardEntity(
+                    "sensor.living_pm25",
+                    "sensor",
+                    "7.2",
+                    "PM2.5",
+                    {"device_class": "pm25", "unit_of_measurement": "µg/m³"},
+                    area_id="living",
+                ),
+                DashboardEntity(
+                    "sensor.living_tvoc",
+                    "sensor",
+                    "104",
+                    "tVOC",
+                    {"device_class": "volatile_organic_compounds", "unit_of_measurement": "ppb"},
+                    area_id="living",
+                ),
+            ),
+            scenarios=(DashboardScenario("movie", "Кино", room_id="living"),),
+            generated_at_ms=1,
+            local_iso="2026-08-22T12:00:00+03:00",
+            room_settings={
+                "living": {
+                    "roomId": "living",
+                    "type": "living",
+                    "icon": "mdi:sofa",
+                    "order": 1,
+                    "visible": True,
+                },
+                "kitchen": {
+                    "roomId": "kitchen",
+                    "type": "kitchen",
+                    "icon": "mdi:fridge-outline",
+                    "order": 0,
+                    "visible": False,
+                },
+            },
+        )
+
+        self.assertEqual(["kitchen", "living"], [room["id"] for room in snapshot["rooms"]])
+        living = snapshot["rooms"][1]
+        self.assertEqual((1, True, "living"), (living["order"], living["visible"], living["type"]))
+        self.assertEqual(
+            {"co2Ppm": 735.0, "pm25UgM3": 7.2, "tvocPpb": 104.0},
+            living["airQuality"],
+        )
+        self.assertEqual("living", snapshot["scenarios"][0]["roomId"])
 
 
 if __name__ == "__main__":

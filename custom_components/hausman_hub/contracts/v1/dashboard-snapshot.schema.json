@@ -177,8 +177,21 @@
         "id": { "type": "string" },
         "name": { "type": "string" },
         "icon": { "type": ["string", "null"] },
+        "type": { "type": ["string", "null"] },
+        "order": { "type": "integer", "minimum": 0, "maximum": 1023 },
+        "visible": { "type": "boolean" },
         "temp": { "type": ["number", "null"] },
         "humidity": { "type": ["number", "null"] },
+        "airQuality": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["co2Ppm", "pm25UgM3", "tvocPpb"],
+          "properties": {
+            "co2Ppm": { "type": ["number", "null"], "minimum": 0 },
+            "pm25UgM3": { "type": ["number", "null"], "minimum": 0 },
+            "tvocPpb": { "type": ["number", "null"], "minimum": 0 }
+          }
+        },
         "targetTemp": { "type": ["number", "null"] },
         "targetHumidity": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
         "minTargetTemp": { "type": ["number", "null"] },
@@ -407,7 +420,8 @@
         "icon": { "type": ["string", "null"] },
         "requiresConfirmation": { "type": "boolean" },
         "favorite": { "type": "boolean" },
-        "danger": { "type": "boolean" }
+        "danger": { "type": "boolean" },
+        "roomId": { "type": ["string", "null"] }
       },
       "additionalProperties": true
     },

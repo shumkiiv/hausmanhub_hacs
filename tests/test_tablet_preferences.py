@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import unittest
 from copy import deepcopy
 from datetime import datetime, timezone
-import unittest
 
 from custom_components.hausman_hub.application.tablet_preferences import (
     TabletPreferencesService,
@@ -50,6 +50,7 @@ class TabletPreferencesServiceTest(unittest.IsolatedAsyncioTestCase):
     async def test_defaults_and_legacy_energy_seed_are_explicit(self) -> None:
         tablet = self.service.tablet
         energy = self.service.energy
+        rooms = self.service.rooms
 
         self.assertEqual(0, tablet["revision"])
         self.assertEqual(default_tablet_settings(), tablet["settings"])
@@ -61,6 +62,76 @@ class TabletPreferencesServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(energy["settings"]["showVoltage"])
         self.assertEqual("separate", energy["settings"]["aggregation"])
         self.assertTrue(energy["settings"]["useAllDevices"])
+        self.assertEqual("hausman-hub-room-settings", rooms["contract"]["name"])
+        self.assertEqual([], rooms["rooms"])
+
+    async def test_room_settings_are_atomic_canonical_and_unique(self) -> None:
+        rooms = [
+            {
+                "roomId": "living",
+                "type": "living",
+                "icon": "mdi:sofa",
+                "order": 0,
+                "visible": True,
+            },
+            {
+                "roomId": "kitchen",
+                "type": "kitchen",
+                "icon": "mdi:fridge-outline",
+                "order": 1,
+                "visible": False,
+            },
+        ]
+        saved = await self.service.async_replace_rooms(0, rooms)
+        self.assertEqual(1, saved["revision"])
+        self.assertEqual(rooms, saved["rooms"])
+        self.assertEqual("living", self.service.room_presentations["living"]["type"])
+
+        invalid = deepcopy(rooms)
+        invalid[1]["order"] = 0
+        with self.assertRaises(TabletPreferencesViolation):
+            await self.service.async_replace_rooms(1, invalid)
+
+        invalid = deepcopy(rooms)
+        invalid[0]["icon"] = "mdi:bed"
+        with self.assertRaises(TabletPreferencesViolation):
+            await self.service.async_replace_rooms(1, invalid)
+
+    async def test_room_registry_change_is_rolled_back_when_storage_fails(self) -> None:
+        calls: list[str] = []
+        rooms = [
+            {
+                "roomId": "living",
+                "type": "living",
+                "icon": "mdi:sofa",
+                "order": 0,
+                "visible": True,
+            }
+        ]
+
+        async def apply(_rooms: list[dict[str, object]]) -> None:
+            calls.append("apply")
+
+        async def rollback() -> None:
+            calls.append("rollback")
+
+        self.store.fail = True
+        with self.assertRaises(RuntimeError):
+            await self.service.async_replace_rooms(
+                0, rooms, apply=apply, rollback=rollback
+            )
+        self.assertEqual(["apply", "rollback"], calls)
+        self.assertEqual([], self.service.rooms["rooms"])
+
+    async def test_old_storage_is_migrated_with_empty_room_settings(self) -> None:
+        await self.service.async_replace_tablet(0, default_tablet_settings())
+        old_state = deepcopy(self.store.value)
+        old_state.pop("rooms")
+        service = TabletPreferencesService(self.store)
+        self.store.value = old_state
+        await service.async_load(HausmanHubSettings())
+        self.assertEqual(0, service.rooms["revision"])
+        self.assertEqual([], service.rooms["rooms"])
 
     async def test_replace_is_atomic_and_rejects_stale_revision(self) -> None:
         changed = default_tablet_settings()

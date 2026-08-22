@@ -17,14 +17,14 @@ from .contour_override import (
     TEMPORARY_TEMPERATURE_REQUEST_CONTRACT_VERSION,
 )
 from .contours import CONTOUR_CONTRACT_NAME, CONTOUR_CONTRACT_VERSION
+from .device_features import (
+    DEVICE_FEATURE_MATRIX_CONTRACT_NAME,
+    DEVICE_FEATURE_MATRIX_CONTRACT_VERSION,
+)
 from .event_stream import (
     EVENT_STREAM_HEARTBEAT_SECONDS,
     EVENT_STREAM_QUEUE_SIZE,
     EVENT_STREAM_REPLAY_SIZE,
-)
-from .device_features import (
-    DEVICE_FEATURE_MATRIX_CONTRACT_NAME,
-    DEVICE_FEATURE_MATRIX_CONTRACT_VERSION,
 )
 from .voice_greeting import (
     VOICE_GREETING_CONTRACT_NAME,
@@ -35,7 +35,6 @@ from .voice_greeting import (
     VOICE_TEST_REQUEST_CONTRACT_VERSION,
 )
 
-
 API_CAPABILITIES_CONTRACT_NAME = "hausman-hub-capabilities"
 API_CAPABILITIES_CONTRACT_VERSION = 1
 API_MAJOR_VERSION = 1
@@ -45,6 +44,7 @@ CAPABILITIES_PATH = f"{API_BASE_PATH}/capabilities"
 HOME_PATH = f"{API_BASE_PATH}/home"
 DASHBOARD_PATH = f"{API_BASE_PATH}/dashboard"
 TABLET_PROFILE_PATH = f"{API_BASE_PATH}/tablet-profile"
+ROOM_SETTINGS_PATH = f"{API_BASE_PATH}/room-settings"
 ENERGY_SETTINGS_PATH = f"{API_BASE_PATH}/energy-settings"
 ENERGY_HISTORY_PATH = f"{API_BASE_PATH}/energy/history"
 ENERGY_METER_PATH = f"{API_BASE_PATH}/energy/meter"
@@ -216,6 +216,16 @@ def api_capabilities_snapshot(
                 "optimistic_locking": True,
                 "response_contract": {
                     "name": "hausman-hub-tablet-profile",
+                    "version": 1,
+                },
+            },
+            "room_settings": {
+                "available": True,
+                "path": ROOM_SETTINGS_PATH,
+                "methods": ["GET", "PUT"],
+                "optimistic_locking": True,
+                "response_contract": {
+                    "name": "hausman-hub-room-settings",
                     "version": 1,
                 },
             },

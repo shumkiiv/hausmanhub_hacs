@@ -2,26 +2,26 @@
 
 from __future__ import annotations
 
+import hashlib
+import math
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
-import hashlib
-import math
 from typing import Any
 
-from ..domain.hub_settings import HausmanHubSettings
-from ..domain.device_power_dependencies import (
-    PowerDependencyStatus,
-    effective_device_state,
-)
 from ..domain.contours import (
     CLIMATE_TARGET_HUMIDITY_DEFAULT,
     CLIMATE_TARGET_TEMPERATURE_DEFAULT,
     CLIMATE_TARGET_TEMPERATURE_MAXIMUM,
     CLIMATE_TARGET_TEMPERATURE_MINIMUM,
 )
+from ..domain.device_power_dependencies import (
+    PowerDependencyStatus,
+    effective_device_state,
+)
+from ..domain.hub_settings import HausmanHubSettings
 from .dashboard_comfort import build_dashboard_comfort
-
+from .tablet_preferences import room_type_from_icon
 
 DASHBOARD_CONTRACT_NAME = "universal-home"
 DASHBOARD_CONTRACT_VERSION = 1
@@ -247,6 +247,7 @@ class DashboardScenario:
     requires_confirmation: bool = False
     favorite: bool = False
     danger: bool = False
+    room_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -913,6 +914,7 @@ def build_dashboard_snapshot(
     pinned_entity_ids: Iterable[str] | None = None,
     power_dependencies: Mapping[str, str] | None = None,
     climate_ownership: Mapping[str, Mapping[str, str]] | None = None,
+    room_settings: Mapping[str, Mapping[str, object]] | None = None,
 ) -> dict[str, object]:
     """Project one immutable, read-only universal dashboard snapshot."""
 
@@ -1253,6 +1255,12 @@ def build_dashboard_snapshot(
 
     room_payloads: list[dict[str, object]] = []
     visible_device_ids = {str(device["id"]) for device in device_payloads}
+    default_room_orders = {
+        area.area_id: index
+        for index, area in enumerate(
+            sorted(area_by_id.values(), key=lambda item: (item.name, item.area_id))
+        )
+    }
     for area in area_by_id.values():
         room_entities = tuple(
             entity
@@ -1299,6 +1307,40 @@ def build_dashboard_snapshot(
         if temperature is None and climate is not None:
             temperature = _number(climate.attributes.get("current_temperature"))
         humidity = _sensor_value(room_entities, "humidity")
+        air_quality = {
+            "co2Ppm": _sensor_value(room_entities, "carbon_dioxide"),
+            "pm25UgM3": _sensor_value(room_entities, "pm25"),
+            "tvocPpb": _sensor_value(room_entities, "volatile_organic_compounds"),
+        }
+        presentation = (
+            room_settings.get(area.area_id)
+            if isinstance(room_settings, Mapping)
+            else None
+        )
+        icon = (
+            presentation.get("icon")
+            if isinstance(presentation, Mapping)
+            and isinstance(presentation.get("icon"), str)
+            else area.icon
+        )
+        room_type = (
+            presentation.get("type")
+            if isinstance(presentation, Mapping)
+            and isinstance(presentation.get("type"), str)
+            else room_type_from_icon(icon)
+        )
+        order = (
+            presentation.get("order")
+            if isinstance(presentation, Mapping)
+            and type(presentation.get("order")) is int
+            else default_room_orders[area.area_id]
+        )
+        visible = (
+            presentation.get("visible")
+            if isinstance(presentation, Mapping)
+            and type(presentation.get("visible")) is bool
+            else True
+        )
         room_device_ids = sorted(
             {
                 source_to_public[entity.device_id]
@@ -1316,9 +1358,13 @@ def build_dashboard_snapshot(
             {
                 "id": area.area_id,
                 "name": area.name,
-                "icon": area.icon,
+                "icon": icon,
+                "type": room_type,
+                "order": order,
+                "visible": visible,
                 "temp": temperature,
                 "humidity": humidity,
+                "airQuality": air_quality,
                 "targetTemp": target,
                 "targetHumidity": target_humidity,
                 "minTargetTemp": target,
@@ -1390,6 +1436,7 @@ def build_dashboard_snapshot(
             "requiresConfirmation": scenario.requires_confirmation,
             "favorite": scenario.favorite,
             "danger": scenario.danger,
+            "roomId": scenario.room_id,
         }
         for scenario in scenarios
     ]
@@ -1493,7 +1540,10 @@ def build_dashboard_snapshot(
         "localIso": local_iso,
         "summary": summary,
         "comfort": comfort,
-        "rooms": sorted(room_payloads, key=lambda item: str(item["name"])),
+        "rooms": sorted(
+            room_payloads,
+            key=lambda item: (int(item["order"]), str(item["name"])),
+        ),
         "devices": sorted(device_payloads, key=lambda item: str(item["name"])),
         "energy": energy_payload,
         "inventory": {

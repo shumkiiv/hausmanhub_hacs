@@ -23,7 +23,6 @@ from .application.weather_read_model import (
 from .domain.hub_settings import HausmanHubSettings
 from .weather_ha_gateway import async_weather_forecast
 
-
 _PUBLIC_DIAGNOSTIC_DEVICE_CLASSES = frozenset(
     {
         "battery",
@@ -281,6 +280,7 @@ async def _dashboard_scenarios(
             requires_confirmation=bool(scenario.requires_confirmation),
             favorite=bool(scenario.favorite),
             danger=bool(scenario.danger),
+            room_id=_non_empty_string(getattr(scenario, "room_id", None)),
         )
         for scenario in scenarios
         if bool(getattr(scenario, "enabled", False))
@@ -383,6 +383,7 @@ async def async_dashboard_snapshot(
     power_dependencies: Mapping[str, str] | None = None,
     climate_ownership: Mapping[str, Mapping[str, str]] | None = None,
     outdoor_sensor_entity_ids: Sequence[str] | None = None,
+    room_settings: Mapping[str, Mapping[str, object]] | None = None,
 ) -> dict[str, object]:
     """Collect current HA registries and project one side-effect-free payload."""
 
@@ -463,6 +464,7 @@ async def async_dashboard_snapshot(
         pinned_entity_ids=pinned_entity_ids,
         power_dependencies=power_dependencies,
         climate_ownership=climate_ownership,
+        room_settings=room_settings,
     )
     weather_entity = next(
         (entity for entity in entity_values if entity.domain == "weather"), None

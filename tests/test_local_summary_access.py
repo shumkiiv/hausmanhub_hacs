@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import copy
-from datetime import datetime, timezone
 import importlib
 import json
-from pathlib import Path
 import sys
-from types import ModuleType, SimpleNamespace
 import unittest
-
+from datetime import datetime, timezone
+from pathlib import Path
+from types import ModuleType, SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_MODULE = "custom_components.hausman_hub"
@@ -1068,6 +1067,62 @@ class LocalSummaryAccessTest(unittest.TestCase):
         current = asyncio.run(view.get(FakeRequest("127.0.0.1", tablet, path=path)))
         self.assertEqual(saved.payload, current.payload)
 
+    def test_room_settings_apply_canonical_icon_with_registry_read_back(self) -> None:
+        class AreaRegistry:
+            def __init__(self) -> None:
+                self.areas = {
+                    "living": SimpleNamespace(
+                        id="living", name="Гостиная", icon="mdi:sofa"
+                    )
+                }
+
+            def async_list_areas(self) -> list[object]:
+                return list(self.areas.values())
+
+            def async_get_area(self, area_id: str) -> object | None:
+                return self.areas.get(area_id)
+
+            def async_update(self, area_id: str, *, icon: str | None) -> object:
+                self.areas[area_id].icon = icon
+                return self.areas[area_id]
+
+        self.hass.area_registry = AreaRegistry()
+        path = "/api/hausman_hub/v1/room-settings"
+        view = next(item for item in self.hass.http.views if item.url == path)
+        tablet = reader_user("system-users")
+        initial = asyncio.run(view.get(FakeRequest("127.0.0.1", tablet, path=path)))
+        self.assertEqual(200, initial.status)
+        self.assertEqual(0, initial.payload["revision"])
+        self.assertEqual("living", initial.payload["rooms"][0]["type"])
+
+        changed = copy.deepcopy(initial.payload["rooms"])
+        changed[0].update({"type": "office", "icon": "mdi:briefcase"})
+        saved = asyncio.run(
+            view.put(
+                FakeJsonRequest(
+                    "127.0.0.1",
+                    tablet,
+                    path,
+                    {"expectedRevision": 0, "rooms": changed},
+                )
+            )
+        )
+        self.assertEqual(200, saved.status)
+        self.assertEqual(1, saved.payload["revision"])
+        self.assertEqual("mdi:briefcase", self.hass.area_registry.areas["living"].icon)
+
+        stale = asyncio.run(
+            view.put(
+                FakeJsonRequest(
+                    "127.0.0.1",
+                    tablet,
+                    path,
+                    {"expectedRevision": 0, "rooms": changed},
+                )
+            )
+        )
+        self.assertEqual(409, stale.status)
+
     def test_dashboard_snapshot_is_available_to_local_tablet_and_admin(self) -> None:
         """The shared read model must feed both product surfaces without writes."""
 
@@ -1885,18 +1940,22 @@ class LocalSummaryAccessTest(unittest.TestCase):
     def test_shadow_climate_route_returns_public_state_and_never_posts(self) -> None:
         """Exercise the native Android facade with an actual runtime."""
 
-        from tests.climate_bridge_fixture import (
-            import_climate_state,
+        from custom_components.hausman_hub.application.climate_runtime import (
+            ClimateRuntime,
         )
-        from custom_components.hausman_hub.application.climate_runtime import ClimateRuntime
         from custom_components.hausman_hub.application.contours import (
             build_climate_contour_setup,
             with_applied_climate_schedule_profile,
             with_climate_schedule,
         )
-        from custom_components.hausman_hub.domain.climate_bridge import ClimateControlMode
+        from custom_components.hausman_hub.domain.climate_bridge import (
+            ClimateControlMode,
+        )
         from custom_components.hausman_hub.domain.configuration import SafeConfiguration
         from custom_components.hausman_hub.domain.contours import ClimateProfile
+        from tests.climate_bridge_fixture import (
+            import_climate_state,
+        )
         from tests.test_climate_import import source_payload
         from tests.test_climate_runtime import (
             SnapshotStateView,
@@ -2047,16 +2106,20 @@ class LocalSummaryAccessTest(unittest.TestCase):
     def test_local_admin_creates_unsaved_climate_draft_and_tablet_cannot(self) -> None:
         """The first setup POST returns only a draft and performs no write."""
 
-        from tests.climate_bridge_fixture import (
-            import_climate_state,
-        )
         from custom_components.hausman_hub.application.climate_registry import (
             registry_from_payload,
         )
-        from custom_components.hausman_hub.application.climate_runtime import ClimateRuntime
-        from custom_components.hausman_hub.domain.climate_bridge import ClimateControlMode
+        from custom_components.hausman_hub.application.climate_runtime import (
+            ClimateRuntime,
+        )
+        from custom_components.hausman_hub.domain.climate_bridge import (
+            ClimateControlMode,
+        )
         from custom_components.hausman_hub.domain.configuration import SafeConfiguration
         from custom_components.hausman_hub.domain.contours import ContourRegistry
+        from tests.climate_bridge_fixture import (
+            import_climate_state,
+        )
         from tests.test_climate_import import source_payload
 
         registry = registry_from_payload({"version": 3, "home": {"outdoor_temperature_entity_id": None, "presence_entity_id": None, "central_heating_entity_id": None}, "rooms": [{"id": "living", "name": "Living room", "window_entity_id": None}, {"id": "kids", "name": "Kids", "window_entity_id": None}], "devices": []})
@@ -2365,14 +2428,18 @@ class LocalSummaryAccessTest(unittest.TestCase):
     def test_local_admin_updates_profiles_without_sending_device_commands(self) -> None:
         """The strict profile route saves only current configured room profiles."""
 
-        from tests.climate_bridge_fixture import (
-            import_climate_state,
+        from custom_components.hausman_hub.application.climate_runtime import (
+            ClimateRuntime,
         )
-        from custom_components.hausman_hub.application.climate_runtime import ClimateRuntime
         from custom_components.hausman_hub.application.contours import (
             build_climate_contour_setup,
         )
-        from custom_components.hausman_hub.domain.climate_bridge import ClimateControlMode
+        from custom_components.hausman_hub.domain.climate_bridge import (
+            ClimateControlMode,
+        )
+        from tests.climate_bridge_fixture import (
+            import_climate_state,
+        )
         from tests.test_climate_import import source_payload
         from tests.test_climate_runtime import (
             ReflectingStrictExecutor,
@@ -2505,14 +2572,18 @@ class LocalSummaryAccessTest(unittest.TestCase):
     def test_local_admin_enables_schedule_without_sending_device_commands(self) -> None:
         """The strict schedule route needs consent and only persists the timer."""
 
-        from tests.climate_bridge_fixture import (
-            import_climate_state,
+        from custom_components.hausman_hub.application.climate_runtime import (
+            ClimateRuntime,
         )
-        from custom_components.hausman_hub.application.climate_runtime import ClimateRuntime
         from custom_components.hausman_hub.application.contours import (
             build_climate_contour_setup,
         )
-        from custom_components.hausman_hub.domain.climate_bridge import ClimateControlMode
+        from custom_components.hausman_hub.domain.climate_bridge import (
+            ClimateControlMode,
+        )
+        from tests.climate_bridge_fixture import (
+            import_climate_state,
+        )
         from tests.test_climate_import import source_payload
         from tests.test_climate_runtime import (
             ReflectingStrictExecutor,
@@ -2644,17 +2715,21 @@ class LocalSummaryAccessTest(unittest.TestCase):
     def _managed_climate_views(self):
         """Build the managed runtime recipe and return the registered views."""
 
-        from tests.climate_bridge_fixture import (
-            import_climate_state,
+        from custom_components.hausman_hub.application.climate_runtime import (
+            ClimateRuntime,
         )
-        from custom_components.hausman_hub.application.climate_runtime import ClimateRuntime
         from custom_components.hausman_hub.application.contours import (
             build_climate_contour_setup,
             with_applied_climate_schedule_profile,
             with_climate_schedule,
         )
-        from custom_components.hausman_hub.domain.climate_bridge import ClimateControlMode
+        from custom_components.hausman_hub.domain.climate_bridge import (
+            ClimateControlMode,
+        )
         from custom_components.hausman_hub.domain.contours import ClimateProfile
+        from tests.climate_bridge_fixture import (
+            import_climate_state,
+        )
         from tests.test_climate_import import source_payload
         from tests.test_climate_runtime import (
             ReflectingStrictExecutor,
@@ -2752,7 +2827,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.143", panel.payload["integration_version"])
+        self.assertEqual("1.52.144", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
@@ -2941,7 +3016,9 @@ class LocalSummaryAccessTest(unittest.TestCase):
         from custom_components.hausman_hub.application.climate_runtime import (
             ClimateRuntime,
         )
-        from custom_components.hausman_hub.domain.climate_bridge import ClimateControlMode
+        from custom_components.hausman_hub.domain.climate_bridge import (
+            ClimateControlMode,
+        )
         from tests.test_climate_runtime import (
             ReflectingStrictExecutor,
             configuration,
@@ -3008,7 +3085,9 @@ class LocalSummaryAccessTest(unittest.TestCase):
         from custom_components.hausman_hub.application.climate_runtime import (
             ClimateRuntime,
         )
-        from custom_components.hausman_hub.domain.climate_bridge import ClimateControlMode
+        from custom_components.hausman_hub.domain.climate_bridge import (
+            ClimateControlMode,
+        )
         from tests.test_climate_runtime import (
             ReflectingStrictExecutor,
             configuration,
@@ -3651,7 +3730,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertFalse(hasattr(self.view, method))
 
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
-        self.assertEqual(77, len(self.hass.http.views))
+        self.assertEqual(78, len(self.hass.http.views))
         self.assertEqual(
             1,
             sum(
@@ -4125,7 +4204,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             [(closed_entry, ("sensor", "switch"))],
             closed_hass.config_entries.forwarded,
         )
-        self.assertEqual(76, len(closed_hass.http.views))
+        self.assertEqual(77, len(closed_hass.http.views))
         self.assertEqual(
             {
                 "/api/hausman_hub/v1/capabilities",
@@ -4138,6 +4217,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 "/api/hausman_hub/v1/energy-settings",
                 "/api/hausman_hub/v1/device-discovery",
                 "/api/hausman_hub/v1/tablet-profile",
+                "/api/hausman_hub/v1/room-settings",
                 "/api/hausman_hub/v1/home",
                 "/api/hausman_hub/v1/climate/runtime",
                 "/api/hausman_hub/v1/climate/actions",

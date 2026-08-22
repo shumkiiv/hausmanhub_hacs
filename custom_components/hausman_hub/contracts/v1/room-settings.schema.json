@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/room-settings.schema.json",
+  "title": "HausmanHub room presentation settings v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "revision", "updatedAt", "rooms"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "hausman-hub-room-settings" },
+        "version": { "const": 1 }
+      }
+    },
+    "revision": { "type": "integer", "minimum": 0 },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "rooms": {
+      "type": "array",
+      "maxItems": 128,
+      "items": { "$ref": "#/$defs/room" }
+    }
+  },
+  "$defs": {
+    "room": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["roomId", "type", "icon", "order", "visible"],
+      "properties": {
+        "roomId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "type": {
+          "enum": [
+            "rooms", "living", "kitchen", "bedroom", "child", "bathroom",
+            "toilet", "hallway", "office", "terrace", "spa", "storage", "category"
+          ]
+        },
+        "icon": {
+          "enum": [
+            "mdi:door-open", "mdi:sofa", "mdi:fridge-outline", "mdi:bed",
+            "mdi:human-child", "mdi:bathtub", "mdi:human-male-female", "mdi:door",
+            "mdi:briefcase", "mdi:balcony", "mdi:hot-tub", "mdi:archive", "mdi:shape"
+          ]
+        },
+        "order": { "type": "integer", "minimum": 0, "maximum": 1023 },
+        "visible": { "type": "boolean" }
+      }
+    }
+  }
+}

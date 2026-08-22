@@ -2,43 +2,18 @@
 
 from __future__ import annotations
 
+import json
+import logging
+import pathlib
 from collections.abc import Mapping
 from datetime import timedelta
 from http import HTTPStatus
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network, ip_address
-import json
-import logging
-import pathlib
 from typing import TYPE_CHECKING, Any, Final
 
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.util import dt as dt_util
 
-from .application.api_capabilities import (
-    CAPABILITIES_PATH,
-    CLIMATE_ACTION_PATH,
-    CLIMATE_OPERATION_PATH,
-    CLIMATE_RUNTIME_PATH,
-    CONTOURS_PATH,
-    CONTOUR_APPLY_PATH,
-    CONTOUR_APPLY_PREVIEW_PATH,
-    DASHBOARD_PATH,
-    DEVICE_DISCOVERY_PATH,
-    ENERGY_HISTORY_PATH,
-    ENERGY_METER_PATH,
-    ENERGY_SETTINGS_PATH,
-    HOME_PATH,
-    HOME_CLIMATE_TARGETS_PATH,
-    TABLET_PROFILE_PATH,
-    TEMPORARY_TEMPERATURE_PATH,
-    api_capabilities_snapshot,
-)
-from .application.climate_tablet import (
-    ClimateTabletOperationNotFound,
-    ClimateTabletService,
-    ClimateTabletUnavailable,
-    ClimateTabletViolation,
-)
 from .application.ai_assistant import AiAssistantService
 from .application.ai_assistant_config import (
     AiAssistantBinding,
@@ -48,14 +23,37 @@ from .application.ai_assistant_config import (
     ai_assistant_public_settings,
 )
 from .application.ai_assistant_storage import ai_assistant_state_to_payload
-from .application.configuration import (
-    CONNECTION_MODE_DEFAULT,
-    CONNECTION_MODE_FIELD,
-    HOME_ASSISTANT_URL_FIELD,
-    SMART_HOME_CENTER_URL_FIELD,
-    create_options,
-    effective_configuration,
+from .application.api_capabilities import (
+    CAPABILITIES_PATH,
+    CLIMATE_ACTION_PATH,
+    CLIMATE_OPERATION_PATH,
+    CLIMATE_RUNTIME_PATH,
+    CONTOUR_APPLY_PATH,
+    CONTOUR_APPLY_PREVIEW_PATH,
+    CONTOURS_PATH,
+    DASHBOARD_PATH,
+    DEVICE_DISCOVERY_PATH,
+    ENERGY_HISTORY_PATH,
+    ENERGY_METER_PATH,
+    ENERGY_SETTINGS_PATH,
+    HOME_CLIMATE_TARGETS_PATH,
+    HOME_PATH,
+    ROOM_SETTINGS_PATH,
+    TABLET_PROFILE_PATH,
+    TEMPORARY_TEMPERATURE_PATH,
+    api_capabilities_snapshot,
 )
+from .application.climate_area_assignment import ClimateAreaAssignmentViolation
+from .application.climate_comparison import climate_comparison_to_payload
+from .application.climate_device_bindings import ClimateDeviceBindingViolation
+from .application.climate_registry import ClimateRegistryViolation
+from .application.climate_runtime import (
+    ClimateRuntime,
+    ClimateRuntimeUnavailable,
+    ClimateSnapshotUnavailable,
+)
+from .application.climate_setup import ClimateSetupViolation
+from .application.climate_shadow_window import ClimateShadowWindowService
 from .application.climate_signal_settings import (
     CENTRAL_HEATING_SIGNAL,
     OUTDOOR_TEMPERATURE_SIGNAL,
@@ -70,52 +68,60 @@ from .application.climate_signal_settings import (
     validate_room_signal_updates,
     validate_room_window_update,
 )
-from .application.climate_comparison import climate_comparison_to_payload
-from .application.climate_shadow_window import ClimateShadowWindowService
-from .application.climate_area_assignment import ClimateAreaAssignmentViolation
-from .application.climate_device_bindings import ClimateDeviceBindingViolation
+from .application.climate_tablet import (
+    ClimateTabletOperationNotFound,
+    ClimateTabletService,
+    ClimateTabletUnavailable,
+    ClimateTabletViolation,
+)
+from .application.configuration import (
+    CONNECTION_MODE_DEFAULT,
+    CONNECTION_MODE_FIELD,
+    HOME_ASSISTANT_URL_FIELD,
+    SMART_HOME_CENTER_URL_FIELD,
+    create_options,
+    effective_configuration,
+)
 from .application.contour_apply import ContourApplyViolation
 from .application.contour_override import TemporaryTemperatureViolation
-from .application.home_climate_targets import HomeClimateTargetsViolation
-from .application.tablet_preferences import (
-    TabletPreferencesService,
-    TabletPreferencesViolation,
-    validate_energy_settings,
+from .application.device_discovery import (
+    DeviceDiscoveryService,
+    DeviceDiscoveryViolation,
 )
 from .application.device_power_dependencies import (
     DevicePowerDependencyService,
     DevicePowerDependencyServiceViolation,
 )
-from .application.energy_meter import EnergyMeterService, EnergyMeterViolation
-from .application.device_discovery import (
-    DeviceDiscoveryService,
-    DeviceDiscoveryViolation,
-)
 from .application.energy_history import ENERGY_HISTORY_MAX_WINDOW_DAYS
+from .application.energy_meter import EnergyMeterService, EnergyMeterViolation
+from .application.home_climate_targets import HomeClimateTargetsViolation
+from .application.legacy_settings_apply import LegacySettingsApplyViolation
 from .application.legacy_settings_import import (
     LegacySettingsImportViolation,
     preview_legacy_settings,
 )
-from .application.legacy_settings_apply import LegacySettingsApplyViolation
-from .application.climate_registry import ClimateRegistryViolation
-from .application.climate_runtime import (
-    ClimateRuntime,
-    ClimateRuntimeUnavailable,
-    ClimateSnapshotUnavailable,
+from .application.tablet_preferences import (
+    TabletPreferencesService,
+    TabletPreferencesViolation,
+    validate_energy_settings,
 )
-from .application.climate_setup import ClimateSetupViolation
-from .domain.ai_assistant import AiAdvisoryStatus, AiAssistantViolation
-from .domain.hub_settings import HausmanHubSettings
+from .correlation import CorrelationIdError, resolve_correlation_id
 from .dashboard_ha_snapshot import async_dashboard_snapshot
-from .energy_history_ha import async_energy_history
-from .error_taxonomy import api_error_payload, api_error_status
+from .device_discovery_ha import assign_device_area, device_discovery_snapshot
 from .device_maintenance_ha import (
     DeviceMaintenanceViolation,
     HomeAssistantDeviceMaintenanceService,
 )
-from .device_discovery_ha import assign_device_area, device_discovery_snapshot
+from .domain.ai_assistant import AiAdvisoryStatus, AiAssistantViolation
+from .domain.hub_settings import HausmanHubSettings
+from .energy_history_ha import async_energy_history
+from .error_taxonomy import api_error_payload, api_error_status
 from .realtime_api import publish_command_receipt
-from .correlation import CorrelationIdError, resolve_correlation_id
+from .room_settings_ha import (
+    RoomSettingsAreaViolation,
+    async_apply_room_icons,
+    room_settings_snapshot,
+)
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -248,6 +254,7 @@ def register_climate_api(
             EnergyMeterView(hass),
             DeviceDiscoveryView(hass),
             TabletProfileView(hass),
+            RoomSettingsView(hass),
             EnergySettingsView(hass),
             ClimateSeasonSettingsView(hass),
             DevicePowerDependenciesView(hass),
@@ -292,8 +299,8 @@ def register_climate_api(
             ClimateAdminResetView(hass),
         ]
         if scenario_service is not None:
-            from .scenario_api import scenario_api_views
             from .device_action_api import DeviceActionView
+            from .scenario_api import scenario_api_views
 
             views.extend(scenario_api_views(hass, scenario_service))
             views.append(DeviceActionView(hass))
@@ -584,6 +591,9 @@ class DashboardView(_ClimateView):
                 else None,
                 climate_ownership,
                 outdoor_sensor_entity_ids,
+                preferences.room_presentations
+                if isinstance(preferences, TabletPreferencesService)
+                else None,
             )
         except Exception:
             return self._unavailable()
@@ -1125,6 +1135,84 @@ class TabletProfileView(_PublicPreferencesView):
                 HTTPStatus.BAD_REQUEST,
                 headers=NO_STORE_HEADERS,
             )
+        return self.json(result, headers=NO_STORE_HEADERS)
+
+
+class RoomSettingsView(_PublicPreferencesView):
+    """Read and replace room presentation with HA Area Registry read-back."""
+
+    url = ROOM_SETTINGS_PATH
+    name = "api:hausman_hub:room_settings"
+
+    async def get(self, request: Any) -> Any:
+        if not _is_exact_request(request, ROOM_SETTINGS_PATH):
+            return _not_found(self)
+        if not self._authorized(request):
+            return _forbidden(self)
+        service = self._service()
+        if service is None:
+            return self._unavailable()
+        try:
+            document = service.rooms
+            document["rooms"] = room_settings_snapshot(
+                self._hass, service.room_presentations
+            )
+        except Exception:
+            return self._unavailable()
+        return self.json(document, headers=NO_STORE_HEADERS)
+
+    async def put(self, request: Any) -> Any:
+        if not _is_exact_request(request, ROOM_SETTINGS_PATH):
+            return _not_found(self)
+        if not self._authorized(request):
+            return _forbidden(self)
+        service = self._service()
+        if service is None:
+            return self._unavailable()
+        rollback_callback: Any = None
+
+        async def apply(rooms: list[dict[str, object]]) -> None:
+            nonlocal rollback_callback
+            rollback_callback = await async_apply_room_icons(self._hass, rooms)
+
+        async def rollback() -> None:
+            if callable(rollback_callback):
+                await rollback_callback()
+
+        try:
+            payload = await _request_json(request, maximum_bytes=MAX_ACTION_BODY_BYTES)
+            if not isinstance(payload, Mapping) or set(payload) != {
+                "expectedRevision", "rooms"
+            }:
+                raise TabletPreferencesViolation("room settings body is invalid")
+            result = await service.async_replace_rooms(
+                payload["expectedRevision"],
+                payload["rooms"],
+                apply=apply,
+                rollback=rollback,
+            )
+        except TabletPreferencesViolation as error:
+            return self.json_message(
+                "Настройки комнат уже изменились. Обновите данные."
+                if error.stale
+                else "Настройки комнат заполнены неверно.",
+                HTTPStatus.CONFLICT if error.stale else HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        except RoomSettingsAreaViolation:
+            return self.json_message(
+                "Список комнат изменился в Home Assistant. Обновите данные.",
+                HTTPStatus.CONFLICT,
+                headers=NO_STORE_HEADERS,
+            )
+        except ValueError:
+            return self.json_message(
+                "Настройки комнат заполнены неверно.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        except Exception:
+            return self._unavailable()
         return self.json(result, headers=NO_STORE_HEADERS)
 
 

@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import re
+from collections.abc import Awaitable
 from copy import deepcopy
 from datetime import datetime, timezone
-import re
 from typing import Callable
 
 from ..domain.hub_settings import HausmanHubSettings
-
 
 _ENTITY_ID = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
 _DEVICE_ID = re.compile(r"^device_[0-9a-f]{16}$")
@@ -19,6 +19,22 @@ _SIGNAL_MODES = frozenset({"any", "all"})
 _UNAVAILABLE_POLICIES = frozenset({"keep_awake", "use_timeouts", "sleep"})
 _ENERGY_UNITS = frozenset({"watts", "amps", "both"})
 _ENERGY_AGGREGATIONS = frozenset({"combined", "separate"})
+ROOM_TYPE_ICONS = {
+    "rooms": "mdi:door-open",
+    "living": "mdi:sofa",
+    "kitchen": "mdi:fridge-outline",
+    "bedroom": "mdi:bed",
+    "child": "mdi:human-child",
+    "bathroom": "mdi:bathtub",
+    "toilet": "mdi:human-male-female",
+    "hallway": "mdi:door",
+    "office": "mdi:briefcase",
+    "terrace": "mdi:balcony",
+    "spa": "mdi:hot-tub",
+    "storage": "mdi:archive",
+    "category": "mdi:shape",
+}
+ROOM_TYPE_BY_ICON = {icon: room_type for room_type, icon in ROOM_TYPE_ICONS.items()}
 
 
 class TabletPreferencesViolation(ValueError):
@@ -181,6 +197,42 @@ def validate_energy_settings(value: object) -> dict[str, object]:
     return result
 
 
+def validate_room_settings(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list) or len(value) > 128:
+        raise TabletPreferencesViolation("room settings are invalid")
+    result = deepcopy(value)
+    room_ids: set[str] = set()
+    orders: set[int] = set()
+    for room in result:
+        item = _object(room, {"roomId", "type", "icon", "order", "visible"}, "room")
+        room_id = item["roomId"]
+        room_type = item["type"]
+        order = item["order"]
+        if (
+            not isinstance(room_id, str)
+            or not room_id
+            or len(room_id) > 128
+            or room_id in room_ids
+        ):
+            raise TabletPreferencesViolation("room id is invalid")
+        if (
+            room_type not in ROOM_TYPE_ICONS
+            or item["icon"] != ROOM_TYPE_ICONS[room_type]
+        ):
+            raise TabletPreferencesViolation("room purpose is invalid")
+        _integer(order, 0, 1023, "room order")
+        if order in orders:
+            raise TabletPreferencesViolation("room order is duplicated")
+        _boolean(item["visible"], "room visibility")
+        room_ids.add(room_id)
+        orders.add(order)
+    return result
+
+
+def room_type_from_icon(icon: object) -> str:
+    return ROOM_TYPE_BY_ICON.get(icon, "rooms") if isinstance(icon, str) else "rooms"
+
+
 class TabletPreferencesService:
     """Atomically persist both public preference documents with revisions."""
 
@@ -204,7 +256,17 @@ class TabletPreferencesService:
                 "energy": _document(
                     0, timestamp, energy_settings_from_legacy(legacy_energy)
                 ),
+                "rooms": _room_document(0, timestamp, []),
             }
+        elif isinstance(loaded, dict) and "rooms" not in loaded:
+            loaded = deepcopy(loaded)
+            tablet = loaded.get("tablet")
+            timestamp = (
+                tablet.get("updatedAt")
+                if isinstance(tablet, dict) and isinstance(tablet.get("updatedAt"), str)
+                else self._timestamp()
+            )
+            loaded["rooms"] = _room_document(0, timestamp, [])
         self._state = _validate_state(loaded)
 
     @property
@@ -214,6 +276,17 @@ class TabletPreferencesService:
     @property
     def energy(self) -> dict[str, object]:
         return deepcopy(self._document("energy"))
+
+    @property
+    def rooms(self) -> dict[str, object]:
+        return deepcopy(self._document("rooms"))
+
+    @property
+    def room_presentations(self) -> dict[str, dict[str, object]]:
+        return {
+            str(room["roomId"]): deepcopy(room)
+            for room in self._document("rooms")["rooms"]
+        }
 
     @property
     def energy_for_dashboard(self) -> HausmanHubSettings:
@@ -258,6 +331,34 @@ class TabletPreferencesService:
         return await self._replace(
             "energy", expected_revision, validate_energy_settings(settings)
         )
+
+    async def async_replace_rooms(
+        self,
+        expected_revision: object,
+        rooms: object,
+        *,
+        apply: Callable[[list[dict[str, object]]], Awaitable[object]] | None = None,
+        rollback: Callable[[], Awaitable[object]] | None = None,
+    ) -> dict[str, object]:
+        validated = validate_room_settings(rooms)
+        async with self._lock:
+            current = self._document("rooms")
+            self._validate_expected_revision(expected_revision, current)
+            if apply is not None:
+                await apply(validated)
+            updated = _room_document(
+                int(expected_revision) + 1, self._timestamp(), validated
+            )
+            state = deepcopy(self._required_state())
+            state["rooms"] = updated
+            try:
+                await self._store.async_save(state)
+            except Exception:
+                if rollback is not None:
+                    await rollback()
+                raise
+            self._state = state
+            return deepcopy(updated)
 
     async def async_include_energy_device(self, device_id: str) -> None:
         if not _DEVICE_ID.fullmatch(device_id):
@@ -311,6 +412,7 @@ class TabletPreferencesService:
             "energy": _document(
                 0, timestamp, energy_settings_from_legacy(HausmanHubSettings())
             ),
+            "rooms": _room_document(0, timestamp, []),
         }
         async with self._lock:
             await self._store.async_save(state)
@@ -321,16 +423,22 @@ class TabletPreferencesService:
     ) -> dict[str, object]:
         async with self._lock:
             current = self._document(key)
-            if type(expected_revision) is not int or expected_revision < 0:
-                raise TabletPreferencesViolation("expected revision is invalid")
-            if expected_revision != current["revision"]:
-                raise TabletPreferencesViolation("settings revision changed", stale=True)
+            self._validate_expected_revision(expected_revision, current)
             updated = _document(expected_revision + 1, self._timestamp(), settings)
             state = deepcopy(self._required_state())
             state[key] = updated
             await self._store.async_save(state)
             self._state = state
             return deepcopy(updated)
+
+    @staticmethod
+    def _validate_expected_revision(
+        expected_revision: object, current: dict[str, object]
+    ) -> None:
+        if type(expected_revision) is not int or expected_revision < 0:
+            raise TabletPreferencesViolation("expected revision is invalid")
+        if expected_revision != current["revision"]:
+            raise TabletPreferencesViolation("settings revision changed", stale=True)
 
     def _timestamp(self) -> str:
         value = self._now().astimezone(timezone.utc).isoformat(timespec="seconds")
@@ -362,8 +470,19 @@ def _document(revision: int, updated_at: str, settings: dict[str, object]) -> di
     }
 
 
+def _room_document(
+    revision: int, updated_at: str, rooms: list[dict[str, object]]
+) -> dict[str, object]:
+    return {
+        "contract": {"name": "hausman-hub-room-settings", "version": 1},
+        "revision": revision,
+        "updatedAt": updated_at,
+        "rooms": deepcopy(rooms),
+    }
+
+
 def _validate_state(value: object) -> dict[str, object]:
-    if not isinstance(value, dict) or set(value) != {"tablet", "energy"}:
+    if not isinstance(value, dict) or set(value) != {"tablet", "energy", "rooms"}:
         raise TabletPreferencesViolation("stored tablet preferences are invalid")
     result = deepcopy(value)
     for key, validator, name in (
@@ -382,6 +501,17 @@ def _validate_state(value: object) -> dict[str, object]:
         if not isinstance(document["updatedAt"], str) or not document["updatedAt"]:
             raise TabletPreferencesViolation(f"stored {key} timestamp is invalid")
         document["settings"] = validator(document["settings"])
+    rooms = result["rooms"]
+    if not isinstance(rooms, dict) or set(rooms) != {
+        "contract", "revision", "updatedAt", "rooms"
+    }:
+        raise TabletPreferencesViolation("stored room document is invalid")
+    if rooms["contract"] != {"name": "hausman-hub-room-settings", "version": 1}:
+        raise TabletPreferencesViolation("stored room contract is invalid")
+    _integer(rooms["revision"], 0, 9_007_199_254_740_991, "rooms revision")
+    if not isinstance(rooms["updatedAt"], str) or not rooms["updatedAt"]:
+        raise TabletPreferencesViolation("stored room timestamp is invalid")
+    rooms["rooms"] = validate_room_settings(rooms["rooms"])
     return result
 
 
