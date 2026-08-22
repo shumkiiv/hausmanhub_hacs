@@ -1,16 +1,21 @@
 # HausmanHub AI Context
 
-Last updated: 2026-08-22 (HACS 1.52.144, настройки комнат готовятся к production deploy).
+Last updated: 2026-08-22 (HACS 1.52.144, настройки комнат развёрнуты в production).
 
 ## Current work
 
-- 2026-08-22 (Codex): подготовлен HACS `1.52.144` для направлений 12-13.
+- 2026-08-22 (Codex): HACS `1.52.144` опубликован и развёрнут в production для направлений 12-13.
   Room settings v1 хранит canonical type/icon, порядок и видимость с
   optimistic locking. PUT применяет иконки Area Registry с read-back и
   rollback при ошибке storage. Dashboard публикует `order`, `visible`,
   `type`, per-room CO2/PM2.5/tVOC и `roomId` сценария. Старое preferences
   storage мигрирует с пустым room document. Pin: contracts `0.51.0`
-  (`d54aa32`). Frontend layout не менялся, выполнен только cache-bust.
+  (`d54aa32`). Full backup `e70bddac` подтверждён в local и KeeneticSSD,
+  `check_config` зелёный до и после install, выполнен один restart. Production
+  GET вернул 13 комнат с revision 0, PUT не вызывался, Area Registry не
+  менялся. Dashboard и 88 frontend assets проверены; journal sequence 941,
+  текущий deploy добавил 0 operations. Frontend layout не менялся, выполнен
+  только cache-bust.
 
 - 2026-08-22 (Codex): HACS `1.52.143` опубликован и развёрнут для
   направления 18. Water safety v1 хранит policy и latch, использует
