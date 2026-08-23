@@ -11,7 +11,7 @@ PIN_PATH = REPOSITORY_ROOT / "hausmanhub-contracts.json"
 
 VENDORED_CONTRACT_HASHES = {
     "custom_components/hausman_hub/contracts/v1/scenario-definition.schema.json": "71ef6345732e599385522935b794d7e391875fa73bce0352642421fab35ca9bf",
-    "custom_components/hausman_hub/contracts/v1/api-capabilities.schema.json": "e5f6388cde7abe25244be42be2747534cacc55fc8cb571bed12ab3c8c031bd91",
+    "custom_components/hausman_hub/contracts/v1/api-capabilities.schema.json": "d101ad053a9c4dd4be19dce0bffe98ccc437f0faf2cc288e8011e3b28f3cd29b",
     "custom_components/hausman_hub/contracts/v1/device-action-request.schema.json": "4ff6f1cb6e7939749e14aa43799e6108c1db7309251d2b7ee5026f047c667b94",
     "custom_components/hausman_hub/contracts/v1/device-action-receipt.schema.json": "38a710d76b1d335e22cf7c8e85907b329ab7d6952375d86756781f10fcd53a3c",
     "custom_components/hausman_hub/contracts/v1/intercom-release-receipt.schema.json": "ea11c82a77a3fe9195513d1a915336167c81a356fa0b56cf058384daedacf947",
@@ -40,6 +40,10 @@ VENDORED_CONTRACT_HASHES = {
     "fixtures/hausmanhub_scenario_list_v1/scenario-list.json": "19bf0d35d97e129e2d60c97802198b3a23264f6670b55129dd01f4de64f64bfd",
     "custom_components/hausman_hub/contracts/v1/water-safety.schema.json": "85cbbf912c2b73b6600b456e1c9e42758fe34da305dbf102718e430bad6e8734",
     "fixtures/hausmanhub_water_safety_v1/water-safety.json": "88a8acb38efd003e77950d726e617193cfaa05320de6981e53c486cf3ed74aa4",
+    "custom_components/hausman_hub/contracts/v1/tablet-power-status-request.schema.json": "a03a17b4c2e2a9973d037c0e4ff2394877e8b0acd5ecede3abd6d5dd181dc905",
+    "custom_components/hausman_hub/contracts/v1/tablet-power-status-receipt.schema.json": "84f1a948d87cf30b5518bbebefcbbcce32ad90968366c9b0886bfb195f5bef70",
+    "fixtures/hausmanhub_tablet_power_v1/request.json": "0713606c6a19a2598c9cf82d07d69fc67038840f38682bb69c7403ef0f9d6a95",
+    "fixtures/hausmanhub_tablet_power_v1/receipt.json": "feb9293e5f39bbb7fdda199ccc208b77114b43655668ab67d032844c380fdd9e",
 }
 
 
@@ -48,14 +52,14 @@ def test_external_contract_pin_is_explicit_and_canonical() -> None:
 
     assert pin == {
         "repository": "shumkiiv/hausmanhub-contracts",
-        "version": "0.56.0",
-        "commit": "078ebd0a38be1ae2f55bb348edd6e2d7db080458",
+        "version": "0.57.0",
+        "commit": "c4a948bd653846185b8764595ac7418d7ad9344f",
         "canonical": True,
         "role": "runtime-consumer",
     }
 
 
-def test_contract_0_56_0_vendored_files_match_canonical_hashes() -> None:
+def test_contract_0_57_0_vendored_files_match_canonical_hashes() -> None:
     for relative_path, expected_hash in VENDORED_CONTRACT_HASHES.items():
         payload = (REPOSITORY_ROOT / relative_path).read_bytes()
         assert hashlib.sha256(payload).hexdigest() == expected_hash, relative_path

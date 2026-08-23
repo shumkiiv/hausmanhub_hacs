@@ -658,6 +658,12 @@
       },
       "disabled_entities_count": {
         "name": "Disabled entities"
+      },
+      "tablet_battery": {
+        "name": "Tablet battery"
+      },
+      "tablet_power": {
+        "name": "Tablet power"
       }
     },
     "switch": {

@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hausmanhub/contracts/v1/tablet-power-status-receipt.schema.json",
+  "title": "Hausman tablet power status receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "correlationId",
+    "accepted",
+    "confirmed",
+    "status",
+    "batterySensorEntityId",
+    "powerSensorEntityId",
+    "chargingPolicy",
+    "physicalCommandsSent",
+    "message"
+  ],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-tablet-power-status-receipt"},
+        "version": {"const": 1}
+      }
+    },
+    "correlationId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "accepted": {"const": true},
+    "confirmed": {"type": "boolean"},
+    "status": {"enum": ["accepted", "confirmed", "failed"]},
+    "batterySensorEntityId": {"const": "sensor.hausman_hub_tablet_battery"},
+    "powerSensorEntityId": {"const": "sensor.hausman_hub_tablet_power"},
+    "chargingPolicy": {
+      "enum": ["disabled", "hold", "turn_on", "turn_off", "fallback_on", "unavailable"]
+    },
+    "physicalCommandsSent": {"type": "boolean"},
+    "message": {"type": "string", "minLength": 1, "maxLength": 500}
+  }
+}

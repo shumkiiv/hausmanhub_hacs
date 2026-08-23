@@ -1,0 +1,10 @@
+{
+  "contract": {"name": "hausman-hub-tablet-power-status-request", "version": 1},
+  "correlationId": "tablet.power.example-0001",
+  "tabletId": "wall_tablet",
+  "batteryPercent": 39,
+  "charging": false,
+  "powerSource": "battery",
+  "batteryTemperatureC": 31.5,
+  "reportedAt": 1787454000000
+}

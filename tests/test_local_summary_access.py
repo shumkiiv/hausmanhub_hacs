@@ -7,6 +7,7 @@ import copy
 import importlib
 import json
 import sys
+import time
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
@@ -587,6 +588,68 @@ class LocalSummaryAccessTest(unittest.TestCase):
         ):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, serialized)
+
+    def test_tablet_publishes_local_power_status_without_physical_commands(self) -> None:
+        path = "/api/hausman_hub/v1/tablet-power-status"
+        view = next(item for item in self.hass.http.views if item.url == path)
+        payload = {
+            "contract": {
+                "name": "hausman-hub-tablet-power-status-request",
+                "version": 1,
+            },
+            "correlationId": "tablet-power-test-39",
+            "tabletId": "hall-tablet",
+            "batteryPercent": 39,
+            "charging": False,
+            "powerSource": "battery",
+            "batteryTemperatureC": 31.5,
+            "reportedAt": time.time_ns() // 1_000_000,
+        }
+
+        response = asyncio.run(
+            view.post(
+                FakeJsonRequest(
+                    "192.168.1.20",
+                    reader_user("system-users"),
+                    path,
+                    payload,
+                )
+            )
+        )
+
+        self.assertEqual(200, response.status)
+        self.assertEqual("turn_on", response.payload["chargingPolicy"])
+        self.assertFalse(response.payload["physicalCommandsSent"])
+        self.assertEqual("no-store", response.headers.get("Cache-Control"))
+        status = self.hass.data["hausman_hub"]["tablet_power_service"].status
+        self.assertEqual(39, status.battery_percent)
+        journal = self.hass.data["hausman_hub"]["operation_journal"]
+        records = journal.snapshot(correlation_id="tablet-power-test-39")["records"]
+        self.assertEqual("tablet_power_update", records[0]["operation"])
+        self.assertTrue(records[0]["confirmed"])
+
+        remote = asyncio.run(
+            view.post(
+                FakeJsonRequest(
+                    "203.0.113.7",
+                    reader_user("system-users"),
+                    path,
+                    payload,
+                )
+            )
+        )
+        self.assertEqual(403, remote.status)
+        malformed = asyncio.run(
+            view.post(
+                FakeJsonRequest(
+                    "192.168.1.20",
+                    reader_user("system-users"),
+                    path,
+                    {**payload, "private": "must-not-pass"},
+                )
+            )
+        )
+        self.assertEqual(400, malformed.status)
 
     def test_legacy_settings_preview_is_local_admin_only_and_read_only(self) -> None:
         path = "/api/hausman_hub/v1/admin/legacy-settings/preview"
@@ -2962,7 +3025,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.159", panel.payload["integration_version"])
+        self.assertEqual("1.52.160", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
@@ -3928,7 +3991,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertFalse(hasattr(self.view, method))
 
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
-        self.assertEqual(81, len(self.hass.http.views))
+        self.assertEqual(82, len(self.hass.http.views))
         self.assertEqual(
             1,
             sum(
@@ -4499,7 +4562,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             [(closed_entry, ("sensor", "switch"))],
             closed_hass.config_entries.forwarded,
         )
-        self.assertEqual(80, len(closed_hass.http.views))
+        self.assertEqual(81, len(closed_hass.http.views))
         self.assertEqual(
             {
                 "/api/hausman_hub/v1/capabilities",
@@ -4514,6 +4577,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 "/api/hausman_hub/v1/energy-settings",
                 "/api/hausman_hub/v1/device-discovery",
                 "/api/hausman_hub/v1/tablet-profile",
+                "/api/hausman_hub/v1/tablet-power-status",
                 "/api/hausman_hub/v1/room-settings",
                 "/api/hausman_hub/v1/home",
                 "/api/hausman_hub/v1/climate/runtime",

@@ -61,7 +61,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         self.assertEqual("hausman_hub", manifest["domain"])
         self.assertTrue(manifest["config_flow"])
         self.assertTrue(manifest["single_config_entry"])
-        self.assertEqual("1.52.159", manifest["version"])
+        self.assertEqual("1.52.160", manifest["version"])
 
     def test_current_manifest_version_has_a_plain_change_note(self) -> None:
         manifest = json.loads((INTEGRATION / "manifest.json").read_text(encoding="utf-8"))
@@ -2425,10 +2425,13 @@ class ReadOnlySkeletonTest(unittest.TestCase):
                 set(content["selector"]["contour_action"]["options"]),
             )
 
-    def test_sensor_translations_have_only_the_approved_nine_counts(self) -> None:
-        """Every visible label must map to an already-approved aggregate count."""
+    def test_sensor_translations_have_only_approved_diagnostics(self) -> None:
+        """Every visible label must map to an approved diagnostic sensor."""
 
-        expected_keys = set(HOME_SUMMARY_COUNT_KEYS)
+        expected_keys = set(HOME_SUMMARY_COUNT_KEYS) | {
+            "tablet_battery",
+            "tablet_power",
+        }
         for language in ("en", "ru"):
             with self.subTest(language=language):
                 content = json.loads(

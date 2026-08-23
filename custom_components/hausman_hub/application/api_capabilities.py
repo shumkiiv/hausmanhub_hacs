@@ -44,6 +44,7 @@ CAPABILITIES_PATH = f"{API_BASE_PATH}/capabilities"
 HOME_PATH = f"{API_BASE_PATH}/home"
 DASHBOARD_PATH = f"{API_BASE_PATH}/dashboard"
 TABLET_PROFILE_PATH = f"{API_BASE_PATH}/tablet-profile"
+TABLET_POWER_PATH = f"{API_BASE_PATH}/tablet-power-status"
 ROOM_SETTINGS_PATH = f"{API_BASE_PATH}/room-settings"
 ENERGY_SETTINGS_PATH = f"{API_BASE_PATH}/energy-settings"
 ENERGY_HISTORY_PATH = f"{API_BASE_PATH}/energy/history"
@@ -238,6 +239,19 @@ def api_capabilities_snapshot(
                 "optimistic_locking": True,
                 "response_contract": {
                     "name": "hausman-hub-tablet-profile",
+                    "version": 1,
+                },
+            },
+            "tablet_power": {
+                "available": True,
+                "path": TABLET_POWER_PATH,
+                "method": "POST",
+                "request_contract": {
+                    "name": "hausman-hub-tablet-power-status-request",
+                    "version": 1,
+                },
+                "response_contract": {
+                    "name": "hausman-hub-tablet-power-status-receipt",
                     "version": 1,
                 },
             },

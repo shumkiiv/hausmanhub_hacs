@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hausmanhub/contracts/v1/tablet-power-status-request.schema.json",
+  "title": "Hausman tablet power status request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "correlationId",
+    "tabletId",
+    "batteryPercent",
+    "charging",
+    "powerSource",
+    "reportedAt"
+  ],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-tablet-power-status-request"},
+        "version": {"const": 1}
+      }
+    },
+    "correlationId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "tabletId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+    },
+    "batteryPercent": {"type": "integer", "minimum": 0, "maximum": 100},
+    "charging": {"type": "boolean"},
+    "powerSource": {"enum": ["battery", "ac", "usb", "wireless", "unknown"]},
+    "batteryTemperatureC": {"type": ["number", "null"], "minimum": -20, "maximum": 80},
+    "reportedAt": {"type": "integer", "minimum": 0}
+  }
+}

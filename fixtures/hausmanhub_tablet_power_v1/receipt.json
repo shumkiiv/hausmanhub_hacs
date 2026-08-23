@@ -1,0 +1,12 @@
+{
+  "contract": {"name": "hausman-hub-tablet-power-status-receipt", "version": 1},
+  "correlationId": "tablet.power.example-0001",
+  "accepted": true,
+  "confirmed": true,
+  "status": "confirmed",
+  "batterySensorEntityId": "sensor.hausman_hub_tablet_battery",
+  "powerSensorEntityId": "sensor.hausman_hub_tablet_power",
+  "chargingPolicy": "turn_on",
+  "physicalCommandsSent": true,
+  "message": "Питание планшета включено: заряд ниже безопасного порога."
+}

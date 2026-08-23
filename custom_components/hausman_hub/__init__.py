@@ -10,6 +10,7 @@ strict climate-call executor used by trial, managed ticks, and settings applicat
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from .application.configuration import ConfigurationViolation, effective_configuration
@@ -75,6 +76,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .application.device_discovery import DeviceDiscoveryService
     from .device_discovery_storage import HomeAssistantDeviceDiscoveryStore
     from .local_summary import register_local_summary_access
+    from .tablet_power_api import tablet_power_service
+
+    tablet_power = tablet_power_service(hass)
 
     await hass.config_entries.async_forward_entry_setups(
         entry,
@@ -145,6 +149,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     await operation_journal.async_load()
     domain_data[DATA_OPERATION_JOURNAL] = operation_journal
+    from homeassistant.helpers.event import async_track_time_interval
+
+    entry.async_on_unload(
+        async_track_time_interval(
+            hass,
+            lambda _now: tablet_power.expire(),
+            timedelta(minutes=5),
+        )
+    )
     climate_deviation_guard = ClimateDeviationGuardService(
         HomeAssistantClimateDeviationGuardStore(hass, entry.entry_id),
         operation_journal=operation_journal,
@@ -152,6 +165,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     domain_data["climate_deviation_guard"] = climate_deviation_guard
     if configuration.local_summary_enabled:
         register_local_summary_access(hass, entry)
+    from .tablet_power_api import register_tablet_power_api
+
+    register_tablet_power_api(hass)
     from .application.water_safety import WaterSafetyService
     from .water_safety_api import DATA_WATER_SAFETY, register_water_safety_api
     from .water_safety_gateway import HomeAssistantWaterSafetyGateway
@@ -298,11 +314,13 @@ async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     from .voice_api import clear_voice_greeting
     from .operation_journal_api import clear_operation_journal
     from .water_safety_api import clear_water_safety_api
+    from .tablet_power_api import clear_tablet_power_api
 
     clear_event_stream(hass, entry.entry_id)
     clear_voice_greeting(hass, entry.entry_id)
     clear_water_safety_api(hass)
     clear_operation_journal(hass)
+    clear_tablet_power_api(hass)
     clear_climate_api(hass, entry.entry_id)
 
     try:
@@ -334,6 +352,7 @@ async def _close_running_duplicate_hausmanhub_entries(
     from .voice_api import clear_voice_greeting
     from .operation_journal_api import clear_operation_journal
     from .water_safety_api import clear_water_safety_api
+    from .tablet_power_api import clear_tablet_power_api
 
     loaded_entries = tuple(hass.config_entries.async_loaded_entries(domain))
     for loaded_entry in loaded_entries:
@@ -342,6 +361,7 @@ async def _close_running_duplicate_hausmanhub_entries(
         clear_voice_greeting(hass, loaded_entry.entry_id)
         clear_water_safety_api(hass)
         clear_operation_journal(hass)
+        clear_tablet_power_api(hass)
         clear_climate_api(hass, loaded_entry.entry_id)
     for loaded_entry in loaded_entries:
         await hass.config_entries.async_unload(loaded_entry.entry_id)
@@ -410,6 +430,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .voice_api import clear_voice_greeting
     from .operation_journal_api import clear_operation_journal
     from .water_safety_api import clear_water_safety_api
+    from .tablet_power_api import clear_tablet_power_api
 
     unloaded = await hass.config_entries.async_unload_platforms(
         entry,
@@ -422,6 +443,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         clear_voice_greeting(hass, entry.entry_id)
         clear_water_safety_api(hass)
         clear_operation_journal(hass)
+        clear_tablet_power_api(hass)
         clear_climate_api(hass, entry.entry_id)
         from .panel import unregister_hausmanhub_panel
 

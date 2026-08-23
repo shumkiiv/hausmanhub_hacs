@@ -1,0 +1,56 @@
+blueprint:
+  name: Hausman - бережная зарядка планшета 40/80
+  description: >-
+    Включает выбранную розетку при заряде ниже 40%, выключает при 80% и
+    включает питание с уведомлением, если датчик или розетка недоступны.
+  domain: automation
+  input:
+    charger_switch:
+      name: Розетка питания планшета
+      selector:
+        entity:
+          domain: switch
+    notification_action:
+      name: Действие уведомления при сбое
+      description: Выберите notify-действие и текст для владельца.
+      selector:
+        action: {}
+
+mode: restart
+max_exceeded: silent
+
+trigger:
+  - platform: state
+    entity_id: sensor.hausman_hub_tablet_battery
+  - platform: state
+    entity_id: sensor.hausman_hub_tablet_power
+  - platform: time_pattern
+    minutes: "/5"
+
+variables:
+  charger: !input charger_switch
+  battery: "{{ states('sensor.hausman_hub_tablet_battery') }}"
+  charger_state: "{{ states(charger) }}"
+
+action:
+  - choose:
+      - conditions: >-
+          {{ battery in ['unknown', 'unavailable', 'none'] or
+             charger_state in ['unknown', 'unavailable', 'none'] }}
+        sequence:
+          - action: switch.turn_on
+            continue_on_error: true
+            target:
+              entity_id: !input charger_switch
+          - choose: []
+            default: !input notification_action
+      - conditions: "{{ battery | int(101) < 40 }}"
+        sequence:
+          - action: switch.turn_on
+            target:
+              entity_id: !input charger_switch
+      - conditions: "{{ battery | int(-1) >= 80 }}"
+        sequence:
+          - action: switch.turn_off
+            target:
+              entity_id: !input charger_switch

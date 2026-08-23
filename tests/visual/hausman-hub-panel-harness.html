@@ -29,7 +29,7 @@
       });
     </script>
     <script type="module">
-      import "../../custom_components/hausman_hub/frontend/hausman-hub-panel.js?v=1.52.159";
+      import "../../custom_components/hausman_hub/frontend/hausman-hub-panel.js?v=1.52.160";
       const params = new URLSearchParams(window.location.search);
       const panel = document.getElementById("panel");
       const theme = params.get("theme") === "dark" ? "dark" : "light";
@@ -38,7 +38,7 @@
       document.documentElement.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       document.body.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       panel._data = {
-        integration_version: "1.52.159",
+        integration_version: "1.52.160",
         readiness: { status: "ready", bridge_mode: "native", reasons: [] },
         snapshot: {
           rooms: [
@@ -567,7 +567,7 @@
       panel._render();
       panel._applyLocalPreferences();
       panel.shadowRoot.querySelector("link").href =
-        "../../custom_components/hausman_hub/frontend/hausman-hub-panel.css?v=1.52.159";
+        "../../custom_components/hausman_hub/frontend/hausman-hub-panel.css?v=1.52.160";
       if (params.get("kiosk") === "1") panel._shell.kioskButton.click();
       const roomName = params.get("openRoom");
       if (roomName) {

@@ -1,6 +1,6 @@
 /* Right column of the lighting section: quick actions, active lights, attention, history. */
 
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.159";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.160";
 
 const LIGHTING_SIDE_SVG_NAMESPACE = "http" + "://www.w3.org/2000/svg";
 

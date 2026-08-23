@@ -658,6 +658,12 @@
       },
       "disabled_entities_count": {
         "name": "Отключённые объекты"
+      },
+      "tablet_battery": {
+        "name": "Заряд планшета"
+      },
+      "tablet_power": {
+        "name": "Питание планшета"
       }
     },
     "switch": {

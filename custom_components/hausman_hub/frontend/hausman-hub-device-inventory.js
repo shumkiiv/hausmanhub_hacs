@@ -1,5 +1,5 @@
-import { dupAttention, dupCompare, dupFilter, dupGroups, dupGuide, dupSize, dupView } from "./hausman-hub-inventory-duplicates.js?v=1.52.159";
-import { withCorrelationId } from "./hausman-hub-correlation.js?v=1.52.159";
+import { dupAttention, dupCompare, dupFilter, dupGroups, dupGuide, dupSize, dupView } from "./hausman-hub-inventory-duplicates.js?v=1.52.160";
+import { withCorrelationId } from "./hausman-hub-correlation.js?v=1.52.160";
 
 const DEVICE_MAINTENANCE_API = "hausman_hub/v1/admin/device-maintenance";
 const Z2M_DEVICE_IMAGE =

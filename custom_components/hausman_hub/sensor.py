@@ -11,9 +11,13 @@ from datetime import timedelta
 import logging
 from typing import Final
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory
+from homeassistant.const import EntityCategory, PERCENTAGE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import (
@@ -24,8 +28,10 @@ from homeassistant.helpers.update_coordinator import (
 
 from .application.configuration import ConfigurationViolation, effective_configuration
 from .application.local_summary import HOME_SUMMARY_COUNT_KEYS, home_summary_payload
+from .application.tablet_power import TabletPowerService
 from .const import DOMAIN
 from .home_observation import collect_home_summary
+from .tablet_power_api import tablet_power_service
 
 
 _LOGGER: Final = logging.getLogger(__name__)
@@ -89,7 +95,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Add exactly nine diagnostic number sensors and nothing controllable."""
+    """Add aggregate diagnostics and two read-only tablet-power sensors."""
 
     configuration = effective_configuration(entry.data, entry.options)
     coordinator = HomeSummaryCoordinator(
@@ -98,10 +104,18 @@ async def async_setup_entry(
         SUMMARY_UPDATE_INTERVALS[configuration.summary_update_interval],
     )
     await coordinator.async_config_entry_first_refresh()
-    async_add_entities(
+    entities: list[SensorEntity] = [
         HomeSummaryCountSensor(coordinator, entry.entry_id, key)
         for key in HOME_SUMMARY_COUNT_KEYS
+    ]
+    service = tablet_power_service(hass)
+    entities.extend(
+        (
+            TabletBatterySensor(service, entry.entry_id),
+            TabletPowerSourceSensor(service, entry.entry_id),
+        )
     )
+    async_add_entities(entities)
 
 
 class HomeSummaryCountSensor(CoordinatorEntity[HomeSummaryCoordinator], SensorEntity):
@@ -133,3 +147,79 @@ class HomeSummaryCountSensor(CoordinatorEntity[HomeSummaryCoordinator], SensorEn
         """Return only the one count selected from the fixed redacted payload."""
 
         return self.coordinator.data[self._summary_key]
+
+
+class _TabletPowerSensor(SensorEntity):
+    """Push one in-memory tablet telemetry projection into Home Assistant."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+
+    def __init__(self, service: TabletPowerService, entry_id: str) -> None:
+        self._service = service
+
+    @property
+    def available(self) -> bool:
+        return self._service.available()
+
+    async def async_added_to_hass(self) -> None:
+        self.async_on_remove(self._service.subscribe(self.async_write_ha_state))
+
+
+class TabletBatterySensor(_TabletPowerSensor):
+    """Expose the wall tablet charge percentage for scenarios."""
+
+    _attr_translation_key = "tablet_battery"
+    _attr_icon = "mdi:tablet-cellphone"
+    _attr_device_class = SensorDeviceClass.BATTERY
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = PERCENTAGE
+    entity_id = "sensor.hausman_hub_tablet_battery"
+
+    def __init__(self, service: TabletPowerService, entry_id: str) -> None:
+        super().__init__(service, entry_id)
+        self._attr_unique_id = f"{entry_id}_tablet_battery"
+        self.entity_id = "sensor.hausman_hub_tablet_battery"
+
+    @property
+    def native_value(self) -> int | None:
+        status = self._service.status
+        return status.battery_percent if status is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        status = self._service.status
+        if status is None:
+            return {}
+        return {
+            "charging": status.charging,
+            "power_source": status.power_source,
+            "battery_temperature_c": status.battery_temperature_c,
+            "reported_at": status.reported_at,
+        }
+
+
+class TabletPowerSourceSensor(_TabletPowerSensor):
+    """Expose whether the wall tablet is charging or running from battery."""
+
+    _attr_translation_key = "tablet_power"
+    _attr_icon = "mdi:power-plug-battery-outline"
+    entity_id = "sensor.hausman_hub_tablet_power"
+
+    def __init__(self, service: TabletPowerService, entry_id: str) -> None:
+        super().__init__(service, entry_id)
+        self._attr_unique_id = f"{entry_id}_tablet_power"
+        self.entity_id = "sensor.hausman_hub_tablet_power"
+
+    @property
+    def native_value(self) -> str | None:
+        status = self._service.status
+        if status is None:
+            return None
+        return "charging" if status.charging else "battery"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        status = self._service.status
+        return {"power_source": status.power_source} if status is not None else {}
