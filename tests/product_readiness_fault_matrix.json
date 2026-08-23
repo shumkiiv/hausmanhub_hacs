@@ -1,0 +1,22 @@
+{
+  "schema": "hausman-product-readiness-fault-matrix-v1",
+  "physicalCommandsAllowed": false,
+  "dangerousProbeDomains": [
+    "water_command",
+    "intercom",
+    "power",
+    "security",
+    "device_action",
+    "scenario_run"
+  ],
+  "faults": [
+    {"id": "latency", "evidence": "tests/test_vendor_resilience.py", "expected": "bounded_timeout"},
+    {"id": "http_401", "evidence": "tests/test_ai_assistant_service.py", "expected": "authorization_required"},
+    {"id": "http_409", "evidence": "tests/test_frontend_error_taxonomy.py", "expected": "refresh_then_retry"},
+    {"id": "http_500", "evidence": "tests/test_frontend_error_taxonomy.py", "expected": "visible_error"},
+    {"id": "dropped_sse", "evidence": "tests/test_frontend_pagination_retention.py", "expected": "cursor_reconnect_or_snapshot"},
+    {"id": "ha_restart", "evidence": "tests/test_operation_journal.py", "expected": "state_restored_without_duplicate"},
+    {"id": "unavailable_entity", "evidence": "tests/test_scenario_executor.py", "expected": "fail_closed"},
+    {"id": "stale_recorder", "evidence": "tests/test_energy_history.py", "expected": "stale_visible_no_command"}
+  ]
+}

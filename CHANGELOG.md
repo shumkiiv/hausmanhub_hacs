@@ -1,5 +1,15 @@
 # История версий
 
+## 1.52.158 - 2026-08-23
+
+- Добавлен production read-only smoke из девяти GET endpoint. Отчёт содержит
+  только агрегированные latency, freshness, pending и availability metrics,
+  не сохраняет entity ID, имена, token или сырые payload.
+- Исполняемая fault matrix связывает latency, 401, 409, 500, dropped SSE,
+  HA restart, unavailable entity и stale Recorder с профильными тестами.
+- Зафиксированы запрет dangerous health probes, soak windows, rollback
+  thresholds и владелец решения. Интерфейс не перекомпоновывался.
+
 ## 1.52.157 - 2026-08-23
 
 - CI запускает реальную панель в Chromium на шести репрезентативных экранах

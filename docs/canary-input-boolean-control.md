@@ -2,9 +2,12 @@
 
 ## Статус
 
-Версия 0.4.0 подготовлена локально после просьбы владельца двигаться к
-работающему управлению. Она ещё не закоммичена, не отправлена в GitHub, не
-выпущена через HACS и не установлена в живой Home Assistant.
+Механизм давно входит в production HACS. Для product-readiness программы
+2026-08-23 в Home Assistant созданы два отдельных helper, не связанные с
+физическими устройствами: `input_boolean.hausmanhub_test_bez_ustroistv` и
+`input_number.hausmanhub_testovoe_znachenie`. Первый предназначен только для
+reversible canary, второй - для безопасных numeric и stale-state проверок.
+Обычный ежедневный smoke их не переключает.
 
 ## Что именно разрешено
 

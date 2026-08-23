@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Hausman production read-only smoke every day
+
+[Timer]
+OnCalendar=*-*-* 04:20:00 Europe/Moscow
+RandomizedDelaySec=10m
+Persistent=true
+Unit=hausman-live-smoke.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,14 @@
+[Unit]
+Description=Hausman production read-only smoke
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/projects/HausmanHub/worktrees/codex-hacs-scenario-editor-maturity-2026-08-22
+ExecStart=/usr/bin/python3 %h/projects/HausmanHub/worktrees/codex-hacs-scenario-editor-maturity-2026-08-22/tools/run_live_readonly_smoke.py
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.config/hausmanhub/live-smoke
