@@ -5,7 +5,6 @@ import unittest
 from pathlib import Path
 
 from jsonschema import Draft202012Validator
-import yaml
 
 from custom_components.hausman_hub.application.tablet_power import (
     TabletPowerService,
@@ -93,8 +92,7 @@ class TabletPowerTest(unittest.TestCase):
             root / "blueprints/automation/hausman_hub/tablet_charging.yaml"
         )
         source = blueprint_path.read_text(encoding="utf-8")
-        parsed = yaml.safe_load(source.replace("!input", ""))
-        self.assertEqual("restart", parsed["mode"])
+        self.assertIn("\nmode: restart\n", source)
         self.assertIn("battery | int(101) < 40", source)
         self.assertIn("battery | int(-1) >= 80", source)
         self.assertIn("switch.turn_on", source)
