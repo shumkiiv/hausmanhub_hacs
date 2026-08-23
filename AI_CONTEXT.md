@@ -1,5 +1,18 @@
 # HausmanHub AI Context
 
+- 2026-08-23: HACS `1.52.159` закрыл operational readiness направления 30.
+  Daily smoke имеет redacted `OnFailure` alert, добавлены SLO, P0-P3,
+  rollback, release blocker, Definition of Done и monthly UX systemd timer.
+  UI не менялся, только cache-bust. Gate: 1650 tests, 4 skipped, 119 critical
+  tests, 75% branch coverage, 13 Chromium tests. Commit `8b58f54`, tag/release
+  `v1.52.159` без assets, Actions `32611390522` success. Production backup
+  `11c0460b` защищён в local и KeeneticSSD по 907284480 bytes, база включена.
+  После двух valid config checks, HACS refresh/install и одного restart
+  installed/latest равны `v1.52.159`, config entry loaded, 88 assets match.
+  Final smoke passed: max latency 115 ms, fresh snapshots, pending 0,
+  physical commands false. Подробности:
+  `docs/RELEASE_AUDIT_1.52.159.md` и `docs/OPERATIONS_SUPPORT_SLO_DOD.md`.
+
 - 2026-08-23: HACS `1.52.158` завершил HACS/operations часть направления 28
   и развёрнут в production. Добавлены dual-role read-only smoke, ежедневный
   persistent timer, fault matrix, soak/rollback policy и два изолированных
