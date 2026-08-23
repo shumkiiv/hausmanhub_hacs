@@ -15,7 +15,30 @@
 .notice.is-error { border-color:color-mix(in srgb,var(--error-color,#E5534B) 58%,var(--hmh-border,#2F3845));
   background:color-mix(in srgb,var(--error-color,#E5534B) 13%,var(--hmh-surface,#12171D)); }
 .notice.is-error::before { border-color:var(--error-color,#E5534B); background:var(--error-color,#E5534B); }
+.command-activity { position:fixed; z-index:1042; top:16px; left:50%; display:flex; align-items:center; gap:13px;
+  width:min(560px,calc(100vw - 32px)); min-height:58px; padding:10px 16px; color:var(--hmh-text,#E7ECF3);
+  border:1px solid color-mix(in srgb,var(--hmh-accent,#4F8CFF) 50%,var(--hmh-border,#2F3845)); border-radius:16px;
+  background:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 11%,var(--hmh-surface,#12171D));
+  box-shadow:0 16px 42px rgba(0,0,0,.24); backdrop-filter:blur(18px); transform:translateX(-50%); }
+.command-activity-spinner, .command-target-spinner { flex:0 0 auto; border:3px solid color-mix(in srgb,var(--hmh-accent,#4F8CFF) 22%,transparent);
+  border-top-color:var(--hmh-accent,#4F8CFF); border-radius:50%; animation:hmh-command-spin .8s linear infinite; }
+.command-activity-spinner { width:28px; height:28px; }
+.command-activity-copy { display:grid; gap:2px; min-width:0; }
+.command-activity-copy strong { font-size:14px; line-height:1.25; }
+.command-activity-detail { overflow:hidden; color:var(--hmh-text-dim,#91A0B5); font-size:12px; line-height:1.3; text-overflow:ellipsis; white-space:nowrap; }
+.is-command-pending { position:relative !important; border-color:var(--hmh-accent,#4F8CFF) !important;
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--hmh-accent,#4F8CFF) 18%,transparent) !important; }
+.command-target-spinner { position:absolute; z-index:5; top:50%; left:50%; width:24px; height:24px; padding:0;
+  background:var(--hmh-surface,#12171D); box-shadow:0 0 0 7px color-mix(in srgb,var(--hmh-surface,#12171D) 88%,transparent);
+  pointer-events:none; transform:translate(-50%,-50%); }
+@keyframes hmh-command-spin { to { transform:rotate(360deg); } }
+.command-target-spinner { animation-name:hmh-command-target-spin; }
+@keyframes hmh-command-target-spin { to { transform:translate(-50%,-50%) rotate(360deg); } }
+@media (prefers-reduced-motion:reduce) {
+  .command-activity-spinner, .command-target-spinner { animation-duration:1.6s; }
+}
 @media (max-width:640px) {
   .notice { top:10px; width:calc(100vw - 20px); padding:11px 14px 11px 40px; font-size:13px; }
   .notice::before { left:15px; }
+  .command-activity { top:10px; width:calc(100vw - 20px); min-height:54px; padding:9px 13px; }
 }

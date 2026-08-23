@@ -76,6 +76,25 @@ export function renderEnergyAnomalyFields(draft, deps, onInput) {
   return fields;
 }
 
+export function energySettingsDraft(energy) {
+  const settings = energy.settings || {};
+  return {
+    displayUnits: settings.displayUnits || "watts",
+    showVoltage: settings.showVoltage !== false,
+    aggregation: settings.aggregation || "combined",
+    useAllDevices: settings.useAllDevices !== false,
+    selectedDeviceIds: [...(energy.selectedSourceIds || [])],
+    anomalyPowerThresholdW: settings.anomalyPowerThresholdW ?? null,
+    anomalySustainMinutes: settings.anomalySustainMinutes ?? null,
+  };
+}
+
+export function energySettingsSaveDisabled(draft, saving) {
+  return !!saving
+    || (draft.anomalyPowerThresholdW === null) !== (draft.anomalySustainMinutes === null)
+    || (!draft.useAllDevices && !draft.selectedDeviceIds.length);
+}
+
 function meterDraft(panel, meter) {
   if (!panel._energyMeterDraft) {
     panel._energyMeterDraft = {

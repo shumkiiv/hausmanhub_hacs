@@ -52,7 +52,7 @@ button.climate-category-card:hover { transform:translateY(-1px); border-color:co
 input.hh-climate-room-search { width:100%; min-height:44px; margin:0; padding:10px 14px; border:1px solid var(--hmh-border,#2F3845); border-radius:12px; color:var(--hmh-text,#E7ECF3); font:inherit; background:var(--hmh-raised,#181E26); box-sizing:border-box; }
 input.hh-climate-room-search:focus-visible { outline:2px solid color-mix(in srgb,var(--hmh-accent,#4F8CFF) 58%,transparent); outline-offset:-2px; }
 .hh-climate-room-toolbar .climate-mode-tabs { margin-bottom:0; }
-.hh-climate-room-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(268px,1fr)); gap:13px; }
+.hh-climate-room-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:13px; }
 .hh-climate-room-card { cursor:pointer; }
 .hh-climate-room-card:hover { border-color:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 45%,var(--hmh-border,#2F3845)); }
 .hh-climate-room-card.is-offline { border-color:color-mix(in srgb,var(--hmh-warning,#E5A84B) 48%,var(--hmh-border,#2F3845)); }
@@ -66,20 +66,27 @@ input.hh-climate-room-search:focus-visible { outline:2px solid color-mix(in srgb
 .hh-climate-room-status.is-auto { color:var(--hmh-accent,#4F8CFF); border-color:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 45%,var(--hmh-border,#2F3845)); background:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 10%,transparent); }
 .hh-climate-room-status.is-manual { color:var(--hmh-warning,#E5A84B); border-color:color-mix(in srgb,var(--hmh-warning,#E5A84B) 50%,var(--hmh-border,#2F3845)); background:color-mix(in srgb,var(--hmh-warning,#E5A84B) 10%,transparent); }
 .hh-climate-room-status.is-offline { color:var(--hmh-text-dim,#9AA7B4); border-color:var(--hmh-border,#2F3845); background:transparent; }
-.hh-climate-room-target { grid-column:3; grid-row:1 / span 2; align-self:start; font-size:26px; line-height:1; white-space:nowrap; }
-.hh-climate-room-lines { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:4px 10px; margin-top:12px; }
-.hh-climate-room-lines p { margin:0; color:var(--hmh-text-dim,#9AA7B4); font-size:13px; line-height:1.4; }
+.hh-climate-room-temperature { grid-column:3; grid-row:1 / span 2; align-self:start; font-size:26px; line-height:1; white-space:nowrap; }
+.hh-climate-room-lines { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:12px; }
+.hh-climate-room-fact { min-width:0; margin:0; padding:7px 9px; border:1px solid color-mix(in srgb,var(--hmh-border,#2F3845) 72%,transparent); border-radius:9px; background:var(--hmh-surface,#12171D); }
+.hh-climate-room-fact small,.hh-climate-room-fact strong { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.hh-climate-room-fact small { color:var(--hmh-text-dim,#9AA7B4); font-size:12px; line-height:1.2; }
+.hh-climate-room-fact strong { margin-top:3px; color:var(--hmh-text,#E7ECF3); font-size:14px; line-height:1.25; }
 .hh-climate-room-steppers { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; margin-top:14px; }
-.hh-climate-room-stepper { display:grid; grid-template-columns:40px minmax(0,1fr) 40px; align-items:center; gap:6px; padding:6px; border:1px solid var(--hmh-border,#2F3845); border-radius:12px; background:var(--hmh-surface,#12171D); }
-.hh-climate-room-stepper.is-disabled { opacity:.55; }
+.hh-climate-room-stepper { display:grid; grid-template-rows:auto 40px; align-items:center; gap:7px; min-width:0; padding:9px; border:1px solid var(--hmh-border,#2F3845); border-radius:12px; background:var(--hmh-surface,#12171D); }
+.hh-climate-room-stepper.is-readonly { border-color:color-mix(in srgb,var(--hmh-border,#2F3845) 72%,transparent); }
+.hh-climate-room-stepper-actions { display:grid; grid-template-columns:40px minmax(54px,1fr) 40px; align-items:center; gap:7px; min-width:0; }
+.hh-climate-room-stepper-actions.is-readonly { grid-template-columns:1fr; }
 button.hh-climate-room-step { display:grid; place-items:center; width:40px; height:40px; min-height:40px; margin:0; padding:0; border:1px solid var(--hmh-border,#2F3845); border-radius:10px; color:var(--hmh-text,#E7ECF3); background:var(--hmh-raised,#181E26); box-shadow:none; }
 button.hh-climate-room-step .icon { width:18px; height:18px; }
 button.hh-climate-room-step:hover:not(:disabled) { border-color:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 55%,var(--hmh-border,#2F3845)); color:var(--hmh-accent,#4F8CFF); }
 button.hh-climate-room-step:focus-visible { outline:2px solid color-mix(in srgb,var(--hmh-accent,#4F8CFF) 58%,transparent); outline-offset:-2px; }
-.hh-climate-room-stepper-label { display:flex; align-items:center; justify-content:center; gap:6px; min-width:0; color:var(--hmh-text-dim,#9AA7B4); font-size:13px; font-weight:650; white-space:nowrap; }
+.hh-climate-room-stepper-label { display:flex; align-items:center; gap:6px; min-width:0; color:var(--hmh-text-dim,#9AA7B4); font-size:13px; font-weight:650; white-space:nowrap; }
+.hh-climate-room-stepper-label > span:last-child { overflow:hidden; text-overflow:ellipsis; }
 .hh-climate-room-stepper-icon { display:grid; flex:0 0 auto; place-items:center; width:16px; height:16px; }
 .hh-climate-room-stepper-icon .icon { width:16px; height:16px; }
-.hh-climate-room-stepper-hint { grid-column:1/-1; color:var(--hmh-text-dim,#9AA7B4); font-size:11px; text-align:center; }
+.hh-climate-room-stepper-value { overflow:hidden; color:var(--hmh-text,#E7ECF3); font-size:16px; line-height:1; text-align:center; text-overflow:ellipsis; white-space:nowrap; }
+.hh-climate-room-stepper-value.is-pending { color:var(--hmh-accent,#4F8CFF); font-size:12px; }
 .climate-mode-tabs { display:flex; gap:8px; margin-bottom:14px; padding:5px; border-radius:14px; background:var(--hmh-raised,#181E26); }
 button.climate-mode-tab { min-height:40px; margin:0; padding:8px 15px; border:1px solid transparent; border-radius:10px; color:var(--hmh-text-dim,#9AA7B4); background:transparent; box-shadow:none; }
 button.climate-mode-tab.is-active { border-color:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 48%,var(--hmh-border,#2F3845)); color:var(--hmh-text,#E7ECF3); background:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 12%,transparent); }
@@ -188,6 +195,7 @@ button.climate-product-card:hover { border-color:color-mix(in srgb,var(--hmh-acc
   .climate-sheet-device-grid { grid-template-columns:1fr; }
   .climate-contour-devices { grid-template-columns:1fr; }
   .hh-climate-room-toolbar { grid-template-columns:1fr; }
+  .hh-climate-room-grid { grid-template-columns:1fr; }
   .hh-climate-room-steppers { grid-template-columns:1fr; }
   .climate-sync-action { grid-template-columns:44px minmax(0,1fr); }
   .climate-sync-button { grid-column:1/-1; width:100%; }

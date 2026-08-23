@@ -20,8 +20,8 @@
 .hmh-library-hero-status { display:inline-flex; flex:0 0 auto; align-items:center; gap:6px; min-height:30px; margin-top:1px; padding:0 11px;
   border:1px solid color-mix(in srgb,var(--hmh-status-success,#3DD17A) 45%,var(--hmh-border,#2F3845)); border-radius:999px; color:var(--hmh-status-success,#3DD17A); background:color-mix(in srgb,var(--hmh-status-success,#3DD17A) 10%,var(--hmh-raised,#181E26)); font-size:13px; font-weight:700; white-space:nowrap; }
 .hmh-library-hero-status-dot { width:6px; height:6px; border-radius:50%; background:var(--hmh-status-success,#3DD17A); box-shadow:0 0 0 3px color-mix(in srgb,var(--hmh-status-success,#3DD17A) 14%,transparent); }
-.hmh-library-hero-status.is-warning { color:#f0bd59; border-color:rgba(234,174,62,.52); }
-.hmh-library-hero-status.is-warning .hmh-library-hero-status-dot { background:#f0bd59; box-shadow:0 0 0 3px rgba(240,189,89,.14); }
+.hmh-library-hero-status.is-warning { color:var(--hmh-text,#E7ECF3); border-color:color-mix(in srgb,var(--hmh-status-danger,#FF5252) 42%,var(--hmh-border,#2F3845)); background:color-mix(in srgb,var(--hmh-status-danger,#FF5252) 8%,var(--hmh-surface,#12171D)); }
+.hmh-library-hero-status.is-warning .hmh-library-hero-status-dot { background:var(--hmh-status-danger,#FF5252); box-shadow:0 0 0 3px color-mix(in srgb,var(--hmh-status-danger,#FF5252) 13%,transparent); }
 .hmh-library-hero-eyebrow { color:var(--hmh-accent,#4F8CFF); font-size:13px;
   font-weight:750;
   letter-spacing:.11em;
@@ -60,11 +60,9 @@
   text-overflow:ellipsis;
   white-space:nowrap;
 }
-.hmh-library-hero.has-warning,
-.hmh-library-hero-fact.has-warning {
-  border-color:rgba(234,174,62,.52);
-}
-.hmh-library-hero-fact.has-warning strong { color:#f0bd59; }
+.hmh-library-hero.has-warning { border-color:color-mix(in srgb,var(--hmh-accent,#4F8CFF) 12%,var(--hmh-border,#2F3845)); }
+.hmh-library-hero-fact.has-warning { border-color:color-mix(in srgb,var(--hmh-status-danger,#FF5252) 35%,var(--hmh-border,#2F3845)); background:color-mix(in srgb,var(--hmh-status-danger,#FF5252) 4%,var(--hmh-surface,#12171D)); }
+.hmh-library-hero-fact.has-warning strong { color:var(--hmh-status-danger,#FF5252); }
 
 @media (max-width:760px) {
   .hmh-library-hero { min-height:96px; padding:14px 16px; }

@@ -1,45 +1,47 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.52.160";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.52.160";
-import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.52.160";
-import { resolveControlChannelTest, summarizeControlChannelReceipts } from "./hausman-hub-control-channel.js?v=1.52.160";
-import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.52.160";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.52.160";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.52.160";
-import { closeFirstRunAreaCreator, createFirstRunArea, openFirstRunAreaCreator, renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.52.160";
-import { createKioskButton, createKioskDock, handleKioskPointerUp, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, resolveIntercomQuickAction, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.52.160";
-import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.52.160";
-import { loadEnergyMeter } from "./hausman-hub-energy-meter.js?v=1.52.160";
-import { loadDeviceDiscovery, updateDeviceDiscoveryBadge } from "./hausman-hub-device-discovery.js?v=1.52.160";
-import { redrawEnergyChartsForTheme } from "./hausman-hub-energy-chart.js?v=1.52.160";
-import { applyHomeSignalSelection, AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, homeEnvironmentSaveError, homeEnvironmentSourcePayload, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.52.160";
-import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.52.160";
-import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.52.160";
-import { renderClimateOverview, setClimateManualMode } from "./hausman-hub-climate-overview.js?v=1.52.160";
-import { renderLightingOverview } from "./hausman-hub-lighting.js?v=1.52.160";
-import { renderRoomsOverview } from "./hausman-hub-rooms.js?v=1.52.160";
-import { renderMediaOverview } from "./hausman-hub-media-overview.js?v=1.52.160";
-import { renderSecurityOverview } from "./hausman-hub-security-overview.js?v=1.52.160";
-import { renderDevicesOverview } from "./hausman-hub-devices-overview.js?v=1.52.160";
-import { buildDiagnosticChecks, diagnosticSummaryText, renderDiagnosticDetails } from "./hausman-hub-diagnostics.js?v=1.52.160";
-import { renderRolloutReadiness } from "./hausman-hub-rollout.js?v=1.52.160";
-import { overviewHeroRenderKey } from "./hausman-hub-overview-hero-state.js?v=1.52.160";
-import { formatUpcomingCountdown, renderOverviewContent, renderOverviewHero } from "./hausman-hub-overview.js?v=1.52.160";
-import { conciseDeviceActionLabel, renderPhysicalDeviceCard } from "./hausman-hub-device-card.js?v=1.52.160";
-import { recordTechnicalEvent as log, renderTechnicalLogCard } from "./hausman-hub-technical-log.js?v=1.52.160";
-import { applyFeedback } from "./hausman-hub-feedback.js?v=1.52.160";
-import { apiErrorMessage, resolveApiError } from "./hausman-hub-error-taxonomy.js?v=1.52.160";
-import { canExecuteCommand, loadingUiState, offlineUiState, staleUiState } from "./hausman-hub-ui-state.js?v=1.52.160";
-import { filterCatalogActions, loadDeviceFeatureMatrix } from "./hausman-hub-device-features.js?v=1.52.160";
-import { withCorrelationId } from "./hausman-hub-correlation.js?v=1.52.160";
-import { createEventStreamClient, createFetchEventSource, EVENT_STREAM_PATH, recordActivityEvent, resolveEventStreamToken } from "./hausman-hub-pagination.js?v=1.52.160";
-import { renderKiosk } from "./hausman-hub-kiosk.js?v=1.52.160";
-import { captureRoomValidation, clearFirstRunDraft, persistFirstRunDraft, reconcileRoomValidation, restoreFirstRunDraft, resumeFirstRunDraft } from "./hausman-hub-first-run-draft.js?v=1.52.160";
-import { applyTabletProfile, isIntercomQuickAccessVisible, renderAppearanceSettings, renderIntercomSettings, syncIntercomQuickAccess } from "./hausman-hub-settings-profile.js?v=1.52.160";
-import { renderSettingsRooms, saveRoomType } from "./hausman-hub-settings-rooms.js?v=1.52.160";
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.160";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.52.161";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.52.161";
+import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.52.161";
+import { resolveControlChannelTest, summarizeControlChannelReceipts } from "./hausman-hub-control-channel.js?v=1.52.161";
+import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.52.161";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.52.161";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.52.161";
+import { closeFirstRunAreaCreator, createFirstRunArea, openFirstRunAreaCreator, renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.52.161";
+import { createKioskButton, createKioskDock, handleKioskPointerUp, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, resolveIntercomQuickAction, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.52.161";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.52.161";
+import { loadEnergyMeter } from "./hausman-hub-energy-meter.js?v=1.52.161";
+import { loadDeviceDiscovery, updateDeviceDiscoveryBadge } from "./hausman-hub-device-discovery.js?v=1.52.161";
+import { redrawEnergyChartsForTheme } from "./hausman-hub-energy-chart.js?v=1.52.161";
+import { applyHomeSignalSelection, AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, homeEnvironmentSaveError, homeEnvironmentSourcePayload, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.52.161";
+import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.52.161";
+import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.52.161";
+import { renderClimateOverview, setClimateManualMode } from "./hausman-hub-climate-overview.js?v=1.52.161";
+import { renderLightingOverview } from "./hausman-hub-lighting.js?v=1.52.161";
+import { renderRoomsOverview } from "./hausman-hub-rooms.js?v=1.52.161";
+import { renderMediaOverview } from "./hausman-hub-media-overview.js?v=1.52.161";
+import { renderSecurityOverview } from "./hausman-hub-security-overview.js?v=1.52.161";
+import { renderDevicesOverview } from "./hausman-hub-devices-overview.js?v=1.52.161";
+import { buildDiagnosticChecks, diagnosticSummaryText, renderDiagnosticDetails } from "./hausman-hub-diagnostics.js?v=1.52.161";
+import { renderRolloutReadiness } from "./hausman-hub-rollout.js?v=1.52.161";
+import { overviewHeroRenderKey } from "./hausman-hub-overview-hero-state.js?v=1.52.161";
+import { formatUpcomingCountdown, renderOverviewContent, renderOverviewHero } from "./hausman-hub-overview.js?v=1.52.161";
+import { renderPhysicalDeviceCard } from "./hausman-hub-device-card.js?v=1.52.161";
+import { deviceActionInitialValue } from "./hausman-hub-device-controls.js?v=1.52.161";
+import { recordTechnicalEvent as log, renderTechnicalLogCard } from "./hausman-hub-technical-log.js?v=1.52.161";
+import { applyFeedback } from "./hausman-hub-feedback.js?v=1.52.161";
+import { applyCommandActivity, applyCommandTarget, captureCommandIntent } from "./hausman-hub-command-feedback.js?v=1.52.161";
+import { apiErrorMessage, resolveApiError } from "./hausman-hub-error-taxonomy.js?v=1.52.161";
+import { canExecuteCommand, loadingUiState, offlineUiState, staleUiState } from "./hausman-hub-ui-state.js?v=1.52.161";
+import { filterCatalogActions, loadDeviceFeatureMatrix } from "./hausman-hub-device-features.js?v=1.52.161";
+import { withCorrelationId } from "./hausman-hub-correlation.js?v=1.52.161";
+import { createEventStreamClient, createFetchEventSource, EVENT_STREAM_PATH, recordActivityEvent, resolveEventStreamToken } from "./hausman-hub-pagination.js?v=1.52.161";
+import { renderKiosk } from "./hausman-hub-kiosk.js?v=1.52.161";
+import { captureRoomValidation, clearFirstRunDraft, persistFirstRunDraft, reconcileRoomValidation, restoreFirstRunDraft, resumeFirstRunDraft } from "./hausman-hub-first-run-draft.js?v=1.52.161";
+import { applyTabletProfile, isIntercomQuickAccessVisible, renderAppearanceSettings, renderIntercomSettings, syncIntercomQuickAccess } from "./hausman-hub-settings-profile.js?v=1.52.161";
+import { renderSettingsRooms, saveRoomType } from "./hausman-hub-settings-rooms.js?v=1.52.161";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.161";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
-const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css?v=1.52.160";
+const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css?v=1.52.161";
 const DASHBOARD_API = "hausman_hub/v1/dashboard";
 const CLIMATE_RUNTIME_API = "hausman_hub/v1/climate/runtime";
 const DEVICE_ACTIONS_API = "hausman_hub/v1/device-actions";
@@ -403,6 +405,9 @@ class HausmanHubPanel extends HTMLElement {
     this._error = false;
     this._busy = false;
     this._notice = "";
+    this._commandIntent = null;
+    this._commandPendingTarget = null;
+    this._commandPendingSpinner = null;
     this._loadedAt = 0;
     this._technicalLog = [];
     this._themeMode = "auto";
@@ -974,6 +979,7 @@ class HausmanHubPanel extends HTMLElement {
     shell.container.className = this._isFirstRunActive() || this._isFirstRunDeferred()
       ? "setup-shell" : "";
     applyFeedback(shell.notice, this._notice, setAttr);
+    this._syncCommandFeedback();
     if (this._error) {
       shell.banner.style.display = "";
       const uiState = this._screenUiState();
@@ -1054,6 +1060,14 @@ class HausmanHubPanel extends HTMLElement {
     const stylesheet = el("link");
     stylesheet.rel = "stylesheet";
     const container = el("main");
+    const captureIntent = (event) => {
+      if (!captureCommandIntent(this, event)) return;
+      const sync = () => this._syncCommandFeedback();
+      if (typeof queueMicrotask === "function") queueMicrotask(sync);
+      else Promise.resolve().then(sync);
+    };
+    container.addEventListener("click", captureIntent, true);
+    container.addEventListener("change", captureIntent, true);
     container.style.visibility = "hidden";
     const revealPanel = () => {
       container.style.visibility = "";
@@ -1123,6 +1137,20 @@ class HausmanHubPanel extends HTMLElement {
     setAttr(notice, "aria-live", "polite");
     notice.style.display = "none";
     container.appendChild(notice);
+    const commandActivity = el("div", "command-activity");
+    setAttr(commandActivity, "role", "status");
+    setAttr(commandActivity, "aria-live", "polite");
+    setAttr(commandActivity, "aria-atomic", "true");
+    commandActivity.style.display = "none";
+    const commandActivitySpinner = el("span", "command-activity-spinner");
+    setAttr(commandActivitySpinner, "aria-hidden", "true");
+    const commandActivityCopy = el("span", "command-activity-copy");
+    commandActivityCopy.appendChild(el("strong", null, "Команда отправляется"));
+    const commandActivityDetail = el("span", "command-activity-detail");
+    commandActivityCopy.appendChild(commandActivityDetail);
+    commandActivity.appendChild(commandActivitySpinner);
+    commandActivity.appendChild(commandActivityCopy);
+    container.appendChild(commandActivity);
     const loading = el("div", "loading muted", "Загрузка данных Hausman Hub…");
     loading.style.display = "none";
     container.appendChild(loading);
@@ -1235,7 +1263,7 @@ class HausmanHubPanel extends HTMLElement {
     });
     this._shell = {
       container,
-      banner, notice, loading, brandSubtitle, statusPill, versionBadge, themeButton, tabs, nav, sidebar, sidebarVersion, sidebarToggle, sectionNodes, wizard,
+      banner, notice, commandActivity, commandActivityDetail, loading, brandSubtitle, statusPill, versionBadge, themeButton, tabs, nav, sidebar, sidebarVersion, sidebarToggle, sectionNodes, wizard,
       headerClockDate, headerClockTime,
       readiness, summary, rooms,
       climateNav, climateTabs, climateViews, climateOverview, contour, profiles, schedule, home, windows, assistant,
@@ -1246,6 +1274,17 @@ class HausmanHubPanel extends HTMLElement {
     };
     this._updateThemeSwitcher();
     this._updateHeaderClock();
+  }
+
+  _syncCommandFeedback() {
+    const shell = this._shell;
+    if (!shell?.commandActivity) return;
+    const intent = this._commandIntent;
+    applyCommandActivity(shell.commandActivity, shell.commandActivityDetail, this._busy, intent, setAttr);
+    const syncTarget = () => applyCommandTarget(this, shell.container, this._busy, intent, setAttr);
+    if (typeof queueMicrotask === "function") queueMicrotask(syncTarget);
+    else Promise.resolve().then(syncTarget);
+    if (!this._busy) this._commandIntent = null;
   }
 
   _updateHeaderClock() {
@@ -5948,93 +5987,7 @@ class HausmanHubPanel extends HTMLElement {
   }
 
   _deviceActionInitialValue(device, target, action) {
-    const details = Array.isArray(device && device.details) ? device.details : [];
-    const detail = details.find((item) => item.entityId === target.entity_id);
-    const attributes = device && device.entityId === target.entity_id && device.attributes
-      ? device.attributes : {};
-    const numeric = (...values) => {
-      const value = values.find((candidate) => (
-        candidate !== null && candidate !== undefined && candidate !== ""
-        && Number.isFinite(Number(candidate))
-      ));
-      return value === undefined ? null : Number(value);
-    };
-    if (action.action_id === "set_temperature") {
-      return numeric(attributes.temperature, device && device.primaryValue, detail && detail.state);
-    }
-    if (action.action_id === "set_brightness") {
-      return numeric(attributes.brightness, detail && detail.state);
-    }
-    if (action.action_id === "set_position") {
-      return numeric(attributes.current_position, detail && detail.state);
-    }
-    if (action.action_id === "set_hvac_mode") {
-      return String((detail && detail.state) || (device && device.state) || "").trim() || null;
-    }
-    if (action.action_id === "set_fan_mode") {
-      return String(attributes.fan_mode || "").trim() || null;
-    }
-    if (action.action_id === "set_humidity") {
-      return numeric(attributes.humidity, device && device.primaryValue, detail && detail.state);
-    }
-    return null;
-  }
-
-  _deviceTargetControls(target, device) {
-    const row = el("div", "device-target-controls");
-    row.appendChild(el("strong", "device-target-name", target.name || "Управление"));
-    const actions = el("div", "device-action-list");
-    (target.actions || []).forEach((action) => {
-      const fields = Array.isArray(action.allowed_fields) ? action.allowed_fields : [];
-      if (!fields.includes("value")) {
-        const label=conciseDeviceActionLabel(action, target, device);
-        const accessibleLabel=`${label}, ${device.name || target.name || "устройство"}`;
-        const button = el("button", "secondary device-action", label);
-        button.type = "button";
-        setAttr(button, "aria-label", accessibleLabel);
-        button.disabled = this._busy;
-        button.addEventListener("click", (event) => {
-          event.preventDefault();
-          this._executeDeviceAction(target.target_id, action.action_id, null);
-        });
-        actions.appendChild(button);
-        return;
-      }
-      const valueRow = el("label", "device-value-action");
-      valueRow.appendChild(el("span", null, conciseDeviceActionLabel(action, target, device)));
-      const input = el("input");
-      const numericAction = ["set_temperature", "set_brightness", "set_position"]
-        .includes(action.action_id);
-      input.type = numericAction ? "number" : "text";
-      if (numericAction) {
-        input.min = action.action_id === "set_temperature" ? "10" : "0";
-        input.max = action.action_id === "set_brightness" ? "255"
-          : (action.action_id === "set_temperature" ? "35" : "100");
-        input.step = action.action_id === "set_temperature" ? "0.5" : "1";
-      }
-      const initialValue = this._deviceActionInitialValue(device, target, action);
-      input.value = initialValue === null ? "" : String(initialValue);
-      input.placeholder = numericAction ? "Укажите значение" : "Укажите режим";
-      valueRow.appendChild(input);
-      const apply = el("button", "secondary", "Применить");
-      apply.type = "button";
-      const syncApplyState = () => {
-        apply.disabled = this._busy || (numericAction
-          ? !Number.isFinite(Number(input.value)) || input.value === ""
-          : !String(input.value || "").trim());
-      };
-      syncApplyState();
-      input.addEventListener("input", syncApplyState);
-      apply.addEventListener("click", (event) => {
-        event.preventDefault();
-        const value = numericAction ? Number(input.value) : String(input.value).trim();
-        this._executeDeviceAction(target.target_id, action.action_id, value);
-      });
-      valueRow.appendChild(apply);
-      actions.appendChild(valueRow);
-    });
-    row.appendChild(actions);
-    return row;
+    return deviceActionInitialValue(device, target, action);
   }
 
   async _executeDeviceAction(targetId, actionId, value, options = {}) {

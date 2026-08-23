@@ -48,8 +48,11 @@ ENERGY_CHART_CSS = PANEL_JS.with_name("hausman-hub-energy-chart.css")
 WEATHER_SOURCES_JS = PANEL_JS.with_name("hausman-hub-weather-sources.js")
 MEDIA_DEVICE_JS = PANEL_JS.with_name("hausman-hub-media-device.js")
 DEVICE_CARD_JS = PANEL_JS.with_name("hausman-hub-device-card.js")
+DEVICE_CONTROLS_JS = PANEL_JS.with_name("hausman-hub-device-controls.js")
+DEVICE_CONTROLS_CSS = PANEL_JS.with_name("hausman-hub-device-controls.css")
 DEVICE_CARD_CSS = PANEL_JS.with_name("hausman-hub-device-card.css")
 SCENARIOS_JS = PANEL_JS.with_name("hausman-hub-scenarios.js")
+SCENARIO_CATALOG_JS = PANEL_JS.with_name("hausman-hub-scenario-catalog.js")
 SCENARIO_DEVICE_PICKER_JS = PANEL_JS.with_name("hausman-hub-scenario-device-picker.js")
 SCENARIO_ICONS_JS = PANEL_JS.with_name("hausman-hub-scenario-icons.js")
 SCENARIO_FIELDS_JS = PANEL_JS.with_name("hausman-hub-scenario-fields.js")
@@ -61,7 +64,9 @@ ROOM_ICONS_JS = PANEL_JS.with_name("hausman-hub-room-icons.js")
 HERO_ROOM_NAVIGATION_JS = PANEL_JS.with_name("hausman-hub-hero-room-navigation.js")
 LIBRARY_HERO_JS = PANEL_JS.with_name("hausman-hub-library-hero.js")
 LIBRARY_HERO_CSS = PANEL_JS.with_name("hausman-hub-library-hero.css")
+CLIMATE_OVERVIEW_JS = PANEL_JS.with_name("hausman-hub-climate-overview.js")
 CLIMATE_OVERVIEW_CSS = PANEL_JS.with_name("hausman-hub-climate-overview.css")
+LIGHTING_CSS = PANEL_JS.with_name("hausman-hub-lighting.css")
 LIBRARY_HERO_CONSUMERS = (
     PANEL_JS.with_name("hausman-hub-lighting.js"),
     PANEL_JS.with_name("hausman-hub-climate-overview.js"),
@@ -81,6 +86,7 @@ SETTINGS_CSS = PANEL_JS.with_name("hausman-hub-settings.css")
 SWITCH_CSS = PANEL_JS.with_name("hausman-hub-switch.css")
 NOTICE_CSS = PANEL_JS.with_name("hausman-hub-notice.css")
 FEEDBACK_JS = PANEL_JS.with_name("hausman-hub-feedback.js")
+COMMAND_FEEDBACK_JS = PANEL_JS.with_name("hausman-hub-command-feedback.js")
 ERROR_TAXONOMY_JS = PANEL_JS.with_name("hausman-hub-error-taxonomy.js")
 UI_STATE_JS = PANEL_JS.with_name("hausman-hub-ui-state.js")
 DEVICE_FEATURES_JS = PANEL_JS.with_name("hausman-hub-device-features.js")
@@ -102,7 +108,7 @@ MAX_DEVICE_BINDINGS_JS_BYTES = 20 * 1024
 MAX_AREA_BINDING_JS_BYTES = 24 * 1024
 MAX_NAVIGATION_JS_BYTES = 16 * 1024
 # Meter presentation and source details remain isolated from panel.js.
-MAX_ENERGY_JS_BYTES = 37 * 1024
+MAX_ENERGY_JS_BYTES = 38 * 1024
 MAX_MEDIA_DEVICE_JS_BYTES = 14 * 1024
 MAX_SCENARIOS_JS_BYTES = 42 * 1024
 # Navigation rail and tablet-parity surfaces are split into imported modules.
@@ -123,7 +129,14 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertNotIn(".hmh-library-hero-overlay", styles)
         self.assertIn("min-height:104px", styles)
         self.assertIn(".hmh-library-hero-facts", styles)
-        self.assertIn("hausman-hub-library-hero.css?v=1.52.160", panel_styles)
+        self.assertIn(
+            ".hmh-library-hero-status.is-warning { color:var(--hmh-text",
+            styles,
+        )
+        self.assertIn("var(--hmh-status-danger", styles)
+        self.assertNotIn("#f0bd59", styles)
+        self.assertNotIn("rgba(234,174,62", styles)
+        self.assertIn("hausman-hub-library-hero.css?v=1.52.161", panel_styles)
         for consumer in LIBRARY_HERO_CONSUMERS:
             source = consumer.read_text(encoding="utf-8")
             self.assertIn("createLibraryHero", source, consumer.name)
@@ -134,6 +147,23 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn("grid-template-columns:44px minmax(0,1fr) auto", styles)
         self.assertIn("grid-column:2; justify-self:start", styles)
         self.assertIn("grid-column:3; grid-row:1 / span 2", styles)
+        self.assertIn(".hh-climate-room-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr))", styles)
+        self.assertIn(".hh-climate-room-stepper-actions { display:grid; grid-template-columns:40px minmax(54px,1fr) 40px", styles)
+        self.assertNotIn(".hh-climate-room-stepper.is-disabled { opacity", styles)
+
+    def test_climate_conditioner_category_uses_device_icon(self) -> None:
+        source = CLIMATE_OVERVIEW_JS.read_text(encoding="utf-8")
+
+        self.assertIn(
+            '{ id: "conditioner", title: "Кондиционеры", icon: "conditioner"',
+            source,
+        )
+        self.assertIn("conditioner: {", source)
+        self.assertIn('stroke-linecap", "round"', source)
+        self.assertNotIn(
+            '{ id: "conditioner", title: "Кондиционеры", icon: "snow"',
+            source,
+        )
 
     def test_panel_script_exists_and_stays_bounded(self) -> None:
         content = PANEL_JS.read_text(encoding="utf-8")
@@ -153,8 +183,11 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         weather_sources = WEATHER_SOURCES_JS.read_text(encoding="utf-8")
         media_device = MEDIA_DEVICE_JS.read_text(encoding="utf-8")
         device_card = DEVICE_CARD_JS.read_text(encoding="utf-8")
+        device_controls = DEVICE_CONTROLS_JS.read_text(encoding="utf-8")
+        device_controls_css = DEVICE_CONTROLS_CSS.read_text(encoding="utf-8")
         device_card_css = DEVICE_CARD_CSS.read_text(encoding="utf-8")
         scenarios = SCENARIOS_JS.read_text(encoding="utf-8")
+        scenario_catalog = SCENARIO_CATALOG_JS.read_text(encoding="utf-8")
         scenario_device_picker = SCENARIO_DEVICE_PICKER_JS.read_text(encoding="utf-8")
         scenario_icons = SCENARIO_ICONS_JS.read_text(encoding="utf-8")
         scenario_fields = SCENARIO_FIELDS_JS.read_text(encoding="utf-8")
@@ -162,17 +195,19 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         overview = OVERVIEW_JS.read_text(encoding="utf-8")
         overview_utility_cards = OVERVIEW_UTILITY_CARDS_JS.read_text(encoding="utf-8")
         room_icons = ROOM_ICONS_JS.read_text(encoding="utf-8")
+        self.assertIn('rooms: "M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"', room_icons)
         device_maintenance_css = DEVICE_MAINTENANCE_CSS.read_text(encoding="utf-8")
         feedback = FEEDBACK_JS.read_text(encoding="utf-8")
+        command_feedback = COMMAND_FEEDBACK_JS.read_text(encoding="utf-8")
 
         self.assertLessEqual(len(content.encode("utf-8")), MAX_PANEL_JS_BYTES)
         self.assertLessEqual(len(rollout.encode("utf-8")), 8 * 1024)
         # Главная повторяет планшетную иерархию: Hero, боковая сводка и панели.
         self.assertLessEqual(len(overview.encode("utf-8")), 28 * 1024)
         self.assertLessEqual(len(overview_utility_cards.encode("utf-8")), 18 * 1024)
-        self.assertIn("hausman-hub-overview-utility-cards.js?v=1.52.160", overview)
+        self.assertIn("hausman-hub-overview-utility-cards.js?v=1.52.161", overview)
         self.assertLessEqual(len(room_icons.encode("utf-8")), 12 * 1024)
-        self.assertIn('hausman-hub-rollout.js?v=1.52.160', content)
+        self.assertIn('hausman-hub-rollout.js?v=1.52.161', content)
         self.assertLessEqual(len(weather_sources.encode("utf-8")), 24 * 1024)
         self.assertLessEqual(
             len(home_sections.encode("utf-8")), MAX_HOME_SECTIONS_JS_BYTES
@@ -193,7 +228,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             len(device_inventory.encode("utf-8")), MAX_DEVICE_INVENTORY_JS_BYTES
         )
         self.assertLessEqual(len(inventory_duplicates.encode("utf-8")), 8 * 1024)
-        self.assertIn("hausman-hub-inventory-duplicates.js?v=1.52.160", device_inventory)
+        self.assertIn("hausman-hub-inventory-duplicates.js?v=1.52.161", device_inventory)
         self.assertLessEqual(
             len(device_bindings.encode("utf-8")), MAX_DEVICE_BINDINGS_JS_BYTES
         )
@@ -204,27 +239,35 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn("restoreFirstRunDraft", first_run_draft)
         self.assertLessEqual(len(navigation.encode("utf-8")), MAX_NAVIGATION_JS_BYTES)
         self.assertLessEqual(len(energy.encode("utf-8")), MAX_ENERGY_JS_BYTES)
-        self.assertLessEqual(len(energy_chart.encode("utf-8")), 16 * 1024)
-        self.assertIn('hausman-hub-energy-chart.js?v=1.52.160', energy)
+        # Rich time scale, HA timezone labels and keyboard/pointer scrubber.
+        self.assertLessEqual(len(energy_chart.encode("utf-8")), 20 * 1024)
+        self.assertIn('hausman-hub-energy-chart.js?v=1.52.161', energy)
         self.assertLessEqual(
             len(media_device.encode("utf-8")), MAX_MEDIA_DEVICE_JS_BYTES
         )
         self.assertLessEqual(len(device_card.encode("utf-8")), 24 * 1024)
+        self.assertLessEqual(len(device_controls.encode("utf-8")), 12 * 1024)
+        self.assertLessEqual(len(device_controls_css.encode("utf-8")), 6 * 1024)
         self.assertLessEqual(len(device_card_css.encode("utf-8")), 14 * 1024)
         self.assertLessEqual(len(scenarios.encode("utf-8")), MAX_SCENARIOS_JS_BYTES)
+        self.assertLessEqual(len(scenario_catalog.encode("utf-8")), 18 * 1024)
+        self.assertIn("hausman-hub-scenario-catalog.js?v=1.52.161", scenarios)
         self.assertLessEqual(len(scenario_device_picker.encode("utf-8")), 16 * 1024)
-        self.assertIn("hausman-hub-scenario-device-picker.js?v=1.52.160", scenarios)
+        self.assertIn("hausman-hub-scenario-device-picker.js?v=1.52.161", scenarios)
         self.assertLessEqual(len(scenario_icons.encode("utf-8")), 12 * 1024)
         self.assertLessEqual(len(scenario_fields.encode("utf-8")), 12 * 1024)
-        self.assertIn('hausman-hub-scenario-fields.js?v=1.52.160', scenarios)
+        self.assertIn('hausman-hub-scenario-fields.js?v=1.52.161', scenarios)
         self.assertNotIn("SCENARIO_STATE_OPTIONS", scenarios)
         self.assertIn("selectedProperty.options", scenario_device_picker)
         self.assertIn('placeholder: numeric ? "Введите число"', scenario_device_picker)
         self.assertNotIn('placeholder: "включено / 23 / открыто"', scenarios)
         self.assertLessEqual(len(device_maintenance_css.encode("utf-8")), 8 * 1024)
         self.assertLessEqual(len(feedback.encode("utf-8")), 4 * 1024)
+        self.assertLessEqual(len(command_feedback.encode("utf-8")), 5 * 1024)
         self.assertIn("applyFeedback", feedback)
         self.assertIn("feedbackTone", feedback)
+        self.assertIn("captureCommandIntent", command_feedback)
+        self.assertIn("applyCommandActivity", command_feedback)
         self.assertIn("renderHomeSection", home_sections)
         self.assertIn("renderFirstRunRoom", room_setup)
         self.assertIn("renderFirstRunDeviceGroups", room_device_groups)
@@ -252,8 +295,9 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn("grid-template-columns:56px minmax(0,1fr) 18px", device_card_css)
         self.assertIn("font-size:16px", device_card_css)
         self.assertIn("width:56px;\n  height:56px", device_card_css)
-        self.assertIn("conciseDeviceActionLabel(action, target, device)", content)
-        self.assertIn('const accessibleLabel=`${label}, ${device.name', content)
+        self.assertIn("renderDeviceTargetControls", device_card)
+        self.assertIn("config/entity_registry/update", device_controls)
+        self.assertIn("deviceActionInitialValue(device, target, action)", content)
         self.assertIn('"К устройствам"', content)
         self.assertIn("renderEnergySection", energy)
         self.assertIn("renderScenarioSection", scenarios)
@@ -283,7 +327,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         script = r"""
           import fs from "node:fs";
           const path = process.argv[1];
-          const source = fs.readFileSync(path, "utf8").replace(/^import .*$/m, "");
+          const source = fs.readFileSync(path, "utf8").replace(/^import .*$/gm, "");
           const moduleUrl = `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`;
           const { conciseDeviceActionLabel } = await import(moduleUrl);
           const device = { name: "Увлажнитель детская" };
@@ -293,6 +337,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             "Увлажнитель детская · Увлажнитель детская Humidifier · Выключить",
             "Увлажнитель детская · Увлажнитель детская Humidifier · Целевая влажность",
             "Увлажнитель детская · Увлажнитель детская Звук уведомления · Включить",
+            "turn_off",
           ].map((title) => conciseDeviceActionLabel({ title }, target, device));
           process.stdout.write(JSON.stringify(titles));
         """
@@ -304,7 +349,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         )
 
         self.assertEqual(
-            ["Включить", "Выключить", "Целевая влажность", "Звук уведомления: включить"],
+            ["Включить", "Выключить", "Целевая влажность", "Звук уведомления: включить", "Выключить"],
             json.loads(result.stdout),
         )
 
@@ -312,7 +357,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         script = r"""
           import fs from "node:fs";
           const path = process.argv[1];
-          const source = fs.readFileSync(path, "utf8").replace(/^import .*$/m, "");
+          const source = fs.readFileSync(path, "utf8").replace(/^import .*$/gm, "");
           const moduleUrl = `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`;
           const { appendDeviceRangeControls, validRangeControl, conciseDetails } = await import(moduleUrl);
 
@@ -499,8 +544,8 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn("if (step > maximum - minimum) return null;", device_card_js)
         self.assertIn("/^entity_[0-9a-f]{16}$/", device_card_js)
         self.assertIn("Math.floor((range.maximum - range.minimum) / range.step", device_card_js)
-        self.assertIn("const rangeCount = appendDeviceRangeControls(sheet, device, owner, deps);", device_card_js)
-        self.assertIn("} else if (!rangeCount) {", device_card_js)
+        self.assertIn("appendDeviceRangeControls(featureGrid, device, owner, deps, { compact: true })", device_card_js)
+        self.assertIn("if (!targets.length && !rangeCount) {", device_card_js)
         device_card_css = DEVICE_CARD_CSS.read_text(encoding="utf-8")
         self.assertIn(".device-range-card {", device_card_css)
         self.assertIn("min-height:48px", device_card_css)
@@ -532,6 +577,68 @@ class PanelJavaScriptContractTest(unittest.TestCase):
           applyFeedback(element, message, setAttr);
           if (element.style.display === "none" || !scheduled) {{
             throw new Error("a later success message did not become visible");
+          }}
+        """
+        completed = subprocess.run(
+            ("node", "--input-type=commonjs", "--eval", script),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_command_feedback_names_and_marks_the_pending_control(self) -> None:
+        script = f"""
+          const vm = require("vm");
+          const fs = require("fs");
+          vm.runInThisContext(fs.readFileSync({str(COMMAND_FEEDBACK_JS)!r}, "utf8").replace(/export /g, ""));
+          const makeNode = (tag = "div", label = "") => {{
+            const node = {{
+              tagName: tag.toUpperCase(), children: [], className: "", style: {{}}, attributes: {{}}, parentElement: null,
+              getAttribute(name) {{ return this.attributes[name] || ""; }},
+              setAttribute(name, value) {{ this.attributes[name] = String(value); }},
+              removeAttribute(name) {{ delete this.attributes[name]; }},
+              appendChild(child) {{ child.parentElement = this; this.children.push(child); return child; }},
+              remove() {{
+                if (!this.parentElement) return;
+                this.parentElement.children = this.parentElement.children.filter((child) => child !== this);
+                this.parentElement = null;
+              }},
+            }};
+            node.classList = {{
+              add(name) {{ node.className = [...new Set([...node.className.split(" ").filter(Boolean), name])].join(" "); }},
+              remove(name) {{ node.className = node.className.split(" ").filter((item) => item && item !== name).join(" "); }},
+              contains(name) {{ return node.className.split(" ").includes(name); }},
+            }};
+            if (label) node.attributes["aria-label"] = label;
+            return node;
+          }};
+          global.document = {{ createElement: (tag) => makeNode(tag) }};
+          const setAttr = (node, name, value) => node.setAttribute(name, value);
+          const panel = {{ _commandPendingTarget: null, _commandPendingSpinner: null }};
+          const root = makeNode("main");
+          const button = makeNode("button", "Выключить свет в гостиной");
+          root.appendChild(button);
+          const intent = captureCommandIntent(panel, {{ composedPath: () => [button, root] }}, 1000);
+          if (!intent || intent.label !== "Выключить свет в гостиной") throw new Error("command label was not captured");
+          const activity = makeNode();
+          const detail = makeNode("span");
+          applyCommandActivity(activity, detail, true, intent, setAttr, 1100);
+          if (activity.style.display !== "" || detail.textContent !== intent.label || activity.attributes["aria-busy"] !== "true") {{
+            throw new Error("pending command activity is not explicit");
+          }}
+          if (applyCommandTarget(panel, root, true, intent, setAttr, 1100) !== button
+            || !button.classList.contains("is-command-pending")
+            || button.attributes["aria-busy"] !== "true"
+            || !button.children.some((child) => child.className === "command-target-spinner")) {{
+            throw new Error("pending command control is not marked");
+          }}
+          applyCommandActivity(activity, detail, false, intent, setAttr, 1200);
+          applyCommandTarget(panel, root, false, intent, setAttr, 1200);
+          if (activity.style.display !== "none" || button.classList.contains("is-command-pending")
+            || button.children.some((child) => child.className === "command-target-spinner")) {{
+            throw new Error("pending command feedback did not clear");
           }}
         """
         completed = subprocess.run(
@@ -609,7 +716,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         ):
             self.assertIn(f"  {icon_name}:", room_icons)
         self.assertIn(
-            './hausman-hub-room-icons.js?v=1.52.160',
+            './hausman-hub-room-icons.js?v=1.52.161',
             OVERVIEW_HERO_STATE_JS.read_text(encoding="utf-8"),
         )
         overview = OVERVIEW_JS.read_text(encoding="utf-8")
@@ -647,6 +754,11 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn(".overview-canon-room-navigation", overview_css)
         self.assertIn("scrollbar-width:none", overview_css)
         self.assertIn(".overview-canon-room-strip::-webkit-scrollbar", overview_css)
+        self.assertIn("--hmh-hero-glass-bg:rgba(248,250,253,.72)", overview_css)
+        self.assertIn(":host(:not(.theme-light)) .overview-canon-hero", overview_css)
+        self.assertIn("background:var(--hmh-hero-glass-bg); box-shadow:var(--hmh-hero-glass-shadow)", overview_css)
+        self.assertIn("border-color:var(--hmh-hero-glass-active-border)", overview_css)
+        self.assertNotIn("background:rgba(236,232,225,.62)", overview_css)
 
     def test_overview_home_target_and_grid_layout_contracts(self) -> None:
         climate_overview = PANEL_JS.with_name(
@@ -694,12 +806,19 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn(".overview-tablet-energy-sources", overview_css)
         self.assertIn(".overview-tablet-bottom-card.is-expanded", overview_css)
         self.assertIn(".overview-tablet-lighting-expanded", overview_css)
+        self.assertIn("padding:10px; overflow:hidden; font-weight:400", overview_css)
+        self.assertIn("overflow-x:hidden; overflow-y:auto; overscroll-behavior:contain", overview_css)
         self.assertIn(".overview-tablet-home-compact", overview_css)
         self.assertIn(".overview-tablet-activity-detailed", overview_css)
+        self.assertIn(".overview-tablet-side-card.is-interactive:hover", overview_css)
+        self.assertIn(".overview-tablet-side-card.is-interactive:focus-visible", overview_css)
         self.assertIn(".overview-canon-climate-controls", overview_css)
         self.assertIn(".overview-tablet-hero-facts", overview_css)
         self.assertIn("grid-template-columns:repeat(4,minmax(0,1fr))", overview_css)
         self.assertIn("@container hausmanhub-panel (min-width:1050px)", overview_css)
+        self.assertIn("@container hausmanhub-panel (min-width:1050px) and (max-width:1219px)", overview_css)
+        self.assertIn("grid-template-columns:minmax(0,1fr) 18px", overview_css)
+        self.assertIn("grid-template-columns:30px minmax(0,1fr) 18px", overview_css)
         self.assertIn("column-gap:28px; width:100%; max-width:1600px; margin:0 auto; padding:28px 34px 56px", overview_css)
         self.assertIn("height:var(--hmh-tablet-rail-height); min-height:var(--hmh-tablet-rail-height); overflow:visible", overview_css)
         self.assertIn(":host(.overview-active) #hausman-overview.overview-utility-expanded { height:auto; }", overview_css)
@@ -737,11 +856,12 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             "hausman-hub-overview.js",
             "hausman-hub-overview-hero-state.js",
             "hausman-hub-feedback.js",
+            "hausman-hub-command-feedback.js",
         ):
             self.assertIn(f'./{module}?v={manifest["version"]}', content)
         self.assertIn(
             f'./hausman-hub-scenario-icons.js?v={manifest["version"]}',
-            SCENARIOS_JS.read_text(encoding="utf-8"),
+            SCENARIO_CATALOG_JS.read_text(encoding="utf-8"),
         )
 
     def test_energy_history_uses_hausmanhub_api_not_raw_recorder_socket(self) -> None:
@@ -751,6 +871,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn('["year", "Год"]', content)
         self.assertIn('year: { days: 365, interval: "1d" }', content)
         self.assertIn('panel._energyHistoryPeriod = value', content)
+        self.assertIn('panel._energyConsumptionHistory = {};', content)
         self.assertIn('panel._energyHistoryReloadRequested = true', content)
         self.assertIn('if (panel._energyHistoryReloadRequested)', content)
         self.assertIn('["power", "W"]', content)
@@ -761,14 +882,56 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         self.assertIn("series.deviceId || series.sourceId", content)
         self.assertIn("energy-history-canvas", chart)
         self.assertIn("energy-chart-metrics", chart)
-        self.assertIn('["Сейчас", latest, 1]', chart)
-        self.assertIn('["Среднее", average, 1]', chart)
-        self.assertIn('["Пик", max, 1]', chart)
-        self.assertIn('["Минимум", min, 1]', chart)
+        self.assertIn('"Последний час"', chart)
+        self.assertIn('["Среднее", average, 1,', chart)
+        self.assertIn('["Пик", max, 1,', chart)
+        self.assertIn('["Минимум", min, 1,', chart)
+        self.assertIn("energyChartScale", chart)
+        self.assertIn("energyChartTimeTicks", chart)
+        self.assertIn("energy-chart-tooltip", chart)
+        self.assertIn("panel._hass.config.time_zone", chart)
+        self.assertIn("appendMeterOdometer(deps, display", content)
+        self.assertIn("Текущий цикл", content)
+        self.assertIn("Следующая передача", content)
         self.assertIn("delete target.selection", content)
         self.assertIn('id: "selection", name: "выбранных источников"', content)
         self.assertNotIn("recorder/statistics_during_period", content)
         self.assertNotIn("detail.entityId", content)
+
+    def test_energy_chart_uses_readable_scale_and_home_timezone(self) -> None:
+        script = f"""
+          const vm = require("vm");
+          const fs = require("fs");
+          vm.runInThisContext(
+            fs.readFileSync({str(ENERGY_CHART_JS)!r}, "utf8").replace(/export /g, ""),
+            {{ filename: {str(ENERGY_CHART_JS)!r} }}
+          );
+          const scale = energyChartScale([573.6, 737.7, 1418.8, 310.7]);
+          if (scale.min !== 0 || scale.max !== 1500 || scale.step !== 500) {{
+            throw new Error(`unexpected scale: ${{JSON.stringify(scale)}}`);
+          }}
+          const points = Array.from({{ length: 24 }}, (_, index) => ({{
+            start: new Date(Date.parse("2026-08-21T19:00:00Z") + index * 3600000).toISOString(),
+            value: 300 + index * 10,
+          }}));
+          const ticks = energyChartTimeTicks(points, "day", 900, "Europe/Moscow");
+          if (ticks.length !== 5 || !ticks[0].secondary || !ticks[4].secondary) {{
+            throw new Error(`unreadable time ticks: ${{JSON.stringify(ticks)}}`);
+          }}
+          const windowLabel = energyChartWindowLabel(points, "Europe/Moscow");
+          if (!windowLabel.includes("22:00") || !windowLabel.includes("21:00")
+              || !windowLabel.includes("время дома")) {{
+            throw new Error(`wrong home time: ${{windowLabel}}`);
+          }}
+        """
+        completed = subprocess.run(
+            ("node", "--input-type=commonjs", "--eval", script),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(0, completed.returncode, completed.stderr)
 
     def test_intercom_quick_action_resolves_physical_device_and_requires_confirmation(self) -> None:
         script = f"""
@@ -856,6 +1019,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         device_card_css = DEVICE_CARD_CSS.read_text(encoding="utf-8")
         control_channel_styles = CONTROL_CHANNEL_CSS.read_text(encoding="utf-8")
         button_styles = BUTTONS_CSS.read_text(encoding="utf-8")
+        lighting_styles = LIGHTING_CSS.read_text(encoding="utf-8")
 
         self.assertLessEqual(len(styles.encode("utf-8")), MAX_PANEL_CSS_BYTES)
         self.assertLessEqual(len(weather_source_styles.encode("utf-8")), 8 * 1024)
@@ -873,49 +1037,82 @@ class PanelJavaScriptContractTest(unittest.TestCase):
         # 30 KiB: tablet-parity meter uses dedicated odometer presentation.
         self.assertLessEqual(len(energy_styles.encode("utf-8")), 30 * 1024)
         self.assertLessEqual(len(energy_chart_styles.encode("utf-8")), 8 * 1024)
+        self.assertIn(
+            ".energy-history-layout { display:grid; grid-template-columns:minmax(0,1fr)",
+            energy_chart_styles,
+        )
+        self.assertNotIn("275px", energy_chart_styles)
+        self.assertIn(
+            ".energy-summary-card.energy-meter-reading-strip { display:grid",
+            energy_styles,
+        )
         self.assertLessEqual(len(button_styles.encode("utf-8")), 8 * 1024)
-        self.assertIn('hausman-hub-buttons.css?v=1.52.160', styles)
-        self.assertIn('hausman-hub-energy-chart.css?v=1.52.160', styles)
+        self.assertIn('hausman-hub-buttons.css?v=1.52.161', styles)
+        self.assertIn('hausman-hub-energy-chart.css?v=1.52.161', styles)
         self.assertLessEqual(len(rollout_styles.encode("utf-8")), 4 * 1024)
-        self.assertIn('"/api/hausman_hub/panel/hausman-hub-panel.css?v=1.52.160"', content)
+        self.assertIn('"/api/hausman_hub/panel/hausman-hub-panel.css?v=1.52.161"', content)
         diagnostics = (PANEL_JS.parent / "hausman-hub-diagnostics.js").read_text(encoding="utf-8")
         self.assertIn("renderSecureAccessGuide", diagnostics)
         self.assertIn("https://${host}/config/dashboard", diagnostics)
         self.assertIn("Автоматическая установка сертификата намеренно недоступна", diagnostics)
-        self.assertIn('hausman-hub-settings.css?v=1.52.160', styles)
-        self.assertIn('hausman-hub-diagnostics.css?v=1.52.160', styles)
-        self.assertIn('hausman-hub-switch.css?v=1.52.160', styles)
-        self.assertIn('hausman-hub-notice.css?v=1.52.160', styles)
+        self.assertIn('hausman-hub-settings.css?v=1.52.161', styles)
+        self.assertIn('hausman-hub-diagnostics.css?v=1.52.161', styles)
+        self.assertIn('hausman-hub-switch.css?v=1.52.161', styles)
+        self.assertIn('hausman-hub-notice.css?v=1.52.161', styles)
         self.assertIn(".notice { position:fixed", notice_styles)
         self.assertIn(".notice { position:fixed; z-index:1040", notice_styles)
         self.assertIn(".notice.is-error", notice_styles)
-        self.assertIn('hausman-hub-device-maintenance.css?v=1.52.160', styles)
-        self.assertIn('hausman-hub-control-channel.css?v=1.52.160', styles)
+        self.assertIn('hausman-hub-device-maintenance.css?v=1.52.161', styles)
+        self.assertIn('hausman-hub-control-channel.css?v=1.52.161', styles)
         self.assertIn(".entity-group.device-card { container-type:inline-size; }", control_channel_styles)
         self.assertIn("grid-template-columns:minmax(0,.75fr) minmax(0,1.25fr)", control_channel_styles)
         self.assertIn(".device-channel-field select { width:100%; min-width:0; max-width:100%", control_channel_styles)
         self.assertIn("@container (max-width:520px)", control_channel_styles)
-        self.assertIn('hausman-hub-weather-sources.css?v=1.52.160', styles)
-        self.assertIn('hausman-hub-wizard-validation.css?v=1.52.160', styles)
-        self.assertIn('hausman-hub-catalog.css?v=1.52.160', styles)
-        self.assertIn('hausman-hub-media-device.css?v=1.52.160', styles)
-        self.assertIn('hausman-hub-device-card.css?v=1.52.160', styles)
+        self.assertIn('hausman-hub-weather-sources.css?v=1.52.161', styles)
+        self.assertIn('hausman-hub-wizard-validation.css?v=1.52.161', styles)
+        self.assertIn('hausman-hub-catalog.css?v=1.52.161', styles)
+        self.assertIn('hausman-hub-media-device.css?v=1.52.161', styles)
+        self.assertIn('hausman-hub-device-card.css?v=1.52.161', styles)
+        self.assertIn('hausman-hub-device-controls.css?v=1.52.161', styles)
+        self.assertIn("--lighting-card-surface:", lighting_styles)
+        self.assertIn(
+            ".lighting-room-card.is-active { border-color:color-mix(in srgb,var(--hmh-accent",
+            lighting_styles,
+        )
+        self.assertIn(
+            ".lighting-room-status.is-on { color:var(--hmh-text",
+            lighting_styles,
+        )
+        self.assertIn(
+            ".lighting-room-chip.is-active { color:var(--hmh-accent",
+            lighting_styles,
+        )
+        self.assertIn(
+            ".lighting-device-section .physical-device-card",
+            lighting_styles,
+        )
+        self.assertNotIn(
+            ".lighting-room-card.is-active { border-color:color-mix(in srgb,#FFB72E",
+            lighting_styles,
+        )
         self.assertIn(".device-sheet-backdrop {", device_card_css)
         self.assertIn("position:fixed", device_card_css)
         self.assertIn("z-index:1200", device_card_css)
         self.assertNotIn(".inventory-device-card:not([open])", device_card_css)
         self.assertIn(".device-sheet {", device_card_css)
-        self.assertIn('hausman-hub-scenarios.css?v=1.52.160', styles)
-        self.assertIn('hausman-hub-scenario-device-picker.css?v=1.52.160', scenario_styles)
-        self.assertIn('.scenario-editor-workspace { display:grid; grid-template-columns:286px minmax(0,1fr);', scenario_styles)
+        self.assertIn('hausman-hub-scenarios.css?v=1.52.161', styles)
+        self.assertIn('hausman-hub-scenario-device-picker.css?v=1.52.161', scenario_styles)
+        self.assertIn('.scenario-editor-workspace { display:grid; grid-template-columns:minmax(0,.80fr) minmax(0,1.10fr) minmax(0,1.12fr);', scenario_styles)
+        self.assertIn('.scenario-editor-steps { display:grid; grid-template-columns:repeat(6,minmax(0,1fr));', scenario_styles)
+        self.assertIn('.scenario-run { position:static;', scenario_styles)
         self.assertIn('.scenario-editor-switch-track { position:relative; display:block!important;', scenario_styles)
         self.assertIn('.scenario-editor-overlay { position:fixed; z-index:1020;', scenario_styles)
-        self.assertIn('hausman-hub-climate-overview.css?v=1.52.160', styles)
-        self.assertIn('hausman-hub-navigation.css?v=1.52.160', styles)
-        self.assertIn('hausman-hub-kiosk.css?v=1.52.160', styles)
+        self.assertIn('hausman-hub-climate-overview.css?v=1.52.161', styles)
+        self.assertIn('hausman-hub-navigation.css?v=1.52.161', styles)
+        self.assertIn('hausman-hub-kiosk.css?v=1.52.161', styles)
         self.assertIn(".kiosk-panorama-metrics", kiosk_styles)
         self.assertIn(".kiosk-panorama-intercom", kiosk_styles)
-        self.assertIn('hausman-hub-rollout.css?v=1.52.160', styles)
+        self.assertIn('hausman-hub-rollout.css?v=1.52.161', styles)
         self.assertIn(":host(.kiosk-mode) .kiosk-dock", navigation_styles)
         self.assertIn(".banner { position:fixed", navigation_styles)
         self.assertIn(".banner { position:fixed; z-index:1041", navigation_styles)
@@ -959,7 +1156,7 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             ".rooms-canon-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }",
             rooms_styles,
         )
-        self.assertIn("выбранные источники", ENERGY_JS.read_text(encoding="utf-8"))
+        self.assertIn("почасовые значения", ENERGY_JS.read_text(encoding="utf-8"))
         self.assertIn("Питание подключённой линии будет снято", ENERGY_JS.read_text(encoding="utf-8"))
         self.assertIn("Фактические данные Recorder Home Assistant", ENERGY_JS.read_text(encoding="utf-8"))
         self.assertIn("подтверждение|ожида", FEEDBACK_JS.read_text(encoding="utf-8"))
@@ -1403,6 +1600,10 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             {{ filename: {str(MODAL_JS)!r} }}
           );
           vm.runInThisContext(
+            fs.readFileSync({str(DEVICE_CONTROLS_JS)!r}, "utf8").replace(/export /g, ""),
+            {{ filename: {str(DEVICE_CONTROLS_JS)!r} }}
+          );
+          vm.runInThisContext(
             fs.readFileSync({str(DEVICE_CARD_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
             {{ filename: {str(DEVICE_CARD_JS)!r} }}
           );
@@ -1415,12 +1616,20 @@ class PanelJavaScriptContractTest(unittest.TestCase):
             {{ filename: {str(SCENARIO_ICONS_JS)!r} }}
           );
           vm.runInThisContext(
+            fs.readFileSync({str(SCENARIO_CATALOG_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, "").replace(/export /g, ""),
+            {{ filename: {str(SCENARIO_CATALOG_JS)!r} }}
+          );
+          vm.runInThisContext(
             fs.readFileSync({str(SCENARIOS_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, "").replace(/export /g, ""),
             {{ filename: {str(SCENARIOS_JS)!r} }}
           );
           vm.runInThisContext(
             fs.readFileSync({str(FEEDBACK_JS)!r}, "utf8").replace(/export /g, ""),
             {{ filename: {str(FEEDBACK_JS)!r} }}
+          );
+          vm.runInThisContext(
+            fs.readFileSync({str(COMMAND_FEEDBACK_JS)!r}, "utf8").replace(/export /g, ""),
+            {{ filename: {str(COMMAND_FEEDBACK_JS)!r} }}
           );
           vm.runInThisContext(
             fs.readFileSync({str(ERROR_TAXONOMY_JS)!r}, "utf8").replace(/export /g, ""),
@@ -1633,6 +1842,10 @@ THEME_TEST_HARNESS = """
     { filename: __MODAL_JS__ }
   );
   vm.runInThisContext(
+    fs.readFileSync(__DEVICE_CONTROLS_JS__, "utf8").replace(/export /g, ""),
+    { filename: __DEVICE_CONTROLS_JS__ }
+  );
+  vm.runInThisContext(
     fs.readFileSync(__DEVICE_CARD_JS__, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
     { filename: __DEVICE_CARD_JS__ }
   );
@@ -1645,12 +1858,20 @@ THEME_TEST_HARNESS = """
     { filename: __SCENARIO_ICONS_JS__ }
   );
   vm.runInThisContext(
+    fs.readFileSync(__SCENARIO_CATALOG_JS__, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
+    { filename: __SCENARIO_CATALOG_JS__ }
+  );
+  vm.runInThisContext(
     fs.readFileSync(__SCENARIOS_JS__, "utf8").replace(/^import .*;\\s*/gm, "").replace(/export /g, ""),
     { filename: __SCENARIOS_JS__ }
   );
   vm.runInThisContext(
     fs.readFileSync(__FEEDBACK_JS__, "utf8").replace(/export /g, ""),
     { filename: __FEEDBACK_JS__ }
+  );
+  vm.runInThisContext(
+    fs.readFileSync(__COMMAND_FEEDBACK_JS__, "utf8").replace(/export /g, ""),
+    { filename: __COMMAND_FEEDBACK_JS__ }
   );
   vm.runInThisContext(
     fs.readFileSync(__PANEL_JS__, "utf8").replace(/^import .*;\\s*/gm, ""),
@@ -1684,11 +1905,14 @@ class PanelThemeSwitcherTest(unittest.TestCase):
         script = script.replace("__ENERGY_METER_JS__", repr(str(ENERGY_METER_JS)))
         script = script.replace("__DEVICE_DISCOVERY_JS__", repr(str(DEVICE_DISCOVERY_JS)))
         script = script.replace("__MODAL_JS__", repr(str(MODAL_JS)))
+        script = script.replace("__DEVICE_CONTROLS_JS__", repr(str(DEVICE_CONTROLS_JS)))
         script = script.replace("__DEVICE_CARD_JS__", repr(str(DEVICE_CARD_JS)))
         script = script.replace("__MEDIA_DEVICE_JS__", repr(str(MEDIA_DEVICE_JS)))
         script = script.replace("__SCENARIO_ICONS_JS__", repr(str(SCENARIO_ICONS_JS)))
+        script = script.replace("__SCENARIO_CATALOG_JS__", repr(str(SCENARIO_CATALOG_JS)))
         script = script.replace("__SCENARIOS_JS__", repr(str(SCENARIOS_JS)))
         script = script.replace("__FEEDBACK_JS__", repr(str(FEEDBACK_JS)))
+        script = script.replace("__COMMAND_FEEDBACK_JS__", repr(str(COMMAND_FEEDBACK_JS)))
         script = script.replace("__CORRELATION_JS__", repr(str(CORRELATION_JS)))
         script = script.replace("__PAGINATION_JS__", repr(str(PAGINATION_JS)))
         return subprocess.run(
@@ -1891,7 +2115,7 @@ class PanelRegistrationTest(unittest.TestCase):
                 "webcomponent_name": "hausman-hub-panel",
                 "sidebar_title": "Hausman Hub",
                 "sidebar_icon": "mdi:thermostat",
-                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.52.160",
+                "module_url": "/api/hausman_hub/panel/hausman-hub-panel.js?v=1.52.161",
                 "require_admin": True,
                 "config_panel_domain": "hausman_hub",
             },

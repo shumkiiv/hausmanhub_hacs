@@ -1,6 +1,7 @@
 /* Canonical physical-device card shared by all tablet-style HACS sections. */
 
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.160";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.161";
+import { renderDeviceTargetControls } from "./hausman-hub-device-controls.js?v=1.52.161";
 
 const STATE_LABELS = {
   on: "Включено",
@@ -134,10 +135,17 @@ const DETAIL_ACTION_VERBS = new Set([
   "включить", "выключить", "переключить", "открыть", "закрыть", "запустить",
   "остановить", "сбросить", "turn on", "turn off", "toggle", "open", "close", "start", "stop", "reset",
 ]);
+const DEVICE_ACTION_LABELS = {
+  turn_on: "Включить", "turn on": "Включить", turn_off: "Выключить", "turn off": "Выключить",
+  toggle: "Переключить", open: "Открыть", open_cover: "Открыть", close: "Закрыть",
+  close_cover: "Закрыть", lock: "Закрыть", unlock: "Открыть", press: "Нажать",
+  start: "Запустить", stop: "Остановить", media_play: "Играть", media_pause: "Пауза",
+};
 
 /** Keep the device identity in the sheet header and expose only capability + command below it. */
 export function conciseDeviceActionLabel(action, target, device) {
-  const title = String(action && (action.title || action.action_id) || "Команда").trim();
+  const supplied = String(action && (action.title || action.action_id) || "Команда").trim();
+  const title = DEVICE_ACTION_LABELS[normalized(supplied)] || supplied;
   const names = [device && device.name, target && target.name]
     .map((value) => String(value || "").trim()).filter(Boolean);
   const parts = title.split(/\s*[·•|]\s*/).map((part) => part.trim()).filter(Boolean)
@@ -400,7 +408,9 @@ export function openPhysicalDeviceSheet(owner, device, deps) {
   hero.appendChild(identity);
   sheet.appendChild(hero);
 
-  const details = conciseDetails(device);
+  const targets = owner._catalogTargets(device);
+  const targetEntities = new Set(targets.map((target) => target.entity_id));
+  const details = conciseDetails(device).filter((detail) => !targetEntities.has(detail.entityId));
   if (details.length) {
     const detailGrid = el("dl", "device-sheet-facts");
     details.forEach((detail) => {
@@ -412,14 +422,25 @@ export function openPhysicalDeviceSheet(owner, device, deps) {
     sheet.appendChild(detailGrid);
   }
 
-  const rangeCount = appendDeviceRangeControls(sheet, device, owner, deps);
-
-  const targets = owner._catalogTargets(device);
   if (targets.length) {
     const controls = el("div", "device-sheet-controls");
-    targets.forEach((target) => controls.appendChild(owner._deviceTargetControls(target, device)));
+    controls.appendChild(el("h4", "device-sheet-section-title", targets.length > 1 ? "Клавиши и действия" : "Управление"));
+    const grid = el("div", "device-sheet-control-grid");
+    targets.forEach((target) => grid.appendChild(renderDeviceTargetControls(owner, target, device, {
+      ...deps, actionLabel: conciseDeviceActionLabel,
+    })));
+    controls.appendChild(grid);
     sheet.appendChild(controls);
-  } else if (!rangeCount) {
+  }
+  const features = el("div", "device-sheet-features");
+  const featureGrid = el("div", "device-sheet-feature-grid");
+  const rangeCount = appendDeviceRangeControls(featureGrid, device, owner, deps, { compact: true });
+  if (rangeCount) {
+    features.appendChild(el("h4", "device-sheet-section-title", "Параметры"));
+    features.appendChild(featureGrid);
+    sheet.appendChild(features);
+  }
+  if (!targets.length && !rangeCount) {
     const controls = el("div", "device-sheet-controls");
     controls.appendChild(el("p", "device-sheet-note", device.unavailable
       ? "Устройство сейчас недоступно. Управление появится после восстановления связи."

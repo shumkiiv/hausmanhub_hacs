@@ -1,11 +1,11 @@
 /* Climate control surface shared with the tablet information architecture. */
 
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.160";
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.160";
-import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.160";
-import { pendingOperationId, requiresSnapshotRefresh, resolveApiError, resolveClimateReceipt } from "./hausman-hub-error-taxonomy.js?v=1.52.160";
-import { withCorrelationId } from "./hausman-hub-correlation.js?v=1.52.160";
-import { renderClimateSide } from "./hausman-hub-climate-side.js?v=1.52.160";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.161";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.161";
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.161";
+import { pendingOperationId, requiresSnapshotRefresh, resolveApiError, resolveClimateReceipt } from "./hausman-hub-error-taxonomy.js?v=1.52.161";
+import { withCorrelationId } from "./hausman-hub-correlation.js?v=1.52.161";
+import { renderClimateSide } from "./hausman-hub-climate-side.js?v=1.52.161";
 
 const CLIMATE_ACTION_API = "hausman_hub/v1/climate/actions";
 const CLIMATE_OPERATION_API = "hausman_hub/v1/climate/operations";
@@ -266,7 +266,7 @@ export function renderHomeTargetCard(panel, dashboard, deps, options = {}) {
 }
 
 const CATEGORY_DEFINITIONS = [
-  { id: "conditioner", title: "Кондиционеры", icon: "snow", pattern: /кондиционер|air.?condition|smartir|\bac\b/ },
+  { id: "conditioner", title: "Кондиционеры", icon: "conditioner", pattern: /кондиционер|air.?condition|smartir|\bac\b/ },
   { id: "trv", title: "Термоголовки", icon: "thermometer", pattern: /термоголов|радиатор|radiator|thermostatic|\btrv\b/ },
   { id: "floor", title: "Тёплый пол", icon: "thermometer", pattern: /т[её]пл.*пол|floor.?heat/ },
   { id: "humidifier", title: "Увлажнители", icon: "water", pattern: /увлажн|humidifier/ },
@@ -275,6 +275,10 @@ const CATEGORY_DEFINITIONS = [
 ];
 
 const CATEGORY_ICON_PATHS = {
+  conditioner: {
+    path: "M5 4.5h14a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2ZM6.5 10.5h11M8 16v1.5M12 15.5v2M16 16v1.5",
+    stroke: true,
+  },
   minus: "M5 11h14v2H5z",
   plus: "M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z",
   snow: "M11 2h2v3.17l2.83-1.63 1 1.73L14 6.9l2.75 1.58 2.75-1.58 1 1.73-2.75 1.59v3.56l2.75 1.59-1 1.73-2.75-1.58L14 17.1l2.83 1.63-1 1.73L13 18.83V22h-2v-3.17l-2.83 1.63-1-1.73L10 17.1l-2.75-1.58-2.75 1.58-1-1.73 2.75-1.59v-3.56L3.5 8.63l1-1.73 2.75 1.58L10 6.9 7.17 5.27l1-1.73L11 5.17z",
@@ -283,14 +287,23 @@ const CATEGORY_ICON_PATHS = {
 };
 
 function climateIcon(name, deps) {
-  if (!CATEGORY_ICON_PATHS[name]) return deps.svgIcon(name);
+  const definition = CATEGORY_ICON_PATHS[name];
+  if (!definition) return deps.svgIcon(name);
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   deps.setAttr(svg, "viewBox", "0 0 24 24");
   deps.setAttr(svg, "aria-hidden", "true");
   deps.setAttr(svg, "class", "icon");
   const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  deps.setAttr(path, "d", CATEGORY_ICON_PATHS[name]);
-  deps.setAttr(path, "fill", "currentColor");
+  deps.setAttr(path, "d", typeof definition === "string" ? definition : definition.path);
+  if (typeof definition === "object" && definition.stroke) {
+    deps.setAttr(path, "fill", "none");
+    deps.setAttr(path, "stroke", "currentColor");
+    deps.setAttr(path, "stroke-width", "1.8");
+    deps.setAttr(path, "stroke-linecap", "round");
+    deps.setAttr(path, "stroke-linejoin", "round");
+  } else {
+    deps.setAttr(path, "fill", "currentColor");
+  }
   svg.appendChild(path);
   return svg;
 }
@@ -641,9 +654,9 @@ function climateDeviceKindLabel(kind) {
   })[kind] || "Устройство климата";
 }
 
-function compactTemperature(value) {
+function climateRoomTemperatureText(value) {
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
-  return `${Number.isInteger(value) ? value : value.toFixed(1)}°`;
+  return `${value.toLocaleString("ru-RU", { maximumFractionDigits: 1 })}°`;
 }
 
 function roomIsOffline(room, devices) {
@@ -652,23 +665,20 @@ function roomIsOffline(room, devices) {
 }
 
 function roomCurrentSummary(room) {
-  const parts = [];
-  const temp = compactTemperature(room.temp);
-  if (temp !== null) parts.push(temp);
   if (typeof room.humidity === "number" && Number.isFinite(room.humidity)) {
-    parts.push(`${Math.round(room.humidity)}% влажн.`);
+    return `${Math.round(room.humidity)}%`;
   }
-  return parts.length ? `Сейчас · ${parts.join(" · ")}` : "Сейчас · нет данных";
+  return "Нет данных";
 }
 
 function roomTargetSummary(room) {
   const parts = [];
-  const temp = compactTemperature(room.targetTemp);
+  const temp = climateRoomTemperatureText(room.targetTemp);
   if (temp !== null) parts.push(temp);
   if (typeof room.targetHumidity === "number" && Number.isFinite(room.targetHumidity)) {
     parts.push(`${Math.round(room.targetHumidity)}%`);
   }
-  return parts.length ? `Цели · ${parts.join(" · ")}` : "Цели · не заданы";
+  return parts.length ? parts.join(" · ") : "Не заданы";
 }
 
 function roomTargetSpec(panel, room, action, parameter) {
@@ -684,13 +694,17 @@ function roomTargetSpec(panel, room, action, parameter) {
 
 function renderRoomStepper(panel, room, deps, options) {
   const { el, setAttr } = deps;
-  const { action, parameter, field, label, icon, current } = options;
+  const { action, parameter, field, label, icon, current, formatValue } = options;
   const wrap = el("div", "hh-climate-room-stepper");
   const found = roomTargetSpec(panel, room, action, parameter);
   const controllable = Boolean(found) && typeof current === "number" && Number.isFinite(current);
   const busy = Boolean(panel._busy || panel._climateModePendingKey);
   const pending = panel._climateModePendingKey === `${room.id}:${action}`;
-  if (!controllable) wrap.classList.add("is-disabled");
+  if (!controllable) wrap.classList.add("is-readonly");
+  setAttr(wrap, "role", "group");
+  const displayedValue = typeof current === "number" && Number.isFinite(current)
+    ? formatValue(current) : "Не задана";
+  setAttr(wrap, "aria-label", `${label}: ${displayedValue}${controllable ? "" : ", только просмотр"}`);
   const stepButton = (direction, aria) => {
     const button = el("button", "hh-climate-room-step");
     button.type = "button";
@@ -712,16 +726,26 @@ function renderRoomStepper(panel, room, deps, options) {
     });
     return button;
   };
-  wrap.appendChild(stepButton(-1, `Понизить цель «${label}» в комнате ${room.name || "Комната"}`));
   const caption = el("span", "hh-climate-room-stepper-label");
   const captionIcon = el("span", "hh-climate-room-stepper-icon");
   captionIcon.appendChild(climateIcon(icon, deps));
   caption.appendChild(captionIcon);
-  caption.appendChild(el("span", null, pending ? "Сохраняем..." : label));
+  caption.appendChild(el("span", null, label));
   wrap.appendChild(caption);
-  wrap.appendChild(stepButton(1, `Повысить цель «${label}» в комнате ${room.name || "Комната"}`));
-  if (!controllable) wrap.appendChild(el("small", "hh-climate-room-stepper-hint", "Недоступно"));
+  const actions = el("span", `hh-climate-room-stepper-actions${controllable ? "" : " is-readonly"}`);
+  if (controllable) actions.appendChild(stepButton(-1, `Понизить цель «${label}» в комнате ${room.name || "Комната"}`));
+  actions.appendChild(el("strong", `hh-climate-room-stepper-value${pending ? " is-pending" : ""}`,
+    pending ? "Сохраняем..." : displayedValue));
+  if (controllable) actions.appendChild(stepButton(1, `Повысить цель «${label}» в комнате ${room.name || "Комната"}`));
+  wrap.appendChild(actions);
   return wrap;
+}
+
+function appendRoomFact(container, label, value, el) {
+  const fact = el("p", "hh-climate-room-fact");
+  fact.appendChild(el("small", null, label));
+  fact.appendChild(el("strong", null, value));
+  container.appendChild(fact);
 }
 
 function renderRoomCard(panel, room, devices, deps) {
@@ -747,22 +771,23 @@ function renderRoomCard(panel, room, devices, deps) {
   const status = el("span", `hh-climate-room-status ${offline ? "is-offline" : (manual ? "is-manual" : "is-auto")}`,
     offline ? "Без связи" : (manual ? "Ручной режим" : "Авто"));
   head.appendChild(status);
-  head.appendChild(el("b", "hh-climate-room-target", compactTemperature(room.targetTemp) || "-"));
+  head.appendChild(el("b", "hh-climate-room-temperature", climateRoomTemperatureText(room.temp) || "—"));
   card.appendChild(head);
   const lines = el("div", "hh-climate-room-lines");
-  lines.appendChild(el("p", null, roomCurrentSummary(room)));
-  lines.appendChild(el("p", null, roomTargetSummary(room)));
+  appendRoomFact(lines, "Влажность", roomCurrentSummary(room), el);
+  appendRoomFact(lines, "Цели", roomTargetSummary(room), el);
   card.appendChild(lines);
   const managedRoom = runtimeRoom(panel, room.id);
   const steppers = el("div", "hh-climate-room-steppers");
   steppers.appendChild(renderRoomStepper(panel, room, deps, {
     action: "set_room_target", parameter: "target_temperature", field: "target_temperature",
-    label: "Темп.", icon: "thermometer",
+    label: "Температура", icon: "thermometer",
+    formatValue: (value) => climateRoomTemperatureText(value) || "Не задана",
     current: typeof managedRoom?.target_temperature === "number" ? managedRoom.target_temperature : room.targetTemp,
   }));
   steppers.appendChild(renderRoomStepper(panel, room, deps, {
     action: "set_room_humidity_target", parameter: "target_humidity", field: "target_humidity",
-    label: "Влажн.", icon: "water",
+    label: "Влажность", icon: "water", formatValue: (value) => `${Math.round(value)}%`,
     current: typeof managedRoom?.target_humidity === "number" ? managedRoom.target_humidity : room.targetHumidity,
   }));
   card.appendChild(steppers);
