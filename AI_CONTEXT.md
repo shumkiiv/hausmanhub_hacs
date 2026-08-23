@@ -1,5 +1,17 @@
 # HausmanHub AI Context
 
+- 2026-08-23: HACS `1.52.158` завершил HACS/operations часть направления 28
+  и развёрнут в production. Добавлены dual-role read-only smoke, ежедневный
+  persistent timer, fault matrix, soak/rollback policy и два изолированных
+  virtual helper без физических связей. Полный gate: 1646 test, 4 skipped;
+  critical runtime 119 test и 75% branch coverage; browser gate 13 test.
+  Actions `32608714394` success. Backup `9f28fd76` находится в local и
+  KeeneticSSD, по 905635840 байт. После restart offline count переходно вырос
+  10 -> 58 и восстановился до 10 за 41 секунду; повторный smoke passed,
+  max latency 123 ms, pending operations 0, физических команд 0. Production
+  installed/latest `v1.52.158`, config entry loaded, 88 assets совпадают,
+  ошибок Hausman нет. Commit/tag `b03a25b`.
+
 - 2026-08-23: HACS `1.52.157` завершил направление 27 и развёрнут в
   production без изменения принятой компоновки интерфейса. Playwright
   проверяет шесть репрезентативных экранов, visual baselines, клавиатуру,
