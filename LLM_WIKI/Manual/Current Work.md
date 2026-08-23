@@ -19,6 +19,19 @@
 - Android, backend, API, contracts, storage и исполнение команд не менялись.
   Аудит: `docs/RELEASE_AUDIT_1.52.161.md`.
 
+## 2026-08-23: HACS 1.52.160, питание настенного планшета
+
+- Contracts `0.57.0` закрепляет bounded tablet power request/receipt. HACS
+  публикует два sensor и журналирует каждое принятое обновление без
+  физических команд.
+- Blueprint зарядки включает питание ниже 40%, выключает при 80% и оставляет
+  его включённым с уведомлением при потере sensor или plug.
+- Gate: 1656 tests, 4 skipped, 119 critical tests, 75% branch coverage,
+  13 Chromium tests. Actions `32615474963` success.
+- Production `v1.52.160`, backup `b09b2e3c`, 88 assets match, live 39/80
+  journal smoke зелёный. Blueprint установлен, но automation не создана:
+  отдельная умная розетка зарядки отсутствует.
+
 ## 2026-08-22: тематическая навигация внутри Hero HACS
 
 - Изменён только HACS frontend. Нижняя лента комнат, стрелки, активная

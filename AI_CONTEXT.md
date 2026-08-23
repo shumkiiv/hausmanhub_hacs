@@ -14,6 +14,21 @@
   pending operations 0. Android, backend, API и contracts не менялись.
   Подробности: `docs/RELEASE_AUDIT_1.52.161.md`.
 
+- 2026-08-23: HACS `1.52.160` завершил backend направления 31. Локальный
+  bounded POST публикует батарею и питание планшета как два HA sensor,
+  operation journal фиксирует `tablet_power_update`, физических команд API
+  не отправляет. Стандартный blueprint реализует 40/80 и fallback `power on`
+  при недоступном sensor/plug. Contracts `0.57.0` (`c4a948b`). UI не менялся,
+  только cache-bust. Gate: 1656 tests, 4 skipped, 119 critical tests, 75%
+  branch coverage, 13 Chromium tests. Actions `32615474963` success. Commit
+  `974f942`, test-only `99f77e9`, release `v1.52.160` без assets. Production
+  backup `b09b2e3c` защищён в local и KeeneticSSD по 908881920 bytes.
+  Installed/latest `v1.52.160`, 88 assets match, live 39/80 journal smoke
+  confirmed. Blueprint установлен, но не активирован: отдельной сущности
+  умной розетки планшета в HA нет. Подробности:
+  `docs/RELEASE_AUDIT_1.52.160.md` и
+  `docs/TABLET_MAINTENANCE_AND_CHARGING.md`.
+
 - 2026-08-23: HACS `1.52.159` закрыл operational readiness направления 30.
   Daily smoke имеет redacted `OnFailure` alert, добавлены SLO, P0-P3,
   rollback, release blocker, Definition of Done и monthly UX systemd timer.
