@@ -1,5 +1,13 @@
 # История версий
 
+## 1.52.159 - 2026-08-23
+
+- Ежедневный read-only smoke теперь создаёт локальный redacted alert при
+  превышении actionable thresholds. Данные дома в alert не попадают.
+- Добавлены SLO, P0-P3, rollback, release blocker и единая Definition of Done.
+- Ежемесячный systemd timer напоминает о проверке реального планшета и HACS в
+  браузере. Интерфейс не перекомпоновывался, изменён только cache-bust версии.
+
 ## 1.52.158 - 2026-08-23
 
 - Добавлен production read-only smoke из девяти GET endpoint. Отчёт содержит

@@ -2,6 +2,7 @@
 Description=Hausman production read-only smoke
 After=network-online.target
 Wants=network-online.target
+OnFailure=hausman-live-smoke-alert@%n.service
 
 [Service]
 Type=oneshot

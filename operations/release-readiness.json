@@ -1,0 +1,10 @@
+{
+  "schema": "hausman-release-readiness-v1",
+  "openP0": 0,
+  "openP1": 0,
+  "gateStatus": "green",
+  "ownersKnown": true,
+  "productDocumentationCurrent": true,
+  "compatibilityChecked": true,
+  "rollbackChecked": true
+}

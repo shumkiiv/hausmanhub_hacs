@@ -1,0 +1,12 @@
+[Unit]
+Description=Record actionable Hausman live smoke failure for %i
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/projects/HausmanHub/worktrees/codex-hacs-scenario-editor-maturity-2026-08-22
+ExecStart=/usr/bin/python3 %h/projects/HausmanHub/worktrees/codex-hacs-scenario-editor-maturity-2026-08-22/tools/report_live_smoke_failure.py
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.config/hausmanhub/live-smoke

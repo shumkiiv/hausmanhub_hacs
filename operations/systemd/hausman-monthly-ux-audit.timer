@@ -1,0 +1,10 @@
+[Unit]
+Description=Remind about the real-tablet and HACS UX audit every month
+
+[Timer]
+OnCalendar=*-*-01 09:00:00 Europe/Moscow
+Persistent=true
+Unit=hausman-monthly-ux-audit.service
+
+[Install]
+WantedBy=timers.target
