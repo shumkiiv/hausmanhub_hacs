@@ -27,8 +27,12 @@ class GitHubLocalQualityWorkflowTest(unittest.TestCase):
         )
         self.assertIn("run: python3 tools/check_local_release.py", workflow)
         self.assertIn("run: python3 tools/check_critical_coverage.py", workflow)
-        self.assertEqual(2, workflow.count("\n        uses:"))
-        self.assertEqual(3, workflow.count("\n        run:"))
+        self.assertIn("uses: actions/setup-node@v6", workflow)
+        self.assertIn("run: npm ci", workflow)
+        self.assertIn("run: npx playwright install --with-deps chromium", workflow)
+        self.assertIn("run: npm run test:browser", workflow)
+        self.assertEqual(4, workflow.count("\n        uses:"))
+        self.assertEqual(6, workflow.count("\n        run:"))
 
     def test_workflow_runs_for_main_changes_and_has_no_home_target(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8").lower()

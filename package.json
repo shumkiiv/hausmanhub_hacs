@@ -1,0 +1,14 @@
+{
+  "name": "hausman-hacs-browser-gate",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Browser, visual and accessibility release gate for the Hausman Home Assistant panel",
+  "scripts": {
+    "test:browser": "playwright test",
+    "test:browser:update": "playwright test --update-snapshots"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.12.1",
+    "@playwright/test": "1.60.0"
+  }
+}
