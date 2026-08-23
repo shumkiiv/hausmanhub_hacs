@@ -1,5 +1,24 @@
 # Current Work
 
+## 2026-08-23: HACS UI 1.52.161 объединён, выпущен и развёрнут
+
+- Накопленная UI-линия объединена с актуальной `main` обычными merge-коммитами
+  `d29488a` и `fa47abe`. История обеих веток сохранена, force push не
+  использовался.
+- В релиз вошли согласованные планшетные экраны главной, освещения, климата,
+  безопасности, энергии, физических устройств и сценариев. Operational,
+  energy anomaly, intercom confirmation и tablet power изменения `main`
+  сохранены.
+- `v1.52.161` опубликован без assets. Actions `32616059573` зелёный. Gate:
+  1662 tests, 4 skipped, 119 critical tests, 75% branch coverage и 13
+  browser tests.
+- Production backup `f251700b` находится в local и KeeneticSSD, обе копии по
+  914780160 байт. После exact install и одного restart installed/latest
+  `v1.52.161`, config entry loaded, 92 frontend assets match, Hausman errors
+  0. Финальный smoke passed после прогрева: unavailable 10, pending 0.
+- Android, backend, API, contracts, storage и исполнение команд не менялись.
+  Аудит: `docs/RELEASE_AUDIT_1.52.161.md`.
+
 ## 2026-08-22: тематическая навигация внутри Hero HACS
 
 - Изменён только HACS frontend. Нижняя лента комнат, стрелки, активная

@@ -1,5 +1,19 @@
 # HausmanHub AI Context
 
+- 2026-08-23: HACS UI-линия объединена с актуальной `main` и выпущена как
+  `1.52.161`. Планшетные представления главной, освещения, климата,
+  безопасности, энергии, устройств и сценариев вошли без потери operational,
+  energy anomaly, intercom confirmation и tablet power изменений основной
+  ветки. Merge commits `d29488a` и `fa47abe`, tag/release `v1.52.161`, Actions
+  `32616059573` success. Gate: 1662 tests, 4 skipped, 119 critical tests,
+  75% branch coverage, 13 Chromium tests. Production backup `f251700b`
+  защищён в local и KeeneticSSD по 914780160 bytes. После трёх valid config
+  checks, exact install и одного restart installed/latest равны `v1.52.161`,
+  config entry loaded, 92 assets match, Hausman errors 0. После 41 секунды
+  прогрева финальный smoke passed: max latency 97 ms, unavailable 10,
+  pending operations 0. Android, backend, API и contracts не менялись.
+  Подробности: `docs/RELEASE_AUDIT_1.52.161.md`.
+
 - 2026-08-23: HACS `1.52.159` закрыл operational readiness направления 30.
   Daily smoke имеет redacted `OnFailure` alert, добавлены SLO, P0-P3,
   rollback, release blocker, Definition of Done и monthly UX systemd timer.
@@ -4032,5 +4046,5 @@ Engineering and review rules are in
 
 - Obsidian/context index: `LLM_WIKI/00_Index.md`.
 - Latest generated context: `LLM_WIKI/Context.md`.
-- Last sync: 2026-08-22T17:08:47+03:00.
+- Last sync: 2026-08-23T07:01:58+03:00.
 <!-- llm-wiki-sync:end -->
