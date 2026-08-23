@@ -1,5 +1,15 @@
 # HausmanHub AI Context
 
+- 2026-08-23: HACS `1.52.157` завершил направление 27 и развёрнут в
+  production без изменения принятой компоновки интерфейса. Playwright
+  проверяет шесть репрезентативных экранов, visual baselines, клавиатуру,
+  focus, переполнение и axe accessibility. Полный gate: 1641 test,
+  4 skipped; browser gate 13 test; critical runtime 119 test и 75% branch
+  coverage. Actions `32607274228` success. Backup `3db97187` сохранён в
+  local и KeeneticSSD, по 905011200 байт. Production installed/latest
+  `v1.52.157`, config entry loaded, 88 assets совпадают, ошибок Hausman нет.
+  Commit/tag `9926419`. Аудит: `docs/RELEASE_AUDIT_1.52.157.md`.
+
 - 2026-08-23: HACS `1.52.156` завершил направление 25 и развёрнут в
   production. CI запускает 119 safety tests и блокирует release при branch
   coverage ниже 75% для water safety, scenario executor/service и climate
