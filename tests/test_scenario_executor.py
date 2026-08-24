@@ -7,7 +7,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, call, patch
 
 from custom_components.hausman_hub.application.scenario_executor import (
     ScenarioExecutor,
@@ -1105,6 +1105,93 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["status"], "completed")
         self.assertEqual(self.nested_runs, ["other"])
         self.assertEqual(result["receipts"][0]["nested_run_id"], "nested-other")
+
+    async def test_restart_cancelled_nested_scenario_is_skipped_not_failed(self) -> None:
+        async def restarted_callback(
+            _scenario_id: str, **_kwargs: object
+        ) -> dict[str, Any]:
+            return {
+                "run_id": "nested-restarted",
+                "status": "cancelled",
+                "reason": "restarted_by_new_trigger",
+                "receipts": [],
+            }
+
+        executor = ScenarioExecutor(self.hass, self.catalog, restarted_callback)
+        definition = _definition(
+            (
+                ScenarioAction(
+                    id="a1",
+                    type=ScenarioActionType.RUN_SCENARIO,
+                    scenario_id="other",
+                ),
+            )
+        )
+
+        result = await executor.async_execute(
+            definition, "run-1", scenario_id="parent"
+        )
+
+        self.assertEqual("completed", result["status"])
+        self.assertEqual("completed", result["receipts"][0]["status"])
+        self.assertTrue(result["receipts"][0]["skipped"])
+        self.assertEqual("cancelled", result["receipts"][0]["nested_outcome"])
+
+    async def test_failed_action_runs_matching_planned_turn_off_cleanup(self) -> None:
+        definition = _definition(
+            (
+                ScenarioAction(
+                    id="turn-on",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="device_1",
+                    action_id="turn_on",
+                ),
+                ScenarioAction(
+                    id="fails",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="missing-device",
+                    action_id="turn_on",
+                ),
+                ScenarioAction(
+                    id="wait",
+                    type=ScenarioActionType.DELAY,
+                    delay_seconds=60,
+                ),
+                ScenarioAction(
+                    id="turn-off",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="device_1",
+                    action_id="turn_off",
+                ),
+            )
+        )
+
+        result = await self.executor.async_execute(
+            definition, "run-1", scenario_id="safe-cleanup"
+        )
+
+        self.assertEqual("partial", result["status"])
+        self.assertEqual(
+            ["turn-on", "fails", "turn-off"],
+            [receipt["action_id"] for receipt in result["receipts"]],
+        )
+        self.assertTrue(result["receipts"][-1]["safety_cleanup"])
+        self.hass.services.async_call.assert_has_awaits(
+            [
+                call(
+                    "light",
+                    "turn_on",
+                    {"entity_id": "light.living_room"},
+                    blocking=True,
+                ),
+                call(
+                    "light",
+                    "turn_off",
+                    {"entity_id": "light.living_room"},
+                    blocking=True,
+                ),
+            ]
+        )
 
     async def test_run_scenario_dry_run_is_a_successful_plan(self) -> None:
         definition = _definition(

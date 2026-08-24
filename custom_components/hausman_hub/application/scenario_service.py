@@ -1195,7 +1195,6 @@ class ScenarioService:
                 "confirmed": False,
                 "trigger_context": resolved_trigger_context,
             }
-            await self._async_record_scenario_result(result)
             return result
         finally:
             async with self._run_lock:

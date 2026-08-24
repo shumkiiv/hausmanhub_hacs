@@ -749,9 +749,10 @@ class ScenarioExecutor:
 
         receipts: list[dict[str, Any]] = []
         powered_sources: set[str] = set()
+        powered_target_ids: set[str] = set()
         start_ms = int(time.time() * 1000)
 
-        for action in definition.actions:
+        for action_index, action in enumerate(definition.actions):
             if not dry_run and action.type is ScenarioActionType.DELAY:
                 await self._confirm_deferred_device_receipts(receipts)
             receipt = await self._execute_action(
@@ -773,10 +774,29 @@ class ScenarioExecutor:
             )
             receipts.append(receipt)
             if receipt.get("status") == "failed":
+                if not dry_run and powered_target_ids:
+                    cleanup_receipts = await self._async_safety_cleanup_actions(
+                        definition.actions[action_index + 1 :],
+                        run_id,
+                        next_visited,
+                        powered_target_ids=powered_target_ids,
+                        powered_sources=powered_sources,
+                        idempotent_actions=(
+                            definition.safety_policy.idempotent_actions
+                        ),
+                        max_evidence_age_seconds=(
+                            definition.safety_policy.max_evidence_age_seconds
+                        ),
+                    )
+                    receipts.extend(cleanup_receipts)
                 break
             if action.type is ScenarioActionType.DEVICE_ACTION:
                 device = self._catalog.device(action.target_id or "")
                 entity_id = getattr(device, "entity_id", None)
+                if action.action_id == "turn_on" and action.target_id:
+                    powered_target_ids.add(action.target_id)
+                elif action.action_id == "turn_off" and action.target_id:
+                    powered_target_ids.discard(action.target_id)
                 if isinstance(entity_id, str):
                     if action.action_id == "turn_on":
                         powered_sources.add(entity_id)
@@ -817,6 +837,58 @@ class ScenarioExecutor:
             if failed_after_progress
             else "failed",
         }
+
+    async def _async_safety_cleanup_actions(
+        self,
+        remaining_actions: tuple[ScenarioAction, ...],
+        run_id: str,
+        visited: frozenset[str],
+        *,
+        powered_target_ids: set[str],
+        powered_sources: set[str],
+        idempotent_actions: bool,
+        max_evidence_age_seconds: int,
+    ) -> list[dict[str, Any]]:
+        """Run planned turn-off actions after a later action fails.
+
+        A failed scenario must not leave a device powered solely because its
+        matching planned turn-off action was still ahead in the sequence.
+        Only targets switched on by this run are eligible, and every target is
+        cleaned up at most once.
+        """
+
+        cleanup_receipts: list[dict[str, Any]] = []
+        cleaned_target_ids: set[str] = set()
+        for action in remaining_actions:
+            if (
+                action.type is not ScenarioActionType.DEVICE_ACTION
+                or action.action_id != "turn_off"
+                or not action.target_id
+                or action.target_id not in powered_target_ids
+                or action.target_id in cleaned_target_ids
+            ):
+                continue
+            receipt = await self._execute_action(
+                action,
+                run_id,
+                visited,
+                defer_device_readback=False,
+                powered_sources=frozenset(powered_sources),
+                idempotent_actions=idempotent_actions,
+                evidence_age_seconds=0.0,
+                max_evidence_age_seconds=max_evidence_age_seconds,
+                stop_on_stale_evidence=False,
+            )
+            receipt["safety_cleanup"] = True
+            cleanup_receipts.append(receipt)
+            cleaned_target_ids.add(action.target_id)
+            if receipt.get("status") == "completed":
+                powered_target_ids.discard(action.target_id)
+                device = self._catalog.device(action.target_id)
+                entity_id = getattr(device, "entity_id", None)
+                if isinstance(entity_id, str):
+                    powered_sources.discard(entity_id)
+        return cleanup_receipts
 
     async def _execute_action(
         self,
@@ -1159,7 +1231,10 @@ class ScenarioExecutor:
         if nested_outcome == "completed":
             status = "completed"
             skipped = False
-        elif nested_outcome == "skipped":
+        elif nested_outcome == "skipped" or (
+            nested_outcome == "cancelled"
+            and result.get("reason") == "restarted_by_new_trigger"
+        ):
             status = "completed"
             skipped = True
         else:

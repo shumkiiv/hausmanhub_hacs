@@ -1,10 +1,10 @@
 /* Scenario library and editor shared with the Hausman Hub tablet contract. */
 
-import { activeElementWithin, trapModalTabKey } from "./hausman-hub-modal.js?v=1.52.161";
-import { eventDataFromDraft, scenarioEditorIssues, scenarioEventFields, scenarioField, scenarioIconField, scenarioSelectField, scenarioToggle } from "./hausman-hub-scenario-fields.js?v=1.52.161";
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.161";
-import { scenarioCapabilityLabel, scenarioDeviceButton, scenarioDeviceFields, scenarioGroupForTarget, scenarioPhysicalGroups } from "./hausman-hub-scenario-device-picker.js?v=1.52.161";
-import { groupScenarios, renderScenarioCatalog, scenarioActivationKind, scenarioDisplayGroup, scenarioDisplayText } from "./hausman-hub-scenario-catalog.js?v=1.52.161";
+import { activeElementWithin, trapModalTabKey } from "./hausman-hub-modal.js?v=1.52.162";
+import { eventDataFromDraft, scenarioEditorIssues, scenarioEventFields, scenarioField, scenarioIconField, scenarioSelectField, scenarioToggle } from "./hausman-hub-scenario-fields.js?v=1.52.162";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.162";
+import { scenarioCapabilityLabel, scenarioDeviceButton, scenarioDeviceFields, scenarioGroupForTarget, scenarioPhysicalGroups } from "./hausman-hub-scenario-device-picker.js?v=1.52.162";
+import { groupScenarios, renderScenarioCatalog, scenarioActivationKind, scenarioDisplayGroup, scenarioDisplayText } from "./hausman-hub-scenario-catalog.js?v=1.52.162";
 
 const TRIGGER_TYPES = [
   ["manual", "Ручной запуск"], ["time", "По времени"],

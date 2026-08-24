@@ -283,6 +283,50 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(item["lastResult"])
         self.assertIsNone(item["temporaryException"])
 
+    async def test_classified_list_keeps_full_ordered_definition_for_tablets(self) -> None:
+        service = ScenarioService(
+            None,
+            self.store,
+            self.catalog,
+            self.executor,
+            now_provider=lambda: datetime(2026, 8, 24, tzinfo=timezone.utc),
+        )
+        await service.async_load()
+        payload = _valid_payload("tablet_editor")
+        payload["enabled"] = False
+        payload["definition"]["actions"] = [
+            {
+                "id": "turn-on",
+                "type": "device_action",
+                "targetId": "device_abc",
+                "actionId": "turn_on",
+                "command": {
+                    "domain": "light",
+                    "service": "turn_on",
+                    "entity_id": "light.living_room",
+                },
+            },
+            {"id": "pause", "type": "delay", "delaySeconds": 30},
+            {
+                "id": "notice",
+                "type": "notification",
+                "message": "Свет включён",
+            },
+        ]
+        await service.async_update_scenario(payload)
+
+        result = await service.async_scenario_list_payload()
+        item = result["scenarios"][0]
+
+        Draft202012Validator(
+            json.loads(SCENARIO_LIST_SCHEMA.read_text(encoding="utf-8"))
+        ).validate(result)
+        self.assertFalse(item["enabled"])
+        self.assertEqual(
+            ["turn-on", "pause", "notice"],
+            [action["id"] for action in item["definition"]["actions"]],
+        )
+
     async def test_classified_list_exposes_durable_result_and_skip_once(self) -> None:
         now = datetime(2026, 8, 22, 7, 0, tzinfo=timezone.utc)
         journal = _FakeJournal(
@@ -843,7 +887,10 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_restart_mode_restarts_the_five_minute_timer(self) -> None:
         executor = _RestartExecutor()
-        service = ScenarioService(None, self.store, self.catalog, executor)
+        journal = _FakeJournal()
+        service = ScenarioService(
+            None, self.store, self.catalog, executor, operation_journal=journal
+        )
         await service.async_load()
         payload = _valid_payload()
         payload["definition"]["executionMode"] = "restart"
@@ -858,6 +905,8 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("cancelled", first_result["status"])
         self.assertEqual("completed", second_result["status"])
         self.assertEqual(2, len(executor.runs))
+        self.assertEqual(1, len(journal.receipts))
+        self.assertEqual("completed", journal.receipts[0]["scenario"]["outcome"])
 
     async def test_single_mode_skips_parallel_duplicate(self) -> None:
         executor = _RestartExecutor()
