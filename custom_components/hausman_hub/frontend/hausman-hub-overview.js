@@ -1,10 +1,10 @@
-import { createHeroRoomNavigation } from "./hausman-hub-hero-room-navigation.js?v=1.52.164";
-import { overviewHeroRenderKey, overviewHomeName, stableOverviewHeroImage } from "./hausman-hub-overview-hero-state.js?v=1.52.164";
-import { renderHomeTargetCard } from "./hausman-hub-climate-overview.js?v=1.52.164";
-import { scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.164";
-import { openUpcomingEventsModal } from "./hausman-hub-overview-events-modal.js?v=1.52.164";
-import { renderOverviewSideCards } from "./hausman-hub-overview-side.js?v=1.52.164";
-import { renderOverviewUtilityCards } from "./hausman-hub-overview-utility-cards.js?v=1.52.164";
+import { createHeroRoomNavigation } from "./hausman-hub-hero-room-navigation.js?v=1.52.165";
+import { overviewHeroRenderKey, overviewHomeName, stableOverviewHeroImage } from "./hausman-hub-overview-hero-state.js?v=1.52.165";
+import { renderHomeTargetCard } from "./hausman-hub-climate-overview.js?v=1.52.165";
+import { scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.165";
+import { openUpcomingEventsModal } from "./hausman-hub-overview-events-modal.js?v=1.52.165";
+import { renderOverviewSideCards } from "./hausman-hub-overview-side.js?v=1.52.165";
+import { renderOverviewUtilityCards } from "./hausman-hub-overview-utility-cards.js?v=1.52.165";
 
 function validNumber(value) {
   return value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
@@ -191,6 +191,11 @@ export function renderOverviewHero(panel, container, readiness, deps) {
   const devices = Array.isArray(dashboard.devices) ? dashboard.devices : [];
   container.innerHTML = "";
   renderDashboardHeader(panel, connectionStatus, container, deps);
+  if (!readiness || typeof readiness.status !== "string") {
+    const fallback = deps.el("div", "overview-readiness-fallback", "Состояние обновляется");
+    fallback.setAttribute("role", "status");
+    container.appendChild(fallback);
+  }
   const selectedRoom = rooms.find((room) => room.id === panel._overviewHeroRoomId) || null;
   if (panel._overviewHeroRoomId && !selectedRoom) panel._overviewHeroRoomId = null;
   const hero = deps.el("section", "overview-canon-hero");

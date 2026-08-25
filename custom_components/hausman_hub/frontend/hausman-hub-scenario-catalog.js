@@ -1,6 +1,6 @@
 /* Tablet scenario catalog classification and presentation helpers. */
 
-import { scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.164";
+import { scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.165";
 
 export const SCENARIO_FILTERS = [
   ["all", "Все"],
