@@ -402,6 +402,8 @@ class ScenarioService:
         self._registry: ScenarioRegistry | None = None
         self._lock = asyncio.Lock()
         self._run_lock = asyncio.Lock()
+        self._stopping = False
+        self._active_run_calls: set[asyncio.Task[Any]] = set()
         self._run_tasks: dict[str, asyncio.Task[dict[str, Any]]] = {}
         self._queue_locks: dict[str, asyncio.Lock] = {}
         self._queue_waiters: dict[str, int] = {}
@@ -657,21 +659,41 @@ class ScenarioService:
             await save({"version": 1, "skips": sorted(self._skipped_runs)})
 
     async def async_save(self, registry: ScenarioRegistry) -> None:
-        """Persist the provided registry."""
+        """Persist one registry and restore the last complete value on failure."""
 
         save = getattr(self._store, "async_save", None)
         if save is None:
             raise ScenarioServiceError("Store does not support save", status=500)
+        previous = self._registry
         started = self._monotonic()
         try:
-            await save(registry)
+            try:
+                await save(registry)
+            except Exception as error:
+                if previous is not None and previous != registry:
+                    try:
+                        await save(previous)
+                    except Exception as rollback_error:
+                        self.cancel_running_scenarios()
+                        _LOGGER.error(
+                            "scenario registry rollback failed after interrupted write",
+                            exc_info=True,
+                        )
+                        raise ScenarioServiceError(
+                            "Scenario storage rollback failed", status=503
+                        ) from rollback_error
+                raise ScenarioServiceError(
+                    "Scenario storage write failed", status=503
+                ) from error
         finally:
             self._record_path_latency("storage", started)
 
     async def async_reset(self) -> None:
         """Remove every user scenario without executing it."""
 
+        self._require_running()
         async with self._lock:
+            self._require_running()
             registry = ScenarioRegistry()
             await self.async_save(registry)
             self._registry = registry
@@ -739,6 +761,25 @@ class ScenarioService:
         self._catalog_warmup_task = None
         if task is not None and not task.done():
             task.cancel()
+
+    def cancel_running_scenarios(self) -> None:
+        """Stop old-entry runs so reload never replays a physical command."""
+
+        self._stopping = True
+        self.cancel_catalog_warmup()
+        try:
+            current = asyncio.current_task()
+        except RuntimeError:  # pragma: no cover - HA invokes callbacks in its loop
+            current = None
+        tasks = set(self._active_run_calls)
+        tasks.update(self._run_tasks.values())
+        for task in tasks:
+            if task is not current and not task.done():
+                task.cancel()
+
+    def _require_running(self) -> None:
+        if self._stopping:
+            raise ScenarioServiceError("Scenario service is stopping", status=503)
 
     async def _async_catalog_warmup(self) -> None:
         """Refresh after late integrations without an unbounded polling loop."""
@@ -1027,7 +1068,9 @@ class ScenarioService:
     async def async_update_scenario(self, payload: dict[str, Any]) -> Scenario:
         """Create or replace a scenario atomically."""
 
+        self._require_running()
         async with self._lock:
+            self._require_running()
             registry = self._ensure_loaded()
             raw_definition = payload.get("definition")
             if not isinstance(raw_definition, dict):
@@ -1173,6 +1216,7 @@ class ScenarioService:
                 raise ScenarioValidationError(
                     (ScenarioDefinitionViolation(str(error), path="scenarios"),)
                 ) from error
+            self._require_running()
             await self.async_save(new_registry)
             self._registry = new_registry
             change = (
@@ -1247,7 +1291,9 @@ class ScenarioService:
     async def async_delete_scenario(self, scenario_id: str) -> None:
         """Delete a scenario unless it is referenced by others."""
 
+        self._require_running()
         async with self._lock:
+            self._require_running()
             registry = self._ensure_loaded()
             if not any(s.id == scenario_id for s in registry.scenarios):
                 raise ScenarioNotFoundError(scenario_id)
@@ -1266,6 +1312,7 @@ class ScenarioService:
 
             scenarios = tuple(s for s in registry.scenarios if s.id != scenario_id)
             new_registry = ScenarioRegistry(scenarios=scenarios)
+            self._require_running()
             await self.async_save(new_registry)
             self._registry = new_registry
             assert target is not None
@@ -1292,6 +1339,33 @@ class ScenarioService:
         trigger_context: Mapping[str, object] | None = None,
     ) -> dict[str, Any]:
         """Execute a scenario via the configured executor."""
+
+        self._require_running()
+        caller = asyncio.current_task()
+        registered = False
+        if caller is not None and caller not in self._active_run_calls:
+            self._active_run_calls.add(caller)
+            registered = True
+        try:
+            return await self._async_run_scenario(
+                scenario_id,
+                visited,
+                correlation_id=correlation_id,
+                trigger_context=trigger_context,
+            )
+        finally:
+            if registered and caller is not None:
+                self._active_run_calls.discard(caller)
+
+    async def _async_run_scenario(
+        self,
+        scenario_id: str,
+        visited: frozenset[str] | None = None,
+        *,
+        correlation_id: str | None = None,
+        trigger_context: Mapping[str, object] | None = None,
+    ) -> dict[str, Any]:
+        """Execute one already registered run call."""
 
         await self.async_refresh_catalog()
         scenario = await self.async_get_scenario(scenario_id)

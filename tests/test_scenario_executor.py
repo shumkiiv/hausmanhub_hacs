@@ -19,7 +19,11 @@ from custom_components.hausman_hub.application.scenario_executor import (
     _solar_curve_brightness,
     _value_parameter_name,
 )
+from custom_components.hausman_hub.application.operation_journal import (
+    scenario_operation_receipt,
+)
 from custom_components.hausman_hub.application.scenarios import (
+    ScenarioCatalog,
     ScenarioDeviceAction,
     ScenarioDeviceEntry,
 )
@@ -61,6 +65,7 @@ class _FakeHass:
                     },
                 ),
                 "cover.living_room": SimpleNamespace(state="closed", attributes={}),
+                "valve.main": SimpleNamespace(state="open", attributes={}),
                 "media_player.living_room": SimpleNamespace(state="off", attributes={}),
             }.get(entity_id)
         )
@@ -194,6 +199,20 @@ class _FakeCatalog:
                         title="On",
                         domain="media_player",
                         service="turn_on",
+                        allowed_fields=frozenset(),
+                    ),
+                ),
+            ),
+            "valve_1": ScenarioDeviceEntry(
+                target_id="valve_1",
+                name="Main valve",
+                entity_id="valve.main",
+                actions=(
+                    ScenarioDeviceAction(
+                        action_id="close_valve",
+                        title="Close",
+                        domain="valve",
+                        service="close_valve",
                         allowed_fields=frozenset(),
                     ),
                 ),
@@ -370,6 +389,40 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["receipts"][0]["skipped"])
         self.hass.services.async_call.assert_not_awaited()
 
+    async def test_repeated_correlation_keeps_physical_action_idempotent(self) -> None:
+        light = SimpleNamespace(state="off", attributes={})
+        self.hass.states = SimpleNamespace(
+            get=lambda entity_id: light if entity_id == "light.living_room" else None
+        )
+
+        async def apply_service(*_args: object, **_kwargs: object) -> None:
+            light.state = "on"
+
+        self.hass.services.async_call.side_effect = apply_service
+        definition = _definition(
+            (
+                ScenarioAction(
+                    id="light_on",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="device_1",
+                    action_id="turn_on",
+                ),
+            ),
+            idempotent_actions=True,
+        )
+
+        first = await self.executor.async_execute(
+            definition, "corr.repeat-1", scenario_id="repeat_scenario"
+        )
+        repeated = await self.executor.async_execute(
+            definition, "corr.repeat-1", scenario_id="repeat_scenario"
+        )
+
+        self.assertEqual("completed", first["status"])
+        self.assertEqual("completed", repeated["status"])
+        self.assertEqual("already_in_target_state", repeated["receipts"][0]["reason"])
+        self.assertEqual(1, self.hass.services.async_call.await_count)
+
     async def test_unavailable_condition_fails_closed_before_action(self) -> None:
         self.catalog._devices["sensor_1"] = ScenarioDeviceEntry(
             target_id="sensor_1",
@@ -413,6 +466,27 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("failed", result["status"])
         self.assertEqual("stale_critical_evidence", result["reason"])
+        self.hass.services.async_call.assert_not_awaited()
+
+    async def test_empty_catalog_fails_closed_without_physical_command(self) -> None:
+        self.executor.replace_catalog(ScenarioCatalog(devices={}, scenarios={}))
+        definition = _definition(
+            (
+                ScenarioAction(
+                    id="a1",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="device_1",
+                    action_id="turn_on",
+                ),
+            )
+        )
+
+        result = await self.executor.async_execute(
+            definition, "run-empty-catalog", scenario_id="empty_catalog"
+        )
+
+        self.assertEqual("failed", result["status"])
+        self.assertIn("not available", result["receipts"][0]["error"])
         self.hass.services.async_call.assert_not_awaited()
 
     async def test_conditions_use_one_evidence_snapshot(self) -> None:
@@ -492,6 +566,53 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             ["completed", "failed"], [item["status"] for item in result["receipts"]]
         )
+
+    async def test_stale_evidence_after_delay_is_partial_and_blocks_valve(self) -> None:
+        definition = ScenarioDefinition(
+            version=1,
+            execution_mode=ScenarioExecutionMode.SINGLE,
+            triggers=(ScenarioTrigger(id="t1", type=ScenarioTriggerType.MANUAL),),
+            conditions=(),
+            actions=(
+                ScenarioAction(
+                    id="wait",
+                    type=ScenarioActionType.DELAY,
+                    delay_seconds=2,
+                ),
+                ScenarioAction(
+                    id="valve_close",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="valve_1",
+                    action_id="close_valve",
+                ),
+            ),
+            safety_policy=ScenarioSafetyPolicy(max_evidence_age_seconds=1),
+        )
+
+        with (
+            patch(
+                "custom_components.hausman_hub.application.scenario_executor.time.time",
+                side_effect=(1000.0, 1000.0, 1000.0, 1002.0, 1002.0),
+            ),
+            patch(
+                "custom_components.hausman_hub.application."
+                "scenario_executor.asyncio.sleep",
+                new=AsyncMock(),
+            ),
+        ):
+            result = await self.executor.async_execute(
+                definition,
+                "run-stale-1",
+                scenario_id="stale_evidence",
+            )
+
+        self.assertEqual("partial", result["status"])
+        self.assertEqual("stale_critical_evidence", result["receipts"][1]["error"])
+        self.hass.services.async_call.assert_not_awaited()
+        normalized = scenario_operation_receipt(result)
+        self.assertFalse(normalized["accepted"])
+        self.assertFalse(normalized["confirmed"])
+        self.assertEqual("partial", normalized["scenario"]["outcome"])
 
     async def test_open_cover_still_receives_close_command(self) -> None:
         original_get = self.hass.states.get

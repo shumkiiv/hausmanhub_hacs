@@ -62,6 +62,18 @@ class _FakeStore:
         self._data = registry
 
 
+class _FailAfterWriteStore(_FakeStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.failures_after_write = 0
+
+    async def async_save(self, registry: ScenarioRegistry) -> None:
+        self._data = registry
+        if self.failures_after_write:
+            self.failures_after_write -= 1
+            raise OSError("injected storage interruption")
+
+
 class _FakeExecutor:
     def __init__(self) -> None:
         self.runs: list[tuple[Any, str]] = []
@@ -258,7 +270,60 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
         listed = await self.service.async_list_scenarios()
         self.assertEqual(len(listed), 1)
         self.assertTrue(self.store._data)
+        assert self.store._data is not None
         self.assertEqual(self.store._data.version, 1)
+
+    async def test_interrupted_write_restores_last_complete_registry(self) -> None:
+        store = _FailAfterWriteStore()
+        changes: list[tuple[str, str, int]] = []
+
+        def publish_change(change: str, scenario_id: str, revision: int) -> None:
+            changes.append((change, scenario_id, revision))
+
+        service = ScenarioService(
+            None,
+            store,
+            self.catalog,
+            self.executor,
+            scenario_change_publisher=publish_change,
+        )
+        await service.async_load()
+        original = await service.async_update_scenario(_valid_payload())
+
+        replacement = _valid_payload()
+        replacement["title"] = "Interrupted replacement"
+        store.failures_after_write = 1
+        with self.assertRaises(ScenarioServiceError) as ctx:
+            await service.async_update_scenario(replacement)
+
+        self.assertEqual(503, ctx.exception.status)
+        self.assertEqual(original, await service.async_get_scenario("scenario_1"))
+        assert store._data is not None
+        self.assertEqual(original, store._data.scenario("scenario_1"))
+        self.assertEqual([("created", "scenario_1", 0)], changes)
+
+        recovered = ScenarioService(None, store, self.catalog, _FakeExecutor())
+        await recovered.async_load()
+        self.assertEqual(original, await recovered.async_get_scenario("scenario_1"))
+
+    async def test_failed_registry_rollback_stops_physical_runs(self) -> None:
+        store = _FailAfterWriteStore()
+        executor = _FakeExecutor()
+        service = ScenarioService(None, store, self.catalog, executor)
+        await service.async_load()
+        await service.async_update_scenario(_valid_payload())
+
+        replacement = _valid_payload()
+        replacement["title"] = "Uncertain replacement"
+        store.failures_after_write = 2
+        with self.assertRaises(ScenarioServiceError) as ctx:
+            await service.async_update_scenario(replacement)
+
+        self.assertEqual(503, ctx.exception.status)
+        self.assertEqual("Scenario storage rollback failed", ctx.exception.message)
+        with self.assertRaises(ScenarioServiceError):
+            await service.async_run_scenario("scenario_1")
+        self.assertEqual([], executor.runs)
 
     async def test_health_reports_live_catalog_drift_without_rewriting_scenarios(
         self,
@@ -1237,6 +1302,31 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(1, len(journal.receipts))
         self.assertEqual("completed", journal.receipts[0]["scenario"]["outcome"])
 
+    async def test_reload_cancels_restart_run_and_rejects_late_command(self) -> None:
+        executor = _RestartExecutor()
+        journal = _FakeJournal()
+        service = ScenarioService(
+            None, self.store, self.catalog, executor, operation_journal=journal
+        )
+        await service.async_load()
+        payload = _valid_payload()
+        payload["definition"]["executionMode"] = "restart"
+        await service.async_update_scenario(payload)
+
+        running = asyncio.create_task(service.async_run_scenario("scenario_1"))
+        await asyncio.wait_for(executor.first_started.wait(), timeout=0.1)
+        service.cancel_running_scenarios()
+
+        with self.assertRaises(asyncio.CancelledError):
+            await running
+        self.assertTrue(executor.first_cancelled.is_set())
+        self.assertEqual([], journal.receipts)
+        with self.assertRaises(ScenarioServiceError) as ctx:
+            await service.async_run_scenario("scenario_1")
+        self.assertEqual(503, ctx.exception.status)
+        with self.assertRaises(ScenarioServiceError):
+            await service.async_update_scenario(_valid_payload())
+
     async def test_single_mode_skips_parallel_duplicate(self) -> None:
         executor = _RestartExecutor()
         service = ScenarioService(None, self.store, self.catalog, executor)
@@ -1272,6 +1362,34 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("completed", first_result["status"])
         self.assertEqual("completed", second_result["status"])
         self.assertEqual(2, len(executor.runs))
+
+    async def test_reload_cancels_running_and_waiting_queue_without_replay(
+        self,
+    ) -> None:
+        executor = _QueueExecutor()
+        service = ScenarioService(None, self.store, self.catalog, executor)
+        await service.async_load()
+        payload = _valid_payload()
+        payload["definition"]["executionMode"] = "queued"
+        await service.async_update_scenario(payload)
+
+        running = asyncio.create_task(service.async_run_scenario("scenario_1"))
+        await asyncio.wait_for(executor.first_started.wait(), timeout=0.1)
+        waiting = asyncio.create_task(service.async_run_scenario("scenario_1"))
+        await asyncio.sleep(0)
+        service.cancel_running_scenarios()
+
+        stopped = await asyncio.gather(running, waiting, return_exceptions=True)
+        self.assertTrue(
+            all(isinstance(item, asyncio.CancelledError) for item in stopped)
+        )
+        self.assertEqual(1, len(executor.runs))
+
+        fresh_executor = _FakeExecutor()
+        recovered = ScenarioService(None, self.store, self.catalog, fresh_executor)
+        await recovered.async_load()
+        await asyncio.sleep(0)
+        self.assertEqual([], fresh_executor.runs)
 
     async def test_queued_mode_rejects_when_bounded_queue_is_full(self) -> None:
         executor = _QueueExecutor()
@@ -1311,6 +1429,19 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ScenarioServiceError) as ctx:
             await self.service.async_run_scenario("scenario_1")
         self.assertEqual(ctx.exception.status, 500)
+
+
+class ScenarioServiceWiringTest(unittest.TestCase):
+    def test_entry_unload_cancels_old_scenario_runs(self) -> None:
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "custom_components/hausman_hub/__init__.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(
+            "entry.async_on_unload(scenario_service.cancel_running_scenarios)",
+            source,
+        )
 
 
 class _FakeHass:
