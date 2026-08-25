@@ -215,6 +215,8 @@ def _catalog() -> ScenarioCatalog:
                 allowed_fields=frozenset(),
             ),
         ),
+        room_id="living",
+        room_name="Гостиная",
     )
     return ScenarioCatalog(devices={"device_abc": entry}, scenarios={})
 
@@ -277,7 +279,12 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
         store = _FailAfterWriteStore()
         changes: list[tuple[str, str, int]] = []
 
-        def publish_change(change: str, scenario_id: str, revision: int) -> None:
+        def publish_change(
+            change: str,
+            scenario_id: str,
+            revision: int,
+            _changed_fields: tuple[str, ...],
+        ) -> None:
             changes.append((change, scenario_id, revision))
 
         service = ScenarioService(
@@ -771,7 +778,7 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
             self.store,
             self.catalog,
             self.executor,
-            scenario_change_publisher=lambda change, scenario_id, revision: changes.append(
+            scenario_change_publisher=lambda change, scenario_id, revision, _fields: changes.append(
                 (change, scenario_id, revision)
             ),
         )
@@ -796,6 +803,32 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
             changes,
         )
 
+    async def test_room_assignment_change_is_identified_for_card_refresh(self) -> None:
+        changes: list[tuple[str, ...]] = []
+        room_device = ScenarioDeviceEntry(
+            target_id="device_abc",
+            name="Light",
+            entity_id="light.living_room",
+            actions=self.catalog.devices["device_abc"].actions,
+            room_id="living",
+            room_name="Гостиная",
+        )
+        service = ScenarioService(
+            None,
+            self.store,
+            ScenarioCatalog(devices={"device_abc": room_device}, scenarios={}),
+            self.executor,
+            scenario_change_publisher=lambda _change, _scenario_id, _revision, fields: changes.append(fields),
+        )
+        await service.async_load()
+        payload = _valid_payload()
+        payload["roomIds"] = ["living"]
+        payload["roomId"] = "living"
+
+        await service.async_update_scenario(payload)
+
+        self.assertIn("roomIds", changes[-1])
+
     async def test_update_rejects_a_stale_editor_revision(self) -> None:
         original = await self.service.async_update_scenario(_valid_payload())
         first_editor = _valid_payload()
@@ -814,6 +847,128 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(original.revision, raised.exception.expected_revision)
         self.assertEqual(saved.revision, raised.exception.current_revision)
         self.assertEqual("First editor", (await self.service.async_get_scenario("scenario_1")).title)
+
+    async def test_multi_room_assignment_round_trip_and_whole_home(self) -> None:
+        living = ScenarioDeviceEntry(
+            target_id="device_abc",
+            name="Light",
+            entity_id="light.living_room",
+            actions=self.catalog.devices["device_abc"].actions,
+            room_id="living",
+            room_name="Гостиная",
+        )
+        kitchen = ScenarioDeviceEntry(
+            target_id="device_kitchen",
+            name="Kitchen light",
+            entity_id="light.kitchen",
+            actions=(),
+            room_id="kitchen",
+            room_name="Кухня",
+        )
+        service = ScenarioService(
+            None,
+            self.store,
+            ScenarioCatalog(
+                devices={"device_abc": living, "device_kitchen": kitchen},
+                scenarios={},
+            ),
+            self.executor,
+            now_provider=lambda: datetime(2026, 8, 25, tzinfo=timezone.utc),
+            sun_times_provider=lambda: (None, None),
+        )
+        await service.async_load()
+        payload = _valid_payload()
+        payload["roomIds"] = ["living", "kitchen"]
+        payload["roomId"] = "living"
+
+        saved = await service.async_update_scenario(payload)
+
+        self.assertEqual(("living", "kitchen"), saved.room_ids)
+        listed = await service.async_scenario_list_payload()
+        self.assertEqual(["living", "kitchen"], listed["scenarios"][0]["roomIds"])
+        self.assertEqual("living", listed["scenarios"][0]["roomId"])
+
+        whole_home = _valid_payload()
+        whole_home["expectedRevision"] = saved.revision
+        whole_home["roomIds"] = []
+        whole_home["roomId"] = None
+        updated = await service.async_update_scenario(whole_home)
+        self.assertEqual((), updated.room_ids)
+        self.assertIsNone(updated.room_id)
+
+    async def test_missing_room_is_rejected_with_recovery_path(self) -> None:
+        payload = _valid_payload()
+        payload["roomIds"] = ["missing_room"]
+        payload["roomId"] = "missing_room"
+
+        with self.assertRaises(ScenarioValidationError) as raised:
+            await self.service.async_update_scenario(payload)
+
+        self.assertEqual("missing_room", raised.exception.violations[0].code)
+        self.assertEqual("roomIds.0", raised.exception.violations[0].path)
+
+    async def test_unchanged_room_is_preserved_while_catalog_is_degraded(self) -> None:
+        room_device = ScenarioDeviceEntry(
+            target_id="device_abc",
+            name="Light",
+            entity_id="light.living_room",
+            actions=self.catalog.devices["device_abc"].actions,
+            room_id="living",
+            room_name="Гостиная",
+        )
+        service = ScenarioService(
+            None,
+            self.store,
+            ScenarioCatalog(devices={"device_abc": room_device}, scenarios={}),
+            self.executor,
+        )
+        await service.async_load()
+        payload = _valid_payload()
+        payload["roomIds"] = ["living"]
+        payload["roomId"] = "living"
+        original = await service.async_update_scenario(payload)
+        service._catalog_readiness["status"] = "degraded"
+        payload["expectedRevision"] = original.revision
+        payload["title"] = "Новое имя"
+
+        updated = await service.async_update_scenario(payload)
+
+        self.assertEqual(("living",), updated.room_ids)
+        self.assertEqual("Новое имя", updated.title)
+
+    async def test_revision_conflict_reports_room_and_action_diff(self) -> None:
+        room_device = ScenarioDeviceEntry(
+            target_id="device_abc",
+            name="Light",
+            entity_id="light.living_room",
+            actions=self.catalog.devices["device_abc"].actions,
+            room_id="living",
+            room_name="Гостиная",
+        )
+        service = ScenarioService(
+            None,
+            self.store,
+            ScenarioCatalog(devices={"device_abc": room_device}, scenarios={}),
+            self.executor,
+        )
+        await service.async_load()
+        original = await service.async_update_scenario(_valid_payload())
+        current_payload = _valid_payload()
+        current_payload["expectedRevision"] = original.revision
+        current_payload["title"] = "Current"
+        current = await service.async_update_scenario(current_payload)
+        stale = _valid_payload()
+        stale["expectedRevision"] = original.revision
+        stale["roomIds"] = ["living"]
+        stale["roomId"] = "living"
+
+        with self.assertRaises(ScenarioRevisionConflictError) as raised:
+            await service.async_update_scenario(stale)
+
+        self.assertEqual(current.revision, raised.exception.current_revision)
+        self.assertIn("roomIds", raised.exception.changed_fields)
+        self.assertEqual((), raised.exception.current_room_ids)
+        self.assertEqual(("a1",), raised.exception.current_action_ids)
 
     async def test_create_accepts_explicit_null_expected_revision(self) -> None:
         payload = _valid_payload()

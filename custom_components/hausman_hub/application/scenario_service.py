@@ -326,6 +326,9 @@ class ScenarioRevisionConflictError(ScenarioServiceError):
         *,
         expected_revision: int | None,
         current_revision: int | None,
+        changed_fields: tuple[str, ...] = (),
+        current_room_ids: tuple[str, ...] = (),
+        current_action_ids: tuple[str, ...] = (),
     ) -> None:
         super().__init__(
             "Scenario changed on another client. Reload it before saving.",
@@ -334,6 +337,9 @@ class ScenarioRevisionConflictError(ScenarioServiceError):
         self.scenario_id = scenario_id
         self.expected_revision = expected_revision
         self.current_revision = current_revision
+        self.changed_fields = changed_fields
+        self.current_room_ids = current_room_ids
+        self.current_action_ids = current_action_ids
 
 
 class ScenarioCatalogNotReadyError(ScenarioServiceError):
@@ -376,7 +382,9 @@ class ScenarioService:
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         operation_journal: object | None = None,
         intercom_release_publisher: Callable[[dict[str, Any]], None] | None = None,
-        scenario_change_publisher: Callable[[str, str, int], None] | None = None,
+        scenario_change_publisher: Callable[
+            [str, str, int, tuple[str, ...]], None
+        ] | None = None,
         monotonic: Callable[[], float] = time.monotonic,
     ):
         self._hass = hass
@@ -1151,16 +1159,41 @@ class ScenarioService:
                     )
                 )
             existing = registry.scenario(raw_id)
+            room_ids = self._room_ids_from_payload(payload)
+            room_assignment_changed = (
+                existing is None or room_ids != existing.room_ids
+            )
             action_steps_changed = (
                 existing is None or definition.actions != existing.definition.actions
             )
             definition_unchanged = (
                 existing is not None and definition == existing.definition
             )
-            if action_steps_changed:
+            if action_steps_changed or room_assignment_changed:
                 self._require_catalog_ready_for_actions()
-            if not definition_unchanged:
+            if not definition_unchanged or room_assignment_changed:
                 await self.async_refresh_catalog()
+            if room_assignment_changed:
+                available_room_ids = {
+                    device.room_id
+                    for device in self._catalog.devices.values()
+                    if device.room_id
+                }
+                missing_room_ids = [
+                    room_id for room_id in room_ids if room_id not in available_room_ids
+                ]
+                if missing_room_ids:
+                    raise ScenarioValidationError(
+                        tuple(
+                            ScenarioDefinitionViolation(
+                                "Выбранная комната больше не доступна. Обновите каталог и выберите комнату снова.",
+                                code="missing_room",
+                                path=f"roomIds.{index}",
+                            )
+                            for index, room_id in enumerate(room_ids)
+                            if room_id in missing_room_ids
+                        )
+                    )
             validate_scenario_definition(
                 definition,
                 catalog=self._validation_catalog(registry),
@@ -1199,20 +1232,17 @@ class ScenarioService:
                         raw_id,
                         expected_revision=expected_revision,
                         current_revision=current_revision,
+                        changed_fields=self._conflict_changed_fields(payload, existing),
+                        current_room_ids=existing.room_ids if existing is not None else (),
+                        current_action_ids=(
+                            tuple(action.id for action in existing.definition.actions)
+                            if existing is not None
+                            else ()
+                        ),
                     )
             group = _str_or_default(payload, "group", "custom")
             if existing is not None and existing.protected:
                 group = existing.group
-            room_id = payload.get("roomId")
-            if room_id is not None and not isinstance(room_id, str):
-                raise ScenarioValidationError(
-                    (
-                        ScenarioDefinitionViolation(
-                            "scenario roomId must be a string or null",
-                            path="roomId",
-                        ),
-                    )
-                )
             try:
                 new_scenario = Scenario.from_definition(
                     scenario_id=raw_id,
@@ -1237,7 +1267,7 @@ class ScenarioService:
                         payload, "actionDescription", ""
                     ),
                     updated_at=int(time.time() * 1000),
-                    room_id=room_id,
+                    room_ids=room_ids,
                     protected=(existing.protected if existing is not None else None),
                     revision=(existing.revision + 1) if existing is not None else 0,
                 )
@@ -1271,8 +1301,112 @@ class ScenarioService:
                     )
                 )
             )
-            self._publish_scenario_change(change, new_scenario.id, new_scenario.revision)
+            changed_fields = self._changed_fields(existing, new_scenario)
+            self._publish_scenario_change(
+                change,
+                new_scenario.id,
+                new_scenario.revision,
+                changed_fields,
+            )
             return new_scenario
+
+    @staticmethod
+    def _room_ids_from_payload(payload: Mapping[str, object]) -> tuple[str, ...]:
+        """Read the additive multi-room field with legacy roomId fallback."""
+
+        if "roomIds" in payload:
+            raw = payload.get("roomIds")
+            if not isinstance(raw, list):
+                raise ScenarioValidationError(
+                    (ScenarioDefinitionViolation(
+                        "scenario roomIds must be an array",
+                        path="roomIds",
+                    ),)
+                )
+            if len(raw) > 32 or any(not isinstance(item, str) for item in raw):
+                raise ScenarioValidationError(
+                    (ScenarioDefinitionViolation(
+                        "scenario roomIds must contain at most 32 room IDs",
+                        path="roomIds",
+                    ),)
+                )
+            result = tuple(raw)
+            if len(result) != len(set(result)):
+                raise ScenarioValidationError(
+                    (ScenarioDefinitionViolation(
+                        "scenario roomIds must be unique",
+                        path="roomIds",
+                    ),)
+                )
+            if "roomId" in payload:
+                legacy = payload.get("roomId")
+                if legacy is not None and not isinstance(legacy, str):
+                    raise ScenarioValidationError(
+                        (ScenarioDefinitionViolation(
+                            "scenario roomId must be a string or null",
+                            path="roomId",
+                        ),)
+                    )
+                if legacy != (result[0] if result else None):
+                    raise ScenarioValidationError(
+                        (ScenarioDefinitionViolation(
+                            "scenario roomId must mirror the first roomIds item",
+                            path="roomId",
+                        ),)
+                    )
+            return result
+        legacy = payload.get("roomId")
+        if legacy is None:
+            return ()
+        if not isinstance(legacy, str):
+            raise ScenarioValidationError(
+                (ScenarioDefinitionViolation(
+                    "scenario roomId must be a string or null",
+                    path="roomId",
+                ),)
+            )
+        return (legacy,)
+
+    @staticmethod
+    def _changed_fields(existing: Scenario | None, current: Scenario) -> tuple[str, ...]:
+        if existing is None:
+            return ("created", "roomIds", "actions")
+        fields: list[str] = []
+        if existing.room_ids != current.room_ids:
+            fields.append("roomIds")
+        if existing.definition.actions != current.definition.actions:
+            fields.append("actions")
+        if existing.enabled != current.enabled:
+            fields.append("enabled")
+        if existing.title != current.title:
+            fields.append("title")
+        if existing.definition.triggers != current.definition.triggers:
+            fields.append("triggers")
+        if existing.definition.conditions != current.definition.conditions:
+            fields.append("conditions")
+        return tuple(fields or ("metadata",))
+
+    @classmethod
+    def _conflict_changed_fields(
+        cls, payload: Mapping[str, object], current: Scenario | None
+    ) -> tuple[str, ...]:
+        if current is None:
+            return ("deleted",)
+        fields: list[str] = []
+        try:
+            if cls._room_ids_from_payload(payload) != current.room_ids:
+                fields.append("roomIds")
+        except ScenarioValidationError:
+            fields.append("roomIds")
+        raw_definition = payload.get("definition")
+        if isinstance(raw_definition, dict):
+            try:
+                proposed = ScenarioDefinition.from_payload(raw_definition)
+                if proposed.actions != current.definition.actions:
+                    fields.append("actions")
+            except ScenarioViolation:
+                fields.append("actions")
+        return tuple(fields or ("metadata",))
 
     async def async_test_scenario(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Validate a scenario definition and return a dry-run trace."""
@@ -1360,14 +1494,20 @@ class ScenarioService:
             self._publish_scenario_change("deleted", target.id, target.revision + 1)
 
     def _publish_scenario_change(
-        self, change: str, scenario_id: str, revision: int
+        self,
+        change: str,
+        scenario_id: str,
+        revision: int,
+        changed_fields: tuple[str, ...] = (),
     ) -> None:
         """Notify connected editors after the durable registry write succeeds."""
 
         if self._scenario_change_publisher is None:
             return
         try:
-            self._scenario_change_publisher(change, scenario_id, revision)
+            self._scenario_change_publisher(
+                change, scenario_id, revision, changed_fields
+            )
         except Exception:  # pragma: no cover - live fan-out must not undo storage
             _LOGGER.exception("Failed to publish scenario change invalidation")
 

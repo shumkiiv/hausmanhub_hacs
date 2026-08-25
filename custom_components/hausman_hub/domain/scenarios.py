@@ -428,6 +428,7 @@ class Scenario:
     definition: ScenarioDefinition
     revision: int = 0
     room_id: str | None = None
+    room_ids: tuple[str, ...] = ()
     protected: bool = False
 
     def __post_init__(self) -> None:
@@ -472,8 +473,19 @@ class Scenario:
             raise ScenarioViolation("scenario revision must be a non-negative integer")
         if not isinstance(self.definition, ScenarioDefinition):
             raise ScenarioViolation("scenario definition must be validated")
-        if self.room_id is not None:
+        object.__setattr__(self, "room_ids", tuple(self.room_ids))
+        if len(self.room_ids) > 32:
+            raise ScenarioViolation("scenario can belong to at most 32 rooms")
+        _unique(self.room_ids, "scenario room ids")
+        for room_id in self.room_ids:
+            _stable_id(room_id, "scenario room id")
+        if self.room_ids:
+            if self.room_id is not None and self.room_id != self.room_ids[0]:
+                raise ScenarioViolation("scenario roomId must mirror roomIds")
+            object.__setattr__(self, "room_id", self.room_ids[0])
+        elif self.room_id is not None:
             _stable_id(self.room_id, "scenario room id")
+            object.__setattr__(self, "room_ids", (self.room_id,))
         if type(self.protected) is not bool:
             raise ScenarioViolation("scenario protected must be boolean")
         if self.protected and self.activation_kind is not ScenarioActivationKind.SYSTEM:
@@ -519,6 +531,7 @@ class Scenario:
         updated_at: int | None = None,
         revision: int = 0,
         room_id: str | None = None,
+        room_ids: tuple[str, ...] = (),
         protected: bool | None = None,
     ) -> Scenario:
         """Build a full persisted scenario from a validated definition."""
@@ -546,6 +559,7 @@ class Scenario:
             definition=definition,
             revision=revision,
             room_id=room_id,
+            room_ids=room_ids,
             protected=protected,
         )
 
@@ -747,7 +761,7 @@ def _scenario_from_payload(payload: object, label: str) -> Scenario:
     _required_allowed_keys(
         root,
         required,
-        required | {"roomId", "activationKind", "protected", "revision"},
+        required | {"roomId", "roomIds", "activationKind", "protected", "revision"},
         label,
     )
     group = _str(root.get("group"), f"{label} group")
@@ -759,6 +773,19 @@ def _scenario_from_payload(payload: object, label: str) -> Scenario:
         else group.casefold() in {"system", "системные"}
         or scenario_id.startswith(("system_", "system-"))
     )
+    raw_room_ids = root.get("roomIds")
+    if raw_room_ids is None:
+        legacy_room_id = _optional_str(root.get("roomId"))
+        room_ids = (legacy_room_id,) if legacy_room_id is not None else ()
+    else:
+        if not isinstance(raw_room_ids, list) or any(
+            not isinstance(item, str) for item in raw_room_ids
+        ):
+            raise ScenarioViolation(f"{label} roomIds must be an array of strings")
+        room_ids = tuple(raw_room_ids)
+        legacy_room_id = _optional_str(root.get("roomId"))
+        if legacy_room_id != (room_ids[0] if room_ids else None):
+            raise ScenarioViolation(f"{label} roomId must mirror roomIds")
     scenario = Scenario(
         id=scenario_id,
         title=_str(root.get("title"), f"{label} title"),
@@ -789,7 +816,8 @@ def _scenario_from_payload(payload: object, label: str) -> Scenario:
             if "revision" in root
             else 0
         ),
-        room_id=_optional_str(root.get("roomId")),
+        room_id=legacy_room_id,
+        room_ids=room_ids,
         protected=protected,
     )
     activation_kind = root.get("activationKind")
@@ -816,6 +844,7 @@ def _scenario_to_payload(scenario: Scenario) -> dict[str, object]:
         "revision": scenario.revision,
         "definition": _definition_to_payload(scenario.definition),
         "roomId": scenario.room_id,
+        "roomIds": list(scenario.room_ids),
         "activationKind": scenario.activation_kind.value,
         "protected": scenario.protected,
     }

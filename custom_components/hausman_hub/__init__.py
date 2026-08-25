@@ -244,10 +244,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         publish_command_receipt(hass, receipt, operation="intercom_release")
 
-    def _publish_scenario_change(change: str, scenario_id: str, revision: int) -> None:
+    def _publish_scenario_change(
+        change: str,
+        scenario_id: str,
+        revision: int,
+        changed_fields: tuple[str, ...] = (),
+    ) -> None:
         from .realtime_api import publish_scenario_change
 
-        publish_scenario_change(hass, change, scenario_id, revision)
+        publish_scenario_change(
+            hass, change, scenario_id, revision, changed_fields
+        )
 
     scenario_service = ScenarioService(
         hass,

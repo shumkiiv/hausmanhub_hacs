@@ -759,6 +759,9 @@ def _revision_conflict_payload(
         "scenarioId": error.scenario_id,
         "expectedRevision": error.expected_revision,
         "currentRevision": error.current_revision,
+        "changedFields": list(error.changed_fields),
+        "currentRoomIds": list(error.current_room_ids),
+        "currentActionIds": list(error.current_action_ids),
     }
 
 

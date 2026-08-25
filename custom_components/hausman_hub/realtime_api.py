@@ -374,7 +374,11 @@ def publish_command_receipt(
 
 
 def publish_scenario_change(
-    hass: HomeAssistant, change: str, scenario_id: str, revision: int
+    hass: HomeAssistant,
+    change: str,
+    scenario_id: str,
+    revision: int,
+    changed_fields: tuple[str, ...] = (),
 ) -> dict[str, object] | None:
     """Publish a bounded editor invalidation without a scenario definition."""
 
@@ -385,13 +389,16 @@ def publish_scenario_change(
     runtime = _current_runtime(hass)
     if runtime is None:
         return None
+    payload: dict[str, object] = {
+        "change": change,
+        "scenario_id": scenario_id,
+        "revision": revision,
+    }
+    if changed_fields:
+        payload["changed_fields"] = list(changed_fields)
     return runtime.broker.publish(
         "scenario_changed",
-        {
-            "change": change,
-            "scenario_id": scenario_id,
-            "revision": revision,
-        },
+        payload,
     )
 
 

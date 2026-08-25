@@ -115,13 +115,19 @@ class ScenarioDomainTest(unittest.TestCase):
 
     def test_round_trip_payload(self) -> None:
         registry = ScenarioRegistry(
-            scenarios=(valid_scenario(room_id="living", protected=True),)
+            scenarios=(
+                valid_scenario(
+                    room_ids=("living", "kitchen"), protected=True
+                ),
+            )
         )
         payload = scenario_registry_to_payload(registry)
         restored = scenario_registry_from_payload(payload)
         self.assertEqual(len(restored.scenarios), 1)
         self.assertEqual(restored.scenarios[0].id, "test_scenario")
         self.assertEqual("living", restored.scenarios[0].room_id)
+        self.assertEqual(("living", "kitchen"), restored.scenarios[0].room_ids)
+        self.assertEqual(["living", "kitchen"], payload["scenarios"][0]["roomIds"])
         self.assertTrue(restored.scenarios[0].protected)
         self.assertEqual("system", payload["scenarios"][0]["activationKind"])
 
@@ -129,7 +135,7 @@ class ScenarioDomainTest(unittest.TestCase):
         payload = scenario_registry_to_payload(
             ScenarioRegistry(scenarios=(valid_scenario(),))
         )
-        for key in ("roomId", "activationKind", "protected"):
+        for key in ("roomId", "roomIds", "activationKind", "protected"):
             del payload["scenarios"][0][key]
 
         restored = scenario_registry_from_payload(payload)
@@ -140,6 +146,28 @@ class ScenarioDomainTest(unittest.TestCase):
             ScenarioActivationKind.MANUAL,
             restored.scenarios[0].activation_kind,
         )
+
+    def test_legacy_room_id_populates_multi_room_projection(self) -> None:
+        payload = scenario_registry_to_payload(
+            ScenarioRegistry(scenarios=(valid_scenario(room_id="living"),))
+        )
+        del payload["scenarios"][0]["roomIds"]
+
+        restored = scenario_registry_from_payload(payload)
+
+        self.assertEqual(("living",), restored.scenarios[0].room_ids)
+
+    def test_room_id_must_mirror_first_room_ids_item(self) -> None:
+        with self.assertRaisesRegex(ScenarioViolation, "must mirror"):
+            valid_scenario(room_id="living", room_ids=("kitchen",))
+
+    def test_room_ids_are_unique_and_bounded(self) -> None:
+        with self.assertRaisesRegex(ScenarioViolation, "unique"):
+            valid_scenario(room_ids=("living", "living"))
+        with self.assertRaisesRegex(ScenarioViolation, "at most 32"):
+            valid_scenario(
+                room_ids=tuple(f"room_{index}" for index in range(33))
+            )
 
     def test_persisted_activation_kind_must_match_triggers(self) -> None:
         payload = scenario_registry_to_payload(
