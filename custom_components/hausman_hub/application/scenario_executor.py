@@ -793,7 +793,11 @@ class ScenarioExecutor:
             if action.type is ScenarioActionType.DEVICE_ACTION:
                 device = self._catalog.device(action.target_id or "")
                 entity_id = getattr(device, "entity_id", None)
-                if action.action_id == "turn_on" and action.target_id:
+                if (
+                    action.action_id == "turn_on"
+                    and action.target_id
+                    and receipt.get("skipped") is not True
+                ):
                     powered_target_ids.add(action.target_id)
                 elif action.action_id == "turn_off" and action.target_id:
                     powered_target_ids.discard(action.target_id)

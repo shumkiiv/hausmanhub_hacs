@@ -1314,6 +1314,43 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             ]
         )
 
+    async def test_cleanup_does_not_turn_off_device_that_was_already_on(self) -> None:
+        definition = _definition(
+            (
+                ScenarioAction(
+                    id="turn-on",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="device_1",
+                    action_id="turn_on",
+                ),
+                ScenarioAction(
+                    id="fails",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="missing-device",
+                    action_id="turn_on",
+                ),
+                ScenarioAction(
+                    id="turn-off",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="device_1",
+                    action_id="turn_off",
+                ),
+            ),
+            idempotent_actions=True,
+        )
+
+        result = await self.executor.async_execute(
+            definition, "run-1", scenario_id="safe-cleanup"
+        )
+
+        self.assertEqual("partial", result["status"])
+        self.assertEqual(
+            ["turn-on", "fails"],
+            [receipt["action_id"] for receipt in result["receipts"]],
+        )
+        self.assertTrue(result["receipts"][0]["skipped"])
+        self.hass.services.async_call.assert_not_awaited()
+
     async def test_run_scenario_dry_run_is_a_successful_plan(self) -> None:
         definition = _definition(
             (
