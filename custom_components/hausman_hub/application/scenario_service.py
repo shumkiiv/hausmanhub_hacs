@@ -23,6 +23,7 @@ from ..domain.scenarios import (
     _scenario_to_payload,
 )
 from .operation_journal import scenario_operation_receipt
+from .scenario_metrics import ScenarioPathMetrics
 from .scenario_schedule import (
     ScheduledRun,
     compute_upcoming_runs,
@@ -45,6 +46,7 @@ INTERCOM_RELEASE_SECONDS = 15
 CATALOG_WARMUP_DELAYS_SECONDS = (1.0, 3.0, 8.0)
 CATALOG_WARMUP_MAX_ATTEMPTS = 1 + len(CATALOG_WARMUP_DELAYS_SECONDS)
 SYSTEM_SEED_RETRY_DELAY_SECONDS = 300.0
+CATALOG_REFRESH_TIMEOUT_SECONDS = 2.0
 
 _HEALTH_RECOMMENDATIONS = {
     "missing_device": "restore_device",
@@ -375,6 +377,7 @@ class ScenarioService:
         operation_journal: object | None = None,
         intercom_release_publisher: Callable[[dict[str, Any]], None] | None = None,
         scenario_change_publisher: Callable[[str, str, int], None] | None = None,
+        monotonic: Callable[[], float] = time.monotonic,
     ):
         self._hass = hass
         self._store = store
@@ -390,6 +393,8 @@ class ScenarioService:
         self._operation_journal = operation_journal
         self._intercom_release_publisher = intercom_release_publisher
         self._scenario_change_publisher = scenario_change_publisher
+        self._monotonic = monotonic
+        self._path_metrics = ScenarioPathMetrics()
         self._skipped_runs: set[str] = set()
         self._intercom_release_cancel: Callable[[], None] | None = None
         self._intercom_release_entity: str | None = None
@@ -657,7 +662,11 @@ class ScenarioService:
         save = getattr(self._store, "async_save", None)
         if save is None:
             raise ScenarioServiceError("Store does not support save", status=500)
-        await save(registry)
+        started = self._monotonic()
+        try:
+            await save(registry)
+        finally:
+            self._record_path_latency("storage", started)
 
     async def async_reset(self) -> None:
         """Remove every user scenario without executing it."""
@@ -687,6 +696,16 @@ class ScenarioService:
         """Return the live catalog snapshot without triggering a rescan."""
 
         return self._catalog
+
+    @property
+    def performance_metrics(self) -> dict[str, dict[str, float | int | str]]:
+        """Return bounded aggregate timings without payload or entity data."""
+
+        return self._path_metrics.snapshot()
+
+    def _record_path_latency(self, path: str, started: float) -> None:
+        duration_ms = max(0.0, (self._monotonic() - started) * 1000)
+        self._path_metrics.record(path, duration_ms)
 
     def _require_catalog_ready_for_actions(self) -> None:
         """Fail closed while late HA integrations can still change selectors."""
@@ -821,7 +840,23 @@ class ScenarioService:
     async def async_refresh_catalog(self) -> ScenarioCatalog:
         """Refresh controllable HA entities without reloading the integration."""
 
-        catalog = await self._async_replace_catalog()
+        started = self._monotonic()
+        try:
+            catalog = await asyncio.wait_for(
+                self._async_replace_catalog(),
+                timeout=CATALOG_REFRESH_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            self._catalog_readiness.update(
+                {
+                    "status": "degraded",
+                    "updatedAt": int(time.time() * 1000),
+                    "reason": "warmup_failed",
+                }
+            )
+            raise ScenarioServiceError("Catalog refresh timed out", status=503) from None
+        finally:
+            self._record_path_latency("catalog", started)
         self._catalog_readiness["deviceCount"] = len(catalog.devices)
         self._catalog_readiness["updatedAt"] = int(time.time() * 1000)
         return catalog
@@ -871,6 +906,7 @@ class ScenarioService:
     async def async_scenario_list_payload(self) -> dict[str, object]:
         """Return the classified list with schedule and durable run evidence."""
 
+        list_started = self._monotonic()
         scenarios = await self.async_list_scenarios()
         now = self._now_local()
         next_sunrise, next_sunset = self._sun_times()
@@ -894,6 +930,7 @@ class ScenarioService:
         last_results: dict[str, dict[str, object]] = {}
         snapshot = getattr(self._operation_journal, "snapshot", None)
         if callable(snapshot):
+            result_started = self._monotonic()
             journal = snapshot(limit=512, source="scenario")
             records = journal.get("records", ()) if isinstance(journal, dict) else ()
             if isinstance(records, list):
@@ -924,6 +961,7 @@ class ScenarioService:
                         "correlationId": correlation_id,
                         "commandMode": command_mode,
                     }
+            self._record_path_latency("last_result", result_started)
 
         payloads: list[dict[str, object]] = []
         for scenario in scenarios:
@@ -953,12 +991,14 @@ class ScenarioService:
         content_revision = hashlib.sha256(
             json.dumps(content, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()[:32]
-        return {
+        result = {
             "contract": {"name": "hausman-hub-scenario-list", "version": 1},
             "generatedAt": max(0, int(now.timestamp() * 1000)),
             "contentRevision": content_revision,
             "scenarios": payloads,
         }
+        self._record_path_latency("list", list_started)
+        return result
 
     async def async_get_scenario(self, scenario_id: str) -> Scenario:
         """Return one scenario or raise 404."""
@@ -1093,32 +1133,46 @@ class ScenarioService:
                         ),
                     )
                 )
-            new_scenario = Scenario.from_definition(
-                scenario_id=raw_id,
-                title=raw_title.strip(),
-                definition=definition,
-                enabled=enabled,
-                group=group,
-                description=_str_or_default(payload, "description", ""),
-                icon=_str_or_default(payload, "icon", "mdi:script"),
-                favorite=_bool_or_default(payload, "favorite", False),
-                danger=_bool_or_default(payload, "danger", False),
-                requires_confirmation=_bool_or_default(
-                    payload, "requiresConfirmation", False
-                ),
-                trigger_description=_str_or_default(payload, "triggerDescription", ""),
-                condition_description=_str_or_default(
-                    payload, "conditionDescription", ""
-                ),
-                action_description=_str_or_default(payload, "actionDescription", ""),
-                updated_at=int(time.time() * 1000),
-                room_id=room_id,
-                protected=(existing.protected if existing is not None else None),
-                revision=(existing.revision + 1) if existing is not None else 0,
-            )
+            try:
+                new_scenario = Scenario.from_definition(
+                    scenario_id=raw_id,
+                    title=raw_title.strip(),
+                    definition=definition,
+                    enabled=enabled,
+                    group=group,
+                    description=_str_or_default(payload, "description", ""),
+                    icon=_str_or_default(payload, "icon", "mdi:script"),
+                    favorite=_bool_or_default(payload, "favorite", False),
+                    danger=_bool_or_default(payload, "danger", False),
+                    requires_confirmation=_bool_or_default(
+                        payload, "requiresConfirmation", False
+                    ),
+                    trigger_description=_str_or_default(
+                        payload, "triggerDescription", ""
+                    ),
+                    condition_description=_str_or_default(
+                        payload, "conditionDescription", ""
+                    ),
+                    action_description=_str_or_default(
+                        payload, "actionDescription", ""
+                    ),
+                    updated_at=int(time.time() * 1000),
+                    room_id=room_id,
+                    protected=(existing.protected if existing is not None else None),
+                    revision=(existing.revision + 1) if existing is not None else 0,
+                )
+            except ScenarioViolation as error:
+                raise ScenarioValidationError(
+                    (ScenarioDefinitionViolation(str(error), path="scenario"),)
+                ) from error
             scenarios = [s for s in registry.scenarios if s.id != new_scenario.id]
             scenarios.append(new_scenario)
-            new_registry = ScenarioRegistry(scenarios=tuple(scenarios))
+            try:
+                new_registry = ScenarioRegistry(scenarios=tuple(scenarios))
+            except ScenarioViolation as error:
+                raise ScenarioValidationError(
+                    (ScenarioDefinitionViolation(str(error), path="scenarios"),)
+                ) from error
             await self.async_save(new_registry)
             self._registry = new_registry
             change = (
@@ -1140,6 +1194,7 @@ class ScenarioService:
     async def async_test_scenario(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Validate a scenario definition and return a dry-run trace."""
 
+        started = self._monotonic()
         self._require_catalog_ready_for_actions()
         await self.async_refresh_catalog()
         registry = self._ensure_loaded()
@@ -1179,13 +1234,15 @@ class ScenarioService:
                 scenario_id=payload.get("id") or payload.get("scenarioId") or "",
                 dry_run=True,
             )
-        return {
+        result = {
             "valid": True,
             "action_count": action_count,
             "referenced_scenario_ids": sorted(referenced),
             "plan": plan,
             "report": _dry_run_report(definition, self._catalog, registry, plan),
         }
+        self._record_path_latency("dry_run", started)
+        return result
 
     async def async_delete_scenario(self, scenario_id: str) -> None:
         """Delete a scenario unless it is referenced by others."""

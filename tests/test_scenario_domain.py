@@ -8,6 +8,7 @@ from custom_components.hausman_hub.domain.scenarios import (
     MAX_ACTIONS,
     MAX_CONDITIONS,
     MAX_DELAY_SECONDS,
+    MAX_SCENARIOS,
     MAX_TRIGGERS,
     Scenario,
     ScenarioActivationKind,
@@ -159,6 +160,15 @@ class ScenarioDomainTest(unittest.TestCase):
             ScenarioRegistry(
                 scenarios=(valid_scenario(id="same"), valid_scenario(id="same"))
             )
+
+    def test_scenario_list_size_matches_schema_limit(self) -> None:
+        scenarios = tuple(
+            valid_scenario(id=f"scenario_{index}")
+            for index in range(MAX_SCENARIOS + 1)
+        )
+
+        with self.assertRaisesRegex(ScenarioViolation, "too many scenarios"):
+            ScenarioRegistry(scenarios=scenarios)
 
     def test_danger_requires_confirmation(self) -> None:
         with self.assertRaises(ScenarioViolation):
@@ -319,6 +329,37 @@ class ScenarioDomainTest(unittest.TestCase):
     def test_scenario_title_stripped(self) -> None:
         with self.assertRaises(ScenarioViolation):
             valid_scenario(title="  ")
+
+    def test_scenario_text_fields_match_schema_limits(self) -> None:
+        with self.assertRaises(ScenarioViolation):
+            valid_scenario(icon="i" * 81)
+        with self.assertRaises(ScenarioViolation):
+            ScenarioTrigger(
+                id="t1",
+                type=ScenarioTriggerType.DEVICE_STATE,
+                target_id="device",
+                target_name="n" * 121,
+                property="state",
+                comparison=ScenarioComparison.EQUALS,
+                value="on",
+            )
+        with self.assertRaises(ScenarioViolation):
+            ScenarioCondition(
+                id="c1",
+                type=ScenarioConditionType.DEVICE_STATE,
+                target_id="device",
+                property="p" * 121,
+                comparison=ScenarioComparison.EQUALS,
+                value="on",
+            )
+        with self.assertRaises(ScenarioViolation):
+            ScenarioAction(
+                id="a1",
+                type=ScenarioActionType.DEVICE_ACTION,
+                target_id="device",
+                action_id="turn_on",
+                action_title="a" * 121,
+            )
 
     def test_payload_rejects_unknown_fields(self) -> None:
         with self.assertRaises(ScenarioViolation):

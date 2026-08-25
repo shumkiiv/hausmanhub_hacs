@@ -13,6 +13,7 @@ from enum import StrEnum
 from types import MappingProxyType
 
 SCENARIO_REGISTRY_VERSION = 1
+MAX_SCENARIOS = 512
 MAX_TRIGGERS = 16
 MAX_CONDITIONS = 32
 MAX_ACTIONS = 64
@@ -20,6 +21,7 @@ MAX_SCENARIO_ID_LENGTH = 64
 MAX_TITLE_LENGTH = 120
 MAX_GROUP_LENGTH = 64
 MAX_DESCRIPTION_LENGTH = 500
+MAX_ICON_LENGTH = 80
 MAX_MESSAGE_LENGTH = 500
 MIN_DELAY_SECONDS = 1
 MAX_DELAY_SECONDS = 86400
@@ -165,6 +167,9 @@ class ScenarioTrigger:
 
     def __post_init__(self) -> None:
         _stable_id(self.id, "trigger id")
+        _optional_stable_id(self.target_id, "trigger target_id")
+        _optional_bounded_text(self.target_name, "trigger target_name")
+        _optional_bounded_text(self.property, "trigger property")
         if self.event_data is not None:
             object.__setattr__(
                 self, "event_data", MappingProxyType(dict(self.event_data))
@@ -238,6 +243,9 @@ class ScenarioCondition:
 
     def __post_init__(self) -> None:
         _stable_id(self.id, "condition id")
+        _optional_stable_id(self.target_id, "condition target_id")
+        _optional_bounded_text(self.target_name, "condition target_name")
+        _optional_bounded_text(self.property, "condition property")
         if not isinstance(self.type, ScenarioConditionType):
             raise ScenarioViolation("condition type must be approved")
         # Android always emits `comparison`; ignore it for non-device_state conditions.
@@ -305,6 +313,11 @@ class ScenarioAction:
 
     def __post_init__(self) -> None:
         _stable_id(self.id, "action id")
+        _optional_stable_id(self.target_id, "action target_id")
+        _optional_bounded_text(self.target_name, "action target_name")
+        _optional_stable_id(self.action_id, "action action_id")
+        _optional_bounded_text(self.action_title, "action action_title")
+        _optional_stable_id(self.scenario_id, "action scenario_id")
         if not isinstance(self.type, ScenarioActionType):
             raise ScenarioViolation("action type must be approved")
         if self.type is ScenarioActionType.DEVICE_ACTION:
@@ -427,8 +440,8 @@ class Scenario:
             raise ScenarioViolation("scenario description must be a string")
         if len(self.description) > MAX_DESCRIPTION_LENGTH:
             raise ScenarioViolation("scenario description is too long")
-        if not isinstance(self.icon, str):
-            raise ScenarioViolation("scenario icon must be a string")
+        if not isinstance(self.icon, str) or len(self.icon) > MAX_ICON_LENGTH:
+            raise ScenarioViolation("scenario icon must be at most 80 characters")
         if type(self.enabled) is not bool:
             raise ScenarioViolation("scenario enabled must be boolean")
         if type(self.favorite) is not bool:
@@ -550,6 +563,8 @@ class ScenarioRegistry:
             raise ScenarioViolation("unsupported scenario registry version")
         if any(not isinstance(item, Scenario) for item in self.scenarios):
             raise ScenarioViolation("scenario must be validated")
+        if len(self.scenarios) > MAX_SCENARIOS:
+            raise ScenarioViolation("too many scenarios")
         _unique((item.id for item in self.scenarios), "scenario ids")
 
     def scenario(self, scenario_id: str) -> Scenario | None:
@@ -593,6 +608,24 @@ def _title(value: object, label: str) -> None:
 def _stable_id(value: object, label: str) -> None:
     if not isinstance(value, str) or not _STABLE_ID.fullmatch(value):
         raise ScenarioViolation(f"{label} must be a stable lowercase id")
+
+
+def _optional_stable_id(value: object, label: str) -> None:
+    if value is not None:
+        _stable_id(value, label)
+
+
+def _optional_bounded_text(
+    value: object,
+    label: str,
+    maximum: int = MAX_TITLE_LENGTH,
+) -> None:
+    if value is None:
+        return
+    if not isinstance(value, str) or not value or len(value) > maximum:
+        raise ScenarioViolation(
+            f"{label} must be non-empty and at most {maximum} characters"
+        )
 
 
 def _unique(values: object, label: str) -> None:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -492,6 +492,101 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
             ["turn-on", "pause", "notice"],
             [action["id"] for action in item["definition"]["actions"]],
         )
+
+    async def test_list_and_editor_metadata_do_not_wait_for_catalog_loader(self) -> None:
+        loader = AsyncMock()
+        service = ScenarioService(
+            None,
+            self.store,
+            self.catalog,
+            self.executor,
+            catalog_loader=loader,
+            now_provider=lambda: datetime(2026, 8, 25, tzinfo=timezone.utc),
+        )
+        await service.async_load()
+
+        result = await asyncio.wait_for(
+            service.async_scenario_list_payload(), timeout=0.05
+        )
+
+        self.assertEqual([], result["scenarios"])
+        self.assertIs(self.catalog, service.current_catalog())
+        loader.assert_not_awaited()
+        self.assertEqual(1, service.performance_metrics["list"]["count"])
+
+    async def test_catalog_timeout_keeps_last_snapshot_and_reports_degraded(self) -> None:
+        cancelled = asyncio.Event()
+
+        async def slow_catalog() -> ScenarioCatalog:
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+            return self.catalog
+
+        service = ScenarioService(
+            None,
+            self.store,
+            self.catalog,
+            self.executor,
+            catalog_loader=slow_catalog,
+            now_provider=lambda: datetime(2026, 8, 25, tzinfo=timezone.utc),
+        )
+        await service.async_load()
+
+        with patch(
+            "custom_components.hausman_hub.application.scenario_service."
+            "CATALOG_REFRESH_TIMEOUT_SECONDS",
+            0.001,
+        ):
+            with self.assertRaisesRegex(ScenarioServiceError, "timed out"):
+                await service.async_refresh_catalog()
+
+        self.assertTrue(cancelled.is_set())
+        self.assertIs(self.catalog, service.current_catalog())
+        self.assertEqual("degraded", service.catalog_readiness["status"])
+        self.assertEqual("warmup_failed", service.catalog_readiness["reason"])
+        self.assertEqual(1, service.performance_metrics["catalog"]["count"])
+
+        dashboard = await asyncio.wait_for(
+            service.async_scenario_list_payload(), timeout=0.05
+        )
+        self.assertEqual([], dashboard["scenarios"])
+
+    async def test_performance_gate_covers_every_scenario_backend_path(self) -> None:
+        service = ScenarioService(
+            None,
+            self.store,
+            self.catalog,
+            self.executor,
+            now_provider=lambda: datetime(2026, 8, 25, tzinfo=timezone.utc),
+            operation_journal=_FakeJournal(),
+        )
+        await service.async_load()
+
+        await service.async_update_scenario(_valid_payload())
+        await service.async_test_scenario({"definition": _valid_definition()})
+        await service.async_scenario_list_payload()
+
+        metrics = service.performance_metrics
+        self.assertEqual(1, metrics["list"]["count"])
+        self.assertEqual(2, metrics["catalog"]["count"])
+        self.assertEqual(1, metrics["dry_run"]["count"])
+        self.assertEqual(1, metrics["storage"]["count"])
+        self.assertEqual(1, metrics["last_result"]["count"])
+        self.assertTrue(
+            all(metric["status"] == "within_budget" for metric in metrics.values())
+        )
+
+    async def test_schema_text_limit_returns_validation_error_before_storage(self) -> None:
+        payload = _valid_payload()
+        payload["title"] = "t" * 121
+
+        with self.assertRaises(ScenarioValidationError) as rejected:
+            await self.service.async_update_scenario(payload)
+
+        self.assertEqual("scenario", rejected.exception.violations[0].path)
+        self.assertIsNone(self.store._data)
 
     async def test_classified_list_exposes_durable_result_and_skip_once(self) -> None:
         now = datetime(2026, 8, 22, 7, 0, tzinfo=timezone.utc)
