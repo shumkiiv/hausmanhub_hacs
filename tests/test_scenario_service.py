@@ -936,6 +936,36 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(("living",), updated.room_ids)
         self.assertEqual("Новое имя", updated.title)
 
+    async def test_room_scope_can_be_cleared_while_catalog_is_degraded(self) -> None:
+        room_device = ScenarioDeviceEntry(
+            target_id="device_abc",
+            name="Light",
+            entity_id="light.living_room",
+            actions=self.catalog.devices["device_abc"].actions,
+            room_id="living",
+            room_name="Гостиная",
+        )
+        service = ScenarioService(
+            None,
+            self.store,
+            ScenarioCatalog(devices={"device_abc": room_device}, scenarios={}),
+            self.executor,
+        )
+        await service.async_load()
+        payload = _valid_payload()
+        payload["roomIds"] = ["living"]
+        payload["roomId"] = "living"
+        original = await service.async_update_scenario(payload)
+        service._catalog_readiness["status"] = "degraded"
+        payload["expectedRevision"] = original.revision
+        payload["roomIds"] = []
+        payload["roomId"] = None
+
+        updated = await service.async_update_scenario(payload)
+
+        self.assertEqual((), updated.room_ids)
+        self.assertIsNone(updated.room_id)
+
     async def test_revision_conflict_reports_room_and_action_diff(self) -> None:
         room_device = ScenarioDeviceEntry(
             target_id="device_abc",

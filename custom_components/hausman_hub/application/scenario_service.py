@@ -1169,7 +1169,7 @@ class ScenarioService:
             definition_unchanged = (
                 existing is not None and definition == existing.definition
             )
-            if action_steps_changed or room_assignment_changed:
+            if action_steps_changed or (room_assignment_changed and room_ids):
                 self._require_catalog_ready_for_actions()
             if not definition_unchanged or room_assignment_changed:
                 await self.async_refresh_catalog()
