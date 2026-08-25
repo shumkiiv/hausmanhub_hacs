@@ -413,6 +413,7 @@ class Scenario:
     action_description: str
     updated_at: int
     definition: ScenarioDefinition
+    revision: int = 0
     room_id: str | None = None
     protected: bool = False
 
@@ -454,6 +455,8 @@ class Scenario:
             raise ScenarioViolation(
                 "scenario updated_at must be a non-negative integer"
             )
+        if type(self.revision) is not int or self.revision < 0:
+            raise ScenarioViolation("scenario revision must be a non-negative integer")
         if not isinstance(self.definition, ScenarioDefinition):
             raise ScenarioViolation("scenario definition must be validated")
         if self.room_id is not None:
@@ -501,6 +504,7 @@ class Scenario:
         condition_description: str = "None",
         action_description: str = "None",
         updated_at: int | None = None,
+        revision: int = 0,
         room_id: str | None = None,
         protected: bool | None = None,
     ) -> Scenario:
@@ -527,6 +531,7 @@ class Scenario:
             action_description=action_description,
             updated_at=updated_at,
             definition=definition,
+            revision=revision,
             room_id=room_id,
             protected=protected,
         )
@@ -709,7 +714,7 @@ def _scenario_from_payload(payload: object, label: str) -> Scenario:
     _required_allowed_keys(
         root,
         required,
-        required | {"roomId", "activationKind", "protected"},
+        required | {"roomId", "activationKind", "protected", "revision"},
         label,
     )
     group = _str(root.get("group"), f"{label} group")
@@ -746,6 +751,11 @@ def _scenario_from_payload(payload: object, label: str) -> Scenario:
         definition=_definition_from_payload(
             root.get("definition"), f"{label} definition"
         ),
+        revision=(
+            _int(root.get("revision"), f"{label} revision")
+            if "revision" in root
+            else 0
+        ),
         room_id=_optional_str(root.get("roomId")),
         protected=protected,
     )
@@ -770,6 +780,7 @@ def _scenario_to_payload(scenario: Scenario) -> dict[str, object]:
         "conditionDescription": scenario.condition_description,
         "actionDescription": scenario.action_description,
         "updatedAt": scenario.updated_at,
+        "revision": scenario.revision,
         "definition": _definition_to_payload(scenario.definition),
         "roomId": scenario.room_id,
         "activationKind": scenario.activation_kind.value,

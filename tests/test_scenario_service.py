@@ -16,6 +16,7 @@ from custom_components.hausman_hub.application.scenario_service import (
     ScenarioNotFoundError,
     ScenarioProtectedError,
     ScenarioReferencedError,
+    ScenarioRevisionConflictError,
     ScenarioService,
     ScenarioServiceError,
     ScenarioValidationError,
@@ -412,6 +413,42 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
         scenario = await self.service.async_update_scenario(payload)
         self.assertEqual(scenario.title, "Updated")
         self.assertEqual(len(await self.service.async_list_scenarios()), 1)
+
+    async def test_update_rejects_a_stale_editor_revision(self) -> None:
+        original = await self.service.async_update_scenario(_valid_payload())
+        first_editor = _valid_payload()
+        first_editor["title"] = "First editor"
+        first_editor["expectedRevision"] = original.revision
+        saved = await self.service.async_update_scenario(first_editor)
+
+        stale_editor = _valid_payload()
+        stale_editor["title"] = "Stale editor"
+        stale_editor["expectedRevision"] = original.revision
+        with self.assertRaises(ScenarioRevisionConflictError) as raised:
+            await self.service.async_update_scenario(stale_editor)
+
+        self.assertEqual(original.revision + 1, saved.revision)
+        self.assertEqual("scenario_1", raised.exception.scenario_id)
+        self.assertEqual(original.revision, raised.exception.expected_revision)
+        self.assertEqual(saved.revision, raised.exception.current_revision)
+        self.assertEqual("First editor", (await self.service.async_get_scenario("scenario_1")).title)
+
+    async def test_create_accepts_explicit_null_expected_revision(self) -> None:
+        payload = _valid_payload()
+        payload["expectedRevision"] = None
+
+        scenario = await self.service.async_update_scenario(payload)
+
+        self.assertEqual("scenario_1", scenario.id)
+
+    async def test_create_rejects_non_null_expected_revision(self) -> None:
+        payload = _valid_payload()
+        payload["expectedRevision"] = 123
+
+        with self.assertRaises(ScenarioRevisionConflictError) as raised:
+            await self.service.async_update_scenario(payload)
+
+        self.assertIsNone(raised.exception.current_revision)
 
     async def test_update_validation_error(self) -> None:
         payload = _valid_payload()

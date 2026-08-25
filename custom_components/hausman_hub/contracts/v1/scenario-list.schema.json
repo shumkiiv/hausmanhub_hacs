@@ -57,7 +57,7 @@
       "required": [
         "id", "title", "group", "description", "icon", "enabled",
         "favorite", "danger", "requiresConfirmation", "triggerDescription",
-        "conditionDescription", "actionDescription", "updatedAt", "definition",
+        "conditionDescription", "actionDescription", "updatedAt", "revision", "definition",
         "roomId", "activationKind", "protected", "nextRun", "lastResult",
         "temporaryException"
       ],
@@ -75,6 +75,7 @@
         "conditionDescription": {"type": "string", "maxLength": 500},
         "actionDescription": {"type": "string", "maxLength": 500},
         "updatedAt": {"type": "integer", "minimum": 0},
+        "revision": {"type": "integer", "minimum": 0},
         "definition": {"type": "object"},
         "roomId": {
           "oneOf": [

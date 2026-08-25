@@ -306,6 +306,25 @@ class ScenarioProtectedError(ScenarioServiceError):
         )
 
 
+class ScenarioRevisionConflictError(ScenarioServiceError):
+    """An editor tried to overwrite a scenario changed by another client."""
+
+    def __init__(
+        self,
+        scenario_id: str,
+        *,
+        expected_revision: int | None,
+        current_revision: int | None,
+    ) -> None:
+        super().__init__(
+            "Scenario changed on another client. Reload it before saving.",
+            status=409,
+        )
+        self.scenario_id = scenario_id
+        self.expected_revision = expected_revision
+        self.current_revision = current_revision
+
+
 class ScenarioValidationError(ScenarioServiceError):
     def __init__(self, violations: tuple[ScenarioDefinitionViolation, ...]):
         super().__init__("Scenario validation failed", status=400)
@@ -950,6 +969,35 @@ class ScenarioService:
                 isinstance(raw_enabled, str) and raw_enabled.lower() == "true"
             )
             existing = registry.scenario(raw_id)
+            expected_is_present = "expectedRevision" in payload
+            expected_revision = payload.get("expectedRevision")
+            if expected_is_present:
+                if expected_revision is not None and (
+                    isinstance(expected_revision, bool)
+                    or not isinstance(expected_revision, int)
+                    or expected_revision < 0
+                ):
+                    raise ScenarioValidationError(
+                        (
+                            ScenarioDefinitionViolation(
+                                "expectedRevision must be a non-negative integer or null",
+                                path="expectedRevision",
+                            ),
+                        )
+                    )
+                current_revision = existing.revision if existing is not None else None
+                if (
+                    (existing is None and expected_revision is not None)
+                    or (
+                        existing is not None
+                        and expected_revision != current_revision
+                    )
+                ):
+                    raise ScenarioRevisionConflictError(
+                        raw_id,
+                        expected_revision=expected_revision,
+                        current_revision=current_revision,
+                    )
             group = _str_or_default(payload, "group", "custom")
             if existing is not None and existing.protected:
                 group = existing.group
@@ -984,6 +1032,7 @@ class ScenarioService:
                 updated_at=int(time.time() * 1000),
                 room_id=room_id,
                 protected=(existing.protected if existing is not None else None),
+                revision=(existing.revision + 1) if existing is not None else 0,
             )
             scenarios = [s for s in registry.scenarios if s.id != new_scenario.id]
             scenarios.append(new_scenario)

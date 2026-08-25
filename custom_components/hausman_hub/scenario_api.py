@@ -13,6 +13,7 @@ from .application.scenario_service import (
     ScenarioNotFoundError,
     ScenarioProtectedError,
     ScenarioReferencedError,
+    ScenarioRevisionConflictError,
     ScenarioService,
     ScenarioServiceError,
     ScenarioValidationError,
@@ -219,6 +220,12 @@ class ScenariosView(_ScenarioView):
             )
         try:
             scenario = await service.async_update_scenario(payload)
+        except ScenarioRevisionConflictError as error:
+            return self.json(
+                _revision_conflict_payload(error),
+                status_code=HTTPStatus.CONFLICT,
+                headers=NO_STORE_HEADERS,
+            )
         except ScenarioValidationError as error:
             return self.json(
                 {
@@ -498,6 +505,12 @@ class ScenarioActionView(_ScenarioView):
         if action == "update_scenario":
             try:
                 scenario = await service.async_update_scenario(dict(payload))
+            except ScenarioRevisionConflictError as error:
+                return self.json(
+                    _revision_conflict_payload(error),
+                    status_code=HTTPStatus.CONFLICT,
+                    headers=NO_STORE_HEADERS,
+                )
             except ScenarioValidationError as error:
                 return self.json(
                     _validation_error_payload(error),
@@ -672,6 +685,22 @@ def _validation_error_payload(error: ScenarioValidationError) -> dict[str, objec
             {"message": str(item), "path": item.path, "code": item.code}
             for item in error.violations
         ],
+    }
+
+
+def _revision_conflict_payload(
+    error: ScenarioRevisionConflictError,
+) -> dict[str, object]:
+    """Return only the revision required to reload one stale editor draft."""
+
+    return {
+        "ok": False,
+        "status": "conflict",
+        "error": "revision_conflict",
+        "message": "Сценарий изменён на другом устройстве. Перечитайте его перед сохранением.",
+        "scenarioId": error.scenario_id,
+        "expectedRevision": error.expected_revision,
+        "currentRevision": error.current_revision,
     }
 
 
