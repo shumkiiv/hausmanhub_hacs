@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import time
 from collections.abc import Awaitable, Callable, Mapping
@@ -944,9 +946,17 @@ class ScenarioService:
                 }
             )
             payloads.append(payload)
+        content = [
+            _scenario_to_payload(scenario)
+            for scenario in sorted(scenarios, key=lambda item: item.id)
+        ]
+        content_revision = hashlib.sha256(
+            json.dumps(content, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()[:32]
         return {
             "contract": {"name": "hausman-hub-scenario-list", "version": 1},
             "generatedAt": max(0, int(now.timestamp() * 1000)),
+            "contentRevision": content_revision,
             "scenarios": payloads,
         }
 

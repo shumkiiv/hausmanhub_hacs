@@ -16,6 +16,10 @@
       }
     },
     "generatedAt": {"type": "integer", "minimum": 0},
+    "contentRevision": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{32}$"
+    },
     "scenarios": {
       "type": "array",
       "maxItems": 512,

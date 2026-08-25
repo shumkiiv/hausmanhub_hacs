@@ -224,10 +224,14 @@ class ScenariosView(_ScenarioView):
         service = self._service_ready()
         if service is None:
             return self._unavailable()
-        return self.json(
-            await service.async_scenario_list_payload(),
-            headers=NO_STORE_HEADERS,
-        )
+        payload = await service.async_scenario_list_payload()
+        revision = payload["contentRevision"]
+        etag = f'"scenario-{revision}"'
+        headers = {**NO_STORE_HEADERS, "ETag": etag}
+        request_headers = getattr(request, "headers", {})
+        if request_headers.get("If-None-Match") == etag:
+            return self.json({}, status_code=HTTPStatus.NOT_MODIFIED, headers=headers)
+        return self.json(payload, headers=headers)
 
     async def post(self, request: Any) -> Any:
         if not _is_exact_request(request, self.url):
