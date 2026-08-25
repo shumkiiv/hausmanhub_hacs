@@ -395,6 +395,8 @@ class ScenarioService:
         self._scenario_change_publisher = scenario_change_publisher
         self._monotonic = monotonic
         self._path_metrics = ScenarioPathMetrics()
+        self._scenario_content_revision_key: tuple[tuple[str, int], ...] | None = None
+        self._scenario_content_revision: str | None = None
         self._skipped_runs: set[str] = set()
         self._intercom_release_cancel: Callable[[], None] | None = None
         self._intercom_release_entity: str | None = None
@@ -944,6 +946,40 @@ class ScenarioService:
             "violations": violations,
         }
 
+    async def async_scenario_content_revision(self) -> str:
+        """Return the revision for the stable scenario definition content."""
+
+        scenarios = await self.async_list_scenarios()
+        return self._scenario_content_revision_for(scenarios)
+
+    def _scenario_content_revision_for(
+        self, scenarios: tuple[Scenario, ...]
+    ) -> str:
+        """Hash definitions only after a scenario revision has changed."""
+
+        cache_key = tuple(
+            sorted((scenario.id, scenario.revision) for scenario in scenarios)
+        )
+        if (
+            cache_key == self._scenario_content_revision_key
+            and self._scenario_content_revision is not None
+        ):
+            return self._scenario_content_revision
+        content = [
+            _scenario_to_payload(scenario)
+            for scenario in sorted(scenarios, key=lambda item: item.id)
+        ]
+        self._scenario_content_revision = hashlib.sha256(
+            json.dumps(
+                content,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()[:32]
+        self._scenario_content_revision_key = cache_key
+        return self._scenario_content_revision
+
     async def async_scenario_list_payload(self) -> dict[str, object]:
         """Return the classified list with schedule and durable run evidence."""
 
@@ -1025,13 +1061,7 @@ class ScenarioService:
                 }
             )
             payloads.append(payload)
-        content = [
-            _scenario_to_payload(scenario)
-            for scenario in sorted(scenarios, key=lambda item: item.id)
-        ]
-        content_revision = hashlib.sha256(
-            json.dumps(content, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest()[:32]
+        content_revision = self._scenario_content_revision_for(scenarios)
         result = {
             "contract": {"name": "hausman-hub-scenario-list", "version": 1},
             "generatedAt": max(0, int(now.timestamp() * 1000)),
@@ -1069,6 +1099,13 @@ class ScenarioService:
         """Create or replace a scenario atomically."""
 
         self._require_running()
+        if "revision" in payload:
+            raise ScenarioValidationError(
+                (ScenarioDefinitionViolation(
+                    "revision is server-owned; send expectedRevision instead",
+                    path="revision",
+                ),)
+            )
         async with self._lock:
             self._require_running()
             registry = self._ensure_loaded()
@@ -1219,6 +1256,8 @@ class ScenarioService:
             self._require_running()
             await self.async_save(new_registry)
             self._registry = new_registry
+            self._scenario_content_revision_key = None
+            self._scenario_content_revision = None
             change = (
                 "created"
                 if existing is None
@@ -1315,6 +1354,8 @@ class ScenarioService:
             self._require_running()
             await self.async_save(new_registry)
             self._registry = new_registry
+            self._scenario_content_revision_key = None
+            self._scenario_content_revision = None
             assert target is not None
             self._publish_scenario_change("deleted", target.id, target.revision + 1)
 

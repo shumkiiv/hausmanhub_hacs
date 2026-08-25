@@ -224,13 +224,19 @@ class ScenariosView(_ScenarioView):
         service = self._service_ready()
         if service is None:
             return self._unavailable()
-        payload = await service.async_scenario_list_payload()
-        revision = payload["contentRevision"]
+        revision = await service.async_scenario_content_revision()
         etag = f'"scenario-{revision}"'
         headers = {**NO_STORE_HEADERS, "ETag": etag}
         request_headers = getattr(request, "headers", {})
-        if request_headers.get("If-None-Match") == etag:
-            return self.json({}, status_code=HTTPStatus.NOT_MODIFIED, headers=headers)
+        if _if_none_match_matches(request_headers.get("If-None-Match"), etag):
+            from aiohttp import web  # noqa: PLC0415
+
+            return web.Response(status=HTTPStatus.NOT_MODIFIED, headers=headers)
+        payload = await service.async_scenario_list_payload()
+        payload_revision = payload["contentRevision"]
+        if isinstance(payload_revision, str) and payload_revision != revision:
+            etag = f'"scenario-{payload_revision}"'
+            headers = {**NO_STORE_HEADERS, "ETag": etag}
         return self.json(payload, headers=headers)
 
     async def post(self, request: Any) -> Any:
@@ -264,11 +270,7 @@ class ScenariosView(_ScenarioView):
                 headers=NO_STORE_HEADERS,
             )
         except ScenarioRevisionConflictError as error:
-            return self.json(
-                _revision_conflict_payload(error),
-                status_code=HTTPStatus.CONFLICT,
-                headers=NO_STORE_HEADERS,
-            )
+            return _revision_conflict_response(self, error)
         except ScenarioValidationError as error:
             return self.json(
                 {
@@ -561,11 +563,7 @@ class ScenarioActionView(_ScenarioView):
             try:
                 scenario = await service.async_update_scenario(dict(payload))
             except ScenarioRevisionConflictError as error:
-                return self.json(
-                    _revision_conflict_payload(error),
-                    status_code=HTTPStatus.CONFLICT,
-                    headers=NO_STORE_HEADERS,
-                )
+                return _revision_conflict_response(self, error)
             except ScenarioValidationError as error:
                 return self.json(
                     _validation_error_payload(error),
@@ -762,6 +760,34 @@ def _revision_conflict_payload(
         "expectedRevision": error.expected_revision,
         "currentRevision": error.current_revision,
     }
+
+
+def _revision_conflict_response(
+    view: _ScenarioView, error: ScenarioRevisionConflictError
+) -> Any:
+    """Keep all scenario mutation routes on one stale-draft response."""
+
+    return view.json(
+        _revision_conflict_payload(error),
+        status_code=HTTPStatus.CONFLICT,
+        headers=NO_STORE_HEADERS,
+    )
+
+
+def _if_none_match_matches(value: object, etag: str) -> bool:
+    """Perform weak comparison for a comma-separated If-None-Match header."""
+
+    if not isinstance(value, str):
+        return False
+    for candidate in value.split(","):
+        token = candidate.strip()
+        if token == "*":
+            return True
+        if token.startswith("W/"):
+            token = token[2:].strip()
+        if token == etag:
+            return True
+    return False
 
 
 async def _delete_scenario(

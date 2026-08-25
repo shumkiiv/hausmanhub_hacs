@@ -558,6 +558,31 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
             [action["id"] for action in item["definition"]["actions"]],
         )
 
+    async def test_content_revision_is_cached_until_a_scenario_changes(self) -> None:
+        service = ScenarioService(None, self.store, self.catalog, self.executor)
+        await service.async_load()
+        await service.async_update_scenario(_valid_payload("cached_revision"))
+
+        first = await service.async_scenario_content_revision()
+        with patch(
+            "custom_components.hausman_hub.application.scenario_service.hashlib.sha256"
+        ) as sha256:
+            second = await service.async_scenario_content_revision()
+
+        self.assertEqual(first, second)
+        sha256.assert_not_called()
+
+        updated = _valid_payload("cached_revision")
+        updated["title"] = "Новое название"
+        updated["expectedRevision"] = 0
+        await service.async_update_scenario(updated)
+        with patch(
+            "custom_components.hausman_hub.application.scenario_service.hashlib.sha256"
+        ) as sha256:
+            await service.async_scenario_content_revision()
+
+        sha256.assert_called_once()
+
     async def test_list_and_editor_metadata_do_not_wait_for_catalog_loader(self) -> None:
         loader = AsyncMock()
         service = ScenarioService(
