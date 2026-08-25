@@ -1,6 +1,6 @@
 /* Physical-device picker and HA state helpers for the scenario editor. */
 
-import { scenarioField, scenarioSelectField } from "./hausman-hub-scenario-fields.js?v=1.52.162";
+import { scenarioField, scenarioSelectField } from "./hausman-hub-scenario-fields.js?v=1.52.163";
 
 const COMPARISONS = [
   ["equals", "равно"], ["not_equals", "не равно"], ["above", "выше"],

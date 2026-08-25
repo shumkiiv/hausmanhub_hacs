@@ -1,10 +1,10 @@
-import { createHeroRoomNavigation } from "./hausman-hub-hero-room-navigation.js?v=1.52.162";
-import { overviewHeroRenderKey, overviewHomeName, stableOverviewHeroImage } from "./hausman-hub-overview-hero-state.js?v=1.52.162";
-import { renderHomeTargetCard } from "./hausman-hub-climate-overview.js?v=1.52.162";
-import { scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.162";
-import { openUpcomingEventsModal } from "./hausman-hub-overview-events-modal.js?v=1.52.162";
-import { renderOverviewSideCards } from "./hausman-hub-overview-side.js?v=1.52.162";
-import { renderOverviewUtilityCards } from "./hausman-hub-overview-utility-cards.js?v=1.52.162";
+import { createHeroRoomNavigation } from "./hausman-hub-hero-room-navigation.js?v=1.52.163";
+import { overviewHeroRenderKey, overviewHomeName, stableOverviewHeroImage } from "./hausman-hub-overview-hero-state.js?v=1.52.163";
+import { renderHomeTargetCard } from "./hausman-hub-climate-overview.js?v=1.52.163";
+import { scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.163";
+import { openUpcomingEventsModal } from "./hausman-hub-overview-events-modal.js?v=1.52.163";
+import { renderOverviewSideCards } from "./hausman-hub-overview-side.js?v=1.52.163";
+import { renderOverviewUtilityCards } from "./hausman-hub-overview-utility-cards.js?v=1.52.163";
 
 function validNumber(value) {
   return value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
@@ -129,13 +129,18 @@ function iconButton(deps, className, iconName, label, onClick) {
   return button;
 }
 
-function renderDashboardHeader(panel, readinessStatus, container, deps) {
+function renderDashboardHeader(panel, connectionStatus, container, deps) {
+  const connection = {
+    online: { className: "ready", text: "Связь с Home Assistant установлена", label: "Система на связи" },
+    recovering: { className: "attention", text: "Восстанавливаем связь с Home Assistant", label: "Связь восстанавливается" },
+    offline: { className: "offline", text: "Нет связи с Home Assistant", label: "Нет связи с Home Assistant" },
+  }[connectionStatus] || { className: "attention", text: "Проверяем связь с Home Assistant", label: "Связь уточняется" };
   const now = new Date();
   const header = deps.el("header", "overview-tablet-header");
   const copy = deps.el("div", "overview-tablet-header-copy");
   copy.appendChild(deps.el("h2", null, overviewGreeting(now)));
-  copy.appendChild(deps.el("span", `overview-tablet-header-status is-${readinessStatus === "ready" ? "ready" : "attention"}`,
-    readinessStatus === "ready" ? "Все системы работают штатно" : "Состояние обновляется"));
+  copy.appendChild(deps.el("span", `overview-tablet-header-status is-${connection.className}`,
+    connection.text));
   header.appendChild(copy);
   const pager = deps.el("span", "overview-tablet-page-dots");
   for (let index = 0; index < 3; index += 1) pager.appendChild(deps.el("i"));
@@ -159,10 +164,10 @@ function renderDashboardHeader(panel, readinessStatus, container, deps) {
     "Открыть режим киоска", deps.enterKiosk));
   actions.appendChild(iconButton(deps, "overview-tablet-header-icon is-refresh", "refresh",
     "Обновить главную", deps.refresh));
-  const system = deps.el("span", `overview-tablet-system-state is-${readinessStatus === "ready" ? "ready" : "attention"}`);
+  const system = deps.el("span", `overview-tablet-system-state is-${connection.className}`);
   system.appendChild(deps.svgIcon("wifi"));
   system.appendChild(deps.svgIcon("cloud"));
-  deps.setAttr(system, "aria-label", readinessStatus === "ready" ? "Система на связи" : "Связь уточняется");
+  deps.setAttr(system, "aria-label", connection.label);
   actions.appendChild(system);
   header.appendChild(actions);
   container.appendChild(header);
@@ -180,12 +185,12 @@ function renderHeroFacts(row, facts, deps) {
 }
 
 export function renderOverviewHero(panel, container, readiness, deps) {
-  const readinessStatus = readiness?.status || "not_ready";
+  const connectionStatus = panel._connectionStatus || "loading";
   const dashboard = panel._homeDashboard || {};
   const rooms = Array.isArray(dashboard.rooms) ? dashboard.rooms : [];
   const devices = Array.isArray(dashboard.devices) ? dashboard.devices : [];
   container.innerHTML = "";
-  renderDashboardHeader(panel, readinessStatus, container, deps);
+  renderDashboardHeader(panel, connectionStatus, container, deps);
   const selectedRoom = rooms.find((room) => room.id === panel._overviewHeroRoomId) || null;
   if (panel._overviewHeroRoomId && !selectedRoom) panel._overviewHeroRoomId = null;
   const hero = deps.el("section", "overview-canon-hero");

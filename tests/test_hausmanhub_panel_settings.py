@@ -2037,8 +2037,36 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         if (attention.length !== 0 || homeNow.length !== 1) {
           throw new Error("Dashboard did not keep the safe tablet sidebar fallback");
         }
-        if (panel._shell.statusPill.textContent !== "Состояние уточняется") {
-          throw new Error("header did not render unknown readiness safely");
+        if (panel._shell.statusPill.textContent !== "Связь с Home Assistant установлена") {
+          throw new Error("header did not keep the confirmed connection state safely");
+        }
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_connection_header_stays_offline_until_two_confirmed_recoveries(self) -> None:
+        script = panel_script(
+            dict(GET_PATHS),
+            {},
+            """
+        panel._recordConnectionFailure();
+        panel._render();
+        if (panel._shell.statusPill.textContent !== "Нет связи с Home Assistant"
+          || panel._shell.statusPill.attributes["data-status"] !== "offline") {
+          throw new Error("offline connection status is not stable");
+        }
+        panel._recordConnectionSuccess();
+        panel._render();
+        if (panel._shell.statusPill.textContent !== "Восстанавливаем связь с Home Assistant"
+          || panel._shell.statusPill.attributes["data-status"] !== "recovering") {
+          throw new Error("first recovery incorrectly showed a ready connection");
+        }
+        panel._recordConnectionSuccess();
+        panel._render();
+        if (panel._shell.statusPill.textContent !== "Связь с Home Assistant установлена"
+          || panel._shell.statusPill.attributes["data-status"] !== "online") {
+          throw new Error("second recovery did not confirm the connection");
         }
             """,
         )
@@ -4859,7 +4887,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.162")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.163")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

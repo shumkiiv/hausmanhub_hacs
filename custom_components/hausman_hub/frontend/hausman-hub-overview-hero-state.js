@@ -1,4 +1,4 @@
-import { roomHeroImage } from "./hausman-hub-room-icons.js?v=1.52.162";
+import { roomHeroImage } from "./hausman-hub-room-icons.js?v=1.52.163";
 
 function heroSummary(dashboard) {
   const summary = dashboard?.summary && typeof dashboard.summary === "object"
@@ -66,6 +66,7 @@ export function overviewHeroRenderKey(panel, readiness) {
   const devices = Array.isArray(dashboard.devices) ? dashboard.devices : [];
   const selectedRoom = rooms.find((room) => room.id === panel._overviewHeroRoomId) || null;
   return JSON.stringify({
+    connection: panel._connectionStatus || "loading",
     readiness: readiness?.status || "not_ready",
     homeName: overviewHomeName(dashboard),
     image: stableOverviewHeroImage(panel, selectedRoom, dashboard),

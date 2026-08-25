@@ -27,6 +27,7 @@
 .overview-tablet-header-status { display:flex; align-items:center; gap:8px; color:var(--hmh-text-secondary); font-size:12px; }
 .overview-tablet-header-status::before { content:""; width:7px; height:7px; flex:none; border-radius:50%; background:var(--hmh-status-warning); }
 .overview-tablet-header-status.is-ready::before { background:var(--hmh-status-success); }
+.overview-tablet-header-status.is-offline::before { background:var(--hmh-status-danger); }
 .overview-tablet-header-clock { display:flex; grid-column:2; grid-row:1; align-items:baseline; justify-content:flex-end; gap:12px; white-space:nowrap; }
 .overview-tablet-header-clock span { color:var(--hmh-text-secondary); font-size:11px; text-transform:lowercase; }
 .overview-tablet-header-clock strong { font-size:17px; font-variant-numeric:tabular-nums; }
@@ -44,6 +45,7 @@
 .overview-tablet-system-state { display:flex; align-items:center; gap:9px; padding-inline:3px; color:var(--hmh-text-secondary); }
 .overview-tablet-system-state .icon { width:18px; height:18px; }
 .overview-tablet-system-state.is-ready { color:color-mix(in srgb,var(--hmh-text-secondary) 84%,var(--hmh-status-success)); }
+.overview-tablet-system-state.is-offline { color:color-mix(in srgb,var(--hmh-text-secondary) 84%,var(--hmh-status-danger)); }
 
 .overview-canon-hero {
   position:relative; min-width:0; min-height:300px; overflow:hidden;

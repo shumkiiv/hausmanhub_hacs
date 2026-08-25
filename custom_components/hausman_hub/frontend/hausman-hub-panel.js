@@ -1,47 +1,47 @@
-import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.52.162";
-import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.52.162";
-import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.52.162";
-import { resolveControlChannelTest, summarizeControlChannelReceipts } from "./hausman-hub-control-channel.js?v=1.52.162";
-import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.52.162";
-import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.52.162";
-import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.52.162";
-import { closeFirstRunAreaCreator, createFirstRunArea, openFirstRunAreaCreator, renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.52.162";
-import { createKioskButton, createKioskDock, handleKioskPointerUp, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, resolveIntercomQuickAction, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.52.162";
-import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.52.162";
-import { loadEnergyMeter } from "./hausman-hub-energy-meter.js?v=1.52.162";
-import { loadDeviceDiscovery, updateDeviceDiscoveryBadge } from "./hausman-hub-device-discovery.js?v=1.52.162";
-import { redrawEnergyChartsForTheme } from "./hausman-hub-energy-chart.js?v=1.52.162";
-import { applyHomeSignalSelection, AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, homeEnvironmentSaveError, homeEnvironmentSourcePayload, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.52.162";
-import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.52.162";
-import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.52.162";
-import { renderClimateOverview, setClimateManualMode } from "./hausman-hub-climate-overview.js?v=1.52.162";
-import { renderLightingOverview } from "./hausman-hub-lighting.js?v=1.52.162";
-import { renderRoomsOverview } from "./hausman-hub-rooms.js?v=1.52.162";
-import { renderMediaOverview } from "./hausman-hub-media-overview.js?v=1.52.162";
-import { renderSecurityOverview } from "./hausman-hub-security-overview.js?v=1.52.162";
-import { renderDevicesOverview } from "./hausman-hub-devices-overview.js?v=1.52.162";
-import { buildDiagnosticChecks, diagnosticSummaryText, renderDiagnosticDetails } from "./hausman-hub-diagnostics.js?v=1.52.162";
-import { renderRolloutReadiness } from "./hausman-hub-rollout.js?v=1.52.162";
-import { overviewHeroRenderKey } from "./hausman-hub-overview-hero-state.js?v=1.52.162";
-import { formatUpcomingCountdown, renderOverviewContent, renderOverviewHero } from "./hausman-hub-overview.js?v=1.52.162";
-import { renderPhysicalDeviceCard } from "./hausman-hub-device-card.js?v=1.52.162";
-import { deviceActionInitialValue } from "./hausman-hub-device-controls.js?v=1.52.162";
-import { recordTechnicalEvent as log, renderTechnicalLogCard } from "./hausman-hub-technical-log.js?v=1.52.162";
-import { applyFeedback } from "./hausman-hub-feedback.js?v=1.52.162";
-import { applyCommandActivity, applyCommandTarget, captureCommandIntent } from "./hausman-hub-command-feedback.js?v=1.52.162";
-import { apiErrorMessage, resolveApiError } from "./hausman-hub-error-taxonomy.js?v=1.52.162";
-import { canExecuteCommand, loadingUiState, offlineUiState, staleUiState } from "./hausman-hub-ui-state.js?v=1.52.162";
-import { filterCatalogActions, loadDeviceFeatureMatrix } from "./hausman-hub-device-features.js?v=1.52.162";
-import { withCorrelationId } from "./hausman-hub-correlation.js?v=1.52.162";
-import { createEventStreamClient, createFetchEventSource, EVENT_STREAM_PATH, recordActivityEvent, resolveEventStreamToken } from "./hausman-hub-pagination.js?v=1.52.162";
-import { renderKiosk } from "./hausman-hub-kiosk.js?v=1.52.162";
-import { captureRoomValidation, clearFirstRunDraft, persistFirstRunDraft, reconcileRoomValidation, restoreFirstRunDraft, resumeFirstRunDraft } from "./hausman-hub-first-run-draft.js?v=1.52.162";
-import { applyTabletProfile, isIntercomQuickAccessVisible, renderAppearanceSettings, renderIntercomSettings, syncIntercomQuickAccess } from "./hausman-hub-settings-profile.js?v=1.52.162";
-import { renderSettingsRooms, saveRoomType } from "./hausman-hub-settings-rooms.js?v=1.52.162";
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.162";
+import { renderHomeSection } from "./hausman-hub-home-sections.js?v=1.52.163";
+import { renderFirstRunRoom } from "./hausman-hub-room-setup.js?v=1.52.163";
+import { renderFirstRunDeviceGroups } from "./hausman-hub-room-device-groups.js?v=1.52.163";
+import { resolveControlChannelTest, summarizeControlChannelReceipts } from "./hausman-hub-control-channel.js?v=1.52.163";
+import { renderFirstRunClimateSources } from "./hausman-hub-room-climate-sources.js?v=1.52.163";
+import { renderDeviceInventory } from "./hausman-hub-device-inventory.js?v=1.52.163";
+import { loadDeviceBindings, renderDeviceBindingCallout, renderDeviceBindings } from "./hausman-hub-device-bindings.js?v=1.52.163";
+import { closeFirstRunAreaCreator, createFirstRunArea, openFirstRunAreaCreator, renderFirstRunAreaBinding } from "./hausman-hub-area-binding.js?v=1.52.163";
+import { createKioskButton, createKioskDock, handleKioskPointerUp, openIntercomFromRail, openRoomFromOverview, PANEL_SECTIONS, renderOverviewNavigationSummary, resolveIntercomQuickAction, restoreNavigationFromLocation, SECTION_SUBTITLES, setKioskState, writeNavigationRoute } from "./hausman-hub-navigation.js?v=1.52.163";
+import { loadEnergyHistory, renderEnergyOverviewCard, renderEnergySection, saveEnergySettings } from "./hausman-hub-energy.js?v=1.52.163";
+import { loadEnergyMeter } from "./hausman-hub-energy-meter.js?v=1.52.163";
+import { loadDeviceDiscovery, updateDeviceDiscoveryBadge } from "./hausman-hub-device-discovery.js?v=1.52.163";
+import { redrawEnergyChartsForTheme } from "./hausman-hub-energy-chart.js?v=1.52.163";
+import { applyHomeSignalSelection, AWAY_MODE_EXPLANATION, AWAY_MODE_TYPE, createHeatingTemperatureFields, createPriorityChoicePicker, homeEnvironmentSaveError, homeEnvironmentSourcePayload, HOME_SIGNAL_BINDINGS, isAwayModeCandidate, isCentralHeatingCandidate, signalCandidateDisplayName } from "./hausman-hub-weather-sources.js?v=1.52.163";
+import { renderMediaDeviceCard } from "./hausman-hub-media-device.js?v=1.52.163";
+import { renderScenarioSection } from "./hausman-hub-scenarios.js?v=1.52.163";
+import { renderClimateOverview, setClimateManualMode } from "./hausman-hub-climate-overview.js?v=1.52.163";
+import { renderLightingOverview } from "./hausman-hub-lighting.js?v=1.52.163";
+import { renderRoomsOverview } from "./hausman-hub-rooms.js?v=1.52.163";
+import { renderMediaOverview } from "./hausman-hub-media-overview.js?v=1.52.163";
+import { renderSecurityOverview } from "./hausman-hub-security-overview.js?v=1.52.163";
+import { renderDevicesOverview } from "./hausman-hub-devices-overview.js?v=1.52.163";
+import { buildDiagnosticChecks, diagnosticSummaryText, renderDiagnosticDetails } from "./hausman-hub-diagnostics.js?v=1.52.163";
+import { renderRolloutReadiness } from "./hausman-hub-rollout.js?v=1.52.163";
+import { overviewHeroRenderKey } from "./hausman-hub-overview-hero-state.js?v=1.52.163";
+import { formatUpcomingCountdown, renderOverviewContent, renderOverviewHero } from "./hausman-hub-overview.js?v=1.52.163";
+import { renderPhysicalDeviceCard } from "./hausman-hub-device-card.js?v=1.52.163";
+import { deviceActionInitialValue } from "./hausman-hub-device-controls.js?v=1.52.163";
+import { recordTechnicalEvent as log, renderTechnicalLogCard } from "./hausman-hub-technical-log.js?v=1.52.163";
+import { applyFeedback } from "./hausman-hub-feedback.js?v=1.52.163";
+import { applyCommandActivity, applyCommandTarget, captureCommandIntent } from "./hausman-hub-command-feedback.js?v=1.52.163";
+import { apiErrorMessage, resolveApiError } from "./hausman-hub-error-taxonomy.js?v=1.52.163";
+import { canExecuteCommand, loadingUiState, offlineUiState, staleUiState } from "./hausman-hub-ui-state.js?v=1.52.163";
+import { filterCatalogActions, loadDeviceFeatureMatrix } from "./hausman-hub-device-features.js?v=1.52.163";
+import { withCorrelationId } from "./hausman-hub-correlation.js?v=1.52.163";
+import { createEventStreamClient, createFetchEventSource, EVENT_STREAM_PATH, recordActivityEvent, resolveEventStreamToken } from "./hausman-hub-pagination.js?v=1.52.163";
+import { renderKiosk } from "./hausman-hub-kiosk.js?v=1.52.163";
+import { captureRoomValidation, clearFirstRunDraft, persistFirstRunDraft, reconcileRoomValidation, restoreFirstRunDraft, resumeFirstRunDraft } from "./hausman-hub-first-run-draft.js?v=1.52.163";
+import { applyTabletProfile, isIntercomQuickAccessVisible, renderAppearanceSettings, renderIntercomSettings, syncIntercomQuickAccess } from "./hausman-hub-settings-profile.js?v=1.52.163";
+import { renderSettingsRooms, saveRoomType } from "./hausman-hub-settings-rooms.js?v=1.52.163";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.163";
 
 const PANEL_API = "hausman_hub/v1/admin/panel";
-const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css?v=1.52.162";
+const PANEL_CSS_URL = "/api/hausman_hub/panel/hausman-hub-panel.css?v=1.52.163";
 const DASHBOARD_API = "hausman_hub/v1/dashboard";
 const CLIMATE_RUNTIME_API = "hausman_hub/v1/climate/runtime";
 const DEVICE_ACTIONS_API = "hausman_hub/v1/device-actions";
@@ -132,6 +132,12 @@ const READINESS_LABELS = {
   not_ready: "Нужна настройка системы",
   unavailable: "Система временно недоступна",
   disabled: "Управление климатом выключено",
+};
+const CONNECTION_STATUS_LABELS = {
+  loading: "Проверяем связь с Home Assistant",
+  online: "Связь с Home Assistant установлена",
+  recovering: "Восстанавливаем связь с Home Assistant",
+  offline: "Нет связи с Home Assistant",
 };
 const BRIDGE_MODE_LABELS = {
   disabled: "Выключен",
@@ -403,6 +409,8 @@ class HausmanHubPanel extends HTMLElement {
     };
     this._resetArmed = false;
     this._error = false;
+    this._connectionStatus = "loading";
+    this._connectionRecoveryCount = 0;
     this._busy = false;
     this._notice = "";
     this._commandIntent = null;
@@ -813,12 +821,14 @@ class HausmanHubPanel extends HTMLElement {
       }
       const recovered = this._error;
       this._error = false;
+      this._recordConnectionSuccess();
       this._loadedAt = Date.now();
       if (recovered || !this._technicalLog.length) {
         log(this, "success", "Связь с Hausman Hub установлена");
       }
     } catch (error) {
       this._error = true;
+      this._recordConnectionFailure();
       log(this, "error", "Не удалось получить данные панели");
     }
     this._loadingPanel = false;
@@ -889,6 +899,21 @@ class HausmanHubPanel extends HTMLElement {
     if (!this._data) return loadingUiState("screen");
     if (ageSeconds !== null && ageSeconds * 1000 > STALE_MS) return staleUiState("screen", ageSeconds);
     return null;
+  }
+
+  _recordConnectionSuccess() {
+    if (["offline", "recovering"].includes(this._connectionStatus)) {
+      this._connectionRecoveryCount += 1;
+      this._connectionStatus = this._connectionRecoveryCount >= 2 ? "online" : "recovering";
+      return;
+    }
+    this._connectionRecoveryCount = 0;
+    this._connectionStatus = "online";
+  }
+
+  _recordConnectionFailure() {
+    this._connectionRecoveryCount = 0;
+    this._connectionStatus = "offline";
   }
 
   async _post(path, payload, confirmText) {
@@ -1436,9 +1461,9 @@ class HausmanHubPanel extends HTMLElement {
   }
 
   _renderHeaderStatus(readiness) {
-    const status = readiness && readiness.status;
-    this._shell.statusPill.textContent = READINESS_LABELS[status] || "Состояние уточняется";
-    setAttr(this._shell.statusPill, "data-status", status || "unknown");
+    const connectionStatus = CONNECTION_STATUS_LABELS[this._connectionStatus] ? this._connectionStatus : "loading";
+    this._shell.statusPill.textContent = CONNECTION_STATUS_LABELS[connectionStatus];
+    setAttr(this._shell.statusPill, "data-status", connectionStatus);
     const version = this._data && this._data.integration_version;
     this._shell.versionBadge.textContent = version ? `Версия ${version}` : "";
     this._shell.versionBadge.style.display = version ? "" : "none";
