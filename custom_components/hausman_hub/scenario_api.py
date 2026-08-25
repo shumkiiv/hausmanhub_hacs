@@ -11,6 +11,7 @@ from homeassistant.components.http import HomeAssistantView
 
 from .application.scenario_service import (
     ScenarioNotFoundError,
+    ScenarioCatalogNotReadyError,
     ScenarioProtectedError,
     ScenarioReferencedError,
     ScenarioRevisionConflictError,
@@ -94,7 +95,7 @@ class ScenarioCatalogView(_ScenarioView):
         service = self._service_ready()
         if service is None:
             return self._unavailable()
-        catalog = await service.async_refresh_catalog()
+        catalog = service.current_catalog()
         devices = []
         for device in catalog.devices.values():
             item = {
@@ -161,6 +162,7 @@ class ScenarioCatalogView(_ScenarioView):
             {
                 "devices": sorted(devices, key=lambda item: item["name"]),
                 "scenarios": scenarios,
+                "readiness": service.catalog_readiness,
             },
             headers=NO_STORE_HEADERS,
         )
@@ -220,6 +222,18 @@ class ScenariosView(_ScenarioView):
             )
         try:
             scenario = await service.async_update_scenario(payload)
+        except ScenarioCatalogNotReadyError as error:
+            return self.json(
+                {
+                    "ok": False,
+                    "status": "failed",
+                    "error": "scenario_catalog_not_ready",
+                    "message": error.message,
+                    "readiness": error.readiness,
+                },
+                status_code=HTTPStatus.CONFLICT,
+                headers=NO_STORE_HEADERS,
+            )
         except ScenarioRevisionConflictError as error:
             return self.json(
                 _revision_conflict_payload(error),
@@ -286,6 +300,18 @@ class ScenarioTestView(_ScenarioView):
             )
         try:
             result = await service.async_test_scenario(payload)
+        except ScenarioCatalogNotReadyError as error:
+            return self.json(
+                {
+                    "ok": False,
+                    "status": "failed",
+                    "error": "scenario_catalog_not_ready",
+                    "message": error.message,
+                    "readiness": error.readiness,
+                },
+                status_code=HTTPStatus.CONFLICT,
+                headers=NO_STORE_HEADERS,
+            )
         except ScenarioValidationError as error:
             return self.json(
                 {

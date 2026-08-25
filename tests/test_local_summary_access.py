@@ -3526,6 +3526,8 @@ class LocalSummaryAccessTest(unittest.TestCase):
         self.assertEqual(200, catalog.status)
         self.assertIn("devices", catalog.payload)
         self.assertIn("scenarios", catalog.payload)
+        self.assertEqual("warming", catalog.payload["readiness"]["status"])
+        self.assertEqual("initial_scan", catalog.payload["readiness"]["reason"])
         self.assertEqual(
             {
                 "id": "close_curtains",

@@ -325,6 +325,17 @@ class ScenarioRevisionConflictError(ScenarioServiceError):
         self.current_revision = current_revision
 
 
+class ScenarioCatalogNotReadyError(ScenarioServiceError):
+    """Action steps cannot be changed until the live catalog is trustworthy."""
+
+    def __init__(self, readiness: Mapping[str, object]) -> None:
+        super().__init__(
+            "Action steps cannot be changed while the device catalog is warming up.",
+            status=409,
+        )
+        self.readiness = dict(readiness)
+
+
 class ScenarioValidationError(ScenarioServiceError):
     def __init__(self, violations: tuple[ScenarioDefinitionViolation, ...]):
         super().__init__("Scenario validation failed", status=400)
@@ -384,13 +395,14 @@ class ScenarioService:
         self._catalog_warmup_task: asyncio.Task[None] | None = None
         # Внутреннее состояние прогрева; публикация в dashboard-снапшот -
         # отдельное изменение контракта, в этот релиз не входит.
+        initial_catalog_status = "warming" if catalog_loader is not None else "ready"
         self._catalog_readiness: dict[str, object] = {
-            "status": "warming",
+            "status": initial_catalog_status,
             "attempt": 1,
             "maxAttempts": CATALOG_WARMUP_MAX_ATTEMPTS,
             "deviceCount": len(catalog.devices),
             "updatedAt": int(time.time() * 1000),
-            "reason": "initial_scan",
+            "reason": "initial_scan" if catalog_loader is not None else "catalog_static",
         }
 
     async def async_load(self) -> None:
@@ -667,6 +679,12 @@ class ScenarioService:
 
         return self._catalog
 
+    def _require_catalog_ready_for_actions(self) -> None:
+        """Fail closed while late HA integrations can still change selectors."""
+
+        if self._catalog_readiness.get("status") != "ready":
+            raise ScenarioCatalogNotReadyError(self.catalog_readiness)
+
     def start_catalog_warmup(self) -> Callable[[], None]:
         """Start one managed, bounded refresh sequence after HA setup."""
 
@@ -916,7 +934,6 @@ class ScenarioService:
     async def async_update_scenario(self, payload: dict[str, Any]) -> Scenario:
         """Create or replace a scenario atomically."""
 
-        await self.async_refresh_catalog()
         async with self._lock:
             registry = self._ensure_loaded()
             raw_definition = payload.get("definition")
@@ -960,6 +977,17 @@ class ScenarioService:
                         ),
                     )
                 )
+            existing = registry.scenario(raw_id)
+            action_steps_changed = (
+                existing is None or definition.actions != existing.definition.actions
+            )
+            definition_unchanged = (
+                existing is not None and definition == existing.definition
+            )
+            if action_steps_changed:
+                self._require_catalog_ready_for_actions()
+            if not definition_unchanged:
+                await self.async_refresh_catalog()
             validate_scenario_definition(
                 definition,
                 catalog=self._validation_catalog(registry),
@@ -970,7 +998,6 @@ class ScenarioService:
             enabled = raw_enabled is True or (
                 isinstance(raw_enabled, str) and raw_enabled.lower() == "true"
             )
-            existing = registry.scenario(raw_id)
             expected_is_present = "expectedRevision" in payload
             expected_revision = payload.get("expectedRevision")
             if expected_is_present:
@@ -1060,6 +1087,7 @@ class ScenarioService:
     async def async_test_scenario(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Validate a scenario definition and return a dry-run trace."""
 
+        self._require_catalog_ready_for_actions()
         await self.async_refresh_catalog()
         registry = self._ensure_loaded()
         raw_definition = payload.get("definition", payload)

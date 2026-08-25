@@ -13,6 +13,7 @@ from typing import Any
 from jsonschema import Draft202012Validator
 
 from custom_components.hausman_hub.application.scenario_service import (
+    ScenarioCatalogNotReadyError,
     ScenarioNotFoundError,
     ScenarioProtectedError,
     ScenarioReferencedError,
@@ -250,6 +251,30 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(listed), 1)
         self.assertTrue(self.store._data)
         self.assertEqual(self.store._data.version, 1)
+
+    async def test_action_steps_wait_for_catalog_readiness(self) -> None:
+        async def load_catalog() -> ScenarioCatalog:
+            return self.catalog
+
+        service = ScenarioService(
+            None,
+            self.store,
+            self.catalog,
+            self.executor,
+            catalog_loader=load_catalog,
+        )
+        await service.async_load()
+
+        with self.assertRaises(ScenarioCatalogNotReadyError) as blocked:
+            await service.async_update_scenario(_valid_payload())
+
+        self.assertEqual("warming", blocked.exception.readiness["status"])
+        self.assertIsNone(self.store._data)
+
+        service._catalog_readiness["status"] = "ready"  # noqa: SLF001
+        saved = await service.async_update_scenario(_valid_payload())
+
+        self.assertEqual("scenario_1", saved.id)
 
     async def test_classified_list_exposes_room_next_run_and_no_false_result(self) -> None:
         now = datetime(2026, 8, 22, 7, 0, tzinfo=timezone.utc)

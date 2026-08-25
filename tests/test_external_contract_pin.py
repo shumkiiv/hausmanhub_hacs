@@ -15,7 +15,7 @@ VENDORED_CONTRACT_HASHES = {
     "custom_components/hausman_hub/contracts/v1/device-action-request.schema.json": "4ff6f1cb6e7939749e14aa43799e6108c1db7309251d2b7ee5026f047c667b94",
     "custom_components/hausman_hub/contracts/v1/device-action-receipt.schema.json": "38a710d76b1d335e22cf7c8e85907b329ab7d6952375d86756781f10fcd53a3c",
     "custom_components/hausman_hub/contracts/v1/intercom-release-receipt.schema.json": "ea11c82a77a3fe9195513d1a915336167c81a356fa0b56cf058384daedacf947",
-    "custom_components/hausman_hub/contracts/v1/scenario-catalog.schema.json": "409feb473695ddd66e0da0c2a5cedbd38d879f9d3008c1460d9a803881981cb2",
+    "custom_components/hausman_hub/contracts/v1/scenario-catalog.schema.json": "3b43fa73e6c254ed0f87188a9f7d50144ee43dd7542233b4dcaf32d3d2629f55",
     "custom_components/hausman_hub/contracts/v1/scenario-dry-run-result.schema.json": "6b1fb038f02461c6851cac67239cf46ae3fc5a52801c0d75c28c7e6fdb27ea86",
     "custom_components/hausman_hub/contracts/v1/operation-journal.schema.json": "79ad67f0e4b7a0eeade2fbc891eb3672ee2c23feea4ef9344196d30d342fc89d",
     "custom_components/hausman_hub/contracts/v1/device-action-batch-request.schema.json": "2976c0039dfca92c5cb11c7bb7bdb419b35b355c4d2c2bb33c94a60a3483e24d",
