@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/scenario-health.schema.json",
+  "title": "HausmanHub read-only scenario health v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "generatedAt", "status", "violations"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-scenario-health"},
+        "version": {"const": 1}
+      }
+    },
+    "generatedAt": {"type": "integer", "minimum": 0},
+    "status": {"enum": ["healthy", "degraded"]},
+    "violations": {
+      "type": "array",
+      "maxItems": 512,
+      "items": {"$ref": "#/$defs/violation"}
+    }
+  },
+  "$defs": {
+    "stableId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+    },
+    "violation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scenarioId", "path", "code", "recommendedAction"],
+      "properties": {
+        "scenarioId": {"$ref": "#/$defs/stableId"},
+        "path": {
+          "type": "string",
+          "pattern": "^definition(?:\\.(?:triggers|conditions|actions)(?:\\[[0-9]+\\](?:\\.[A-Za-z][A-Za-z0-9]*)?)?)?$",
+          "maxLength": 160
+        },
+        "code": {
+          "enum": [
+            "missing_device",
+            "missing_action",
+            "value_out_of_range",
+            "recursive_reference",
+            "invalid_definition"
+          ]
+        },
+        "recommendedAction": {
+          "enum": [
+            "restore_device",
+            "select_available_action",
+            "correct_value",
+            "break_recursion",
+            "review_step"
+          ]
+        }
+      }
+    }
+  }
+}

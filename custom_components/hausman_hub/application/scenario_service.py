@@ -44,6 +44,13 @@ CATALOG_WARMUP_DELAYS_SECONDS = (1.0, 3.0, 8.0)
 CATALOG_WARMUP_MAX_ATTEMPTS = 1 + len(CATALOG_WARMUP_DELAYS_SECONDS)
 SYSTEM_SEED_RETRY_DELAY_SECONDS = 300.0
 
+_HEALTH_RECOMMENDATIONS = {
+    "missing_device": "restore_device",
+    "missing_action": "select_available_action",
+    "value_out_of_range": "correct_value",
+    "recursive_reference": "break_recursion",
+}
+
 
 def _default_call_later(
     hass: HomeAssistant, delay: float, callback: Callable[[Any], Awaitable[None]]
@@ -822,6 +829,42 @@ class ScenarioService:
 
         registry = self._ensure_loaded()
         return tuple(sorted(registry.scenarios, key=lambda scenario: scenario.title))
+
+    async def async_scenario_health(self) -> dict[str, object]:
+        """Inspect saved definitions against the live catalog without mutating them."""
+
+        registry = self._ensure_loaded()
+        await self.async_refresh_catalog()
+        catalog = self._validation_catalog(registry)
+        violations: list[dict[str, str]] = []
+        for scenario in registry.scenarios:
+            try:
+                validate_scenario_definition(
+                    scenario.definition,
+                    catalog=catalog,
+                    existing_scenario_id=scenario.id,
+                )
+            except ScenarioDefinitionViolation as error:
+                code = error.code
+                if code not in _HEALTH_RECOMMENDATIONS:
+                    code = "invalid_definition"
+                path = error.path if isinstance(error.path, str) else "definition"
+                violations.append(
+                    {
+                        "scenarioId": scenario.id,
+                        "path": path,
+                        "code": code,
+                        "recommendedAction": _HEALTH_RECOMMENDATIONS.get(
+                            code, "review_step"
+                        ),
+                    }
+                )
+        return {
+            "contract": {"name": "hausman-hub-scenario-health", "version": 1},
+            "generatedAt": max(0, int(time.time() * 1000)),
+            "status": "healthy" if not violations else "degraded",
+            "violations": violations,
+        }
 
     async def async_scenario_list_payload(self) -> dict[str, object]:
         """Return the classified list with schedule and durable run evidence."""

@@ -32,6 +32,7 @@ from .climate_api import (
 from .application.api_capabilities import (
     SCENARIOS_ACTION_PATH,
     SCENARIOS_CATALOG_PATH,
+    SCENARIOS_HEALTH_PATH,
     SCENARIOS_DELETE_PATH,
     SCENARIOS_PATH,
     SCENARIOS_RUN_PATH,
@@ -48,6 +49,7 @@ if TYPE_CHECKING:
 
 ADMIN_SCENARIOS_PATH = "/api/hausman_hub/v1/admin/scenarios"
 ADMIN_SCENARIOS_CATALOG_PATH = f"{ADMIN_SCENARIOS_PATH}/catalog"
+ADMIN_SCENARIOS_HEALTH_PATH = f"{ADMIN_SCENARIOS_PATH}/health"
 ADMIN_SCENARIOS_TEST_PATH = f"{ADMIN_SCENARIOS_PATH}/test"
 ADMIN_SCENARIOS_DELETE_PATH = f"{ADMIN_SCENARIOS_PATH}/delete"
 ADMIN_SCENARIOS_RUN_PATH = f"{ADMIN_SCENARIOS_PATH}/run"
@@ -166,6 +168,29 @@ class ScenarioCatalogView(_ScenarioView):
             },
             headers=NO_STORE_HEADERS,
         )
+
+
+class ScenarioHealthView(_ScenarioView):
+    """Return redacted live-catalog problems without editing or running scenarios."""
+
+    url = ADMIN_SCENARIOS_HEALTH_PATH
+    name = "api:hausman_hub:scenarios_health"
+
+    async def get(self, request: Any) -> Any:
+        if not _is_exact_request(request, self.url):
+            return _not_found(self)
+        if not self._authorized(request):
+            return _forbidden(self)
+        service = self._service_ready()
+        if service is None:
+            return self._unavailable()
+        try:
+            payload = await service.async_scenario_health()
+        except ScenarioServiceError as error:
+            return self.json_message(
+                error.message, error.status, headers=NO_STORE_HEADERS
+            )
+        return self.json(payload, headers=NO_STORE_HEADERS)
 
 
 def _scenario_catalog_summary(scenario: object) -> dict[str, str]:
@@ -676,6 +701,11 @@ class TabletScenarioCatalogView(_TabletScenarioAccess, ScenarioCatalogView):
     name = "api:hausman_hub:tablet_scenarios_catalog"
 
 
+class TabletScenarioHealthView(_TabletScenarioAccess, ScenarioHealthView):
+    url = SCENARIOS_HEALTH_PATH
+    name = "api:hausman_hub:tablet_scenarios_health"
+
+
 class TabletScenariosView(_TabletScenarioAccess, ScenariosView):
     url = SCENARIOS_PATH
     name = "api:hausman_hub:tablet_scenarios"
@@ -818,12 +848,14 @@ def scenario_api_views(
     del service
     return (
         ScenarioCatalogView(hass),
+        ScenarioHealthView(hass),
         ScenariosView(hass),
         ScenarioTestView(hass),
         ScenarioDeleteView(hass),
         ScenarioRunView(hass),
         ScenarioActionView(hass),
         TabletScenarioCatalogView(hass),
+        TabletScenarioHealthView(hass),
         TabletScenariosView(hass),
         TabletScenarioTestView(hass),
         TabletScenarioDeleteView(hass),

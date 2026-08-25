@@ -1,0 +1,31 @@
+{
+  "contract": {"name": "hausman-hub-scenario-health", "version": 1},
+  "generatedAt": 1787649600000,
+  "status": "degraded",
+  "violations": [
+    {
+      "scenarioId": "hall_light",
+      "path": "definition.actions[0].targetId",
+      "code": "missing_device",
+      "recommendedAction": "restore_device"
+    },
+    {
+      "scenarioId": "evening_light",
+      "path": "definition.actions[1].actionId",
+      "code": "missing_action",
+      "recommendedAction": "select_available_action"
+    },
+    {
+      "scenarioId": "comfort_mode",
+      "path": "definition.actions[2].value",
+      "code": "value_out_of_range",
+      "recommendedAction": "correct_value"
+    },
+    {
+      "scenarioId": "night_cycle",
+      "path": "definition.actions[0].scenarioId",
+      "code": "recursive_reference",
+      "recommendedAction": "break_recursion"
+    }
+  ]
+}

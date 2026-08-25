@@ -715,6 +715,9 @@
                 "catalog": {
                   "const": "/api/hausman_hub/v1/scenarios/catalog"
                 },
+                "health": {
+                  "const": "/api/hausman_hub/v1/scenarios/health"
+                },
                 "test": {
                   "const": "/api/hausman_hub/v1/scenarios/test"
                 },

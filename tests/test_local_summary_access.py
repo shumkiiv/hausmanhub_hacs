@@ -3450,11 +3450,17 @@ class LocalSummaryAccessTest(unittest.TestCase):
         tablet = reader_user("system-users")
         scenarios_path = "/api/hausman_hub/v1/scenarios"
         catalog_path = "/api/hausman_hub/v1/scenarios/catalog"
+        health_path = "/api/hausman_hub/v1/scenarios/health"
         action_path = "/api/hausman_hub/v1/scenarios/action"
 
         scenarios = asyncio.run(
             views[scenarios_path].get(
                 FakeRequest("192.168.1.20", tablet, path=scenarios_path)
+            )
+        )
+        health = asyncio.run(
+            views[health_path].get(
+                FakeRequest("192.168.1.20", tablet, path=health_path)
             )
         )
         service = self.hass.data["hausman_hub"]["scenario_service"]
@@ -3537,6 +3543,13 @@ class LocalSummaryAccessTest(unittest.TestCase):
             catalog.payload["scenarios"][0],
         )
         self.assertNotIn("icon", catalog.payload["scenarios"][1])
+        self.assertEqual(200, health.status)
+        self.assertEqual(
+            {"name": "hausman-hub-scenario-health", "version": 1},
+            health.payload["contract"],
+        )
+        self.assertEqual("healthy", health.payload["status"])
+        self.assertEqual([], health.payload["violations"])
         self.assertEqual(400, unknown_action.status)
         self.assertEqual(200, run_action.status)
         self.assertTrue(run_action.payload["confirmed"])
@@ -3993,7 +4006,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertFalse(hasattr(self.view, method))
 
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
-        self.assertEqual(82, len(self.hass.http.views))
+        self.assertEqual(84, len(self.hass.http.views))
         self.assertEqual(
             1,
             sum(
@@ -4564,7 +4577,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             [(closed_entry, ("sensor", "switch"))],
             closed_hass.config_entries.forwarded,
         )
-        self.assertEqual(81, len(closed_hass.http.views))
+        self.assertEqual(83, len(closed_hass.http.views))
         self.assertEqual(
             {
                 "/api/hausman_hub/v1/capabilities",
@@ -4631,12 +4644,14 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 "/api/hausman_hub/v1/admin/scenarios",
                 "/api/hausman_hub/v1/admin/scenarios/action",
                 "/api/hausman_hub/v1/admin/scenarios/catalog",
+                "/api/hausman_hub/v1/admin/scenarios/health",
                 "/api/hausman_hub/v1/admin/scenarios/delete",
                 "/api/hausman_hub/v1/admin/scenarios/run",
                 "/api/hausman_hub/v1/admin/scenarios/test",
                 "/api/hausman_hub/v1/scenarios",
                 "/api/hausman_hub/v1/scenarios/action",
                 "/api/hausman_hub/v1/scenarios/catalog",
+                "/api/hausman_hub/v1/scenarios/health",
                 "/api/hausman_hub/v1/scenarios/delete",
                 "/api/hausman_hub/v1/scenarios/run",
                 "/api/hausman_hub/v1/scenarios/test",

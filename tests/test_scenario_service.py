@@ -30,7 +30,11 @@ from custom_components.hausman_hub.application.scenarios import (
     ScenarioDeviceProperty,
     ScenarioPropertyOption,
 )
-from custom_components.hausman_hub.domain.scenarios import ScenarioRegistry
+from custom_components.hausman_hub.domain.scenarios import (
+    Scenario,
+    ScenarioDefinition,
+    ScenarioRegistry,
+)
 
 
 SCENARIO_LIST_SCHEMA = (
@@ -40,6 +44,10 @@ SCENARIO_LIST_SCHEMA = (
 SCENARIO_DRY_RUN_SCHEMA = (
     Path(__file__).resolve().parents[1]
     / "custom_components/hausman_hub/contracts/v1/scenario-dry-run-result.schema.json"
+)
+SCENARIO_HEALTH_SCHEMA = (
+    Path(__file__).resolve().parents[1]
+    / "custom_components/hausman_hub/contracts/v1/scenario-health.schema.json"
 )
 
 
@@ -251,6 +259,138 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(listed), 1)
         self.assertTrue(self.store._data)
         self.assertEqual(self.store._data.version, 1)
+
+    async def test_health_reports_live_catalog_drift_without_rewriting_scenarios(
+        self,
+    ) -> None:
+        def definition(action: dict[str, Any]) -> ScenarioDefinition:
+            return ScenarioDefinition.from_payload(
+                {
+                    "version": 1,
+                    "executionMode": "single",
+                    "triggers": [{"id": "t1", "type": "time", "value": "08:00"}],
+                    "conditions": [],
+                    "actions": [action],
+                }
+            )
+
+        missing_device = Scenario.from_definition(
+            "missing_device",
+            "Missing device",
+            definition(
+                {
+                    "id": "a1",
+                    "type": "device_action",
+                    "targetId": "removed_device",
+                    "actionId": "turn_on",
+                }
+            ),
+        )
+        missing_action = Scenario.from_definition(
+            "missing_action",
+            "Missing action",
+            definition(
+                {
+                    "id": "a1",
+                    "type": "device_action",
+                    "targetId": "device_abc",
+                    "actionId": "turn_off",
+                }
+            ),
+        )
+        numeric = ScenarioDeviceEntry(
+            target_id="number_target",
+            name="Number",
+            entity_id="number.comfort",
+            actions=(
+                ScenarioDeviceAction(
+                    action_id="set_value",
+                    title="Set value",
+                    domain="number",
+                    service="set_value",
+                    allowed_fields=frozenset({"value"}),
+                    value_policy={
+                        "kind": "number",
+                        "minimum": 40,
+                        "maximum": 80,
+                        "step": 1,
+                        "preview": True,
+                    },
+                ),
+            ),
+        )
+        outside_range = Scenario.from_definition(
+            "outside_range",
+            "Outside range",
+            definition(
+                {
+                    "id": "a1",
+                    "type": "device_action",
+                    "targetId": "number_target",
+                    "actionId": "set_value",
+                    "value": 81,
+                }
+            ),
+        )
+        first_cycle = Scenario.from_definition(
+            "first_cycle",
+            "First cycle",
+            definition(
+                {
+                    "id": "a1",
+                    "type": "run_scenario",
+                    "scenarioId": "second_cycle",
+                }
+            ),
+        )
+        second_cycle = Scenario.from_definition(
+            "second_cycle",
+            "Second cycle",
+            definition(
+                {
+                    "id": "a1",
+                    "type": "run_scenario",
+                    "scenarioId": "first_cycle",
+                }
+            ),
+        )
+        registry = ScenarioRegistry(
+            scenarios=(
+                missing_device,
+                missing_action,
+                outside_range,
+                first_cycle,
+                second_cycle,
+            )
+        )
+        self.service._registry = registry  # noqa: SLF001
+        self.service._catalog = ScenarioCatalog(  # noqa: SLF001
+            devices={
+                "device_abc": _catalog().devices["device_abc"],
+                "number_target": numeric,
+            },
+            scenarios={},
+        )
+
+        health = await self.service.async_scenario_health()
+
+        Draft202012Validator(
+            json.loads(SCENARIO_HEALTH_SCHEMA.read_text(encoding="utf-8"))
+        ).validate(health)
+        self.assertEqual("degraded", health["status"])
+        self.assertEqual(
+            {
+                "missing_device",
+                "missing_action",
+                "value_out_of_range",
+                "recursive_reference",
+            },
+            {item["code"] for item in health["violations"]},
+        )
+        self.assertTrue(
+            all("entity_id" not in str(item) for item in health["violations"])
+        )
+        self.assertIs(self.service._registry, registry)  # noqa: SLF001
 
     async def test_action_steps_wait_for_catalog_readiness(self) -> None:
         async def load_catalog() -> ScenarioCatalog:

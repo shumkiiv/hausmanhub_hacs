@@ -385,6 +385,7 @@ def _validate_device_action(
     if device is None:
         raise ScenarioDefinitionViolation(
             f"device {action.target_id} is not available",
+            code="missing_device",
             path=f"{path}.targetId",
             status=HTTPStatus.NOT_FOUND,
         )
@@ -392,6 +393,7 @@ def _validate_device_action(
     if allowed is None:
         raise ScenarioDefinitionViolation(
             f"action {action.action_id} is not available for device {action.target_id}",
+            code="missing_action",
             path=f"{path}.actionId",
             status=HTTPStatus.UNPROCESSABLE_ENTITY,
         )
@@ -405,12 +407,14 @@ def _validate_device_action(
             f"action {action.action_id} requires a value",
             path=f"{path}.value",
         )
+    _validate_value_policy(action.value, allowed.value_policy, f"{path}.value")
     if action.action_id == "set_adaptive_brightness":
         try:
             adaptive_brightness_minimum(action.value)
         except ValueError as error:
             raise ScenarioDefinitionViolation(
                 str(error),
+                code="value_out_of_range",
                 path=f"{path}.value",
             ) from error
     if action.action_id == "set_night_light":
@@ -455,6 +459,7 @@ def _validate_run_scenario_action(
     if action.scenario_id == existing_scenario_id:
         raise ScenarioDefinitionViolation(
             "scenario cannot call itself",
+            code="recursive_reference",
             path=f"{path}.scenarioId",
             status=HTTPStatus.CONFLICT,
         )
@@ -487,6 +492,7 @@ def _validate_no_cycles(
         if scenario_id in visiting:
             raise ScenarioDefinitionViolation(
                 "recursive scenario call detected",
+                code="recursive_reference",
                 path=path,
                 status=HTTPStatus.CONFLICT,
             )
@@ -533,10 +539,61 @@ def _require_device(
     if device is None:
         raise ScenarioDefinitionViolation(
             f"device {target_id} is not available",
+            code="missing_device",
             path=path,
             status=HTTPStatus.NOT_FOUND,
         )
     return device
+
+
+def _validate_value_policy(
+    value: object,
+    policy: Mapping[str, object] | None,
+    path: str,
+) -> None:
+    """Validate number actions before a health pass or live execution needs them."""
+
+    if value is None or policy is None or policy.get("kind") != "number":
+        return
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ScenarioDefinitionViolation(
+            "numeric action needs a number",
+            code="value_out_of_range",
+            path=path,
+        )
+    minimum = policy.get("minimum")
+    maximum = policy.get("maximum")
+    step = policy.get("step")
+    if not all(
+        isinstance(item, (int, float)) and not isinstance(item, bool)
+        for item in (minimum, maximum, step)
+    ):
+        raise ScenarioDefinitionViolation(
+            "numeric action range is unavailable",
+            code="value_out_of_range",
+            path=path,
+        )
+    numeric = float(value)
+    lower, upper, increment = float(minimum), float(maximum), float(step)
+    if not all(math.isfinite(item) for item in (numeric, lower, upper, increment)):
+        raise ScenarioDefinitionViolation(
+            "numeric action range is unavailable",
+            code="value_out_of_range",
+            path=path,
+        )
+    if numeric < lower or numeric > upper or increment <= 0:
+        raise ScenarioDefinitionViolation(
+            "value is outside the allowed range",
+            code="value_out_of_range",
+            path=path,
+        )
+    steps = (numeric - lower) / increment
+    if abs(steps - round(steps)) > 1e-6:
+        raise ScenarioDefinitionViolation(
+            "value does not match the allowed step",
+            code="value_out_of_range",
+            path=path,
+        )
 
 
 def _validate_device_property(

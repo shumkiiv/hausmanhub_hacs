@@ -274,6 +274,7 @@
       "paths": {
         "list": "/api/hausman_hub/v1/scenarios",
         "catalog": "/api/hausman_hub/v1/scenarios/catalog",
+        "health": "/api/hausman_hub/v1/scenarios/health",
         "test": "/api/hausman_hub/v1/scenarios/test",
         "delete": "/api/hausman_hub/v1/scenarios/delete",
         "run": "/api/hausman_hub/v1/scenarios/run",

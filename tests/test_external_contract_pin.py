@@ -11,7 +11,8 @@ PIN_PATH = REPOSITORY_ROOT / "hausmanhub-contracts.json"
 
 VENDORED_CONTRACT_HASHES = {
     "custom_components/hausman_hub/contracts/v1/scenario-definition.schema.json": "71ef6345732e599385522935b794d7e391875fa73bce0352642421fab35ca9bf",
-    "custom_components/hausman_hub/contracts/v1/api-capabilities.schema.json": "d101ad053a9c4dd4be19dce0bffe98ccc437f0faf2cc288e8011e3b28f3cd29b",
+    "custom_components/hausman_hub/contracts/v1/api-capabilities.schema.json": "2c8a798657e268ce2210e34a6825886f8f891f70b2459d23f633e12d472e34b5",
+    "custom_components/hausman_hub/contracts/v1/scenario-health.schema.json": "8a14e51bdb531dd674bede8e0e0618a2788df641dc23fc9da2e8af9b821890e4",
     "custom_components/hausman_hub/contracts/v1/device-action-request.schema.json": "4ff6f1cb6e7939749e14aa43799e6108c1db7309251d2b7ee5026f047c667b94",
     "custom_components/hausman_hub/contracts/v1/device-action-receipt.schema.json": "38a710d76b1d335e22cf7c8e85907b329ab7d6952375d86756781f10fcd53a3c",
     "custom_components/hausman_hub/contracts/v1/intercom-release-receipt.schema.json": "ea11c82a77a3fe9195513d1a915336167c81a356fa0b56cf058384daedacf947",
@@ -38,6 +39,7 @@ VENDORED_CONTRACT_HASHES = {
     "fixtures/hausmanhub_energy_meter_v1/energy-meter.json": "bc942d4c6bda816c1d7189c4d3a206f1111bd0e80ab776b4eee006e8b7cc9fa3",
     "custom_components/hausman_hub/contracts/v1/scenario-list.schema.json": "ab7d6c54ee6f876380dd960f4e5a64210da7a7f5f68bc3e0c5a045c6f117f158",
     "fixtures/hausmanhub_scenario_list_v1/scenario-list.json": "ee50fe5c6b89f29c56e82b49c41b65754bf8b187ac9e7e7bdac6b8e5ff33929c",
+    "fixtures/hausmanhub_scenario_health_v1/health.json": "37628ebbf8ece709e3b9c45f6834820c40d92688cc872cd54b5a0492d83c522a",
     "custom_components/hausman_hub/contracts/v1/water-safety.schema.json": "85cbbf912c2b73b6600b456e1c9e42758fe34da305dbf102718e430bad6e8734",
     "fixtures/hausmanhub_water_safety_v1/water-safety.json": "88a8acb38efd003e77950d726e617193cfaa05320de6981e53c486cf3ed74aa4",
     "custom_components/hausman_hub/contracts/v1/tablet-power-status-request.schema.json": "a03a17b4c2e2a9973d037c0e4ff2394877e8b0acd5ecede3abd6d5dd181dc905",
