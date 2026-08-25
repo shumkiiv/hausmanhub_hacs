@@ -1,11 +1,12 @@
 # HausmanHub AI Context
 
-- 2026-08-25: подготовлен HACS `1.52.165`: при частичном dashboard-ответе
+- 2026-08-25: HACS `1.52.165` опубликован и развёрнут: при частичном dashboard-ответе
   без readiness главная честно показывает «Состояние обновляется» и сохраняет
   планшетную компоновку. Исправление закрывает последний frontend fallback,
   на котором остановился предыдущий gate. Проверены целевой panel-тест, 13
-  Chromium tests и полный local release gate: 1693 tests, 4 skipped.
-  Release, push и deploy ожидают фиксации версии.
+  Chromium tests и полный local release gate: 1693 tests, 4 skipped. Перед
+  deploy создан full backup `545e7403`; два config checks и один restart
+  приняты, installed/latest равны `v1.52.165`, все sensor Hausman доступны.
 
 - 2026-08-25: подготовлен HACS `1.52.164` для устойчивого списка сценариев.
   ETag сопоставляется до тяжёлого расчёта списка, поддерживает weak и
