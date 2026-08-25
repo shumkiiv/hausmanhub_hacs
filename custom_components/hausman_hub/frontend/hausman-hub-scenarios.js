@@ -1,10 +1,10 @@
 /* Scenario library and editor shared with the Hausman Hub tablet contract. */
 
-import { activeElementWithin, trapModalTabKey } from "./hausman-hub-modal.js?v=1.52.165";
-import { eventDataFromDraft, scenarioEditorIssues, scenarioEventFields, scenarioField, scenarioIconField, scenarioSelectField, scenarioToggle } from "./hausman-hub-scenario-fields.js?v=1.52.165";
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.165";
-import { scenarioCapabilityLabel, scenarioDeviceButton, scenarioDeviceFields, scenarioGroupForTarget, scenarioPhysicalGroups } from "./hausman-hub-scenario-device-picker.js?v=1.52.165";
-import { groupScenarios, renderScenarioCatalog, scenarioActivationKind, scenarioDisplayGroup, scenarioDisplayText } from "./hausman-hub-scenario-catalog.js?v=1.52.165";
+import { activeElementWithin, trapModalTabKey } from "./hausman-hub-modal.js?v=1.52.166";
+import { eventDataFromDraft, scenarioEditorIssues, scenarioEventFields, scenarioField, scenarioIconField, scenarioSelectField, scenarioToggle } from "./hausman-hub-scenario-fields.js?v=1.52.166";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.166";
+import { scenarioCapabilityLabel, scenarioDeviceButton, scenarioDeviceFields, scenarioGroupForTarget, scenarioPhysicalGroups } from "./hausman-hub-scenario-device-picker.js?v=1.52.166";
+import { groupScenarios, renderScenarioCatalog, scenarioActivationKind, scenarioDisplayGroup, scenarioDisplayText } from "./hausman-hub-scenario-catalog.js?v=1.52.166";
 
 const TRIGGER_TYPES = [
   ["manual", "Ручной запуск"], ["time", "По времени"],
@@ -130,6 +130,17 @@ function scenarioDevices(panel) {
   const devices = panel._scenarios.catalog && Array.isArray(panel._scenarios.catalog.devices)
     ? panel._scenarios.catalog.devices : [];
   return devices;
+}
+
+function scenarioRoomOptions(panel) {
+  const rooms = new Map();
+  scenarioDevices(panel).forEach((device) => {
+    if (!device.room_id) return;
+    rooms.set(device.room_id, device.room_name || device.room_id);
+  });
+  return [["", "Весь дом или несколько комнат"]].concat(
+    Array.from(rooms, ([id, name]) => [id, name]).sort((left, right) => left[1].localeCompare(right[1], "ru")),
+  );
 }
 
 function updateScenarioEditor(panel) {
@@ -484,6 +495,9 @@ function renderScenarioEditor(panel, container, deps) {
   const grid = el("div", "scenario-editor-grid is-single");
   grid.appendChild(scenarioField(deps, "Название", scenario.title, (value) => { scenario.title = value; }, { placeholder: "Например: Доброе утро", maxlength: 120 }));
   grid.appendChild(scenarioField(deps, "Группа", scenario.group, (value) => { scenario.group = value; }, { placeholder: "Сценарии" }));
+  grid.appendChild(scenarioSelectField(deps, "Основная комната", scenario.roomId || "", scenarioRoomOptions(panel), (value) => {
+    scenario.roomId = value || null;
+  }, "Комната помогает найти сценарий. Действия по-прежнему можно выбрать из любых комнат."));
   grid.appendChild(scenarioIconField(deps, scenario.icon, (value) => { scenario.icon = value; }));
   grid.appendChild(scenarioField(deps, "Что делает сценарий", scenario.description, (value) => { scenario.description = value; }, { multiline: true, wide: true, maxlength: 500 }));
   about.appendChild(grid);
