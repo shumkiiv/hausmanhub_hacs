@@ -23,5 +23,6 @@
 .scenario-device-picker-card:hover,.scenario-device-picker-card.is-selected { border-color:color-mix(in srgb,var(--hmh-accent,#2F6DCC) 55%,var(--hmh-border,#D8E0EA)); background:color-mix(in srgb,var(--hmh-accent,#2F6DCC) 8%,var(--hmh-surface,#F7F9FC)); }
 .scenario-device-picker-card strong { overflow:hidden; font-size:15px; text-overflow:ellipsis; white-space:nowrap; }
 .scenario-device-picker-card span { color:var(--hmh-muted,#667085); font-size:12px; }
+.scenario-device-picker-card small { overflow:hidden; color:var(--hmh-muted,#667085); font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
 .scenario-device-picker-empty { margin:34px 0; color:var(--hmh-muted,#667085); text-align:center; }
 @media (max-width:820px) { .scenario-device-picker-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }

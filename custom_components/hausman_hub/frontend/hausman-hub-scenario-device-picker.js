@@ -45,8 +45,11 @@ export function scenarioCapabilityLabel(device) {
 
 function openPicker(panel, deps, devices, selectedId, actionsOnly, onSelected) {
   const groups = scenarioPhysicalGroups(devices, actionsOnly);
-  let selectedRoom = "";
-  let selectedType = "";
+  panel._scenarioDevicePickerFilters = panel._scenarioDevicePickerFilters || { room: "", type: "" };
+  let selectedRoom = panel._scenarioDevicePickerFilters.room || "";
+  let selectedType = panel._scenarioDevicePickerFilters.type || "";
+  const nameCounts = new Map();
+  groups.forEach((group) => nameCounts.set(group.name, (nameCounts.get(group.name) || 0) + 1));
   const overlay = deps.el("div", "scenario-device-picker-overlay");
   deps.setAttr(overlay, "role", "dialog");
   deps.setAttr(overlay, "aria-modal", "true");
@@ -80,8 +83,8 @@ function openPicker(panel, deps, devices, selectedId, actionsOnly, onSelected) {
   const renderFilters = () => {
     filters.innerHTML = "";
     const rows = [
-      ["Комнаты", "Все комнаты", Array.from(new Set(groups.map((group) => group.roomName))), selectedRoom, (value) => { selectedRoom = value; }],
-      ["Типы", "Все типы", Array.from(new Set(groups.map((group) => group.typeName))), selectedType, (value) => { selectedType = value; }],
+      ["Комнаты", "Все комнаты", Array.from(new Set(groups.map((group) => group.roomName))), selectedRoom, (value) => { selectedRoom = value; panel._scenarioDevicePickerFilters.room = value; }],
+      ["Типы", "Все типы", Array.from(new Set(groups.map((group) => group.typeName))), selectedType, (value) => { selectedType = value; panel._scenarioDevicePickerFilters.type = value; }],
     ];
     rows.forEach(([title, allLabel, values, selected, choose]) => {
       const row = deps.el("div", "scenario-device-filter-row");
@@ -131,6 +134,9 @@ function openPicker(panel, deps, devices, selectedId, actionsOnly, onSelected) {
       button.type = "button";
       button.appendChild(deps.el("strong", null, group.name));
       button.appendChild(deps.el("span", null, `${group.typeName} · ${group.entries.length} ${group.entries.length === 1 ? "возможность" : "возможности"}`));
+      if ((nameCounts.get(group.name) || 0) > 1) {
+        button.appendChild(deps.el("small", "scenario-device-picker-stable-id", `${group.roomName} · ${group.key}`));
+      }
       button.addEventListener("click", () => {
         const entry = preferredEntry(group, actionsOnly);
         if (entry) onSelected(entry);

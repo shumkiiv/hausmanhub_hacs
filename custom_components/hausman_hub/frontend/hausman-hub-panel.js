@@ -562,7 +562,15 @@ class HausmanHubPanel extends HTMLElement {
     if (this._eventStreamClient || !this._hass || !resolveEventStreamToken(this._hass)) return;
     this._eventStreamClient = createEventStreamClient({
       connect: createFetchEventSource(EVENT_STREAM_PATH, () => resolveEventStreamToken(this._hass)),
-      onDomainEvent: (event) => { recordActivityEvent(this, event); this._load(); },
+      onDomainEvent: (event) => {
+        recordActivityEvent(this, event);
+        if (event && event.type === "scenario_changed") {
+          this._scenarios.list = null;
+          this._loadScenarios();
+          return;
+        }
+        this._load();
+      },
       onGap: () => this._load(),
     });
     this._eventStreamClient.start();
@@ -6057,6 +6065,7 @@ class HausmanHubPanel extends HTMLElement {
     renderScenarioSection(this, container, {
       el, svgIcon, setAttr, scenariosApi: SCENARIOS_API, testApi: SCENARIOS_TEST_API,
       deleteApi: SCENARIOS_DELETE_API, runApi: SCENARIOS_RUN_API,
+      catalogApi: SCENARIOS_CATALOG_API,
     });
   }
 

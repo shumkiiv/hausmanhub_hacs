@@ -1,10 +1,13 @@
 /* Scenario library and editor shared with the Hausman Hub tablet contract. */
 
 import { activeElementWithin, trapModalTabKey } from "./hausman-hub-modal.js?v=1.52.166";
-import { eventDataFromDraft, scenarioEditorIssues, scenarioEventFields, scenarioField, scenarioIconField, scenarioSelectField, scenarioToggle } from "./hausman-hub-scenario-fields.js?v=1.52.166";
+import { scenarioEditorIssues, scenarioEventFields, scenarioField, scenarioIconField, scenarioSelectField, scenarioToggle } from "./hausman-hub-scenario-fields.js?v=1.52.166";
 import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.166";
 import { scenarioCapabilityLabel, scenarioDeviceButton, scenarioDeviceFields, scenarioGroupForTarget, scenarioPhysicalGroups } from "./hausman-hub-scenario-device-picker.js?v=1.52.166";
 import { groupScenarios, renderScenarioCatalog, scenarioActivationKind, scenarioDisplayGroup, scenarioDisplayText } from "./hausman-hub-scenario-catalog.js?v=1.52.166";
+import { renderScenarioRoomPicker, scenarioAffectedDeviceCount, scenarioRoomLabels } from "./hausman-hub-scenario-rooms.js?v=1.52.167";
+import { defaultScenarioDraft, duplicateScenarioDraft, normalizedScenario, scenarioPayload } from "./hausman-hub-scenario-state.js?v=1.52.167";
+import { bulkSaveScenarios } from "./hausman-hub-scenario-bulk.js?v=1.52.167";
 
 const TRIGGER_TYPES = [
   ["manual", "Ручной запуск"], ["time", "По времени"],
@@ -28,47 +31,6 @@ const EDITOR_STEPS = [
   ["review", "Проверка"],
   ["publication", "Публикация"],
 ];
-function scenarioClone(value) {
-  return JSON.parse(JSON.stringify(value));
-}
-
-function scenarioId() {
-  return `scenario_${Date.now().toString(36)}`;
-}
-
-function defaultScenarioDraft() {
-  return {
-    id: scenarioId(), title: "", group: "Мои сценарии", description: "", icon: "mdi:home-heart",
-    enabled: true, favorite: false, danger: false, requiresConfirmation: false,
-    definition: {
-      version: 1, executionMode: "single",
-      triggers: [{ id: "trigger-1", type: "manual" }], conditions: [], actions: [],
-    },
-  };
-}
-
-function normalizedScenario(source) {
-  const scenario = scenarioClone(source || defaultScenarioDraft());
-  scenario.group = scenario.group || "Сценарии";
-  scenario.description = scenario.description || "";
-  scenario.icon = scenario.icon || "mdi:script";
-  scenario.enabled = scenario.enabled !== false;
-  scenario.favorite = scenario.favorite === true;
-  scenario.danger = scenario.danger === true;
-  scenario.requiresConfirmation = scenario.requiresConfirmation === true
-    || scenario.requires_confirmation === true || scenario.danger;
-  scenario.definition = scenario.definition || {};
-  scenario.definition.version = 1;
-  scenario.definition.executionMode = scenario.definition.executionMode || "single";
-  scenario.definition.triggers = Array.isArray(scenario.definition.triggers)
-    && scenario.definition.triggers.length ? scenario.definition.triggers : [{ id: "trigger-1", type: "manual" }];
-  scenario.definition.conditions = Array.isArray(scenario.definition.conditions)
-    ? scenario.definition.conditions : [];
-  scenario.definition.actions = Array.isArray(scenario.definition.actions)
-    ? scenario.definition.actions : [];
-  return scenario;
-}
-
 function localizeSystemScenarioDraft(scenario) {
   if (scenarioActivationKind(scenario) !== "system") return scenario;
   Object.defineProperties(scenario, {
@@ -82,13 +44,10 @@ function localizeSystemScenarioDraft(scenario) {
   return scenario;
 }
 
-function duplicateScenarioDraft(source) {
-  const scenario = normalizedScenario(source);
-  scenario.id = scenarioId();
-  scenario.title = `${scenario.title || "Сценарий"} - копия`;
-  scenario.favorite = false;
-  delete scenario.updatedAt;
-  return scenario;
+function duplicateScenarioWithChoices(source) {
+  const keepRooms = window.confirm("Сохранить комнаты исходного сценария в копии?");
+  const keepActions = window.confirm("Сохранить действия исходного сценария в копии?");
+  return duplicateScenarioDraft(source, { keepRooms, keepActions });
 }
 
 function openScenarioEditor(panel, source) {
@@ -130,17 +89,6 @@ function scenarioDevices(panel) {
   const devices = panel._scenarios.catalog && Array.isArray(panel._scenarios.catalog.devices)
     ? panel._scenarios.catalog.devices : [];
   return devices;
-}
-
-function scenarioRoomOptions(panel) {
-  const rooms = new Map();
-  scenarioDevices(panel).forEach((device) => {
-    if (!device.room_id) return;
-    rooms.set(device.room_id, device.room_name || device.room_id);
-  });
-  return [["", "Весь дом или несколько комнат"]].concat(
-    Array.from(rooms, ([id, name]) => [id, name]).sort((left, right) => left[1].localeCompare(right[1], "ru")),
-  );
 }
 
 function updateScenarioEditor(panel) {
@@ -292,6 +240,7 @@ function scenarioEditorSection(deps, title, description) {
 function renderScenarioRules(panel, kind, heading, description, items, deps) {
   const { el } = deps;
   const section = scenarioEditorSection(deps, heading);
+  deps.setAttr(section, "data-scenario-step", kind);
   const summary = el("div", "scenario-rule-list-summary");
   summary.appendChild(el("span", null, description));
   summary.appendChild(el("b", "scenario-editor-badge", String(items.length)));
@@ -319,49 +268,11 @@ function renderScenarioRules(panel, kind, heading, description, items, deps) {
   return section;
 }
 
-function scenarioSummary(scenario) {
-  const definition = scenario.definition;
-  const trigger = definition.triggers.length === 1 ? "1 триггер" : `${definition.triggers.length} триггера`;
-  const conditions = definition.conditions.length ? `${definition.conditions.length} усл.` : "без условий";
-  const actions = `${definition.actions.length} действ.`;
-  return `${trigger} · ${conditions} · ${actions}`;
-}
-
-function scenarioPayload(scenario) {
-  const result = scenarioClone(scenario);
-  result.title = String(result.title || "").trim();
-  result.description = String(result.description || "").trim();
-  result.group = String(result.group || "Сценарии").trim();
-  if (Object.hasOwn(scenario, "_sourceTitle")
-      && result.title === scenarioDisplayText(scenario._sourceTitle, scenario).trim()) {
-    result.title = String(scenario._sourceTitle || "").trim();
-  }
-  if (Object.hasOwn(scenario, "_sourceDescription")
-      && result.description === scenarioDisplayText(scenario._sourceDescription, scenario).trim()) {
-    result.description = String(scenario._sourceDescription || "").trim();
-  }
-  if (Object.hasOwn(scenario, "_sourceGroup") && result.group === scenarioDisplayGroup(scenario)) {
-    result.group = String(scenario._sourceGroup || "Сценарии").trim();
-  }
-  result.requiresConfirmation = result.danger || result.requiresConfirmation;
-  result.triggerDescription = scenarioSummary(result).split(" · ")[0];
-  result.conditionDescription = result.definition.conditions.length ? `${result.definition.conditions.length} условий` : "Без дополнительных условий";
-  result.actionDescription = `${result.definition.actions.length} действий`;
-  result.definition.triggers.forEach((trigger) => {
-    if (trigger.type !== "event") return;
-    const filter = eventDataFromDraft(trigger);
-    if (!filter.error) trigger.eventData = filter.value;
-    delete trigger.eventDataText;
-  });
-  delete result.updatedAt;
-  delete result.requires_confirmation;
-  return result;
-}
-
 async function submitScenario(panel, deps, testOnly) {
   const scenario = panel._scenarioEditor;
   const issues = scenarioEditorIssues(scenario);
   if (issues.length) {
+    focusScenarioProblem(panel, issues[0]);
     updateScenarioEditor(panel);
     return;
   }
@@ -382,13 +293,43 @@ async function submitScenario(panel, deps, testOnly) {
       panel._notice = `Сценарий «${scenario.title}» сохранён.`;
     }
   } catch (error) {
+    const body = error && typeof error.body === "object" ? error.body : {};
+    const violations = Array.isArray(body.violations) ? body.violations : [];
+    const firstViolation = violations[0] || null;
+    if (firstViolation) focusScenarioProblem(panel, firstViolation);
+    if (["missing_room", "missing_device", "missing_action"].includes(firstViolation && firstViolation.code)) {
+      try {
+        panel._scenarios.catalog = await panel._hass.callApi("GET", deps.catalogApi);
+      } catch (catalogError) { /* keep the last complete catalog */ }
+    }
     panel._error = true;
-    panel._notice = testOnly ? "Проверка не пройдена. Исправьте отмеченные поля." : "Сценарий не сохранён. Проверьте заполнение действий.";
+    if (body.error === "revision_conflict") {
+      const changed = Array.isArray(body.changedFields) ? body.changedFields.join(", ") : "содержимое";
+      panel._notice = `Сценарий уже изменён на другом устройстве: ${changed}. Перечитайте его перед сохранением.`;
+    } else {
+      panel._notice = firstViolation && firstViolation.message
+        ? `${firstViolation.message} Каталог устройств перечитан.`
+        : testOnly ? "Проверка не пройдена. Исправьте отмеченные поля." : "Сценарий не сохранён. Проверьте заполнение действий.";
+    }
   } finally {
     panel._busy = false;
   }
   if (!testOnly && !panel._error) await panel._loadScenarios();
   else updateScenarioEditor(panel);
+}
+
+function focusScenarioProblem(panel, issue) {
+  const path = String(issue && (issue.path || issue.step) || "");
+  const kind = path.includes("action") ? "action" : path.includes("condition") ? "condition" : path.includes("trigger") ? "trigger" : "about";
+  if (["action", "condition", "trigger"].includes(kind)) panel._scenarioEditorExpanded[kind] = 0;
+  panel._scenarioEditorProblemStep = kind;
+  Promise.resolve().then(() => {
+    const target = panel._shell && panel._shell.scenarios
+      && panel._shell.scenarios.querySelector(`[data-scenario-step="${kind}"]`);
+    if (target && typeof target.scrollIntoView === "function") target.scrollIntoView({ block: "nearest" });
+    const focusable = target && target.querySelector("input,select,textarea,button");
+    if (focusable && typeof focusable.focus === "function") focusable.focus();
+  });
 }
 
 async function saveScenarioQuick(panel, deps, source, successText) {
@@ -446,6 +387,20 @@ function scenarioReviewSummary(scenario) {
   return `Когда: ${scenarioCountLabel(definition.triggers.length, "триггер", "триггера", "триггеров")} · Если: ${definition.conditions.length ? scenarioCountLabel(definition.conditions.length, "условие", "условия", "условий") : "без условий"} · Что сделать: ${scenarioCountLabel(definition.actions.length, "действие", "действия", "действий")}`;
 }
 
+function scenarioReviewDetails(panel, scenario, deps) {
+  const review = deps.el("div", "scenario-editor-change-preview");
+  review.appendChild(deps.el("strong", null, "Что изменится после сохранения"));
+  const rooms = scenarioRoomLabels(panel, scenario).join(", ");
+  const devices = scenarioAffectedDeviceCount(panel, scenario);
+  const list = deps.el("ul");
+  list.appendChild(deps.el("li", null, `Комнаты: ${rooms}`));
+  list.appendChild(deps.el("li", null, `Физических устройств: ${devices}`));
+  list.appendChild(deps.el("li", null, `Действий: ${scenario.definition.actions.length}; триггеров: ${scenario.definition.triggers.length}; условий: ${scenario.definition.conditions.length}`));
+  list.appendChild(deps.el("li", null, scenario.enabled ? "Сценарий будет включён" : "Сценарий останется выключенным"));
+  review.appendChild(list);
+  return review;
+}
+
 function renderScenarioEditor(panel, container, deps) {
   const { el, setAttr } = deps;
   const scenario = panel._scenarioEditor;
@@ -491,13 +446,12 @@ function renderScenarioEditor(panel, container, deps) {
 
   const workspace = el("div", "scenario-editor-workspace");
   const left = el("div", "scenario-editor-column scenario-editor-column-about");
+  setAttr(left, "data-scenario-step", "about");
   const about = scenarioEditorSection(deps, "О сценарии");
   const grid = el("div", "scenario-editor-grid is-single");
   grid.appendChild(scenarioField(deps, "Название", scenario.title, (value) => { scenario.title = value; }, { placeholder: "Например: Доброе утро", maxlength: 120 }));
   grid.appendChild(scenarioField(deps, "Группа", scenario.group, (value) => { scenario.group = value; }, { placeholder: "Сценарии" }));
-  grid.appendChild(scenarioSelectField(deps, "Основная комната", scenario.roomId || "", scenarioRoomOptions(panel), (value) => {
-    scenario.roomId = value || null;
-  }, "Комната помогает найти сценарий. Действия по-прежнему можно выбрать из любых комнат."));
+  grid.appendChild(renderScenarioRoomPicker(panel, scenario, deps, () => updateScenarioEditor(panel)));
   grid.appendChild(scenarioIconField(deps, scenario.icon, (value) => { scenario.icon = value; }));
   grid.appendChild(scenarioField(deps, "Что делает сценарий", scenario.description, (value) => { scenario.description = value; }, { multiline: true, wide: true, maxlength: 500 }));
   about.appendChild(grid);
@@ -525,11 +479,13 @@ function renderScenarioEditor(panel, container, deps) {
   middle.appendChild(renderScenarioRules(panel, "condition", "Только если", "Все условия должны выполняться", scenario.definition.conditions, deps));
   workspace.appendChild(middle);
   const right = el("div", "scenario-editor-column scenario-editor-column-actions");
+  setAttr(right, "data-scenario-step", "action");
   right.appendChild(renderScenarioRules(panel, "action", "Выполнить", "Шаги идут строго сверху вниз", scenario.definition.actions, deps));
   workspace.appendChild(right);
   dialog.appendChild(workspace);
 
   const footer = el("footer", "scenario-editor-footer");
+  footer.appendChild(scenarioReviewDetails(panel, scenario, deps));
   footer.appendChild(el("p", "scenario-editor-review-summary", scenarioReviewSummary(scenario)));
   const footerRow = el("div", "scenario-editor-footer-row");
   footerRow.appendChild(el("div", issues.length ? "scenario-editor-status is-warning" : "scenario-editor-status is-ready",
@@ -568,7 +524,7 @@ function renderScenarioEditor(panel, container, deps) {
 export function renderScenarioSection(panel, container, deps) {
   const { el } = deps;
   container.innerHTML = "";
-  panel._scenarioLibrary = panel._scenarioLibrary || { filter: "all", roomId: "all", query: "" };
+  panel._scenarioLibrary = panel._scenarioLibrary || { filter: "all", roomId: "all", query: "", selectedIds: new Set(), bulkRoomIds: new Set() };
   if (!panel._scenarioLibrary.roomId) panel._scenarioLibrary.roomId = "all";
   const items = panel._scenarios.list && Array.isArray(panel._scenarios.list.scenarios)
     ? panel._scenarios.list.scenarios : [];
@@ -602,10 +558,17 @@ export function renderScenarioSection(panel, container, deps) {
       normalize: normalizedScenario,
       open: (scenario) => openScenarioEditor(panel, scenario),
       create: () => openScenarioEditor(panel, defaultScenarioDraft()),
-      duplicate: duplicateScenarioDraft,
+      duplicate: duplicateScenarioWithChoices,
       save: (scenario, notice) => saveScenarioQuick(panel, deps, scenario, notice),
       delete: (scenario) => deleteScenarioQuick(panel, deps, scenario),
       refresh: () => updateScenarioEditor(panel),
+      bulkSave: (scenarios, notice) => bulkSaveScenarios(panel, deps, scenarios, notice),
+      isSelected: (id) => panel._scenarioLibrary.selectedIds.has(id),
+      toggleSelected: (id, selected) => {
+        if (selected) panel._scenarioLibrary.selectedIds.add(id);
+        else panel._scenarioLibrary.selectedIds.delete(id);
+        updateScenarioEditor(panel);
+      },
     });
   }
   container.appendChild(card);

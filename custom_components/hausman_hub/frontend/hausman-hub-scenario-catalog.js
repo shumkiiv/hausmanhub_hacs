@@ -1,6 +1,8 @@
 /* Tablet scenario catalog classification and presentation helpers. */
 
 import { scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.166";
+import { scenarioAffectedDeviceCount, scenarioRoomIds, scenarioRoomLabels, scenarioRoomOptions as roomOptions } from "./hausman-hub-scenario-rooms.js?v=1.52.167";
+import { renderScenarioBulkTools } from "./hausman-hub-scenario-bulk.js?v=1.52.167";
 
 export const SCENARIO_FILTERS = [
   ["all", "Все"],
@@ -65,11 +67,7 @@ export function scenarioLogicalGroup(scenario) {
 }
 
 export function scenarioRoomOptions(panel, scenarios) {
-  const rooms = panel._homeDashboard && Array.isArray(panel._homeDashboard.rooms)
-    ? panel._homeDashboard.rooms : [];
-  const names = new Map(rooms.map((room) => [room.id, room.name]));
-  const ids = new Set(scenarios.map((scenario) => scenario.roomId).filter((roomId) => names.has(roomId)));
-  return rooms.filter((room) => ids.has(room.id)).map((room) => [room.id, room.name]);
+  return roomOptions(panel, scenarios);
 }
 
 export function scenarioMatchesCatalog(scenario, state) {
@@ -81,7 +79,7 @@ export function scenarioMatchesCatalog(scenario, state) {
   if (filter === "favorite" && scenario.favorite !== true) return false;
   if (filter === "enabled" && scenario.enabled === false) return false;
   if (filter === "disabled" && scenario.enabled !== false) return false;
-  if (state.roomId && state.roomId !== "all" && scenario.roomId !== state.roomId) return false;
+  if (state.roomId && state.roomId !== "all" && !scenarioRoomIds(scenario).includes(state.roomId)) return false;
   const query = String(state.query || "").trim().toLocaleLowerCase("ru");
   if (!query) return true;
   return [scenario.title, scenarioDisplayText(scenario.title, scenario), scenarioDisplayGroup(scenario), scenario.description, scenarioDisplayText(scenario.description, scenario)]
@@ -112,6 +110,13 @@ function scenarioCard(panel, source, deps, handlers) {
   row._scenarioState = scenario;
 
   const head = el("div", "scenario-library-card-head");
+  const select = el("input", "scenario-bulk-select");
+  select.type = "checkbox";
+  select.checked = handlers.isSelected(scenario.id);
+  select.disabled = scenario.protected || scenarioActivationKind(scenario) === "system";
+  setAttr(select, "aria-label", `Выбрать сценарий «${title}» для массового изменения`);
+  select.addEventListener("change", () => handlers.toggleSelected(scenario.id, select.checked));
+  head.appendChild(select);
   const icon = el("span", "scenario-icon scenario-library-icon");
   const materialIcon = el("ha-icon", "icon scenario-material-icon");
   setAttr(materialIcon, "icon", `mdi:${meta.mdi}`);
@@ -167,6 +172,7 @@ function scenarioCard(panel, source, deps, handlers) {
   const triggerCount = scenarioRuleCount(scenario, "triggers");
   summary.appendChild(el("span", null, scenario.triggerDescription || `${triggerCount} тригг.`));
   summary.appendChild(el("span", null, `${scenarioRuleCount(scenario, "actions")} действ.`));
+  summary.appendChild(el("span", "scenario-library-room-summary", `${scenarioRoomLabels(panel, scenario).join(", ")} · ${scenarioAffectedDeviceCount(panel, scenario)} устр.`));
   if (requiresConfirmation) summary.appendChild(el("span", "scenario-library-confirmation", "с подтверждением"));
   copy.appendChild(summary);
   row.appendChild(copy);
@@ -224,6 +230,8 @@ export function renderScenarioCatalog(panel, card, sources, deps, handlers) {
   });
   controls.appendChild(filters);
   card.appendChild(controls);
+  const bulk = renderScenarioBulkTools(panel, scenarios, deps, handlers);
+  if (bulk) card.appendChild(bulk);
 
   const roomSources = scenarios.filter((scenario) => state.filter === "system"
     ? scenarioActivationKind(scenario) === "system" : scenarioActivationKind(scenario) !== "system");
