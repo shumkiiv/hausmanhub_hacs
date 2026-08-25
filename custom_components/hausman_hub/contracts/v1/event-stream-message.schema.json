@@ -28,6 +28,7 @@
       "enum": [
         "hello",
         "snapshot_invalidated",
+        "scenario_changed",
         "critical_alert",
         "attention_alert",
         "command_receipt",
@@ -42,6 +43,7 @@
       "oneOf": [
         { "$ref": "#/$defs/hello" },
         { "$ref": "#/$defs/snapshot_invalidated" },
+        { "$ref": "#/$defs/scenario_changed" },
         { "$ref": "#/$defs/critical_alert" },
         { "$ref": "#/$defs/attention_alert" },
         { "$ref": "#/$defs/command_receipt" },
@@ -57,6 +59,10 @@
     {
       "if": { "properties": { "type": { "const": "snapshot_invalidated" } } },
       "then": { "properties": { "data": { "$ref": "#/$defs/snapshot_invalidated" } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "scenario_changed" } } },
+      "then": { "properties": { "data": { "$ref": "#/$defs/scenario_changed" } } }
     },
     {
       "if": { "properties": { "type": { "const": "critical_alert" } } },
@@ -117,6 +123,16 @@
         },
         "state_revision": { "type": ["integer", "null"], "minimum": 0 },
         "replay_status": { "const": "gap" }
+      }
+    },
+    "scenario_changed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["change", "scenario_id", "revision"],
+      "properties": {
+        "change": {"enum": ["created", "updated", "deleted", "enabled", "disabled"]},
+        "scenario_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+        "revision": {"type": "integer", "minimum": 0}
       }
     },
     "critical_alert": {

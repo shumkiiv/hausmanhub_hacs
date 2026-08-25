@@ -244,6 +244,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         publish_command_receipt(hass, receipt, operation="intercom_release")
 
+    def _publish_scenario_change(change: str, scenario_id: str, revision: int) -> None:
+        from .realtime_api import publish_scenario_change
+
+        publish_scenario_change(hass, change, scenario_id, revision)
+
     scenario_service = ScenarioService(
         hass,
         scenario_store,
@@ -255,6 +260,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         schedule_store=HomeAssistantScenarioScheduleStore(hass, entry.entry_id),
         operation_journal=operation_journal,
         intercom_release_publisher=_publish_intercom_release,
+        scenario_change_publisher=_publish_scenario_change,
     )
     await scenario_service.async_load()
     scenario_executor = ScenarioExecutor(

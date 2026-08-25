@@ -75,7 +75,7 @@ class FrontendCorrelationSurfacesTest(unittest.TestCase):
         self.assertEqual("correlation_id", matrix["events"]["messageField"])
         self.assertEqual("data.correlation_id", matrix["events"]["commandReceiptField"])
         self.assertEqual(
-            ["hello", "snapshot_invalidated", "critical_alert",
+            ["hello", "snapshot_invalidated", "scenario_changed", "critical_alert",
              "attention_alert", "command_receipt", "heartbeat"],
             matrix["events"]["allTypes"],
         )

@@ -414,6 +414,38 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(scenario.title, "Updated")
         self.assertEqual(len(await self.service.async_list_scenarios()), 1)
 
+    async def test_publishes_bounded_change_after_each_registry_write(self) -> None:
+        changes: list[tuple[str, str, int]] = []
+        service = ScenarioService(
+            None,
+            self.store,
+            self.catalog,
+            self.executor,
+            scenario_change_publisher=lambda change, scenario_id, revision: changes.append(
+                (change, scenario_id, revision)
+            ),
+        )
+        await service.async_load()
+
+        created = await service.async_update_scenario(_valid_payload())
+        updated_payload = _valid_payload()
+        updated_payload["title"] = "Updated"
+        updated = await service.async_update_scenario(updated_payload)
+        disabled_payload = _valid_payload()
+        disabled_payload["enabled"] = False
+        disabled = await service.async_update_scenario(disabled_payload)
+        await service.async_delete_scenario("scenario_1")
+
+        self.assertEqual(
+            [
+                ("created", "scenario_1", created.revision),
+                ("updated", "scenario_1", updated.revision),
+                ("disabled", "scenario_1", disabled.revision),
+                ("deleted", "scenario_1", disabled.revision + 1),
+            ],
+            changes,
+        )
+
     async def test_update_rejects_a_stale_editor_revision(self) -> None:
         original = await self.service.async_update_scenario(_valid_payload())
         first_editor = _valid_payload()

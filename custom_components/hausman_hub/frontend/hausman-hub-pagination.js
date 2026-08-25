@@ -35,6 +35,7 @@ const PAGINATION_SNAPSHOT = {
         "survivesRestart": false,
         "retainedTypes": [
           "snapshot_invalidated",
+          "scenario_changed",
           "critical_alert",
           "attention_alert",
           "command_receipt"

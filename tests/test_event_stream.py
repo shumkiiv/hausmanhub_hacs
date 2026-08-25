@@ -145,6 +145,23 @@ class EventStreamBrokerTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             broker.publish("heartbeat", {}, correlation_id="invalid value")
 
+    async def test_scenario_change_is_replayable_and_has_no_definition(self) -> None:
+        broker = EventStreamBroker(stream_id="scenario-stream")
+
+        message = broker.publish(
+            "scenario_changed",
+            {"change": "disabled", "scenario_id": "night_light", "revision": 4},
+        )
+
+        self.assertEqual("scenario_changed", message["type"])
+        self.assertEqual(
+            {"change": "disabled", "scenario_id": "night_light", "revision": 4},
+            message["data"],
+        )
+        self.assertNotIn("definition", repr(message))
+        self.assertTrue(broker.can_resume(message["id"]))
+        self._validate(message)
+
     async def test_session_events_are_not_retained_and_restart_cursor_is_stale(self) -> None:
         first = EventStreamBroker(stream_id="stream-one")
         domain_event = first.publish(

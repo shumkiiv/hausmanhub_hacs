@@ -105,6 +105,7 @@ const SURFACES_SNAPSHOT = {
     "allTypes": [
       "hello",
       "snapshot_invalidated",
+      "scenario_changed",
       "critical_alert",
       "attention_alert",
       "command_receipt",
@@ -151,7 +152,7 @@ const TRACKER_DEFAULT_LIMIT = 256;
 const CORR_COMMAND_FIELDS = new Set(["correlation_id", "correlationId"]);
 const CORR_JOURNAL_SOURCES = new Set(["climate", "device", "scenario", "voice"]);
 const CORR_EVENT_TYPES = [
-  "hello", "snapshot_invalidated", "critical_alert",
+  "hello", "snapshot_invalidated", "scenario_changed", "critical_alert",
   "attention_alert", "command_receipt", "heartbeat",
 ];
 const CORR_NOTIFICATION_SURFACES = new Set([

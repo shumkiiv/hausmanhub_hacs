@@ -354,6 +354,7 @@ class ScenarioService:
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         operation_journal: object | None = None,
         intercom_release_publisher: Callable[[dict[str, Any]], None] | None = None,
+        scenario_change_publisher: Callable[[str, str, int], None] | None = None,
     ):
         self._hass = hass
         self._store = store
@@ -368,6 +369,7 @@ class ScenarioService:
         self._sleep = sleep
         self._operation_journal = operation_journal
         self._intercom_release_publisher = intercom_release_publisher
+        self._scenario_change_publisher = scenario_change_publisher
         self._skipped_runs: set[str] = set()
         self._intercom_release_cancel: Callable[[], None] | None = None
         self._intercom_release_entity: str | None = None
@@ -1039,6 +1041,20 @@ class ScenarioService:
             new_registry = ScenarioRegistry(scenarios=tuple(scenarios))
             await self.async_save(new_registry)
             self._registry = new_registry
+            change = (
+                "created"
+                if existing is None
+                else (
+                    "enabled"
+                    if not existing.enabled and new_scenario.enabled
+                    else (
+                        "disabled"
+                        if existing.enabled and not new_scenario.enabled
+                        else "updated"
+                    )
+                )
+            )
+            self._publish_scenario_change(change, new_scenario.id, new_scenario.revision)
             return new_scenario
 
     async def async_test_scenario(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1114,6 +1130,20 @@ class ScenarioService:
             new_registry = ScenarioRegistry(scenarios=scenarios)
             await self.async_save(new_registry)
             self._registry = new_registry
+            assert target is not None
+            self._publish_scenario_change("deleted", target.id, target.revision + 1)
+
+    def _publish_scenario_change(
+        self, change: str, scenario_id: str, revision: int
+    ) -> None:
+        """Notify connected editors after the durable registry write succeeds."""
+
+        if self._scenario_change_publisher is None:
+            return
+        try:
+            self._scenario_change_publisher(change, scenario_id, revision)
+        except Exception:  # pragma: no cover - live fan-out must not undo storage
+            _LOGGER.exception("Failed to publish scenario change invalidation")
 
     async def async_run_scenario(
         self,
