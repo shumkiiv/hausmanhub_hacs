@@ -124,7 +124,6 @@ class DeviceActionView(HomeAssistantView):
                 HTTPStatus.BAD_REQUEST,
                 headers=NO_STORE_HEADERS,
             )
-        climate_mode_change: dict[str, object] | None = None
         climate_runtime = self._hass.data.get(DOMAIN, {}).get("climate_runtime")
         mode_writer = getattr(
             climate_runtime, "async_set_device_mode_for_entity", None
@@ -139,12 +138,13 @@ class DeviceActionView(HomeAssistantView):
                 headers=NO_STORE_HEADERS,
             )
         try:
+            climate_entity_id = None
             if not dry_run and action_id == "turn_off" and callable(mode_writer):
                 resolved = await service.async_resolve_device_action(
                     target_id, action_id
                 )
                 if resolved is not None and resolved[1] == "climate":
-                    climate_mode_change = await mode_writer(resolved[0], "manual")
+                    climate_entity_id = resolved[0]
             execute_options: dict[str, Any] = {
                 "correlation_id": correlation_id
             }
@@ -157,18 +157,13 @@ class DeviceActionView(HomeAssistantView):
                 **execute_options,
             )
         except Exception:
-            await self._async_restore_climate_mode(
-                mode_writer, climate_mode_change
-            )
             raise
-        if result.get("accepted") is not True:
-            await self._async_restore_climate_mode(mode_writer, climate_mode_change)
-            climate_mode_change = None
-        elif climate_mode_change is not None:
+        if result.get("accepted") is True and climate_entity_id is not None:
+            climate_mode_change = await mode_writer(climate_entity_id, "automatic")
             result = {
                 **result,
-                "climateMode": "manual",
-                "climateModeName": "Ручной режим",
+                "climateMode": climate_mode_change["mode"],
+                "climateModeName": "Автоматический режим",
             }
         release_seconds = None
         if result.get("accepted") is True:
@@ -207,23 +202,6 @@ class DeviceActionView(HomeAssistantView):
             ),
             headers=NO_STORE_HEADERS,
         )
-
-    @staticmethod
-    async def _async_restore_climate_mode(
-        mode_writer: object,
-        change: dict[str, object] | None,
-    ) -> None:
-        """Undo only the manual exclusion introduced by this failed request."""
-
-        if (
-            change is None
-            or change.get("changed") is not True
-            or change.get("previous_mode") != "automatic"
-            or not callable(mode_writer)
-        ):
-            return
-        await mode_writer(change.get("entity_id"), "automatic")
-
 
 class DeviceActionBatchView(HomeAssistantView):
     """Execute an ordered bounded batch and expose each target outcome."""

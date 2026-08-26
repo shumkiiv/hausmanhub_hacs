@@ -3026,7 +3026,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.171", panel.payload["integration_version"])
+        self.assertEqual("1.52.172", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
@@ -3760,7 +3760,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
         self.assertEqual(404, wrong_path.status)
 
-    def test_manual_ac_off_enters_manual_mode_before_command(self) -> None:
+    def test_manual_ac_off_returns_ac_to_automatic_mode_after_command(self) -> None:
         path = "/api/hausman_hub/v1/device-actions"
         view = next(item for item in self.hass.http.views if item.url == path)
         service = self.hass.data["hausman_hub"]["scenario_service"]
@@ -3807,18 +3807,18 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, response.status)
-        self.assertEqual("manual", response.payload["climateMode"])
-        self.assertEqual("Ручной режим", response.payload["climateModeName"])
+        self.assertEqual("automatic", response.payload["climateMode"])
+        self.assertEqual("Автоматический режим", response.payload["climateModeName"])
         self.assertEqual(
             [
                 ("resolve", ("office-ac", "turn_off")),
-                ("mode", ("climate.office", "manual")),
                 ("execute", ("office-ac", "turn_off", None)),
+                ("mode", ("climate.office", "automatic")),
             ],
             events,
         )
 
-    def test_rejected_manual_ac_off_restores_automatic_mode(self) -> None:
+    def test_rejected_manual_ac_off_keeps_existing_contour_ownership(self) -> None:
         path = "/api/hausman_hub/v1/device-actions"
         view = next(item for item in self.hass.http.views if item.url == path)
         service = self.hass.data["hausman_hub"]["scenario_service"]
@@ -3864,13 +3864,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
 
         self.assertEqual(409, response.status)
         self.assertNotIn("climateMode", response.payload)
-        self.assertEqual(
-            [
-                ("climate.office", "manual"),
-                ("climate.office", "automatic"),
-            ],
-            modes,
-        )
+        self.assertEqual([], modes)
 
     def test_view_rejects_disallowed_origins_before_reading_the_home(self) -> None:
         """Only ordinary home-network source ranges may read the summary."""
@@ -4007,7 +4001,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertFalse(hasattr(self.view, method))
 
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
-        self.assertEqual(86, len(self.hass.http.views))
+        self.assertEqual(87, len(self.hass.http.views))
         self.assertEqual(
             1,
             sum(
@@ -4578,7 +4572,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             [(closed_entry, ("sensor", "switch"))],
             closed_hass.config_entries.forwarded,
         )
-        self.assertEqual(85, len(closed_hass.http.views))
+        self.assertEqual(86, len(closed_hass.http.views))
         self.assertEqual(
             {
                 "/api/hausman_hub/v1/capabilities",
@@ -4587,6 +4581,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 "/api/hausman_hub/v1/device-actions",
                 "/api/hausman_hub/v1/device-actions/batch",
                 "/api/hausman_hub/v1/device-features",
+                "/api/hausman_hub/v1/device-property-names",
                 "/api/hausman_hub/v1/energy/history",
                 "/api/hausman_hub/v1/energy/meter",
                 "/api/hausman_hub/v1/energy/meters",
