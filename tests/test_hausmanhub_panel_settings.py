@@ -59,6 +59,9 @@ SCENARIO_CATALOG_JS = PANEL_JS.with_name("hausman-hub-scenario-catalog.js")
 SCENARIO_DEVICE_PICKER_JS = PANEL_JS.with_name("hausman-hub-scenario-device-picker.js")
 SCENARIO_ICONS_JS = PANEL_JS.with_name("hausman-hub-scenario-icons.js")
 SCENARIO_FIELDS_JS = PANEL_JS.with_name("hausman-hub-scenario-fields.js")
+SCENARIO_ROOMS_JS = PANEL_JS.with_name("hausman-hub-scenario-rooms.js")
+SCENARIO_STATE_JS = PANEL_JS.with_name("hausman-hub-scenario-state.js")
+SCENARIO_BULK_JS = PANEL_JS.with_name("hausman-hub-scenario-bulk.js")
 SETTINGS_CSS = PANEL_JS.with_name("hausman-hub-settings.css")
 OVERVIEW_CSS = PANEL_JS.with_name("hausman-hub-overview.css")
 SECURITY_OVERVIEW_CSS = PANEL_JS.with_name("hausman-hub-security-overview.css")
@@ -644,6 +647,21 @@ def panel_script(
       vm.runInThisContext(
         fs.readFileSync({str(SCENARIO_DEVICE_PICKER_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(SCENARIO_DEVICE_PICKER_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(SCENARIO_ROOMS_JS)!r}, "utf8")
+          .replace(/^import .*;\s*/gm, "")
+          .replace(/export /g, "")
+          .replace("function scenarioRoomOptions", "function roomOptions"),
+        {{ filename: {str(SCENARIO_ROOMS_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(SCENARIO_STATE_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
+        {{ filename: {str(SCENARIO_STATE_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(SCENARIO_BULK_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
+        {{ filename: {str(SCENARIO_BULK_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(SCENARIO_CATALOG_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, "").replace(/export /g, ""),
@@ -4887,7 +4905,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.166")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.167")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;
