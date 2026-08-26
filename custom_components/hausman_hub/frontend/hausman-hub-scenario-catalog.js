@@ -1,8 +1,8 @@
 /* Tablet scenario catalog classification and presentation helpers. */
 
-import { scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.171";
-import { scenarioAffectedDeviceCount, scenarioRoomIds, scenarioRoomLabels, scenarioRoomOptions as roomOptions } from "./hausman-hub-scenario-rooms.js?v=1.52.171";
-import { renderScenarioBulkTools } from "./hausman-hub-scenario-bulk.js?v=1.52.171";
+import { scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.174";
+import { scenarioAffectedDeviceCount, scenarioRoomIds, scenarioRoomLabels, scenarioRoomOptions as roomOptions } from "./hausman-hub-scenario-rooms.js?v=1.52.174";
+import { renderScenarioBulkTools } from "./hausman-hub-scenario-bulk.js?v=1.52.174";
 
 export const SCENARIO_FILTERS = [
   ["all", "Все"],

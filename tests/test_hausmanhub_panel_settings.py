@@ -41,6 +41,7 @@ SETTINGS_ROOMS_JS = PANEL_JS.with_name("hausman-hub-settings-rooms.js")
 ROOM_SETUP_JS = PANEL_JS.with_name("hausman-hub-room-setup.js")
 DEVICE_INVENTORY_JS = PANEL_JS.with_name("hausman-hub-device-inventory.js")
 INVENTORY_DUPLICATES_JS = PANEL_JS.with_name("hausman-hub-inventory-duplicates.js")
+DEVICE_PROPERTY_NAMES_JS = PANEL_JS.with_name("hausman-hub-device-property-names.js")
 DEVICE_BINDINGS_JS = PANEL_JS.with_name("hausman-hub-device-bindings.js")
 POWER_LINKS_JS = PANEL_JS.with_name("hausman-hub-power-links.js")
 AREA_BINDING_JS = PANEL_JS.with_name("hausman-hub-area-binding.js")
@@ -585,6 +586,10 @@ def panel_script(
       vm.runInThisContext(
         fs.readFileSync({str(INVENTORY_DUPLICATES_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(INVENTORY_DUPLICATES_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(DEVICE_PROPERTY_NAMES_JS)!r}, "utf8").replace(/^import .*;\s*/gm, "").replace(/export /g, ""),
+        {{ filename: {str(DEVICE_PROPERTY_NAMES_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(DEVICE_INVENTORY_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, "").replace("export function renderDeviceInventory", "function renderDeviceInventory"),
@@ -4992,7 +4997,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.171")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.174")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;
