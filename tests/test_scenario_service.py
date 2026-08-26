@@ -1433,6 +1433,18 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(409, ctx.exception.status)
 
+    async def test_delete_disabled_protected_system_scenario(self) -> None:
+        payload = _valid_payload("system_retired")
+        payload["group"] = "system"
+        payload["enabled"] = False
+        scenario = await self.service.async_update_scenario(payload)
+        self.assertTrue(scenario.protected)
+        self.assertFalse(scenario.enabled)
+
+        await self.service.async_delete_scenario("system_retired")
+
+        self.assertEqual((), await self.service.async_list_scenarios())
+
     async def test_delete_missing_raises_404(self) -> None:
         with self.assertRaises(ScenarioNotFoundError):
             await self.service.async_delete_scenario("missing")

@@ -1472,7 +1472,7 @@ class ScenarioService:
                 raise ScenarioNotFoundError(scenario_id)
 
             target = registry.scenario(scenario_id)
-            if target is not None and target.protected:
+            if target is not None and target.protected and target.enabled:
                 raise ScenarioProtectedError(scenario_id)
 
             for scenario in registry.scenarios:
