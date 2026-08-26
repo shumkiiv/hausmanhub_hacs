@@ -649,6 +649,84 @@ class HomeAssistantDeviceMaintenanceService:
             message="Название и комната устройства сохранены в Home Assistant.",
         )
 
+    async def async_rename_entity(self, payload: dict[str, object]) -> dict[str, object]:
+        """Persist one human-readable entity name without changing its ID."""
+
+        if "name" not in payload:
+            raise DeviceMaintenanceViolation("entity name is required")
+        entity_id = payload.get("entityId")
+        if not isinstance(entity_id, str) or not entity_id or len(entity_id) > 255:
+            raise DeviceMaintenanceViolation("entity id is invalid")
+        raw_name = payload.get("name")
+        if raw_name is not None and not isinstance(raw_name, str):
+            raise DeviceMaintenanceViolation("entity name is invalid")
+        custom_name = raw_name.strip() if isinstance(raw_name, str) else None
+        if isinstance(raw_name, str) and (not custom_name or len(custom_name) > 255):
+            raise DeviceMaintenanceViolation("entity name is invalid")
+
+        _area_registry, _device_registry, entity_registry = self._registries()
+        try:
+            entry = self._entity_only(entity_registry, entity_id)
+        except DeviceMaintenanceViolation as error:
+            if error.code != "not_found":
+                raise
+            entry = next(
+                (
+                    item
+                    for item in _values(entity_registry, "entities")
+                    if getattr(item, "entity_id", None) == entity_id
+                ),
+                None,
+            )
+            if entry is None:
+                raise
+        update_entity = getattr(entity_registry, "async_update_entity", None)
+        if not callable(update_entity):
+            raise DeviceMaintenanceViolation(
+                "entity update is unavailable", code="registry_unavailable"
+            )
+        update_entity(entity_id, name=custom_name)
+        read_back = next(
+            (
+                item
+                for item in _values(entity_registry, "entities")
+                if getattr(item, "entity_id", None) == entity_id
+            ),
+            None,
+        )
+        if read_back is None or getattr(read_back, "name", None) != custom_name:
+            raise DeviceMaintenanceViolation(
+                "registry update was not confirmed by read-back",
+                code="registry_unavailable",
+            )
+        effective_name = _entry_name(read_back)
+        if not effective_name:
+            raise DeviceMaintenanceViolation(
+                "entity has no effective name", code="registry_unavailable"
+            )
+        return {
+            "contract": {
+                "name": "hausman-hub-device-property-name-receipt",
+                "version": 1,
+            },
+            "accepted": True,
+            "confirmed": True,
+            "status": "confirmed",
+            "result": "renamed" if custom_name is not None else "reset",
+            "entityId": entity_id,
+            "customName": custom_name,
+            "effectiveName": effective_name,
+            "message": "Название свойства сохранено в Home Assistant."
+            if custom_name is not None
+            else "Исходное название свойства восстановлено в Home Assistant.",
+            "physicalCommandsSent": False,
+            "readBack": {
+                "attempted": True,
+                "matched": True,
+                "observedAt": int(time.time() * 1000),
+            },
+        }
+
     async def async_identify(self, payload: dict[str, object]) -> dict[str, object]:
         await self._require_revision(payload)
         if payload.get("confirmed") is not True:

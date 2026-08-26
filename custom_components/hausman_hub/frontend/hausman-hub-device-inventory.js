@@ -1,5 +1,6 @@
-import { dupAttention, dupCompare, dupFilter, dupGroups, dupGuide, dupSize, dupView } from "./hausman-hub-inventory-duplicates.js?v=1.52.170";
-import { withCorrelationId } from "./hausman-hub-correlation.js?v=1.52.170";
+import { dupAttention, dupCompare, dupFilter, dupGroups, dupGuide, dupSize, dupView } from "./hausman-hub-inventory-duplicates.js?v=1.52.171";
+import { withCorrelationId } from "./hausman-hub-correlation.js?v=1.52.171";
+import { propertyNamesSection } from "./hausman-hub-device-property-names.js?v=1.52.171";
 
 const DEVICE_MAINTENANCE_API = "hausman_hub/v1/admin/device-maintenance";
 const Z2M_DEVICE_IMAGE =
@@ -168,6 +169,11 @@ function detailPanel(panel, el, device, maintenance, repaint, duplicateGroupSize
     });
     entityList.appendChild(rows);
     composition.appendChild(entityList);
+
+    composition.appendChild(propertyNamesSection({
+      panel, el, state, repaint,
+      reload: () => loadMaintenance(panel, repaint, true),
+    }, entities));
   } else {
     composition.appendChild(el("p", "muted", "Сущностей нет. Это может быть устаревшая запись реестра."));
   }

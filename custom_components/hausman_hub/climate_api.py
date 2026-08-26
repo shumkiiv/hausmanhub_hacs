@@ -176,6 +176,7 @@ ADMIN_DEVICE_AREA_ASSIGNMENTS_PATH = (
     "/api/hausman_hub/v1/admin/device-area-assignments"
 )
 ADMIN_DEVICE_MAINTENANCE_PATH = "/api/hausman_hub/v1/admin/device-maintenance"
+DEVICE_PROPERTY_NAMES_PATH = "/api/hausman_hub/v1/device-property-names"
 ADMIN_DEVICE_BINDINGS_PATH = "/api/hausman_hub/v1/admin/climate-device-bindings"
 ADMIN_DEVICE_BINDINGS_PREVIEW_PATH = f"{ADMIN_DEVICE_BINDINGS_PATH}/preview"
 ADMIN_PROFILE_UPDATE_PATH = "/api/hausman_hub/v1/admin/climate-profiles"
@@ -296,6 +297,7 @@ def register_climate_api(
             ClimateAdminDraftSaveView(hass),
             ClimateAdminDeviceAreaAssignmentsView(hass),
             ClimateAdminDeviceMaintenanceView(hass),
+            DevicePropertyNamesView(hass),
             ClimateAdminDeviceBindingsView(hass),
             ClimateAdminDeviceBindingsPreviewView(hass),
             ClimateAdminProfileUpdateView(hass),
@@ -2050,6 +2052,68 @@ class ClimateAdminDeviceMaintenanceView(_ClimateView):
                 "message": response.get("message"),
             },
             operation="device_maintenance",
+        )
+        return self.json(response, headers=NO_STORE_HEADERS)
+
+
+class DevicePropertyNamesView(_ClimateView):
+    """Rename one Home Assistant entity while preserving its stable ID."""
+
+    url = DEVICE_PROPERTY_NAMES_PATH
+    name = "api:hausman_hub:device_property_names"
+
+    async def post(self, request: Any) -> Any:
+        if not _is_exact_request(request, DEVICE_PROPERTY_NAMES_PATH):
+            return _not_found(self)
+        if not _is_local_admin_request(request):
+            return _forbidden(self)
+        try:
+            payload = await _request_json(request, maximum_bytes=MAX_ACTION_BODY_BYTES)
+            if not isinstance(payload, dict):
+                raise DeviceMaintenanceViolation("request body is invalid")
+            if set(payload) - {"contract", "correlationId", "entityId", "name"}:
+                raise DeviceMaintenanceViolation("request body has unknown fields")
+            contract = payload.get("contract")
+            if not isinstance(contract, dict) or contract != {
+                "name": "hausman-hub-device-property-name-request",
+                "version": 1,
+            }:
+                raise DeviceMaintenanceViolation("request contract is invalid")
+            correlation_id = resolve_correlation_id(payload, field="correlationId")
+            service_payload = dict(payload)
+            service_payload.pop("contract", None)
+            service_payload.pop("correlationId", None)
+            result = await HomeAssistantDeviceMaintenanceService(
+                self._hass
+            ).async_rename_entity(service_payload)
+        except DeviceMaintenanceViolation as error:
+            status = {
+                "not_found": HTTPStatus.NOT_FOUND,
+                "registry_unavailable": HTTPStatus.SERVICE_UNAVAILABLE,
+            }.get(error.code, HTTPStatus.BAD_REQUEST)
+            return self.json(
+                {"error": error.code, "message": str(error)},
+                status=status,
+                headers=NO_STORE_HEADERS,
+            )
+        except (ValueError, CorrelationIdError):
+            return self.json_message(
+                "Запрос переименования свойства заполнен неверно.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        except Exception:
+            return self._unavailable()
+        response = {**result, "correlationId": correlation_id}
+        publish_command_receipt(
+            self._hass,
+            {
+                **response,
+                "requestId": correlation_id,
+                "targetId": response.get("entityId"),
+                "message": response.get("message"),
+            },
+            operation="device_property_name",
         )
         return self.json(response, headers=NO_STORE_HEADERS)
 

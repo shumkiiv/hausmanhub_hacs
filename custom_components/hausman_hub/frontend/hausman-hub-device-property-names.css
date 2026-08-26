@@ -1,0 +1,10 @@
+.device-maintenance-property-names { display:grid; gap:8px; margin-top:12px; }
+.device-maintenance-property-name-row { display:grid; grid-template-columns:minmax(0,1fr) auto auto; align-items:end; gap:8px; padding:9px; border-radius:9px;
+  background:color-mix(in srgb,var(--hmh-surface,#12171D) 74%,transparent); }
+.device-maintenance-property-name-row label { display:grid; gap:5px; min-width:0; color:var(--hmh-text-dim,#9AA7B4); font:500 11px/1.35 ui-monospace,SFMono-Regular,Consolas,monospace; }
+.device-maintenance-property-name-row input, .device-maintenance-property-name-row button { min-height:38px; margin:0; }
+.device-maintenance-property-name-row input { width:100%; font:inherit; color:var(--hmh-text,#E7ECF3); }
+@media (max-width:760px) {
+  .device-maintenance-property-name-row { grid-template-columns:1fr 1fr; }
+  .device-maintenance-property-name-row label { grid-column:1 / -1; }
+}

@@ -252,6 +252,50 @@ class HomeAssistantDeviceMaintenanceServiceTests(unittest.TestCase):
         self.assertEqual("Реле подсветки", entity.name)
         self.assertEqual("living", entity.area_id)
 
+    def test_property_rename_updates_a_device_entity_and_keeps_its_id(self) -> None:
+        hass = self._hass()
+        with patch.dict(sys.modules, _registry_modules(hass)):
+            result = asyncio.run(
+                HomeAssistantDeviceMaintenanceService(hass).async_rename_entity(
+                    {
+                        "entityId": "sensor.room_temperature",
+                        "name": "Температура у окна",
+                    }
+                )
+            )
+        entity = hass.entity_registry.entities["sensor.room_temperature"]
+        self.assertEqual("sensor.room_temperature", entity.entity_id)
+        self.assertEqual("Температура у окна", entity.name)
+        self.assertEqual("renamed", result["result"])
+        self.assertTrue(result["readBack"]["matched"])
+        self.assertFalse(result["physicalCommandsSent"])
+
+    def test_property_name_reset_restores_the_original_entity_label(self) -> None:
+        hass = self._hass()
+        entity = hass.entity_registry.entities["button.device_identify"]
+        entity.name = "Найти реле"
+        with patch.dict(sys.modules, _registry_modules(hass)):
+            result = asyncio.run(
+                HomeAssistantDeviceMaintenanceService(hass).async_rename_entity(
+                    {"entityId": "button.device_identify", "name": None}
+                )
+            )
+        self.assertIsNone(entity.name)
+        self.assertEqual("Identify", result["effectiveName"])
+        self.assertEqual("reset", result["result"])
+
+    def test_property_rename_rejects_an_omitted_name(self) -> None:
+        hass = self._hass()
+        with patch.dict(sys.modules, _registry_modules(hass)):
+            with self.assertRaises(DeviceMaintenanceViolation) as failure:
+                asyncio.run(
+                    HomeAssistantDeviceMaintenanceService(hass).async_rename_entity(
+                        {"entityId": "sensor.room_temperature"}
+                    )
+                )
+        self.assertEqual("invalid_request", failure.exception.code)
+        self.assertEqual([], hass.entity_registry.updated)
+
     def test_delete_requires_confirmation_and_is_blocked_by_scenario_usage(self) -> None:
         hass = self._hass()
         target = SimpleNamespace(
