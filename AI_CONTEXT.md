@@ -10,7 +10,12 @@
   восстановление после ошибок, выборочное дублирование и пакетные операции.
   Pin: contracts `0.58.0` (`828b288`). Полный gate: 1702 теста, 4 skipped;
   critical runtime 148 тестов и 77% branch coverage; Chromium 13 из 13.
-  Release и production deploy ещё не запускались.
+  Tag/Release `v1.52.167` опубликован, release commit `623c98d`. Production
+  backup `0907efca` защищён локально и содержит Home Assistant с базой.
+  После трёх valid config checks, точной установки и одного restart
+  installed/latest равны `v1.52.167`; пять read-only API отвечают 200,
+  все 11 sensor Hausman доступны, ошибок интеграции нет. Аудит:
+  `docs/RELEASE_AUDIT_1.52.167.md`.
 
 - 2026-08-25: HACS `1.52.165` опубликован и развёрнут: при частичном dashboard-ответе
   без readiness главная честно показывает «Состояние обновляется» и сохраняет
