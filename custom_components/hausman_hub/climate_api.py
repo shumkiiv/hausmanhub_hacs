@@ -3317,10 +3317,11 @@ class ClimateAdminResetView(_ClimateView):
         ir_code_service = data.get("ir_code_service")
         settings_service = data.get("settings_service")
         tablet_preferences_service = data.get("tablet_preferences_service")
+        power_dependency_service = data.get("device_power_dependency_service")
         assistant = self._ai_assistant()
         if any(item is None for item in (
             runtime, entry, scenario_service, ir_code_service, settings_service,
-            tablet_preferences_service, assistant,
+            tablet_preferences_service, power_dependency_service, assistant,
         )):
             return self._unavailable()
         try:
@@ -3330,6 +3331,7 @@ class ClimateAdminResetView(_ClimateView):
             await ir_code_service.async_reset()
             await settings_service.async_replace(HausmanHubSettings())
             await tablet_preferences_service.async_reset()
+            await power_dependency_service.async_reset()
             await assistant.async_reset_state()
             self._hass.config_entries.async_update_entry(
                 entry,
@@ -3351,6 +3353,7 @@ class ClimateAdminResetView(_ClimateView):
                     "scenarios",
                     "ir_codes",
                     "tablet_preferences",
+                    "device_power_dependencies",
                     "assistant",
                     "connection",
                 ],

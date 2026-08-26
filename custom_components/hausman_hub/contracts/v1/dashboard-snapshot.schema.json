@@ -275,7 +275,10 @@
         "reason": {
           "enum": ["power_source_on", "power_source_off", "power_source_unavailable"]
         },
-        "blocksCommands": { "type": "boolean" }
+        "blocksCommands": { "type": "boolean" },
+        "policy": { "enum": ["requires_on", "auto_turn_on"] },
+        "warmupSeconds": { "type": "integer", "minimum": 0, "maximum": 30 },
+        "autoPowerOn": { "type": "boolean" }
       }
     },
     "inventory": {

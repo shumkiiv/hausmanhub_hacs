@@ -30,6 +30,9 @@ from custom_components.hausman_hub.application.scenarios import (
 from custom_components.hausman_hub.application.vendor_resilience import (
     VendorCircuitBreaker,
 )
+from custom_components.hausman_hub.domain.device_power_dependencies import (
+    DevicePowerDependency,
+)
 from custom_components.hausman_hub.domain.scenarios import (
     ScenarioAction,
     ScenarioActionType,
@@ -43,6 +46,19 @@ from custom_components.hausman_hub.domain.scenarios import (
     ScenarioTrigger,
     ScenarioTriggerType,
 )
+
+
+def _power_link(
+    *, policy: str = "requires_on", warmup_seconds: int = 0
+) -> dict[str, DevicePowerDependency]:
+    return {
+        "light.living_room": DevicePowerDependency(
+            "light.living_room",
+            "switch.wall",
+            policy,
+            warmup_seconds,
+        )
+    }
 
 
 class _FakeHass:
@@ -656,12 +672,126 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             self.hass,
             self.catalog,
             self.executor._run_callback,
-            power_dependency_resolver=lambda: {"light.living_room": "switch.wall"},
+            power_dependency_resolver=_power_link,
         )
         receipt = await executor.async_execute_device_action("device_1", "turn_on")
         self.assertFalse(receipt["accepted"])
         self.assertEqual("failed", receipt["status"])
         self.assertEqual("power_source_off", receipt["error"])
+        self.hass.services.async_call.assert_not_awaited()
+
+    async def test_auto_dependency_powers_source_before_target_command(self) -> None:
+        states = {
+            "light.living_room": SimpleNamespace(state="off", attributes={}),
+            "switch.wall": SimpleNamespace(state="off", attributes={}),
+        }
+        self.hass.states = SimpleNamespace(get=states.get)
+
+        async def apply_service(
+            domain: str,
+            service: str,
+            data: dict[str, object],
+            *,
+            blocking: bool,
+        ) -> None:
+            self.assertTrue(blocking)
+            entity_id = str(data["entity_id"])
+            if service == "turn_on":
+                states[entity_id] = SimpleNamespace(state="on", attributes={})
+
+        self.hass.services.async_call.side_effect = apply_service
+        executor = ScenarioExecutor(
+            self.hass,
+            self.catalog,
+            self.executor._run_callback,
+            readback_window_seconds=0.02,
+            readback_interval_seconds=0.01,
+            power_dependency_resolver=lambda: _power_link(
+                policy="auto_turn_on", warmup_seconds=2
+            ),
+        )
+
+        with patch(
+            "custom_components.hausman_hub.application.scenario_executor.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as sleep:
+            receipt = await executor.async_execute_device_action(
+                "device_1", "turn_on"
+            )
+
+        self.assertTrue(receipt["accepted"])
+        self.assertTrue(receipt["confirmed"])
+        self.assertEqual(
+            [
+                call(
+                    "switch",
+                    "turn_on",
+                    {"entity_id": "switch.wall"},
+                    blocking=True,
+                ),
+                call(
+                    "light",
+                    "turn_on",
+                    {"entity_id": "light.living_room"},
+                    blocking=True,
+                ),
+            ],
+            self.hass.services.async_call.await_args_list,
+        )
+        self.assertEqual("on", states["switch.wall"].state)
+        sleep.assert_awaited_once_with(2.0)
+
+    async def test_auto_dependency_fails_closed_when_source_stays_off(self) -> None:
+        self.hass.states = SimpleNamespace(
+            get={
+                "light.living_room": SimpleNamespace(state="off", attributes={}),
+                "switch.wall": SimpleNamespace(state="off", attributes={}),
+            }.get
+        )
+        executor = ScenarioExecutor(
+            self.hass,
+            self.catalog,
+            self.executor._run_callback,
+            readback_window_seconds=0.02,
+            readback_interval_seconds=0.01,
+            power_dependency_resolver=lambda: _power_link(
+                policy="auto_turn_on", warmup_seconds=0
+            ),
+        )
+
+        receipt = await executor.async_execute_device_action("device_1", "turn_on")
+
+        self.assertFalse(receipt["accepted"])
+        self.assertEqual("power_source_unavailable", receipt["error"])
+        self.hass.services.async_call.assert_awaited_once_with(
+            "switch",
+            "turn_on",
+            {"entity_id": "switch.wall"},
+            blocking=True,
+        )
+
+    async def test_auto_dependency_dry_run_plans_without_service_call(self) -> None:
+        self.hass.states = SimpleNamespace(
+            get={
+                "light.living_room": SimpleNamespace(state="off", attributes={}),
+                "switch.wall": SimpleNamespace(state="off", attributes={}),
+            }.get
+        )
+        executor = ScenarioExecutor(
+            self.hass,
+            self.catalog,
+            self.executor._run_callback,
+            power_dependency_resolver=lambda: _power_link(
+                policy="auto_turn_on", warmup_seconds=5
+            ),
+        )
+
+        receipt = await executor.async_execute_device_action(
+            "device_1", "turn_on", dry_run=True
+        )
+
+        self.assertTrue(receipt["accepted"])
+        self.assertTrue(receipt["dryRun"])
         self.hass.services.async_call.assert_not_awaited()
 
     async def test_command_guard_distinguishes_manual_and_automatic_action(self) -> None:
@@ -717,7 +847,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             self.hass,
             self.catalog,
             self.executor._run_callback,
-            power_dependency_resolver=lambda: {"light.living_room": "switch.wall"},
+            power_dependency_resolver=_power_link,
         )
 
         live = await executor.async_execute_device_action("device_1", "turn_off")
@@ -760,7 +890,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             self.executor._run_callback,
             readback_window_seconds=0.02,
             readback_interval_seconds=0.01,
-            power_dependency_resolver=lambda: {"light.living_room": "switch.wall"},
+            power_dependency_resolver=_power_link,
         )
         receipt = await executor.async_execute_device_action("device_1", "turn_on")
         self.assertTrue(receipt["accepted"])
@@ -799,7 +929,7 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
             self.hass,
             self.catalog,
             self.executor._run_callback,
-            power_dependency_resolver=lambda: {"light.living_room": "switch.wall"},
+            power_dependency_resolver=_power_link,
         )
         definition = _definition(
             (

@@ -28,7 +28,9 @@ VENDORED_CONTRACT_HASHES = {
     "fixtures/hausmanhub_device_action_batch_v1/request.json": "e4fa3073d5de3f716cce634ccfc3248dc2a89e4371766aeab136d267379e3f1f",
     "fixtures/hausmanhub_device_action_batch_v1/receipt.json": "4d3b40d3d89982c059e0e13c300a30a4ff3b9964c1dfc261c3295dfedca1607a",
     "fixtures/hausmanhub_device_feature_matrix_v1/document.json": "ef1f2784f5ffdd0bde84282816f09542e4f7aabf3e9150c1dfe5b1f8c0315455",
-    "custom_components/hausman_hub/contracts/v1/dashboard-snapshot.schema.json": "aac80774375adcc8480549cd34c7912d80c19c94ec0798b7283ebfe4d0ff8d39",
+    "custom_components/hausman_hub/contracts/v1/dashboard-snapshot.schema.json": "75b1b531f2b0b04f7fb8a73dd6e4ccc2271c78cd0c441967a9d2619cbb5c3f74",
+    "custom_components/hausman_hub/contracts/v1/device-power-dependencies.schema.json": "c0b3decdb785ce68ba2048061bed8db9f0caa32303d082c3ad2a0bd2b6e265c5",
+    "fixtures/hausmanhub_device_power_dependencies_v1/document.json": "379574fffa1d7f5be2249203fc7d0bf3fcdf5655f3fd4557bdbbc555c52ae1eb",
     "custom_components/hausman_hub/contracts/v1/energy-history.schema.json": "2ff676c72e249b0ea70d34bfb628e187e425ec516a9d46ae8f835cf275c7dea8",
     "custom_components/hausman_hub/contracts/v1/energy-settings.schema.json": "a1bd73766e4d1051214ab427abf08b57c763ca3acff1c2d618b71ffba6fac2d7",
     "custom_components/hausman_hub/contracts/v1/energy-settings-document.schema.json": "b1aaeaa7b7e37cc6ac49ab2cad5fd65e0d9a27f329e810cb0c599ac606c0e670",
@@ -54,14 +56,14 @@ def test_external_contract_pin_is_explicit_and_canonical() -> None:
 
     assert pin == {
         "repository": "shumkiiv/hausmanhub-contracts",
-        "version": "0.58.1",
-        "commit": "b0f581158e7846019a426942c7ee6b8f9f5a5168",
+        "version": "0.59.0",
+        "commit": "5189a020c395babb65795b17f35674b31c4c0a45",
         "canonical": True,
         "role": "runtime-consumer",
     }
 
 
-def test_contract_0_58_1_vendored_files_match_canonical_hashes() -> None:
+def test_contract_0_59_0_vendored_files_match_canonical_hashes() -> None:
     for relative_path, expected_hash in VENDORED_CONTRACT_HASHES.items():
         payload = (REPOSITORY_ROOT / relative_path).read_bytes()
         assert hashlib.sha256(payload).hexdigest() == expected_hash, relative_path

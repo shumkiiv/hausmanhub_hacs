@@ -42,6 +42,7 @@ ROOM_SETUP_JS = PANEL_JS.with_name("hausman-hub-room-setup.js")
 DEVICE_INVENTORY_JS = PANEL_JS.with_name("hausman-hub-device-inventory.js")
 INVENTORY_DUPLICATES_JS = PANEL_JS.with_name("hausman-hub-inventory-duplicates.js")
 DEVICE_BINDINGS_JS = PANEL_JS.with_name("hausman-hub-device-bindings.js")
+POWER_LINKS_JS = PANEL_JS.with_name("hausman-hub-power-links.js")
 AREA_BINDING_JS = PANEL_JS.with_name("hausman-hub-area-binding.js")
 FIRST_RUN_DRAFT_JS = PANEL_JS.with_name("hausman-hub-first-run-draft.js")
 NAVIGATION_JS = PANEL_JS.with_name("hausman-hub-navigation.js")
@@ -593,6 +594,10 @@ def panel_script(
         {{ filename: {str(DEVICE_BINDINGS_JS)!r} }}
       );
       vm.runInThisContext(
+        fs.readFileSync({str(POWER_LINKS_JS)!r}, "utf8").replace(/export /g, ""),
+        {{ filename: {str(POWER_LINKS_JS)!r} }}
+      );
+      vm.runInThisContext(
         fs.readFileSync({str(AREA_BINDING_JS)!r}, "utf8").replace(/export /g, ""),
         {{ filename: {str(AREA_BINDING_JS)!r} }}
       );
@@ -868,6 +873,83 @@ def run_panel_script(script: str) -> subprocess.CompletedProcess[str]:
 
 class PanelSettingsSectionsTest(unittest.TestCase):
     """The settings sections render and post the strict admin contracts."""
+
+    def test_power_links_editor_saves_automatic_source_precondition(self) -> None:
+        dashboard = json.loads(
+            (ROOT / "fixtures/hausmanhub_dashboard_v1/dashboard.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        path = "hausman_hub/v1/admin/device-power-dependencies"
+        initial = {
+            "contract": {
+                "name": "hausman-hub-device-power-dependencies",
+                "version": 1,
+            },
+            "revision": 0,
+            "updatedAt": "2026-08-26T09:50:00Z",
+            "dependencies": [],
+        }
+        saved = initial | {
+            "revision": 1,
+            "dependencies": [
+                {
+                    "dependentEntityId": "light.example_ceiling",
+                    "powerSourceEntityId": "switch.example_wall_relay",
+                    "policy": "auto_turn_on",
+                    "warmupSeconds": 3,
+                }
+            ],
+        }
+        script = panel_script(
+            GET_PATHS
+            | {
+                "hausman_hub/v1/dashboard": dashboard,
+                path: initial,
+            },
+            {path: saved},
+            f"""
+        panel._activateSection("settings");
+        panel._activateSettingsView("power");
+        await tick();
+        const add = findAll(panel._shell.settings, (node) =>
+          node.tagName === "BUTTON" && node.textContent === "Добавить связь")[0];
+        if (!add) throw new Error("power link add action is missing");
+        add.fire("click");
+
+        let selects = findAll(panel._shell.settings, (node) => node.tagName === "SELECT");
+        selects[0].value = "light.example_ceiling";
+        selects[0].fire("change");
+        selects = findAll(panel._shell.settings, (node) => node.tagName === "SELECT");
+        selects[1].value = "switch.example_wall_relay";
+        selects[1].fire("change");
+        const warmup = findAll(panel._shell.settings, (node) =>
+          node.tagName === "INPUT" && node.type === "number")[0];
+        warmup.value = "3";
+        warmup.fire("input");
+        const save = findAll(panel._shell.settings, (node) =>
+          node.tagName === "BUTTON" && node.textContent === "Сохранить связи")[0];
+        save.fire("click");
+        await tick();
+
+        const write = calls.find((item) => item.method === "PUT" && item.path === {path!r});
+        if (!write || write.payload.expectedRevision !== 0) {{
+          throw new Error("power link revision is missing: " + JSON.stringify(write));
+        }}
+        const dependency = write.payload.dependencies[0];
+        if (dependency.dependentEntityId !== "light.example_ceiling"
+          || dependency.powerSourceEntityId !== "switch.example_wall_relay"
+          || dependency.policy !== "auto_turn_on"
+          || dependency.warmupSeconds !== 3) {{
+          throw new Error("power link payload mismatch: " + JSON.stringify(write.payload));
+        }}
+        if (!textOf(panel._shell.settings).includes("После команды источник остаётся включённым")) {{
+          throw new Error("safe source behavior is not explained");
+        }}
+            """,
+        )
+        completed = run_panel_script(script)
+        self.assertEqual(0, completed.returncode, completed.stderr)
 
     def test_panel_exposes_tablet_style_command_progress(self) -> None:
         script = panel_script(
@@ -4905,7 +4987,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.168")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.169")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

@@ -46,6 +46,8 @@ _PUBLIC_DIAGNOSTIC_DEVICE_CLASSES = frozenset(
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
+    from .domain.device_power_dependencies import DevicePowerDependency
+
     from .application.scenario_service import ScenarioService
 
 
@@ -380,7 +382,7 @@ async def async_dashboard_snapshot(
     energy_settings: HausmanHubSettings | None = None,
     climate_targets: Mapping[str, tuple[float, int]] | None = None,
     pinned_entity_ids: frozenset[str] | None = None,
-    power_dependencies: Mapping[str, str] | None = None,
+    power_dependencies: Mapping[str, DevicePowerDependency] | None = None,
     climate_ownership: Mapping[str, Mapping[str, str]] | None = None,
     outdoor_sensor_entity_ids: Sequence[str] | None = None,
     room_settings: Mapping[str, Mapping[str, object]] | None = None,

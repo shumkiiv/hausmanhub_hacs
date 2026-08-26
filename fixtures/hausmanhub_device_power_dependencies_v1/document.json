@@ -10,6 +10,12 @@
       "dependentEntityId": "light.example_ceiling",
       "powerSourceEntityId": "switch.example_wall_relay",
       "policy": "requires_on"
+    },
+    {
+      "dependentEntityId": "light.example_chandelier",
+      "powerSourceEntityId": "switch.example_chandelier_relay",
+      "policy": "auto_turn_on",
+      "warmupSeconds": 5
     }
   ]
 }

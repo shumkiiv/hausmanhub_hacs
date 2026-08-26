@@ -12,7 +12,11 @@ from datetime import datetime, timedelta
 from datetime import time as datetime_time
 from typing import TYPE_CHECKING, Any
 
-from ..domain.device_power_dependencies import effective_device_state
+from ..domain.device_power_dependencies import (
+    AUTO_TURN_ON_POLICY,
+    DevicePowerDependency,
+    effective_device_state,
+)
 from ..domain.scenarios import (
     ScenarioCommandMode,
     ScenarioComparison,
@@ -270,7 +274,7 @@ def _evaluate_condition(
     condition: ScenarioCondition,
     catalog: ScenarioCatalog,
     hass: HomeAssistant,
-    power_dependencies: Mapping[str, str] | None = None,
+    power_dependencies: Mapping[str, DevicePowerDependency] | None = None,
     state_snapshot: Mapping[str, object | None] | None = None,
 ) -> tuple[bool, str | None]:
     if condition.type is ScenarioConditionType.DEVICE_STATE:
@@ -360,7 +364,7 @@ def _condition_evidence_snapshot(
     definition: ScenarioDefinition,
     catalog: ScenarioCatalog,
     hass: HomeAssistant,
-    power_dependencies: Mapping[str, str],
+    power_dependencies: Mapping[str, DevicePowerDependency],
 ) -> tuple[dict[str, object | None], str | None, str | None]:
     """Capture every device condition without yielding to another HA event."""
 
@@ -379,7 +383,7 @@ def _condition_evidence_snapshot(
         condition_entities.append((condition, device.entity_id))
         dependency = power_dependencies.get(device.entity_id)
         if dependency:
-            entity_ids.add(dependency)
+            entity_ids.add(dependency.power_source_entity_id)
     snapshot = {entity_id: states.get(entity_id) for entity_id in entity_ids}
     for state in snapshot.values():
         raw_state = getattr(state, "state", None) if state is not None else None
@@ -431,7 +435,9 @@ class ScenarioExecutor:
         notify_target: str = "",
         readback_window_seconds: float = _DEFAULT_DEVICE_READBACK_WINDOW_SECONDS,
         readback_interval_seconds: float = _DEFAULT_DEVICE_READBACK_INTERVAL_SECONDS,
-        power_dependency_resolver: Callable[[], Mapping[str, str]] | None = None,
+        power_dependency_resolver: (
+            Callable[[], Mapping[str, DevicePowerDependency]] | None
+        ) = None,
         command_guard: Callable[[str, str, bool], str | None] | None = None,
         vendor_resilience: VendorCircuitBreaker | None = None,
     ):
@@ -446,6 +452,7 @@ class ScenarioExecutor:
         self._readback_window_seconds = readback_window_seconds
         self._readback_interval_seconds = readback_interval_seconds
         self._power_dependency_resolver = power_dependency_resolver
+        self._power_source_locks: dict[str, asyncio.Lock] = {}
         self._command_guard = command_guard
         self._vendor_resilience = vendor_resilience
 
@@ -748,7 +755,7 @@ class ScenarioExecutor:
                 }
 
         receipts: list[dict[str, Any]] = []
-        powered_sources: set[str] = set()
+        powered_sources: dict[str, float] = {}
         powered_target_ids: set[str] = set()
         start_ms = int(time.time() * 1000)
 
@@ -761,7 +768,7 @@ class ScenarioExecutor:
                 next_visited,
                 dry_run=dry_run,
                 defer_device_readback=True,
-                powered_sources=frozenset(powered_sources),
+                powered_sources=dict(powered_sources),
                 idempotent_actions=definition.safety_policy.idempotent_actions,
                 evidence_age_seconds=(int(time.time() * 1000) - evidence_captured_at_ms)
                 / 1000,
@@ -803,9 +810,9 @@ class ScenarioExecutor:
                     powered_target_ids.discard(action.target_id)
                 if isinstance(entity_id, str):
                     if action.action_id == "turn_on":
-                        powered_sources.add(entity_id)
+                        powered_sources[entity_id] = asyncio.get_running_loop().time()
                     elif action.action_id == "turn_off":
-                        powered_sources.discard(entity_id)
+                        powered_sources.pop(entity_id, None)
 
         if not dry_run:
             await self._confirm_deferred_device_receipts(receipts)
@@ -849,7 +856,7 @@ class ScenarioExecutor:
         visited: frozenset[str],
         *,
         powered_target_ids: set[str],
-        powered_sources: set[str],
+        powered_sources: dict[str, float],
         idempotent_actions: bool,
         max_evidence_age_seconds: int,
     ) -> list[dict[str, Any]]:
@@ -877,7 +884,7 @@ class ScenarioExecutor:
                 run_id,
                 visited,
                 defer_device_readback=False,
-                powered_sources=frozenset(powered_sources),
+                powered_sources=dict(powered_sources),
                 idempotent_actions=idempotent_actions,
                 evidence_age_seconds=0.0,
                 max_evidence_age_seconds=max_evidence_age_seconds,
@@ -891,7 +898,7 @@ class ScenarioExecutor:
                 device = self._catalog.device(action.target_id)
                 entity_id = getattr(device, "entity_id", None)
                 if isinstance(entity_id, str):
-                    powered_sources.discard(entity_id)
+                    powered_sources.pop(entity_id, None)
         return cleanup_receipts
 
     async def _execute_action(
@@ -902,7 +909,7 @@ class ScenarioExecutor:
         *,
         dry_run: bool = False,
         defer_device_readback: bool = False,
-        powered_sources: frozenset[str] = frozenset(),
+        powered_sources: Mapping[str, float] | None = None,
         idempotent_actions: bool = False,
         evidence_age_seconds: float = 0.0,
         max_evidence_age_seconds: int = 300,
@@ -922,7 +929,7 @@ class ScenarioExecutor:
                     base,
                     dry_run=dry_run,
                     defer_readback=defer_device_readback,
-                    powered_sources=powered_sources,
+                    powered_sources=powered_sources or {},
                     idempotent_actions=idempotent_actions,
                     evidence_age_seconds=evidence_age_seconds,
                     max_evidence_age_seconds=max_evidence_age_seconds,
@@ -955,7 +962,7 @@ class ScenarioExecutor:
         *,
         dry_run: bool = False,
         defer_readback: bool = False,
-        powered_sources: frozenset[str] = frozenset(),
+        powered_sources: Mapping[str, float] | None = None,
         idempotent_actions: bool = False,
         evidence_age_seconds: float = 0.0,
         max_evidence_age_seconds: int = 300,
@@ -996,7 +1003,7 @@ class ScenarioExecutor:
                 }
         dependency_error = self._power_dependency_error(
             device.entity_id,
-            powered_sources=powered_sources,
+            powered_sources=powered_sources or {},
         )
         if dependency_error is not None:
             if (
@@ -1081,7 +1088,29 @@ class ScenarioExecutor:
                     return {**base, "status": "failed", "error": error}
             service_data[param] = normalized
             confirmation_value = normalized
-        if idempotent_actions and not dry_run:
+        power_error, power_precondition, _prepared_sources = (
+            await self._prepare_power_dependency(
+                device.entity_id,
+                powered_sources=powered_sources or {},
+                dry_run=dry_run,
+            )
+        )
+        if power_error is not None:
+            return {
+                **base,
+                "status": "failed",
+                "error": power_error,
+                **(
+                    {"power_precondition": power_precondition}
+                    if power_precondition is not None
+                    else {}
+                ),
+            }
+        source_was_turned_on = bool(
+            power_precondition
+            and power_precondition.get("sourceTurnedOn") is True
+        )
+        if idempotent_actions and not dry_run and not source_was_turned_on:
             current = self._hass.states.get(device.entity_id)
             if current is not None and _device_action_confirmed(
                 current, action.action_id, confirmation_value
@@ -1097,6 +1126,11 @@ class ScenarioExecutor:
                     "confirmed": True,
                     "skipped": True,
                     "reason": "already_in_target_state",
+                    **(
+                        {"power_precondition": power_precondition}
+                        if power_precondition is not None
+                        else {}
+                    ),
                     "read_back": {
                         "attempted": False,
                         "matched": True,
@@ -1114,6 +1148,11 @@ class ScenarioExecutor:
             "domain": allowed.domain,
             "service": allowed.service,
             "entity_id": device.entity_id,
+            **(
+                {"power_precondition": power_precondition}
+                if power_precondition is not None
+                else {}
+            ),
         }
         if dry_run:
             receipt["service_data"] = service_data
@@ -1139,11 +1178,115 @@ class ScenarioExecutor:
             }
         return receipt
 
+    async def _prepare_power_dependency(
+        self,
+        entity_id: str,
+        *,
+        powered_sources: Mapping[str, float],
+        dry_run: bool,
+        visiting: frozenset[str] = frozenset(),
+    ) -> tuple[str | None, dict[str, object] | None, frozenset[str]]:
+        """Ensure an automatic upstream source is on before a device command."""
+
+        if self._power_dependency_resolver is None:
+            return None, None, frozenset()
+        dependencies = self._power_dependency_resolver()
+        dependency = dependencies.get(entity_id)
+        if dependency is None:
+            return None, None, frozenset()
+        if entity_id in visiting:
+            return "power_source_unavailable", None, frozenset()
+
+        source_entity_id = dependency.power_source_entity_id
+        upstream_error, _, upstream_sources = await self._prepare_power_dependency(
+            source_entity_id,
+            powered_sources=powered_sources,
+            dry_run=dry_run,
+            visiting=visiting | {entity_id},
+        )
+        precondition: dict[str, object] = {
+            "sourceEntityId": source_entity_id,
+            "policy": dependency.policy,
+            "warmupSeconds": dependency.warmup_seconds,
+            "sourceTurnedOn": False,
+            "planned": dry_run,
+        }
+        if upstream_error is not None:
+            return upstream_error, precondition, upstream_sources
+
+        loop = asyncio.get_running_loop()
+        activated_at = powered_sources.get(source_entity_id)
+        if activated_at is not None:
+            remaining = max(
+                0.0,
+                dependency.warmup_seconds - (loop.time() - activated_at),
+            )
+            if remaining > 0 and not dry_run:
+                await asyncio.sleep(remaining)
+            precondition["waitedSeconds"] = round(remaining, 3) if not dry_run else 0
+            precondition["sourceTurnedOnByPreviousAction"] = True
+            return None, precondition, upstream_sources | {source_entity_id}
+
+        state = self._entity_state(source_entity_id)
+        if state == "on":
+            precondition["waitedSeconds"] = 0
+            return None, precondition, upstream_sources
+        if state in {None, "unknown", "unavailable"}:
+            return "power_source_unavailable", precondition, upstream_sources
+        if dependency.policy != AUTO_TURN_ON_POLICY:
+            return "power_source_off", precondition, upstream_sources
+        if dry_run:
+            precondition["sourceTurnedOn"] = True
+            precondition["waitedSeconds"] = 0
+            return None, precondition, upstream_sources | {source_entity_id}
+
+        lock = self._power_source_locks.setdefault(source_entity_id, asyncio.Lock())
+        async with lock:
+            state = self._entity_state(source_entity_id)
+            source_turned_on = False
+            if state != "on":
+                if state in {None, "unknown", "unavailable"}:
+                    return "power_source_unavailable", precondition, upstream_sources
+                domain = source_entity_id.split(".", 1)[0]
+                try:
+                    await self._call_service(
+                        domain,
+                        "turn_on",
+                        {"entity_id": source_entity_id},
+                    )
+                except Exception:  # source failure must not reach the target command
+                    return "power_source_unavailable", precondition, upstream_sources
+                source_turned_on = True
+                if not await self._wait_for_entity_state(source_entity_id, "on"):
+                    return "power_source_unavailable", precondition, upstream_sources
+            wait_seconds = float(dependency.warmup_seconds) if source_turned_on else 0.0
+            if wait_seconds > 0:
+                await asyncio.sleep(wait_seconds)
+            precondition["sourceTurnedOn"] = source_turned_on
+            precondition["waitedSeconds"] = wait_seconds
+            return None, precondition, upstream_sources | {source_entity_id}
+
+    def _entity_state(self, entity_id: str) -> str | None:
+        states = getattr(self._hass, "states", None)
+        state = states.get(entity_id) if states is not None else None
+        return None if state is None else str(getattr(state, "state", "unknown"))
+
+    async def _wait_for_entity_state(self, entity_id: str, expected: str) -> bool:
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self._readback_window_seconds
+        while True:
+            if self._entity_state(entity_id) == expected:
+                return True
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                return False
+            await asyncio.sleep(min(self._readback_interval_seconds, remaining))
+
     def _power_dependency_error(
         self,
         entity_id: str,
         *,
-        powered_sources: frozenset[str] = frozenset(),
+        powered_sources: Mapping[str, float] | None = None,
     ) -> str | None:
         """Fail closed when an upstream source does not currently provide power."""
 
@@ -1154,7 +1297,7 @@ class ScenarioExecutor:
             return None
 
         def read_state(requested_entity_id: str) -> str | None:
-            if requested_entity_id in powered_sources:
+            if requested_entity_id in (powered_sources or {}):
                 return "on"
             states = getattr(self._hass, "states", None)
             state = states.get(requested_entity_id) if states is not None else None

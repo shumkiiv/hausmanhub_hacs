@@ -16,6 +16,7 @@ from ..domain.contours import (
     CLIMATE_TARGET_TEMPERATURE_MINIMUM,
 )
 from ..domain.device_power_dependencies import (
+    DevicePowerDependency,
     PowerDependencyStatus,
     effective_device_state,
 )
@@ -516,7 +517,8 @@ def _safe_attributes(entity: DashboardEntity) -> dict[str, object]:
 
 
 def _apply_power_dependencies(
-    entities: tuple[DashboardEntity, ...], dependencies: Mapping[str, str]
+    entities: tuple[DashboardEntity, ...],
+    dependencies: Mapping[str, DevicePowerDependency],
 ) -> tuple[tuple[DashboardEntity, ...], dict[str, PowerDependencyStatus]]:
     """Replace stale child states with their effective powered states."""
 
@@ -912,7 +914,7 @@ def build_dashboard_snapshot(
     energy_settings: HausmanHubSettings | None = None,
     climate_targets: Mapping[str, tuple[float, int]] | None = None,
     pinned_entity_ids: Iterable[str] | None = None,
-    power_dependencies: Mapping[str, str] | None = None,
+    power_dependencies: Mapping[str, DevicePowerDependency] | None = None,
     climate_ownership: Mapping[str, Mapping[str, str]] | None = None,
     room_settings: Mapping[str, Mapping[str, object]] | None = None,
 ) -> dict[str, object]:
@@ -1186,6 +1188,9 @@ def build_dashboard_snapshot(
                 "state": dependency_status.state,
                 "reason": dependency_status.reason,
                 "blocksCommands": dependency_status.blocks_commands,
+                "policy": dependency_status.policy,
+                "warmupSeconds": dependency_status.warmup_seconds,
+                "autoPowerOn": dependency_status.auto_power_on,
             }
         climate_mode = entity_modes.get(primary.entity_id)
         climate_fields = (

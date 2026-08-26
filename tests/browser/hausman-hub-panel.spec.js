@@ -11,6 +11,7 @@ const surfaces = [
   { name: "climate-wide", query: "section=climate&screen=contour&theme=dark", width: 1440, height: 1400 },
   { name: "scenarios-wide", query: "section=scenarios&theme=dark", width: 1440, height: 900 },
   { name: "settings-narrow-light", query: "section=settings&settings=overview&theme=light", width: 640, height: 1000 },
+  { name: "settings-power-tablet", query: "section=settings&settings=power&theme=dark", width: 900, height: 1000 },
 ];
 
 // The interface was accepted before this gate existed. Keep its exact serious
@@ -27,6 +28,7 @@ const acceptedSeriousBaseline = {
   "climate-wide": {},
   "scenarios-wide": {},
   "settings-narrow-light": { "color-contrast": 5 },
+  "settings-power-tablet": { "color-contrast": 1 },
 };
 
 async function openHarness(page, surface) {

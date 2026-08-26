@@ -29,7 +29,7 @@
       });
     </script>
     <script type="module">
-      import "../../custom_components/hausman_hub/frontend/hausman-hub-panel.js?v=1.52.168";
+      import "../../custom_components/hausman_hub/frontend/hausman-hub-panel.js?v=1.52.169";
       const params = new URLSearchParams(window.location.search);
       const panel = document.getElementById("panel");
       const theme = params.get("theme") === "dark" ? "dark" : "light";
@@ -38,7 +38,7 @@
       document.documentElement.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       document.body.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       panel._data = {
-        integration_version: "1.52.168",
+        integration_version: "1.52.169",
         readiness: { status: "ready", bridge_mode: "native", reasons: [] },
         snapshot: {
           rooms: [
@@ -232,6 +232,9 @@
           if (method === "GET" && path === "hausman_hub/v1/dashboard") {
             return cloneHarnessValue(panel._homeDashboard);
           }
+          if (method === "GET" && path === "hausman_hub/v1/admin/device-power-dependencies") {
+            return cloneHarnessValue(panel._powerLinks.data);
+          }
           if (method === "GET" && path === "hausman_hub/v1/scenarios/upcoming") {
             return cloneHarnessValue(panel._upcomingEvents);
           }
@@ -383,6 +386,20 @@
           { id: "event-8", title: "Уходим из дома", message: "Сценарий выполнен", ts: Date.now() - 4800000 },
         ],
       };
+      panel._powerLinks.data = {
+        contract: { name: "hausman-hub-device-power-dependencies", version: 1 },
+        revision: 1,
+        updatedAt: "2026-08-26T10:00:00Z",
+        dependencies: [
+          {
+            dependentEntityId: "light.office_chandelier",
+            powerSourceEntityId: "switch.office_1",
+            policy: "auto_turn_on",
+            warmupSeconds: 2,
+          },
+        ],
+      };
+      panel._powerLinks.draft = cloneHarnessValue(panel._powerLinks.data.dependencies);
       panel._upcomingEvents = {
         events: [
           { scenarioId: "scenario.evening_lights", triggerId: "sunset", scenarioTitle: "Вечерний свет", triggerType: "sunset", runAt: new Date(Date.now() + 34 * 60000).toISOString(), cancellable: true },
@@ -563,7 +580,7 @@
         };
       }
       const settingsView = params.get("settings");
-      if (["overview", "rooms", "connection", "appearance", "system"].includes(settingsView)) {
+      if (["overview", "rooms", "power", "connection", "appearance", "system"].includes(settingsView)) {
         panel._activeSettingsView = settingsView;
       }
       const energyMode = params.get("energyMode");
@@ -578,7 +595,7 @@
       panel._render();
       panel._applyLocalPreferences();
       panel.shadowRoot.querySelector("link").href =
-        "../../custom_components/hausman_hub/frontend/hausman-hub-panel.css?v=1.52.168";
+        "../../custom_components/hausman_hub/frontend/hausman-hub-panel.css?v=1.52.169";
       if (params.get("kiosk") === "1") panel._shell.kioskButton.click();
       const scenarioName = params.get("openScenario");
       if (scenarioName && panel._activeSection === "scenarios") {

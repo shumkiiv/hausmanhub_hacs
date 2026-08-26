@@ -93,7 +93,7 @@ class DevicePowerDependencyService:
         }
 
     @property
-    def mapping(self) -> dict[str, str]:
+    def mapping(self) -> dict[str, DevicePowerDependency]:
         self._require_loaded()
         return device_power_dependency_mapping(self._dependencies)
 
@@ -135,6 +135,11 @@ class DevicePowerDependencyService:
             self._updated_at = updated_at
             self._dependencies = validated
         return self.document
+
+    async def async_reset(self) -> dict[str, object]:
+        """Remove every Hausman-owned power link using the same atomic write."""
+
+        return await self.async_replace(self._revision, [])
 
     def _timestamp(self) -> str:
         value = self._now()

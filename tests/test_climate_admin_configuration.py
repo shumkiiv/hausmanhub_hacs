@@ -1769,6 +1769,25 @@ class ClimateAdminConfigurationRoutesTest(unittest.TestCase):
         path = "/api/hausman_hub/v1/admin/reset"
         self.assertIn(path, self.views)
         self._inject_runtime(configured=True)
+        power_dependencies = self.hass.data["hausman_hub"][
+            "device_power_dependency_service"
+        ]
+        self.hass.states.values["light.synthetic_lamp"] = SimpleNamespace(
+            entity_id="light.synthetic_lamp", state="off", attributes={}
+        )
+        asyncio.run(
+            power_dependencies.async_replace(
+                0,
+                [
+                    {
+                        "dependentEntityId": "light.synthetic_lamp",
+                        "powerSourceEntityId": "switch.synthetic_central",
+                        "policy": "auto_turn_on",
+                        "warmupSeconds": 1,
+                    }
+                ],
+            )
+        )
         self.assertEqual(400, self._post(path, self._admin(), {}).status)
         self.assertEqual(
             403,
@@ -1785,6 +1804,8 @@ class ClimateAdminConfigurationRoutesTest(unittest.TestCase):
         )
         self.assertEqual(200, response.status)
         self.assertEqual("reset", response.payload["status"])
+        self.assertIn("device_power_dependencies", response.payload["reset"])
+        self.assertEqual([], power_dependencies.document["dependencies"])
         self.assertEqual(
             ["home_assistant_areas", "home_assistant_devices"],
             response.payload["preserved"],

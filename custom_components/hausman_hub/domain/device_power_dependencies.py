@@ -9,6 +9,11 @@ from typing import Callable, Mapping
 
 MAX_DEVICE_POWER_DEPENDENCIES = 128
 POWER_DEPENDENCY_POLICY = "requires_on"
+AUTO_TURN_ON_POLICY = "auto_turn_on"
+POWER_DEPENDENCY_POLICIES = frozenset(
+    {POWER_DEPENDENCY_POLICY, AUTO_TURN_ON_POLICY}
+)
+MAX_POWER_WARMUP_SECONDS = 30
 _ENTITY_ID = re.compile(r"^[a-z][a-z0-9_]*\.[a-z0-9_]+$")
 _POWER_SOURCE_DOMAINS = frozenset({"light", "switch"})
 
@@ -24,6 +29,7 @@ class DevicePowerDependency:
     dependent_entity_id: str
     power_source_entity_id: str
     policy: str = POWER_DEPENDENCY_POLICY
+    warmup_seconds: int = 0
 
     def __post_init__(self) -> None:
         _entity_id(self.dependent_entity_id, "dependent entity")
@@ -36,8 +42,13 @@ class DevicePowerDependency:
             raise DevicePowerDependencyViolation(
                 "power source entity must be a switch or light"
             )
-        if self.policy != POWER_DEPENDENCY_POLICY:
+        if self.policy not in POWER_DEPENDENCY_POLICIES:
             raise DevicePowerDependencyViolation("power dependency policy is invalid")
+        if (
+            type(self.warmup_seconds) is not int
+            or not 0 <= self.warmup_seconds <= MAX_POWER_WARMUP_SECONDS
+        ):
+            raise DevicePowerDependencyViolation("power warm-up is invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +59,14 @@ class PowerDependencyStatus:
     state: str
     reason: str
     blocks_commands: bool
+    policy: str
+    warmup_seconds: int
+
+    @property
+    def auto_power_on(self) -> bool:
+        """Whether Hausman Hub may turn the source on before a command."""
+
+        return self.policy == AUTO_TURN_ON_POLICY
 
 
 def validate_device_power_dependencies(
@@ -59,17 +78,23 @@ def validate_device_power_dependencies(
         raise DevicePowerDependencyViolation("device power dependencies are invalid")
     dependencies: list[DevicePowerDependency] = []
     for item in value:
-        if not isinstance(item, dict) or set(item) != {
-            "dependentEntityId",
-            "powerSourceEntityId",
-            "policy",
-        }:
+        if not isinstance(item, dict):
             raise DevicePowerDependencyViolation("power dependency fields are invalid")
+        fields = set(item)
+        required = {"dependentEntityId", "powerSourceEntityId", "policy"}
+        allowed = required | {"warmupSeconds"}
+        if not required.issubset(fields) or not fields.issubset(allowed):
+            raise DevicePowerDependencyViolation("power dependency fields are invalid")
+        if item.get("policy") == AUTO_TURN_ON_POLICY and "warmupSeconds" not in item:
+            raise DevicePowerDependencyViolation(
+                "automatic power dependency needs a warm-up"
+            )
         dependencies.append(
             DevicePowerDependency(
                 dependent_entity_id=item["dependentEntityId"],
                 power_source_entity_id=item["powerSourceEntityId"],
                 policy=item["policy"],
+                warmup_seconds=item.get("warmupSeconds", 0),
             )
         )
     dependent_ids = [item.dependent_entity_id for item in dependencies]
@@ -86,7 +111,7 @@ def validate_device_power_dependencies(
 
 def device_power_dependencies_to_payload(
     dependencies: tuple[DevicePowerDependency, ...],
-) -> list[dict[str, str]]:
+) -> list[dict[str, object]]:
     """Encode canonical contract field names."""
 
     return [
@@ -94,6 +119,12 @@ def device_power_dependencies_to_payload(
             "dependentEntityId": item.dependent_entity_id,
             "powerSourceEntityId": item.power_source_entity_id,
             "policy": item.policy,
+            **(
+                {"warmupSeconds": item.warmup_seconds}
+                if item.policy == AUTO_TURN_ON_POLICY
+                or item.warmup_seconds > 0
+                else {}
+            ),
         }
         for item in dependencies
     ]
@@ -101,17 +132,17 @@ def device_power_dependencies_to_payload(
 
 def device_power_dependency_mapping(
     dependencies: tuple[DevicePowerDependency, ...],
-) -> dict[str, str]:
-    """Return the current dependent to source lookup."""
+) -> dict[str, DevicePowerDependency]:
+    """Return the complete current dependency lookup."""
 
     return {
-        item.dependent_entity_id: item.power_source_entity_id for item in dependencies
+        item.dependent_entity_id: item for item in dependencies
     }
 
 
 def effective_device_state(
     entity_id: str,
-    dependencies: Mapping[str, str],
+    dependencies: Mapping[str, DevicePowerDependency],
     state_reader: Callable[[str], str | None],
 ) -> tuple[str, PowerDependencyStatus | None]:
     """Resolve a device state through an acyclic requires-on graph."""
@@ -124,10 +155,11 @@ def effective_device_state(
         if current_entity_id in visiting:
             return "unknown"
         reported = state_reader(current_entity_id)
-        source_entity_id = dependencies.get(current_entity_id)
-        if source_entity_id is None:
+        dependency = dependencies.get(current_entity_id)
+        if dependency is None:
             result = reported if reported is not None else "unknown"
         else:
+            source_entity_id = dependency.power_source_entity_id
             source_state = resolve(source_entity_id, visiting | {current_entity_id})
             if source_state == "on":
                 result = reported if reported is not None else "unknown"
@@ -139,9 +171,10 @@ def effective_device_state(
         return result
 
     effective = resolve(entity_id, frozenset())
-    source_entity_id = dependencies.get(entity_id)
-    if source_entity_id is None:
+    dependency = dependencies.get(entity_id)
+    if dependency is None:
         return effective, None
+    source_entity_id = dependency.power_source_entity_id
     source_state = resolve(source_entity_id, frozenset({entity_id}))
     if source_state == "on":
         return effective, PowerDependencyStatus(
@@ -149,19 +182,25 @@ def effective_device_state(
             state="powered",
             reason="power_source_on",
             blocks_commands=False,
+            policy=dependency.policy,
+            warmup_seconds=dependency.warmup_seconds,
         )
     if source_state == "off":
         return effective, PowerDependencyStatus(
             source_entity_id=source_entity_id,
             state="unpowered",
             reason="power_source_off",
-            blocks_commands=True,
+            blocks_commands=dependency.policy != AUTO_TURN_ON_POLICY,
+            policy=dependency.policy,
+            warmup_seconds=dependency.warmup_seconds,
         )
     return effective, PowerDependencyStatus(
         source_entity_id=source_entity_id,
         state="unavailable",
         reason="power_source_unavailable",
         blocks_commands=True,
+        policy=dependency.policy,
+        warmup_seconds=dependency.warmup_seconds,
     )
 
 

@@ -836,7 +836,8 @@ class LocalSummaryAccessTest(unittest.TestCase):
             {
                 "dependentEntityId": "light.synthetic_private_lamp",
                 "powerSourceEntityId": "switch.synthetic_private_light",
-                "policy": "requires_on",
+                "policy": "auto_turn_on",
+                "warmupSeconds": 2,
             }
         ]
         saved = asyncio.run(
@@ -3025,7 +3026,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.168", panel.payload["integration_version"])
+        self.assertEqual("1.52.169", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",

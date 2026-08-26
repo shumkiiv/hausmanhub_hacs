@@ -10,6 +10,7 @@ from custom_components.hausman_hub.application.device_power_dependencies import 
     DevicePowerDependencyServiceViolation,
 )
 from custom_components.hausman_hub.domain.device_power_dependencies import (
+    DevicePowerDependency,
     DevicePowerDependencyViolation,
     effective_device_state,
     validate_device_power_dependencies,
@@ -29,13 +30,30 @@ class _Store:
 
 
 def _dependency(
-    dependent: str = "light.ceiling", source: str = "switch.wall"
-) -> dict[str, str]:
-    return {
+    dependent: str = "light.ceiling",
+    source: str = "switch.wall",
+    *,
+    policy: str = "requires_on",
+    warmup_seconds: int | None = None,
+) -> dict[str, object]:
+    dependency: dict[str, object] = {
         "dependentEntityId": dependent,
         "powerSourceEntityId": source,
-        "policy": "requires_on",
+        "policy": policy,
     }
+    if warmup_seconds is not None:
+        dependency["warmupSeconds"] = warmup_seconds
+    return dependency
+
+
+def _link(
+    dependent: str = "light.ceiling",
+    source: str = "switch.wall",
+    *,
+    policy: str = "requires_on",
+    warmup_seconds: int = 0,
+) -> DevicePowerDependency:
+    return DevicePowerDependency(dependent, source, policy, warmup_seconds)
 
 
 class DevicePowerDependencyDomainTest(unittest.TestCase):
@@ -43,7 +61,7 @@ class DevicePowerDependencyDomainTest(unittest.TestCase):
         states = {"switch.wall": "off", "light.ceiling": "on"}
         effective, status = effective_device_state(
             "light.ceiling",
-            {"light.ceiling": "switch.wall"},
+            {"light.ceiling": _link()},
             states.get,
         )
         self.assertEqual("off", effective)
@@ -61,13 +79,44 @@ class DevicePowerDependencyDomainTest(unittest.TestCase):
         effective, status = effective_device_state(
             "light.ceiling",
             {
-                "switch.branch": "switch.main",
-                "light.ceiling": "switch.branch",
+                "switch.branch": _link("switch.branch", "switch.main"),
+                "light.ceiling": _link("light.ceiling", "switch.branch"),
             },
             states.get,
         )
         self.assertEqual("off", effective)
         self.assertEqual("unpowered", status.state)
+
+    def test_auto_source_off_keeps_command_available_for_preparation(self) -> None:
+        effective, status = effective_device_state(
+            "light.ceiling",
+            {
+                "light.ceiling": _link(
+                    policy="auto_turn_on", warmup_seconds=5
+                )
+            },
+            {"switch.wall": "off", "light.ceiling": "on"}.get,
+        )
+
+        self.assertEqual("off", effective)
+        self.assertIsNotNone(status)
+        self.assertFalse(status.blocks_commands)
+        self.assertTrue(status.auto_power_on)
+        self.assertEqual(5, status.warmup_seconds)
+
+    def test_auto_policy_requires_explicit_bounded_warmup(self) -> None:
+        with self.assertRaises(DevicePowerDependencyViolation):
+            validate_device_power_dependencies(
+                [_dependency(policy="auto_turn_on")]
+            )
+        with self.assertRaises(DevicePowerDependencyViolation):
+            validate_device_power_dependencies(
+                [
+                    _dependency(
+                        policy="auto_turn_on", warmup_seconds=31
+                    )
+                ]
+            )
 
     def test_cycles_and_duplicate_dependents_are_rejected(self) -> None:
         with self.assertRaises(DevicePowerDependencyViolation):
@@ -99,7 +148,7 @@ class DevicePowerDependencyServiceTest(unittest.IsolatedAsyncioTestCase):
         document = await service.async_replace(0, [_dependency()])
         self.assertEqual(1, document["revision"])
         self.assertEqual(
-            {"light.ceiling": "switch.wall"},
+            {"light.ceiling": _link()},
             service.mapping,
         )
         self.assertEqual(1, len(store.saved))
@@ -127,4 +176,26 @@ class DevicePowerDependencyServiceTest(unittest.IsolatedAsyncioTestCase):
         )
         await service.async_load()
         self.assertEqual(4, service.document["revision"])
-        self.assertEqual({"light.ceiling": "switch.wall"}, service.mapping)
+        self.assertEqual({"light.ceiling": _link()}, service.mapping)
+
+    async def test_auto_policy_and_warmup_survive_restart(self) -> None:
+        stored = {
+            "revision": 2,
+            "updatedAt": "2026-08-26T09:45:00Z",
+            "dependencies": [
+                _dependency(policy="auto_turn_on", warmup_seconds=5)
+            ],
+        }
+        service = DevicePowerDependencyService(_Store(stored))
+
+        await service.async_load()
+
+        self.assertEqual(
+            {
+                "light.ceiling": _link(
+                    policy="auto_turn_on", warmup_seconds=5
+                )
+            },
+            service.mapping,
+        )
+        self.assertEqual(stored["dependencies"], service.document["dependencies"])

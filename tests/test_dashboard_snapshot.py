@@ -17,6 +17,9 @@ from custom_components.hausman_hub.application.dashboard_snapshot import (
     build_dashboard_snapshot,
 )
 from custom_components.hausman_hub.domain.hub_settings import HausmanHubSettings
+from custom_components.hausman_hub.domain.device_power_dependencies import (
+    DevicePowerDependency,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -227,7 +230,11 @@ class DashboardSnapshotTest(unittest.TestCase):
             ),
             generated_at_ms=1,
             local_iso="2026-08-10T19:00:00+03:00",
-            power_dependencies={"light.ceiling": "switch.wall"},
+            power_dependencies={
+                "light.ceiling": DevicePowerDependency(
+                    "light.ceiling", "switch.wall"
+                )
+            },
         )
         light = next(device for device in snapshot["devices"] if device["name"] == "Люстра")
         switch = next(
@@ -242,6 +249,8 @@ class DashboardSnapshotTest(unittest.TestCase):
         self.assertEqual(switch["id"], light["powerDependency"]["sourceDeviceId"])
         self.assertEqual("unpowered", light["powerDependency"]["state"])
         self.assertTrue(light["powerDependency"]["blocksCommands"])
+        self.assertEqual("requires_on", light["powerDependency"]["policy"])
+        self.assertFalse(light["powerDependency"]["autoPowerOn"])
 
     def test_events_are_newest_first_and_enable_activity_capability(self) -> None:
         snapshot = build_dashboard_snapshot(
