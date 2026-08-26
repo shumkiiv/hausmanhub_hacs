@@ -1,5 +1,12 @@
 # HausmanHub AI Context
 
+- 2026-08-26: HACS `1.52.174`, commit `3adc780`, исправляет название и
+  иконку панели в боковом меню Home Assistant. Живая регистрация после
+  restart подтверждает `title=Hausman`, `icon=mdi:home-heart` и модуль
+  `1.52.174`. Перед установкой создан backup `e153e033`; config check прошёл,
+  installed/latest равны `v1.52.174`, ошибок Hausman в system log нет.
+  Полный release gate: 1720 тестов, 4 skipped.
+
 - 2026-08-26: HACS `1.52.173`, commit `320e9e8`, разрешает удалять только
   отключённые protected-сценарии. На production удалены 4 устаревших правила,
   39 оставшихся привязаны к комнатам. «Закрыть шторы» подтверждённо содержит
