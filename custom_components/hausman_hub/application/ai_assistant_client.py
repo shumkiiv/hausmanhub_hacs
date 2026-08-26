@@ -17,6 +17,7 @@ from ..domain.ai_assistant_json import AiJsonObject, AiJsonValue
 
 
 _REQUEST_TIMEOUT_SECONDS = 10
+_MAX_SYSTEM_PROMPT_LENGTH = 32 * 1024
 _SYSTEM_PROMPT = (
     "Ты климатический помощник HausmanHub. Верни только JSON advisory без команд, "
     "с полями version, source, generatedAt, summary, recommendations и riskFlags."
@@ -59,6 +60,28 @@ class OpenAiCompatibleTransport:
         api_key: str,
         evidence: AiJsonObject,
     ) -> AiProviderCompletion:
+        return await self.async_complete_task(
+            settings,
+            api_key,
+            _SYSTEM_PROMPT,
+            {"evidence": evidence},
+        )
+
+    async def async_complete_task(
+        self,
+        settings: AiAssistantSettings,
+        api_key: str,
+        system_prompt: str,
+        payload: AiJsonObject,
+    ) -> AiProviderCompletion:
+        """Complete one server-owned JSON task through the same provider."""
+
+        if (
+            type(system_prompt) is not str
+            or not system_prompt
+            or len(system_prompt) > _MAX_SYSTEM_PROMPT_LENGTH
+        ):
+            raise AiAssistantViolation("invalid_system_prompt")
         session = self._session_factory()
         try:
             async with session.post(
@@ -71,11 +94,11 @@ class OpenAiCompatibleTransport:
                     "model": settings.model,
                     "response_format": {"type": "json_object"},
                     "messages": [
-                        {"role": "system", "content": _SYSTEM_PROMPT},
+                        {"role": "system", "content": system_prompt},
                         {
                             "role": "user",
                             "content": json.dumps(
-                                {"evidence": evidence},
+                                payload,
                                 ensure_ascii=False,
                                 separators=(",", ":"),
                             ),

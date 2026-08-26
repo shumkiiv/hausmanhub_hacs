@@ -67,6 +67,7 @@ SCENARIOS_TEST_PATH = f"{SCENARIOS_PATH}/test"
 SCENARIOS_DELETE_PATH = f"{SCENARIOS_PATH}/delete"
 SCENARIOS_RUN_PATH = f"{SCENARIOS_PATH}/run"
 SCENARIOS_ACTION_PATH = f"{SCENARIOS_PATH}/action"
+SCENARIOS_AI_DRAFT_PATH = f"{SCENARIOS_PATH}/ai-draft"
 SCENARIOS_UPCOMING_PATH = f"{SCENARIOS_PATH}/upcoming"
 SCENARIOS_UPCOMING_CANCEL_PATH = f"{SCENARIOS_UPCOMING_PATH}/cancel"
 VOICE_GREETING_PATH = f"{API_BASE_PATH}/voice/yandex-greeting"
@@ -83,6 +84,7 @@ def api_capabilities_snapshot(
     climate_runtime_available: bool = False,
     climate_phase: str = "unavailable",
     climate_commands_enabled: bool = False,
+    scenario_ai_available: bool = False,
 ) -> dict[str, object]:
     """Describe only the stable, local, tablet-facing HausmanHub API surface."""
 
@@ -337,6 +339,21 @@ def api_capabilities_snapshot(
                 "test": True,
                 "delete": True,
                 "run": True,
+                "aiDraft": {
+                    "available": scenario_ai_available,
+                    "path": SCENARIOS_AI_DRAFT_PATH,
+                    "method": "POST",
+                    "request_contract": {
+                        "name": "hausman-hub-scenario-ai-draft-request",
+                        "version": 1,
+                    },
+                    "response_contract": {
+                        "name": "hausman-hub-scenario-ai-draft",
+                        "version": 1,
+                    },
+                    "saves": False,
+                    "sends_commands": False,
+                },
                 "upcoming": True,
                 "definitionVersions": [1],
                 "paths": {
@@ -347,6 +364,7 @@ def api_capabilities_snapshot(
                     "delete": SCENARIOS_DELETE_PATH,
                     "run": SCENARIOS_RUN_PATH,
                     "action": SCENARIOS_ACTION_PATH,
+                    "aiDraft": SCENARIOS_AI_DRAFT_PATH,
                     "upcoming": SCENARIOS_UPCOMING_PATH,
                     "upcomingCancel": SCENARIOS_UPCOMING_CANCEL_PATH,
                 },

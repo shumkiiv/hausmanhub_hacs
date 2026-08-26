@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import unittest
 
 from custom_components.hausman_hub.application.ai_assistant_client import (
@@ -84,3 +85,31 @@ class OpenAiCompatibleTransportTest(unittest.TestCase):
         self.assertFalse(request["allow_redirects"])
         self.assertEqual("Bearer test-key-123", request["headers"]["Authorization"])
         self.assertEqual("gpt-test", request["json"]["model"])
+
+    def test_task_transport_uses_server_prompt_and_exact_json_payload(self) -> None:
+        session = Session(
+            Response(
+                {
+                    "choices": [{"message": {"content": '{"status":"ready"}'}}],
+                    "usage": {"prompt_tokens": 4, "completion_tokens": 2},
+                }
+            )
+        )
+        transport = OpenAiCompatibleTransport(lambda: session)
+
+        completion = asyncio.run(
+            transport.async_complete_task(
+                settings(),
+                "test-key-123",
+                "Верни JSON сценария",
+                {"request": "Включи свет", "catalog": {"devices": []}},
+            )
+        )
+
+        messages = session.calls[0][1]["json"]["messages"]
+        self.assertEqual("Верни JSON сценария", messages[0]["content"])
+        self.assertEqual(
+            {"request": "Включи свет", "catalog": {"devices": []}},
+            json.loads(messages[1]["content"]),
+        )
+        self.assertEqual(2, completion.completion_tokens)

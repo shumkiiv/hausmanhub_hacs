@@ -67,3 +67,14 @@ def test_device_tree_groups_physical_devices_and_meets_p95_budget() -> None:
         """
     )
     assert completed.returncode == 0, completed.stderr
+
+
+def test_ai_composer_keeps_mentions_typed_and_draft_inert() -> None:
+    source = (FRONTEND / "hausman-hub-scenario-ai.js").read_text(encoding="utf-8")
+
+    assert 'name: "hausman-hub-scenario-ai-draft-request"' in source
+    assert "targetId: device.target_id" in source
+    assert "result.saved === false" in source
+    assert "result.commandSent === false" in source
+    assert "onDraft(result.draft)" in source
+    assert "SpeechRecognition" in source

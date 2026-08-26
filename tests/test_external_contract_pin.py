@@ -11,7 +11,9 @@ PIN_PATH = REPOSITORY_ROOT / "hausmanhub-contracts.json"
 
 VENDORED_CONTRACT_HASHES = {
     "custom_components/hausman_hub/contracts/v1/scenario-definition.schema.json": "71ef6345732e599385522935b794d7e391875fa73bce0352642421fab35ca9bf",
-    "custom_components/hausman_hub/contracts/v1/api-capabilities.schema.json": "2c8a798657e268ce2210e34a6825886f8f891f70b2459d23f633e12d472e34b5",
+    "custom_components/hausman_hub/contracts/v1/api-capabilities.schema.json": "79bb1abaa011b82f3494b95a7e60179cc28be3e3761659ccc83abfc6b50e30f0",
+    "custom_components/hausman_hub/contracts/v1/scenario-ai-draft-request.schema.json": "eeb72fc172f8730552fb174a1a0a55f58debeb9b5612068b0c2889190c37b9c1",
+    "custom_components/hausman_hub/contracts/v1/scenario-ai-draft.schema.json": "585ec9c8e48c208452f4f80407feacfc04a00c8b580e04a63504fa049adedb5e",
     "custom_components/hausman_hub/contracts/v1/scenario-health.schema.json": "8a14e51bdb531dd674bede8e0e0618a2788df641dc23fc9da2e8af9b821890e4",
     "custom_components/hausman_hub/contracts/v1/device-action-request.schema.json": "4ff6f1cb6e7939749e14aa43799e6108c1db7309251d2b7ee5026f047c667b94",
     "custom_components/hausman_hub/contracts/v1/device-action-receipt.schema.json": "38a710d76b1d335e22cf7c8e85907b329ab7d6952375d86756781f10fcd53a3c",
@@ -56,14 +58,14 @@ def test_external_contract_pin_is_explicit_and_canonical() -> None:
 
     assert pin == {
         "repository": "shumkiiv/hausmanhub-contracts",
-        "version": "0.59.0",
-        "commit": "5189a020c395babb65795b17f35674b31c4c0a45",
+        "version": "0.60.0",
+        "commit": "acce7df94ad5dbf1385e43e4bf75f4a9ced0c203",
         "canonical": True,
         "role": "runtime-consumer",
     }
 
 
-def test_contract_0_59_0_vendored_files_match_canonical_hashes() -> None:
+def test_contract_0_60_0_vendored_files_match_canonical_hashes() -> None:
     for relative_path, expected_hash in VENDORED_CONTRACT_HASHES.items():
         payload = (REPOSITORY_ROOT / relative_path).read_bytes()
         assert hashlib.sha256(payload).hexdigest() == expected_hash, relative_path

@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/scenario-ai-draft-request.schema.json",
+  "title": "Hausman scenario AI draft request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "text",
+    "mentions"
+  ],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "const": "hausman-hub-scenario-ai-draft-request"
+        },
+        "version": {
+          "const": 1
+        }
+      }
+    },
+    "text": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 2000
+    },
+    "locale": {
+      "type": "string",
+      "enum": [
+        "ru-RU",
+        "en-US"
+      ],
+      "default": "ru-RU"
+    },
+    "mentions": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "$ref": "#/$defs/mention"
+      }
+    }
+  },
+  "$defs": {
+    "public_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "mention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "token",
+        "label",
+        "targetId"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^mention_[1-9][0-9]{0,2}$"
+        },
+        "token": {
+          "type": "string",
+          "pattern": "^@[^\\r\\n]{1,120}$",
+          "maxLength": 121
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "targetId": {
+          "$ref": "#/$defs/public_id"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,260 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/scenario-ai-draft.schema.json",
+  "title": "Hausman scenario AI draft v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "status",
+    "summary",
+    "warnings",
+    "clarifyingQuestions",
+    "resolvedMentions",
+    "saved",
+    "commandSent"
+  ],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "const": "hausman-hub-scenario-ai-draft"
+        },
+        "version": {
+          "const": 1
+        }
+      }
+    },
+    "status": {
+      "enum": [
+        "ready",
+        "needs_clarification"
+      ]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "draft": {
+      "$ref": "#/$defs/draft"
+    },
+    "warnings": {
+      "type": "array",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "review_required",
+          "disabled_until_saved",
+          "dangerous_action_requires_confirmation",
+          "ambiguous_request",
+          "provider_output_repaired"
+        ]
+      }
+    },
+    "clarifyingQuestions": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 240
+      }
+    },
+    "resolvedMentions": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "$ref": "#/$defs/resolved_mention"
+      }
+    },
+    "saved": {
+      "const": false
+    },
+    "commandSent": {
+      "const": false
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "ready"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "required": [
+          "draft"
+        ],
+        "properties": {
+          "clarifyingQuestions": {
+            "maxItems": 0
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "needs_clarification"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "not": {
+          "required": [
+            "draft"
+          ]
+        },
+        "properties": {
+          "clarifyingQuestions": {
+            "minItems": 1
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "stable_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+    },
+    "public_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "resolved_mention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "targetId"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^mention_[1-9][0-9]{0,2}$"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "targetId": {
+          "$ref": "#/$defs/public_id"
+        }
+      }
+    },
+    "draft": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "group",
+        "description",
+        "icon",
+        "enabled",
+        "favorite",
+        "danger",
+        "requiresConfirmation",
+        "roomId",
+        "roomIds",
+        "triggerDescription",
+        "conditionDescription",
+        "actionDescription",
+        "definition"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/stable_id"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "group": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "icon": {
+          "type": "string",
+          "pattern": "^mdi:[a-z0-9-]+$",
+          "maxLength": 80
+        },
+        "enabled": {
+          "const": false
+        },
+        "favorite": {
+          "type": "boolean"
+        },
+        "danger": {
+          "type": "boolean"
+        },
+        "requiresConfirmation": {
+          "type": "boolean"
+        },
+        "roomId": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/public_id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "roomIds": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/public_id"
+          }
+        },
+        "triggerDescription": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "conditionDescription": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "actionDescription": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "definition": {
+          "$ref": "scenario-definition.schema.json"
+        }
+      }
+    }
+  }
+}

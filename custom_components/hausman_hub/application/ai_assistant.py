@@ -72,6 +72,14 @@ class AiProviderTransport(Protocol):
         evidence: AiJsonObject,
     ) -> AiProviderCompletion: ...
 
+    async def async_complete_task(
+        self,
+        settings: AiAssistantSettings,
+        api_key: str,
+        system_prompt: str,
+        payload: AiJsonObject,
+    ) -> AiProviderCompletion: ...
+
 
 class AiAssistantService:
     def __init__(
@@ -126,6 +134,38 @@ class AiAssistantService:
             assert api_key is not None
             evidence = await self._evidence_reader()
             return await self._async_refresh_configured(settings, api_key, evidence)
+
+    @property
+    def scenario_generation_available(self) -> bool:
+        """Report whether the configured provider can generate a scenario draft."""
+
+        return (
+            self._settings is not None
+            and self._settings.enabled
+            and bool(self._api_key)
+        )
+
+    async def async_complete_json_task(
+        self,
+        *,
+        system_prompt: str,
+        payload: AiJsonObject,
+    ) -> AiProviderCompletion:
+        """Run one bounded JSON task without changing climate advisory state."""
+
+        async with self._lock:
+            if not self.scenario_generation_available:
+                raise AiProviderUnavailable()
+            settings = self._settings
+            api_key = self._api_key
+            assert settings is not None
+            assert api_key is not None
+            return await self._transport.async_complete_task(
+                settings,
+                api_key,
+                system_prompt,
+                payload,
+            )
 
     def _short_circuit_status(self) -> AiAdvisoryStatus | None:
         if self._settings is None or not self._api_key:

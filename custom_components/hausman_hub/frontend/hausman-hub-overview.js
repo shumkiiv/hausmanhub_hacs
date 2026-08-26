@@ -1,10 +1,10 @@
-import { createHeroRoomNavigation } from "./hausman-hub-hero-room-navigation.js?v=1.52.169";
-import { overviewHeroRenderKey, overviewHomeName, stableOverviewHeroImage } from "./hausman-hub-overview-hero-state.js?v=1.52.169";
-import { renderHomeTargetCard } from "./hausman-hub-climate-overview.js?v=1.52.169";
-import { scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.169";
-import { openUpcomingEventsModal } from "./hausman-hub-overview-events-modal.js?v=1.52.169";
-import { renderOverviewSideCards } from "./hausman-hub-overview-side.js?v=1.52.169";
-import { renderOverviewUtilityCards } from "./hausman-hub-overview-utility-cards.js?v=1.52.169";
+import { createHeroRoomNavigation } from "./hausman-hub-hero-room-navigation.js?v=1.52.170";
+import { overviewHeroRenderKey, overviewHomeName, stableOverviewHeroImage } from "./hausman-hub-overview-hero-state.js?v=1.52.170";
+import { renderHomeTargetCard } from "./hausman-hub-climate-overview.js?v=1.52.170";
+import { scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.170";
+import { openUpcomingEventsModal } from "./hausman-hub-overview-events-modal.js?v=1.52.170";
+import { renderOverviewSideCards } from "./hausman-hub-overview-side.js?v=1.52.170";
+import { renderOverviewUtilityCards } from "./hausman-hub-overview-utility-cards.js?v=1.52.170";
 
 function validNumber(value) {
   return value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));

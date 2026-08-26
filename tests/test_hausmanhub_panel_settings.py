@@ -56,6 +56,7 @@ MEDIA_DEVICE_JS = PANEL_JS.with_name("hausman-hub-media-device.js")
 DEVICE_CARD_JS = PANEL_JS.with_name("hausman-hub-device-card.js")
 DEVICE_CONTROLS_JS = PANEL_JS.with_name("hausman-hub-device-controls.js")
 SCENARIOS_JS = PANEL_JS.with_name("hausman-hub-scenarios.js")
+SCENARIO_AI_JS = PANEL_JS.with_name("hausman-hub-scenario-ai.js")
 SCENARIO_CATALOG_JS = PANEL_JS.with_name("hausman-hub-scenario-catalog.js")
 SCENARIO_DEVICE_PICKER_JS = PANEL_JS.with_name("hausman-hub-scenario-device-picker.js")
 SCENARIO_ICONS_JS = PANEL_JS.with_name("hausman-hub-scenario-icons.js")
@@ -671,6 +672,10 @@ def panel_script(
       vm.runInThisContext(
         fs.readFileSync({str(SCENARIO_CATALOG_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(SCENARIO_CATALOG_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(SCENARIO_AI_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, "").replace(/export /g, ""),
+        {{ filename: {str(SCENARIO_AI_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(SCENARIOS_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, "").replace(/export /g, ""),
@@ -4987,7 +4992,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.169")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.170")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

@@ -63,13 +63,38 @@
           "type": "object",
           "additionalProperties": false,
           "dependentRequired": {
-            "feature_matrix_path": ["feature_matrix_method", "feature_matrix_contract"],
-            "feature_matrix_method": ["feature_matrix_path", "feature_matrix_contract"],
-            "feature_matrix_contract": ["feature_matrix_path", "feature_matrix_method"],
-            "batch_path": ["batch_method", "batch_request_contract", "batch_response_contract"],
-            "batch_method": ["batch_path", "batch_request_contract", "batch_response_contract"],
-            "batch_request_contract": ["batch_path", "batch_method", "batch_response_contract"],
-            "batch_response_contract": ["batch_path", "batch_method", "batch_request_contract"]
+            "feature_matrix_path": [
+              "feature_matrix_method",
+              "feature_matrix_contract"
+            ],
+            "feature_matrix_method": [
+              "feature_matrix_path",
+              "feature_matrix_contract"
+            ],
+            "feature_matrix_contract": [
+              "feature_matrix_path",
+              "feature_matrix_method"
+            ],
+            "batch_path": [
+              "batch_method",
+              "batch_request_contract",
+              "batch_response_contract"
+            ],
+            "batch_method": [
+              "batch_path",
+              "batch_request_contract",
+              "batch_response_contract"
+            ],
+            "batch_request_contract": [
+              "batch_path",
+              "batch_method",
+              "batch_response_contract"
+            ],
+            "batch_response_contract": [
+              "batch_path",
+              "batch_method",
+              "batch_request_contract"
+            ]
           },
           "required": [
             "available",
@@ -114,7 +139,9 @@
             "batch_path": {
               "const": "/api/hausman_hub/v1/device-actions/batch"
             },
-            "batch_method": {"const": "POST"},
+            "batch_method": {
+              "const": "POST"
+            },
             "batch_request_contract": {
               "$ref": "#/$defs/device_action_batch_request_contract"
             },
@@ -132,11 +159,25 @@
                 "release_receipt_contract"
               ],
               "properties": {
-                "confirmation_field": {"const": "confirmedByUser"},
-                "dry_run_field": {"const": "dryRun"},
-                "default_hold_seconds": {"type": "integer", "minimum": 1, "maximum": 20},
-                "maximum_hold_seconds": {"type": "integer", "minimum": 1, "maximum": 20},
-                "release_receipt_contract": {"$ref": "#/$defs/intercom_release_receipt_contract"}
+                "confirmation_field": {
+                  "const": "confirmedByUser"
+                },
+                "dry_run_field": {
+                  "const": "dryRun"
+                },
+                "default_hold_seconds": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 20
+                },
+                "maximum_hold_seconds": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 20
+                },
+                "release_receipt_contract": {
+                  "$ref": "#/$defs/intercom_release_receipt_contract"
+                }
               }
             }
           }
@@ -144,14 +185,33 @@
         "device_property_names": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["available", "path", "method", "supports_reset", "request_contract", "response_contract"],
+          "required": [
+            "available",
+            "path",
+            "method",
+            "supports_reset",
+            "request_contract",
+            "response_contract"
+          ],
           "properties": {
-            "available": {"type": "boolean"},
-            "path": {"const": "/api/hausman_hub/v1/device-property-names"},
-            "method": {"const": "POST"},
-            "supports_reset": {"const": true},
-            "request_contract": {"$ref": "#/$defs/device_property_name_request_contract"},
-            "response_contract": {"$ref": "#/$defs/device_property_name_receipt_contract"}
+            "available": {
+              "type": "boolean"
+            },
+            "path": {
+              "const": "/api/hausman_hub/v1/device-property-names"
+            },
+            "method": {
+              "const": "POST"
+            },
+            "supports_reset": {
+              "const": true
+            },
+            "request_contract": {
+              "$ref": "#/$defs/device_property_name_request_contract"
+            },
+            "response_contract": {
+              "$ref": "#/$defs/device_property_name_receipt_contract"
+            }
           }
         },
         "dashboard_snapshot": {
@@ -385,25 +445,51 @@
         "room_settings": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["available", "path", "methods", "optimistic_locking", "response_contract"],
+          "required": [
+            "available",
+            "path",
+            "methods",
+            "optimistic_locking",
+            "response_contract"
+          ],
           "properties": {
-            "available": { "type": "boolean" },
-            "path": { "const": "/api/hausman_hub/v1/room-settings" },
+            "available": {
+              "type": "boolean"
+            },
+            "path": {
+              "const": "/api/hausman_hub/v1/room-settings"
+            },
             "methods": {
               "type": "array",
-              "prefixItems": [{ "const": "GET" }, { "const": "PUT" }],
+              "prefixItems": [
+                {
+                  "const": "GET"
+                },
+                {
+                  "const": "PUT"
+                }
+              ],
               "items": false,
               "minItems": 2,
               "maxItems": 2
             },
-            "optimistic_locking": { "const": true },
+            "optimistic_locking": {
+              "const": true
+            },
             "response_contract": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["name", "version"],
+              "required": [
+                "name",
+                "version"
+              ],
               "properties": {
-                "name": { "const": "hausman-hub-room-settings" },
-                "version": { "const": 1 }
+                "name": {
+                  "const": "hausman-hub-room-settings"
+                },
+                "version": {
+                  "const": 1
+                }
               }
             }
           }
@@ -411,27 +497,53 @@
         "tablet_power": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["available", "path", "method", "request_contract", "response_contract"],
+          "required": [
+            "available",
+            "path",
+            "method",
+            "request_contract",
+            "response_contract"
+          ],
           "properties": {
-            "available": {"type": "boolean"},
-            "path": {"const": "/api/hausman_hub/v1/tablet-power-status"},
-            "method": {"const": "POST"},
+            "available": {
+              "type": "boolean"
+            },
+            "path": {
+              "const": "/api/hausman_hub/v1/tablet-power-status"
+            },
+            "method": {
+              "const": "POST"
+            },
             "request_contract": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["name", "version"],
+              "required": [
+                "name",
+                "version"
+              ],
               "properties": {
-                "name": {"const": "hausman-hub-tablet-power-status-request"},
-                "version": {"const": 1}
+                "name": {
+                  "const": "hausman-hub-tablet-power-status-request"
+                },
+                "version": {
+                  "const": 1
+                }
               }
             },
             "response_contract": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["name", "version"],
+              "required": [
+                "name",
+                "version"
+              ],
               "properties": {
-                "name": {"const": "hausman-hub-tablet-power-status-receipt"},
-                "version": {"const": 1}
+                "name": {
+                  "const": "hausman-hub-tablet-power-status-receipt"
+                },
+                "version": {
+                  "const": 1
+                }
               }
             }
           }
@@ -532,64 +644,138 @@
         "energy_meter": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["available", "path", "methods", "optimistic_locking", "response_contract"],
+          "required": [
+            "available",
+            "path",
+            "methods",
+            "optimistic_locking",
+            "response_contract"
+          ],
           "properties": {
-            "available": { "type": "boolean" },
-            "path": { "const": "/api/hausman_hub/v1/energy/meter" },
+            "available": {
+              "type": "boolean"
+            },
+            "path": {
+              "const": "/api/hausman_hub/v1/energy/meter"
+            },
             "methods": {
               "type": "array",
-              "prefixItems": [{ "const": "GET" }, { "const": "POST" }],
+              "prefixItems": [
+                {
+                  "const": "GET"
+                },
+                {
+                  "const": "POST"
+                }
+              ],
               "items": false,
               "minItems": 2,
               "maxItems": 2
             },
-            "optimistic_locking": { "const": true },
-            "response_contract": { "$ref": "#/$defs/energy_meter_contract" },
-            "collection_path": { "const": "/api/hausman_hub/v1/energy/meters" },
+            "optimistic_locking": {
+              "const": true
+            },
+            "response_contract": {
+              "$ref": "#/$defs/energy_meter_contract"
+            },
+            "collection_path": {
+              "const": "/api/hausman_hub/v1/energy/meters"
+            },
             "collection_methods": {
               "type": "array",
-              "prefixItems": [{ "const": "GET" }, { "const": "POST" }],
+              "prefixItems": [
+                {
+                  "const": "GET"
+                },
+                {
+                  "const": "POST"
+                }
+              ],
               "items": false,
               "minItems": 2,
               "maxItems": 2
             },
-            "collection_response_contract": { "$ref": "#/$defs/energy_meters_contract" }
+            "collection_response_contract": {
+              "$ref": "#/$defs/energy_meters_contract"
+            }
           }
         },
         "water_meter": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["available", "path", "methods", "optimistic_locking", "response_contract"],
+          "required": [
+            "available",
+            "path",
+            "methods",
+            "optimistic_locking",
+            "response_contract"
+          ],
           "properties": {
-            "available": { "type": "boolean" },
-            "path": { "const": "/api/hausman_hub/v1/water/meter" },
+            "available": {
+              "type": "boolean"
+            },
+            "path": {
+              "const": "/api/hausman_hub/v1/water/meter"
+            },
             "methods": {
               "type": "array",
-              "prefixItems": [{ "const": "GET" }, { "const": "POST" }],
+              "prefixItems": [
+                {
+                  "const": "GET"
+                },
+                {
+                  "const": "POST"
+                }
+              ],
               "items": false,
               "minItems": 2,
               "maxItems": 2
             },
-            "optimistic_locking": { "const": true },
-            "response_contract": { "$ref": "#/$defs/water_meter_contract" }
+            "optimistic_locking": {
+              "const": true
+            },
+            "response_contract": {
+              "$ref": "#/$defs/water_meter_contract"
+            }
           }
         },
         "device_discovery": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["available", "path", "methods", "optimistic_locking", "response_contract"],
+          "required": [
+            "available",
+            "path",
+            "methods",
+            "optimistic_locking",
+            "response_contract"
+          ],
           "properties": {
-            "available": { "type": "boolean" },
-            "path": { "const": "/api/hausman_hub/v1/device-discovery" },
+            "available": {
+              "type": "boolean"
+            },
+            "path": {
+              "const": "/api/hausman_hub/v1/device-discovery"
+            },
             "methods": {
               "type": "array",
-              "prefixItems": [{ "const": "GET" }, { "const": "POST" }],
+              "prefixItems": [
+                {
+                  "const": "GET"
+                },
+                {
+                  "const": "POST"
+                }
+              ],
               "items": false,
               "minItems": 2,
               "maxItems": 2
             },
-            "optimistic_locking": { "const": true },
-            "response_contract": { "$ref": "#/$defs/device_discovery_contract" }
+            "optimistic_locking": {
+              "const": true
+            },
+            "response_contract": {
+              "$ref": "#/$defs/device_discovery_contract"
+            }
           }
         },
         "event_stream": {
@@ -648,11 +834,21 @@
                 "survives_restart"
               ],
               "properties": {
-                "strategy": { "const": "last_event_id" },
-                "request_header": { "const": "Last-Event-ID" },
-                "max_events": { "const": 128 },
-                "delivery_queue_limit": { "const": 32 },
-                "survives_restart": { "const": false }
+                "strategy": {
+                  "const": "last_event_id"
+                },
+                "request_header": {
+                  "const": "Last-Event-ID"
+                },
+                "max_events": {
+                  "const": 128
+                },
+                "delivery_queue_limit": {
+                  "const": 32
+                },
+                "survives_restart": {
+                  "const": false
+                }
               }
             }
           }
@@ -688,6 +884,42 @@
             },
             "run": {
               "const": true
+            },
+            "aiDraft": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "available",
+                "path",
+                "method",
+                "request_contract",
+                "response_contract",
+                "saves",
+                "sends_commands"
+              ],
+              "properties": {
+                "available": {
+                  "type": "boolean"
+                },
+                "path": {
+                  "const": "/api/hausman_hub/v1/scenarios/ai-draft"
+                },
+                "method": {
+                  "const": "POST"
+                },
+                "request_contract": {
+                  "$ref": "#/$defs/scenario_ai_draft_request_contract"
+                },
+                "response_contract": {
+                  "$ref": "#/$defs/scenario_ai_draft_contract"
+                },
+                "saves": {
+                  "const": false
+                },
+                "sends_commands": {
+                  "const": false
+                }
+              }
             },
             "definitionVersions": {
               "type": "array",
@@ -729,6 +961,9 @@
                 },
                 "action": {
                   "const": "/api/hausman_hub/v1/scenarios/action"
+                },
+                "aiDraft": {
+                  "const": "/api/hausman_hub/v1/scenarios/ai-draft"
                 },
                 "upcoming": {
                   "const": "/api/hausman_hub/v1/scenarios/upcoming"
@@ -898,76 +1133,164 @@
     }
   },
   "$defs": {
+    "scenario_ai_draft_request_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "const": "hausman-hub-scenario-ai-draft-request"
+        },
+        "version": {
+          "const": 1
+        }
+      }
+    },
+    "scenario_ai_draft_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "const": "hausman-hub-scenario-ai-draft"
+        },
+        "version": {
+          "const": 1
+        }
+      }
+    },
     "device_property_name_request_contract": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "version"],
+      "required": [
+        "name",
+        "version"
+      ],
       "properties": {
-        "name": {"const": "hausman-hub-device-property-name-request"},
-        "version": {"const": 1}
+        "name": {
+          "const": "hausman-hub-device-property-name-request"
+        },
+        "version": {
+          "const": 1
+        }
       }
     },
     "device_property_name_receipt_contract": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "version"],
+      "required": [
+        "name",
+        "version"
+      ],
       "properties": {
-        "name": {"const": "hausman-hub-device-property-name-receipt"},
-        "version": {"const": 1}
+        "name": {
+          "const": "hausman-hub-device-property-name-receipt"
+        },
+        "version": {
+          "const": 1
+        }
       }
     },
     "energy_meter_contract": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "version"],
+      "required": [
+        "name",
+        "version"
+      ],
       "properties": {
-        "name": { "const": "hausman-hub-energy-meter" },
-        "version": { "const": 1 }
+        "name": {
+          "const": "hausman-hub-energy-meter"
+        },
+        "version": {
+          "const": 1
+        }
       }
     },
     "energy_meters_contract": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "version"],
+      "required": [
+        "name",
+        "version"
+      ],
       "properties": {
-        "name": { "const": "hausman-hub-energy-meters" },
-        "version": { "const": 1 }
+        "name": {
+          "const": "hausman-hub-energy-meters"
+        },
+        "version": {
+          "const": 1
+        }
       }
     },
     "water_meter_contract": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "version"],
+      "required": [
+        "name",
+        "version"
+      ],
       "properties": {
-        "name": { "const": "hausman-hub-water-meter" },
-        "version": { "const": 1 }
+        "name": {
+          "const": "hausman-hub-water-meter"
+        },
+        "version": {
+          "const": 1
+        }
       }
     },
     "device_discovery_contract": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "version"],
+      "required": [
+        "name",
+        "version"
+      ],
       "properties": {
-        "name": { "const": "hausman-hub-device-discovery" },
-        "version": { "const": 1 }
+        "name": {
+          "const": "hausman-hub-device-discovery"
+        },
+        "version": {
+          "const": 1
+        }
       }
     },
     "voice_greeting_test_request_contract": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "version"],
+      "required": [
+        "name",
+        "version"
+      ],
       "properties": {
-        "name": { "const": "hausman-hub-voice-greeting-test-request" },
-        "version": { "const": 1 }
+        "name": {
+          "const": "hausman-hub-voice-greeting-test-request"
+        },
+        "version": {
+          "const": 1
+        }
       }
     },
     "voice_command_receipt_contract": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "version"],
+      "required": [
+        "name",
+        "version"
+      ],
       "properties": {
-        "name": { "const": "hausman-hub-voice-command-receipt" },
-        "version": { "const": 1 }
+        "name": {
+          "const": "hausman-hub-voice-command-receipt"
+        },
+        "version": {
+          "const": 1
+        }
       }
     },
     "voice_station": {
@@ -1049,37 +1372,65 @@
     "intercom_release_receipt_contract": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "version"],
+      "required": [
+        "name",
+        "version"
+      ],
       "properties": {
-        "name": {"const": "hausman-hub-intercom-release-receipt"},
-        "version": {"const": 1}
+        "name": {
+          "const": "hausman-hub-intercom-release-receipt"
+        },
+        "version": {
+          "const": 1
+        }
       }
     },
     "device_action_batch_request_contract": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "version"],
+      "required": [
+        "name",
+        "version"
+      ],
       "properties": {
-        "name": {"const": "hausman-hub-device-action-batch-request"},
-        "version": {"const": 1}
+        "name": {
+          "const": "hausman-hub-device-action-batch-request"
+        },
+        "version": {
+          "const": 1
+        }
       }
     },
     "device_action_batch_receipt_contract": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "version"],
+      "required": [
+        "name",
+        "version"
+      ],
       "properties": {
-        "name": {"const": "hausman-hub-device-action-batch-receipt"},
-        "version": {"const": 1}
+        "name": {
+          "const": "hausman-hub-device-action-batch-receipt"
+        },
+        "version": {
+          "const": 1
+        }
       }
     },
     "device_feature_matrix_contract": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "version"],
+      "required": [
+        "name",
+        "version"
+      ],
       "properties": {
-        "name": {"const": "hausman-hub-device-feature-matrix"},
-        "version": {"const": 1}
+        "name": {
+          "const": "hausman-hub-device-feature-matrix"
+        },
+        "version": {
+          "const": 1
+        }
       }
     },
     "dashboard_contract": {

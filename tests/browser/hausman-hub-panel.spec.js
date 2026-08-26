@@ -102,3 +102,15 @@ test("клавиатура открывает основные разделы и
   await page.keyboard.press("Enter");
   await expect.poll(() => page.evaluate(() => window.__hausmanHubHarnessErrors)).toEqual([]);
 });
+
+test("AI-компоновщик сценария открывается и предлагает устройство по @", async ({ page }) => {
+  const panel = await openHarness(page, surfaces.find((surface) => surface.name === "scenarios-wide"));
+  const root = panel.locator(":scope");
+  await root.getByRole("button", { name: "Создать с Hausman AI" }).click();
+  const dialog = root.getByRole("dialog", { name: "Создать с Hausman AI" });
+  await expect(dialog).toBeVisible();
+  const prompt = dialog.getByLabel("Опишите сценарий");
+  await prompt.fill("Когда @");
+  await expect(dialog.locator(".scenario-ai-suggestion").first()).toBeVisible();
+  await expect(dialog.getByText("Токен Home Assistant", { exact: false })).toBeVisible();
+});

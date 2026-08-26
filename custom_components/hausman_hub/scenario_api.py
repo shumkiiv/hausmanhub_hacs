@@ -19,6 +19,12 @@ from .application.scenario_service import (
     ScenarioServiceError,
     ScenarioValidationError,
 )
+from .application.scenario_ai import (
+    ScenarioAiDraftService,
+    ScenarioAiOutputInvalid,
+    ScenarioAiRequestError,
+    ScenarioAiUnavailable,
+)
 from .climate_api import (
     DOMAIN,
     NO_STORE_HEADERS,
@@ -31,6 +37,7 @@ from .climate_api import (
 )
 from .application.api_capabilities import (
     SCENARIOS_ACTION_PATH,
+    SCENARIOS_AI_DRAFT_PATH,
     SCENARIOS_CATALOG_PATH,
     SCENARIOS_HEALTH_PATH,
     SCENARIOS_DELETE_PATH,
@@ -53,6 +60,7 @@ ADMIN_SCENARIOS_HEALTH_PATH = f"{ADMIN_SCENARIOS_PATH}/health"
 ADMIN_SCENARIOS_TEST_PATH = f"{ADMIN_SCENARIOS_PATH}/test"
 ADMIN_SCENARIOS_DELETE_PATH = f"{ADMIN_SCENARIOS_PATH}/delete"
 ADMIN_SCENARIOS_RUN_PATH = f"{ADMIN_SCENARIOS_PATH}/run"
+ADMIN_SCENARIOS_AI_DRAFT_PATH = f"{ADMIN_SCENARIOS_PATH}/ai-draft"
 _MDI_ICON = re.compile(r"^mdi:[a-z0-9-]+$")
 
 
@@ -376,6 +384,84 @@ class ScenarioTestView(_ScenarioView):
             },
             headers=NO_STORE_HEADERS,
         )
+
+
+class ScenarioAiDraftView(_ScenarioView):
+    """Generate a validated, disabled draft without persistence or commands."""
+
+    url = ADMIN_SCENARIOS_AI_DRAFT_PATH
+    name = "api:hausman_hub:scenario_ai_draft"
+
+    def _ai_service(self) -> ScenarioAiDraftService | None:
+        candidate = self._hass.data.get(DOMAIN, {}).get("scenario_ai_draft_service")
+        return candidate if isinstance(candidate, ScenarioAiDraftService) else None
+
+    async def post(self, request: Any) -> Any:
+        if not _is_exact_request(request, self.url):
+            return _not_found(self)
+        if not self._authorized(request):
+            return _forbidden(self)
+        service = self._ai_service()
+        if service is None or not service.available:
+            return self.json(
+                {
+                    "ok": False,
+                    "status": "failed",
+                    "error": "scenario_ai_unavailable",
+                    "message": "Подключите и включите нейросеть в настройках Hausman.",
+                },
+                status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+                headers=NO_STORE_HEADERS,
+            )
+        try:
+            payload = await _request_json(request)
+            result = await service.async_generate(payload)
+        except (ValueError, ScenarioAiRequestError):
+            return self.json(
+                {
+                    "ok": False,
+                    "status": "failed",
+                    "error": "invalid_scenario_ai_request",
+                    "message": "Описание или упоминание устройства заполнено неверно.",
+                },
+                status_code=HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        except ScenarioCatalogNotReadyError as error:
+            return self.json(
+                {
+                    "ok": False,
+                    "status": "failed",
+                    "error": "scenario_catalog_not_ready",
+                    "message": error.message,
+                    "readiness": error.readiness,
+                },
+                status_code=HTTPStatus.CONFLICT,
+                headers=NO_STORE_HEADERS,
+            )
+        except ScenarioAiUnavailable:
+            return self.json(
+                {
+                    "ok": False,
+                    "status": "failed",
+                    "error": "scenario_ai_unavailable",
+                    "message": "Нейросеть не ответила. Попробуйте ещё раз.",
+                },
+                status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+                headers=NO_STORE_HEADERS,
+            )
+        except ScenarioAiOutputInvalid:
+            return self.json(
+                {
+                    "ok": False,
+                    "status": "failed",
+                    "error": "scenario_ai_output_invalid",
+                    "message": "Черновик не прошёл проверку Hausman. Уточните описание и повторите.",
+                },
+                status_code=HTTPStatus.BAD_GATEWAY,
+                headers=NO_STORE_HEADERS,
+            )
+        return self.json(result, headers=NO_STORE_HEADERS)
 
 
 class ScenarioDeleteView(_ScenarioView):
@@ -733,6 +819,11 @@ class TabletScenarioActionView(_TabletScenarioAccess, ScenarioActionView):
     name = "api:hausman_hub:tablet_scenario_action"
 
 
+class TabletScenarioAiDraftView(_TabletScenarioAccess, ScenarioAiDraftView):
+    url = SCENARIOS_AI_DRAFT_PATH
+    name = "api:hausman_hub:tablet_scenario_ai_draft"
+
+
 def _validation_error_payload(error: ScenarioValidationError) -> dict[str, object]:
     return {
         "ok": False,
@@ -884,6 +975,7 @@ def scenario_api_views(
         ScenarioHealthView(hass),
         ScenariosView(hass),
         ScenarioTestView(hass),
+        ScenarioAiDraftView(hass),
         ScenarioDeleteView(hass),
         ScenarioRunView(hass),
         ScenarioActionView(hass),
@@ -891,6 +983,7 @@ def scenario_api_views(
         TabletScenarioHealthView(hass),
         TabletScenariosView(hass),
         TabletScenarioTestView(hass),
+        TabletScenarioAiDraftView(hass),
         TabletScenarioDeleteView(hass),
         TabletScenarioRunView(hass),
         TabletScenarioActionView(hass),

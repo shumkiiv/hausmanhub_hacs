@@ -249,6 +249,13 @@ def register_climate_api(
         data[DATA_AI_ASSISTANT] = ai_assistant
     if scenario_service is not None:
         data["scenario_service"] = scenario_service
+    if ai_assistant is not None and scenario_service is not None:
+        from .application.scenario_ai import ScenarioAiDraftService
+
+        data["scenario_ai_draft_service"] = ScenarioAiDraftService(
+            ai_assistant,
+            scenario_service,
+        )
     if ir_code_service is not None:
         data["ir_code_service"] = ir_code_service
     if climate_shadow is not None:
@@ -338,6 +345,7 @@ def clear_climate_api(hass: HomeAssistant, entry_id: str) -> None:
     if runtime is not None and runtime.entry_id == entry_id:
         data.pop(DATA_CLIMATE_RUNTIME, None)
         data.pop(DATA_AI_ASSISTANT, None)
+        data.pop("scenario_ai_draft_service", None)
         scenario_service = data.pop("scenario_service", None)
         cancel_release = getattr(scenario_service, "cancel_intercom_release", None)
         if callable(cancel_release):
@@ -458,6 +466,9 @@ class ClimateCapabilitiesView(_ClimateView):
                 climate_runtime_available=climate_runtime_available,
                 climate_phase=climate_phase,
                 climate_commands_enabled=climate_commands_enabled,
+                scenario_ai_available=bool(
+                    getattr(data.get("scenario_ai_draft_service"), "available", False)
+                ),
             ),
             headers=NO_STORE_HEADERS,
         )

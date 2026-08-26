@@ -1,13 +1,14 @@
 /* Scenario library and editor shared with the Hausman Hub tablet contract. */
 
-import { activeElementWithin, trapModalTabKey } from "./hausman-hub-modal.js?v=1.52.169";
-import { scenarioEditorIssues, scenarioEventFields, scenarioField, scenarioIconField, scenarioSelectField, scenarioToggle } from "./hausman-hub-scenario-fields.js?v=1.52.169";
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.169";
-import { scenarioCapabilityLabel, scenarioDeviceButton, scenarioDeviceFields, scenarioGroupForTarget, scenarioPhysicalGroups } from "./hausman-hub-scenario-device-picker.js?v=1.52.169";
-import { groupScenarios, renderScenarioCatalog, scenarioActivationKind, scenarioDisplayGroup, scenarioDisplayText } from "./hausman-hub-scenario-catalog.js?v=1.52.169";
-import { renderScenarioRoomPicker, scenarioAffectedDeviceCount, scenarioRoomLabels } from "./hausman-hub-scenario-rooms.js?v=1.52.169";
-import { defaultScenarioDraft, duplicateScenarioDraft, normalizedScenario, scenarioPayload } from "./hausman-hub-scenario-state.js?v=1.52.169";
-import { bulkSaveScenarios } from "./hausman-hub-scenario-bulk.js?v=1.52.169";
+import { activeElementWithin, trapModalTabKey } from "./hausman-hub-modal.js?v=1.52.170";
+import { scenarioEditorIssues, scenarioEventFields, scenarioField, scenarioIconField, scenarioSelectField, scenarioToggle } from "./hausman-hub-scenario-fields.js?v=1.52.170";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.170";
+import { scenarioCapabilityLabel, scenarioDeviceButton, scenarioDeviceFields, scenarioGroupForTarget, scenarioPhysicalGroups } from "./hausman-hub-scenario-device-picker.js?v=1.52.170";
+import { groupScenarios, renderScenarioCatalog, scenarioActivationKind, scenarioDisplayGroup, scenarioDisplayText } from "./hausman-hub-scenario-catalog.js?v=1.52.170";
+import { renderScenarioRoomPicker, scenarioAffectedDeviceCount, scenarioRoomLabels } from "./hausman-hub-scenario-rooms.js?v=1.52.170";
+import { defaultScenarioDraft, duplicateScenarioDraft, normalizedScenario, scenarioPayload } from "./hausman-hub-scenario-state.js?v=1.52.170";
+import { bulkSaveScenarios } from "./hausman-hub-scenario-bulk.js?v=1.52.170";
+import { openScenarioAiComposer, renderScenarioAiComposer } from "./hausman-hub-scenario-ai.js?v=1.52.170";
 
 const TRIGGER_TYPES = [
   ["manual", "Ручной запуск"], ["time", "По времени"],
@@ -547,7 +548,13 @@ export function renderScenarioSection(panel, container, deps) {
   const create = el("button", "scenario-create", "Новый сценарий");
   create.type = "button";
   create.addEventListener("click", () => openScenarioEditor(panel, defaultScenarioDraft()));
-  heading.appendChild(create);
+  const createActions = el("div", "scenario-create-actions");
+  const createAi = el("button", "secondary scenario-create-ai", "Создать с Hausman AI");
+  createAi.type = "button";
+  createAi.addEventListener("click", () => openScenarioAiComposer(panel, () => updateScenarioEditor(panel)));
+  createActions.appendChild(createAi);
+  createActions.appendChild(create);
+  heading.appendChild(createActions);
   card.appendChild(heading);
   if (panel._scenarios.loading && !panel._scenarios.list) {
     card.appendChild(el("div", "muted", "Загрузка сценариев…"));
@@ -572,5 +579,12 @@ export function renderScenarioSection(panel, container, deps) {
     });
   }
   container.appendChild(card);
+  renderScenarioAiComposer(
+    panel,
+    container,
+    deps,
+    (draft) => openScenarioEditor(panel, draft),
+    () => updateScenarioEditor(panel),
+  );
   if (panel._scenarioEditor) renderScenarioEditor(panel, container, deps);
 }
