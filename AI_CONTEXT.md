@@ -4,7 +4,11 @@
   validator разрыв: runtime pin поднят до contracts `0.58.1` (`b0f5811`).
   Опубликованный контракт теперь включает все уже используемые HACS поля
   `revision`, `contentRevision`, readiness, health и `scenario_changed`
-  вместе с `roomIds`. Vendored schemas совпадают с contracts source.
+  вместе с `roomIds`. Vendored schemas совпадают с contracts source. Release
+  `v1.52.168` опубликован, commit `2245c9b`. Production обновлён после backup
+  `0907efca`, трёх valid config checks и одного restart; installed/latest
+  равны `v1.52.168`, пять read-only API отвечают 200, все 11 sensor Hausman
+  доступны, ошибок интеграции нет. Аудит: `docs/RELEASE_AUDIT_1.52.168.md`.
 
 - 2026-08-26: подготовлен HACS `1.52.167` для 20 улучшений сценариев.
   Backend хранит `roomIds`, читает legacy `roomId`, проверяет комнаты по
