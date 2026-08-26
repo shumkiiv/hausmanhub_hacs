@@ -103,6 +103,26 @@ test("клавиатура открывает основные разделы и
   await expect.poll(() => page.evaluate(() => window.__hausmanHubHarnessErrors)).toEqual([]);
 });
 
+test("выделение активной страницы Hero не обрезается полосой комнат", async ({ page }) => {
+  const panel = await openHarness(page, surfaces[0]);
+  const activeGeometry = () => panel.evaluate((host) => {
+    const root = host.shadowRoot;
+    const strip = root.querySelector(".overview-canon-room-strip");
+    const active = strip?.querySelector('[aria-current="page"]');
+    const stripRect = strip?.getBoundingClientRect();
+    const activeRect = active?.getBoundingClientRect();
+    return {
+      leftInset: activeRect && stripRect ? activeRect.left - stripRect.left : -1,
+      rightInset: activeRect && stripRect ? stripRect.right - activeRect.right : -1,
+    };
+  });
+  expect((await activeGeometry()).leftInset).toBeGreaterThanOrEqual(4);
+  const lastPage = panel.locator(".overview-canon-room-strip button").last();
+  await lastPage.click();
+  await expect(lastPage).toHaveAttribute("aria-current", "page");
+  await expect.poll(async () => (await activeGeometry()).rightInset).toBeGreaterThanOrEqual(4);
+});
+
 test("AI-компоновщик сценария открывается и предлагает устройство по @", async ({ page }) => {
   const panel = await openHarness(page, surfaces.find((surface) => surface.name === "scenarios-wide"));
   const root = panel.locator(":scope");

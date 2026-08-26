@@ -1,6 +1,6 @@
-@import url("./hausman-hub-scenario-device-picker.css?v=1.52.174");
-@import url("./hausman-hub-scenario-extensions.css?v=1.52.174");
-@import url("./hausman-hub-scenario-ai.css?v=1.52.174");
+@import url("./hausman-hub-scenario-device-picker.css?v=1.52.175");
+@import url("./hausman-hub-scenario-extensions.css?v=1.52.175");
+@import url("./hausman-hub-scenario-ai.css?v=1.52.175");
 
 /* Scenario library: the same compact two-column catalog used on the tablet. */
 .scenario-library { display:grid; gap:12px; margin-top:14px; padding:14px; }

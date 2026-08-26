@@ -124,7 +124,7 @@
   background:var(--hmh-hero-glass-bg); box-shadow:var(--hmh-hero-glass-shadow);
   backdrop-filter:blur(18px) saturate(1.18);
 }
-.overview-canon-room-strip { display:flex; box-sizing:border-box; min-width:0; height:100%; gap:4px; padding-block:2px; overflow-x:auto; overflow-y:hidden; scrollbar-width:none; scroll-behavior:smooth; }
+.overview-canon-room-strip { display:flex; box-sizing:border-box; min-width:0; height:100%; gap:4px; padding:2px 4px; overflow-x:auto; overflow-y:hidden; scrollbar-width:none; scroll-behavior:smooth; scroll-padding-inline:4px; }
 .overview-canon-room-strip::-webkit-scrollbar { display:none; width:0; height:0; }
 .overview-canon-room-arrow,.overview-canon-room-strip button {
   display:flex; align-items:center; justify-content:center; height:44px; min-height:44px; margin:0;
