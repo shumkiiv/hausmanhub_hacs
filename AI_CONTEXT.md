@@ -1,5 +1,11 @@
 # HausmanHub AI Context
 
+- 2026-08-26: HACS `1.52.168` исправляет найденный финальным release-line
+  validator разрыв: runtime pin поднят до contracts `0.58.1` (`b0f5811`).
+  Опубликованный контракт теперь включает все уже используемые HACS поля
+  `revision`, `contentRevision`, readiness, health и `scenario_changed`
+  вместе с `roomIds`. Vendored schemas совпадают с contracts source.
+
 - 2026-08-26: подготовлен HACS `1.52.167` для 20 улучшений сценариев.
   Backend хранит `roomIds`, читает legacy `roomId`, проверяет комнаты по
   живому каталогу и сохраняет прежнюю область при деградации каталога.
