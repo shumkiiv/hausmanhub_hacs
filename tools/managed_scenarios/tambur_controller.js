@@ -96,11 +96,15 @@ if (confidentlyAbsent) {
   }
 } else if (occupied && (hour >= 23 || hour < 9)) {
   branch = 'night_mirror';
-  if (state(ID.chandelier) !== 'off') {
-    actions.push(switchAction('chandelier_off', ID.chandelier, 'Люстра тамбур', false));
-  }
-  if (state(ID.mirror) !== 'on') {
+  const mirrorNeedsOn = state(ID.mirror) !== 'on';
+  if (mirrorNeedsOn) {
     actions.push(switchAction('mirror_on', ID.mirror, 'Подсветка зеркала тамбура', true));
+  }
+  if (state(ID.chandelier) !== 'off') {
+    if (mirrorNeedsOn) {
+      actions.push({id: 'mirror_handoff_wait', type: 'delay', delaySeconds: 1});
+    }
+    actions.push(switchAction('chandelier_off', ID.chandelier, 'Люстра тамбур', false));
   }
 } else if (occupied && hour >= 9 && hour < 23 && sunState === 'above_horizon') {
   branch = 'morning_day';
@@ -136,9 +140,7 @@ if (confidentlyAbsent) {
 }
 
 if (brightness !== null && kelvin !== null) {
-  if (state(ID.mirror) !== 'off') {
-    actions.push(switchAction('mirror_off', ID.mirror, 'Подсветка зеркала тамбура', false));
-  }
+  const mirrorNeedsOff = state(ID.mirror) !== 'off';
   actions.push(lightAction('brightness', 'set_brightness_percent', brightness));
   const prime = kelvin >= 6500 ? 6400 : Math.min(6500, kelvin + 100);
   actions.push(lightAction('temperature_prime', 'set_color_temperature', prime));
@@ -146,6 +148,9 @@ if (brightness !== null && kelvin !== null) {
   actions.push(lightAction('temperature_target', 'set_color_temperature', kelvin));
   actions.push({id: 'temperature_wait_2', type: 'delay', delaySeconds: 1});
   actions.push(lightAction('temperature_confirm', 'set_color_temperature', kelvin));
+  if (mirrorNeedsOff) {
+    actions.push(switchAction('mirror_off', ID.mirror, 'Подсветка зеркала тамбура', false));
+  }
 }
 
 trace.push(
