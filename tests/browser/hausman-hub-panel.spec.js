@@ -114,13 +114,20 @@ test("выделение активной страницы Hero не обрез�
     return {
       leftInset: activeRect && stripRect ? activeRect.left - stripRect.left : -1,
       rightInset: activeRect && stripRect ? stripRect.right - activeRect.right : -1,
+      topInset: activeRect && stripRect ? activeRect.top - stripRect.top : -1,
+      bottomInset: activeRect && stripRect ? stripRect.bottom - activeRect.bottom : -1,
     };
   });
-  expect((await activeGeometry()).leftInset).toBeGreaterThanOrEqual(4);
+  const firstGeometry = await activeGeometry();
+  expect(firstGeometry.leftInset).toBeGreaterThanOrEqual(4);
+  expect(firstGeometry.topInset).toBeGreaterThanOrEqual(2);
+  expect(firstGeometry.bottomInset).toBeGreaterThanOrEqual(2);
   const lastPage = panel.locator(".overview-canon-room-strip button").last();
   await lastPage.click();
   await expect(lastPage).toHaveAttribute("aria-current", "page");
   await expect.poll(async () => (await activeGeometry()).rightInset).toBeGreaterThanOrEqual(4);
+  await expect.poll(async () => (await activeGeometry()).topInset).toBeGreaterThanOrEqual(2);
+  await expect.poll(async () => (await activeGeometry()).bottomInset).toBeGreaterThanOrEqual(2);
 });
 
 test("AI-компоновщик сценария открывается и предлагает устройство по @", async ({ page }) => {
