@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+import inspect
+import unittest
 from dataclasses import replace
 from types import SimpleNamespace
+from typing import Any, Callable, Coroutine
 from unittest.mock import AsyncMock
-
-import pytest
 
 from custom_components.hausman_hub.application.scenario_node_red import (
     NodeRedBackendError,
@@ -62,7 +64,16 @@ def test_compiler_builds_one_compact_command_free_function_flow() -> None:
     assert managed_source_hash(source) == managed_source_hash(source)
 
 
-@pytest.mark.asyncio
+def _async_test_case(
+    case: Callable[[], Coroutine[Any, Any, None]],
+) -> unittest.FunctionTestCase:
+    def run() -> None:
+        asyncio.run(case())
+
+    run.__name__ = case.__name__
+    return unittest.FunctionTestCase(run)
+
+
 async def test_prepare_creates_a_managed_flow_and_records_server_id() -> None:
     calls: list[tuple[str, str]] = []
 
@@ -96,7 +107,6 @@ async def test_prepare_creates_a_managed_flow_and_records_server_id() -> None:
     assert calls[-1] == ("POST", "/ingress/token-one/flow")
 
 
-@pytest.mark.asyncio
 async def test_prepare_never_overwrites_a_manually_changed_function() -> None:
     original = compile_managed_function("test_flow", _definition())
     previous = ScenarioNodeRedMetadata(
@@ -130,7 +140,6 @@ async def test_prepare_never_overwrites_a_manually_changed_function() -> None:
     assert prepared.node_red.source_hash == previous.source_hash
 
 
-@pytest.mark.asyncio
 async def test_plan_accepts_nested_scenario_but_rejects_existing_actions() -> None:
     responses = [
         {
@@ -191,13 +200,16 @@ async def test_plan_accepts_nested_scenario_but_rejects_existing_actions() -> No
     assert actions[0].type is ScenarioActionType.RUN_SCENARIO
     assert result["selectedBranch"] == "off_delay"
 
-    with pytest.raises(NodeRedBackendError, match="forbidden"):
+    try:
         await backend.async_plan(
             "test_flow", definition, "run-one", catalog, dry_run=True
         )
+    except NodeRedBackendError as err:
+        assert "forbidden" in str(err)
+    else:
+        raise AssertionError("Node-RED existing_action must fail closed")
 
 
-@pytest.mark.asyncio
 async def test_executor_uses_node_red_plan_without_bypassing_dry_run() -> None:
     planned = ScenarioAction(
         "planned_notice", ScenarioActionType.NOTIFICATION, message="Выбрана ветка"
@@ -242,3 +254,21 @@ async def test_executor_uses_node_red_plan_without_bypassing_dry_run() -> None:
     assert result["node_red"]["selectedBranch"] == "night"
     assert result["receipts"][0]["status"] == "completed"
     hass.services.async_call.assert_not_awaited()
+
+
+def load_tests(
+    loader: unittest.TestLoader,
+    tests: unittest.TestSuite,
+    pattern: str | None,
+) -> unittest.TestSuite:
+    """Expose the compact function-style cases to the stdlib release runner."""
+    del loader, tests, pattern
+    suite = unittest.TestSuite()
+    for name, case in sorted(globals().items()):
+        if not name.startswith("test_") or not callable(case):
+            continue
+        if inspect.iscoroutinefunction(case):
+            suite.addTest(_async_test_case(case))
+        else:
+            suite.addTest(unittest.FunctionTestCase(case))
+    return suite
