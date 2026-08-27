@@ -172,6 +172,22 @@ test("встроенный редактор Node-RED проверяет и со�
   await expect(backendChoices).toHaveCount(2);
   await expect(backendChoices.nth(0)).toContainText("Hausman");
   await expect(backendChoices.nth(1)).toContainText("Node-RED");
+  const selectedInputs = scenarioDialog.locator(".scenario-node-red-selected");
+  await expect(selectedInputs.getByText("Выбрано: 2", { exact: true })).toBeVisible();
+  await expect(selectedInputs.getByText("Кондиционер гостиная", { exact: true })).toBeVisible();
+  await expect(selectedInputs.getByText("Увлажнитель спальня", { exact: true })).toBeVisible();
+  await expect(selectedInputs.getByText("Температура", { exact: true })).toBeVisible();
+  await expect(selectedInputs.getByText("Влажность", { exact: true })).toBeVisible();
+  const inputPicker = scenarioDialog.getByLabel("Добавить или убрать данные алгоритма");
+  await expect(inputPicker.locator("option:checked")).toHaveCount(2);
+  await expect(inputPicker.locator("option").first()).toHaveText("Кондиционер гостиная · Температура");
+  await selectedInputs.getByRole("button", { name: "Убрать Кондиционер гостиная" }).click();
+  await expect(selectedInputs.getByText("Выбрано: 1", { exact: true })).toBeVisible();
+  await expect(selectedInputs.getByText("Кондиционер гостиная", { exact: true })).toHaveCount(0);
+  await expect(inputPicker.locator("option:checked")).toHaveCount(1);
+  await selectedInputs.getByRole("button", { name: "Очистить выбранные данные" }).click();
+  await expect(selectedInputs.getByText("Ничего не выбрано", { exact: true })).toBeVisible();
+  await expect(inputPicker.locator("option:checked")).toHaveCount(0);
   const backendChoiceGeometry = await backendChoices.evaluateAll((buttons) => buttons.map((button) => {
     const title = button.querySelector("b");
     const help = button.querySelector("small");

@@ -1,8 +1,8 @@
-@import url("./hausman-hub-scenario-device-picker.css?v=1.52.184");
-@import url("./hausman-hub-scenario-extensions.css?v=1.52.184");
-@import url("./hausman-hub-scenario-ai.css?v=1.52.184");
-@import url("./hausman-hub-scenario-node-red.css?v=1.52.184");
-@import url("./hausman-hub-scenario-badges.css?v=1.52.184");
+@import url("./hausman-hub-scenario-device-picker.css?v=1.52.185");
+@import url("./hausman-hub-scenario-extensions.css?v=1.52.185");
+@import url("./hausman-hub-scenario-ai.css?v=1.52.185");
+@import url("./hausman-hub-scenario-node-red.css?v=1.52.185");
+@import url("./hausman-hub-scenario-badges.css?v=1.52.185");
 
 /* Scenario library: the same compact two-column catalog used on the tablet. */
 .scenario-library { display:grid; gap:12px; margin-top:14px; padding:14px; }

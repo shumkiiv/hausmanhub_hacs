@@ -1,6 +1,105 @@
 /* Safe embedded editor for one Hausman-managed Node-RED function node. */
 
-import { trapModalTabKey } from "./hausman-hub-modal.js?v=1.52.184";
+import { trapModalTabKey } from "./hausman-hub-modal.js?v=1.52.185";
+
+function inputDeviceTitle(device, targetId) {
+  return String(device && (device.physical_name || device.name) || targetId || "Источник недоступен").trim();
+}
+
+function inputDeviceDetails(device) {
+  if (!device) return "Источник больше не найден в каталоге";
+  const title = inputDeviceTitle(device, device.target_id).toLocaleLowerCase("ru");
+  return [device.room_name, device.capability_name]
+    .map((value) => String(value || "").trim())
+    .filter((value, index, values) => value && !title.includes(value.toLocaleLowerCase("ru")) && values.indexOf(value) === index)
+    .join(" · ");
+}
+
+function inputOptionTitle(device) {
+  const title = inputDeviceTitle(device, device && device.target_id);
+  const details = inputDeviceDetails(device);
+  return details ? `${title} · ${details}` : title;
+}
+
+export function renderNodeRedInputPicker(metadata, devices, deps) {
+  const { el, setAttr } = deps;
+  const field = el("div", "scenario-field scenario-node-red-inputs");
+  const label = el("label", null, "Добавить данные для алгоритма");
+  setAttr(label, "for", "scenario-node-red-input-picker");
+  field.appendChild(label);
+
+  const candidates = Array.isArray(devices) ? devices : [];
+  const byId = new Map(candidates.map((device) => [device.target_id, device]));
+  const selected = el("section", "scenario-node-red-selected");
+  setAttr(selected, "aria-label", "Выбранные данные алгоритма");
+  setAttr(selected, "aria-live", "polite");
+  field.appendChild(selected);
+
+  const select = el("select");
+  select.id = "scenario-node-red-input-picker";
+  select.multiple = true;
+  setAttr(select, "aria-label", "Добавить или убрать данные алгоритма");
+  candidates.forEach((device) => {
+    const option = el("option", null, inputOptionTitle(device));
+    option.value = device.target_id;
+    option.selected = (metadata.inputTargetIds || []).includes(device.target_id);
+    select.appendChild(option);
+  });
+
+  const updateSelected = (targetIds) => {
+    metadata.inputTargetIds = Array.from(new Set(targetIds.filter(Boolean))).slice(0, 32);
+    Array.from(select.options).forEach((option) => {
+      option.selected = metadata.inputTargetIds.includes(option.value);
+    });
+    renderSelected();
+  };
+  const renderSelected = () => {
+    selected.innerHTML = "";
+    const header = el("header");
+    header.appendChild(el("strong", null, `Выбрано: ${(metadata.inputTargetIds || []).length}`));
+    if ((metadata.inputTargetIds || []).length) {
+      const clear = el("button", "scenario-node-red-selected-clear", "Очистить");
+      clear.type = "button";
+      setAttr(clear, "aria-label", "Очистить выбранные данные");
+      clear.addEventListener("click", () => updateSelected([]));
+      header.appendChild(clear);
+    }
+    selected.appendChild(header);
+    if (!(metadata.inputTargetIds || []).length) {
+      selected.appendChild(el("p", "scenario-node-red-selected-empty", "Ничего не выбрано"));
+      return;
+    }
+    const list = el("div", "scenario-node-red-selected-list");
+    (metadata.inputTargetIds || []).forEach((targetId) => {
+      const device = byId.get(targetId);
+      const title = inputDeviceTitle(device, targetId);
+      const item = el("div", "scenario-node-red-selected-item");
+      const text = el("span");
+      text.appendChild(el("b", null, title));
+      const details = inputDeviceDetails(device);
+      if (details) text.appendChild(el("small", null, details));
+      item.appendChild(text);
+      const remove = el("button", "scenario-node-red-selected-remove", "×");
+      remove.type = "button";
+      setAttr(remove, "aria-label", `Убрать ${title}`);
+      remove.addEventListener("click", () => updateSelected(metadata.inputTargetIds.filter((id) => id !== targetId)));
+      item.appendChild(remove);
+      list.appendChild(item);
+    });
+    selected.appendChild(list);
+  };
+
+  select.addEventListener("change", () => {
+    const unresolved = (metadata.inputTargetIds || []).filter((targetId) => !byId.has(targetId));
+    const visible = Array.from(select.selectedOptions).map((option) => option.value);
+    updateSelected([...unresolved, ...visible]);
+  });
+  renderSelected();
+  field.appendChild(select);
+  field.appendChild(el("small", null, "Выберите датчики и свойства, нужные для ветвлений. Уже выбранные значения показаны отдельным списком выше."));
+  field.appendChild(el("small", null, "Устройства из триггеров и действий добавятся автоматически."));
+  return field;
+}
 
 export function renderDynamicNodeRedActions(scenario, deps) {
   const { el, setAttr } = deps;

@@ -1,14 +1,14 @@
-import { activeElementWithin, trapModalTabKey } from "./hausman-hub-modal.js?v=1.52.184";
-import { scenarioEditorIssues, scenarioEventFields, scenarioField, scenarioIconField, scenarioSelectField, scenarioToggle } from "./hausman-hub-scenario-fields.js?v=1.52.184";
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.184";
-import { scenarioCapabilityLabel, scenarioDeviceButton, scenarioDeviceFields, scenarioGroupForTarget, scenarioPhysicalGroups } from "./hausman-hub-scenario-device-picker.js?v=1.52.184";
-import { groupScenarios, renderScenarioCatalog, scenarioActivationKind, scenarioDisplayGroup, scenarioDisplayText } from "./hausman-hub-scenario-catalog.js?v=1.52.184";
-import { renderScenarioRoomPicker, scenarioAffectedDeviceCount, scenarioRoomLabels } from "./hausman-hub-scenario-rooms.js?v=1.52.184";
-import { defaultScenarioDraft, duplicateScenarioDraft, normalizedScenario, scenarioActionDetail, scenarioHasDynamicNodeRedPlan, scenarioPayload, scenarioReviewSummary } from "./hausman-hub-scenario-state.js?v=1.52.184";
-import { bulkSaveScenarios } from "./hausman-hub-scenario-bulk.js?v=1.52.184";
-import { openScenarioAiComposer, renderScenarioAiComposer } from "./hausman-hub-scenario-ai.js?v=1.52.184";
-import { captureScenarioEditorScroll, restoreScenarioEditorScroll } from "./hausman-hub-scenario-editor-scroll.js?v=1.52.184";
-import { closeManagedSourceEditor, openManagedSourceEditor, renderDynamicNodeRedActions, renderManagedSourceEditor } from "./hausman-hub-scenario-node-red.js?v=1.52.184";
+import { activeElementWithin, trapModalTabKey } from "./hausman-hub-modal.js?v=1.52.185";
+import { scenarioEditorIssues, scenarioEventFields, scenarioField, scenarioIconField, scenarioSelectField, scenarioToggle } from "./hausman-hub-scenario-fields.js?v=1.52.185";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.185";
+import { scenarioCapabilityLabel, scenarioDeviceButton, scenarioDeviceFields, scenarioGroupForTarget, scenarioPhysicalGroups } from "./hausman-hub-scenario-device-picker.js?v=1.52.185";
+import { groupScenarios, renderScenarioCatalog, scenarioActivationKind, scenarioDisplayGroup, scenarioDisplayText } from "./hausman-hub-scenario-catalog.js?v=1.52.185";
+import { renderScenarioRoomPicker, scenarioAffectedDeviceCount, scenarioRoomLabels } from "./hausman-hub-scenario-rooms.js?v=1.52.185";
+import { defaultScenarioDraft, duplicateScenarioDraft, normalizedScenario, scenarioActionDetail, scenarioHasDynamicNodeRedPlan, scenarioPayload, scenarioReviewSummary } from "./hausman-hub-scenario-state.js?v=1.52.185";
+import { bulkSaveScenarios } from "./hausman-hub-scenario-bulk.js?v=1.52.185";
+import { openScenarioAiComposer, renderScenarioAiComposer } from "./hausman-hub-scenario-ai.js?v=1.52.185";
+import { captureScenarioEditorScroll, restoreScenarioEditorScroll } from "./hausman-hub-scenario-editor-scroll.js?v=1.52.185";
+import { closeManagedSourceEditor, openManagedSourceEditor, renderDynamicNodeRedActions, renderManagedSourceEditor, renderNodeRedInputPicker } from "./hausman-hub-scenario-node-red.js?v=1.52.185";
 
 const TRIGGER_TYPES = [
   ["manual", "Ручной запуск"], ["time", "По времени"],
@@ -134,24 +134,7 @@ function renderExecutionBackend(panel, scenario, deps) {
   if (backend === "node_red") {
     const metadata = scenario.definition.nodeRed || { inputTargetIds: [] };
     scenario.definition.nodeRed = metadata;
-    const field = el("label", "scenario-field scenario-node-red-inputs");
-    field.appendChild(el("span", null, "Данные для алгоритма"));
-    const select = el("select");
-    select.multiple = true;
-    setAttr(select, "aria-label", "Устройства и датчики, доступные функции Node-RED");
-    const selected = new Set(metadata.inputTargetIds || []);
-    scenarioDevices(panel).forEach((device) => {
-      const option = el("option", null, device.physical_name || device.name || device.target_id);
-      option.value = device.target_id;
-      option.selected = selected.has(device.target_id);
-      select.appendChild(option);
-    });
-    select.addEventListener("change", () => {
-      metadata.inputTargetIds = Array.from(select.selectedOptions).map((option) => option.value).slice(0, 32);
-    });
-    field.appendChild(select);
-    field.appendChild(el("small", null, "Выберите датчики, значения которых нужны для ветвлений. Устройства из триггеров и действий добавятся автоматически."));
-    section.appendChild(field);
+    section.appendChild(renderNodeRedInputPicker(metadata, scenarioDevices(panel), deps));
     if (metadata.syncStatus) {
       section.appendChild(el("span", `scenario-editor-badge scenario-node-red-sync is-${metadata.syncStatus}`, {
         synced: "Flow синхронизирован", changed: "Функция изменена вручную", missing: "Flow не найден",

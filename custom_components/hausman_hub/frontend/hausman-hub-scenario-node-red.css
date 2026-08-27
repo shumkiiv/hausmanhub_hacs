@@ -13,6 +13,18 @@
 .scenario-backend-status.is-warning { color:var(--hmh-warning,#E4A54B); }
 .scenario-node-red-inputs { display:grid; gap:5px; margin-top:10px; }
 .scenario-node-red-inputs select { min-height:112px; }
+.scenario-node-red-selected { display:grid; gap:8px; margin:2px 0 7px; padding:10px; border:1px solid color-mix(in srgb,var(--hmh-accent,#4D8DFF) 34%,var(--hmh-border,#2F3845)); border-radius:11px; background:color-mix(in srgb,var(--hmh-accent,#4D8DFF) 6%,var(--hmh-raised,#181E26)); }
+.scenario-node-red-selected header { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.scenario-node-red-selected header strong { font-size:12px; }
+.scenario-node-red-selected-clear { min-height:28px!important; padding:4px 8px!important; border:0!important; color:var(--hmh-accent,#4D8DFF)!important; background:transparent!important; box-shadow:none!important; font-size:11px!important; }
+.scenario-node-red-selected-list { display:grid; gap:6px; }
+.scenario-node-red-selected-item { display:grid; grid-template-columns:minmax(0,1fr) 28px; align-items:center; gap:8px; min-width:0; padding:7px 7px 7px 9px; border:1px solid var(--hmh-border,#2F3845); border-radius:9px; background:var(--hmh-surface,#10161F); }
+.scenario-node-red-selected-item>span,.scenario-node-red-selected-item b,.scenario-node-red-selected-item small { display:block; min-width:0; overflow-wrap:anywhere; }
+.scenario-node-red-selected-item b { font-size:11px; line-height:1.3; }
+.scenario-node-red-selected-item small { margin-top:2px; color:var(--hmh-muted,#AAB4C2); font-size:10px; line-height:1.25; }
+.scenario-node-red-selected-remove { width:28px!important; min-width:28px!important; min-height:28px!important; padding:0!important; border:1px solid var(--hmh-border,#2F3845)!important; border-radius:8px!important; color:var(--hmh-muted,#AAB4C2)!important; background:transparent!important; box-shadow:none!important; font-size:18px!important; line-height:1!important; }
+.scenario-node-red-selected-remove:hover,.scenario-node-red-selected-remove:focus-visible { border-color:var(--hmh-danger,#EF6A6A)!important; color:var(--hmh-danger,#EF6A6A)!important; }
+.scenario-node-red-selected-empty { margin:0; color:var(--hmh-muted,#AAB4C2); font-size:11px; }
 .scenario-node-red-sync { margin-top:8px; }
 .scenario-node-red-open { display:inline-flex; width:max-content; margin-top:8px; color:var(--hmh-accent,#4D8DFF); font-size:12px; font-weight:700; }
 .scenario-node-red-edit { width:max-content; margin-top:8px; }

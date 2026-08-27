@@ -29,7 +29,7 @@
       });
     </script>
     <script type="module">
-      import "../../custom_components/hausman_hub/frontend/hausman-hub-panel.js?v=1.52.184";
+      import "../../custom_components/hausman_hub/frontend/hausman-hub-panel.js?v=1.52.185";
       const params = new URLSearchParams(window.location.search);
       const panel = document.getElementById("panel");
       const theme = params.get("theme") === "dark" ? "dark" : "light";
@@ -38,7 +38,7 @@
       document.documentElement.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       document.body.style.background = theme === "light" ? "#eef1f6" : "#0b0f14";
       panel._data = {
-        integration_version: "1.52.184",
+        integration_version: "1.52.185",
         readiness: { status: "ready", bridge_mode: "native", reasons: [] },
         snapshot: {
           rooms: [
@@ -174,8 +174,8 @@
       panel._scenarios = {
         loading: false, error: false, catalog: {
           devices: [
-            { target_id: "ac-living", entity_id: "climate.living_ac", name: "Кондиционер гостиная", actions: [{ action_id: "turn_off", title: "Выключить", allowed_fields: [] }, { action_id: "set_temperature", title: "Температура", allowed_fields: ["value"] }] },
-            { target_id: "humidifier-bedroom", entity_id: "humidifier.bedroom", name: "Увлажнитель спальня", actions: [{ action_id: "turn_on", title: "Включить", allowed_fields: [] }, { action_id: "set_humidity", title: "Влажность", allowed_fields: ["value"] }] },
+            { target_id: "ac-living", entity_id: "climate.living_ac", name: "Кондиционер гостиная", room_name: "Гостиная", capability_name: "Температура", actions: [{ action_id: "turn_off", title: "Выключить", allowed_fields: [] }, { action_id: "set_temperature", title: "Температура", allowed_fields: ["value"] }] },
+            { target_id: "humidifier-bedroom", entity_id: "humidifier.bedroom", name: "Увлажнитель спальня", room_name: "Спальня", capability_name: "Влажность", actions: [{ action_id: "turn_on", title: "Включить", allowed_fields: [] }, { action_id: "set_humidity", title: "Влажность", allowed_fields: ["value"] }] },
             { target_id: "target-office-1", entity_id: "switch.office_1", name: "Линия 1", actions: [{ action_id: "turn_on", title: "Включить", allowed_fields: [] }, { action_id: "turn_off", title: "Выключить", allowed_fields: [] }] },
             { target_id: "target-office-2", entity_id: "switch.office_2", name: "Линия 2", actions: [{ action_id: "turn_on", title: "Включить", allowed_fields: [] }, { action_id: "turn_off", title: "Выключить", allowed_fields: [] }] },
             { target_id: "target-office-light", entity_id: "light.office_chandelier", name: "Люстра кабинет", actions: [{ action_id: "turn_on", title: "Включить", allowed_fields: [] }, { action_id: "turn_off", title: "Выключить", allowed_fields: [] }] },
@@ -230,7 +230,7 @@ return msg;`;
               { id: "trigger-6", type: "time", value: "23:00" },
             ], conditions: [],
             actions: [{ id: "safe_placeholder", type: "delay", delaySeconds: 1 }],
-            nodeRed: { flowId: "flow-test", flowRevision: 2, sourceHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", generatedBy: "user", syncStatus: "synced", inputTargetIds: [] },
+            nodeRed: { flowId: "flow-test", flowRevision: 2, sourceHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", generatedBy: "user", syncStatus: "synced", inputTargetIds: ["ac-living", "humidifier-bedroom"] },
           },
         });
         panel._scenarios.nodeRed = {
@@ -667,7 +667,7 @@ return msg;`;
       panel._render();
       panel._applyLocalPreferences();
       panel.shadowRoot.querySelector("link").href =
-        "../../custom_components/hausman_hub/frontend/hausman-hub-panel.css?v=1.52.184";
+        "../../custom_components/hausman_hub/frontend/hausman-hub-panel.css?v=1.52.185";
       if (params.get("kiosk") === "1") panel._shell.kioskButton.click();
       const scenarioName = params.get("openScenario");
       if (scenarioName && panel._activeSection === "scenarios") {
