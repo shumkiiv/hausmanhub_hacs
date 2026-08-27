@@ -8,6 +8,12 @@
   "properties": {
     "version": {"const": 1},
     "executionMode": {"enum": ["single", "restart", "queued"]},
+    "executionBackend": {
+      "description": "Hausman executes the definition directly or compiles it into a managed Node-RED function flow",
+      "enum": ["hausman", "node_red"],
+      "default": "hausman"
+    },
+    "nodeRed": {"$ref": "#/$defs/node_red"},
     "commandMode": {
       "description": "live executes actions; shadow evaluates the same trigger, evidence, conditions and plan without calling services",
       "enum": ["live", "shadow"],
@@ -30,6 +36,23 @@
         "nestedDepthLimit": {"type": "integer", "minimum": 1, "maximum": 8, "default": 4},
         "stopOnStaleEvidence": {"type": "boolean", "default": true},
         "idempotentActions": {"type": "boolean", "default": true}
+      }
+    },
+    "node_red": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "flowId": {"type": "string", "minLength": 1, "maxLength": 128},
+        "flowRevision": {"type": "integer", "minimum": 0},
+        "sourceHash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "generatedBy": {"enum": ["hausman", "ai", "user"], "default": "hausman"},
+        "syncStatus": {"enum": ["pending", "synced", "changed", "missing", "unavailable"], "default": "pending"},
+        "inputTargetIds": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/stable_id"}
+        }
       }
     },
     "event_type": {"type": "string", "pattern": "^[a-z][a-z0-9_]{1,63}$", "not": {"enum": ["state_changed", "call_service", "service_executed", "homeassistant_start", "homeassistant_stop"]}},
@@ -97,5 +120,11 @@
         "message": {"type": "string", "minLength": 1, "maxLength": 500}
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"executionBackend": {"const": "node_red"}}, "required": ["executionBackend"]},
+      "then": {"required": ["nodeRed"]}
+    }
+  ]
 }

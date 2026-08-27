@@ -3,6 +3,7 @@
 function composerState(panel) {
   panel._scenarioAiComposer = panel._scenarioAiComposer || {
     open: false, text: "", mentions: [], busy: false, error: "", questions: [], listening: false,
+    executionBackend: "hausman",
   };
   return panel._scenarioAiComposer;
 }
@@ -77,6 +78,26 @@ export function renderScenarioAiComposer(panel, container, deps, onDraft, refres
   close.addEventListener("click", () => { state.open = false; refresh(); });
   header.appendChild(close);
   dialog.appendChild(header);
+
+  const engine = el("div", "scenario-ai-engine");
+  engine.appendChild(el("strong", null, "Как собрать сценарий"));
+  const engineChoices = el("div", "scenario-ai-engine-choices");
+  const nodeRedAvailable = panel._scenarios.nodeRed && panel._scenarios.nodeRed.available === true;
+  [
+    ["hausman", "В Hausman", "Для коротких и понятных правил", true],
+    ["node_red", "Функцией Node-RED", "Для ветвлений и расчётов без десятков карточек", nodeRedAvailable],
+  ].forEach(([value, titleText, hint, available]) => {
+    const button = el("button", `secondary${state.executionBackend === value ? " is-selected" : ""}`);
+    button.type = "button";
+    button.disabled = !available || state.busy;
+    button.appendChild(el("b", null, titleText));
+    button.appendChild(el("small", null, hint));
+    button.addEventListener("click", () => { state.executionBackend = value; refresh(); });
+    engineChoices.appendChild(button);
+  });
+  engine.appendChild(engineChoices);
+  if (!nodeRedAvailable) engine.appendChild(el("small", null, panel._scenarios.nodeRed?.message || "Node-RED не подключён. Черновик можно создать в Hausman."));
+  dialog.appendChild(engine);
 
   const textarea = el("textarea", "scenario-ai-input");
   textarea.value = state.text;
@@ -208,6 +229,15 @@ export function renderScenarioAiComposer(panel, container, deps, onDraft, refres
         mentions: state.mentions,
       });
       if (result && result.status === "ready" && result.draft && result.saved === false && result.commandSent === false) {
+        result.draft.definition = result.draft.definition || {};
+        result.draft.definition.executionBackend = state.executionBackend;
+        if (state.executionBackend === "node_red") {
+          result.draft.definition.nodeRed = {
+            generatedBy: "ai",
+            syncStatus: "pending",
+            inputTargetIds: Array.from(new Set(state.mentions.map((item) => item.targetId))).slice(0, 32),
+          };
+        }
         state.open = false;
         onDraft(result.draft);
       } else if (result && result.status === "needs_clarification") {

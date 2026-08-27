@@ -921,6 +921,24 @@
                 }
               }
             },
+            "nodeRed": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["available", "statusPath", "statusMethod", "executionBackends", "physicalCommandsOwnedByHausman"],
+              "properties": {
+                "available": {"type": "boolean"},
+                "statusPath": {"const": "/api/hausman_hub/v1/scenarios/node-red"},
+                "statusMethod": {"const": "GET"},
+                "executionBackends": {
+                  "type": "array",
+                  "prefixItems": [{"const": "hausman"}, {"const": "node_red"}],
+                  "minItems": 2,
+                  "maxItems": 2
+                },
+                "physicalCommandsOwnedByHausman": {"const": true},
+                "managedFlowStyle": {"const": "function"}
+              }
+            },
             "definitionVersions": {
               "type": "array",
               "items": {
@@ -964,6 +982,9 @@
                 },
                 "aiDraft": {
                   "const": "/api/hausman_hub/v1/scenarios/ai-draft"
+                },
+                "nodeRedStatus": {
+                  "const": "/api/hausman_hub/v1/scenarios/node-red"
                 },
                 "upcoming": {
                   "const": "/api/hausman_hub/v1/scenarios/upcoming"

@@ -6,6 +6,12 @@
 .scenario-ai-header h2 { margin:0 0 5px; }
 .scenario-ai-header p { margin:0; color:var(--secondary-text-color,#aeb9c8); }
 .scenario-ai-close { min-width:44px; min-height:44px; padding:4px; font-size:26px; }
+.scenario-ai-engine { display:grid; gap:8px; }
+.scenario-ai-engine > small { color:var(--secondary-text-color,#aeb9c8); }
+.scenario-ai-engine-choices { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+.scenario-ai-engine-choices button { display:grid; min-height:72px; align-content:center; gap:4px; text-align:left; }
+.scenario-ai-engine-choices button small { color:var(--secondary-text-color,#aeb9c8); font-weight:400; }
+.scenario-ai-engine-choices button.is-selected { border-color:var(--primary-color,#48a9ff); background:rgba(72,169,255,.14); }
 .scenario-ai-input { width:100%; min-height:142px; box-sizing:border-box; resize:vertical; padding:14px 16px; border:1px solid var(--hh-border,rgba(255,255,255,.16)); border-radius:14px; background:rgba(4,12,24,.55); color:inherit; font:inherit; line-height:1.5; }
 .scenario-ai-input:focus { outline:2px solid var(--primary-color,#48a9ff); outline-offset:1px; }
 .scenario-ai-toolbar,.scenario-ai-actions { display:flex; align-items:center; gap:9px; flex-wrap:wrap; }

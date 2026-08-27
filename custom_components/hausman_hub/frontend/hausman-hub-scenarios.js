@@ -1,14 +1,14 @@
 /* Scenario library and editor shared with the Hausman Hub tablet contract. */
 
-import { activeElementWithin, trapModalTabKey } from "./hausman-hub-modal.js?v=1.52.175";
-import { scenarioEditorIssues, scenarioEventFields, scenarioField, scenarioIconField, scenarioSelectField, scenarioToggle } from "./hausman-hub-scenario-fields.js?v=1.52.175";
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.175";
-import { scenarioCapabilityLabel, scenarioDeviceButton, scenarioDeviceFields, scenarioGroupForTarget, scenarioPhysicalGroups } from "./hausman-hub-scenario-device-picker.js?v=1.52.175";
-import { groupScenarios, renderScenarioCatalog, scenarioActivationKind, scenarioDisplayGroup, scenarioDisplayText } from "./hausman-hub-scenario-catalog.js?v=1.52.175";
-import { renderScenarioRoomPicker, scenarioAffectedDeviceCount, scenarioRoomLabels } from "./hausman-hub-scenario-rooms.js?v=1.52.175";
-import { defaultScenarioDraft, duplicateScenarioDraft, normalizedScenario, scenarioPayload } from "./hausman-hub-scenario-state.js?v=1.52.175";
-import { bulkSaveScenarios } from "./hausman-hub-scenario-bulk.js?v=1.52.175";
-import { openScenarioAiComposer, renderScenarioAiComposer } from "./hausman-hub-scenario-ai.js?v=1.52.175";
+import { activeElementWithin, trapModalTabKey } from "./hausman-hub-modal.js?v=1.52.176";
+import { scenarioEditorIssues, scenarioEventFields, scenarioField, scenarioIconField, scenarioSelectField, scenarioToggle } from "./hausman-hub-scenario-fields.js?v=1.52.176";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.176";
+import { scenarioCapabilityLabel, scenarioDeviceButton, scenarioDeviceFields, scenarioGroupForTarget, scenarioPhysicalGroups } from "./hausman-hub-scenario-device-picker.js?v=1.52.176";
+import { groupScenarios, renderScenarioCatalog, scenarioActivationKind, scenarioDisplayGroup, scenarioDisplayText } from "./hausman-hub-scenario-catalog.js?v=1.52.176";
+import { renderScenarioRoomPicker, scenarioAffectedDeviceCount, scenarioRoomLabels } from "./hausman-hub-scenario-rooms.js?v=1.52.176";
+import { defaultScenarioDraft, duplicateScenarioDraft, normalizedScenario, scenarioPayload } from "./hausman-hub-scenario-state.js?v=1.52.176";
+import { bulkSaveScenarios } from "./hausman-hub-scenario-bulk.js?v=1.52.176";
+import { openScenarioAiComposer, renderScenarioAiComposer } from "./hausman-hub-scenario-ai.js?v=1.52.176";
 
 const TRIGGER_TYPES = [
   ["manual", "Ручной запуск"], ["time", "По времени"],
@@ -57,6 +57,7 @@ function openScenarioEditor(panel, source) {
   panel._scenarioEditorExpanded = { trigger: 0, condition: 0, action: 0 };
   panel._scenarioEditorRestoreFocus = activeElementWithin(panel);
   panel._scenarioEditorJustOpened = true;
+  panel._scenarioDryRun = null;
   updateScenarioEditor(panel);
 }
 
@@ -90,6 +91,108 @@ function scenarioDevices(panel) {
   const devices = panel._scenarios.catalog && Array.isArray(panel._scenarios.catalog.devices)
     ? panel._scenarios.catalog.devices : [];
   return devices;
+}
+
+function renderExecutionBackend(panel, scenario, deps) {
+  const { el, setAttr } = deps;
+  const section = scenarioEditorSection(deps, "Где выполняется алгоритм");
+  const status = panel._scenarios.nodeRed || {};
+  const backend = scenario.definition.executionBackend || "hausman";
+  const choices = el("div", "scenario-backend-choices");
+  [
+    ["hausman", "Hausman", "Быстрые обычные сценарии без внешней зависимости.", true],
+    ["node_red", "Node-RED", "Компактная function-схема для ветвлений. Команды всё равно проверяет Hausman.", status.available === true],
+  ].forEach(([value, title, help, available]) => {
+    const button = el("button", `scenario-backend-choice${backend === value ? " is-selected" : ""}`);
+    button.type = "button";
+    button.disabled = !available;
+    setAttr(button, "aria-pressed", backend === value ? "true" : "false");
+    button.appendChild(el("b", null, title));
+    button.appendChild(el("small", null, help));
+    button.addEventListener("click", () => {
+      scenario.definition.executionBackend = value;
+      if (value === "node_red") {
+        scenario.definition.nodeRed = scenario.definition.nodeRed || {
+          generatedBy: "hausman", syncStatus: "pending", inputTargetIds: [],
+        };
+      } else delete scenario.definition.nodeRed;
+      panel._scenarioDryRun = null;
+      updateScenarioEditor(panel);
+    });
+    choices.appendChild(button);
+  });
+  section.appendChild(choices);
+  const statusText = status.available
+    ? `Node-RED ${status.version || ""} подключён. Управляемый flow будет синхронизирован при сохранении.`
+    : status.message || "Node-RED не установлен или не отвечает. Выберите выполнение в Hausman.";
+  section.appendChild(el("p", `scenario-backend-status${status.available ? " is-ready" : " is-warning"}`, statusText));
+
+  if (backend === "node_red") {
+    const metadata = scenario.definition.nodeRed || { inputTargetIds: [] };
+    scenario.definition.nodeRed = metadata;
+    const field = el("label", "scenario-field scenario-node-red-inputs");
+    field.appendChild(el("span", null, "Данные для алгоритма"));
+    const select = el("select");
+    select.multiple = true;
+    setAttr(select, "aria-label", "Устройства и датчики, доступные функции Node-RED");
+    const selected = new Set(metadata.inputTargetIds || []);
+    scenarioDevices(panel).forEach((device) => {
+      const option = el("option", null, device.physical_name || device.name || device.target_id);
+      option.value = device.target_id;
+      option.selected = selected.has(device.target_id);
+      select.appendChild(option);
+    });
+    select.addEventListener("change", () => {
+      metadata.inputTargetIds = Array.from(select.selectedOptions).map((option) => option.value).slice(0, 32);
+    });
+    field.appendChild(select);
+    field.appendChild(el("small", null, "Выберите датчики, значения которых нужны для ветвлений. Устройства из триггеров и действий добавятся автоматически."));
+    section.appendChild(field);
+    if (metadata.syncStatus) {
+      section.appendChild(el("span", `scenario-editor-badge scenario-node-red-sync is-${metadata.syncStatus}`, {
+        synced: "Flow синхронизирован", changed: "Функция изменена вручную", missing: "Flow не найден",
+        pending: "Flow будет создан", unavailable: "Node-RED недоступен",
+      }[metadata.syncStatus] || metadata.syncStatus));
+    }
+    const managed = Array.isArray(status.flows)
+      ? status.flows.find((item) => item.flowId === metadata.flowId) : null;
+    if (managed && managed.openPath) {
+      const link = el("a", "scenario-node-red-open", "Открыть function-схему в Node-RED");
+      link.href = managed.openPath;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      section.appendChild(link);
+    }
+  }
+  return section;
+}
+
+function renderScenarioTrace(panel, deps) {
+  const report = panel._scenarioDryRun;
+  if (!report) return null;
+  const { el } = deps;
+  const section = el("section", "scenario-trace");
+  section.appendChild(el("h3", null, "Отладка пробного запуска"));
+  section.appendChild(el("p", null, report.summary || "Проверка завершена без отправки команд."));
+  const nodeRed = report.nodeRed;
+  if (nodeRed && Array.isArray(nodeRed.trace)) {
+    const meta = el("p", "scenario-trace-meta", `Ветка: ${nodeRed.selectedBranch || "не выбрана"} · расчёт ${nodeRed.durationMs || 0} мс`);
+    section.appendChild(meta);
+    const list = el("ol", "scenario-trace-list");
+    nodeRed.trace.forEach((item) => {
+      const row = el("li", `is-${item.status || "skipped"}`);
+      row.appendChild(el("b", null, item.title || item.id || "Проверка"));
+      const evidence = [
+        item.actual !== null && item.actual !== undefined ? `факт: ${item.actual}` : "",
+        item.expected !== null && item.expected !== undefined ? `ожидалось: ${item.expected}` : "",
+        item.reason || "",
+      ].filter(Boolean).join(" · ");
+      if (evidence) row.appendChild(el("small", null, evidence));
+      list.appendChild(row);
+    });
+    section.appendChild(list);
+  }
+  return section;
 }
 
 function updateScenarioEditor(panel) {
@@ -283,8 +386,9 @@ async function submitScenario(panel, deps, testOnly) {
   panel._error = false;
   updateScenarioEditor(panel);
   try {
-    await panel._hass.callApi("POST", testOnly ? deps.testApi : deps.scenariosApi, scenarioPayload(scenario));
+    const response = await panel._hass.callApi("POST", testOnly ? deps.testApi : deps.scenariosApi, scenarioPayload(scenario));
     if (testOnly) {
+      panel._scenarioDryRun = response && response.report ? response.report : null;
       panel._notice = `Сценарий «${scenario.title}» прошёл проверку.`;
     } else {
       panel._scenarioEditor = null;
@@ -468,6 +572,7 @@ function renderScenarioEditor(panel, container, deps) {
   };
   execution.appendChild(el("p", "scenario-editor-panel-copy", executionHelp[scenario.definition.executionMode] || executionHelp.single));
   left.appendChild(execution);
+  left.appendChild(renderExecutionBackend(panel, scenario, deps));
   const publication = scenarioEditorSection(deps, "Публикация");
   publication.appendChild(scenarioToggle(deps, "Сценарий включён", "Разрешить автоматический и ручной запуск", scenario.enabled, (value) => { scenario.enabled = value; }));
   publication.appendChild(scenarioToggle(deps, "В быстром доступе", "Показывать карточку среди избранных", scenario.favorite, (value) => { scenario.favorite = value; }));
@@ -486,14 +591,19 @@ function renderScenarioEditor(panel, container, deps) {
   dialog.appendChild(workspace);
 
   const footer = el("footer", "scenario-editor-footer");
+  const trace = renderScenarioTrace(panel, deps);
+  if (trace) footer.appendChild(trace);
   footer.appendChild(scenarioReviewDetails(panel, scenario, deps));
   footer.appendChild(el("p", "scenario-editor-review-summary", scenarioReviewSummary(scenario)));
   const footerRow = el("div", "scenario-editor-footer-row");
   footerRow.appendChild(el("div", issues.length ? "scenario-editor-status is-warning" : "scenario-editor-status is-ready",
     issues.length ? `${issues[0].message}${issues.length > 1 ? ` · ещё ${issues.length - 1}` : ""}` : "Сценарий готов к сохранению"));
   const buttons = el("div", "scenario-editor-footer-actions");
-  const test = el("button", "secondary", "Пробный запуск");
-  test.disabled = panel._busy || issues.length > 0;
+  const needsNodeRedSave = scenario.definition.executionBackend === "node_red"
+    && !(scenario.definition.nodeRed && scenario.definition.nodeRed.flowId);
+  const test = el("button", "secondary", needsNodeRedSave ? "Сначала сохранить" : "Пробный запуск");
+  test.disabled = panel._busy || issues.length > 0 || needsNodeRedSave;
+  if (needsNodeRedSave) test.title = "Hausman создаст управляемую function-схему при первом сохранении";
   test.addEventListener("click", () => submitScenario(panel, deps, true));
   const cancel = el("button", "secondary", "Отмена");
   cancel.addEventListener("click", () => closeScenarioEditor(panel));

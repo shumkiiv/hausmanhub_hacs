@@ -40,6 +40,7 @@ from .application.api_capabilities import (
     SCENARIOS_AI_DRAFT_PATH,
     SCENARIOS_CATALOG_PATH,
     SCENARIOS_HEALTH_PATH,
+    SCENARIOS_NODE_RED_PATH,
     SCENARIOS_DELETE_PATH,
     SCENARIOS_PATH,
     SCENARIOS_RUN_PATH,
@@ -57,6 +58,7 @@ if TYPE_CHECKING:
 ADMIN_SCENARIOS_PATH = "/api/hausman_hub/v1/admin/scenarios"
 ADMIN_SCENARIOS_CATALOG_PATH = f"{ADMIN_SCENARIOS_PATH}/catalog"
 ADMIN_SCENARIOS_HEALTH_PATH = f"{ADMIN_SCENARIOS_PATH}/health"
+ADMIN_SCENARIOS_NODE_RED_PATH = f"{ADMIN_SCENARIOS_PATH}/node-red"
 ADMIN_SCENARIOS_TEST_PATH = f"{ADMIN_SCENARIOS_PATH}/test"
 ADMIN_SCENARIOS_DELETE_PATH = f"{ADMIN_SCENARIOS_PATH}/delete"
 ADMIN_SCENARIOS_RUN_PATH = f"{ADMIN_SCENARIOS_PATH}/run"
@@ -89,6 +91,27 @@ class _ScenarioView(HomeAssistantView):
 
     def _authorized(self, request: Any) -> bool:
         return _is_local_admin_request(request)
+
+
+class ScenarioNodeRedView(_ScenarioView):
+    """Expose Node-RED availability and managed-flow synchronization."""
+
+    url = ADMIN_SCENARIOS_NODE_RED_PATH
+    name = "api:hausman_hub:scenarios_node_red"
+
+    async def get(self, request: Any) -> Any:
+        if not _is_exact_request(request, self.url):
+            return _not_found(self)
+        if not self._authorized(request):
+            return _forbidden(self)
+        service = self._service_ready()
+        if service is None:
+            return self._unavailable()
+        return self.json(
+            await service.async_node_red_status(),
+            status_code=HTTPStatus.OK,
+            headers=NO_STORE_HEADERS,
+        )
 
 
 class ScenarioCatalogView(_ScenarioView):
@@ -794,6 +817,11 @@ class TabletScenarioHealthView(_TabletScenarioAccess, ScenarioHealthView):
     name = "api:hausman_hub:tablet_scenarios_health"
 
 
+class TabletScenarioNodeRedView(_TabletScenarioAccess, ScenarioNodeRedView):
+    url = SCENARIOS_NODE_RED_PATH
+    name = "api:hausman_hub:tablet_scenarios_node_red"
+
+
 class TabletScenariosView(_TabletScenarioAccess, ScenariosView):
     url = SCENARIOS_PATH
     name = "api:hausman_hub:tablet_scenarios"
@@ -973,6 +1001,7 @@ def scenario_api_views(
     return (
         ScenarioCatalogView(hass),
         ScenarioHealthView(hass),
+        ScenarioNodeRedView(hass),
         ScenariosView(hass),
         ScenarioTestView(hass),
         ScenarioAiDraftView(hass),
@@ -981,6 +1010,7 @@ def scenario_api_views(
         ScenarioActionView(hass),
         TabletScenarioCatalogView(hass),
         TabletScenarioHealthView(hass),
+        TabletScenarioNodeRedView(hass),
         TabletScenariosView(hass),
         TabletScenarioTestView(hass),
         TabletScenarioAiDraftView(hass),

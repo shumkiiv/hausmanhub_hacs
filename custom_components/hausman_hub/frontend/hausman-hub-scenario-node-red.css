@@ -1,0 +1,23 @@
+.scenario-backend-choices { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+.scenario-backend-choice { display:grid; min-height:92px; align-content:start; gap:5px; margin:0; padding:11px; border:1px solid var(--hmh-border,#2F3845); border-radius:12px; color:var(--hmh-text,#E7ECF3); background:var(--hmh-raised,#181E26); box-shadow:none; text-align:left; }
+.scenario-backend-choice small { color:var(--hmh-muted,#AAB4C2); font-weight:400; line-height:1.35; }
+.scenario-backend-choice.is-selected { border-color:var(--hmh-accent,#4D8DFF); background:color-mix(in srgb,var(--hmh-accent,#4D8DFF) 12%,var(--hmh-raised,#181E26)); }
+.scenario-backend-choice:disabled { opacity:.44; }
+.scenario-backend-status { margin:8px 0 0; color:var(--hmh-muted,#AAB4C2); font-size:11px; line-height:1.4; }
+.scenario-backend-status.is-ready { color:var(--hmh-success,#58C786); }
+.scenario-backend-status.is-warning { color:var(--hmh-warning,#E4A54B); }
+.scenario-node-red-inputs { display:grid; gap:5px; margin-top:10px; }
+.scenario-node-red-inputs select { min-height:112px; }
+.scenario-node-red-sync { margin-top:8px; }
+.scenario-node-red-open { display:inline-flex; width:max-content; margin-top:8px; color:var(--hmh-accent,#4D8DFF); font-size:12px; font-weight:700; }
+.scenario-node-red-sync.is-changed,.scenario-node-red-sync.is-missing,.scenario-node-red-sync.is-unavailable { border-color:var(--hmh-warning,#E4A54B); color:var(--hmh-warning,#E4A54B); }
+.scenario-trace { display:grid; gap:6px; max-height:210px; overflow:auto; padding:10px 12px; border:1px solid var(--hmh-border,#2F3845); border-radius:12px; background:var(--hmh-raised,#181E26); }
+.scenario-trace h3,.scenario-trace p { margin:0; }
+.scenario-trace h3 { font-size:13px; }
+.scenario-trace p,.scenario-trace small { color:var(--hmh-muted,#AAB4C2); font-size:11px; }
+.scenario-trace-meta { color:var(--hmh-accent,#4D8DFF)!important; }
+.scenario-trace-list { display:grid; gap:4px; margin:0; padding-left:20px; }
+.scenario-trace-list li { padding:4px 6px; border-radius:7px; color:var(--hmh-muted,#AAB4C2); }
+.scenario-trace-list li.is-passed,.scenario-trace-list li.is-selected { color:var(--hmh-success,#58C786); background:color-mix(in srgb,var(--hmh-success,#58C786) 8%,transparent); }
+.scenario-trace-list li.is-failed { color:var(--hmh-danger,#EF6A6A); background:color-mix(in srgb,var(--hmh-danger,#EF6A6A) 8%,transparent); }
+.scenario-trace-list b,.scenario-trace-list small { display:block; }

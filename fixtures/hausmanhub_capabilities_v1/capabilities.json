@@ -276,6 +276,14 @@
         "saves": false,
         "sends_commands": false
       },
+      "nodeRed": {
+        "available": true,
+        "statusPath": "/api/hausman_hub/v1/scenarios/node-red",
+        "statusMethod": "GET",
+        "executionBackends": ["hausman", "node_red"],
+        "physicalCommandsOwnedByHausman": true,
+        "managedFlowStyle": "function"
+      },
       "upcoming": true,
       "definitionVersions": [
         1
@@ -289,6 +297,7 @@
         "run": "/api/hausman_hub/v1/scenarios/run",
         "action": "/api/hausman_hub/v1/scenarios/action",
         "aiDraft": "/api/hausman_hub/v1/scenarios/ai-draft",
+        "nodeRedStatus": "/api/hausman_hub/v1/scenarios/node-red",
         "upcoming": "/api/hausman_hub/v1/scenarios/upcoming",
         "upcomingCancel": "/api/hausman_hub/v1/scenarios/upcoming/cancel"
       }

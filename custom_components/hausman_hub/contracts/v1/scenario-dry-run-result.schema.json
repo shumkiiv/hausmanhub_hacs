@@ -44,6 +44,23 @@
         "conditionCount": {"type": "integer", "minimum": 0, "maximum": 32},
         "actionCount": {"type": "integer", "minimum": 1, "maximum": 64},
         "commandSent": {"const": false},
+        "executionBackend": {"enum": ["hausman", "node_red"]},
+        "nodeRed": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "summary", "trace"],
+          "properties": {
+            "status": {"enum": ["completed", "skipped", "failed"]},
+            "summary": {"type": "string", "minLength": 1, "maxLength": 500},
+            "selectedBranch": {"type": ["string", "null"], "maxLength": 120},
+            "durationMs": {"type": "integer", "minimum": 0, "maximum": 10000},
+            "trace": {
+              "type": "array",
+              "maxItems": 64,
+              "items": {"$ref": "#/$defs/trace"}
+            }
+          }
+        },
         "conditions": {
           "type": "array",
           "maxItems": 32,
@@ -65,6 +82,19 @@
         "position": {"type": "integer", "minimum": 1, "maximum": 32},
         "title": {"type": "string", "minLength": 1, "maxLength": 240},
         "status": {"enum": ["passed", "failed"]},
+        "reason": {"type": ["string", "null"], "maxLength": 500}
+      }
+    },
+    "trace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "status"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+        "title": {"type": "string", "minLength": 1, "maxLength": 240},
+        "status": {"enum": ["passed", "failed", "selected", "skipped"]},
+        "actual": {"type": ["string", "number", "boolean", "null"]},
+        "expected": {"type": ["string", "number", "boolean", "null"]},
         "reason": {"type": ["string", "null"], "maxLength": 500}
       }
     },

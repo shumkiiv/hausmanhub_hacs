@@ -1,8 +1,8 @@
 /* Pure scenario editor state, compatibility projection and save payload. */
 
-import { eventDataFromDraft } from "./hausman-hub-scenario-fields.js?v=1.52.175";
-import { scenarioDisplayGroup, scenarioDisplayText } from "./hausman-hub-scenario-catalog.js?v=1.52.175";
-import { applyScenarioRoomIds, scenarioRoomIds } from "./hausman-hub-scenario-rooms.js?v=1.52.175";
+import { eventDataFromDraft } from "./hausman-hub-scenario-fields.js?v=1.52.176";
+import { scenarioDisplayGroup, scenarioDisplayText } from "./hausman-hub-scenario-catalog.js?v=1.52.176";
+import { applyScenarioRoomIds, scenarioRoomIds } from "./hausman-hub-scenario-rooms.js?v=1.52.176";
 
 export function scenarioClone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -24,6 +24,7 @@ export function defaultScenarioDraft() {
     definition: {
       version: 1,
       executionMode: "single",
+      executionBackend: "hausman",
       triggers: [{ id: "trigger-1", type: "manual" }],
       conditions: [],
       actions: [],
@@ -44,6 +45,16 @@ export function normalizedScenario(source) {
   scenario.definition = scenario.definition || {};
   scenario.definition.version = 1;
   scenario.definition.executionMode = scenario.definition.executionMode || "single";
+  scenario.definition.executionBackend = scenario.definition.executionBackend || "hausman";
+  if (scenario.definition.executionBackend === "node_red") {
+    scenario.definition.nodeRed = scenario.definition.nodeRed || {
+      generatedBy: "hausman", syncStatus: "pending", inputTargetIds: [],
+    };
+    scenario.definition.nodeRed.inputTargetIds = Array.isArray(scenario.definition.nodeRed.inputTargetIds)
+      ? scenario.definition.nodeRed.inputTargetIds : [];
+  } else {
+    delete scenario.definition.nodeRed;
+  }
   scenario.definition.triggers = Array.isArray(scenario.definition.triggers)
     && scenario.definition.triggers.length ? scenario.definition.triggers : [{ id: "trigger-1", type: "manual" }];
   scenario.definition.conditions = Array.isArray(scenario.definition.conditions)
@@ -101,6 +112,22 @@ export function scenarioPayload(scenario) {
   result.conditionDescription = result.definition.conditions.length
     ? `${result.definition.conditions.length} условий` : "Без дополнительных условий";
   result.actionDescription = `${result.definition.actions.length} действий`;
+  if (result.definition.executionBackend === "node_red") {
+    result.definition.nodeRed = result.definition.nodeRed || {
+      generatedBy: "hausman", syncStatus: "pending", inputTargetIds: [],
+    };
+    const referenced = [
+      ...result.definition.triggers,
+      ...result.definition.conditions,
+      ...result.definition.actions,
+    ].map((item) => item && item.targetId).filter(Boolean);
+    result.definition.nodeRed.inputTargetIds = Array.from(new Set([
+      ...(result.definition.nodeRed.inputTargetIds || []), ...referenced,
+    ])).slice(0, 32);
+  } else {
+    result.definition.executionBackend = "hausman";
+    delete result.definition.nodeRed;
+  }
   result.definition.triggers.forEach((trigger) => {
     if (trigger.type !== "event") return;
     const filter = eventDataFromDraft(trigger);

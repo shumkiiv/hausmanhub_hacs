@@ -15,6 +15,16 @@
     "conditionCount": 1,
     "actionCount": 3,
     "commandSent": false,
+    "executionBackend": "node_red",
+    "nodeRed": {
+      "status": "completed",
+      "summary": "Выбрана ветка влажности выше порога.",
+      "selectedBranch": "humidity_high",
+      "durationMs": 5,
+      "trace": [
+        {"id": "humidity_high", "title": "Влажность выше порога", "status": "selected", "actual": 67, "expected": 55, "reason": null}
+      ]
+    },
     "conditions": [
       {
         "position": 1,

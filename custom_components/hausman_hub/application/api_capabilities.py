@@ -63,6 +63,7 @@ HOME_CLIMATE_TARGETS_PATH = f"{CONTOURS_PATH}/home-targets"
 SCENARIOS_PATH = f"{API_BASE_PATH}/scenarios"
 SCENARIOS_CATALOG_PATH = f"{SCENARIOS_PATH}/catalog"
 SCENARIOS_HEALTH_PATH = f"{SCENARIOS_PATH}/health"
+SCENARIOS_NODE_RED_PATH = f"{SCENARIOS_PATH}/node-red"
 SCENARIOS_TEST_PATH = f"{SCENARIOS_PATH}/test"
 SCENARIOS_DELETE_PATH = f"{SCENARIOS_PATH}/delete"
 SCENARIOS_RUN_PATH = f"{SCENARIOS_PATH}/run"
@@ -360,6 +361,7 @@ def api_capabilities_snapshot(
                     "list": SCENARIOS_PATH,
                     "catalog": SCENARIOS_CATALOG_PATH,
                     "health": SCENARIOS_HEALTH_PATH,
+                    "nodeRedStatus": SCENARIOS_NODE_RED_PATH,
                     "test": SCENARIOS_TEST_PATH,
                     "delete": SCENARIOS_DELETE_PATH,
                     "run": SCENARIOS_RUN_PATH,
@@ -367,6 +369,14 @@ def api_capabilities_snapshot(
                     "aiDraft": SCENARIOS_AI_DRAFT_PATH,
                     "upcoming": SCENARIOS_UPCOMING_PATH,
                     "upcomingCancel": SCENARIOS_UPCOMING_CANCEL_PATH,
+                },
+                "nodeRed": {
+                    "available": True,
+                    "statusPath": SCENARIOS_NODE_RED_PATH,
+                    "statusMethod": "GET",
+                    "executionBackends": ["hausman", "node_red"],
+                    "physicalCommandsOwnedByHausman": True,
+                    "managedFlowStyle": "function",
                 },
             },
             "voice_greeting": {

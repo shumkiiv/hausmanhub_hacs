@@ -22,7 +22,9 @@ from ..domain.scenarios import (
     ScenarioComparison,
     ScenarioCondition,
     ScenarioConditionType,
+    ScenarioExecutionBackend,
 )
+from .scenario_node_red import NodeRedBackendError, NodeRedScenarioBackend
 from .scenarios import (
     ScenarioAction,
     ScenarioActionType,
@@ -440,6 +442,7 @@ class ScenarioExecutor:
         ) = None,
         command_guard: Callable[[str, str, bool], str | None] | None = None,
         vendor_resilience: VendorCircuitBreaker | None = None,
+        node_red_backend: NodeRedScenarioBackend | None = None,
     ):
         if not 0.01 <= readback_window_seconds <= 30.0:
             raise ValueError("readback window must be between 0.01 and 30 seconds")
@@ -455,6 +458,7 @@ class ScenarioExecutor:
         self._power_source_locks: dict[str, asyncio.Lock] = {}
         self._command_guard = command_guard
         self._vendor_resilience = vendor_resilience
+        self._node_red_backend = node_red_backend
 
     def new_run_id(self) -> str:
         """Generate a unique execution trace id."""
@@ -754,12 +758,69 @@ class ScenarioExecutor:
                     "receipts": [],
                 }
 
+        actions = definition.actions
+        node_red_result: dict[str, object] | None = None
+        if definition.execution_backend is ScenarioExecutionBackend.NODE_RED:
+            if self._node_red_backend is None:
+                return {
+                    "run_id": run_id,
+                    "scenario_id": scenario_id,
+                    "execution_mode": definition.execution_mode.value,
+                    "execution_backend": definition.execution_backend.value,
+                    "command_mode": command_mode,
+                    "status": "failed",
+                    "error": "Node-RED backend is unavailable",
+                    "condition_results": condition_results,
+                    "evidence_revision": evidence_revision,
+                    "receipts": [],
+                    "accepted": False,
+                    "confirmed": False,
+                }
+            try:
+                actions, node_red_result = await self._node_red_backend.async_plan(
+                    scenario_id,
+                    definition,
+                    run_id,
+                    self._catalog,
+                    dry_run=dry_run,
+                )
+            except NodeRedBackendError as error:
+                return {
+                    "run_id": run_id,
+                    "scenario_id": scenario_id,
+                    "execution_mode": definition.execution_mode.value,
+                    "execution_backend": definition.execution_backend.value,
+                    "command_mode": command_mode,
+                    "status": "failed",
+                    "error": str(error),
+                    "condition_results": condition_results,
+                    "evidence_revision": evidence_revision,
+                    "receipts": [],
+                    "accepted": False,
+                    "confirmed": False,
+                }
+            if node_red_result["status"] != "completed":
+                return {
+                    "run_id": run_id,
+                    "scenario_id": scenario_id,
+                    "execution_mode": definition.execution_mode.value,
+                    "execution_backend": definition.execution_backend.value,
+                    "command_mode": command_mode,
+                    "status": node_red_result["status"],
+                    "condition_results": condition_results,
+                    "evidence_revision": evidence_revision,
+                    "node_red": node_red_result,
+                    "receipts": [],
+                    "accepted": node_red_result["status"] == "skipped",
+                    "confirmed": False,
+                }
+
         receipts: list[dict[str, Any]] = []
         powered_sources: dict[str, float] = {}
         powered_target_ids: set[str] = set()
         start_ms = int(time.time() * 1000)
 
-        for action_index, action in enumerate(definition.actions):
+        for action_index, action in enumerate(actions):
             if not dry_run and action.type is ScenarioActionType.DELAY:
                 await self._confirm_deferred_device_receipts(receipts)
             receipt = await self._execute_action(
@@ -783,7 +844,7 @@ class ScenarioExecutor:
             if receipt.get("status") == "failed":
                 if not dry_run and powered_target_ids:
                     cleanup_receipts = await self._async_safety_cleanup_actions(
-                        definition.actions[action_index + 1 :],
+                        actions[action_index + 1 :],
                         run_id,
                         next_visited,
                         powered_target_ids=powered_target_ids,
@@ -834,11 +895,13 @@ class ScenarioExecutor:
             "run_id": run_id,
             "scenario_id": scenario_id,
             "execution_mode": definition.execution_mode.value,
+            "execution_backend": definition.execution_backend.value,
             "command_mode": command_mode,
             "started_at_ms": start_ms,
             "finished_at_ms": int(time.time() * 1000),
             "condition_results": condition_results,
             "evidence_revision": evidence_revision,
+            "node_red": node_red_result,
             "receipts": receipts,
             "accepted": completed,
             "confirmed": confirmed,

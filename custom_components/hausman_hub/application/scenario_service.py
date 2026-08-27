@@ -16,6 +16,7 @@ from ..domain.scenarios import (
     ScenarioCommandMode,
     ScenarioComparison,
     ScenarioDefinition,
+    ScenarioExecutionBackend,
     ScenarioExecutionMode,
     ScenarioRegistry,
     ScenarioTriggerType,
@@ -23,6 +24,7 @@ from ..domain.scenarios import (
     _scenario_to_payload,
 )
 from .operation_journal import scenario_operation_receipt
+from .scenario_node_red import NodeRedBackendError, NodeRedScenarioBackend
 from .scenario_metrics import ScenarioPathMetrics
 from .scenario_schedule import (
     ScheduledRun,
@@ -275,16 +277,20 @@ def _dry_run_report(
         )
     else:
         summary = "Проверка нашла невыполнимый шаг. Физические команды не отправлены."
-    return {
+    report: dict[str, object] = {
         "contract": {"name": "hausman-hub-scenario-dry-run", "version": 1},
         "status": status,
         "summary": summary,
         "conditionCount": len(conditions),
         "actionCount": len(steps),
         "commandSent": False,
+        "executionBackend": definition.execution_backend.value,
         "conditions": conditions,
         "steps": steps,
     }
+    if plan is not None and isinstance(plan.get("node_red"), Mapping):
+        report["nodeRed"] = dict(plan["node_red"])
+    return report
 
 
 class ScenarioServiceError(Exception):
@@ -381,6 +387,7 @@ class ScenarioService:
         schedule_store: object | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         operation_journal: object | None = None,
+        node_red_backend: NodeRedScenarioBackend | None = None,
         intercom_release_publisher: Callable[[dict[str, Any]], None] | None = None,
         scenario_change_publisher: Callable[
             [str, str, int, tuple[str, ...]], None
@@ -399,6 +406,7 @@ class ScenarioService:
         self._schedule_store = schedule_store
         self._sleep = sleep
         self._operation_journal = operation_journal
+        self._node_red_backend = node_red_backend
         self._intercom_release_publisher = intercom_release_publisher
         self._scenario_change_publisher = scenario_change_publisher
         self._monotonic = monotonic
@@ -728,6 +736,28 @@ class ScenarioService:
         """Return the live catalog snapshot without triggering a rescan."""
 
         return self._catalog
+
+    async def async_node_red_status(self) -> dict[str, object]:
+        """Return installation and synchronization state for the editor."""
+
+        registry = self._ensure_loaded()
+        if self._node_red_backend is None:
+            return {
+                "contract": {
+                    "name": "hausman-hub-scenario-node-red-status",
+                    "version": 1,
+                },
+                "available": False,
+                "installed": False,
+                "running": False,
+                "connected": False,
+                "canProvision": False,
+                "version": None,
+                "message": "Node-RED backend не настроен.",
+                "lastCheckedAt": int(time.time() * 1000),
+                "flows": [],
+            }
+        return await self._node_red_backend.async_status(registry.scenarios)
 
     @property
     def performance_metrics(self) -> dict[str, dict[str, float | int | str]]:
@@ -1240,6 +1270,40 @@ class ScenarioService:
                             else ()
                         ),
                     )
+            if definition.execution_backend is ScenarioExecutionBackend.NODE_RED:
+                if self._node_red_backend is None:
+                    raise ScenarioValidationError(
+                        (
+                            ScenarioDefinitionViolation(
+                                "Node-RED недоступен. Установите и запустите дополнение либо выберите выполнение в Hausman.",
+                                code="node_red_unavailable",
+                                path="definition.executionBackend",
+                            ),
+                        )
+                    )
+                try:
+                    definition = await self._node_red_backend.async_prepare(
+                        raw_id,
+                        raw_title.strip(),
+                        definition,
+                        previous=(
+                            existing.definition.node_red
+                            if existing is not None
+                            and existing.definition.execution_backend
+                            is ScenarioExecutionBackend.NODE_RED
+                            else None
+                        ),
+                    )
+                except NodeRedBackendError as error:
+                    raise ScenarioValidationError(
+                        (
+                            ScenarioDefinitionViolation(
+                                str(error),
+                                code="node_red_sync_failed",
+                                path="definition.executionBackend",
+                            ),
+                        )
+                    ) from error
             group = _str_or_default(payload, "group", "custom")
             if existing is not None and existing.protected:
                 group = existing.group

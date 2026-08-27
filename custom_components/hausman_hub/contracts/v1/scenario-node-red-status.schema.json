@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/scenario-node-red-status.schema.json",
+  "title": "HausmanHub Node-RED scenario backend status v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "available", "installed", "running", "connected", "canProvision", "message", "flows"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-scenario-node-red-status"},
+        "version": {"const": 1}
+      }
+    },
+    "available": {"type": "boolean"},
+    "installed": {"type": "boolean"},
+    "running": {"type": "boolean"},
+    "connected": {"type": "boolean"},
+    "canProvision": {"type": "boolean"},
+    "version": {"type": ["string", "null"], "maxLength": 64},
+    "message": {"type": "string", "minLength": 1, "maxLength": 500},
+    "lastCheckedAt": {"type": ["integer", "null"], "minimum": 0},
+    "flows": {
+      "type": "array",
+      "maxItems": 512,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["scenarioId", "title", "flowId", "syncStatus"],
+        "properties": {
+          "scenarioId": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+          "title": {"type": "string", "minLength": 1, "maxLength": 120},
+          "flowId": {"type": "string", "minLength": 1, "maxLength": 128},
+          "sourceHash": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+          "syncStatus": {"enum": ["pending", "synced", "changed", "missing", "unavailable"]},
+          "openPath": {"type": ["string", "null"], "maxLength": 240}
+        }
+      }
+    }
+  }
+}

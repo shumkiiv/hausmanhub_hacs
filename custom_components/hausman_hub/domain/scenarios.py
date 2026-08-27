@@ -69,6 +69,13 @@ class ScenarioCommandMode(StrEnum):
     SHADOW = "shadow"
 
 
+class ScenarioExecutionBackend(StrEnum):
+    """Runtime selected by the owner for one scenario definition."""
+
+    HAUSMAN = "hausman"
+    NODE_RED = "node_red"
+
+
 class ScenarioActivationKind(StrEnum):
     """User-facing ownership class derived from triggers and policy."""
 
@@ -107,6 +114,24 @@ class ScenarioActionType(StrEnum):
     RUN_SCENARIO = "run_scenario"
     NOTIFICATION = "notification"
     EXISTING_ACTION = "existing_action"
+
+
+class ScenarioNodeRedGeneratedBy(StrEnum):
+    """Source that requested the managed Node-RED flow."""
+
+    HAUSMAN = "hausman"
+    AI = "ai"
+    USER = "user"
+
+
+class ScenarioNodeRedSyncStatus(StrEnum):
+    """Synchronization state of a managed Node-RED flow."""
+
+    PENDING = "pending"
+    SYNCED = "synced"
+    CHANGED = "changed"
+    MISSING = "missing"
+    UNAVAILABLE = "unavailable"
 
 
 class ScenarioComparison(StrEnum):
@@ -296,6 +321,34 @@ class ScenarioDeviceCommand:
 
 
 @dataclass(frozen=True, slots=True)
+class ScenarioNodeRedMetadata:
+    """Persisted pointer and conflict evidence for a managed function-flow."""
+
+    flow_id: str | None = None
+    flow_revision: int = 0
+    source_hash: str | None = None
+    generated_by: ScenarioNodeRedGeneratedBy = ScenarioNodeRedGeneratedBy.HAUSMAN
+    sync_status: ScenarioNodeRedSyncStatus = ScenarioNodeRedSyncStatus.PENDING
+    input_target_ids: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        _optional_bounded_text(self.flow_id, "Node-RED flow id", maximum=128)
+        _bounded_int(self.flow_revision, 0, 2_147_483_647, "Node-RED flow revision")
+        if self.source_hash is not None and re.fullmatch(r"[a-f0-9]{64}", self.source_hash) is None:
+            raise ScenarioViolation("Node-RED source hash must be SHA-256")
+        if not isinstance(self.generated_by, ScenarioNodeRedGeneratedBy):
+            raise ScenarioViolation("Node-RED generatedBy must be approved")
+        if not isinstance(self.sync_status, ScenarioNodeRedSyncStatus):
+            raise ScenarioViolation("Node-RED syncStatus must be approved")
+        object.__setattr__(self, "input_target_ids", tuple(self.input_target_ids))
+        if len(self.input_target_ids) > 32:
+            raise ScenarioViolation("Node-RED accepts at most 32 input targets")
+        _unique(self.input_target_ids, "Node-RED input target ids")
+        for target_id in self.input_target_ids:
+            _stable_id(target_id, "Node-RED input target id")
+
+
+@dataclass(frozen=True, slots=True)
 class ScenarioAction:
     """One step executed sequentially inside a scenario run."""
 
@@ -358,6 +411,8 @@ class ScenarioDefinition:
     triggers: tuple[ScenarioTrigger, ...]
     conditions: tuple[ScenarioCondition, ...]
     actions: tuple[ScenarioAction, ...]
+    execution_backend: ScenarioExecutionBackend = ScenarioExecutionBackend.HAUSMAN
+    node_red: ScenarioNodeRedMetadata | None = None
     command_mode: ScenarioCommandMode = ScenarioCommandMode.LIVE
     queue_limit: int = DEFAULT_QUEUE_LIMIT
     safety_policy: ScenarioSafetyPolicy = field(default_factory=ScenarioSafetyPolicy)
@@ -372,6 +427,13 @@ class ScenarioDefinition:
             raise ScenarioViolation("execution mode must be approved")
         if not isinstance(self.command_mode, ScenarioCommandMode):
             raise ScenarioViolation("command mode must be approved")
+        if not isinstance(self.execution_backend, ScenarioExecutionBackend):
+            raise ScenarioViolation("execution backend must be approved")
+        if self.execution_backend is ScenarioExecutionBackend.NODE_RED:
+            if not isinstance(self.node_red, ScenarioNodeRedMetadata):
+                raise ScenarioViolation("Node-RED backend needs nodeRed metadata")
+        elif self.node_red is not None:
+            raise ScenarioViolation("nodeRed metadata is only allowed for Node-RED backend")
         _bounded_int(self.queue_limit, 1, MAX_QUEUE_LIMIT, "scenario queue limit")
         if not isinstance(self.safety_policy, ScenarioSafetyPolicy):
             raise ScenarioViolation("scenario safety policy must be validated")
@@ -858,6 +920,8 @@ def _definition_from_payload(payload: object, label: str) -> ScenarioDefinition:
         {
             "version",
             "executionMode",
+            "executionBackend",
+            "nodeRed",
             "commandMode",
             "queueLimit",
             "safetyPolicy",
@@ -874,6 +938,12 @@ def _definition_from_payload(payload: object, label: str) -> ScenarioDefinition:
             ScenarioExecutionMode,
             f"{label} executionMode",
         ),
+        execution_backend=_enum(
+            root.get("executionBackend", ScenarioExecutionBackend.HAUSMAN.value),
+            ScenarioExecutionBackend,
+            f"{label} executionBackend",
+        ),
+        node_red=_node_red_from_payload(root.get("nodeRed"), f"{label} nodeRed"),
         command_mode=_enum(
             root.get("commandMode", ScenarioCommandMode.LIVE.value),
             ScenarioCommandMode,
@@ -915,6 +985,10 @@ def _definition_to_payload(definition: ScenarioDefinition) -> dict[str, object]:
         "conditions": [_condition_to_payload(item) for item in definition.conditions],
         "actions": [_action_to_payload(item) for item in definition.actions],
     }
+    if definition.execution_backend is not ScenarioExecutionBackend.HAUSMAN:
+        payload["executionBackend"] = definition.execution_backend.value
+    if definition.node_red is not None:
+        payload["nodeRed"] = _node_red_to_payload(definition.node_red)
     if definition.command_mode is not ScenarioCommandMode.LIVE:
         payload["commandMode"] = definition.command_mode.value
     if definition.queue_limit != DEFAULT_QUEUE_LIMIT:
@@ -926,6 +1000,47 @@ def _definition_to_payload(definition: ScenarioDefinition) -> dict[str, object]:
             "stopOnStaleEvidence": definition.safety_policy.stop_on_stale_evidence,
             "idempotentActions": definition.safety_policy.idempotent_actions,
         }
+    return payload
+
+
+def _node_red_from_payload(payload: object, label: str) -> ScenarioNodeRedMetadata | None:
+    if payload is None:
+        return None
+    root = _mapping(payload, label)
+    allowed = {
+        "flowId",
+        "flowRevision",
+        "sourceHash",
+        "generatedBy",
+        "syncStatus",
+        "inputTargetIds",
+    }
+    if not set(root).issubset(allowed):
+        raise ScenarioViolation(f"{label} has unexpected fields")
+    raw_inputs = root.get("inputTargetIds", [])
+    if not isinstance(raw_inputs, list) or any(not isinstance(item, str) for item in raw_inputs):
+        raise ScenarioViolation(f"{label} inputTargetIds must be an array of strings")
+    return ScenarioNodeRedMetadata(
+        flow_id=_optional_str(root.get("flowId")),
+        flow_revision=_bounded_int(root.get("flowRevision", 0), 0, 2_147_483_647, f"{label} flowRevision"),
+        source_hash=_optional_str(root.get("sourceHash")),
+        generated_by=_enum(root.get("generatedBy", "hausman"), ScenarioNodeRedGeneratedBy, f"{label} generatedBy"),
+        sync_status=_enum(root.get("syncStatus", "pending"), ScenarioNodeRedSyncStatus, f"{label} syncStatus"),
+        input_target_ids=tuple(raw_inputs),
+    )
+
+
+def _node_red_to_payload(metadata: ScenarioNodeRedMetadata) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "flowRevision": metadata.flow_revision,
+        "generatedBy": metadata.generated_by.value,
+        "syncStatus": metadata.sync_status.value,
+        "inputTargetIds": list(metadata.input_target_ids),
+    }
+    if metadata.flow_id is not None:
+        payload["flowId"] = metadata.flow_id
+    if metadata.source_hash is not None:
+        payload["sourceHash"] = metadata.source_hash
     return payload
 
 

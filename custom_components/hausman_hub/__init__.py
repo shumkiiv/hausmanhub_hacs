@@ -238,6 +238,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     scenario_store = HomeAssistantScenarioStore(hass, entry.entry_id)
     scenario_catalog = await async_build_scenario_catalog(hass)
+    from .application.scenario_node_red import NodeRedScenarioBackend
+
+    scenario_node_red_backend = NodeRedScenarioBackend(hass)
 
     def _publish_intercom_release(receipt: dict[str, object]) -> None:
         from .realtime_api import publish_command_receipt
@@ -266,6 +269,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ),
         schedule_store=HomeAssistantScenarioScheduleStore(hass, entry.entry_id),
         operation_journal=operation_journal,
+        node_red_backend=scenario_node_red_backend,
         intercom_release_publisher=_publish_intercom_release,
         scenario_change_publisher=_publish_scenario_change,
     )
@@ -277,6 +281,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         power_dependency_resolver=lambda: device_power_dependency_service.mapping,
         command_guard=water_safety.command_guard,
         vendor_resilience=vendor_resilience,
+        node_red_backend=scenario_node_red_backend,
     )
     scenario_service.set_executor(scenario_executor)
     entry.async_on_unload(scenario_service.cancel_running_scenarios)
