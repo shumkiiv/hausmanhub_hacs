@@ -12,10 +12,9 @@
   backup `6d01ac53` от этого же дня. После точной установки, config check и
   одного restart installed/latest равны `v1.52.182`; 53 из 53 сценариев
   включены, Scenario Health `healthy`, Node-RED 22.0.2 подключён, live CSS
-  содержит внутренний размер 15 px. Две планшетные telemetry-сущности после
-  restart ожидают нового отчёта Android; десять остальных служебных сущностей
-  доступны, записей Hausman в system log нет. Физические команды не
-  отправлялись.
+  содержит внутренний размер 15 px. После нового telemetry-отчёта Android все
+  12 служебных сущностей доступны, записей Hausman в system log нет.
+  Физические команды не отправлялись.
 
 - 2026-08-27: HACS `1.52.181` опубликован и развёрнут в production. Annotated
   tag и Release без assets указывают на `8e610d5`; GitHub Actions
