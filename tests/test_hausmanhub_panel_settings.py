@@ -3757,7 +3757,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         completed = run_panel_script(script)
         self.assertEqual(0, completed.returncode, completed.stderr)
 
-    def test_scenario_catalog_hides_system_by_default_and_filters_by_type_room_and_group(self) -> None:
+    def test_scenario_catalog_shows_complete_catalog_and_filters_by_type_room_and_group(self) -> None:
         payloads = dict(GET_PATHS)
         payloads["hausman_hub/v1/admin/scenarios"] = {
             "scenarios": [
@@ -3801,7 +3801,9 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const screen = panel._shell.scenarios;
         const rows = () => findAll(screen, (node) => String(node.className).split(" ").includes("scenario-row"));
         const button = (label) => findAll(screen, (node) => node.tagName === "BUTTON" && node.textContent === label)[0];
-        if (rows().length !== 3) throw new Error("system scenarios are not hidden by default");
+        if (rows().length !== 4 || !textOf(screen).includes("Показано 4 из 4")) {
+          throw new Error("the default catalog is incomplete");
+        }
         for (const label of ["Все", "На главной", "Включены", "Отключены", "Ручные", "Автоматика", "Гибридные", "Node-RED", "Системные", "Все комнаты", "Гостиная", "Кухня", "Режимы дома", "Климат", "Медиа"]) {
           if (!textOf(screen).includes(label)) throw new Error("scenario catalog label missing: " + label);
         }

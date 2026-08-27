@@ -90,7 +90,6 @@ export function scenarioRoomOptions(panel, scenarios) {
 export function scenarioMatchesCatalog(scenario, state) {
   const kind = scenarioActivationKind(scenario);
   const filter = state.filter || "all";
-  if (kind === "system" && !["system", "node_red"].includes(filter)) return false;
   if (filter === "system" && kind !== "system") return false;
   if (filter === "node_red" && scenarioBackendKind(scenario) !== "node_red") return false;
   if (["manual", "automatic", "hybrid"].includes(filter) && kind !== filter) return false;
@@ -272,11 +271,8 @@ export function renderScenarioCatalog(panel, card, sources, deps, handlers) {
   const bulk = renderScenarioBulkTools(panel, scenarios, deps, handlers);
   if (bulk) card.appendChild(bulk);
 
-  const roomSources = scenarios.filter((scenario) => state.filter === "system"
-    ? scenarioActivationKind(scenario) === "system"
-    : state.filter === "node_red"
-      ? scenarioBackendKind(scenario) === "node_red"
-      : scenarioActivationKind(scenario) !== "system");
+  const roomState = { ...state, roomId: "all", query: "" };
+  const roomSources = scenarios.filter((scenario) => scenarioMatchesCatalog(scenario, roomState));
   const rooms = scenarioRoomOptions(panel, roomSources);
   if (rooms.length) {
     const roomFilters = el("div", "scenario-library-room-filters");
@@ -343,6 +339,8 @@ export function renderScenarioCatalog(panel, card, sources, deps, handlers) {
     });
     empty.hidden = visibleCount > 0;
     groupsNode.hidden = visibleCount === 0;
+    const count = card.querySelector(".scenario-library-count");
+    if (count) count.textContent = `Показано ${visibleCount} из ${scenarios.length}`;
   };
   search.addEventListener("input", applySearch);
   applySearch();

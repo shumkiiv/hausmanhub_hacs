@@ -648,13 +648,12 @@ export function renderScenarioSection(panel, container, deps) {
   if (!panel._scenarioLibrary.roomId) panel._scenarioLibrary.roomId = "all";
   const items = panel._scenarios.list && Array.isArray(panel._scenarios.list.scenarios)
     ? panel._scenarios.list.scenarios : [];
-  const userItems = items.filter((item) => scenarioActivationKind(item) !== "system");
-  const logicalGroups = groupScenarios(userItems);
+  const logicalGroups = groupScenarios(items);
 
   container.appendChild(createLibraryHero(panel, {
     eyebrow: "СЦЕНАРИИ ДОМА",
     title: "Дом работает по вашим правилам",
-    subtitle: `${userItems.length} сценариев · ${userItems.filter((item) => item.favorite === true).length} на главной · ${userItems.filter((item) => item.enabled === false).length} отключено`,
+    subtitle: `${items.length} сценариев · ${items.filter((item) => item.favorite === true).length} на главной · ${items.filter((item) => item.enabled === false).length} отключено`,
     facts: logicalGroups.map((group) => ({ label: group.title, value: group.scenarios.length })),
   }, deps));
 
@@ -662,7 +661,7 @@ export function renderScenarioSection(panel, container, deps) {
   const heading = el("div", "scenarios-heading scenario-library-toolbar");
   const headingCopy = el("div");
   headingCopy.appendChild(el("h2", null, "Сценарии"));
-  headingCopy.appendChild(el("p", "section-intro", `Показано ${userItems.length}`));
+  headingCopy.appendChild(el("p", "section-intro scenario-library-count", `Показано ${items.length} из ${items.length}`));
   heading.appendChild(headingCopy);
   const create = el("button", "scenario-create", "Новый сценарий");
   create.type = "button";

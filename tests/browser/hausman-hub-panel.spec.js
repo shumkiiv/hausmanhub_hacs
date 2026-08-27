@@ -163,9 +163,20 @@ test("каталог показывает способ редактирован�
     width: 1440,
     height: 900,
   });
+  const allCards = panel.locator(".scenario-library-card:visible");
+  await expect(allCards).toHaveCount(6);
+  await expect(panel.getByText("Показано 6 из 6", { exact: true })).toBeVisible();
+  await expect(allCards.filter({ hasText: "Ванная: вытяжка" })).toHaveCount(1);
+  const titleGap = await allCards.first().evaluate((card) => {
+    const icon = card.querySelector(".scenario-library-icon").getBoundingClientRect();
+    const title = card.querySelector(".scenario-library-identity h3").getBoundingClientRect();
+    return title.left - icon.right;
+  });
+  expect(titleGap).toBeGreaterThanOrEqual(14);
   await panel.getByRole("button", { name: "Node-RED", exact: true }).click();
   const cards = panel.locator(".scenario-library-card:visible");
   await expect(cards).toHaveCount(1);
+  await expect(panel.getByText("Показано 1 из 6", { exact: true })).toBeVisible();
   await expect(cards.first()).toContainText("Тестовый алгоритм Node-RED");
   await expect(cards.first()).toContainText("Node-RED · код");
   await expect(cards.first()).toContainText("Ручной запуск");

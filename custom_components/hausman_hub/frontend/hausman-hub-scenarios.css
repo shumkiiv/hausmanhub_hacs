@@ -27,10 +27,10 @@
 .scenario-row.scenario-library-card { container-type:inline-size; display:flex; min-width:0; min-height:218px; padding:12px; flex-direction:column; align-items:stretch; gap:7px; border:.6px solid var(--hmh-border,#2F3845); border-radius:15px; background:var(--hmh-surface,#12171D); transition:border-color .18s ease,transform .18s ease,box-shadow .18s ease; }
 .scenario-row.scenario-library-card:hover { transform:translateY(-1px); border-color:color-mix(in srgb,var(--hmh-accent,#4D8DFF) 42%,var(--hmh-border,#2F3845)); box-shadow:0 8px 22px rgba(5,11,20,.10); }
 .scenario-library-card-head { display:grid; grid-template-columns:24px 39px minmax(0,1fr) 40px 40px; align-items:center; gap:9px; min-width:0; }
-.scenario-library-icon { width:39px; height:39px; border-radius:10px; color:var(--hmh-success,#58C786); background:color-mix(in srgb,var(--hmh-success,#58C786) 12%,var(--hmh-raised,#181E26)); }
+.scenario-icon.scenario-library-icon { width:39px; height:39px; border-radius:10px; color:var(--hmh-success,#58C786); background:color-mix(in srgb,var(--hmh-success,#58C786) 12%,var(--hmh-raised,#181E26)); }
 .scenario-library-card.is-disabled .scenario-library-icon { color:var(--hmh-muted,#AAB4C2); background:color-mix(in srgb,var(--hmh-muted,#AAB4C2) 12%,var(--hmh-raised,#181E26)); }
 .scenario-library-icon .icon { width:24px; height:24px; }
-.scenario-library-identity { display:grid; gap:2px; min-width:0; cursor:pointer; outline:none; }
+.scenario-library-identity { display:grid; gap:2px; min-width:0; padding-inline-start:5px; cursor:pointer; outline:none; }
 .scenario-library-identity h3 { margin:0; overflow:hidden; font-size:15px; line-height:1.25; text-overflow:ellipsis; white-space:nowrap; }
 .scenario-library-identity small { overflow:hidden; color:var(--hmh-muted,#AAB4C2); font-size:12px; line-height:1.25; text-overflow:ellipsis; white-space:nowrap; }
 .scenario-library-identity:focus-visible h3 { color:var(--hmh-accent,#4D8DFF); }
