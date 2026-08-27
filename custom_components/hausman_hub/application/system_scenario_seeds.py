@@ -125,7 +125,6 @@ LEAK_EXTRA = "binary_sensor.0x983268fffe63cb6c_water_leak"
 
 MOTION_TOILET = "binary_sensor.datchik_dvizheniia_tualet_zaniatost"
 MOTION_TOILET_TUYA = "binary_sensor.0xa4c13889c39443d5_occupancy"
-MOTION_HALLWAY = "binary_sensor.0xf044d3fffe1b8e57_occupancy"
 AWAY_A100 = "binary_sensor.a100_away_zaniatost"
 SUN = "sun.sun"
 
@@ -488,26 +487,6 @@ SYSTEM_SCENARIO_SEEDS: tuple[SystemScenarioSeed, ...] = (
             SWITCH_TOILET_LIGHT_2,
             SWITCH_TOILET_FAN,
         ),
-    ),
-    SystemScenarioSeed(
-        scenario_id="system-hallway-light-motion",
-        title="Тамбур: свет по движению",
-        description=(
-            "Перенос из Node-RED «Прихожая»: движение включает люстру "
-            "тамбура, через 5 минут без движения свет выключается. Таймаут "
-            "оригинального trigger-узла не сохранился в экспорте, выбрано "
-            "5 минут."
-        ),
-        icon="mdi:motion-sensor",
-        execution_mode="restart",
-        triggers=(_device_trigger("t1", MOTION_HALLWAY, "equals", "on"),),
-        conditions=(),
-        actions=(
-            _device_action("a1", LIGHT_HALLWAY, "turn_on"),
-            _delay("a2", 300),
-            _device_action("a3", LIGHT_HALLWAY, "turn_off"),
-        ),
-        required_entities=(MOTION_HALLWAY, LIGHT_HALLWAY),
     ),
     SystemScenarioSeed(
         scenario_id="system-bathroom-fan-day-light-1",

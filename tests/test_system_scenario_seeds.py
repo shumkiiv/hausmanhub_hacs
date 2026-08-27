@@ -381,6 +381,7 @@ class SystemScenarioSeedsTest(unittest.IsolatedAsyncioTestCase):
     def test_seed_ids_are_unique_and_stable(self) -> None:
         ids = [seed.scenario_id for seed in SYSTEM_SCENARIO_SEEDS]
         self.assertEqual(len(ids), len(set(ids)))
+        self.assertNotIn("system-hallway-light-motion", ids)
         for seed in SYSTEM_SCENARIO_SEEDS:
             self.assertTrue(seed.title.strip())
             self.assertTrue(seed.description.strip())
