@@ -1,8 +1,8 @@
 /* Tablet scenario catalog classification and presentation helpers. */
 
-import { scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.180";
-import { scenarioAffectedDeviceCount, scenarioRoomIds, scenarioRoomLabels, scenarioRoomOptions as roomOptions } from "./hausman-hub-scenario-rooms.js?v=1.52.180";
-import { renderScenarioBulkTools } from "./hausman-hub-scenario-bulk.js?v=1.52.180";
+import { scenarioIconMeta } from "./hausman-hub-scenario-icons.js?v=1.52.181";
+import { scenarioAffectedDeviceCount, scenarioRoomIds, scenarioRoomLabels, scenarioRoomOptions as roomOptions } from "./hausman-hub-scenario-rooms.js?v=1.52.181";
+import { renderScenarioBulkTools } from "./hausman-hub-scenario-bulk.js?v=1.52.181";
 
 export const SCENARIO_FILTERS = [
   ["all", "Все"],
@@ -12,6 +12,7 @@ export const SCENARIO_FILTERS = [
   ["manual", "Ручные"],
   ["automatic", "Автоматика"],
   ["hybrid", "Гибридные"],
+  ["node_red", "Node-RED"],
   ["system", "Системные"],
 ];
 
@@ -20,6 +21,13 @@ const ACTIVATION_LABELS = {
   automatic: "Автоматика",
   hybrid: "Автоматика + ручной запуск",
   system: "Системный процесс",
+};
+
+const ACTIVATION_ICONS = {
+  manual: "mdi:gesture-tap-button",
+  automatic: "mdi:robot-outline",
+  hybrid: "mdi:call-merge",
+  system: "mdi:shield-cog-outline",
 };
 
 const LOGICAL_GROUPS = [
@@ -36,6 +44,15 @@ export function scenarioActivationKind(scenario) {
 
 export function scenarioActivationLabel(scenario) {
   return ACTIVATION_LABELS[scenarioActivationKind(scenario)];
+}
+
+export function scenarioBackendKind(scenario) {
+  return String(scenario && scenario.definition && scenario.definition.executionBackend || "hausman").toLowerCase() === "node_red"
+    ? "node_red" : "hausman";
+}
+
+export function scenarioBackendLabel(scenario) {
+  return scenarioBackendKind(scenario) === "node_red" ? "Node-RED · код" : "Hausman · конструктор";
 }
 
 export function scenarioDisplayGroup(scenario) {
@@ -73,8 +90,9 @@ export function scenarioRoomOptions(panel, scenarios) {
 export function scenarioMatchesCatalog(scenario, state) {
   const kind = scenarioActivationKind(scenario);
   const filter = state.filter || "all";
-  if (kind === "system" && filter !== "system") return false;
+  if (kind === "system" && !["system", "node_red"].includes(filter)) return false;
   if (filter === "system" && kind !== "system") return false;
+  if (filter === "node_red" && scenarioBackendKind(scenario) !== "node_red") return false;
   if (["manual", "automatic", "hybrid"].includes(filter) && kind !== filter) return false;
   if (filter === "favorite" && scenario.favorite !== true) return false;
   if (filter === "enabled" && scenario.enabled === false) return false;
@@ -125,7 +143,7 @@ function scenarioCard(panel, source, deps, handlers) {
   const identity = el("div", "scenario-copy scenario-library-identity");
   identity.tabIndex = 0;
   identity.appendChild(el("h3", null, title));
-  identity.appendChild(el("small", null, `${scenarioDisplayGroup(scenario)} · ${scenarioActivationLabel(scenario)}`));
+  identity.appendChild(el("small", null, scenarioDisplayGroup(scenario)));
   identity.addEventListener("click", () => handlers.open(scenario));
   identity.addEventListener("keydown", (event) => {
     if (event.key === "Enter" || event.key === " ") {
@@ -164,6 +182,27 @@ function scenarioCard(panel, source, deps, handlers) {
   menu.appendChild(menuItems);
   head.appendChild(menu);
   row.appendChild(head);
+
+  const badges = el("div", "scenario-library-badges");
+  const backendKind = scenarioBackendKind(scenario);
+  const backendBadge = el("span", `scenario-library-badge is-${backendKind.replace("_", "-")}`);
+  const backendIcon = el("ha-icon", "icon");
+  setAttr(backendIcon, "icon", backendKind === "node_red" ? "mdi:source-branch" : "mdi:home-automation");
+  backendBadge.appendChild(backendIcon);
+  backendBadge.appendChild(el("span", null, scenarioBackendLabel(scenario)));
+  setAttr(backendBadge, "title", backendKind === "node_red"
+    ? "Выполняется Node-RED, исходник редактируется во встроенном редакторе Hausman"
+    : "Выполняется Hausman, редактируется в конструкторе сценариев");
+  badges.appendChild(backendBadge);
+  const activationKind = scenarioActivationKind(scenario);
+  const activationBadge = el("span", "scenario-library-badge is-activation");
+  const activationIcon = el("ha-icon", "icon");
+  setAttr(activationIcon, "icon", ACTIVATION_ICONS[activationKind]);
+  activationBadge.appendChild(activationIcon);
+  activationBadge.appendChild(el("span", null, scenarioActivationLabel(scenario)));
+  setAttr(activationBadge, "title", `Способ запуска: ${scenarioActivationLabel(scenario)}`);
+  badges.appendChild(activationBadge);
+  row.appendChild(badges);
 
   const copy = el("div", "scenario-library-copy");
   copy.appendChild(el("p", null, description));
@@ -234,7 +273,10 @@ export function renderScenarioCatalog(panel, card, sources, deps, handlers) {
   if (bulk) card.appendChild(bulk);
 
   const roomSources = scenarios.filter((scenario) => state.filter === "system"
-    ? scenarioActivationKind(scenario) === "system" : scenarioActivationKind(scenario) !== "system");
+    ? scenarioActivationKind(scenario) === "system"
+    : state.filter === "node_red"
+      ? scenarioBackendKind(scenario) === "node_red"
+      : scenarioActivationKind(scenario) !== "system");
   const rooms = scenarioRoomOptions(panel, roomSources);
   if (rooms.length) {
     const roomFilters = el("div", "scenario-library-room-filters");

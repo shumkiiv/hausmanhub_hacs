@@ -1,7 +1,7 @@
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.180";
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.180";
-import { canonicalRoomMdiIcon, ROOM_TYPE_OPTIONS, roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.180";
-import { renderRoomsSide } from "./hausman-hub-rooms-side.js?v=1.52.180";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.181";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.181";
+import { canonicalRoomMdiIcon, ROOM_TYPE_OPTIONS, roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.181";
+import { renderRoomsSide } from "./hausman-hub-rooms-side.js?v=1.52.181";
 
 function roomNormalized(value) {
   return String(value || "").trim().toLocaleLowerCase("ru");

@@ -1,0 +1,7 @@
+.scenario-library-badges { display:flex; min-width:0; align-items:center; gap:6px; overflow:hidden; }
+.scenario-library-badge { display:inline-flex; min-width:0; min-height:24px; align-items:center; gap:5px; padding:3px 7px; overflow:hidden; border:1px solid var(--hmh-border,#2F3845); border-radius:8px; color:var(--hmh-muted,#AAB4C2); background:color-mix(in srgb,var(--hmh-muted,#AAB4C2) 6%,transparent); font-size:11px; font-weight:700; white-space:nowrap; }
+.scenario-library-badge .icon { width:15px; height:15px; flex:0 0 auto; }
+.scenario-library-badge span { overflow:hidden; text-overflow:ellipsis; }
+.scenario-library-badge.is-node-red { border-color:color-mix(in srgb,var(--hmh-warning,#E4A54B) 52%,var(--hmh-border,#2F3845)); color:var(--hmh-warning,#E4A54B); background:color-mix(in srgb,var(--hmh-warning,#E4A54B) 9%,transparent); }
+.scenario-library-badge.is-hausman { border-color:color-mix(in srgb,var(--hmh-accent,#4D8DFF) 48%,var(--hmh-border,#2F3845)); color:var(--hmh-accent,#4D8DFF); background:color-mix(in srgb,var(--hmh-accent,#4D8DFF) 8%,transparent); }
+.scenario-library-badge.is-activation { max-width:55%; }

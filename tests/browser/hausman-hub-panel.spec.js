@@ -156,3 +156,18 @@ test("встроенный редактор Node-RED проверяет и со�
     .filter((call) => call.method === "PUT" && call.path.endsWith("/source/node_red_test"))
     .map((call) => call.payload.validateOnly))).toEqual([false]);
 });
+
+test("каталог показывает способ редактирования и запуска и фильтрует Node-RED", async ({ page }) => {
+  const panel = await openHarness(page, {
+    query: "section=scenarios&theme=dark&nodeRedEditor=1",
+    width: 1440,
+    height: 900,
+  });
+  await panel.getByRole("button", { name: "Node-RED", exact: true }).click();
+  const cards = panel.locator(".scenario-library-card:visible");
+  await expect(cards).toHaveCount(1);
+  await expect(cards.first()).toContainText("Тестовый алгоритм Node-RED");
+  await expect(cards.first()).toContainText("Node-RED · код");
+  await expect(cards.first()).toContainText("Ручной запуск");
+  await expect(cards.first().locator(".scenario-library-badge ha-icon")).toHaveCount(2);
+});

@@ -3802,10 +3802,10 @@ class PanelSettingsSectionsTest(unittest.TestCase):
         const rows = () => findAll(screen, (node) => String(node.className).split(" ").includes("scenario-row"));
         const button = (label) => findAll(screen, (node) => node.tagName === "BUTTON" && node.textContent === label)[0];
         if (rows().length !== 3) throw new Error("system scenarios are not hidden by default");
-        for (const label of ["Все", "На главной", "Включены", "Отключены", "Ручные", "Автоматика", "Гибридные", "Системные", "Все комнаты", "Гостиная", "Кухня", "Режимы дома", "Климат", "Медиа"]) {
+        for (const label of ["Все", "На главной", "Включены", "Отключены", "Ручные", "Автоматика", "Гибридные", "Node-RED", "Системные", "Все комнаты", "Гостиная", "Кухня", "Режимы дома", "Климат", "Медиа"]) {
           if (!textOf(screen).includes(label)) throw new Error("scenario catalog label missing: " + label);
         }
-        if (/SYSTEM|Node-RED|Shadow|\boff\b/.test(textOf(screen))) throw new Error("English system names leaked into the default catalog");
+        if (rows().some((row) => /SYSTEM|Node-RED|Shadow|\boff\b/.test(textOf(row)))) throw new Error("English system names leaked into the default catalog");
         button("Автоматика").fire("click");
         if (rows().length !== 1 || !textOf(rows()[0]).includes("Климат кухни")) throw new Error("automatic filter mismatch");
         button("Системные").fire("click");
@@ -4997,7 +4997,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.180")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.181")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;
