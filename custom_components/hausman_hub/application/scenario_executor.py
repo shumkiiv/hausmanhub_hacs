@@ -24,6 +24,11 @@ from ..domain.scenarios import (
     ScenarioConditionType,
     ScenarioExecutionBackend,
 )
+from .scenario_light_priority import (
+    MANUAL_LIGHT_PRIORITY_REASON,
+    LightAutomationPriority,
+    skipped_light_receipt,
+)
 from .scenario_node_red import NodeRedBackendError, NodeRedScenarioBackend
 from .scenarios import (
     ScenarioAction,
@@ -459,6 +464,7 @@ class ScenarioExecutor:
         self._command_guard = command_guard
         self._vendor_resilience = vendor_resilience
         self._node_red_backend = node_red_backend
+        self._light_priority = LightAutomationPriority()
 
     def new_run_id(self) -> str:
         """Generate a unique execution trace id."""
@@ -573,6 +579,15 @@ class ScenarioExecutor:
             )
         confirmed = read_back["matched"] is True
         observed_state = read_back["observedState"]
+        receipt["confirmed"] = confirmed
+        receipt["read_back"] = read_back
+        self._light_priority.note_direct_action(
+            target_id,
+            action_id,
+            receipt,
+            self._catalog,
+            self._hass,
+        )
 
         return {
             "correlationId": correlation_id,
@@ -667,6 +682,11 @@ class ScenarioExecutor:
         scenario_id: str = "",
         visited_scenarios: frozenset[str] | None = None,
         dry_run: bool = False,
+        trigger_context: Mapping[str, object] | None = None,
+        scenario_title: str = "",
+        scenario_description: str = "",
+        scenario_action_description: str = "",
+        scenario_icon: str = "",
     ) -> dict[str, Any]:
         """Run every action sequentially and return confirmed receipts."""
 
@@ -815,31 +835,95 @@ class ScenarioExecutor:
                     "confirmed": False,
                 }
 
+        scenario_text = " ".join(
+            (
+                scenario_id,
+                scenario_title,
+                scenario_description,
+                scenario_action_description,
+                scenario_icon,
+            )
+        ).casefold()
+        light_priority = self._light_priority.plan(
+            actions,
+            self._catalog,
+            self._hass,
+            scenario_text=scenario_text,
+            trigger_context=trigger_context,
+            power_dependencies=power_dependencies,
+        )
         receipts: list[dict[str, Any]] = []
         powered_sources: dict[str, float] = {}
         powered_target_ids: set[str] = set()
         start_ms = int(time.time() * 1000)
 
+        if light_priority.applied and light_priority.only_lighting_effects:
+            receipts = [
+                skipped_light_receipt(
+                    action,
+                    self._catalog,
+                    correlation_id=run_id,
+                    dry_run=dry_run,
+                )
+                for action in actions
+                if action.id in light_priority.light_action_ids
+            ]
+            return {
+                "run_id": run_id,
+                "scenario_id": scenario_id,
+                "execution_mode": definition.execution_mode.value,
+                "execution_backend": definition.execution_backend.value,
+                "command_mode": command_mode,
+                "started_at_ms": start_ms,
+                "finished_at_ms": int(time.time() * 1000),
+                "condition_results": condition_results,
+                "evidence_revision": evidence_revision,
+                "node_red": node_red_result,
+                "manual_light_priority": {
+                    "applied": True,
+                    "reason": MANUAL_LIGHT_PRIORITY_REASON,
+                    "manual_target_ids": sorted(light_priority.manual_target_ids),
+                },
+                "receipts": receipts,
+                "accepted": True,
+                "confirmed": not dry_run,
+                "status": "completed",
+            }
+
         for action_index, action in enumerate(actions):
             if not dry_run and action.type is ScenarioActionType.DELAY:
                 await self._confirm_deferred_device_receipts(receipts)
-            receipt = await self._execute_action(
-                action,
-                run_id,
-                next_visited,
-                dry_run=dry_run,
-                defer_device_readback=True,
-                powered_sources=dict(powered_sources),
-                idempotent_actions=definition.safety_policy.idempotent_actions,
-                evidence_age_seconds=(int(time.time() * 1000) - evidence_captured_at_ms)
-                / 1000,
-                max_evidence_age_seconds=(
-                    definition.safety_policy.max_evidence_age_seconds
-                ),
-                stop_on_stale_evidence=(
-                    definition.safety_policy.stop_on_stale_evidence
-                ),
-            )
+            if (
+                action.id in light_priority.light_action_ids
+                and action.target_id in light_priority.guarded_target_ids
+            ):
+                receipt = skipped_light_receipt(
+                    action,
+                    self._catalog,
+                    correlation_id=run_id,
+                    dry_run=dry_run,
+                )
+            else:
+                receipt = await self._execute_action(
+                    action,
+                    run_id,
+                    next_visited,
+                    dry_run=dry_run,
+                    defer_device_readback=True,
+                    powered_sources=dict(powered_sources),
+                    idempotent_actions=definition.safety_policy.idempotent_actions,
+                    evidence_age_seconds=(
+                        int(time.time() * 1000) - evidence_captured_at_ms
+                    )
+                    / 1000,
+                    max_evidence_age_seconds=(
+                        definition.safety_policy.max_evidence_age_seconds
+                    ),
+                    stop_on_stale_evidence=(
+                        definition.safety_policy.stop_on_stale_evidence
+                    ),
+                    trigger_context=trigger_context,
+                )
             receipts.append(receipt)
             if receipt.get("status") == "failed":
                 if not dry_run and powered_target_ids:
@@ -878,6 +962,17 @@ class ScenarioExecutor:
         if not dry_run:
             await self._confirm_deferred_device_receipts(receipts)
 
+        source = trigger_context.get("source") if trigger_context else "automatic"
+        self._light_priority.note_results(
+            actions,
+            receipts,
+            light_priority,
+            self._catalog,
+            self._hass,
+            automatic=source != "manual",
+            dry_run=dry_run,
+        )
+
         completed = all(r.get("status") == "completed" for r in receipts)
         failed_after_progress = any(
             receipt.get("status") == "failed" for receipt in receipts
@@ -902,6 +997,13 @@ class ScenarioExecutor:
             "condition_results": condition_results,
             "evidence_revision": evidence_revision,
             "node_red": node_red_result,
+            "manual_light_priority": {
+                "applied": light_priority.applied,
+                "reason": (
+                    MANUAL_LIGHT_PRIORITY_REASON if light_priority.applied else None
+                ),
+                "manual_target_ids": sorted(light_priority.manual_target_ids),
+            },
             "receipts": receipts,
             "accepted": completed,
             "confirmed": confirmed,
@@ -977,6 +1079,7 @@ class ScenarioExecutor:
         evidence_age_seconds: float = 0.0,
         max_evidence_age_seconds: int = 300,
         stop_on_stale_evidence: bool = True,
+        trigger_context: Mapping[str, object] | None = None,
     ) -> dict[str, Any]:
         base = {
             "action_id": action.id,
@@ -1009,7 +1112,11 @@ class ScenarioExecutor:
                 }
             if action.type == ScenarioActionType.RUN_SCENARIO:
                 return await self._run_scenario_receipt(
-                    action, base, visited, dry_run=dry_run
+                    action,
+                    base,
+                    visited,
+                    dry_run=dry_run,
+                    trigger_context=trigger_context,
                 )
             if action.type == ScenarioActionType.NOTIFICATION:
                 return await self._notification_receipt(action, base, dry_run=dry_run)
@@ -1418,6 +1525,7 @@ class ScenarioExecutor:
         visited: frozenset[str],
         *,
         dry_run: bool = False,
+        trigger_context: Mapping[str, object] | None = None,
     ) -> dict[str, Any]:
         if not action.scenario_id:
             return {
@@ -1432,10 +1540,20 @@ class ScenarioExecutor:
                 "planned": True,
                 "scenario_id": action.scenario_id,
             }
+        origin_target_id = (
+            trigger_context.get("target_id")
+            if isinstance(trigger_context, Mapping)
+            else None
+        )
         result = await self._run_callback(
             action.scenario_id,
             visited=visited,
-            trigger_context={"source": "nested", "trigger_id": None, "recovery": False},
+            trigger_context={
+                "source": "nested",
+                "target_id": origin_target_id,
+                "trigger_id": None,
+                "recovery": False,
+            },
         )
         nested_outcome = result.get("status", "failed")
         if nested_outcome == "completed":

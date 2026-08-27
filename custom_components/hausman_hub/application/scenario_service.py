@@ -1762,6 +1762,17 @@ class ScenarioService:
                 run_id,
                 scenario_id=payload.get("id") or payload.get("scenarioId") or "",
                 dry_run=True,
+                trigger_context=(
+                    payload.get("triggerContext")
+                    if isinstance(payload.get("triggerContext"), Mapping)
+                    else None
+                ),
+                scenario_title=str(payload.get("title") or ""),
+                scenario_description=str(payload.get("description") or ""),
+                scenario_action_description=str(
+                    payload.get("actionDescription") or ""
+                ),
+                scenario_icon=str(payload.get("icon") or ""),
             )
         result = {
             "valid": True,
@@ -1884,6 +1895,11 @@ class ScenarioService:
                 dry_run=(
                     scenario.definition.command_mode is ScenarioCommandMode.SHADOW
                 ),
+                trigger_context=resolved_trigger_context,
+                scenario_title=scenario.title,
+                scenario_description=scenario.description,
+                scenario_action_description=scenario.action_description,
+                scenario_icon=scenario.icon,
             )
             result.setdefault("scenario_id", scenario.id)
             result.setdefault("run_id", run_id)

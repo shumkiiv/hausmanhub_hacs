@@ -121,6 +121,7 @@ class _FakeExecutor:
         scenario_id: str = "",
         visited_scenarios: frozenset[str] | None = None,
         dry_run: bool = False,
+        **_kwargs: object,
     ) -> dict[str, Any]:
         self.runs.append((definition, run_id, dry_run))
         return {
@@ -145,6 +146,7 @@ class _RestartExecutor(_FakeExecutor):
         scenario_id: str = "",
         visited_scenarios: frozenset[str] | None = None,
         dry_run: bool = False,
+        **_kwargs: object,
     ) -> dict[str, Any]:
         self.runs.append((definition, run_id, dry_run))
         if len(self.runs) == 1:
@@ -176,6 +178,7 @@ class _QueueExecutor(_FakeExecutor):
         scenario_id: str = "",
         visited_scenarios: frozenset[str] | None = None,
         dry_run: bool = False,
+        **_kwargs: object,
     ) -> dict[str, Any]:
         self.runs.append((definition, run_id, dry_run))
         if len(self.runs) == 1:

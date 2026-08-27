@@ -21,6 +21,10 @@ from custom_components.hausman_hub.application.scenario_node_red import (
     validate_managed_source,
 )
 from custom_components.hausman_hub.application.scenario_executor import ScenarioExecutor
+from custom_components.hausman_hub.application.scenarios import (
+    ScenarioDeviceAction,
+    ScenarioDeviceEntry,
+)
 from custom_components.hausman_hub.domain.scenarios import (
     ScenarioAction,
     ScenarioActionType,
@@ -349,6 +353,93 @@ async def test_executor_uses_node_red_plan_without_bypassing_dry_run() -> None:
     assert result["status"] == "completed"
     assert result["node_red"]["selectedBranch"] == "night"
     assert result["receipts"][0]["status"] == "completed"
+    hass.services.async_call.assert_not_awaited()
+
+
+async def test_executor_applies_manual_light_priority_after_node_red_plan() -> None:
+    planned = ScenarioAction(
+        "planned_light",
+        ScenarioActionType.DEVICE_ACTION,
+        target_id="light_one",
+        action_id="turn_on",
+    )
+    backend = SimpleNamespace(
+        async_plan=AsyncMock(
+            return_value=(
+                (planned,),
+                {
+                    "status": "completed",
+                    "summary": "Выбрана ветка света.",
+                    "selectedBranch": "presence",
+                    "durationMs": 1,
+                    "trace": [],
+                },
+            )
+        )
+    )
+    states = {
+        "light.hall": SimpleNamespace(state="on", attributes={}),
+        "binary_sensor.hall_motion": SimpleNamespace(state="on", attributes={}),
+    }
+    hass = SimpleNamespace(
+        states=SimpleNamespace(get=states.get),
+        services=AsyncMock(),
+    )
+    devices = {
+        "light_one": ScenarioDeviceEntry(
+            target_id="light_one",
+            name="Люстра",
+            entity_id="light.hall",
+            actions=(
+                ScenarioDeviceAction(
+                    action_id="turn_on",
+                    title="Включить",
+                    domain="light",
+                    service="turn_on",
+                    allowed_fields=frozenset(),
+                ),
+            ),
+        ),
+        "sensor_one": ScenarioDeviceEntry(
+            target_id="sensor_one",
+            name="Датчик движения",
+            entity_id="binary_sensor.hall_motion",
+            actions=(),
+        ),
+    }
+    catalog = SimpleNamespace(device=devices.get)
+    executor = ScenarioExecutor(
+        hass,
+        catalog,
+        AsyncMock(),
+        node_red_backend=backend,
+    )
+    definition = replace(
+        _definition(),
+        node_red=ScenarioNodeRedMetadata(
+            flow_id="flow-one", sync_status=ScenarioNodeRedSyncStatus.SYNCED
+        ),
+    )
+
+    result = await executor.async_execute(
+        definition,
+        "run-node-red-priority",
+        scenario_id="hall_light",
+        scenario_title="Свет по движению",
+        trigger_context={
+            "source": "device_state",
+            "trigger_id": "motion",
+            "target_id": "sensor_one",
+            "old_value": "off",
+            "new_value": "on",
+            "recovery": False,
+        },
+    )
+
+    assert result["status"] == "completed"
+    assert result["node_red"]["selectedBranch"] == "presence"
+    assert result["manual_light_priority"]["applied"] is True
+    assert result["receipts"][0]["reason"] == "manual_light_already_on"
     hass.services.async_call.assert_not_awaited()
 
 

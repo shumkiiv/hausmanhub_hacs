@@ -11,6 +11,7 @@ SOURCE = ",".join(
     (
         "custom_components.hausman_hub.application.water_safety",
         "custom_components.hausman_hub.application.scenario_executor",
+        "custom_components.hausman_hub.application.scenario_light_priority",
         "custom_components.hausman_hub.application.scenario_service",
         "custom_components.hausman_hub.application.climate_deviation_guard",
     )

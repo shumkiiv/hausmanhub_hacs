@@ -64,27 +64,28 @@ def _power_link(
 class _FakeHass:
     def __init__(self) -> None:
         self.services = AsyncMock()
-        self.states = SimpleNamespace(
-            get=lambda entity_id: {
-                "light.living_room": SimpleNamespace(state="on", attributes={}),
-                "climate.living_room": SimpleNamespace(
-                    state="cool", attributes={"temperature": 22}
-                ),
-                "number.breaker_temperature_threshold": SimpleNamespace(
-                    state="80", attributes={}
-                ),
-                "sun.sun": SimpleNamespace(
-                    state="below_horizon",
-                    attributes={
-                        "next_rising": "2026-08-15T00:00:00+00:00",
-                        "next_setting": "2026-08-15T14:00:00+00:00",
-                    },
-                ),
-                "cover.living_room": SimpleNamespace(state="closed", attributes={}),
-                "valve.main": SimpleNamespace(state="open", attributes={}),
-                "media_player.living_room": SimpleNamespace(state="off", attributes={}),
-            }.get(entity_id)
-        )
+        self.state_values = {
+            "light.living_room": SimpleNamespace(state="on", attributes={}),
+            "climate.living_room": SimpleNamespace(
+                state="cool", attributes={"temperature": 22}
+            ),
+            "number.breaker_temperature_threshold": SimpleNamespace(
+                state="80", attributes={}
+            ),
+            "sun.sun": SimpleNamespace(
+                state="below_horizon",
+                attributes={
+                    "next_rising": "2026-08-15T00:00:00+00:00",
+                    "next_setting": "2026-08-15T14:00:00+00:00",
+                },
+            ),
+            "cover.living_room": SimpleNamespace(state="closed", attributes={}),
+            "valve.main": SimpleNamespace(state="open", attributes={}),
+            "media_player.living_room": SimpleNamespace(state="off", attributes={}),
+            "binary_sensor.hall_motion": SimpleNamespace(state="on", attributes={}),
+            "switch.shower_fan": SimpleNamespace(state="on", attributes={}),
+        }
+        self.states = SimpleNamespace(get=self.state_values.get)
 
 
 class _FakeCatalog:
@@ -233,6 +234,26 @@ class _FakeCatalog:
                     ),
                 ),
             ),
+            "sensor_1": ScenarioDeviceEntry(
+                target_id="sensor_1",
+                name="Датчик движения",
+                entity_id="binary_sensor.hall_motion",
+                actions=(),
+            ),
+            "fan_1": ScenarioDeviceEntry(
+                target_id="fan_1",
+                name="Вытяжка душевой",
+                entity_id="switch.shower_fan",
+                actions=(
+                    ScenarioDeviceAction(
+                        action_id="turn_on",
+                        title="On",
+                        domain="switch",
+                        service="turn_on",
+                        allowed_fields=frozenset(),
+                    ),
+                ),
+            ),
         }
 
     def device(self, target_id: str) -> Any | None:
@@ -302,6 +323,206 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result["receipts"]), 1)
         self.hass.services.async_call.assert_awaited_once_with(
             "light", "turn_on", {"entity_id": "light.living_room"}, blocking=True
+        )
+
+    async def test_sensor_run_preserves_preexisting_manual_light(self) -> None:
+        definition = _definition(
+            (
+                ScenarioAction(
+                    id="light_on",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="device_1",
+                    action_id="set_brightness_percent",
+                    value=40,
+                ),
+                ScenarioAction(
+                    id="wait",
+                    type=ScenarioActionType.DELAY,
+                    delay_seconds=60,
+                ),
+                ScenarioAction(
+                    id="light_off",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="device_1",
+                    action_id="turn_off",
+                ),
+            )
+        )
+
+        with patch(
+            "custom_components.hausman_hub.application.scenario_executor.asyncio.sleep"
+        ) as sleep:
+            result = await self.executor.async_execute(
+                definition,
+                "run-manual-priority",
+                scenario_id="hall_light",
+                scenario_title="Свет по движению",
+                trigger_context={
+                    "source": "device_state",
+                    "trigger_id": "t1",
+                    "target_id": "sensor_1",
+                    "old_value": "off",
+                    "new_value": "on",
+                    "recovery": False,
+                },
+            )
+
+        self.assertEqual("completed", result["status"])
+        self.assertTrue(result["manual_light_priority"]["applied"])
+        self.assertEqual(
+            "manual_light_already_on",
+            result["manual_light_priority"]["reason"],
+        )
+        self.assertEqual(
+            ["light_on", "light_off"],
+            [receipt["action_id"] for receipt in result["receipts"]],
+        )
+        self.assertTrue(all(receipt["skipped"] for receipt in result["receipts"]))
+        journal = scenario_operation_receipt(result)
+        self.assertEqual(
+            ["manual_light_already_on", "manual_light_already_on"],
+            [action["reason"] for action in journal["scenario"]["actions"]],
+        )
+        self.hass.services.async_call.assert_not_awaited()
+        sleep.assert_not_awaited()
+
+    async def test_confirmed_automatic_light_can_be_refreshed_until_user_changes_it(
+        self,
+    ) -> None:
+        first_revision = datetime(2026, 8, 27, 12, 0, tzinfo=timezone.utc)
+        user_revision = first_revision + timedelta(minutes=1)
+        self.hass.state_values["light.living_room"] = SimpleNamespace(
+            state="off", attributes={}, last_changed=first_revision - timedelta(minutes=1)
+        )
+
+        async def apply_light_state(*_args: object, **_kwargs: object) -> None:
+            self.hass.state_values["light.living_room"] = SimpleNamespace(
+                state="on", attributes={}, last_changed=first_revision
+            )
+
+        self.hass.services.async_call.side_effect = apply_light_state
+        definition = _definition(
+            (
+                ScenarioAction(
+                    id="light_on",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="device_1",
+                    action_id="turn_on",
+                ),
+            )
+        )
+        trigger_context = {
+            "source": "device_state",
+            "trigger_id": "t1",
+            "target_id": "sensor_1",
+            "old_value": "off",
+            "new_value": "on",
+            "recovery": False,
+        }
+
+        first = await self.executor.async_execute(
+            definition,
+            "run-owned-first",
+            scenario_id="hall_light",
+            scenario_title="Свет по движению",
+            trigger_context=trigger_context,
+        )
+        second = await self.executor.async_execute(
+            definition,
+            "run-owned-second",
+            scenario_id="hall_light",
+            scenario_title="Свет по движению",
+            trigger_context=trigger_context,
+        )
+
+        self.assertFalse(first["manual_light_priority"]["applied"])
+        self.assertFalse(second["manual_light_priority"]["applied"])
+        self.assertEqual(2, self.hass.services.async_call.await_count)
+
+        self.hass.state_values["light.living_room"] = SimpleNamespace(
+            state="on", attributes={}, last_changed=user_revision
+        )
+        third = await self.executor.async_execute(
+            definition,
+            "run-owned-after-user",
+            scenario_id="hall_light",
+            scenario_title="Свет по движению",
+            trigger_context=trigger_context,
+        )
+
+        self.assertTrue(third["manual_light_priority"]["applied"])
+        self.assertEqual(2, self.hass.services.async_call.await_count)
+
+    async def test_light_state_trigger_is_not_mistaken_for_sensor(self) -> None:
+        definition = _definition(
+            (
+                ScenarioAction(
+                    id="adjust_light",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="device_1",
+                    action_id="set_brightness_percent",
+                    value=40,
+                ),
+            )
+        )
+
+        result = await self.executor.async_execute(
+            definition,
+            "run-light-trigger",
+            scenario_id="office_adaptive_light",
+            scenario_title="Кабинет: адаптивный свет",
+            trigger_context={
+                "source": "device_state",
+                "trigger_id": "t1",
+                "target_id": "device_1",
+                "old_value": "off",
+                "new_value": "on",
+                "recovery": False,
+            },
+        )
+
+        self.assertFalse(result["manual_light_priority"]["applied"])
+        self.hass.services.async_call.assert_awaited_once()
+
+    async def test_sensor_run_preserves_light_but_still_starts_fan(self) -> None:
+        definition = _definition(
+            (
+                ScenarioAction(
+                    id="light_on",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="device_1",
+                    action_id="turn_on",
+                ),
+                ScenarioAction(
+                    id="fan_on",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="fan_1",
+                    action_id="turn_on",
+                ),
+            )
+        )
+
+        result = await self.executor.async_execute(
+            definition,
+            "run-mixed-priority",
+            scenario_id="shower_light_and_fan",
+            scenario_title="Душевая: свет и вытяжка",
+            trigger_context={
+                "source": "device_state",
+                "trigger_id": "t1",
+                "target_id": "sensor_1",
+                "old_value": "off",
+                "new_value": "on",
+                "recovery": False,
+            },
+        )
+
+        self.assertEqual("completed", result["status"])
+        self.assertTrue(result["manual_light_priority"]["applied"])
+        self.assertTrue(result["receipts"][0]["skipped"])
+        self.assertNotIn("skipped", result["receipts"][1])
+        self.hass.services.async_call.assert_awaited_once_with(
+            "switch", "turn_on", {"entity_id": "switch.shower_fan"}, blocking=True
         )
 
     async def test_direct_device_action_dry_run_sends_no_service_call(self) -> None:
