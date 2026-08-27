@@ -1,6 +1,23 @@
 /* Safe embedded editor for one Hausman-managed Node-RED function node. */
 
-import { trapModalTabKey } from "./hausman-hub-modal.js?v=1.52.183";
+import { trapModalTabKey } from "./hausman-hub-modal.js?v=1.52.184";
+
+export function renderDynamicNodeRedActions(scenario, deps) {
+  const { el, setAttr } = deps;
+  const section = el("section", "scenario-editor-panel");
+  setAttr(section, "data-scenario-step", "action");
+  section.appendChild(el("h3", null, "Выполнить"));
+  const summary = el("div", "scenario-rule-list-summary");
+  summary.appendChild(el("span", null, "Действия выбираются по текущим данным и ветке алгоритма"));
+  summary.appendChild(el("b", "scenario-editor-badge", "Node-RED"));
+  section.appendChild(summary);
+  const plan = el("div", "scenario-node-red-plan");
+  plan.appendChild(el("h4", null, "Динамический план действий"));
+  plan.appendChild(el("p", null, scenario.actionDescription || "Состав команд определяет управляемая function Node-RED."));
+  plan.appendChild(el("small", null, "Техническая пауза в хранилище не является действием дома. Точные команды и выбранную ветку покажет пробный запуск без их отправки."));
+  section.appendChild(plan);
+  return section;
+}
 
 function sourcePath(deps, scenarioId) {
   return `${deps.nodeRedApi}/source/${encodeURIComponent(scenarioId)}`;

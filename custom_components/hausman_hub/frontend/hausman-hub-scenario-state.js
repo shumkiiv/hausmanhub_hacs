@@ -1,8 +1,8 @@
 /* Pure scenario editor state, compatibility projection and save payload. */
 
-import { eventDataFromDraft } from "./hausman-hub-scenario-fields.js?v=1.52.183";
-import { scenarioDisplayGroup, scenarioDisplayText } from "./hausman-hub-scenario-catalog.js?v=1.52.183";
-import { applyScenarioRoomIds, scenarioRoomIds } from "./hausman-hub-scenario-rooms.js?v=1.52.183";
+import { eventDataFromDraft } from "./hausman-hub-scenario-fields.js?v=1.52.184";
+import { scenarioDisplayGroup, scenarioDisplayText } from "./hausman-hub-scenario-catalog.js?v=1.52.184";
+import { applyScenarioRoomIds, scenarioRoomIds } from "./hausman-hub-scenario-rooms.js?v=1.52.184";
 
 export function scenarioClone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -65,6 +65,44 @@ export function normalizedScenario(source) {
   return scenario;
 }
 
+function isNodeRedSafetyPlaceholder(action) {
+  return action && action.id === "safe_placeholder"
+    && action.type === "delay" && Number(action.delaySeconds) === 1;
+}
+
+export function scenarioHasDynamicNodeRedPlan(scenario) {
+  const definition = scenario && scenario.definition || {};
+  return definition.executionBackend === "node_red"
+    && Array.isArray(definition.actions)
+    && definition.actions.some(isNodeRedSafetyPlaceholder);
+}
+
+export function scenarioVisibleActions(scenario) {
+  const definition = scenario && scenario.definition || {};
+  const actions = Array.isArray(definition.actions) ? definition.actions : [];
+  return scenarioHasDynamicNodeRedPlan(scenario)
+    ? actions.filter((action) => !isNodeRedSafetyPlaceholder(action)) : actions;
+}
+
+function countLabel(value, one, few, many) {
+  const absolute = Math.abs(value);
+  const word = absolute % 100 >= 11 && absolute % 100 <= 14
+    ? many : absolute % 10 === 1 ? one : absolute % 10 >= 2 && absolute % 10 <= 4 ? few : many;
+  return `${value} ${word}`;
+}
+
+export function scenarioActionDetail(scenario) {
+  if (scenarioHasDynamicNodeRedPlan(scenario)) return "Алгоритм Node-RED";
+  return countLabel(scenarioVisibleActions(scenario).length, "действие", "действия", "действий");
+}
+
+export function scenarioReviewSummary(scenario) {
+  const definition = scenario.definition;
+  const conditions = definition.conditions.length
+    ? countLabel(definition.conditions.length, "условие", "условия", "условий") : "без условий";
+  return `Когда: ${countLabel(definition.triggers.length, "триггер", "триггера", "триггеров")} · Если: ${conditions} · Что сделать: ${scenarioActionDetail(scenario)}`;
+}
+
 export function duplicateScenarioDraft(source, options = {}) {
   const scenario = normalizedScenario(source);
   scenario.id = `scenario_${Date.now().toString(36)}`;
@@ -82,7 +120,8 @@ export function scenarioSummary(scenario) {
   const definition = scenario.definition;
   const trigger = definition.triggers.length === 1 ? "1 триггер" : `${definition.triggers.length} триггера`;
   const conditions = definition.conditions.length ? `${definition.conditions.length} усл.` : "без условий";
-  const actions = `${definition.actions.length} действ.`;
+  const actions = scenarioHasDynamicNodeRedPlan(scenario)
+    ? "алгоритм Node-RED" : `${definition.actions.length} действ.`;
   return `${trigger} · ${conditions} · ${actions}`;
 }
 
@@ -111,7 +150,9 @@ export function scenarioPayload(scenario) {
   result.triggerDescription = scenarioSummary(result).split(" · ")[0];
   result.conditionDescription = result.definition.conditions.length
     ? `${result.definition.conditions.length} условий` : "Без дополнительных условий";
-  result.actionDescription = `${result.definition.actions.length} действий`;
+  result.actionDescription = scenarioHasDynamicNodeRedPlan(result)
+    ? String(result.actionDescription || "Динамический план действий Node-RED").trim()
+    : `${result.definition.actions.length} действий`;
   if (result.definition.executionBackend === "node_red") {
     result.definition.nodeRed = result.definition.nodeRed || {
       generatedBy: "hausman", syncStatus: "pending", inputTargetIds: [],

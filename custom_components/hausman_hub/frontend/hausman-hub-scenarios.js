@@ -1,13 +1,14 @@
-import { activeElementWithin, trapModalTabKey } from "./hausman-hub-modal.js?v=1.52.183";
-import { scenarioEditorIssues, scenarioEventFields, scenarioField, scenarioIconField, scenarioSelectField, scenarioToggle } from "./hausman-hub-scenario-fields.js?v=1.52.183";
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.183";
-import { scenarioCapabilityLabel, scenarioDeviceButton, scenarioDeviceFields, scenarioGroupForTarget, scenarioPhysicalGroups } from "./hausman-hub-scenario-device-picker.js?v=1.52.183";
-import { groupScenarios, renderScenarioCatalog, scenarioActivationKind, scenarioDisplayGroup, scenarioDisplayText } from "./hausman-hub-scenario-catalog.js?v=1.52.183";
-import { renderScenarioRoomPicker, scenarioAffectedDeviceCount, scenarioRoomLabels } from "./hausman-hub-scenario-rooms.js?v=1.52.183";
-import { defaultScenarioDraft, duplicateScenarioDraft, normalizedScenario, scenarioPayload } from "./hausman-hub-scenario-state.js?v=1.52.183";
-import { bulkSaveScenarios } from "./hausman-hub-scenario-bulk.js?v=1.52.183";
-import { openScenarioAiComposer, renderScenarioAiComposer } from "./hausman-hub-scenario-ai.js?v=1.52.183";
-import { closeManagedSourceEditor, openManagedSourceEditor, renderManagedSourceEditor } from "./hausman-hub-scenario-node-red.js?v=1.52.183";
+import { activeElementWithin, trapModalTabKey } from "./hausman-hub-modal.js?v=1.52.184";
+import { scenarioEditorIssues, scenarioEventFields, scenarioField, scenarioIconField, scenarioSelectField, scenarioToggle } from "./hausman-hub-scenario-fields.js?v=1.52.184";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.184";
+import { scenarioCapabilityLabel, scenarioDeviceButton, scenarioDeviceFields, scenarioGroupForTarget, scenarioPhysicalGroups } from "./hausman-hub-scenario-device-picker.js?v=1.52.184";
+import { groupScenarios, renderScenarioCatalog, scenarioActivationKind, scenarioDisplayGroup, scenarioDisplayText } from "./hausman-hub-scenario-catalog.js?v=1.52.184";
+import { renderScenarioRoomPicker, scenarioAffectedDeviceCount, scenarioRoomLabels } from "./hausman-hub-scenario-rooms.js?v=1.52.184";
+import { defaultScenarioDraft, duplicateScenarioDraft, normalizedScenario, scenarioActionDetail, scenarioHasDynamicNodeRedPlan, scenarioPayload, scenarioReviewSummary } from "./hausman-hub-scenario-state.js?v=1.52.184";
+import { bulkSaveScenarios } from "./hausman-hub-scenario-bulk.js?v=1.52.184";
+import { openScenarioAiComposer, renderScenarioAiComposer } from "./hausman-hub-scenario-ai.js?v=1.52.184";
+import { captureScenarioEditorScroll, restoreScenarioEditorScroll } from "./hausman-hub-scenario-editor-scroll.js?v=1.52.184";
+import { closeManagedSourceEditor, openManagedSourceEditor, renderDynamicNodeRedActions, renderManagedSourceEditor } from "./hausman-hub-scenario-node-red.js?v=1.52.184";
 
 const TRIGGER_TYPES = [
   ["manual", "Ручной запуск"], ["time", "По времени"],
@@ -491,14 +492,9 @@ function scenarioEditorStepState(scenario, issues, id) {
   if (id === "about") return [Boolean(String(scenario.title || "").trim()), scenario.title || "Без названия"];
   if (id === "triggers") return [definition.triggers.length > 0 && !stepIssues("triggers"), scenarioCountLabel(definition.triggers.length, "триггер", "триггера", "триггеров")];
   if (id === "conditions") return [!stepIssues("conditions"), definition.conditions.length ? scenarioCountLabel(definition.conditions.length, "условие", "условия", "условий") : "Без условий"];
-  if (id === "actions") return [definition.actions.length > 0 && !stepIssues("actions"), scenarioCountLabel(definition.actions.length, "действие", "действия", "действий")];
+  if (id === "actions") return [definition.actions.length > 0 && !stepIssues("actions"), scenarioActionDetail(scenario)];
   if (id === "review") return [issues.length === 0, issues.length ? scenarioCountLabel(issues.length, "ошибка", "ошибки", "ошибок") : "Ошибок нет"];
   return [true, scenario.enabled ? "Включён" : "Выключен"];
-}
-
-function scenarioReviewSummary(scenario) {
-  const definition = scenario.definition;
-  return `Когда: ${scenarioCountLabel(definition.triggers.length, "триггер", "триггера", "триггеров")} · Если: ${definition.conditions.length ? scenarioCountLabel(definition.conditions.length, "условие", "условия", "условий") : "без условий"} · Что сделать: ${scenarioCountLabel(definition.actions.length, "действие", "действия", "действий")}`;
 }
 
 function scenarioReviewDetails(panel, scenario, deps) {
@@ -509,7 +505,7 @@ function scenarioReviewDetails(panel, scenario, deps) {
   const list = deps.el("ul");
   list.appendChild(deps.el("li", null, `Комнаты: ${rooms}`));
   list.appendChild(deps.el("li", null, `Физических устройств: ${devices}`));
-  list.appendChild(deps.el("li", null, `Действий: ${scenario.definition.actions.length}; триггеров: ${scenario.definition.triggers.length}; условий: ${scenario.definition.conditions.length}`));
+  list.appendChild(deps.el("li", null, `Действия: ${scenarioActionDetail(scenario)}; триггеров: ${scenario.definition.triggers.length}; условий: ${scenario.definition.conditions.length}`));
   list.appendChild(deps.el("li", null, scenario.enabled ? "Сценарий будет включён" : "Сценарий останется выключенным"));
   review.appendChild(list);
   return review;
@@ -531,7 +527,7 @@ function renderScenarioEditor(panel, container, deps) {
   const heading = el("h2", null, "Редактор сценария");
   setAttr(heading, "id", "scenario-editor-title");
   title.appendChild(heading);
-  title.appendChild(el("p", null, `Сценарий «${scenarioDisplayText(scenario.title, scenario) || "Без названия"}» · ${scenarioCountLabel(scenario.definition.triggers.length, "триггер", "триггера", "триггеров")} · ${scenarioCountLabel(scenario.definition.conditions.length, "условие", "условия", "условий")} · ${scenarioCountLabel(scenario.definition.actions.length, "действие", "действия", "действий")}`));
+  title.appendChild(el("p", null, `Сценарий «${scenarioDisplayText(scenario.title, scenario) || "Без названия"}» · ${scenarioCountLabel(scenario.definition.triggers.length, "триггер", "триггера", "триггеров")} · ${scenarioCountLabel(scenario.definition.conditions.length, "условие", "условия", "условий")} · ${scenarioActionDetail(scenario)}`));
   header.appendChild(title);
   const badges = el("div", "scenario-editor-header-badges");
   if (scenario.danger || scenario.protected) badges.appendChild(el("span", "scenario-editor-badge is-warning", "Защищённый"));
@@ -595,7 +591,9 @@ function renderScenarioEditor(panel, container, deps) {
   workspace.appendChild(middle);
   const right = el("div", "scenario-editor-column scenario-editor-column-actions");
   setAttr(right, "data-scenario-step", "action");
-  right.appendChild(renderScenarioRules(panel, "action", "Выполнить", "Шаги идут строго сверху вниз", scenario.definition.actions, deps));
+  right.appendChild(scenarioHasDynamicNodeRedPlan(scenario)
+    ? renderDynamicNodeRedActions(scenario, deps)
+    : renderScenarioRules(panel, "action", "Выполнить", "Шаги идут строго сверху вниз", scenario.definition.actions, deps));
   workspace.appendChild(right);
   dialog.appendChild(workspace);
 
@@ -643,6 +641,7 @@ function renderScenarioEditor(panel, container, deps) {
 
 export function renderScenarioSection(panel, container, deps) {
   const { el } = deps;
+  const editorScroll = captureScenarioEditorScroll(container);
   container.innerHTML = "";
   panel._scenarioLibrary = panel._scenarioLibrary || { filter: "all", roomId: "all", query: "", selectedIds: new Set(), bulkRoomIds: new Set() };
   if (!panel._scenarioLibrary.roomId) panel._scenarioLibrary.roomId = "all";
@@ -706,4 +705,5 @@ export function renderScenarioSection(panel, container, deps) {
   );
   if (panel._scenarioEditor) renderScenarioEditor(panel, container, deps);
   if (panel._scenarioNodeRedEditor) renderManagedSourceEditor(panel, container, deps, updateScenarioEditor);
+  restoreScenarioEditorScroll(container, editorScroll);
 }

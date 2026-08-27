@@ -65,6 +65,8 @@ SCENARIO_FIELDS_JS = PANEL_JS.with_name("hausman-hub-scenario-fields.js")
 SCENARIO_ROOMS_JS = PANEL_JS.with_name("hausman-hub-scenario-rooms.js")
 SCENARIO_STATE_JS = PANEL_JS.with_name("hausman-hub-scenario-state.js")
 SCENARIO_BULK_JS = PANEL_JS.with_name("hausman-hub-scenario-bulk.js")
+SCENARIO_EDITOR_SCROLL_JS = PANEL_JS.with_name("hausman-hub-scenario-editor-scroll.js")
+SCENARIO_NODE_RED_JS = PANEL_JS.with_name("hausman-hub-scenario-node-red.js")
 SETTINGS_CSS = PANEL_JS.with_name("hausman-hub-settings.css")
 OVERVIEW_CSS = PANEL_JS.with_name("hausman-hub-overview.css")
 SECURITY_OVERVIEW_CSS = PANEL_JS.with_name("hausman-hub-security-overview.css")
@@ -681,6 +683,14 @@ def panel_script(
       vm.runInThisContext(
         fs.readFileSync({str(SCENARIO_AI_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, "").replace(/export /g, ""),
         {{ filename: {str(SCENARIO_AI_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(SCENARIO_EDITOR_SCROLL_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, "").replace(/export /g, ""),
+        {{ filename: {str(SCENARIO_EDITOR_SCROLL_JS)!r} }}
+      );
+      vm.runInThisContext(
+        fs.readFileSync({str(SCENARIO_NODE_RED_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, "").replace(/export /g, ""),
+        {{ filename: {str(SCENARIO_NODE_RED_JS)!r} }}
       );
       vm.runInThisContext(
         fs.readFileSync({str(SCENARIOS_JS)!r}, "utf8").replace(/^import .*;\\s*/gm, "").replace(/export /g, ""),
@@ -4999,7 +5009,7 @@ class PanelSettingsSectionsTest(unittest.TestCase):
           throw new Error("translated status missing");
         }
         const stylesheet = findAll(panel.shadowRoot, (node) => node.tagName === "LINK")[0];
-        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.183")) {
+        if (!stylesheet || !String(stylesheet.href).includes("hausman-hub-panel.css?v=1.52.184")) {
           throw new Error("local panel stylesheet missing");
         }
         const active = panel._shell.sectionNodes.overview;

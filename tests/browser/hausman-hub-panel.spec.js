@@ -150,6 +150,24 @@ test("встроенный редактор Node-RED проверяет и со�
   });
   const scenarioDialog = panel.getByRole("dialog", { name: "Редактор сценария" });
   await expect(scenarioDialog).toBeVisible();
+  await expect(scenarioDialog.locator(".scenario-editor-heading p")).not.toContainText("1 действие");
+  await expect(scenarioDialog.locator(".scenario-editor-column-actions")).toContainText("Динамический план действий");
+  await expect(scenarioDialog.getByText("Пауза 1 сек.", { exact: true })).toHaveCount(0);
+  await expect(scenarioDialog.getByText("Люстра, подсветка и вытяжка по выбранной ветке", { exact: true })).toBeVisible();
+
+  const triggerColumn = scenarioDialog.locator(".scenario-editor-column-rules");
+  const scrollBefore = await triggerColumn.evaluate((column) => {
+    column.scrollTop = Math.min(120, column.scrollHeight - column.clientHeight);
+    return column.scrollTop;
+  });
+  expect(scrollBefore).toBeGreaterThan(0);
+  await triggerColumn.locator("select").first().evaluate((select) => {
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await expect.poll(() => scenarioDialog.locator(".scenario-editor-column-rules").evaluate((column) => column.scrollTop)).toBe(scrollBefore);
+  await panel.evaluate((host) => host._render());
+  await expect.poll(() => scenarioDialog.locator(".scenario-editor-column-rules").evaluate((column) => column.scrollTop)).toBe(scrollBefore);
+
   const backendChoices = scenarioDialog.locator(".scenario-backend-choice");
   await expect(backendChoices).toHaveCount(2);
   await expect(backendChoices.nth(0)).toContainText("Hausman");

@@ -42,6 +42,38 @@ def test_room_scope_is_backward_compatible_and_duplicate_is_selective() -> None:
     assert completed.returncode == 0, completed.stderr
 
 
+def test_node_red_placeholder_is_not_presented_or_saved_as_a_real_action() -> None:
+    state = (FRONTEND / "hausman-hub-scenario-state.js").as_uri()
+    completed = _run(
+        f"""
+        import {{
+          normalizedScenario, scenarioHasDynamicNodeRedPlan,
+          scenarioPayload, scenarioVisibleActions,
+        }} from {state!r};
+        const scenario = normalizedScenario({{
+          id: "managed", title: "Управляемый свет",
+          actionDescription: "Люстра и подсветка по выбранной ветке",
+          definition: {{
+            version: 1, executionMode: "restart", executionBackend: "node_red",
+            triggers: [{{id: "trigger-1", type: "manual"}}], conditions: [],
+            actions: [{{id: "safe_placeholder", type: "delay", delaySeconds: 1}}],
+            nodeRed: {{flowId: "flow-1", generatedBy: "user", syncStatus: "changed", inputTargetIds: []}},
+          }},
+        }});
+        if (!scenarioHasDynamicNodeRedPlan(scenario)) throw new Error("managed plan not detected");
+        if (scenarioVisibleActions(scenario).length !== 0) throw new Error("placeholder exposed as an action");
+        const payload = scenarioPayload(scenario);
+        if (payload.actionDescription !== "Люстра и подсветка по выбранной ветке") {{
+          throw new Error("human action description was overwritten: " + payload.actionDescription);
+        }}
+        if (payload.definition.actions.length !== 1 || payload.definition.actions[0].id !== "safe_placeholder") {{
+          throw new Error("storage safety marker was removed");
+        }}
+        """
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
 def test_device_tree_groups_physical_devices_and_meets_p95_budget() -> None:
     picker = (FRONTEND / "hausman-hub-scenario-device-picker.js").as_uri()
     completed = _run(
