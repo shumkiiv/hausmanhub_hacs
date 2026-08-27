@@ -1,8 +1,8 @@
 /* Pure scenario editor state, compatibility projection and save payload. */
 
-import { eventDataFromDraft } from "./hausman-hub-scenario-fields.js?v=1.52.182";
-import { scenarioDisplayGroup, scenarioDisplayText } from "./hausman-hub-scenario-catalog.js?v=1.52.182";
-import { applyScenarioRoomIds, scenarioRoomIds } from "./hausman-hub-scenario-rooms.js?v=1.52.182";
+import { eventDataFromDraft } from "./hausman-hub-scenario-fields.js?v=1.52.183";
+import { scenarioDisplayGroup, scenarioDisplayText } from "./hausman-hub-scenario-catalog.js?v=1.52.183";
+import { applyScenarioRoomIds, scenarioRoomIds } from "./hausman-hub-scenario-rooms.js?v=1.52.183";
 
 export function scenarioClone(value) {
   return JSON.parse(JSON.stringify(value));

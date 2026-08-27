@@ -150,6 +150,38 @@ test("встроенный редактор Node-RED проверяет и со�
   });
   const scenarioDialog = panel.getByRole("dialog", { name: "Редактор сценария" });
   await expect(scenarioDialog).toBeVisible();
+  const backendChoices = scenarioDialog.locator(".scenario-backend-choice");
+  await expect(backendChoices).toHaveCount(2);
+  await expect(backendChoices.nth(0)).toContainText("Hausman");
+  await expect(backendChoices.nth(1)).toContainText("Node-RED");
+  const backendChoiceGeometry = await backendChoices.evaluateAll((buttons) => buttons.map((button) => {
+    const title = button.querySelector("b");
+    const help = button.querySelector("small");
+    const buttonRect = button.getBoundingClientRect();
+    const titleRect = title?.getBoundingClientRect();
+    const helpRect = help?.getBoundingClientRect();
+    return {
+      buttonWhiteSpace: getComputedStyle(button).whiteSpace,
+      helpWhiteSpace: help ? getComputedStyle(help).whiteSpace : "",
+      horizontalOverflow: Math.max(0, button.scrollWidth - button.clientWidth),
+      verticalOverflow: Math.max(0, button.scrollHeight - button.clientHeight),
+      titleContained: Boolean(titleRect)
+        && titleRect.left >= buttonRect.left && titleRect.right <= buttonRect.right,
+      helpContained: Boolean(helpRect)
+        && helpRect.left >= buttonRect.left && helpRect.right <= buttonRect.right
+        && helpRect.top >= buttonRect.top && helpRect.bottom <= buttonRect.bottom,
+      contentGap: titleRect && helpRect ? helpRect.top - titleRect.bottom : -1,
+    };
+  }));
+  for (const geometry of backendChoiceGeometry) {
+    expect(geometry.buttonWhiteSpace).toBe("normal");
+    expect(geometry.helpWhiteSpace).toBe("normal");
+    expect(geometry.horizontalOverflow).toBe(0);
+    expect(geometry.verticalOverflow).toBe(0);
+    expect(geometry.titleContained).toBe(true);
+    expect(geometry.helpContained).toBe(true);
+    expect(geometry.contentGap).toBeGreaterThanOrEqual(5);
+  }
   await scenarioDialog.getByRole("button", { name: "Редактировать алгоритм в Hausman" }).click();
   const sourceDialog = panel.getByRole("dialog", { name: "Алгоритм Node-RED" });
   await expect(sourceDialog).toBeVisible();
