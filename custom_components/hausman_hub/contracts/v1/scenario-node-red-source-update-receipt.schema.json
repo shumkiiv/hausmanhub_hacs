@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/scenario-node-red-source-update-receipt.schema.json",
+  "title": "HausmanHub managed Node-RED source validation or update receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "scenarioId", "valid", "saved", "commandSent", "scenarioRevision", "flowRevision", "currentSourceHash", "proposedSourceHash", "syncStatus", "diagnostics"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-scenario-node-red-source-update-receipt"},
+        "version": {"const": 1}
+      }
+    },
+    "scenarioId": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+    "valid": {"const": true},
+    "saved": {"type": "boolean"},
+    "commandSent": {"const": false},
+    "scenarioRevision": {"type": "integer", "minimum": 0},
+    "flowRevision": {"type": "integer", "minimum": 1},
+    "currentSourceHash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "proposedSourceHash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "syncStatus": {"enum": ["validated", "synced"]},
+    "diagnostics": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "severity", "message"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+          "severity": {"enum": ["info", "warning"]},
+          "line": {"type": ["integer", "null"], "minimum": 1},
+          "message": {"type": "string", "minLength": 1, "maxLength": 500}
+        }
+      }
+    },
+    "verification": {
+      "anyOf": [
+        {"$ref": "scenario-node-red-execution.schema.json"},
+        {"type": "null"}
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"saved": {"const": false}}},
+      "then": {"properties": {"currentSourceHash": {"type": "string"}}}
+    }
+  ]
+}

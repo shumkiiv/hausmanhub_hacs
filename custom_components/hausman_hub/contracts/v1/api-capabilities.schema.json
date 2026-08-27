@@ -929,6 +929,39 @@
                 "available": {"type": "boolean"},
                 "statusPath": {"const": "/api/hausman_hub/v1/scenarios/node-red"},
                 "statusMethod": {"const": "GET"},
+                "sourcePathTemplate": {"const": "/api/hausman_hub/v1/scenarios/node-red/source/{scenario_id}"},
+                "sourceReadMethod": {"const": "GET"},
+                "sourceWriteMethod": {"const": "PUT"},
+                "source_contract": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["name", "version"],
+                  "properties": {
+                    "name": {"const": "hausman-hub-scenario-node-red-source"},
+                    "version": {"const": 1}
+                  }
+                },
+                "source_update_request_contract": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["name", "version"],
+                  "properties": {
+                    "name": {"const": "hausman-hub-scenario-node-red-source-update-request"},
+                    "version": {"const": 1}
+                  }
+                },
+                "source_update_receipt_contract": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["name", "version"],
+                  "properties": {
+                    "name": {"const": "hausman-hub-scenario-node-red-source-update-receipt"},
+                    "version": {"const": 1}
+                  }
+                },
+                "maxSourceBytes": {"const": 65536},
+                "optimisticLocking": {"const": true},
+                "dryRunBeforeSave": {"const": true},
                 "executionBackends": {
                   "type": "array",
                   "prefixItems": [{"const": "hausman"}, {"const": "node_red"}],
@@ -985,6 +1018,9 @@
                 },
                 "nodeRedStatus": {
                   "const": "/api/hausman_hub/v1/scenarios/node-red"
+                },
+                "nodeRedSourceTemplate": {
+                  "const": "/api/hausman_hub/v1/scenarios/node-red/source/{scenario_id}"
                 },
                 "upcoming": {
                   "const": "/api/hausman_hub/v1/scenarios/upcoming"

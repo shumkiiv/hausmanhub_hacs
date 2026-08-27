@@ -12,6 +12,7 @@ from homeassistant.components.http import HomeAssistantView
 from .application.scenario_service import (
     ScenarioNotFoundError,
     ScenarioCatalogNotReadyError,
+    ScenarioNodeRedSourceConflictError,
     ScenarioProtectedError,
     ScenarioReferencedError,
     ScenarioRevisionConflictError,
@@ -41,6 +42,7 @@ from .application.api_capabilities import (
     SCENARIOS_CATALOG_PATH,
     SCENARIOS_HEALTH_PATH,
     SCENARIOS_NODE_RED_PATH,
+    SCENARIOS_NODE_RED_SOURCE_PATH,
     SCENARIOS_DELETE_PATH,
     SCENARIOS_PATH,
     SCENARIOS_RUN_PATH,
@@ -59,6 +61,9 @@ ADMIN_SCENARIOS_PATH = "/api/hausman_hub/v1/admin/scenarios"
 ADMIN_SCENARIOS_CATALOG_PATH = f"{ADMIN_SCENARIOS_PATH}/catalog"
 ADMIN_SCENARIOS_HEALTH_PATH = f"{ADMIN_SCENARIOS_PATH}/health"
 ADMIN_SCENARIOS_NODE_RED_PATH = f"{ADMIN_SCENARIOS_PATH}/node-red"
+ADMIN_SCENARIOS_NODE_RED_SOURCE_PATH = (
+    f"{ADMIN_SCENARIOS_NODE_RED_PATH}/source/{{scenario_id}}"
+)
 ADMIN_SCENARIOS_TEST_PATH = f"{ADMIN_SCENARIOS_PATH}/test"
 ADMIN_SCENARIOS_DELETE_PATH = f"{ADMIN_SCENARIOS_PATH}/delete"
 ADMIN_SCENARIOS_RUN_PATH = f"{ADMIN_SCENARIOS_PATH}/run"
@@ -112,6 +117,111 @@ class ScenarioNodeRedView(_ScenarioView):
             status_code=HTTPStatus.OK,
             headers=NO_STORE_HEADERS,
         )
+
+
+class ScenarioNodeRedSourceView(_ScenarioView):
+    """Read, validate and save one managed Node-RED function."""
+
+    url = ADMIN_SCENARIOS_NODE_RED_SOURCE_PATH
+    name = "api:hausman_hub:scenario_node_red_source"
+
+    def _scenario_id(self, request: Any) -> str | None:
+        scenario_id = getattr(request, "match_info", {}).get("scenario_id")
+        if (
+            not isinstance(scenario_id, str)
+            or re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", scenario_id) is None
+            or not _is_exact_request(
+                request, self.url.format(scenario_id=scenario_id)
+            )
+        ):
+            return None
+        return scenario_id
+
+    async def get(self, request: Any) -> Any:
+        scenario_id = self._scenario_id(request)
+        if scenario_id is None:
+            return _not_found(self)
+        if not self._authorized(request):
+            return _forbidden(self)
+        service = self._service_ready()
+        if service is None:
+            return self._unavailable()
+        try:
+            payload = await service.async_node_red_source(scenario_id)
+        except ScenarioServiceError as error:
+            return self.json_message(
+                error.message, error.status, headers=NO_STORE_HEADERS
+            )
+        return self.json(payload, headers=NO_STORE_HEADERS)
+
+    async def put(self, request: Any) -> Any:
+        scenario_id = self._scenario_id(request)
+        if scenario_id is None:
+            return _not_found(self)
+        if not self._authorized(request):
+            return _forbidden(self)
+        service = self._service_ready()
+        if service is None:
+            return self._unavailable()
+        try:
+            payload = await _request_json(request)
+        except ValueError as error:
+            return self.json_message(
+                str(error), HTTPStatus.BAD_REQUEST, headers=NO_STORE_HEADERS
+            )
+        if not isinstance(payload, Mapping):
+            return self.json_message(
+                "Request body must be a JSON object.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        contract = payload.get("contract")
+        if (
+            not isinstance(contract, Mapping)
+            or contract.get("name")
+            != "hausman-hub-scenario-node-red-source-update-request"
+            or contract.get("version") != 1
+            or payload.get("scenarioId") != scenario_id
+        ):
+            return self.json_message(
+                "Node-RED source update contract or scenarioId is invalid.",
+                HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        try:
+            receipt = await service.async_update_node_red_source(
+                scenario_id, payload
+            )
+        except ScenarioRevisionConflictError as error:
+            return _revision_conflict_response(self, error)
+        except ScenarioNodeRedSourceConflictError as error:
+            return self.json(
+                {
+                    "ok": False,
+                    "status": "conflict",
+                    "error": "source_conflict",
+                    "message": (
+                        "Алгоритм изменён в другом редакторе. "
+                        "Перечитайте его перед сохранением."
+                    ),
+                    "scenarioId": scenario_id,
+                    "expectedSourceHash": error.expected_hash,
+                    "currentSourceHash": error.current_hash,
+                },
+                status_code=HTTPStatus.CONFLICT,
+                headers=NO_STORE_HEADERS,
+            )
+        except ScenarioValidationError as error:
+            return self.json(
+                _validation_error_payload(error),
+                status_code=HTTPStatus.BAD_REQUEST,
+                headers=NO_STORE_HEADERS,
+            )
+        except ScenarioServiceError as error:
+            return self.json_message(
+                error.message, error.status, headers=NO_STORE_HEADERS
+            )
+        return self.json(receipt, headers=NO_STORE_HEADERS)
 
 
 class ScenarioCatalogView(_ScenarioView):
@@ -822,6 +932,13 @@ class TabletScenarioNodeRedView(_TabletScenarioAccess, ScenarioNodeRedView):
     name = "api:hausman_hub:tablet_scenarios_node_red"
 
 
+class TabletScenarioNodeRedSourceView(
+    _TabletScenarioAccess, ScenarioNodeRedSourceView
+):
+    url = SCENARIOS_NODE_RED_SOURCE_PATH
+    name = "api:hausman_hub:tablet_scenario_node_red_source"
+
+
 class TabletScenariosView(_TabletScenarioAccess, ScenariosView):
     url = SCENARIOS_PATH
     name = "api:hausman_hub:tablet_scenarios"
@@ -1002,6 +1119,7 @@ def scenario_api_views(
         ScenarioCatalogView(hass),
         ScenarioHealthView(hass),
         ScenarioNodeRedView(hass),
+        ScenarioNodeRedSourceView(hass),
         ScenariosView(hass),
         ScenarioTestView(hass),
         ScenarioAiDraftView(hass),
@@ -1011,6 +1129,7 @@ def scenario_api_views(
         TabletScenarioCatalogView(hass),
         TabletScenarioHealthView(hass),
         TabletScenarioNodeRedView(hass),
+        TabletScenarioNodeRedSourceView(hass),
         TabletScenariosView(hass),
         TabletScenarioTestView(hass),
         TabletScenarioAiDraftView(hass),

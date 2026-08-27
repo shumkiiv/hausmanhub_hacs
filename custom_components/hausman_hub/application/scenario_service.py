@@ -6,8 +6,10 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 import time
 from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -18,13 +20,20 @@ from ..domain.scenarios import (
     ScenarioDefinition,
     ScenarioExecutionBackend,
     ScenarioExecutionMode,
+    ScenarioNodeRedGeneratedBy,
+    ScenarioNodeRedSyncStatus,
     ScenarioRegistry,
     ScenarioTriggerType,
     ScenarioViolation,
     _scenario_to_payload,
 )
 from .operation_journal import scenario_operation_receipt
-from .scenario_node_red import NodeRedBackendError, NodeRedScenarioBackend
+from .scenario_node_red import (
+    NodeRedBackendError,
+    NodeRedScenarioBackend,
+    NodeRedSourceConflict,
+    NodeRedSourceInvalid,
+)
 from .scenario_metrics import ScenarioPathMetrics
 from .scenario_schedule import (
     ScheduledRun,
@@ -357,6 +366,18 @@ class ScenarioCatalogNotReadyError(ScenarioServiceError):
             status=409,
         )
         self.readiness = dict(readiness)
+
+
+class ScenarioNodeRedSourceConflictError(ScenarioServiceError):
+    """The managed function changed after the embedded editor loaded it."""
+
+    def __init__(self, expected_hash: str, current_hash: str) -> None:
+        super().__init__(
+            "Function changed in another editor. Reload it before saving.",
+            status=409,
+        )
+        self.expected_hash = expected_hash
+        self.current_hash = current_hash
 
 
 class ScenarioValidationError(ScenarioServiceError):
@@ -758,6 +779,233 @@ class ScenarioService:
                 "flows": [],
             }
         return await self._node_red_backend.async_status(registry.scenarios)
+
+    async def async_node_red_source(self, scenario_id: str) -> dict[str, object]:
+        """Return one exact managed function for an embedded editor."""
+
+        registry = self._ensure_loaded()
+        scenario = registry.scenario(scenario_id)
+        if scenario is None:
+            raise ScenarioNotFoundError(scenario_id)
+        metadata = scenario.definition.node_red
+        if (
+            scenario.definition.execution_backend
+            is not ScenarioExecutionBackend.NODE_RED
+            or metadata is None
+            or not metadata.flow_id
+        ):
+            raise ScenarioServiceError(
+                "Scenario does not use a managed Node-RED function.", status=404
+            )
+        if self._node_red_backend is None:
+            raise ScenarioServiceError("Node-RED backend is unavailable.", status=503)
+        try:
+            source = await self._node_red_backend.async_read_source(
+                scenario.id, metadata.flow_id
+            )
+        except NodeRedBackendError as error:
+            raise ScenarioServiceError(str(error), status=503) from error
+        actual_hash = str(source["source_hash"])
+        sync_status = (
+            ScenarioNodeRedSyncStatus.SYNCED.value
+            if metadata.source_hash == actual_hash
+            else ScenarioNodeRedSyncStatus.CHANGED.value
+        )
+        return {
+            "contract": {
+                "name": "hausman-hub-scenario-node-red-source",
+                "version": 1,
+            },
+            "scenarioId": scenario.id,
+            "title": scenario.title,
+            "flowId": metadata.flow_id,
+            "scenarioRevision": scenario.revision,
+            "flowRevision": max(1, metadata.flow_revision),
+            "sourceHash": actual_hash,
+            "syncStatus": sync_status,
+            "generatedBy": metadata.generated_by.value,
+            "source": source["source"],
+            "editable": True,
+            "maxSourceBytes": 65_536,
+            "updatedAt": scenario.updated_at,
+        }
+
+    async def async_update_node_red_source(
+        self, scenario_id: str, payload: Mapping[str, object]
+    ) -> dict[str, object]:
+        """Validate or atomically save one managed function source."""
+
+        self._require_running()
+        async with self._lock:
+            self._require_running()
+            registry = self._ensure_loaded()
+            scenario = registry.scenario(scenario_id)
+            if scenario is None:
+                raise ScenarioNotFoundError(scenario_id)
+            metadata = scenario.definition.node_red
+            if (
+                scenario.definition.execution_backend
+                is not ScenarioExecutionBackend.NODE_RED
+                or metadata is None
+                or not metadata.flow_id
+            ):
+                raise ScenarioServiceError(
+                    "Scenario does not use a managed Node-RED function.",
+                    status=404,
+                )
+            expected_revision = payload.get("expectedScenarioRevision")
+            if expected_revision != scenario.revision:
+                raise ScenarioRevisionConflictError(
+                    scenario.id,
+                    expected_revision=(
+                        expected_revision if isinstance(expected_revision, int) else None
+                    ),
+                    current_revision=scenario.revision,
+                    changed_fields=("definition.nodeRed",),
+                    current_room_ids=scenario.room_ids,
+                    current_action_ids=tuple(
+                        action.id for action in scenario.definition.actions
+                    ),
+                )
+            expected_source_hash = payload.get("expectedSourceHash")
+            source = payload.get("source")
+            validate_only = payload.get("validateOnly")
+            if (
+                not isinstance(expected_source_hash, str)
+                or re.fullmatch(r"[a-f0-9]{64}", expected_source_hash) is None
+                or not isinstance(source, str)
+                or not isinstance(validate_only, bool)
+            ):
+                raise ScenarioValidationError(
+                    (
+                        ScenarioDefinitionViolation(
+                            "Node-RED source update request is invalid.",
+                            code="node_red_source_invalid",
+                            path="source",
+                        ),
+                    )
+                )
+            if self._node_red_backend is None:
+                raise ScenarioServiceError(
+                    "Node-RED backend is unavailable.", status=503
+                )
+            try:
+                result = await self._node_red_backend.async_update_source(
+                    scenario.id,
+                    scenario.definition,
+                    metadata.flow_id,
+                    source,
+                    expected_source_hash,
+                    self._catalog,
+                    validate_only=validate_only,
+                )
+            except NodeRedSourceConflict as error:
+                raise ScenarioNodeRedSourceConflictError(
+                    error.expected_hash, error.current_hash
+                ) from error
+            except NodeRedSourceInvalid as error:
+                raise ScenarioValidationError(
+                    (
+                        ScenarioDefinitionViolation(
+                            str(error),
+                            code=error.code,
+                            path=(
+                                f"source.line.{error.line}"
+                                if error.line is not None
+                                else "source"
+                            ),
+                        ),
+                    )
+                ) from error
+            except NodeRedBackendError as error:
+                raise ScenarioServiceError(str(error), status=503) from error
+
+            proposed_hash = str(result["proposed_source_hash"])
+            flow_changed = bool(result["saved"])
+            metadata_changed = (
+                metadata.source_hash != proposed_hash
+                or metadata.sync_status is not ScenarioNodeRedSyncStatus.SYNCED
+                or metadata.generated_by is not ScenarioNodeRedGeneratedBy.USER
+            )
+            current_scenario = scenario
+            if not validate_only and (flow_changed or metadata_changed):
+                next_metadata = replace(
+                    metadata,
+                    flow_revision=metadata.flow_revision + (1 if flow_changed else 0),
+                    source_hash=proposed_hash,
+                    generated_by=ScenarioNodeRedGeneratedBy.USER,
+                    sync_status=ScenarioNodeRedSyncStatus.SYNCED,
+                )
+                current_scenario = replace(
+                    scenario,
+                    definition=replace(
+                        scenario.definition, node_red=next_metadata
+                    ),
+                    revision=scenario.revision + 1,
+                    updated_at=int(time.time() * 1000),
+                )
+                scenarios = [
+                    item for item in registry.scenarios if item.id != scenario.id
+                ]
+                scenarios.append(current_scenario)
+                new_registry = ScenarioRegistry(scenarios=tuple(scenarios))
+                try:
+                    await self.async_save(new_registry)
+                except ScenarioServiceError:
+                    if flow_changed:
+                        try:
+                            await self._node_red_backend.async_restore_source(
+                                scenario.id,
+                                metadata.flow_id,
+                                str(result["previous_source"]),
+                                expected_current_hash=proposed_hash,
+                            )
+                        except NodeRedBackendError as rollback_error:
+                            raise ScenarioServiceError(
+                                "Scenario storage and Node-RED rollback failed.",
+                                status=503,
+                            ) from rollback_error
+                    raise
+                self._registry = new_registry
+                self._scenario_content_revision_key = None
+                self._scenario_content_revision = None
+                self._publish_scenario_change(
+                    "updated",
+                    current_scenario.id,
+                    current_scenario.revision,
+                    ("definition.nodeRed.source",),
+                )
+
+            return {
+                "contract": {
+                    "name": "hausman-hub-scenario-node-red-source-update-receipt",
+                    "version": 1,
+                },
+                "scenarioId": scenario.id,
+                "valid": True,
+                "saved": bool(
+                    not validate_only and (flow_changed or metadata_changed)
+                ),
+                "commandSent": False,
+                "scenarioRevision": current_scenario.revision,
+                "flowRevision": max(
+                    1,
+                    metadata.flow_revision + (1 if flow_changed else 0),
+                ),
+                "currentSourceHash": (
+                    proposed_hash
+                    if not validate_only
+                    else str(result["current_source_hash"])
+                ),
+                "proposedSourceHash": proposed_hash,
+                "syncStatus": (
+                    "validated"
+                    if validate_only
+                    else ScenarioNodeRedSyncStatus.SYNCED.value
+                ),
+                "diagnostics": list(result["diagnostics"]),
+                "verification": result["verification"],
+            }
 
     @property
     def performance_metrics(self) -> dict[str, dict[str, float | int | str]]:

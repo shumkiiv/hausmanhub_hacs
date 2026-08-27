@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/scenario-node-red-source-update-request.schema.json",
+  "title": "HausmanHub managed Node-RED source validation or update request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "scenarioId", "expectedScenarioRevision", "expectedSourceHash", "source", "validateOnly"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-scenario-node-red-source-update-request"},
+        "version": {"const": 1}
+      }
+    },
+    "scenarioId": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+    "expectedScenarioRevision": {"type": "integer", "minimum": 0},
+    "expectedSourceHash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "source": {"type": "string", "minLength": 100, "maxLength": 65536},
+    "validateOnly": {"type": "boolean"}
+  }
+}

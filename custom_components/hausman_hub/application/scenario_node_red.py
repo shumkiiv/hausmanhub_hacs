@@ -23,6 +23,7 @@ from ..domain.scenarios import (
     ScenarioNodeRedSyncStatus,
     ScenarioViolation,
     _action_from_payload,
+    _action_to_payload,
     _definition_to_payload,
 )
 
@@ -38,9 +39,42 @@ NODE_RED_EXECUTION_CONTRACT = "hausman-node-red-scenario-execution"
 NODE_RED_ENDPOINT_PREFIX = "endpoint/hausman/scenarios"
 NODE_RED_TIMEOUT_SECONDS = 5
 MAX_RETURNED_ACTIONS = 32
+MAX_MANAGED_SOURCE_BYTES = 65_536
 _ALLOWED_TRACE_STATUSES = frozenset({"passed", "failed", "selected", "skipped"})
 _ALLOWED_RESULT_STATUSES = frozenset({"completed", "skipped", "failed"})
 _TRACE_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+_FORBIDDEN_SOURCE_PATTERNS = (
+    (
+        "global_context",
+        re.compile(r"\bglobal\s*\.\s*(?:get|set)\s*\("),
+        "Глобальный контекст Node-RED недоступен управляемому алгоритму.",
+    ),
+    (
+        "flow_context",
+        re.compile(r"\bflow\s*\.\s*(?:get|set)\s*\("),
+        "Контекст вкладки Node-RED недоступен управляемому алгоритму.",
+    ),
+    (
+        "environment",
+        re.compile(r"\benv\s*\.\s*get\s*\(|\bprocess\s*\."),
+        "Переменные окружения недоступны управляемому алгоритму.",
+    ),
+    (
+        "module_access",
+        re.compile(r"\brequire\s*\(|\bimport\s*\("),
+        "Подключение внешних модулей запрещено.",
+    ),
+    (
+        "network_access",
+        re.compile(r"\bfetch\s*\(|\bXMLHttpRequest\b|\bhttps?\s*\.\s*request\s*\("),
+        "Сетевые вызовы из функции запрещены.",
+    ),
+    (
+        "direct_node_output",
+        re.compile(r"\bnode\s*\.\s*(?:send|done)\s*\("),
+        "Функция должна вернуть один проверяемый результат через return msg.",
+    ),
+)
 
 RequestAdapter = Callable[
     [str, str, Mapping[str, str], Mapping[str, object] | None],
@@ -54,6 +88,24 @@ class NodeRedBackendError(RuntimeError):
 
 class NodeRedFlowConflict(NodeRedBackendError):
     """A managed function was edited in Node-RED and must not be overwritten."""
+
+
+class NodeRedSourceConflict(NodeRedBackendError):
+    """The function changed after an editor loaded it."""
+
+    def __init__(self, expected_hash: str, current_hash: str) -> None:
+        super().__init__("Функция уже изменена в другом редакторе. Перечитайте исходник.")
+        self.expected_hash = expected_hash
+        self.current_hash = current_hash
+
+
+class NodeRedSourceInvalid(NodeRedBackendError):
+    """The proposed function breaks the bounded managed-source policy."""
+
+    def __init__(self, message: str, *, code: str, line: int | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.line = line
 
 
 def _canonical_definition(definition: ScenarioDefinition) -> dict[str, object]:
@@ -100,6 +152,64 @@ def managed_source_hash(source: str) -> str:
     """Return the stable conflict hash stored with one scenario."""
 
     return hashlib.sha256(source.encode()).hexdigest()
+
+
+def validate_managed_source(
+    scenario_id: str, source: str
+) -> tuple[dict[str, object], ...]:
+    """Validate one editable function without executing or deploying it."""
+
+    if not isinstance(source, str):
+        raise NodeRedSourceInvalid(
+            "Исходник функции должен быть текстом.", code="source_not_text"
+        )
+    source_bytes = source.encode("utf-8")
+    if len(source_bytes) > MAX_MANAGED_SOURCE_BYTES:
+        raise NodeRedSourceInvalid(
+            "Исходник функции превышает 64 КиБ.", code="source_too_large"
+        )
+    if "\x00" in source:
+        raise NodeRedSourceInvalid(
+            "Исходник функции содержит недопустимый нулевой символ.",
+            code="source_invalid_character",
+        )
+    marker = f"// HAUSMAN_MANAGED_SCENARIO {scenario_id}"
+    first_line = source.splitlines()[0].strip() if source.splitlines() else ""
+    if first_line != marker:
+        raise NodeRedSourceInvalid(
+            f"Первая строка должна быть: {marker}", code="managed_marker_missing", line=1
+        )
+    if NODE_RED_EXECUTION_CONTRACT not in source:
+        raise NodeRedSourceInvalid(
+            "Функция должна вернуть контракт hausman-node-red-scenario-execution.",
+            code="execution_contract_missing",
+        )
+    if re.search(r"\breturn\s+msg\s*;?", source) is None:
+        raise NodeRedSourceInvalid(
+            "Функция должна завершаться возвратом return msg.",
+            code="return_missing",
+        )
+    for code, pattern, message in _FORBIDDEN_SOURCE_PATTERNS:
+        match = pattern.search(source)
+        if match is None:
+            continue
+        line = source.count("\n", 0, match.start()) + 1
+        raise NodeRedSourceInvalid(message, code=code, line=line)
+    contract_offset = source.find(NODE_RED_EXECUTION_CONTRACT)
+    return (
+        {
+            "id": "contract_present",
+            "severity": "info",
+            "line": source.count("\n", 0, contract_offset) + 1,
+            "message": "Контракт результата найден.",
+        },
+        {
+            "id": "physical_commands_owned_by_hausman",
+            "severity": "info",
+            "line": None,
+            "message": "Функция возвращает план, физические команды выполняет Hausman.",
+        },
+    )
 
 
 def _node_ids(scenario_id: str) -> tuple[str, str, str]:
@@ -185,6 +295,26 @@ def _function_source(flow: Mapping[str, object]) -> str | None:
         if isinstance(source, str) and source.startswith("// HAUSMAN_MANAGED_SCENARIO "):
             return source
     return None
+
+
+def _replace_function_source(
+    flow: Mapping[str, object], scenario_id: str, source: str
+) -> dict[str, object]:
+    """Copy one flow and replace only its managed function body."""
+
+    copied = json.loads(json.dumps(flow, ensure_ascii=False))
+    nodes = copied.get("nodes") if isinstance(copied, dict) else None
+    if not isinstance(nodes, list):
+        raise NodeRedBackendError("Управляемая function-схема повреждена.")
+    marker = f"// HAUSMAN_MANAGED_SCENARIO {scenario_id}"
+    for node in nodes:
+        if not isinstance(node, dict) or node.get("type") != "function":
+            continue
+        current = node.get("func")
+        if isinstance(current, str) and current.startswith(marker):
+            node["func"] = source
+            return copied
+    raise NodeRedBackendError("Управляемая function не найдена.")
 
 
 class NodeRedScenarioBackend:
@@ -320,6 +450,10 @@ class NodeRedScenarioBackend:
                     "flowId": metadata.flow_id,
                     "sourceHash": metadata.source_hash,
                     "syncStatus": metadata.sync_status.value,
+                    "sourcePath": (
+                        "/api/hausman_hub/v1/scenarios/node-red/source/"
+                        f"{getattr(scenario, 'id', '')}"
+                    ),
                     "openPath": f"/hassio/ingress/{self._addon_slug}?flow={metadata.flow_id}",
                 }
             )
@@ -335,6 +469,174 @@ class NodeRedScenarioBackend:
             "lastCheckedAt": self._last_checked_at,
             "flows": flows,
         }
+
+    async def async_read_source(
+        self, scenario_id: str, flow_id: str
+    ) -> dict[str, object]:
+        """Read the exact managed function currently deployed in Node-RED."""
+
+        status, body = await self._raw_request(
+            "GET", f"/flow/{flow_id}", ingress=True
+        )
+        if status == 404:
+            raise NodeRedBackendError("Управляемая function-схема не найдена.")
+        if status != 200 or not isinstance(body, Mapping):
+            raise NodeRedBackendError("Не удалось прочитать function-схему Node-RED.")
+        source = _function_source(body)
+        marker = f"// HAUSMAN_MANAGED_SCENARIO {scenario_id}"
+        if source is None or not source.startswith(marker):
+            raise NodeRedBackendError("Function не принадлежит выбранному сценарию.")
+        return {
+            "flow": body,
+            "source": source,
+            "source_hash": managed_source_hash(source),
+        }
+
+    async def async_update_source(
+        self,
+        scenario_id: str,
+        definition: ScenarioDefinition,
+        flow_id: str,
+        source: str,
+        expected_source_hash: str,
+        catalog: ScenarioCatalog,
+        *,
+        validate_only: bool,
+    ) -> dict[str, object]:
+        """Validate and optionally deploy one function with rollback verification."""
+
+        current = await self.async_read_source(scenario_id, flow_id)
+        current_hash = str(current["source_hash"])
+        if current_hash != expected_source_hash:
+            raise NodeRedSourceConflict(expected_source_hash, current_hash)
+        diagnostics = validate_managed_source(scenario_id, source)
+        proposed_hash = managed_source_hash(source)
+        if validate_only:
+            return {
+                "saved": False,
+                "current_source_hash": current_hash,
+                "proposed_source_hash": proposed_hash,
+                "diagnostics": diagnostics,
+                "verification": None,
+                "previous_source": current["source"],
+            }
+        if proposed_hash == current_hash:
+            run_id = f"verify-{scenario_id}-{int(time.time() * 1000)}"
+            actions, result = await self.async_plan(
+                scenario_id,
+                definition,
+                run_id,
+                catalog,
+                dry_run=True,
+            )
+            if result["status"] == "failed":
+                raise NodeRedBackendError(
+                    "Проверочный запуск функции завершился ошибкой."
+                )
+            verification = {
+                "contract": {
+                    "name": NODE_RED_EXECUTION_CONTRACT,
+                    "version": 1,
+                },
+                "correlationId": run_id,
+                "scenarioId": scenario_id,
+                **result,
+                "actions": [_action_to_payload(action) for action in actions],
+            }
+            return {
+                "saved": False,
+                "current_source_hash": current_hash,
+                "proposed_source_hash": proposed_hash,
+                "diagnostics": diagnostics,
+                "verification": verification,
+                "previous_source": current["source"],
+            }
+
+        updated_flow = _replace_function_source(
+            current["flow"], scenario_id, source
+        )
+        status, _ = await self._raw_request(
+            "PUT", f"/flow/{flow_id}", payload=updated_flow, ingress=True
+        )
+        if status not in {200, 204}:
+            raise NodeRedBackendError("Node-RED отклонил новый исходник функции.")
+        try:
+            deployed = await self.async_read_source(scenario_id, flow_id)
+            if deployed["source_hash"] != proposed_hash:
+                raise NodeRedBackendError(
+                    "Контрольная сумма функции после сохранения не совпала."
+                )
+            run_id = f"verify-{scenario_id}-{int(time.time() * 1000)}"
+            actions, result = await self.async_plan(
+                scenario_id,
+                definition,
+                run_id,
+                catalog,
+                dry_run=True,
+            )
+            if result["status"] == "failed":
+                raise NodeRedBackendError(
+                    "Проверочный запуск новой функции завершился ошибкой."
+                )
+            verification = {
+                "contract": {
+                    "name": NODE_RED_EXECUTION_CONTRACT,
+                    "version": 1,
+                },
+                "correlationId": run_id,
+                "scenarioId": scenario_id,
+                **result,
+                "actions": [_action_to_payload(action) for action in actions],
+            }
+        except Exception as error:  # noqa: BLE001
+            await self.async_restore_source(
+                scenario_id,
+                flow_id,
+                str(current["source"]),
+                expected_current_hash=proposed_hash,
+            )
+            if isinstance(error, NodeRedBackendError):
+                raise
+            raise NodeRedBackendError(
+                "Проверочный запуск функции не прошёл, прежний исходник восстановлен."
+            ) from error
+        return {
+            "saved": True,
+            "current_source_hash": proposed_hash,
+            "proposed_source_hash": proposed_hash,
+            "diagnostics": diagnostics,
+            "verification": verification,
+            "previous_source": current["source"],
+        }
+
+    async def async_restore_source(
+        self,
+        scenario_id: str,
+        flow_id: str,
+        source: str,
+        *,
+        expected_current_hash: str,
+    ) -> None:
+        """Restore an exact previous source after a later persistence failure."""
+
+        current = await self.async_read_source(scenario_id, flow_id)
+        if current["source_hash"] != expected_current_hash:
+            raise NodeRedSourceConflict(
+                expected_current_hash, str(current["source_hash"])
+            )
+        restored_flow = _replace_function_source(
+            current["flow"], scenario_id, source
+        )
+        status, _ = await self._raw_request(
+            "PUT", f"/flow/{flow_id}", payload=restored_flow, ingress=True
+        )
+        if status not in {200, 204}:
+            raise NodeRedBackendError("Не удалось восстановить прежний исходник.")
+        restored = await self.async_read_source(scenario_id, flow_id)
+        if restored["source_hash"] != managed_source_hash(source):
+            raise NodeRedBackendError(
+                "Контрольная сумма восстановленного исходника не совпала."
+            )
 
     async def async_prepare(
         self,

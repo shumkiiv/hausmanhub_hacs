@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/scenario-node-red-source.schema.json",
+  "title": "HausmanHub managed Node-RED function source v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "scenarioId", "title", "flowId", "scenarioRevision", "flowRevision", "sourceHash", "syncStatus", "source", "editable", "maxSourceBytes"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-scenario-node-red-source"},
+        "version": {"const": 1}
+      }
+    },
+    "scenarioId": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+    "title": {"type": "string", "minLength": 1, "maxLength": 120},
+    "flowId": {"type": "string", "minLength": 1, "maxLength": 128},
+    "scenarioRevision": {"type": "integer", "minimum": 0},
+    "flowRevision": {"type": "integer", "minimum": 1},
+    "sourceHash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "syncStatus": {"enum": ["synced", "changed"]},
+    "generatedBy": {"enum": ["hausman", "ai", "user"]},
+    "source": {"type": "string", "minLength": 100, "maxLength": 65536},
+    "editable": {"const": true},
+    "maxSourceBytes": {"const": 65536},
+    "updatedAt": {"type": ["integer", "null"], "minimum": 0}
+  }
+}

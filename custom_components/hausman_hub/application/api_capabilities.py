@@ -64,6 +64,7 @@ SCENARIOS_PATH = f"{API_BASE_PATH}/scenarios"
 SCENARIOS_CATALOG_PATH = f"{SCENARIOS_PATH}/catalog"
 SCENARIOS_HEALTH_PATH = f"{SCENARIOS_PATH}/health"
 SCENARIOS_NODE_RED_PATH = f"{SCENARIOS_PATH}/node-red"
+SCENARIOS_NODE_RED_SOURCE_PATH = f"{SCENARIOS_NODE_RED_PATH}/source/{{scenario_id}}"
 SCENARIOS_TEST_PATH = f"{SCENARIOS_PATH}/test"
 SCENARIOS_DELETE_PATH = f"{SCENARIOS_PATH}/delete"
 SCENARIOS_RUN_PATH = f"{SCENARIOS_PATH}/run"
@@ -362,6 +363,7 @@ def api_capabilities_snapshot(
                     "catalog": SCENARIOS_CATALOG_PATH,
                     "health": SCENARIOS_HEALTH_PATH,
                     "nodeRedStatus": SCENARIOS_NODE_RED_PATH,
+                    "nodeRedSourceTemplate": SCENARIOS_NODE_RED_SOURCE_PATH,
                     "test": SCENARIOS_TEST_PATH,
                     "delete": SCENARIOS_DELETE_PATH,
                     "run": SCENARIOS_RUN_PATH,
@@ -374,6 +376,24 @@ def api_capabilities_snapshot(
                     "available": True,
                     "statusPath": SCENARIOS_NODE_RED_PATH,
                     "statusMethod": "GET",
+                    "sourcePathTemplate": SCENARIOS_NODE_RED_SOURCE_PATH,
+                    "sourceReadMethod": "GET",
+                    "sourceWriteMethod": "PUT",
+                    "source_contract": {
+                        "name": "hausman-hub-scenario-node-red-source",
+                        "version": 1,
+                    },
+                    "source_update_request_contract": {
+                        "name": "hausman-hub-scenario-node-red-source-update-request",
+                        "version": 1,
+                    },
+                    "source_update_receipt_contract": {
+                        "name": "hausman-hub-scenario-node-red-source-update-receipt",
+                        "version": 1,
+                    },
+                    "maxSourceBytes": 65_536,
+                    "optimisticLocking": True,
+                    "dryRunBeforeSave": True,
                     "executionBackends": ["hausman", "node_red"],
                     "physicalCommandsOwnedByHausman": True,
                     "managedFlowStyle": "function",

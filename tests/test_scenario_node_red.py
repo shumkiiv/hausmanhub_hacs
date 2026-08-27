@@ -13,9 +13,12 @@ from unittest.mock import AsyncMock
 from custom_components.hausman_hub.application.scenario_node_red import (
     NodeRedBackendError,
     NodeRedScenarioBackend,
+    NodeRedSourceConflict,
+    NodeRedSourceInvalid,
     build_managed_flow,
     compile_managed_function,
     managed_source_hash,
+    validate_managed_source,
 )
 from custom_components.hausman_hub.application.scenario_executor import ScenarioExecutor
 from custom_components.hausman_hub.domain.scenarios import (
@@ -62,6 +65,99 @@ def test_compiler_builds_one_compact_command_free_function_flow() -> None:
     ]
     assert "call-service" not in source
     assert managed_source_hash(source) == managed_source_hash(source)
+
+
+def test_embedded_source_policy_rejects_direct_commands_and_context() -> None:
+    source = compile_managed_function("test_flow", _definition())
+    diagnostics = validate_managed_source("test_flow", source)
+    assert diagnostics[0]["id"] == "contract_present"
+
+    for forbidden, code in (
+        (source.replace("return msg;", "node.send(msg);\nreturn msg;"), "direct_node_output"),
+        (source.replace("return msg;", "global.set('secret', 1);\nreturn msg;"), "global_context"),
+        (source.replace("return msg;", "fetch('https://example.com');\nreturn msg;"), "network_access"),
+    ):
+        try:
+            validate_managed_source("test_flow", forbidden)
+        except NodeRedSourceInvalid as error:
+            assert error.code == code
+        else:
+            raise AssertionError(f"{code} must fail closed")
+
+
+async def test_embedded_source_update_uses_hash_lock_and_dry_run() -> None:
+    original = compile_managed_function("test_flow", _definition())
+    proposed = original.replace("Основная ветка", "Проверенная ветка")
+    deployed = build_managed_flow(
+        "test_flow", "Тест", original, flow_id="flow-one"
+    )
+    calls: list[tuple[str, str]] = []
+
+    async def adapter(method, path, headers, payload):
+        calls.append((method, path))
+        if method == "GET" and path.endswith("/flow/flow-one"):
+            return 200, deployed
+        if method == "PUT" and path.endswith("/flow/flow-one"):
+            deployed.clear()
+            deployed.update(payload)
+            return 204, None
+        if method == "POST" and path.endswith("/endpoint/hausman/scenarios/test_flow"):
+            return 200, {
+                "contract": {"name": "hausman-node-red-scenario-execution", "version": 1},
+                "correlationId": payload["correlationId"],
+                "scenarioId": "test_flow",
+                "status": "completed",
+                "summary": "Проверено.",
+                "selectedBranch": "default",
+                "durationMs": 1,
+                "trace": [],
+                "actions": [],
+            }
+        raise AssertionError((method, path))
+
+    backend = NodeRedScenarioBackend(
+        SimpleNamespace(states=SimpleNamespace(get=lambda _: None)),
+        request_adapter=adapter,
+    )
+    backend._ingress_token = "token"  # noqa: SLF001
+    backend._ingress_session = "session"  # noqa: SLF001
+    definition = replace(
+        _definition(),
+        node_red=ScenarioNodeRedMetadata(
+            flow_id="flow-one",
+            source_hash=managed_source_hash(original),
+            sync_status=ScenarioNodeRedSyncStatus.SYNCED,
+        ),
+    )
+    result = await backend.async_update_source(
+        "test_flow",
+        definition,
+        "flow-one",
+        proposed,
+        managed_source_hash(original),
+        SimpleNamespace(device=lambda _: None),
+        validate_only=False,
+    )
+
+    assert result["saved"] is True
+    assert result["current_source_hash"] == managed_source_hash(proposed)
+    assert result["verification"]["actions"] == []
+    assert ("PUT", "/ingress/token/flow/flow-one") in calls
+
+    try:
+        await backend.async_update_source(
+            "test_flow",
+            definition,
+            "flow-one",
+            proposed,
+            managed_source_hash(original),
+            SimpleNamespace(device=lambda _: None),
+            validate_only=True,
+        )
+    except NodeRedSourceConflict as error:
+        assert error.current_hash == managed_source_hash(proposed)
+    else:
+        raise AssertionError("stale source hash must fail closed")
 
 
 def _async_test_case(

@@ -280,6 +280,15 @@
         "available": true,
         "statusPath": "/api/hausman_hub/v1/scenarios/node-red",
         "statusMethod": "GET",
+        "sourcePathTemplate": "/api/hausman_hub/v1/scenarios/node-red/source/{scenario_id}",
+        "sourceReadMethod": "GET",
+        "sourceWriteMethod": "PUT",
+        "source_contract": {"name": "hausman-hub-scenario-node-red-source", "version": 1},
+        "source_update_request_contract": {"name": "hausman-hub-scenario-node-red-source-update-request", "version": 1},
+        "source_update_receipt_contract": {"name": "hausman-hub-scenario-node-red-source-update-receipt", "version": 1},
+        "maxSourceBytes": 65536,
+        "optimisticLocking": true,
+        "dryRunBeforeSave": true,
         "executionBackends": ["hausman", "node_red"],
         "physicalCommandsOwnedByHausman": true,
         "managedFlowStyle": "function"
@@ -298,6 +307,7 @@
         "action": "/api/hausman_hub/v1/scenarios/action",
         "aiDraft": "/api/hausman_hub/v1/scenarios/ai-draft",
         "nodeRedStatus": "/api/hausman_hub/v1/scenarios/node-red",
+        "nodeRedSourceTemplate": "/api/hausman_hub/v1/scenarios/node-red/source/{scenario_id}",
         "upcoming": "/api/hausman_hub/v1/scenarios/upcoming",
         "upcomingCancel": "/api/hausman_hub/v1/scenarios/upcoming/cancel"
       }

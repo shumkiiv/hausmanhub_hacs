@@ -36,6 +36,7 @@
           "flowId": {"type": "string", "minLength": 1, "maxLength": 128},
           "sourceHash": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
           "syncStatus": {"enum": ["pending", "synced", "changed", "missing", "unavailable"]},
+          "sourcePath": {"type": ["string", "null"], "maxLength": 240},
           "openPath": {"type": ["string", "null"], "maxLength": 240}
         }
       }
