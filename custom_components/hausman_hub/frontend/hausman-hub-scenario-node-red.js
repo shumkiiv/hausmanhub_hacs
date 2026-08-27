@@ -1,6 +1,6 @@
 /* Safe embedded editor for one Hausman-managed Node-RED function node. */
 
-import { trapModalTabKey } from "./hausman-hub-modal.js?v=1.52.181";
+import { trapModalTabKey } from "./hausman-hub-modal.js?v=1.52.182";
 
 function sourcePath(deps, scenarioId) {
   return `${deps.nodeRedApi}/source/${encodeURIComponent(scenarioId)}`;

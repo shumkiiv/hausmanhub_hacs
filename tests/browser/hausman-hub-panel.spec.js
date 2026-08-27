@@ -180,6 +180,30 @@ test("каталог показывает способ редактирован�
     return title.left - icon.right;
   });
   expect(titleGap).toBeGreaterThanOrEqual(14);
+  const badgeIconGeometry = await allCards.first().evaluate((card) => {
+    const badge = card.querySelector(".scenario-library-badge");
+    const icon = badge?.querySelector(":scope > ha-icon.icon");
+    const label = badge?.querySelector(":scope > span");
+    const badgeRect = badge?.getBoundingClientRect();
+    const iconRect = icon?.getBoundingClientRect();
+    const labelRect = label?.getBoundingClientRect();
+    const style = icon ? getComputedStyle(icon) : null;
+    return {
+      iconSize: style?.getPropertyValue("--mdc-icon-size").trim() || "",
+      iconDisplay: style?.display || "",
+      leftInset: badgeRect && iconRect ? iconRect.left - badgeRect.left : -1,
+      rightInset: badgeRect && labelRect ? badgeRect.right - labelRect.right : -1,
+      labelGap: iconRect && labelRect ? labelRect.left - iconRect.right : -1,
+      centerDelta: badgeRect && iconRect
+        ? Math.abs((badgeRect.top + badgeRect.bottom - iconRect.top - iconRect.bottom) / 2) : -1,
+    };
+  });
+  expect(badgeIconGeometry.iconSize).toBe("15px");
+  expect(badgeIconGeometry.iconDisplay).toBe("block");
+  expect(badgeIconGeometry.leftInset).toBeGreaterThanOrEqual(7);
+  expect(badgeIconGeometry.rightInset).toBeGreaterThanOrEqual(7);
+  expect(badgeIconGeometry.labelGap).toBeGreaterThanOrEqual(5);
+  expect(badgeIconGeometry.centerDelta).toBeLessThanOrEqual(0.5);
   await panel.getByRole("button", { name: "Node-RED", exact: true }).click();
   const cards = panel.locator(".scenario-library-card:visible");
   await expect(cards).toHaveCount(1);
