@@ -134,3 +134,25 @@ test("AI-компоновщик сценария открывается и пр�
   await expect(dialog.locator(".scenario-ai-suggestion").first()).toBeVisible();
   await expect(dialog.getByText("Токен Home Assistant", { exact: false })).toBeVisible();
 });
+
+test("встроенный редактор Node-RED проверяет и сохраняет function без команд", async ({ page }) => {
+  const panel = await openHarness(page, {
+    query: "section=scenarios&theme=dark&nodeRedEditor=1&openScenario=Тестовый%20алгоритм",
+    width: 1440,
+    height: 900,
+  });
+  const scenarioDialog = panel.getByRole("dialog", { name: "Редактор сценария" });
+  await expect(scenarioDialog).toBeVisible();
+  await scenarioDialog.getByRole("button", { name: "Редактировать алгоритм в Hausman" }).click();
+  const sourceDialog = panel.getByRole("dialog", { name: "Алгоритм Node-RED" });
+  await expect(sourceDialog).toBeVisible();
+  const editor = sourceDialog.getByLabel("Исходник function Node-RED");
+  await expect(editor).toHaveValue(/HAUSMAN_MANAGED_SCENARIO node_red_test/);
+  await editor.fill(`${await editor.inputValue()}\n// browser gate`);
+  await sourceDialog.getByRole("button", { name: "Проверить и сохранить" }).click();
+  await expect(sourceDialog.getByText("Проверено.", { exact: true })).toBeVisible();
+  await expect(sourceDialog.getByText("команд отправлено: нет", { exact: false })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.__hausmanHubHarnessCalls
+    .filter((call) => call.method === "PUT" && call.path.endsWith("/source/node_red_test"))
+    .map((call) => call.payload.validateOnly))).toEqual([false]);
+});

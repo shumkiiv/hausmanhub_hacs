@@ -10,6 +10,7 @@
 .scenario-node-red-inputs select { min-height:112px; }
 .scenario-node-red-sync { margin-top:8px; }
 .scenario-node-red-open { display:inline-flex; width:max-content; margin-top:8px; color:var(--hmh-accent,#4D8DFF); font-size:12px; font-weight:700; }
+.scenario-node-red-edit { width:max-content; margin-top:8px; }
 .scenario-node-red-sync.is-changed,.scenario-node-red-sync.is-missing,.scenario-node-red-sync.is-unavailable { border-color:var(--hmh-warning,#E4A54B); color:var(--hmh-warning,#E4A54B); }
 .scenario-trace { display:grid; gap:6px; max-height:210px; overflow:auto; padding:10px 12px; border:1px solid var(--hmh-border,#2F3845); border-radius:12px; background:var(--hmh-raised,#181E26); }
 .scenario-trace h3,.scenario-trace p { margin:0; }
@@ -21,3 +22,24 @@
 .scenario-trace-list li.is-passed,.scenario-trace-list li.is-selected { color:var(--hmh-success,#58C786); background:color-mix(in srgb,var(--hmh-success,#58C786) 8%,transparent); }
 .scenario-trace-list li.is-failed { color:var(--hmh-danger,#EF6A6A); background:color-mix(in srgb,var(--hmh-danger,#EF6A6A) 8%,transparent); }
 .scenario-trace-list b,.scenario-trace-list small { display:block; }
+.scenario-node-red-source-overlay { position:fixed; inset:0; z-index:1300; display:grid; place-items:center; padding:18px; background:rgba(3,7,12,.84); backdrop-filter:blur(8px); }
+.scenario-node-red-source-dialog { display:grid; grid-template-rows:auto auto auto minmax(260px,1fr) auto auto; gap:12px; width:min(1120px,calc(100vw - 36px)); height:min(820px,calc(100vh - 36px)); padding:18px; overflow:hidden; border:1px solid var(--hmh-border,#2F3845); border-radius:18px; background:var(--hmh-surface,#10161F); box-shadow:0 28px 80px rgba(0,0,0,.5); color:var(--hmh-text,#E7ECF3); }
+.scenario-node-red-source-dialog>header,.scenario-node-red-source-dialog>footer { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.scenario-node-red-source-dialog h2,.scenario-node-red-source-dialog p { margin:0; }
+.scenario-node-red-source-dialog header p,.scenario-node-red-source-dialog footer p { color:var(--hmh-muted,#AAB4C2); font-size:12px; }
+.scenario-node-red-source-safety { padding:10px 12px; border:1px solid color-mix(in srgb,var(--hmh-success,#58C786) 45%,var(--hmh-border,#2F3845)); border-radius:12px; background:color-mix(in srgb,var(--hmh-success,#58C786) 8%,transparent); }
+.scenario-node-red-source-safety p { margin-top:3px; color:var(--hmh-muted,#AAB4C2); font-size:12px; line-height:1.45; }
+.scenario-node-red-source-meta { display:flex; flex-wrap:wrap; gap:7px; }
+.scenario-node-red-source-meta span { padding:5px 8px; border:1px solid var(--hmh-border,#2F3845); border-radius:999px; color:var(--hmh-muted,#AAB4C2); font-size:11px; }
+.scenario-node-red-source-meta .is-synced { color:var(--hmh-success,#58C786); }
+.scenario-node-red-source-meta .is-dirty { color:var(--hmh-warning,#E4A54B); }
+.scenario-node-red-source-code { box-sizing:border-box; width:100%; min-height:260px; resize:none; padding:14px 16px; overflow:auto; border:1px solid var(--hmh-border,#2F3845); border-radius:12px; outline:none; background:#080C12; color:#D8E4F2; font:500 13px/1.55 ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace; tab-size:2; }
+.scenario-node-red-source-code:focus { border-color:var(--hmh-accent,#4D8DFF); box-shadow:0 0 0 2px color-mix(in srgb,var(--hmh-accent,#4D8DFF) 24%,transparent); }
+.scenario-node-red-source-error { padding:9px 11px; border-radius:10px; background:color-mix(in srgb,var(--hmh-danger,#EF6A6A) 12%,transparent); color:var(--hmh-danger,#EF6A6A); }
+.scenario-node-red-source-diagnostics { margin:0; padding:9px 12px 9px 30px; border-radius:10px; background:color-mix(in srgb,var(--hmh-success,#58C786) 8%,transparent); color:var(--hmh-success,#58C786); font-size:12px; }
+.scenario-node-red-source-trace { display:grid; gap:5px; max-height:150px; overflow:auto; padding:10px 12px; border:1px solid var(--hmh-border,#2F3845); border-radius:10px; }
+.scenario-node-red-source-trace>small { color:var(--hmh-muted,#AAB4C2); }
+.scenario-node-red-source-trace ol { display:grid; gap:3px; margin:0; padding-left:22px; }
+.scenario-node-red-source-trace li b,.scenario-node-red-source-trace li small { display:block; }
+.scenario-node-red-source-dialog footer>div { display:flex; gap:8px; }
+@media(max-width:760px) { .scenario-node-red-source-overlay { padding:0; } .scenario-node-red-source-dialog { width:100vw; height:100vh; border:0; border-radius:0; padding:12px; } .scenario-node-red-source-dialog>footer { align-items:stretch; flex-direction:column; } .scenario-node-red-source-dialog footer>div { display:grid; grid-template-columns:1fr; } }

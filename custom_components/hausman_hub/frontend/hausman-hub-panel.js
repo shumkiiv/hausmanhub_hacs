@@ -376,6 +376,7 @@ class HausmanHubPanel extends HTMLElement {
     this._intercomDirty = false;
     this._roomTypeSaving = new Set();
     this._scenarioEditor = null;
+    this._scenarioNodeRedEditor = null;
     this._settingsData = { connection_mode: "home_assistant", smart_home_center_url: "", home_assistant_url: "" };
     this._settingsBaseline = { ...this._settingsData };
     this._settingsPrefs = { large_text: false, reduced_motion: false, show_hints: true, rail_collapsed: false };
