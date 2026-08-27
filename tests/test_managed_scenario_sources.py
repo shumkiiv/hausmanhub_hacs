@@ -70,9 +70,86 @@ class ManagedTamburSourceTest(unittest.TestCase):
         self.assertEqual("morning_day", payload["selectedBranch"])
         self.assertEqual("brightness", actions[0])
         self.assertLess(
-            actions.index("temperature_wait_1"), actions.index("mirror_off")
+            actions.index("temperature_target"), actions.index("mirror_off")
         )
         self.assertEqual("mirror_off", actions[-1])
+
+    def test_repeated_motion_does_not_reapply_matching_day_profile(self) -> None:
+        payload = _run_tambur(
+            timestamp="2026-08-27T11:45:00+06:00",
+            states={
+                PRESENCE: "on",
+                MOTION: "on",
+                SUN: "above_horizon",
+                CHANDELIER: {
+                    "state": "on",
+                    "attributes": {"brightness": 191, "color_temp_kelvin": 2801},
+                },
+                MIRROR: "off",
+            },
+        )
+
+        self.assertEqual("morning_day", payload["selectedBranch"])
+        self.assertEqual([], payload["actions"])
+
+    def test_brightness_drift_does_not_rewrite_matching_temperature(self) -> None:
+        payload = _run_tambur(
+            timestamp="2026-08-27T11:45:00+06:00",
+            states={
+                PRESENCE: "on",
+                MOTION: "on",
+                SUN: "above_horizon",
+                CHANDELIER: {
+                    "state": "on",
+                    "attributes": {"brightness": 128, "color_temp_kelvin": 2801},
+                },
+                MIRROR: "off",
+            },
+        )
+
+        self.assertEqual(["brightness"], _action_ids(payload))
+
+    def test_temperature_drift_uses_one_direct_correction(self) -> None:
+        payload = _run_tambur(
+            timestamp="2026-08-27T11:45:00+06:00",
+            states={
+                PRESENCE: "on",
+                MOTION: "on",
+                SUN: "above_horizon",
+                CHANDELIER: {
+                    "state": "on",
+                    "attributes": {"brightness": 191, "color_temp_kelvin": 3600},
+                },
+                MIRROR: "off",
+            },
+        )
+
+        self.assertEqual(["temperature_target"], _action_ids(payload))
+
+    def test_power_recovery_with_stale_temperature_forces_once(self) -> None:
+        payload = _run_tambur(
+            timestamp="2026-08-27T11:45:00+06:00",
+            states={
+                PRESENCE: "on",
+                MOTION: "on",
+                SUN: "above_horizon",
+                CHANDELIER: {
+                    "state": "off",
+                    "attributes": {"brightness": 191, "color_temp_kelvin": 2801},
+                },
+                MIRROR: "off",
+            },
+        )
+
+        self.assertEqual(
+            [
+                "brightness",
+                "temperature_prime",
+                "temperature_wait_1",
+                "temperature_target",
+            ],
+            _action_ids(payload),
+        )
 
     def test_night_handoff_confirms_mirror_before_chandelier_off(self) -> None:
         payload = _run_tambur(

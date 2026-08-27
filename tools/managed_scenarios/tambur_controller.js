@@ -22,6 +22,13 @@ function state(targetId) {
   return value === null || value === undefined ? null : String(value);
 }
 
+function numberAttribute(targetId, name) {
+  const value = item(targetId).attributes && item(targetId).attributes[name];
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 function switchAction(id, targetId, targetName, turnOn) {
   return {
     id,
@@ -141,13 +148,36 @@ if (confidentlyAbsent) {
 
 if (brightness !== null && kelvin !== null) {
   const mirrorNeedsOff = state(ID.mirror) !== 'off';
-  actions.push(lightAction('brightness', 'set_brightness_percent', brightness));
-  const prime = kelvin >= 6500 ? 6400 : Math.min(6500, kelvin + 100);
-  actions.push(lightAction('temperature_prime', 'set_color_temperature', prime));
-  actions.push({id: 'temperature_wait_1', type: 'delay', delaySeconds: 1});
-  actions.push(lightAction('temperature_target', 'set_color_temperature', kelvin));
-  actions.push({id: 'temperature_wait_2', type: 'delay', delaySeconds: 1});
-  actions.push(lightAction('temperature_confirm', 'set_color_temperature', kelvin));
+  const chandelierOn = state(ID.chandelier) === 'on';
+  const currentBrightness = numberAttribute(ID.chandelier, 'brightness');
+  const currentBrightnessPercent = currentBrightness === null
+    ? null
+    : Math.round(currentBrightness * 100 / 255);
+  const currentKelvinDirect = numberAttribute(ID.chandelier, 'color_temp_kelvin');
+  const currentMired = numberAttribute(ID.chandelier, 'color_temp');
+  const currentKelvin = currentKelvinDirect !== null
+    ? currentKelvinDirect
+    : currentMired !== null && currentMired > 0
+      ? Math.round(1000000 / currentMired)
+      : null;
+  const brightnessValueMatches = currentBrightnessPercent !== null
+    && Math.abs(currentBrightnessPercent - brightness) <= 1;
+  const temperatureValueMatches = currentKelvin !== null
+    && Math.abs(currentKelvin - kelvin) <= 25;
+
+  if (!chandelierOn || !brightnessValueMatches) {
+    actions.push(lightAction('brightness', 'set_brightness_percent', brightness));
+  }
+  if (!chandelierOn && temperatureValueMatches) {
+    // После возврата питания Zigbee может сохранить целевое значение в кеше.
+    // Один близкий импульс гарантирует настоящую команду, но только при старте.
+    const prime = kelvin >= 6500 ? 6400 : Math.min(6500, kelvin + 100);
+    actions.push(lightAction('temperature_prime', 'set_color_temperature', prime));
+    actions.push({id: 'temperature_wait_1', type: 'delay', delaySeconds: 1});
+  }
+  if (!chandelierOn || !temperatureValueMatches) {
+    actions.push(lightAction('temperature_target', 'set_color_temperature', kelvin));
+  }
   if (mirrorNeedsOff) {
     actions.push(switchAction('mirror_off', ID.mirror, 'Подсветка зеркала тамбура', false));
   }
