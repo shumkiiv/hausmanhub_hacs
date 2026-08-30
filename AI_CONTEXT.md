@@ -1,5 +1,27 @@
 # HausmanHub AI Context
 
+- 2026-08-30: HACS `1.52.188` опубликован и развёрнут в production вместе с
+  contracts `0.63.0`. Основной релиз `1.52.187` добавил достоверность
+  reported/effective state, durable manual и automation ownership света,
+  restart-safe delayed off душевой и вытяжки, полный idempotency/receipt
+  protocol и строгий серверный envelope managed Node-RED. После первого
+  restart реальный Node-RED `GET /flow/{id}` выявил, что сервер не возвращает
+  пустой `configs`; hotfix `1.52.188` (`a0f07ed`) принимает только отсутствие
+  этого пустого поля, сохраняя запрет непустых, неверно типизированных и
+  неизвестных полей. Tag и Release `v1.52.188` опубликованы, GitHub Actions
+  `33303232150` успешен. Локально прошли 1851 тест, 4 skipped, critical branch
+  coverage 76% при пороге 75%, Chromium 19/19 и contracts validator 77
+  schemas/167 fixtures. Использован полный backup `cd0ffd3c`; выполнены два
+  restart, второй потребовался для production hotfix. Installed/latest равны
+  `v1.52.188`, config check, Scenario Health, Node-RED и read-only smoke
+  зелёные, максимальная задержка 87 мс, записей Hausman в system log нет.
+  Managed sources душевой и тамбура синхронизированы до revision 2. Только
+  люстра тамбура переведена на `auto_turn_on` с прогревом 3 секунды, две
+  остальные power-связи сохранены. Создан обычный sunrise-сценарий кухни,
+  два старых protected расписания отключены; итог 54 сценария, 52 включены.
+  Физические команды, canary и power-cycle не выполнялись. Штора кабинета
+  остаётся заблокированной до появления сущности Home Assistant.
+
 - 2026-08-27: HACS `1.52.185` опубликован и развёрнут в production с отдельным
   представлением выбранных
   данных managed Node-RED-алгоритма. Над системным multi-select появился блок
