@@ -693,6 +693,32 @@ def _state_property(
     )
 
 
+def _domain_properties(
+    state_property: ScenarioDeviceProperty,
+    domain: str,
+) -> tuple[ScenarioDeviceProperty, ...]:
+    """Expose stable attributes that are safe to use in scenario conditions."""
+
+    properties = [state_property]
+    if domain == "cover":
+        properties.append(
+            ScenarioDeviceProperty(
+                property_id="current_position",
+                label="Позиция",
+                value_type="number",
+                comparisons=(
+                    "equals",
+                    "not_equals",
+                    "above",
+                    "below",
+                    "changed",
+                ),
+                unit="%",
+            )
+        )
+    return tuple(properties)
+
+
 def _registries(hass: HomeAssistant) -> tuple[object | None, object | None, object | None]:
     """Read official HA registries with lightweight test doubles as fallback."""
 
@@ -858,7 +884,7 @@ async def async_build_scenario_catalog(hass: HomeAssistant) -> ScenarioCatalog:
             device_type=device_class or domain,
             device_type_name=_TYPE_NAMES.get(domain, "Устройства"),
             capability_name=capability_name,
-            properties=(state_property,),
+            properties=_domain_properties(state_property, domain),
             range_minimum=number_range[0] if number_range is not None else None,
             range_maximum=number_range[1] if number_range is not None else None,
             range_step=number_range[2] if number_range is not None else None,

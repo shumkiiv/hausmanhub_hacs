@@ -6,6 +6,7 @@ import unittest
 
 from custom_components.hausman_hub.application.scenario_catalog import (
     SCENARIO_CATALOG_DOMAINS,
+    _domain_properties,
     _domain_actions,
     _number_actions_with_policy,
     _number_range,
@@ -153,6 +154,38 @@ class ScenarioCatalogPureTest(unittest.TestCase):
         actions = _domain_actions("cover")
         position = next(action for action in actions if action.action_id == "set_position")
         self.assertIn("value", position.allowed_fields)
+
+    def test_cover_exposes_numeric_position_for_guarded_automation(self) -> None:
+        state = type(
+            "State",
+            (),
+            {"state": "open", "attributes": {"current_position": 7}},
+        )()
+        state_property = _state_property(state, "cover", "", "Шторы и ворота")
+
+        properties = _domain_properties(state_property, "cover")
+
+        self.assertEqual(
+            ("state", "current_position"),
+            tuple(item.property_id for item in properties),
+        )
+        position = properties[1]
+        self.assertEqual("Позиция", position.label)
+        self.assertEqual("number", position.value_type)
+        self.assertEqual("%", position.unit)
+        self.assertEqual(
+            ("equals", "not_equals", "above", "below", "changed"),
+            position.comparisons,
+        )
+
+    def test_non_cover_keeps_only_state_property(self) -> None:
+        state = type("State", (), {"state": "on", "attributes": {}})()
+        state_property = _state_property(state, "switch", "", "Реле")
+
+        self.assertEqual(
+            (state_property,),
+            _domain_properties(state_property, "switch"),
+        )
 
     def test_extended_tablet_domains_have_semantic_actions(self) -> None:
         expected = {
