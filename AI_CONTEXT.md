@@ -1,5 +1,17 @@
 # HausmanHub AI Context
 
+- 2026-08-30: HACS `1.52.189` опубликован и развёрнут как policy-only hotfix
+  поверх `1.52.188`. Два синтетических HACS browser-baseline переименованы из
+  путей с `tablet` в пути с `hacs`; Git подтвердил R100 и совпадающие blob,
+  пиксели и UI не менялись. Это закрывает запрет публичного репозитория на
+  Android/tablet materials. Commit/tag `cf12457`, Release `v1.52.189`,
+  GitHub Actions `33304627416` успешен. Полный gate снова прошёл 1851 тест,
+  4 skipped, critical branch coverage 76% и Chromium 19/19. После третьего
+  restart installed/latest равны `v1.52.189`; config check, Scenario Health,
+  Node-RED и read-only smoke зелёные, максимальная задержка 89 мс, записей
+  Hausman в system log нет. Production-настройки revision 2/3 и 54 сценария,
+  52 включённых, пережили restart без изменений. Физических команд не было.
+
 - 2026-08-30: HACS `1.52.188` опубликован и развёрнут в production вместе с
   contracts `0.63.0`. Основной релиз `1.52.187` добавил достоверность
   reported/effective state, durable manual и automation ownership света,
