@@ -1066,6 +1066,7 @@ class ScenarioExecutor:
             actions,
             self._catalog,
             self._hass,
+            scenario_id=scenario_id,
             scenario_text=scenario_text,
             trigger_context=trigger_context,
             power_dependencies=power_dependencies,
@@ -1119,7 +1120,11 @@ class ScenarioExecutor:
         powered_target_ids: set[str] = set()
         start_ms = int(time.time() * 1000)
 
-        if light_priority.applied and light_priority.only_lighting_effects:
+        if (
+            light_priority.applied
+            and light_priority.only_lighting_effects
+            and light_priority.guarded_target_ids == light_priority.light_target_ids
+        ):
             receipts = [
                 skipped_light_receipt(
                     action,
@@ -1292,6 +1297,13 @@ class ScenarioExecutor:
                         self._catalog,
                         self._hass,
                         power_dependencies,
+                        target_ids=(
+                            frozenset({action.target_id})
+                            if action.target_id is not None
+                            and light_priority.guarded_target_ids
+                            != light_priority.light_target_ids
+                            else None
+                        ),
                     ):
                         receipt = skipped_light_receipt(
                             action,

@@ -556,6 +556,84 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.hass.services.async_call.assert_not_awaited()
         sleep.assert_not_awaited()
 
+    async def test_tambur_manual_chandelier_does_not_block_presence_spots(
+        self,
+    ) -> None:
+        self.catalog._devices["device_2"] = ScenarioDeviceEntry(
+            target_id="device_2",
+            name="Точки тамбура",
+            entity_id="light.tambur_spots",
+            actions=(
+                ScenarioDeviceAction(
+                    action_id="turn_on",
+                    title="On",
+                    domain="light",
+                    service="turn_on",
+                    allowed_fields=frozenset(),
+                ),
+            ),
+        )
+        self.hass.state_values["light.tambur_spots"] = SimpleNamespace(
+            state="off", attributes={}
+        )
+
+        async def apply_service(
+            _domain: str,
+            _service: str,
+            data: dict[str, object],
+            *,
+            blocking: bool,
+        ) -> None:
+            self.assertTrue(blocking)
+            if data.get("entity_id") == "light.tambur_spots":
+                self.hass.state_values["light.tambur_spots"].state = "on"
+
+        self.hass.services.async_call.side_effect = apply_service
+        definition = _definition(
+            (
+                ScenarioAction(
+                    id="chandelier_brightness",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="device_1",
+                    action_id="set_brightness_percent",
+                    value=100,
+                ),
+                ScenarioAction(
+                    id="points_on",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="device_2",
+                    action_id="turn_on",
+                ),
+            )
+        )
+
+        result = await self.executor.async_execute(
+            definition,
+            "run-tambur-partial-manual-priority",
+            scenario_id="system-tambur-adaptive-controller",
+            scenario_title="Тамбур: адаптивное освещение",
+            trigger_context={
+                "source": "device_state",
+                "target_id": "sensor_1",
+                "old_value": "off",
+                "new_value": "on",
+            },
+        )
+
+        self.assertEqual("completed", result["status"])
+        self.assertEqual(
+            ["manual_light_already_on", None],
+            [receipt.get("reason") for receipt in result["receipts"]],
+        )
+        self.assertTrue(result["receipts"][0]["skipped"])
+        self.assertTrue(result["receipts"][1]["confirmed"])
+        self.hass.services.async_call.assert_awaited_once_with(
+            "light",
+            "turn_on",
+            {"entity_id": "light.tambur_spots"},
+            blocking=True,
+        )
+
     async def test_represence_cancels_every_profile_obligation_but_dry_run_does_not(
         self,
     ) -> None:

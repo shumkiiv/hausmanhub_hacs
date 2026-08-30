@@ -20,6 +20,7 @@ from .scenarios import ScenarioCatalog, ScenarioDeviceEntry
 MANUAL_LIGHT_PRIORITY_REASON = "manual_light_already_on"
 LIGHT_STATE_FRESHNESS_SECONDS = 300
 _SENSOR_DOMAINS = frozenset({"binary_sensor", "sensor"})
+_TAMBUR_ADAPTIVE_SCENARIO_ID = "system-tambur-adaptive-controller"
 
 _LIGHT_WORDS = (
     "light",
@@ -299,6 +300,7 @@ class LightAutomationPriority:
         catalog: ScenarioCatalog,
         hass: object,
         *,
+        scenario_id: str = "",
         scenario_text: str,
         trigger_context: Mapping[str, object] | None,
         power_dependencies: Mapping[str, DevicePowerDependency],
@@ -393,7 +395,16 @@ class LightAutomationPriority:
                 )
             )
             if manual_target_ids:
-                guarded_target_ids = light_target_ids
+                # The tambur chandelier and spots are complementary sources.
+                # A manual chandelier must stay untouched without suppressing
+                # the spots that independently follow presence. Other light
+                # profiles keep the conservative whole-branch guard because
+                # their sources may be interchangeable.
+                guarded_target_ids = (
+                    manual_target_ids
+                    if scenario_id == _TAMBUR_ADAPTIVE_SCENARIO_ID
+                    else light_target_ids
+                )
                 manual_claims = {
                     action.target_id: device.entity_id
                     for action, device in visible
@@ -554,10 +565,12 @@ class LightAutomationPriority:
         catalog: ScenarioCatalog,
         hass: object,
         power_dependencies: Mapping[str, DevicePowerDependency] | None = None,
+        *,
+        target_ids: frozenset[str] | None = None,
     ) -> bool:
         """Recheck API claims and fresh physical on events under the lock."""
 
-        for target_id in plan.light_target_ids:
+        for target_id in target_ids or plan.light_target_ids:
             device = catalog.device(target_id)
             if device is None:
                 continue
