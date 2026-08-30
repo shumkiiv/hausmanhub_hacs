@@ -109,6 +109,26 @@ def test_compiler_builds_one_compact_command_free_function_flow() -> None:
     assert managed_source_hash(source) == managed_source_hash(source)
 
 
+def test_topology_accepts_live_get_without_empty_configs_only() -> None:
+    source = compile_managed_function("test_flow", _definition())
+    flow = build_managed_flow("test_flow", "Тест", source, flow_id="flow-one")
+    flow.pop("configs")
+
+    assert scenario_node_red._execution_topology_hash(  # noqa: SLF001
+        "test_flow", "flow-one", flow, managed_source_hash(source)
+    )
+
+    for invalid in (
+        {**flow, "configs": [{}]},
+        {**flow, "configs": {}},
+        {**flow, "unexpected": True},
+    ):
+        with pytest.raises(NodeRedBackendError, match="topology"):
+            scenario_node_red._execution_topology_hash(  # noqa: SLF001
+                "test_flow", "flow-one", invalid, managed_source_hash(source)
+            )
+
+
 def test_source_view_accepts_home_assistant_route_keyword() -> None:
     """HA dispatches ``{scenario_id}`` as a handler keyword argument."""
 
@@ -232,6 +252,8 @@ async def _case_embedded_source_update_uses_hash_lock_and_dry_run() -> None:
     deployed = build_managed_flow(
         "test_flow", "Тест", original, flow_id="flow-one"
     )
+    # Real GET /flow/{id} replies omit an empty configs list.
+    deployed.pop("configs")
     calls: list[tuple[str, str]] = []
     revision = "rev-one"
 

@@ -377,11 +377,13 @@ def _execution_topology_hash(
         "subflows",
     }
     if (
-        not {"id", "nodes", "configs"}.issubset(flow)
+        not {"id", "nodes"}.issubset(flow)
         or not set(flow).issubset(allowed_flow_keys)
         or flow.get("id") != flow_id
         or flow.get("disabled", False) is not False
-        or flow.get("configs") != []
+        # Node-RED's GET /flow/{id} omits empty config lists, while POST
+        # payloads include them. Both are the same command-free topology.
+        or flow.get("configs", []) != []
         or flow.get("subflows", []) != []
     ):
         raise NodeRedBackendError("Node-RED managed flow topology is invalid")
