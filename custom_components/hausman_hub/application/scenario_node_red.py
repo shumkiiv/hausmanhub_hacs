@@ -49,6 +49,7 @@ _TRUSTED_SYSTEM_SOURCE_HASHES = {
         {
             "3183bc1806afdadd797968bafcc7cbb738f13d80cc02c28cc42852de07c36d21",
             "baa8044bf3cbcb360a963599b164434eb7b385f4d3b9a8cd156ee901fbf6dcff",
+            "399a39d89a4b745c901b0201fe9510eb0a754106b49c1ef1a85c61359c1022c4",
         }
     ),
     "system-shower-comfort-controller": frozenset(
@@ -56,6 +57,9 @@ _TRUSTED_SYSTEM_SOURCE_HASHES = {
             "ef263e1adbcaa2e69ff118d14411b31892cf73497626751fbfa3106b81f2e933",
             "4ecf6735e3350c89116c9e1ec56f649fc9c6ba420ca884dcd43347bbc8bb3257",
         }
+    ),
+    "system-small-corridor-light-controller": frozenset(
+        {"ce2580a1a8616b313b832d4da4c7648c4d01e5ce6b65d1fabf0ae1ac15672a44"}
     ),
 }
 # Release-trusted managed sources may select a branch, but cannot enlarge the
@@ -80,12 +84,26 @@ _SYSTEM_PLAN_ENVELOPES = {
         "actions": {
             ("entity_71859313239a14e4", "turn_on"): 1,
             ("entity_71859313239a14e4", "turn_off"): 1,
-            ("entity_71859313239a14e4", "set_brightness_percent"): 1,
-            ("entity_71859313239a14e4", "set_color_temperature"): 2,
+            ("entity_71859313239a14e4", "set_brightness_percent"): 4,
+            ("entity_71859313239a14e4", "set_color_temperature"): 1,
+            ("entity_cd0098e5ff95da46", "turn_on"): 1,
+            ("entity_cd0098e5ff95da46", "turn_off"): 1,
             ("entity_fbdf27871edb89bf", "turn_on"): 1,
             ("entity_fbdf27871edb89bf", "turn_off"): 1,
         },
-        "delays": {1: 2, 600: 1},
+        "delays": {1: 1, 5: 4, 600: 1},
+        "runScenarios": {},
+    },
+    "system-small-corridor-light-controller": {
+        "actions": {
+            ("entity_ff0244d6b760be7e", "turn_on"): 1,
+            ("entity_ff0244d6b760be7e", "turn_off"): 1,
+            ("entity_9ed909332fdaa8fd", "turn_on"): 1,
+            ("entity_9ed909332fdaa8fd", "turn_off"): 1,
+            ("entity_9ed909332fdaa8fd", "set_brightness_percent"): 4,
+            ("entity_9ed909332fdaa8fd", "set_color_temperature"): 1,
+        },
+        "delays": {1: 1, 5: 4, 300: 1},
         "runScenarios": {},
     },
 }
@@ -94,6 +112,11 @@ _SYSTEM_INPUT_ATTRIBUTE_ALLOWLIST = {
     "system-tambur-adaptive-controller": {
         "entity_6b9ccdab9bb484b2": frozenset({"next_setting"}),
         "entity_71859313239a14e4": frozenset(
+            {"brightness", "color_temp_kelvin", "color_temp"}
+        ),
+    },
+    "system-small-corridor-light-controller": {
+        "entity_9ed909332fdaa8fd": frozenset(
             {"brightness", "color_temp_kelvin", "color_temp"}
         ),
     },
@@ -1574,6 +1597,7 @@ class NodeRedScenarioBackend:
         catalog: ScenarioCatalog,
         *,
         dry_run: bool,
+        trigger_context: Mapping[str, object] | None = None,
     ) -> tuple[tuple[ScenarioAction, ...], dict[str, object]]:
         metadata = definition.node_red
         if metadata is None or not metadata.flow_id:
@@ -1601,12 +1625,35 @@ class NodeRedScenarioBackend:
             current["flow"],
             current_hash,
         )
+        safe_trigger = {
+            key: value
+            for key, value in (trigger_context or {}).items()
+            if key
+            in {
+                "source",
+                "trigger_id",
+                "target_id",
+                "old_value",
+                "new_value",
+                "recovery",
+            }
+            and (
+                value is None
+                or isinstance(value, (str, int, float, bool))
+                and not isinstance(value, float)
+                or isinstance(value, float)
+                and math.isfinite(value)
+            )
+        }
         payload = {
             "correlationId": run_id,
             "scenarioId": scenario_id,
             "dryRun": dry_run,
             "inputs": self._input_snapshot(scenario_id, definition, catalog),
-            "context": {"timestampMs": int(time.time() * 1000)},
+            "context": {
+                "timestampMs": int(time.time() * 1000),
+                "trigger": safe_trigger,
+            },
         }
         status, body = await self._raw_request(
             "POST",
@@ -1814,23 +1861,37 @@ def _validate_system_branch(scenario_id: str, actions: list[ScenarioAction]) -> 
 
     if scenario_id == "system-tambur-adaptive-controller":
         chandelier = "entity_71859313239a14e4"
+        points = "entity_cd0098e5ff95da46"
         mirror = "entity_fbdf27871edb89bf"
         if not actions:
             return
+        if len(actions) == 1 and (
+            device(actions[0], "mirror_on", mirror, "turn_on")
+            or device(actions[0], "mirror_off", mirror, "turn_off")
+        ):
+            return
         if delay(actions[0], "absence_wait", 600):
-            expected = [actions[0]]
-            for ident, target in (("chandelier_off", chandelier), ("mirror_off", mirror)):
-                if len(expected) < len(actions) and device(actions[len(expected)], ident, target, "turn_off"):
-                    expected.append(actions[len(expected)])
-            if len(expected) == len(actions) and len(expected) > 1:
+            cursor = 1
+            previous = 101
+            while cursor + 1 < len(actions) and actions[cursor].id.startswith("fade_"):
+                value = actions[cursor].value
+                if (
+                    type(value) is not int
+                    or value not in {75, 50, 25, 5}
+                    or value >= previous
+                    or not device(actions[cursor], f"fade_{value}", chandelier, "set_brightness_percent", value)
+                    or not delay(actions[cursor + 1], f"fade_wait_{value}", 5)
+                ):
+                    raise NodeRedBackendError("Node-RED tambur fade exceeds release source")
+                previous = value
+                cursor += 2
+            if cursor < len(actions) and device(actions[cursor], "chandelier_off", chandelier, "turn_off"):
+                cursor += 1
+            if cursor < len(actions) and device(actions[cursor], "points_off", points, "turn_off"):
+                cursor += 1
+            if cursor == len(actions) and cursor > 1:
                 return
             raise NodeRedBackendError("Node-RED tambur absence branch exceeds release source")
-        if device(actions[0], "mirror_on", mirror, "turn_on"):
-            if len(actions) == 1:
-                return
-            if len(actions) == 3 and delay(actions[1], "mirror_handoff_wait", 1) and device(actions[2], "chandelier_off", chandelier, "turn_off"):
-                return
-            raise NodeRedBackendError("Node-RED tambur night branch exceeds release source")
         if not (len(actions) >= 2 and device(actions[0], "chandelier_on", chandelier, "turn_on") and delay(actions[1], "chandelier_ownership_wait", 1)):
             raise NodeRedBackendError("Node-RED tambur profile prefix exceeds release source")
         cursor = 2
@@ -1842,32 +1903,76 @@ def _validate_system_branch(scenario_id: str, actions: list[ScenarioAction]) -> 
                 raise NodeRedBackendError("Node-RED tambur brightness exceeds release source")
             brightness = action.value
             cursor += 1
-        if cursor < len(actions) and actions[cursor].id == "temperature_prime":
-            prime = actions[cursor]
-            if not device(prime, "temperature_prime", chandelier, "set_color_temperature", prime.value) or type(prime.value) is not int:
-                raise NodeRedBackendError("Node-RED tambur prime exceeds release source")
-            cursor += 1
-            if cursor >= len(actions) or not delay(actions[cursor], "temperature_wait_1", 1):
-                raise NodeRedBackendError("Node-RED tambur prime wait exceeds release source")
-            cursor += 1
-            if cursor >= len(actions) or actions[cursor].id != "temperature_target":
-                raise NodeRedBackendError("Node-RED tambur prime target is missing")
-            target_kelvin = actions[cursor].value if type(actions[cursor].value) is int else None
-            if target_kelvin is None or not device(actions[cursor], "temperature_target", chandelier, "set_color_temperature", target_kelvin) or prime.value != {6500: 6400, 6000: 6100, 5200: 5300, 4400: 4500, 3600: 3700, 2800: 2900, 2200: 2300}.get(target_kelvin):
-                raise NodeRedBackendError("Node-RED tambur prime target exceeds release source")
-            cursor += 1
-        elif cursor < len(actions) and actions[cursor].id == "temperature_target":
+        if cursor < len(actions) and actions[cursor].id == "temperature_target":
             target_kelvin = actions[cursor].value if type(actions[cursor].value) is int else None
             if target_kelvin is None or not device(actions[cursor], "temperature_target", chandelier, "set_color_temperature", target_kelvin):
                 raise NodeRedBackendError("Node-RED tambur temperature exceeds release source")
             cursor += 1
-        pairs = {(5, 6500), (15, 6000), (30, 5200), (45, 4400), (60, 3600), (75, 2800), (85, 2200), (10, 6500)}
+        pairs = {(100, 3000), (85, 6500), (70, 5200), (50, 4400), (35, 3600)}
         if (brightness is not None and brightness not in {item[0] for item in pairs}) or (brightness is not None and target_kelvin is not None and (brightness, target_kelvin) not in pairs) or (target_kelvin is not None and target_kelvin not in {item[1] for item in pairs}):
             raise NodeRedBackendError("Node-RED tambur profile values exceed release source")
-        if cursor < len(actions) and device(actions[cursor], "mirror_off", mirror, "turn_off"):
+        if cursor < len(actions) and device(actions[cursor], "points_on", points, "turn_on"):
             cursor += 1
         if cursor != len(actions):
             raise NodeRedBackendError("Node-RED tambur profile order exceeds release source")
+        return
+    if scenario_id == "system-small-corridor-light-controller":
+        relay = "entity_ff0244d6b760be7e"
+        chandelier = "entity_9ed909332fdaa8fd"
+        if not actions:
+            return
+        cursor = 0
+        if delay(actions[0], "absence_wait", 300):
+            cursor = 1
+        if cursor < len(actions) and actions[cursor].id.startswith("fade_"):
+            previous = 101
+            while cursor + 1 < len(actions) and actions[cursor].id.startswith("fade_"):
+                value = actions[cursor].value
+                if (
+                    type(value) is not int
+                    or value not in {75, 50, 25, 5}
+                    or value >= previous
+                    or not device(actions[cursor], f"fade_{value}", chandelier, "set_brightness_percent", value)
+                    or not delay(actions[cursor + 1], f"fade_wait_{value}", 5)
+                ):
+                    raise NodeRedBackendError("Node-RED small corridor fade exceeds release source")
+                previous = value
+                cursor += 2
+        if cursor < len(actions) and device(actions[cursor], "chandelier_off", chandelier, "turn_off"):
+            cursor += 1
+            if cursor < len(actions) and device(actions[cursor], "relay_off", relay, "turn_off") and cursor + 1 == len(actions):
+                return
+            raise NodeRedBackendError("Node-RED small corridor off branch exceeds release source")
+        cursor = 0
+        if device(actions[0], "relay_on", relay, "turn_on"):
+            cursor = 1
+        if not (
+            cursor + 1 < len(actions)
+            and device(actions[cursor], "chandelier_on", chandelier, "turn_on")
+            and delay(actions[cursor + 1], "ownership_wait", 1)
+        ):
+            raise NodeRedBackendError("Node-RED small corridor profile prefix exceeds release source")
+        cursor += 2
+        brightness: int | None = None
+        kelvin: int | None = None
+        if cursor < len(actions) and actions[cursor].id == "brightness":
+            brightness = actions[cursor].value if type(actions[cursor].value) is int else None
+            if brightness is None or not device(actions[cursor], "brightness", chandelier, "set_brightness_percent", brightness):
+                raise NodeRedBackendError("Node-RED small corridor brightness exceeds release source")
+            cursor += 1
+        if cursor < len(actions) and actions[cursor].id == "temperature":
+            kelvin = actions[cursor].value if type(actions[cursor].value) is int else None
+            if kelvin is None or not device(actions[cursor], "temperature", chandelier, "set_color_temperature", kelvin):
+                raise NodeRedBackendError("Node-RED small corridor temperature exceeds release source")
+            cursor += 1
+        pairs = {(100, 3000), (45, 3000), (35, 2700), (30, 2700), (20, 2400), (10, 2200)}
+        if (
+            cursor != len(actions)
+            or brightness is not None and brightness not in {item[0] for item in pairs}
+            or kelvin is not None and kelvin not in {item[1] for item in pairs}
+            or brightness is not None and kelvin is not None and (brightness, kelvin) not in pairs
+        ):
+            raise NodeRedBackendError("Node-RED small corridor profile exceeds release source")
         return
     targets = {"main": "entity_4be32416634e6416", "extra": "entity_1fdcd8b244637246", "cabinet": "entity_e7a7c61eec7bdff8", "fan": "entity_afef5df0e0cae309"}
     cursor = 0

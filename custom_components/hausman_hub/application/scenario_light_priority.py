@@ -487,6 +487,16 @@ class LightAutomationPriority:
             if receipt is None or receipt.get("status") != "completed":
                 continue
             if receipt.get("skipped") is True:
+                if not automatic:
+                    device = catalog.device(action.target_id)
+                    allowed = device.action(action.action_id or "") if device else None
+                    if (
+                        device is not None
+                        and allowed is not None
+                        and allowed.service == "turn_on"
+                        and plan.pre_states.get(device.entity_id) == "on"
+                    ):
+                        self._set_manual(device.entity_id, action.target_id, hass)
                 continue
             device = catalog.device(action.target_id)
             allowed = device.action(action.action_id or "") if device else None

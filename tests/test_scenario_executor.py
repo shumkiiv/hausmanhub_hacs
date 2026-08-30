@@ -1996,6 +1996,37 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["receipts"][0]["skipped"])
         self.hass.services.async_call.assert_not_awaited()
 
+    async def test_managed_fade_skips_light_without_confirmed_ownership(self) -> None:
+        self.hass.state_values["light.living_room"] = SimpleNamespace(
+            state="on",
+            attributes={"brightness": 255},
+            last_updated=datetime.now(timezone.utc),
+        )
+        definition = _definition(
+            (
+                ScenarioAction(
+                    id="fade_50",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="device_1",
+                    action_id="set_brightness_percent",
+                    value=50,
+                ),
+            )
+        )
+
+        result = await self.executor.async_execute(
+            definition,
+            "managed-fade-no-owner.1",
+            scenario_id="system-tambur-adaptive-controller",
+            trigger_context={"source": "device_state", "target_id": "sensor_1"},
+        )
+
+        self.assertEqual(
+            "manual_light_already_on", result["receipts"][0]["reason"]
+        )
+        self.assertTrue(result["receipts"][0]["skipped"])
+        self.hass.services.async_call.assert_not_awaited()
+
     async def test_unavailable_condition_fails_closed_before_action(self) -> None:
         self.catalog._devices["sensor_1"] = ScenarioDeviceEntry(
             target_id="sensor_1",

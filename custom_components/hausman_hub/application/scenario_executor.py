@@ -54,6 +54,7 @@ from .vendor_resilience import VendorCircuitBreaker, VendorServiceUnavailable
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
+    from .scenario_command_context import ScenarioCommandContextRegistry
 
 
 _DEFAULT_DEVICE_READBACK_WINDOW_SECONDS = 8.0
@@ -543,6 +544,7 @@ class ScenarioExecutor:
         light_priority: LightAutomationPriority | None = None,
         light_safety_obligations: LightSafetyObligations | None = None,
         contextual_dangerous_resolver: Callable[[str, str], bool] | None = None,
+        command_contexts: ScenarioCommandContextRegistry | None = None,
     ):
         if not 0.01 <= readback_window_seconds <= 30.0:
             raise ValueError("readback window must be between 0.01 and 30 seconds")
@@ -562,6 +564,7 @@ class ScenarioExecutor:
         self._light_priority = light_priority or LightAutomationPriority()
         self._light_safety_obligations = light_safety_obligations
         self._contextual_dangerous_resolver = contextual_dangerous_resolver
+        self._command_contexts = command_contexts
 
     def new_run_id(self) -> str:
         """Generate a unique execution trace id."""
@@ -1017,6 +1020,7 @@ class ScenarioExecutor:
                     run_id,
                     self._catalog,
                     dry_run=dry_run,
+                    trigger_context=trigger_context,
                 )
             except NodeRedBackendError as error:
                 return {
@@ -1241,7 +1245,49 @@ class ScenarioExecutor:
                 and action.id in light_priority.light_action_ids
             ):
                 async with self._light_priority.authority_lock():
-                    if await self._light_priority.async_has_manual_claim(
+                    device = (
+                        self._catalog.device(action.target_id)
+                        if action.target_id is not None
+                        else None
+                    )
+                    owned_directly = (
+                        device is not None
+                        and self._light_priority.is_owned(
+                            device.entity_id, self._hass
+                        )
+                    )
+                    owned_as_power_source = (
+                        device is not None
+                        and action.action_id == "turn_off"
+                        and any(
+                            dependency.power_source_entity_id == device.entity_id
+                            and self._light_priority.is_owned(
+                                target_entity_id, self._hass
+                            )
+                            for target_entity_id, dependency in power_dependencies.items()
+                        )
+                    )
+                    ownership_required = action.action_id == "turn_off" or (
+                        scenario_id
+                        in {
+                            "system-tambur-adaptive-controller",
+                            "system-small-corridor-light-controller",
+                        }
+                        and action.id.startswith("fade_")
+                    )
+                    if (
+                        ownership_required
+                        and not owned_directly
+                        and not owned_as_power_source
+                    ):
+                        receipt = skipped_light_receipt(
+                            action,
+                            self._catalog,
+                            correlation_id=run_id,
+                            dry_run=False,
+                        )
+                        receipt["reason"] = "automatic_ownership_missing"
+                    elif await self._light_priority.async_has_manual_claim(
                         light_priority,
                         self._catalog,
                         self._hass,
@@ -1434,6 +1480,7 @@ class ScenarioExecutor:
             scenario_id in {
                 "system-shower-comfort-controller",
                 "system-tambur-adaptive-controller",
+                "system-small-corridor-light-controller",
             }
             and actions[start_index].id != "absence_wait"
         ):
@@ -1446,7 +1493,11 @@ class ScenarioExecutor:
         guard_entity_ids: tuple[str, ...] = ()
         guard_evidence: dict[str, str] = {}
         generations: dict[str, str] = {}
-        if scenario_id in {"system-shower-comfort-controller", "system-tambur-adaptive-controller"}:
+        if scenario_id in {
+            "system-shower-comfort-controller",
+            "system-tambur-adaptive-controller",
+            "system-small-corridor-light-controller",
+        }:
             guard_candidates = (
                 definition.node_red.input_target_ids if definition.node_red is not None else ()
             )
@@ -1547,7 +1598,9 @@ class ScenarioExecutor:
         if not isinstance(target_id, str) or not isinstance(entity_id, str):
             return RECONCILE_INVALIDATED
         managed_presence_guard = record.get("scenarioId") in {
-            "system-shower-comfort-controller", "system-tambur-adaptive-controller"
+            "system-shower-comfort-controller",
+            "system-tambur-adaptive-controller",
+            "system-small-corridor-light-controller",
         }
         if managed_presence_guard and (
             not isinstance(guard_entity_ids, list)
@@ -2667,13 +2720,21 @@ class ScenarioExecutor:
                 domain = source_entity_id.split(".", 1)[0]
                 previous_revision = _state_revision(source_state_object)
                 source_command_sent_at = int(time.time() * 1000)
+                service_context = (
+                    self._command_contexts.create(source_entity_id, "on")
+                    if self._command_contexts is not None
+                    else None
+                )
                 try:
                     await self._call_service(
                         domain,
                         "turn_on",
                         {"entity_id": source_entity_id},
+                        context=service_context,
                     )
                 except Exception:  # source failure must not reach the target command
+                    if self._command_contexts is not None:
+                        self._command_contexts.discard(service_context)
                     return "power_source_unavailable", precondition, upstream_sources
                 source_turned_on = True
                 if not await self._wait_for_entity_state(
@@ -2682,6 +2743,8 @@ class ScenarioExecutor:
                     after_revision=previous_revision,
                     require_trusted=True,
                 ):
+                    if self._command_contexts is not None:
+                        self._command_contexts.discard(service_context)
                     return "power_source_unavailable", precondition, upstream_sources
             wait_seconds = float(dependency.warmup_seconds) if source_turned_on else 0.0
             if wait_seconds > 0:
@@ -3007,7 +3070,12 @@ class ScenarioExecutor:
         return {**base, "status": "completed", "message": action.message}
 
     async def _call_service(
-        self, domain: str, service: str, service_data: dict[str, Any]
+        self,
+        domain: str,
+        service: str,
+        service_data: dict[str, Any],
+        *,
+        context: object | None = None,
     ) -> None:
         services = getattr(self._hass, "services", None)
         if services is None:
@@ -3015,7 +3083,13 @@ class ScenarioExecutor:
         call = getattr(services, "async_call", None)
         if call is None:
             raise RuntimeError("Home Assistant async_call is not available")
-        operation = lambda: call(domain, service, service_data, blocking=True)
+        operation = lambda: call(
+            domain,
+            service,
+            service_data,
+            blocking=True,
+            **({"context": context} if context is not None else {}),
+        )
         if self._vendor_resilience is not None and domain in _VENDOR_SERVICE_DOMAINS:
             await self._vendor_resilience.async_execute(
                 f"{domain}.{service}", operation

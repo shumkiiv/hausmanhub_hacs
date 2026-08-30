@@ -15,11 +15,18 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
     from .application.scenario_service import ScenarioService
+    from .application.scenario_command_context import ScenarioCommandContextRegistry
 
 
 _LOGGER = logging.getLogger(__name__)
 _EVENT_STATE_CHANGED = "state_changed"
 _UNAVAILABLE_STATE_VALUES = frozenset({"unknown", "unavailable"})
+_MANUAL_STATE_TRIGGERS = frozenset(
+    {
+        ("system-tambur-adaptive-controller", "manual_chandelier_on"),
+        ("system-small-corridor-light-controller", "manual_chandelier_on"),
+    }
+)
 
 
 def _state_value(state: object | None, property_name: str) -> object | None:
@@ -106,9 +113,15 @@ def state_level_matches(
 class _StateTriggerCoordinator:
     """Apply per-trigger debounce, hold duration and cooldown bounds."""
 
-    def __init__(self, hass: HomeAssistant, service: ScenarioService) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        service: ScenarioService,
+        command_contexts: ScenarioCommandContextRegistry | None = None,
+    ) -> None:
         self._hass = hass
         self._service = service
+        self._command_contexts = command_contexts
         self._pending: dict[tuple[str, str], asyncio.Task[None]] = {}
         self._cooldown_until: dict[tuple[str, str], float] = {}
 
@@ -129,6 +142,7 @@ class _StateTriggerCoordinator:
         ],
         old_state: object | None,
         new_state: object | None,
+        event_context: object | None = None,
     ) -> None:
         (
             scenario_id,
@@ -162,12 +176,26 @@ class _StateTriggerCoordinator:
                 existing.cancel()
                 self._pending.pop(key, None)
             return
+        if (
+            (scenario_id, trigger_id) in _MANUAL_STATE_TRIGGERS
+            and self._command_contexts is not None
+            and self._command_contexts.consume(
+                event_context,
+                entity_id,
+                _state_value(new_state, property_name),
+            )
+        ):
+            return
         if existing is not None:
             existing.cancel()
         old_value = _state_value(old_state, property_name)
         new_value = _state_value(new_state, property_name)
         trigger_context = {
-            "source": "device_state",
+            "source": (
+                "manual"
+                if (scenario_id, trigger_id) in _MANUAL_STATE_TRIGGERS
+                else "device_state"
+            ),
             "trigger_id": trigger_id,
             "target_id": target_id,
             "old_value": old_value,
@@ -266,10 +294,11 @@ async def async_start_scenario_events(
     hass: HomeAssistant,
     entry: ConfigEntry,
     service: ScenarioService,
+    command_contexts: ScenarioCommandContextRegistry | None = None,
 ) -> None:
     """Subscribe enabled device-state scenario triggers to HA state events."""
 
-    coordinator = _StateTriggerCoordinator(hass, service)
+    coordinator = _StateTriggerCoordinator(hass, service, command_contexts)
     entry.async_on_unload(coordinator.cancel)
 
     async def _async_handle(event: Any) -> None:
@@ -284,7 +313,12 @@ async def async_start_scenario_events(
             if entity_id != target_entity_id:
                 continue
             try:
-                await coordinator.async_handle(item, old_state, new_state)
+                await coordinator.async_handle(
+                    item,
+                    old_state,
+                    new_state,
+                    getattr(event, "context", None),
+                )
             except Exception:  # noqa: BLE001
                 _LOGGER.warning(
                     "state trigger %s of scenario %s failed",

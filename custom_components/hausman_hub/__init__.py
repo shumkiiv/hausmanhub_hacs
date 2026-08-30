@@ -317,6 +317,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         issue_reporter=HomeAssistantLightSafetyIssueReporter(hass),
     )
     await light_safety_obligations.async_load()
+    from .application.scenario_command_context import (
+        ScenarioCommandContextRegistry,
+    )
+
+    scenario_command_contexts = ScenarioCommandContextRegistry()
     scenario_executor = ScenarioExecutor(
         hass,
         scenario_catalog,
@@ -330,6 +335,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         contextual_dangerous_resolver=(
             scenario_service.is_contextually_dangerous_action
         ),
+        command_contexts=scenario_command_contexts,
     )
     entry.async_on_unload(
         light_safety_obligations.start(
@@ -347,7 +353,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await async_start_scenario_schedule(hass, entry, scenario_service)
     from .scenario_events import async_start_scenario_events
 
-    await async_start_scenario_events(hass, entry, scenario_service)
+    await async_start_scenario_events(
+        hass,
+        entry,
+        scenario_service,
+        scenario_command_contexts,
+    )
 
     from .error_taxonomy import async_preload_error_policies
 

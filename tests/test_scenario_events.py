@@ -6,7 +6,7 @@ import asyncio
 import unittest
 from types import MappingProxyType
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from custom_components.hausman_hub.domain.scenarios import ScenarioComparison
 from custom_components.hausman_hub.scenario_events import (
@@ -119,6 +119,87 @@ class StateTriggerMatchesTest(unittest.TestCase):
 
 
 class StateTriggerCoordinatorTest(unittest.IsolatedAsyncioTestCase):
+    async def test_physical_tambur_switch_is_classified_as_manual(self) -> None:
+        service = SimpleNamespace(async_run_scenario=AsyncMock())
+        hass = SimpleNamespace(states=SimpleNamespace(get=lambda _: _state("on")))
+        coordinator = _StateTriggerCoordinator(hass, service)
+        item = (
+            "system-tambur-adaptive-controller",
+            "manual_chandelier_on",
+            "switch.wall",
+            "wall_target",
+            "state",
+            ScenarioComparison.EQUALS,
+            "on",
+            0,
+            0,
+            0,
+            True,
+        )
+
+        await coordinator.async_handle(item, _state("off"), _state("on"))
+
+        context = service.async_run_scenario.await_args.kwargs["trigger_context"]
+        self.assertEqual("manual", context["source"])
+        self.assertEqual("manual_chandelier_on", context["trigger_id"])
+
+    async def test_automatic_power_context_suppresses_manual_trigger(self) -> None:
+        service = SimpleNamespace(async_run_scenario=AsyncMock())
+        command_contexts = SimpleNamespace(consume=lambda *_: True)
+        hass = SimpleNamespace(states=SimpleNamespace(get=lambda _: _state("on")))
+        coordinator = _StateTriggerCoordinator(hass, service, command_contexts)
+        item = (
+            "system-tambur-adaptive-controller",
+            "manual_chandelier_on",
+            "switch.wall",
+            "wall_target",
+            "state",
+            ScenarioComparison.EQUALS,
+            "on",
+            0,
+            0,
+            0,
+            True,
+        )
+
+        await coordinator.async_handle(
+            item,
+            _state("off"),
+            _state("on"),
+            SimpleNamespace(id="automatic.1"),
+        )
+
+        service.async_run_scenario.assert_not_awaited()
+
+    async def test_automatic_context_does_not_consume_unrelated_trigger(self) -> None:
+        service = SimpleNamespace(async_run_scenario=AsyncMock())
+        command_contexts = SimpleNamespace(consume=Mock(return_value=True))
+        hass = SimpleNamespace(states=SimpleNamespace(get=lambda _: _state("on")))
+        coordinator = _StateTriggerCoordinator(hass, service, command_contexts)
+        item = (
+            "another-scenario",
+            "relay_on",
+            "switch.wall",
+            "wall_target",
+            "state",
+            ScenarioComparison.EQUALS,
+            "on",
+            0,
+            0,
+            0,
+            True,
+        )
+
+        await coordinator.async_handle(
+            item,
+            _state("off"),
+            _state("on"),
+            SimpleNamespace(id="automatic.1"),
+        )
+
+        command_contexts.consume.assert_not_called()
+        service.async_run_scenario.assert_awaited_once()
+
     async def test_for_duration_rechecks_state_before_run(self) -> None:
         service = SimpleNamespace(async_run_scenario=AsyncMock())
         hass = SimpleNamespace(

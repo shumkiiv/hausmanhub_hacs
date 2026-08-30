@@ -60,7 +60,11 @@ CATALOG_WARMUP_MAX_ATTEMPTS = 1 + len(CATALOG_WARMUP_DELAYS_SECONDS)
 SYSTEM_SEED_RETRY_DELAY_SECONDS = 300.0
 CATALOG_REFRESH_TIMEOUT_SECONDS = 2.0
 _RESTART_ONLY_SYSTEM_SCENARIOS = frozenset(
-    {"system-shower-comfort-controller", "system-tambur-adaptive-controller"}
+    {
+        "system-shower-comfort-controller",
+        "system-tambur-adaptive-controller",
+        "system-small-corridor-light-controller",
+    }
 )
 
 _HEALTH_RECOMMENDATIONS = {

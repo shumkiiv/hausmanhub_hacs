@@ -1,228 +1,146 @@
 // HAUSMAN_MANAGED_SCENARIO system-tambur-adaptive-controller
-// Тамбур: два датчика присутствия, 10 минут уверенного отсутствия и профиль 30 минут.
+// Тамбур: единый профиль люстры и точек, ручной приоритет и зеркало 23:00-01:00.
 const started = Date.now();
 const request = (msg.payload && typeof msg.payload === 'object') ? msg.payload : {};
 const inputs = (request.inputs && typeof request.inputs === 'object') ? request.inputs : {};
+const trigger = (request.context && request.context.trigger && typeof request.context.trigger === 'object')
+  ? request.context.trigger
+  : {};
 
 const ID = Object.freeze({
   presence: 'entity_156050daca86aa6c',
   motion: 'entity_10b78187426f8485',
   sun: 'entity_6b9ccdab9bb484b2',
+  outsideLux: 'entity_5f3b4436fb7b6f2b',
   chandelier: 'entity_71859313239a14e4',
+  points: 'entity_cd0098e5ff95da46',
   mirror: 'entity_fbdf27871edb89bf',
+  chandelierPower: 'entity_b47991988cc6b9f3',
 });
 
 function item(targetId) {
   const value = inputs[targetId];
   return value && typeof value === 'object' ? value : {state: null, attributes: {}};
 }
-
 function state(targetId) {
   const value = item(targetId).state;
   return value === null || value === undefined ? null : String(value);
 }
-
-function numberAttribute(targetId, name) {
-  const value = item(targetId).attributes && item(targetId).attributes[name];
+function numeric(value) {
   if (value === null || value === undefined || value === '') return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
-
-function switchAction(id, targetId, targetName, turnOn) {
-  return {
-    id,
-    type: 'device_action',
-    targetId,
-    targetName,
-    actionId: turnOn ? 'turn_on' : 'turn_off',
-    actionTitle: turnOn ? 'Включить' : 'Выключить',
-  };
+function numberAttribute(targetId, name) {
+  return numeric(item(targetId).attributes && item(targetId).attributes[name]);
 }
-
+function switchAction(id, targetId, targetName, turnOn) {
+  return {id, type: 'device_action', targetId, targetName,
+    actionId: turnOn ? 'turn_on' : 'turn_off', actionTitle: turnOn ? 'Включить' : 'Выключить'};
+}
 function lightAction(id, actionId, value) {
-  return {
-    id,
-    type: 'device_action',
-    targetId: ID.chandelier,
-    targetName: 'Люстра тамбур',
-    actionId,
-    actionTitle: actionId === 'set_brightness_percent' ? 'Яркость' : 'Температура света',
-    value,
-  };
+  return {id, type: 'device_action', targetId: ID.chandelier, targetName: 'Люстра тамбур',
+    actionId, actionTitle: actionId === 'set_brightness_percent' ? 'Яркость' : 'Температура света', value};
+}
+function profileActions(brightness, kelvin, includePoints = true) {
+  const actions = [
+    switchAction('chandelier_on', ID.chandelier, 'Люстра тамбур', true),
+    {id: 'chandelier_ownership_wait', type: 'delay', delaySeconds: 1},
+  ];
+  const chandelierOn = state(ID.chandelier) === 'on';
+  const rawBrightness = numberAttribute(ID.chandelier, 'brightness');
+  const currentPercent = rawBrightness === null ? null : Math.round(rawBrightness * 100 / 255);
+  const directKelvin = numberAttribute(ID.chandelier, 'color_temp_kelvin');
+  const mired = numberAttribute(ID.chandelier, 'color_temp');
+  const currentKelvin = directKelvin !== null ? directKelvin : mired !== null && mired > 0 ? Math.round(1000000 / mired) : null;
+  if (!chandelierOn || currentPercent === null || Math.abs(currentPercent - brightness) > 1) {
+    actions.push(lightAction('brightness', 'set_brightness_percent', brightness));
+  }
+  if (!chandelierOn || currentKelvin === null || Math.abs(currentKelvin - kelvin) > 25) {
+    actions.push(lightAction('temperature_target', 'set_color_temperature', kelvin));
+  }
+  if (includePoints) actions.push(switchAction('points_on', ID.points, 'Точки тамбура', true));
+  return actions;
+}
+function fadeActions(waitSeconds) {
+  const actions = [];
+  const chandelierOn = state(ID.chandelierPower) === 'on' && state(ID.chandelier) === 'on';
+  const pointsOn = state(ID.points) === 'on';
+  if (!chandelierOn && !pointsOn) return actions;
+  if (waitSeconds > 0) actions.push({id: 'absence_wait', type: 'delay', delaySeconds: waitSeconds});
+  if (chandelierOn) {
+    const rawBrightness = numberAttribute(ID.chandelier, 'brightness');
+    const currentPercent = rawBrightness === null ? 101 : Math.round(rawBrightness * 100 / 255);
+    for (const percent of [75, 50, 25, 5]) {
+      if (percent >= currentPercent) continue;
+      actions.push(lightAction(`fade_${percent}`, 'set_brightness_percent', percent));
+      actions.push({id: `fade_wait_${percent}`, type: 'delay', delaySeconds: 5});
+    }
+    actions.push(switchAction('chandelier_off', ID.chandelier, 'Люстра тамбур', false));
+  }
+  if (pointsOn) actions.push(switchAction('points_off', ID.points, 'Точки тамбура', false));
+  return actions;
 }
 
 const timestampMs = Number(request.context && request.context.timestampMs) || Date.now();
 const local = new Date(timestampMs + 6 * 60 * 60 * 1000);
 const hour = local.getUTCHours();
-const minute = local.getUTCMinutes();
-const clockMinutes = hour * 60 + minute;
-const clock = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+const clock = `${String(hour).padStart(2, '0')}:${String(local.getUTCMinutes()).padStart(2, '0')}`;
 const presenceState = state(ID.presence);
 const motionState = state(ID.motion);
 const occupied = presenceState === 'on' || motionState === 'on';
 const confidentlyAbsent = presenceState === 'off' && motionState === 'off';
 const sunState = state(ID.sun);
-
-const actions = [];
-const trace = [
-  {
-    id: 'presence_sensor',
-    title: 'Датчик присутствия тамбур 2',
-    status: presenceState === 'on' ? 'passed' : presenceState === 'off' ? 'failed' : 'skipped',
-    actual: presenceState,
-    expected: 'on',
-    reason: presenceState === null ? 'Нет достоверного состояния.' : null,
-  },
-  {
-    id: 'motion_sensor',
-    title: 'Датчик движения тамбур',
-    status: motionState === 'on' ? 'passed' : motionState === 'off' ? 'failed' : 'skipped',
-    actual: motionState,
-    expected: 'on',
-    reason: motionState === null ? 'Нет достоверного состояния.' : null,
-  },
-];
+const outsideLux = numeric(state(ID.outsideLux));
+const triggerId = String(trigger.trigger_id || '');
+const manualChandelier = trigger.source === 'manual' && triggerId === 'manual_chandelier_on';
 
 let branch = 'presence_uncertain';
 let brightness = null;
 let kelvin = null;
-
-if (confidentlyAbsent) {
-  branch = 'off_after_10m';
-  const chandelierOn = state(ID.chandelier) === 'on';
-  const mirrorOn = state(ID.mirror) === 'on';
-  if (chandelierOn || mirrorOn) {
-    actions.push({id: 'absence_wait', type: 'delay', delaySeconds: 600});
-    if (chandelierOn) {
-      actions.push(switchAction('chandelier_off', ID.chandelier, 'Люстра тамбур', false));
-    }
-    if (mirrorOn) {
-      actions.push(switchAction('mirror_off', ID.mirror, 'Подсветка зеркала тамбура', false));
-    }
-  }
-} else if (occupied && (hour >= 23 || hour < 9)) {
-  branch = 'night_mirror';
-  // The explicit idempotent activation keeps the whole light profile behind
-  // the shared manual-priority guard even when the mirror already reports on.
-  actions.push(switchAction('mirror_on', ID.mirror, 'Подсветка зеркала тамбура', true));
-  if (state(ID.chandelier) !== 'off') {
-    actions.push({id: 'mirror_handoff_wait', type: 'delay', delaySeconds: 1});
-    actions.push(switchAction('chandelier_off', ID.chandelier, 'Люстра тамбур', false));
-  }
-} else if (occupied && hour >= 9 && hour < 23 && sunState === 'above_horizon') {
-  branch = 'morning_day';
-  const elapsed = Math.max(0, clockMinutes - 9 * 60);
-  const step = Math.min(6, Math.floor(elapsed / 30));
-  const profile = [
-    [5, 6500],
-    [15, 6000],
-    [30, 5200],
-    [45, 4400],
-    [60, 3600],
-    [75, 2800],
-    [85, 2200],
-  ][step];
-  [brightness, kelvin] = profile;
-} else if (occupied && hour >= 9 && hour < 23 && sunState === 'below_horizon') {
-  branch = 'sunset_fade';
-  const nextSettingRaw = item(ID.sun).attributes && item(ID.sun).attributes.next_setting;
-  const nextSetting = Date.parse(String(nextSettingRaw || ''));
-  let previousSetting = Number.isFinite(nextSetting) ? nextSetting : timestampMs;
-  while (previousSetting > timestampMs) previousSetting -= 24 * 60 * 60 * 1000;
-  const elapsed = Math.max(0, Math.floor((timestampMs - previousSetting) / 60000));
-  const step = Math.min(5, Math.floor(elapsed / 30));
-  const profile = [
-    [85, 2200],
-    [75, 2800],
-    [60, 3600],
-    [45, 4400],
-    [30, 5200],
-    [10, 6500],
-  ][step];
-  [brightness, kelvin] = profile;
+let actions = [];
+if (manualChandelier) {
+  branch = 'manual_chandelier';
+  brightness = 100;
+  kelvin = 3000;
+  actions = profileActions(brightness, kelvin, false);
+} else if (triggerId === 'mirror_window_start' || triggerId === 'mirror_window_midnight') {
+  branch = 'mirror_23_01_on';
+  if (state(ID.mirror) !== 'on') actions.push(switchAction('mirror_on', ID.mirror, 'Подсветка зеркала тамбура', true));
+} else if (triggerId === 'mirror_window_end') {
+  branch = 'mirror_01_off';
+  if (state(ID.mirror) === 'on') actions.push(switchAction('mirror_off', ID.mirror, 'Подсветка зеркала тамбура', false));
+} else if (confidentlyAbsent && (triggerId === 'presence_changed' || triggerId === 'motion_changed')) {
+  branch = 'fade_after_10m';
+  actions = fadeActions(600);
+} else if (occupied && sunState === 'above_horizon') {
+  branch = 'sunrise_to_sunset';
+  brightness = 100;
+  kelvin = 3000;
+  actions = profileActions(brightness, kelvin);
+} else if (occupied && sunState === 'below_horizon') {
+  if (outsideLux === null) [branch, brightness, kelvin] = ['after_sunset_lux_fallback', 50, 4400];
+  else if (outsideLux < 20) [branch, brightness, kelvin] = ['after_sunset_dark', 85, 6500];
+  else if (outsideLux < 100) [branch, brightness, kelvin] = ['after_sunset_low', 70, 5200];
+  else if (outsideLux < 400) [branch, brightness, kelvin] = ['after_sunset_dusk', 50, 4400];
+  else [branch, brightness, kelvin] = ['after_sunset_bright', 35, 3600];
+  actions = profileActions(brightness, kelvin);
 }
 
-if (brightness !== null && kelvin !== null) {
-  const mirrorNeedsOff = state(ID.mirror) !== 'off';
-  const chandelierOn = state(ID.chandelier) === 'on';
-  const currentBrightness = numberAttribute(ID.chandelier, 'brightness');
-  const currentBrightnessPercent = currentBrightness === null
-    ? null
-    : Math.round(currentBrightness * 100 / 255);
-  const currentKelvinDirect = numberAttribute(ID.chandelier, 'color_temp_kelvin');
-  const currentMired = numberAttribute(ID.chandelier, 'color_temp');
-  const currentKelvin = currentKelvinDirect !== null
-    ? currentKelvinDirect
-    : currentMired !== null && currentMired > 0
-      ? Math.round(1000000 / currentMired)
-      : null;
-  const brightnessValueMatches = currentBrightnessPercent !== null
-    && Math.abs(currentBrightnessPercent - brightness) <= 1;
-  const temperatureValueMatches = currentKelvin !== null
-    && Math.abs(currentKelvin - kelvin) <= 25;
-
-  // Turn-on is deliberately present even when HA currently reports `on`.
-  // Hausman uses it to establish manual priority or confirmed automation
-  // ownership before any brightness/temperature command. The shared executor
-  // also powers and confirms the linked wall switch before this action.
-  actions.push(switchAction('chandelier_on', ID.chandelier, 'Люстра тамбур', true));
-  actions.push({id: 'chandelier_ownership_wait', type: 'delay', delaySeconds: 1});
-  if (!chandelierOn || !brightnessValueMatches) {
-    actions.push(lightAction('brightness', 'set_brightness_percent', brightness));
-  }
-  if (!chandelierOn && temperatureValueMatches) {
-    // После возврата питания Zigbee может сохранить целевое значение в кеше.
-    // Один близкий импульс гарантирует настоящую команду, но только при старте.
-    const prime = kelvin >= 6500 ? 6400 : Math.min(6500, kelvin + 100);
-    actions.push(lightAction('temperature_prime', 'set_color_temperature', prime));
-    actions.push({id: 'temperature_wait_1', type: 'delay', delaySeconds: 1});
-  }
-  if (!chandelierOn || !temperatureValueMatches) {
-    actions.push(lightAction('temperature_target', 'set_color_temperature', kelvin));
-  }
-  if (mirrorNeedsOff) {
-    actions.push(switchAction('mirror_off', ID.mirror, 'Подсветка зеркала тамбура', false));
-  }
-}
-
-trace.push(
-  {
-    id: 'absence_policy',
-    title: 'Уверенное отсутствие 10 минут',
-    status: confidentlyAbsent ? 'selected' : occupied ? 'skipped' : 'failed',
-    actual: confidentlyAbsent,
-    expected: true,
-    reason: !occupied && !confidentlyAbsent
-      ? 'Хотя бы один датчик недоступен, выключение запрещено.'
-      : null,
-  },
-  {
-    id: 'light_profile',
-    title: 'Профиль света тамбура',
-    status: branch === 'presence_uncertain' ? 'skipped' : 'selected',
-    actual: `${clock}; ${sunState || 'sun unavailable'}`,
-    expected: brightness === null ? branch : `${branch}: ${brightness}%, ${kelvin} K`,
-    reason: branch === 'presence_uncertain' ? 'Недостаточно достоверных данных.' : null,
-  },
-);
-
+const trace = [
+  {id: 'presence', title: 'Присутствие в тамбуре', status: occupied ? 'passed' : confidentlyAbsent ? 'failed' : 'skipped',
+    actual: `${presenceState || 'unknown'}; ${motionState || 'unknown'}`, expected: 'хотя бы один датчик on',
+    reason: !occupied && !confidentlyAbsent ? 'Состояние одного из датчиков недостоверно.' : null},
+  {id: 'time_band', title: 'Граница времени суток', status: 'selected', actual: `${clock}; ${sunState || 'sun unavailable'}`, expected: branch, reason: null},
+  {id: 'outside_light', title: 'Освещённость на улице', status: outsideLux === null ? 'skipped' : 'selected',
+    actual: outsideLux, expected: 'чем темнее, тем ярче и теплее', reason: outsideLux === null ? 'Использован безопасный вечерний профиль.' : null},
+  {id: 'manual_priority', title: 'Ручной приоритет люстры', status: manualChandelier ? 'selected' : 'skipped', actual: trigger.source || null, expected: 'manual', reason: null},
+];
 msg.statusCode = 200;
-msg.headers = {
-  'content-type': 'application/json; charset=utf-8',
-  'cache-control': 'no-store',
-};
-msg.payload = {
-  contract: {name: 'hausman-node-red-scenario-execution', version: 1},
-  correlationId: String(request.correlationId || ''),
-  scenarioId: 'system-tambur-adaptive-controller',
+msg.headers = {'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store'};
+msg.payload = {contract: {name: 'hausman-node-red-scenario-execution', version: 1},
+  correlationId: String(request.correlationId || ''), scenarioId: 'system-tambur-adaptive-controller',
   status: actions.length ? 'completed' : 'skipped',
-  summary: actions.length
-    ? `Тамбур: выбран профиль ${branch}.`
-    : 'Тамбур: команды не требуются.',
-  selectedBranch: branch,
-  durationMs: Math.max(0, Date.now() - started),
-  trace,
-  actions,
-};
+  summary: actions.length ? `Тамбур: выбрана ветка ${branch}.` : 'Тамбур: команды не требуются.',
+  selectedBranch: branch, durationMs: Math.max(0, Date.now() - started), trace, actions};
 return msg;
