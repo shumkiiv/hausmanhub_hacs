@@ -1,6 +1,6 @@
 /* Safe embedded editor for one Hausman-managed Node-RED function node. */
 
-import { trapModalTabKey } from "./hausman-hub-modal.js?v=1.52.188";
+import { trapModalTabKey } from "./hausman-hub-modal.js?v=1.52.189";
 
 function inputDeviceTitle(device, targetId) {
   return String(device && (device.physical_name || device.name) || targetId || "Источник недоступен").trim();

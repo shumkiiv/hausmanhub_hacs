@@ -6,19 +6,19 @@ const FIXED_NOW = "2026-08-23T02:15:00.000Z";
 
 const surfaces = [
   { name: "overview-light-wide", query: "section=overview&theme=light", width: 1440, height: 1200 },
-  { name: "overview-dark-tablet", query: "section=overview&theme=dark", width: 900, height: 1000 },
+  { name: "overview-dark-hacs", query: "section=overview&theme=dark", width: 900, height: 1000 },
   { name: "lighting-wide", query: "section=lighting&theme=dark", width: 1440, height: 1200 },
   { name: "climate-wide", query: "section=climate&screen=contour&theme=dark", width: 1440, height: 1400 },
   { name: "scenarios-wide", query: "section=scenarios&theme=dark", width: 1440, height: 900 },
   { name: "settings-narrow-light", query: "section=settings&settings=overview&theme=light", width: 640, height: 1000 },
-  { name: "settings-power-tablet", query: "section=settings&settings=power&theme=dark", width: 900, height: 1000 },
+  { name: "settings-power-hacs", query: "section=settings&settings=power&theme=dark", width: 900, height: 1000 },
 ];
 
 // The interface was accepted before this gate existed. Keep its exact serious
 // debt visible and stable, while blocking every new serious or critical issue.
 const acceptedSeriousBaseline = {
   "overview-light-wide": { "aria-prohibited-attr": 1, "color-contrast": 1, "target-size": 4 },
-  "overview-dark-tablet": {
+  "overview-dark-hacs": {
     "aria-prohibited-attr": 1,
     "color-contrast": 1,
     "scrollable-region-focusable": 1,
@@ -28,7 +28,7 @@ const acceptedSeriousBaseline = {
   "climate-wide": {},
   "scenarios-wide": {},
   "settings-narrow-light": { "color-contrast": 5 },
-  "settings-power-tablet": { "color-contrast": 1 },
+  "settings-power-hacs": { "color-contrast": 1 },
 };
 
 async function openHarness(page, surface) {
