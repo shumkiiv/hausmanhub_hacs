@@ -1,0 +1,681 @@
+{
+  "contract": {
+    "name": "hausman-hub-device-action-batch-receipt",
+    "version": 1
+  },
+  "correlationId": "corr.lighting.manual-profile.111",
+  "status": "accepted",
+  "total": 4,
+  "acceptedCount": 4,
+  "confirmedCount": 0,
+  "failedCount": 0,
+  "receipts": [
+    {
+      "contract": {
+        "name": "hausman-hub-device-action-receipt",
+        "version": 1
+      },
+      "correlationId": "corr.lighting.manual-profile.111",
+      "requestId": "lighting-profile-skip-turn-on-111",
+      "accepted": true,
+      "confirmed": false,
+      "status": "accepted",
+      "statusName": "Проверяется",
+      "targetId": "device_chandelier",
+      "targetType": "light",
+      "actionId": "turn_on",
+      "actionIndex": 0,
+      "decision": "skipped",
+      "commandSent": false,
+      "decisionTerminal": true,
+      "decisionAt": 1787911501000,
+      "commandSource": "automation",
+      "reasonCode": "manual_light_priority",
+      "evidenceRevision": "lighting.evidence.111",
+      "preCommandEvidenceRevision": "lighting.evidence.111",
+      "preCommandOwnership": "manual",
+      "ownership": "manual",
+      "blockedReasons": [],
+      "lightingProfileId": "lighting-profile:chandelier-mirror",
+      "lightingProfileRevision": "profile.revision.1",
+      "manualPriority": {
+        "lightingProfileId": "lighting-profile:chandelier-mirror",
+        "lightingProfileRevision": "profile.revision.1",
+        "profileSnapshot": {
+          "source": "configured_profile",
+          "lightingProfileId": "lighting-profile:chandelier-mirror",
+          "profileRevision": "profile.revision.1",
+          "profileTargetIds": ["device_chandelier", "device_mirror"],
+          "snapshotHash": "sha256:f211d2de16ff7aba79632d33c3a24ae48153b2738b6d10f243c6b2bd84356257"
+        },
+        "blockingEvidence": {
+          "contract": {
+            "name": "hausman-hub-device-state-evidence",
+            "version": 1
+          },
+          "lightingProfileId": "lighting-profile:chandelier-mirror",
+          "lightingProfileRevision": "profile.revision.1",
+          "targetId": "device_chandelier",
+          "reportedState": "on",
+          "effectiveState": "on",
+          "confidence": "fresh",
+          "ownership": "manual",
+          "observedAt": 1787911500000,
+          "freshUntil": 1787911560000,
+          "freshnessWindowMs": 60000,
+          "ownershipSource": "manual_command",
+          "ownershipEvidence": {
+            "receiptId": "lighting-request-111",
+            "requestId": "lighting-request-111",
+            "targetId": "device_chandelier",
+            "actionId": "turn_on",
+            "commandSentAt": 1787911499000,
+            "readBackEvidenceRevision": "lighting.evidence.111",
+            "readBackEvidenceSequence": 111,
+            "provenanceId": "sha256:60d78049e05ea5aaf314488a642a95ce9b3576112f42f2067ccbc0181becd85e"
+          },
+          "evidenceRevision": "lighting.evidence.111",
+          "evidenceSequence": 111,
+          "reasonCode": "manual_light_priority",
+          "reassertBudget": 0,
+          "reassertPolicy": "none",
+          "allowedActions": [
+            "turn_off",
+            "set_brightness",
+            "set_adaptive_brightness",
+            "set_brightness_percent",
+            "set_color_temperature",
+            "set_night_light",
+            "set_rgb_color"
+          ],
+          "blockedReasons": []
+        }
+      },
+      "evidence": {
+        "contract": {
+          "name": "hausman-hub-device-state-evidence",
+          "version": 1
+        },
+        "targetId": "device_chandelier",
+        "reportedState": "on",
+        "effectiveState": "on",
+        "confidence": "fresh",
+        "ownership": "manual",
+        "observedAt": 1787911500000,
+        "freshUntil": 1787911560000,
+        "freshnessWindowMs": 60000,
+        "ownershipSource": "manual_command",
+        "ownershipEvidence": {
+          "receiptId": "lighting-request-111",
+          "requestId": "lighting-request-111",
+          "targetId": "device_chandelier",
+          "actionId": "turn_on",
+          "commandSentAt": 1787911499000,
+          "readBackEvidenceRevision": "lighting.evidence.111",
+          "readBackEvidenceSequence": 111,
+          "provenanceId": "sha256:60d78049e05ea5aaf314488a642a95ce9b3576112f42f2067ccbc0181becd85e"
+        },
+        "evidenceRevision": "lighting.evidence.111",
+        "evidenceSequence": 111,
+        "reasonCode": "manual_light_priority",
+        "reassertBudget": 0,
+        "reassertPolicy": "none",
+        "allowedActions": [
+          "turn_off",
+          "set_brightness",
+          "set_adaptive_brightness",
+          "set_brightness_percent",
+          "set_color_temperature",
+          "set_night_light",
+          "set_rgb_color"
+        ],
+        "blockedReasons": []
+      },
+      "preCommandEvidence": {
+        "contract": {
+          "name": "hausman-hub-device-state-evidence",
+          "version": 1
+        },
+        "targetId": "device_chandelier",
+        "reportedState": "on",
+        "effectiveState": "on",
+        "confidence": "fresh",
+        "ownership": "manual",
+        "observedAt": 1787911500000,
+        "freshUntil": 1787911560000,
+        "freshnessWindowMs": 60000,
+        "ownershipSource": "manual_command",
+        "ownershipEvidence": {
+          "receiptId": "lighting-request-111",
+          "requestId": "lighting-request-111",
+          "targetId": "device_chandelier",
+          "actionId": "turn_on",
+          "commandSentAt": 1787911499000,
+          "readBackEvidenceRevision": "lighting.evidence.111",
+          "readBackEvidenceSequence": 111,
+          "provenanceId": "sha256:60d78049e05ea5aaf314488a642a95ce9b3576112f42f2067ccbc0181becd85e"
+        },
+        "evidenceRevision": "lighting.evidence.111",
+        "evidenceSequence": 111,
+        "reasonCode": "manual_light_priority",
+        "reassertBudget": 0,
+        "reassertPolicy": "none",
+        "allowedActions": [
+          "turn_off",
+          "set_brightness",
+          "set_adaptive_brightness",
+          "set_brightness_percent",
+          "set_color_temperature",
+          "set_night_light",
+          "set_rgb_color"
+        ],
+        "blockedReasons": []
+      },
+      "message": "Автоматическое включение пропущено: пользователь уже включил свет.",
+      "dryRun": false,
+      "reason": "manual_light_priority",
+      "error": null
+    },
+    {
+      "contract": {
+        "name": "hausman-hub-device-action-receipt",
+        "version": 1
+      },
+      "correlationId": "corr.lighting.manual-profile.111",
+      "requestId": "lighting-profile-skip-brightness-111",
+      "accepted": true,
+      "confirmed": false,
+      "status": "accepted",
+      "statusName": "Проверяется",
+      "targetId": "device_chandelier",
+      "targetType": "light",
+      "actionId": "set_brightness_percent",
+      "actionValue": 50,
+      "actionIndex": 1,
+      "decision": "skipped",
+      "commandSent": false,
+      "decisionTerminal": true,
+      "decisionAt": 1787911502000,
+      "commandSource": "automation",
+      "reasonCode": "manual_light_priority",
+      "evidenceRevision": "lighting.evidence.111",
+      "preCommandEvidenceRevision": "lighting.evidence.111",
+      "preCommandOwnership": "manual",
+      "ownership": "manual",
+      "blockedReasons": [],
+      "lightingProfileId": "lighting-profile:chandelier-mirror",
+      "lightingProfileRevision": "profile.revision.1",
+      "manualPriority": {
+        "lightingProfileId": "lighting-profile:chandelier-mirror",
+        "lightingProfileRevision": "profile.revision.1",
+        "profileSnapshot": {
+          "source": "configured_profile",
+          "lightingProfileId": "lighting-profile:chandelier-mirror",
+          "profileRevision": "profile.revision.1",
+          "profileTargetIds": ["device_chandelier", "device_mirror"],
+          "snapshotHash": "sha256:f211d2de16ff7aba79632d33c3a24ae48153b2738b6d10f243c6b2bd84356257"
+        },
+        "blockingEvidence": {
+          "contract": {
+            "name": "hausman-hub-device-state-evidence",
+            "version": 1
+          },
+          "lightingProfileId": "lighting-profile:chandelier-mirror",
+          "lightingProfileRevision": "profile.revision.1",
+          "targetId": "device_chandelier",
+          "reportedState": "on",
+          "effectiveState": "on",
+          "confidence": "fresh",
+          "ownership": "manual",
+          "observedAt": 1787911500000,
+          "freshUntil": 1787911560000,
+          "freshnessWindowMs": 60000,
+          "ownershipSource": "manual_command",
+          "ownershipEvidence": {
+            "receiptId": "lighting-request-111",
+            "requestId": "lighting-request-111",
+            "targetId": "device_chandelier",
+            "actionId": "turn_on",
+            "commandSentAt": 1787911499000,
+            "readBackEvidenceRevision": "lighting.evidence.111",
+            "readBackEvidenceSequence": 111,
+            "provenanceId": "sha256:60d78049e05ea5aaf314488a642a95ce9b3576112f42f2067ccbc0181becd85e"
+          },
+          "evidenceRevision": "lighting.evidence.111",
+          "evidenceSequence": 111,
+          "reasonCode": "manual_light_priority",
+          "reassertBudget": 0,
+          "reassertPolicy": "none",
+          "allowedActions": [
+            "turn_off",
+            "set_brightness",
+            "set_adaptive_brightness",
+            "set_brightness_percent",
+            "set_color_temperature",
+            "set_night_light",
+            "set_rgb_color"
+          ],
+          "blockedReasons": []
+        }
+      },
+      "evidence": {
+        "contract": {
+          "name": "hausman-hub-device-state-evidence",
+          "version": 1
+        },
+        "targetId": "device_chandelier",
+        "reportedState": "on",
+        "effectiveState": "on",
+        "confidence": "fresh",
+        "ownership": "manual",
+        "observedAt": 1787911500000,
+        "freshUntil": 1787911560000,
+        "freshnessWindowMs": 60000,
+        "ownershipSource": "manual_command",
+        "ownershipEvidence": {
+          "receiptId": "lighting-request-111",
+          "requestId": "lighting-request-111",
+          "targetId": "device_chandelier",
+          "actionId": "turn_on",
+          "commandSentAt": 1787911499000,
+          "readBackEvidenceRevision": "lighting.evidence.111",
+          "readBackEvidenceSequence": 111,
+          "provenanceId": "sha256:60d78049e05ea5aaf314488a642a95ce9b3576112f42f2067ccbc0181becd85e"
+        },
+        "evidenceRevision": "lighting.evidence.111",
+        "evidenceSequence": 111,
+        "reasonCode": "manual_light_priority",
+        "reassertBudget": 0,
+        "reassertPolicy": "none",
+        "allowedActions": [
+          "turn_off",
+          "set_brightness",
+          "set_adaptive_brightness",
+          "set_brightness_percent",
+          "set_color_temperature",
+          "set_night_light",
+          "set_rgb_color"
+        ],
+        "blockedReasons": []
+      },
+      "preCommandEvidence": {
+        "contract": {
+          "name": "hausman-hub-device-state-evidence",
+          "version": 1
+        },
+        "targetId": "device_chandelier",
+        "reportedState": "on",
+        "effectiveState": "on",
+        "confidence": "fresh",
+        "ownership": "manual",
+        "observedAt": 1787911500000,
+        "freshUntil": 1787911560000,
+        "freshnessWindowMs": 60000,
+        "ownershipSource": "manual_command",
+        "ownershipEvidence": {
+          "receiptId": "lighting-request-111",
+          "requestId": "lighting-request-111",
+          "targetId": "device_chandelier",
+          "actionId": "turn_on",
+          "commandSentAt": 1787911499000,
+          "readBackEvidenceRevision": "lighting.evidence.111",
+          "readBackEvidenceSequence": 111,
+          "provenanceId": "sha256:60d78049e05ea5aaf314488a642a95ce9b3576112f42f2067ccbc0181becd85e"
+        },
+        "evidenceRevision": "lighting.evidence.111",
+        "evidenceSequence": 111,
+        "reasonCode": "manual_light_priority",
+        "reassertBudget": 0,
+        "reassertPolicy": "none",
+        "allowedActions": [
+          "turn_off",
+          "set_brightness",
+          "set_adaptive_brightness",
+          "set_brightness_percent",
+          "set_color_temperature",
+          "set_night_light",
+          "set_rgb_color"
+        ],
+        "blockedReasons": []
+      },
+      "message": "Автоматическое изменение яркости пропущено: пользователь уже включил свет.",
+      "dryRun": false,
+      "reason": "manual_light_priority",
+      "error": null
+    },
+    {
+      "contract": {
+        "name": "hausman-hub-device-action-receipt",
+        "version": 1
+      },
+      "correlationId": "corr.lighting.manual-profile.111",
+      "requestId": "lighting-profile-skip-temperature-111",
+      "accepted": true,
+      "confirmed": false,
+      "status": "accepted",
+      "statusName": "Проверяется",
+      "targetId": "device_chandelier",
+      "targetType": "light",
+      "actionId": "set_color_temperature",
+      "actionValue": 3500,
+      "actionIndex": 2,
+      "decision": "skipped",
+      "commandSent": false,
+      "decisionTerminal": true,
+      "decisionAt": 1787911503000,
+      "commandSource": "automation",
+      "reasonCode": "manual_light_priority",
+      "evidenceRevision": "lighting.evidence.111",
+      "preCommandEvidenceRevision": "lighting.evidence.111",
+      "preCommandOwnership": "manual",
+      "ownership": "manual",
+      "blockedReasons": [],
+      "lightingProfileId": "lighting-profile:chandelier-mirror",
+      "lightingProfileRevision": "profile.revision.1",
+      "manualPriority": {
+        "lightingProfileId": "lighting-profile:chandelier-mirror",
+        "lightingProfileRevision": "profile.revision.1",
+        "profileSnapshot": {
+          "source": "configured_profile",
+          "lightingProfileId": "lighting-profile:chandelier-mirror",
+          "profileRevision": "profile.revision.1",
+          "profileTargetIds": ["device_chandelier", "device_mirror"],
+          "snapshotHash": "sha256:f211d2de16ff7aba79632d33c3a24ae48153b2738b6d10f243c6b2bd84356257"
+        },
+        "blockingEvidence": {
+          "contract": {
+            "name": "hausman-hub-device-state-evidence",
+            "version": 1
+          },
+          "lightingProfileId": "lighting-profile:chandelier-mirror",
+          "lightingProfileRevision": "profile.revision.1",
+          "targetId": "device_chandelier",
+          "reportedState": "on",
+          "effectiveState": "on",
+          "confidence": "fresh",
+          "ownership": "manual",
+          "observedAt": 1787911500000,
+          "freshUntil": 1787911560000,
+          "freshnessWindowMs": 60000,
+          "ownershipSource": "manual_command",
+          "ownershipEvidence": {
+            "receiptId": "lighting-request-111",
+            "requestId": "lighting-request-111",
+            "targetId": "device_chandelier",
+            "actionId": "turn_on",
+            "commandSentAt": 1787911499000,
+            "readBackEvidenceRevision": "lighting.evidence.111",
+            "readBackEvidenceSequence": 111,
+            "provenanceId": "sha256:60d78049e05ea5aaf314488a642a95ce9b3576112f42f2067ccbc0181becd85e"
+          },
+          "evidenceRevision": "lighting.evidence.111",
+          "evidenceSequence": 111,
+          "reasonCode": "manual_light_priority",
+          "reassertBudget": 0,
+          "reassertPolicy": "none",
+          "allowedActions": [
+            "turn_off",
+            "set_brightness",
+            "set_adaptive_brightness",
+            "set_brightness_percent",
+            "set_color_temperature",
+            "set_night_light",
+            "set_rgb_color"
+          ],
+          "blockedReasons": []
+        }
+      },
+      "evidence": {
+        "contract": {
+          "name": "hausman-hub-device-state-evidence",
+          "version": 1
+        },
+        "targetId": "device_chandelier",
+        "reportedState": "on",
+        "effectiveState": "on",
+        "confidence": "fresh",
+        "ownership": "manual",
+        "observedAt": 1787911500000,
+        "freshUntil": 1787911560000,
+        "freshnessWindowMs": 60000,
+        "ownershipSource": "manual_command",
+        "ownershipEvidence": {
+          "receiptId": "lighting-request-111",
+          "requestId": "lighting-request-111",
+          "targetId": "device_chandelier",
+          "actionId": "turn_on",
+          "commandSentAt": 1787911499000,
+          "readBackEvidenceRevision": "lighting.evidence.111",
+          "readBackEvidenceSequence": 111,
+          "provenanceId": "sha256:60d78049e05ea5aaf314488a642a95ce9b3576112f42f2067ccbc0181becd85e"
+        },
+        "evidenceRevision": "lighting.evidence.111",
+        "evidenceSequence": 111,
+        "reasonCode": "manual_light_priority",
+        "reassertBudget": 0,
+        "reassertPolicy": "none",
+        "allowedActions": [
+          "turn_off",
+          "set_brightness",
+          "set_adaptive_brightness",
+          "set_brightness_percent",
+          "set_color_temperature",
+          "set_night_light",
+          "set_rgb_color"
+        ],
+        "blockedReasons": []
+      },
+      "preCommandEvidence": {
+        "contract": {
+          "name": "hausman-hub-device-state-evidence",
+          "version": 1
+        },
+        "targetId": "device_chandelier",
+        "reportedState": "on",
+        "effectiveState": "on",
+        "confidence": "fresh",
+        "ownership": "manual",
+        "observedAt": 1787911500000,
+        "freshUntil": 1787911560000,
+        "freshnessWindowMs": 60000,
+        "ownershipSource": "manual_command",
+        "ownershipEvidence": {
+          "receiptId": "lighting-request-111",
+          "requestId": "lighting-request-111",
+          "targetId": "device_chandelier",
+          "actionId": "turn_on",
+          "commandSentAt": 1787911499000,
+          "readBackEvidenceRevision": "lighting.evidence.111",
+          "readBackEvidenceSequence": 111,
+          "provenanceId": "sha256:60d78049e05ea5aaf314488a642a95ce9b3576112f42f2067ccbc0181becd85e"
+        },
+        "evidenceRevision": "lighting.evidence.111",
+        "evidenceSequence": 111,
+        "reasonCode": "manual_light_priority",
+        "reassertBudget": 0,
+        "reassertPolicy": "none",
+        "allowedActions": [
+          "turn_off",
+          "set_brightness",
+          "set_adaptive_brightness",
+          "set_brightness_percent",
+          "set_color_temperature",
+          "set_night_light",
+          "set_rgb_color"
+        ],
+        "blockedReasons": []
+      },
+      "message": "Автоматическое изменение температуры пропущено: пользователь уже включил свет.",
+      "dryRun": false,
+      "reason": "manual_light_priority",
+      "error": null
+    },
+    {
+      "contract": {
+        "name": "hausman-hub-device-action-receipt",
+        "version": 1
+      },
+      "correlationId": "corr.lighting.manual-profile.111",
+      "requestId": "lighting-profile-skip-rgb-111",
+      "accepted": true,
+      "confirmed": false,
+      "status": "accepted",
+      "statusName": "Проверяется",
+      "targetId": "device_chandelier",
+      "targetType": "light",
+      "actionId": "set_rgb_color",
+      "actionValue": "#FFB36B",
+      "actionIndex": 3,
+      "decision": "skipped",
+      "commandSent": false,
+      "decisionTerminal": true,
+      "decisionAt": 1787911504000,
+      "commandSource": "automation",
+      "reasonCode": "manual_light_priority",
+      "evidenceRevision": "lighting.evidence.111",
+      "preCommandEvidenceRevision": "lighting.evidence.111",
+      "preCommandOwnership": "manual",
+      "ownership": "manual",
+      "blockedReasons": [],
+      "lightingProfileId": "lighting-profile:chandelier-mirror",
+      "lightingProfileRevision": "profile.revision.1",
+      "manualPriority": {
+        "lightingProfileId": "lighting-profile:chandelier-mirror",
+        "lightingProfileRevision": "profile.revision.1",
+        "profileSnapshot": {
+          "source": "configured_profile",
+          "lightingProfileId": "lighting-profile:chandelier-mirror",
+          "profileRevision": "profile.revision.1",
+          "profileTargetIds": ["device_chandelier", "device_mirror"],
+          "snapshotHash": "sha256:f211d2de16ff7aba79632d33c3a24ae48153b2738b6d10f243c6b2bd84356257"
+        },
+        "blockingEvidence": {
+          "contract": {
+            "name": "hausman-hub-device-state-evidence",
+            "version": 1
+          },
+          "lightingProfileId": "lighting-profile:chandelier-mirror",
+          "lightingProfileRevision": "profile.revision.1",
+          "targetId": "device_chandelier",
+          "reportedState": "on",
+          "effectiveState": "on",
+          "confidence": "fresh",
+          "ownership": "manual",
+          "observedAt": 1787911500000,
+          "freshUntil": 1787911560000,
+          "freshnessWindowMs": 60000,
+          "ownershipSource": "manual_command",
+          "ownershipEvidence": {
+            "receiptId": "lighting-request-111",
+            "requestId": "lighting-request-111",
+            "targetId": "device_chandelier",
+            "actionId": "turn_on",
+            "commandSentAt": 1787911499000,
+            "readBackEvidenceRevision": "lighting.evidence.111",
+            "readBackEvidenceSequence": 111,
+            "provenanceId": "sha256:60d78049e05ea5aaf314488a642a95ce9b3576112f42f2067ccbc0181becd85e"
+          },
+          "evidenceRevision": "lighting.evidence.111",
+          "evidenceSequence": 111,
+          "reasonCode": "manual_light_priority",
+          "reassertBudget": 0,
+          "reassertPolicy": "none",
+          "allowedActions": [
+            "turn_off",
+            "set_brightness",
+            "set_adaptive_brightness",
+            "set_brightness_percent",
+            "set_color_temperature",
+            "set_night_light",
+            "set_rgb_color"
+          ],
+          "blockedReasons": []
+        }
+      },
+      "evidence": {
+        "contract": {
+          "name": "hausman-hub-device-state-evidence",
+          "version": 1
+        },
+        "targetId": "device_chandelier",
+        "reportedState": "on",
+        "effectiveState": "on",
+        "confidence": "fresh",
+        "ownership": "manual",
+        "observedAt": 1787911500000,
+        "freshUntil": 1787911560000,
+        "freshnessWindowMs": 60000,
+        "ownershipSource": "manual_command",
+        "ownershipEvidence": {
+          "receiptId": "lighting-request-111",
+          "requestId": "lighting-request-111",
+          "targetId": "device_chandelier",
+          "actionId": "turn_on",
+          "commandSentAt": 1787911499000,
+          "readBackEvidenceRevision": "lighting.evidence.111",
+          "readBackEvidenceSequence": 111,
+          "provenanceId": "sha256:60d78049e05ea5aaf314488a642a95ce9b3576112f42f2067ccbc0181becd85e"
+        },
+        "evidenceRevision": "lighting.evidence.111",
+        "evidenceSequence": 111,
+        "reasonCode": "manual_light_priority",
+        "reassertBudget": 0,
+        "reassertPolicy": "none",
+        "allowedActions": [
+          "turn_off",
+          "set_brightness",
+          "set_adaptive_brightness",
+          "set_brightness_percent",
+          "set_color_temperature",
+          "set_night_light",
+          "set_rgb_color"
+        ],
+        "blockedReasons": []
+      },
+      "preCommandEvidence": {
+        "contract": {
+          "name": "hausman-hub-device-state-evidence",
+          "version": 1
+        },
+        "targetId": "device_chandelier",
+        "reportedState": "on",
+        "effectiveState": "on",
+        "confidence": "fresh",
+        "ownership": "manual",
+        "observedAt": 1787911500000,
+        "freshUntil": 1787911560000,
+        "freshnessWindowMs": 60000,
+        "ownershipSource": "manual_command",
+        "ownershipEvidence": {
+          "receiptId": "lighting-request-111",
+          "requestId": "lighting-request-111",
+          "targetId": "device_chandelier",
+          "actionId": "turn_on",
+          "commandSentAt": 1787911499000,
+          "readBackEvidenceRevision": "lighting.evidence.111",
+          "readBackEvidenceSequence": 111,
+          "provenanceId": "sha256:60d78049e05ea5aaf314488a642a95ce9b3576112f42f2067ccbc0181becd85e"
+        },
+        "evidenceRevision": "lighting.evidence.111",
+        "evidenceSequence": 111,
+        "reasonCode": "manual_light_priority",
+        "reassertBudget": 0,
+        "reassertPolicy": "none",
+        "allowedActions": [
+          "turn_off",
+          "set_brightness",
+          "set_adaptive_brightness",
+          "set_brightness_percent",
+          "set_color_temperature",
+          "set_night_light",
+          "set_rgb_color"
+        ],
+        "blockedReasons": []
+      },
+      "message": "Автоматическое изменение цвета пропущено: пользователь уже включил свет.",
+      "dryRun": false,
+      "reason": "manual_light_priority",
+      "error": null
+    }
+  ]
+}

@@ -149,6 +149,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     await operation_journal.async_load()
     domain_data[DATA_OPERATION_JOURNAL] = operation_journal
+    from .application.device_action_idempotency import DangerousActionIdempotency
+    from .device_action_idempotency_storage import (
+        HomeAssistantDeviceActionIdempotencyStore,
+    )
+
+    device_action_idempotency = DangerousActionIdempotency(
+        HomeAssistantDeviceActionIdempotencyStore(hass, entry.entry_id)
+    )
+    await device_action_idempotency.async_load()
+    domain_data["device_action_idempotency"] = device_action_idempotency
     from homeassistant.helpers.event import async_track_time_interval
 
     entry.async_on_unload(
@@ -241,6 +251,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .application.scenario_node_red import NodeRedScenarioBackend
 
     scenario_node_red_backend = NodeRedScenarioBackend(hass)
+    from .application.intercom_release_obligation import (
+        IntercomReleaseObligation,
+    )
+    from .intercom_release_obligation_storage import (
+        HomeAssistantIntercomReleaseObligationStore,
+    )
+
+    intercom_release_obligation = IntercomReleaseObligation(
+        HomeAssistantIntercomReleaseObligationStore(hass, entry.entry_id)
+    )
+    await intercom_release_obligation.async_load()
 
     def _publish_intercom_release(receipt: dict[str, object]) -> None:
         from .realtime_api import publish_command_receipt
@@ -272,8 +293,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         node_red_backend=scenario_node_red_backend,
         intercom_release_publisher=_publish_intercom_release,
         scenario_change_publisher=_publish_scenario_change,
+        intercom_release_obligation=intercom_release_obligation,
     )
     await scenario_service.async_load()
+    from .application.scenario_light_priority import LightAutomationPriority
+    from .light_automation_priority_storage import (
+        HomeAssistantLightAutomationPriorityStore,
+    )
+
+    light_priority = LightAutomationPriority(
+        HomeAssistantLightAutomationPriorityStore(hass, entry.entry_id)
+    )
+    await light_priority.async_load()
+    domain_data["light_automation_priority"] = light_priority
+    from .application.light_safety_obligations import LightSafetyObligations
+    from .light_safety_obligation_storage import (
+        HomeAssistantLightSafetyObligationStore,
+    )
+    from .light_safety_repairs import HomeAssistantLightSafetyIssueReporter
+
+    light_safety_obligations = LightSafetyObligations(
+        HomeAssistantLightSafetyObligationStore(hass, entry.entry_id),
+        issue_reporter=HomeAssistantLightSafetyIssueReporter(hass),
+    )
+    await light_safety_obligations.async_load()
     scenario_executor = ScenarioExecutor(
         hass,
         scenario_catalog,
@@ -282,8 +325,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         command_guard=water_safety.command_guard,
         vendor_resilience=vendor_resilience,
         node_red_backend=scenario_node_red_backend,
+        light_priority=light_priority,
+        light_safety_obligations=light_safety_obligations,
+        contextual_dangerous_resolver=(
+            scenario_service.is_contextually_dangerous_action
+        ),
+    )
+    entry.async_on_unload(
+        light_safety_obligations.start(
+            scenario_executor.async_reconcile_light_obligation
+        )
     )
     scenario_service.set_executor(scenario_executor)
+    entry.async_on_unload(
+        intercom_release_obligation.start(
+            scenario_service.async_reconcile_intercom_release
+        )
+    )
     entry.async_on_unload(scenario_service.cancel_running_scenarios)
     entry.async_on_unload(scenario_service.start_catalog_warmup())
     await async_start_scenario_schedule(hass, entry, scenario_service)

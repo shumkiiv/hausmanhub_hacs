@@ -1,0 +1,40 @@
+{
+  "contract": {
+    "name": "hausman-hub-device-state-evidence",
+    "version": 1
+  },
+  "targetId": "device_lighting_demo",
+  "reportedState": "on",
+  "effectiveState": "on",
+  "confidence": "fresh",
+  "ownership": "manual",
+  "observedAt": 1787911200000,
+  "evidenceRevision": "lighting.evidence.101",
+  "evidenceSequence": 101,
+  "freshUntil": 1787911260000,
+  "freshnessWindowMs": 60000,
+  "ownershipSource": "manual_command",
+  "ownershipEvidence": {
+    "receiptId": "lighting-request-101",
+    "requestId": "lighting-request-101",
+    "targetId": "device_lighting_demo",
+    "actionId": "turn_on",
+    "commandSentAt": 1787911199000,
+    "readBackEvidenceRevision": "lighting.evidence.101",
+    "readBackEvidenceSequence": 101,
+    "provenanceId": "sha256:e2a2b8e15730dbe87fd176280b6cada6d634c9f6a1ff9034e045e2a282def021"
+  },
+  "reasonCode": "manual_state_fresh",
+  "reassertBudget": 0,
+  "reassertPolicy": "none",
+  "allowedActions": [
+    "turn_off",
+    "set_brightness",
+    "set_adaptive_brightness",
+    "set_brightness_percent",
+    "set_color_temperature",
+    "set_night_light",
+    "set_rgb_color"
+  ],
+  "blockedReasons": []
+}

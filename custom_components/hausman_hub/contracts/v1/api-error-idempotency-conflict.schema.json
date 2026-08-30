@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/api-error-idempotency-conflict.schema.json",
+  "title": "HausmanHub device-action idempotency conflict error v1",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract",
+        "code",
+        "status",
+        "category",
+        "message",
+        "retryable",
+        "details"
+      ],
+      "properties": {
+        "contract": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "version"],
+          "properties": {
+            "name": {"const": "hausman-hub-error"},
+            "version": {"const": 1}
+          }
+        },
+        "code": {"const": "conflict"},
+        "status": {"const": 409},
+        "category": {"const": "conflict"},
+        "message": {
+          "const": "Команда уже обрабатывается. Обновите состояние, не повторяя действие автоматически."
+        },
+        "retryable": {"const": false},
+        "requestId": {"type": ["string", "null"], "maxLength": 128},
+        "details": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "detailCode",
+            "state",
+            "recoveryRequired",
+            "operatorRecoveryRequired",
+            "automaticRetryAllowed",
+            "newUserActionRequired",
+            "freshConfirmationRequired"
+          ],
+          "properties": {
+            "detailCode": {"const": "idempotency_in_progress"},
+            "state": {"enum": ["reserved", "pending", "dispatch_unknown"]},
+            "recoveryRequired": {"const": true},
+            "operatorRecoveryRequired": {"type": "boolean"},
+            "automaticRetryAllowed": {"const": false},
+            "newUserActionRequired": {"const": false},
+            "freshConfirmationRequired": {"const": false}
+          },
+          "allOf": [
+            {
+              "if": {"properties": {"state": {"const": "reserved"}}},
+              "then": {
+                "properties": {"operatorRecoveryRequired": {"const": false}}
+              }
+            },
+            {
+              "if": {"properties": {"state": {"const": "pending"}}},
+              "then": {
+                "properties": {"operatorRecoveryRequired": {"const": false}}
+              }
+            },
+            {
+              "if": {
+                "properties": {"state": {"const": "dispatch_unknown"}}
+              },
+              "then": {
+                "properties": {"operatorRecoveryRequired": {"const": true}}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract",
+        "code",
+        "status",
+        "category",
+        "message",
+        "retryable",
+        "details"
+      ],
+      "properties": {
+        "contract": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "version"],
+          "properties": {
+            "name": {"const": "hausman-hub-error"},
+            "version": {"const": 1}
+          }
+        },
+        "code": {"const": "conflict"},
+        "status": {"const": 409},
+        "category": {"const": "conflict"},
+        "message": {
+          "const": "Ключ команды уже использован для другого запроса. Запустите действие заново вручную."
+        },
+        "retryable": {"const": false},
+        "requestId": {"type": ["string", "null"], "maxLength": 128},
+        "details": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "detailCode",
+            "recoveryRequired",
+            "automaticRetryAllowed",
+            "newUserActionRequired",
+            "freshConfirmationRequired"
+          ],
+          "properties": {
+            "detailCode": {"const": "idempotency_key_conflict"},
+            "recoveryRequired": {"const": false},
+            "automaticRetryAllowed": {"const": false},
+            "newUserActionRequired": {"const": true},
+            "freshConfirmationRequired": {"const": true},
+            "expectedHash": {
+              "type": "string",
+              "minLength": 71,
+              "maxLength": 71,
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "requestHash": {
+              "type": "string",
+              "minLength": 71,
+              "maxLength": 71,
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
+          },
+          "dependentRequired": {
+            "expectedHash": ["requestHash"],
+            "requestHash": ["expectedHash"]
+          }
+        }
+      }
+    }
+  ]
+}

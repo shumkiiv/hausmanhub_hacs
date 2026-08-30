@@ -36,11 +36,32 @@
         "scenario_disabled",
         "rate_limited",
         "unavailable",
+        "not_acceptable",
         "internal_error"
       ]
     },
     "message": { "type": "string", "minLength": 1, "maxLength": 500 },
     "retryable": { "type": "boolean" },
+    "category": {
+      "enum": [
+        "input",
+        "access",
+        "resource",
+        "conflict",
+        "capability",
+        "confirmation",
+        "policy",
+        "freshness",
+        "rate_limit",
+        "availability",
+        "internal"
+      ],
+      "description": "Optional taxonomy category. When present it must match the canonical error policy."
+    },
+    "status": {
+      "enum": [400, 403, 404, 406, 409, 429, 500, 503],
+      "description": "Optional HTTP status echo. When present it must match the canonical error taxonomy."
+    },
     "requestId": { "type": ["string", "null"], "maxLength": 128 },
     "details": { "type": "object", "additionalProperties": true }
   }

@@ -1,0 +1,229 @@
+{
+  "contract": {
+    "name": "hausman-hub-device-state-evidence-reason-codes",
+    "version": 1
+  },
+  "inventoryVersion": 1,
+  "codes": [
+    {
+      "code": "manual_state_fresh",
+      "category": "state",
+      "description": "A recent manual command supports manual light ownership.",
+      "defaultConfidence": "fresh",
+      "defaultOwnership": "manual",
+      "blocked": false,
+      "allowedActions": [
+        "turn_off",
+        "set_brightness",
+        "set_adaptive_brightness",
+        "set_brightness_percent",
+        "set_color_temperature",
+        "set_night_light",
+        "set_rgb_color"
+      ]
+    },
+    {
+      "code": "manual_state_confirmed",
+      "category": "state",
+      "description": "Matching evidence from a manual command supports manual light ownership.",
+      "defaultConfidence": "confirmed",
+      "defaultOwnership": "manual",
+      "blocked": false,
+      "allowedActions": [
+        "turn_off",
+        "set_brightness",
+        "set_adaptive_brightness",
+        "set_brightness_percent",
+        "set_color_temperature",
+        "set_night_light",
+        "set_rgb_color"
+      ]
+    },
+    {
+      "code": "manual_off_confirmed",
+      "category": "state",
+      "description": "A manual turn-off was followed by matching physical evidence.",
+      "defaultConfidence": "confirmed",
+      "defaultOwnership": "manual",
+      "blocked": false,
+      "allowedActions": ["turn_on"]
+    },
+    {
+      "code": "device_report_off_confirmed",
+      "category": "state",
+      "description": "A fresh confirmed device report shows a normal light off-state without ownership; turn_on is safe to offer.",
+      "defaultConfidence": "confirmed",
+      "defaultOwnership": "unknown",
+      "blocked": false,
+      "allowedActions": ["turn_on"]
+    },
+    {
+      "code": "automatic_on_confirmed",
+      "category": "state",
+      "description": "The automatic turn-on was followed by matching physical evidence; the light profile remains available while the light is on.",
+      "defaultConfidence": "confirmed",
+      "defaultOwnership": "automation",
+      "blocked": false,
+      "allowedActions": [
+        "turn_off",
+        "set_brightness",
+        "set_adaptive_brightness",
+        "set_brightness_percent",
+        "set_color_temperature",
+        "set_night_light",
+        "set_rgb_color"
+      ]
+    },
+    {
+      "code": "automatic_off_confirmed",
+      "category": "state",
+      "description": "The automatic turn-off was followed by matching physical evidence.",
+      "defaultConfidence": "confirmed",
+      "defaultOwnership": "automation",
+      "blocked": false,
+      "allowedActions": ["turn_on"]
+    },
+    {
+      "code": "state_stale",
+      "category": "freshness",
+      "description": "The last report is too old to establish the current light state; a separate server policy must allow a bounded light reassert.",
+      "defaultConfidence": "suspect",
+      "defaultOwnership": "unknown",
+      "blocked": true,
+      "allowedActions": []
+    },
+    {
+      "code": "state_suspect",
+      "category": "freshness",
+      "description": "The state evidence is contradictory or otherwise unsafe to use for a physical action.",
+      "defaultConfidence": "suspect",
+      "defaultOwnership": "unknown",
+      "blocked": true,
+      "allowedActions": []
+    },
+    {
+      "code": "power_source_off",
+      "category": "power",
+      "description": "A trusted power source is off, so the dependent light is effectively off.",
+      "defaultConfidence": "confirmed",
+      "defaultOwnership": "unknown",
+      "blocked": true,
+      "allowedActions": []
+    },
+    {
+      "code": "power_source_off_auto_turn_on",
+      "category": "power",
+      "description": "A trusted power source is off; the dependent light remains blocked until a new source read-back completes warm-up.",
+      "defaultConfidence": "confirmed",
+      "defaultOwnership": "unknown",
+      "blocked": true,
+      "allowedActions": []
+    },
+    {
+      "code": "power_source_ready",
+      "category": "power",
+      "description": "The power source produced a new confirmed read-back and completed its warm-up for a dependent light.",
+      "defaultConfidence": "confirmed",
+      "defaultOwnership": "unknown",
+      "blocked": false,
+      "allowedActions": ["turn_on"]
+    },
+    {
+      "code": "power_source_unavailable",
+      "category": "power",
+      "description": "The power source cannot be read, so the dependent light action is blocked.",
+      "defaultConfidence": "unavailable",
+      "defaultOwnership": "unknown",
+      "blocked": true,
+      "allowedActions": []
+    },
+    {
+      "code": "power_source_unknown",
+      "category": "power",
+      "description": "The power source state is unknown, so dependent light actions are blocked.",
+      "defaultConfidence": "suspect",
+      "defaultOwnership": "unknown",
+      "blocked": true,
+      "allowedActions": []
+    },
+    {
+      "code": "read_back_failed",
+      "category": "confirmation",
+      "description": "A command was attempted but did not produce new matching device evidence.",
+      "defaultConfidence": "suspect",
+      "defaultOwnership": "unknown",
+      "blocked": true,
+      "allowedActions": []
+    },
+    {
+      "code": "read_back_not_new",
+      "category": "confirmation",
+      "description": "The read-back repeated an older report and cannot confirm the command.",
+      "defaultConfidence": "suspect",
+      "defaultOwnership": "unknown",
+      "blocked": true,
+      "allowedActions": []
+    },
+    {
+      "code": "restart_recovery",
+      "category": "recovery",
+      "description": "The server is recovering after restart and has not established fresh evidence.",
+      "defaultConfidence": "suspect",
+      "defaultOwnership": "unknown",
+      "blocked": true,
+      "allowedActions": []
+    },
+    {
+      "code": "reasserted_light_on",
+      "category": "confirmation",
+      "description": "A bounded light turn-on reassertion produced new matching evidence; allowedActions is filtered to the target's supported on-state capabilities.",
+      "defaultConfidence": "confirmed",
+      "defaultOwnership": "automation",
+      "blocked": false,
+      "allowedActions": [
+        "turn_off",
+        "set_brightness",
+        "set_adaptive_brightness",
+        "set_brightness_percent",
+        "set_color_temperature",
+        "set_night_light",
+        "set_rgb_color"
+      ]
+    },
+    {
+      "code": "manual_light_priority",
+      "category": "state",
+      "description": "A fresh manual light takes priority, so the automatic turn-on branch is skipped.",
+      "defaultConfidence": "fresh",
+      "defaultOwnership": "manual",
+      "blocked": false,
+      "allowedActions": [
+        "turn_off",
+        "set_brightness",
+        "set_adaptive_brightness",
+        "set_brightness_percent",
+        "set_color_temperature",
+        "set_night_light",
+        "set_rgb_color"
+      ]
+    },
+    {
+      "code": "automatic_ownership_missing",
+      "category": "ownership",
+      "description": "The light is on but automatic ownership is not proven, so automatic turn-off is blocked.",
+      "defaultConfidence": "fresh",
+      "defaultOwnership": "unknown",
+      "blocked": true,
+      "allowedActions": []
+    },
+    {
+      "code": "repair_required",
+      "category": "recovery",
+      "description": "The device needs repair before a physical light action can be trusted.",
+      "defaultConfidence": "suspect",
+      "defaultOwnership": "unknown",
+      "blocked": true,
+      "allowedActions": []
+    }
+  ]
+}

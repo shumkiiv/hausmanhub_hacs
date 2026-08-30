@@ -1,0 +1,17 @@
+{
+  "contract": {
+    "name": "hausman-hub-device-action-batch-request",
+    "version": 1
+  },
+  "correlationId": "corr.lighting.cross-target-profile.250",
+  "requestId": "request.lighting.cross-target-profile.250",
+  "actions": [
+    {"targetId": "device_chandelier", "actionId": "turn_on"},
+    {"targetId": "device_chandelier", "actionId": "set_brightness", "value": 128},
+    {"targetId": "device_chandelier", "actionId": "set_adaptive_brightness", "value": 50},
+    {"targetId": "device_chandelier", "actionId": "set_brightness_percent", "value": 75},
+    {"targetId": "device_chandelier", "actionId": "set_color_temperature", "value": 3500},
+    {"targetId": "device_chandelier", "actionId": "set_night_light", "value": 10},
+    {"targetId": "device_chandelier", "actionId": "set_rgb_color", "value": "#FFB36B"}
+  ]
+}

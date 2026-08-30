@@ -34,7 +34,7 @@ def error_policies() -> dict[str, dict[str, Any]]:
         for entry in payload["entries"]
         if isinstance(entry, dict) and isinstance(entry.get("code"), str)
     }
-    if len(policies) != 20 or _FALLBACK_CODE not in policies:
+    if len(policies) != len(payload["entries"]) or _FALLBACK_CODE not in policies:
         raise RuntimeError("HausmanHub error taxonomy coverage is invalid")
     return policies
 

@@ -1,0 +1,29 @@
+{
+  "contract": {
+    "name": "hausman-hub-device-action-batch-request",
+    "version": 1
+  },
+  "correlationId": "corr.lighting.profile-missing.121",
+  "requestId": "request.lighting.profile-missing.121",
+  "actions": [
+    {
+      "targetId": "device_lighting_demo",
+      "actionId": "turn_on"
+    },
+    {
+      "targetId": "device_lighting_demo",
+      "actionId": "set_brightness_percent",
+      "value": 50
+    },
+    {
+      "targetId": "device_lighting_demo",
+      "actionId": "set_color_temperature",
+      "value": 3500
+    },
+    {
+      "targetId": "device_lighting_demo",
+      "actionId": "set_rgb_color",
+      "value": "#FFB36B"
+    }
+  ]
+}

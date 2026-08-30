@@ -87,8 +87,56 @@ def validator(name: str) -> Draft202012Validator:
     )
 
 
+def definition_validator(name: str, definition: str) -> Draft202012Validator:
+    schema = load_json(SCHEMAS / name)
+    store = {}
+    for path in SCHEMAS.rglob("*.json"):
+        candidate = load_json(path)
+        if isinstance(candidate, dict) and isinstance(candidate.get("$id"), str):
+            store[candidate["$id"]] = candidate
+    return Draft202012Validator(
+        schema["$defs"][definition],
+        resolver=RefResolver.from_schema(schema, store=store),
+    )
+
+
 class ClimateContractSchemasTest(unittest.TestCase):
     """Keep examples and generated projections compatible with schema v1."""
+
+    def test_contract_0_63_lighting_evidence_fixtures_match_full_views(self) -> None:
+        for path in (ROOT / "fixtures" / "hausmanhub_device_evidence_v1").glob(
+            "*.json"
+        ):
+            with self.subTest(path=path.name):
+                validator("v1/device-state-evidence.schema.json").validate(
+                    load_json(path)
+                )
+        actions_root = ROOT / "fixtures" / "hausmanhub_device_actions_v1"
+        for path in actions_root.glob("device-action-*.json"):
+            with self.subTest(path=path.name):
+                definition_validator(
+                    "v1/device-action-receipt.schema.json", "full"
+                ).validate(
+                    load_json(path)
+                )
+        validator("v1/api-error-not-acceptable.schema.json").validate(
+            load_json(actions_root / "api-error-not-acceptable.json")
+        )
+        batch_root = ROOT / "fixtures" / "hausmanhub_device_action_batch_v1"
+        for path in batch_root.glob("device-action-*-request.json"):
+            with self.subTest(path=path.name):
+                definition_validator(
+                    "v1/device-action-batch-request.schema.json", "full"
+                ).validate(
+                    load_json(path)
+                )
+        for path in batch_root.glob("device-action-*-receipt.json"):
+            with self.subTest(path=path.name):
+                definition_validator(
+                    "v1/device-action-batch-receipt.schema.json", "full"
+                ).validate(
+                    load_json(path)
+                )
 
     def test_every_packaged_schema_is_valid_and_each_fixture_matches(self) -> None:
         pairs = {

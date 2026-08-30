@@ -1,0 +1,50 @@
+{
+  "contract": {
+    "name": "hausman-hub-device-action-receipt",
+    "version": 1
+  },
+  "correlationId": "corr.lighting.evidence.110",
+  "requestId": "lighting-request-110",
+  "accepted": false,
+  "confirmed": false,
+  "status": "failed",
+  "statusName": "Не выполнено",
+  "targetId": "device_lighting_demo",
+  "targetType": "light",
+  "actionId": "turn_on",
+  "decision": "blocked",
+  "commandSent": false,
+  "decisionTerminal": true,
+  "decisionAt": 1787911405000,
+  "commandSource": "automation",
+  "reasonCode": "power_source_unavailable",
+  "evidenceRevision": "lighting.evidence.110",
+  "ownership": "unknown",
+  "blockedReasons": ["power_source_unavailable"],
+  "evidence": {
+    "contract": {
+      "name": "hausman-hub-device-state-evidence",
+      "version": 1
+    },
+    "targetId": "device_lighting_demo",
+    "reportedState": "on",
+    "effectiveState": "unavailable",
+    "confidence": "unavailable",
+    "ownership": "unknown",
+    "observedAt": null,
+    "freshUntil": null,
+    "freshnessWindowMs": 60000,
+    "ownershipSource": "unknown",
+    "evidenceRevision": "lighting.evidence.110",
+    "evidenceSequence": 110,
+    "reasonCode": "power_source_unavailable",
+    "reassertBudget": 0,
+    "reassertPolicy": "none",
+    "allowedActions": [],
+    "blockedReasons": ["power_source_unavailable"]
+  },
+  "message": "Включение заблокировано: источник питания недоступен.",
+  "dryRun": false,
+  "reason": "power_source_unavailable",
+  "error": "device_unavailable"
+}

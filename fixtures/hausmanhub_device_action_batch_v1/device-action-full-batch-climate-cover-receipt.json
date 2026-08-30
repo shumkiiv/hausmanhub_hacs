@@ -1,0 +1,83 @@
+{
+  "contract": {
+    "name": "hausman-hub-device-action-batch-receipt",
+    "version": 1
+  },
+  "correlationId": "generic-climate-cover-batch-1",
+  "status": "confirmed",
+  "total": 2,
+  "acceptedCount": 2,
+  "confirmedCount": 2,
+  "failedCount": 0,
+  "receipts": [
+    {
+      "contract": {
+        "name": "hausman-hub-device-action-receipt",
+        "version": 1
+      },
+      "correlationId": "generic-climate-cover-batch-1",
+      "requestId": "generic-climate-cover-climate-1",
+      "accepted": true,
+      "confirmed": true,
+      "status": "confirmed",
+      "statusName": "Выполнено",
+      "targetId": "device_climate_demo",
+      "targetType": "climate",
+      "actionId": "set_temperature",
+      "actionValue": 22,
+      "actionIndex": 0,
+      "decision": "executed",
+      "decisionAt": 1787912000000,
+      "commandSent": true,
+      "commandSentAt": 1787912001000,
+      "confirmationWindowMs": 8000,
+      "dryRun": false,
+      "readBack": {
+        "targetId": "device_climate_demo",
+        "attempted": true,
+        "matched": true,
+        "observedAt": 1787912002000,
+        "observedValue": 22,
+        "attempts": 1,
+        "commandRequestId": "generic-climate-cover-climate-1"
+      },
+      "message": "Температура 22 °C подтверждена.",
+      "reason": null,
+      "error": null
+    },
+    {
+      "contract": {
+        "name": "hausman-hub-device-action-receipt",
+        "version": 1
+      },
+      "correlationId": "generic-climate-cover-batch-1",
+      "requestId": "generic-climate-cover-cover-1",
+      "accepted": true,
+      "confirmed": true,
+      "status": "confirmed",
+      "statusName": "Выполнено",
+      "targetId": "device_cover_demo",
+      "targetType": "cover",
+      "actionId": "open_cover",
+      "actionIndex": 1,
+      "decision": "executed",
+      "decisionAt": 1787912003000,
+      "commandSent": true,
+      "commandSentAt": 1787912004000,
+      "confirmationWindowMs": 8000,
+      "dryRun": false,
+      "readBack": {
+        "targetId": "device_cover_demo",
+        "attempted": true,
+        "matched": true,
+        "observedAt": 1787912005000,
+        "observedState": "open",
+        "attempts": 1,
+        "commandRequestId": "generic-climate-cover-cover-1"
+      },
+      "message": "Штора открыта.",
+      "reason": null,
+      "error": null
+    }
+  ]
+}

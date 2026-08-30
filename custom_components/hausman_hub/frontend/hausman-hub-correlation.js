@@ -299,6 +299,22 @@ export function withCorrelationId(path, payload, matrix) {
   return { ...payload, [field]: newCorrelationId() };
 }
 
+export function fullDeviceActionRequest(payload, requestId) {
+  requireValidCorrelationId(requestId);
+  return {
+    payload: {
+      ...payload,
+      contract: { name: "hausman-hub-device-action-request", version: 1 },
+      requestId,
+      idempotencyKey: `confirmed.${requestId}`,
+    },
+    headers: {
+      "Content-Type": "application/vnd.hausmanhub.device-action-request.full+json",
+      Accept: "application/vnd.hausmanhub.device-action-receipt.full+json",
+    },
+  };
+}
+
 function corrCollectPath(value, path, out) {
   const segments = path.split(".");
   const walk = (node, index) => {

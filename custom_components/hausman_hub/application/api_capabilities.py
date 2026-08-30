@@ -114,6 +114,15 @@ def api_capabilities_snapshot(
                     "name": "hausman-hub-device-action-receipt",
                     "version": 1,
                 },
+                "fullProtocol": {
+                    "fullAvailable": True,
+                    "singleRequestMediaType": "application/vnd.hausmanhub.device-action-request.full+json",
+                    "singleResponseMediaType": "application/vnd.hausmanhub.device-action-receipt.full+json",
+                    "batchRequestMediaType": "application/vnd.hausmanhub.device-action-batch-request.full+json",
+                    "batchResponseMediaType": "application/vnd.hausmanhub.device-action-batch-receipt.full+json",
+                    "evidenceContractVersion": "1",
+                    "dangerousPolicyVersion": "1",
+                },
                 "feature_matrix_path": DEVICE_FEATURES_PATH,
                 "feature_matrix_method": "GET",
                 "feature_matrix_contract": {

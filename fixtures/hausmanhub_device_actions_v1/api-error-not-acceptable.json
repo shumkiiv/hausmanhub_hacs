@@ -1,0 +1,12 @@
+{
+  "contract": {
+    "name": "hausman-hub-error",
+    "version": 1
+  },
+  "code": "not_acceptable",
+  "category": "capability",
+  "message": "Формат ответа не поддерживается. Обновите клиент.",
+  "retryable": false,
+  "status": 406,
+  "requestId": "request-content-negotiation-406"
+}

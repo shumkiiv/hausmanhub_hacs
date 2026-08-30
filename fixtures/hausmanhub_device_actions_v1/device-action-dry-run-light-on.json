@@ -1,0 +1,98 @@
+{
+  "contract": {
+    "name": "hausman-hub-device-action-receipt",
+    "version": 1
+  },
+  "correlationId": "corr.lighting.evidence.dry-run.115",
+  "requestId": "lighting-dry-run-115",
+  "accepted": true,
+  "confirmed": false,
+  "status": "accepted",
+  "statusName": "Проверяется",
+  "targetId": "device_lighting_demo",
+  "targetType": "light",
+  "actionId": "turn_on",
+  "decision": "executed",
+  "commandSent": false,
+  "decisionTerminal": true,
+  "decisionAt": 1787911689000,
+  "commandSource": "automation",
+  "reasonCode": "automatic_off_confirmed",
+  "evidenceRevision": "lighting.evidence.114",
+  "preCommandEvidenceRevision": "lighting.evidence.114",
+  "preCommandOwnership": "automation",
+  "ownership": "automation",
+  "blockedReasons": [],
+  "evidence": {
+    "contract": {
+      "name": "hausman-hub-device-state-evidence",
+      "version": 1
+    },
+    "targetId": "device_lighting_demo",
+    "reportedState": "off",
+    "effectiveState": "off",
+    "confidence": "confirmed",
+    "ownership": "automation",
+    "observedAt": 1787911680000,
+    "freshUntil": 1787911740000,
+    "freshnessWindowMs": 60000,
+    "ownershipSource": "automation_command",
+    "ownershipEvidence": {
+      "receiptId": "lighting-request-114",
+      "requestId": "lighting-request-114",
+      "targetId": "device_lighting_demo",
+      "actionId": "turn_off",
+      "commandSentAt": 1787911679000,
+      "readBackEvidenceRevision": "lighting.evidence.114",
+      "readBackEvidenceSequence": 114,
+      "provenanceId": "sha256:4cfaf88c368b441b133a1fa003a6dda5c401d56fa5cf5114d08132066c5585ff"
+    },
+    "evidenceRevision": "lighting.evidence.114",
+    "evidenceSequence": 114,
+    "reasonCode": "automatic_off_confirmed",
+    "reassertBudget": 0,
+    "reassertPolicy": "none",
+    "allowedActions": [
+      "turn_on"
+    ],
+    "blockedReasons": []
+  },
+  "preCommandEvidence": {
+    "contract": {
+      "name": "hausman-hub-device-state-evidence",
+      "version": 1
+    },
+    "targetId": "device_lighting_demo",
+    "reportedState": "off",
+    "effectiveState": "off",
+    "confidence": "confirmed",
+    "ownership": "automation",
+    "observedAt": 1787911680000,
+    "freshUntil": 1787911740000,
+    "freshnessWindowMs": 60000,
+    "ownershipSource": "automation_command",
+    "ownershipEvidence": {
+      "receiptId": "lighting-request-114",
+      "requestId": "lighting-request-114",
+      "targetId": "device_lighting_demo",
+      "actionId": "turn_off",
+      "commandSentAt": 1787911679000,
+      "readBackEvidenceRevision": "lighting.evidence.114",
+      "readBackEvidenceSequence": 114,
+      "provenanceId": "sha256:4cfaf88c368b441b133a1fa003a6dda5c401d56fa5cf5114d08132066c5585ff"
+    },
+    "evidenceRevision": "lighting.evidence.114",
+    "evidenceSequence": 114,
+    "reasonCode": "automatic_off_confirmed",
+    "reassertBudget": 0,
+    "reassertPolicy": "none",
+    "allowedActions": [
+      "turn_on"
+    ],
+    "blockedReasons": []
+  },
+  "message": "Команда проверена без отправки физическому устройству.",
+  "dryRun": true,
+  "reason": null,
+  "error": null
+}

@@ -61,7 +61,7 @@ class ReadOnlySkeletonTest(unittest.TestCase):
         self.assertEqual("hausman_hub", manifest["domain"])
         self.assertTrue(manifest["config_flow"])
         self.assertTrue(manifest["single_config_entry"])
-        self.assertEqual("1.52.186", manifest["version"])
+        self.assertEqual("1.52.187", manifest["version"])
 
     def test_current_manifest_version_has_a_plain_change_note(self) -> None:
         manifest = json.loads((INTEGRATION / "manifest.json").read_text(encoding="utf-8"))
@@ -2210,6 +2210,9 @@ class ReadOnlySkeletonTest(unittest.TestCase):
             "device_maintenance_gateway.py",
             "voice_greeting_ha_gateway.py",
             "water_safety_gateway.py",
+            # Repairs guidance may create one non-fixable HA issue, but this
+            # adapter has no device or configuration mutation capability.
+            "light_safety_repairs.py",
         }
         source = "\n".join(
             path.read_text(encoding="utf-8").lower()

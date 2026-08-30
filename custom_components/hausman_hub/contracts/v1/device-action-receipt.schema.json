@@ -2,100 +2,4930 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hausman.local/hausmanhub/contracts/v1/device-action-receipt.schema.json",
   "title": "HausmanHub device action receipt v1",
-  "type": "object",
-  "additionalProperties": false,
-  "required": [
-    "contract",
-    "requestId",
-    "accepted",
-    "confirmed",
-    "status",
-    "targetId",
-    "actionId"
-  ],
-  "properties": {
-    "contract": {
+  "$defs": {
+    "legacy": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "version"],
+      "required": [
+        "contract",
+        "requestId",
+        "accepted",
+        "confirmed",
+        "status",
+        "targetId",
+        "actionId"
+      ],
       "properties": {
-        "name": { "const": "hausman-hub-device-action-receipt" },
-        "version": { "const": 1 }
+        "contract": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "version"
+          ],
+          "properties": {
+            "name": {
+              "const": "hausman-hub-device-action-receipt"
+            },
+            "version": {
+              "const": 1
+            }
+          }
+        },
+        "correlationId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "accepted": {
+          "type": "boolean"
+        },
+        "confirmed": {
+          "type": "boolean"
+        },
+        "status": {
+          "enum": [
+            "failed",
+            "accepted",
+            "confirmed"
+          ]
+        },
+        "statusName": {
+          "enum": [
+            "Не выполнено",
+            "Проверяется",
+            "Выполнено"
+          ]
+        },
+        "targetId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "actionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "climateMode": {
+          "enum": [
+            "automatic",
+            "manual"
+          ]
+        },
+        "climateModeName": {
+          "enum": [
+            "Автоматический режим",
+            "Ручной режим"
+          ]
+        },
+        "observedState": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "appliedAt": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "message": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 500
+        },
+        "confirmationWindowMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 30000
+        },
+        "dryRun": {
+          "type": "boolean"
+        },
+        "autoReleaseSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "releaseReceiptPending": {
+          "type": "boolean"
+        },
+        "readBack": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "attempted",
+            "matched",
+            "observedAt"
+          ],
+          "properties": {
+            "attempted": {
+              "type": "boolean"
+            },
+            "matched": {
+              "type": "boolean"
+            },
+            "observedAt": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "observedState": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "attempts": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 128
+            }
+          }
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "confirmed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "accepted": {
+                "const": true
+              },
+              "confirmed": {
+                "const": true
+              },
+              "statusName": {
+                "const": "Выполнено"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "accepted"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "accepted": {
+                "const": true
+              },
+              "confirmed": {
+                "const": false
+              },
+              "statusName": {
+                "const": "Проверяется"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "failed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "confirmed": {
+                "const": false
+              },
+              "statusName": {
+                "const": "Не выполнено"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "fullCore": {
+      "type": "object",
+      "required": [
+        "correlationId",
+        "targetType",
+        "decision",
+        "decisionAt",
+        "commandSent"
+      ],
+      "properties": {
+        "correlationId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "targetType": {
+          "enum": [
+            "alarm_control_panel",
+            "binary_sensor",
+            "button",
+            "camera",
+            "climate",
+            "cover",
+            "fan",
+            "humidifier",
+            "light",
+            "lock",
+            "media_player",
+            "number",
+            "select",
+            "sensor",
+            "sun",
+            "switch",
+            "vacuum",
+            "valve",
+            "water_heater"
+          ]
+        },
+        "decision": {
+          "enum": [
+            "skipped",
+            "executed",
+            "reasserted",
+            "blocked"
+          ]
+        },
+        "decisionAt": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "commandSent": {
+          "type": "boolean"
+        },
+        "actionValue": {
+          "$ref": "device-action-value.schema.json#/$defs/actionValue"
+        },
+        "readBack": {
+          "properties": {
+            "observedValue": {
+              "$ref": "device-action-value.schema.json#/$defs/actionValue"
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "confirmed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "accepted": {
+                "const": true
+              },
+              "confirmed": {
+                "const": true
+              },
+              "statusName": {
+                "const": "Выполнено"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "accepted"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "accepted": {
+                "const": true
+              },
+              "confirmed": {
+                "const": false
+              },
+              "statusName": {
+                "const": "Проверяется"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "failed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "confirmed": {
+                "const": false
+              },
+              "statusName": {
+                "const": "Не выполнено"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "targetType": {
+                "const": "light"
+              }
+            },
+            "required": [
+              "targetType"
+            ]
+          },
+          "else": {
+            "not": {
+              "properties": {
+                "decision": {
+                  "const": "reasserted"
+                }
+              },
+              "required": [
+                "decision"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "decision": {
+                "enum": [
+                  "skipped",
+                  "executed",
+                  "reasserted",
+                  "blocked"
+                ]
+              },
+              "actionId": {
+                "enum": [
+                  "press",
+                  "turn_on",
+                  "turn_off",
+                  "open_cover",
+                  "close_cover",
+                  "toggle",
+                  "lock",
+                  "unlock",
+                  "media_play",
+                  "media_pause",
+                  "start",
+                  "pause",
+                  "stop",
+                  "return_home",
+                  "open_valve",
+                  "close_valve"
+                ]
+              }
+            },
+            "required": [
+              "decision",
+              "actionId"
+            ]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "actionValue"
+                  ]
+                },
+                {
+                  "required": [
+                    "readBack"
+                  ],
+                  "properties": {
+                    "readBack": {
+                      "required": [
+                        "observedValue"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "decision": {
+                "enum": [
+                  "skipped",
+                  "executed",
+                  "reasserted",
+                  "blocked"
+                ]
+              },
+              "actionId": {
+                "const": "set_temperature"
+              }
+            },
+            "required": [
+              "decision",
+              "actionId"
+            ]
+          },
+          "then": {
+            "required": [
+              "actionValue"
+            ],
+            "properties": {
+              "actionValue": {
+                "$ref": "device-action-value.schema.json#/$defs/runtimeNumber"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "decision": {
+                "enum": [
+                  "skipped",
+                  "executed",
+                  "reasserted",
+                  "blocked"
+                ]
+              },
+              "actionId": {
+                "enum": [
+                  "set_humidity",
+                  "set_value"
+                ]
+              }
+            },
+            "required": [
+              "decision",
+              "actionId"
+            ]
+          },
+          "then": {
+            "required": [
+              "actionValue"
+            ],
+            "properties": {
+              "actionValue": {
+                "$ref": "device-action-value.schema.json#/$defs/runtimeNumber"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "decision": {
+                "enum": [
+                  "skipped",
+                  "executed",
+                  "reasserted",
+                  "blocked"
+                ]
+              },
+              "actionId": {
+                "enum": [
+                  "set_hvac_mode",
+                  "set_fan_mode",
+                  "set_operation_mode"
+                ]
+              }
+            },
+            "required": [
+              "decision",
+              "actionId"
+            ]
+          },
+          "then": {
+            "required": [
+              "actionValue"
+            ],
+            "properties": {
+              "actionValue": {
+                "$ref": "device-action-value.schema.json#/$defs/runtimeString"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "decision": {
+                "enum": [
+                  "skipped",
+                  "executed",
+                  "reasserted",
+                  "blocked"
+                ]
+              },
+              "actionId": {
+                "const": "set_position"
+              }
+            },
+            "required": [
+              "decision",
+              "actionId"
+            ]
+          },
+          "then": {
+            "required": [
+              "actionValue"
+            ],
+            "properties": {
+              "actionValue": {
+                "$ref": "device-action-value.schema.json#/$defs/position"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "decision": {
+                "const": "blocked"
+              }
+            },
+            "required": [
+              "decision"
+            ]
+          },
+          "then": {
+            "required": [
+              "decisionTerminal"
+            ],
+            "properties": {
+              "accepted": {
+                "const": false
+              },
+              "confirmed": {
+                "const": false
+              },
+              "commandSent": {
+                "const": false
+              },
+              "decisionTerminal": {
+                "const": true
+              },
+              "status": {
+                "const": "failed"
+              }
+            },
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "readBack"
+                  ]
+                },
+                {
+                  "required": [
+                    "commandSentAt"
+                  ]
+                },
+                {
+                  "required": [
+                    "confirmationWindowMs"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "decision": {
+                "const": "skipped"
+              }
+            },
+            "required": [
+              "decision"
+            ]
+          },
+          "then": {
+            "required": [
+              "decisionTerminal"
+            ],
+            "properties": {
+              "accepted": {
+                "const": true
+              },
+              "confirmed": {
+                "const": false
+              },
+              "commandSent": {
+                "const": false
+              },
+              "decisionTerminal": {
+                "const": true
+              },
+              "status": {
+                "const": "accepted"
+              }
+            },
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "readBack"
+                  ]
+                },
+                {
+                  "required": [
+                    "commandSentAt"
+                  ]
+                },
+                {
+                  "required": [
+                    "confirmationWindowMs"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "decision": {
+                "const": "executed"
+              },
+              "dryRun": {
+                "const": true
+              }
+            },
+            "required": [
+              "decision",
+              "dryRun"
+            ]
+          },
+          "then": {
+            "required": [
+              "decisionTerminal"
+            ],
+            "properties": {
+              "accepted": {
+                "const": true
+              },
+              "confirmed": {
+                "const": false
+              },
+              "commandSent": {
+                "const": false
+              },
+              "decisionTerminal": {
+                "const": true
+              },
+              "status": {
+                "const": "accepted"
+              }
+            },
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "readBack"
+                  ]
+                },
+                {
+                  "required": [
+                    "commandSentAt"
+                  ]
+                },
+                {
+                  "required": [
+                    "confirmationWindowMs"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "decision": {
+                "const": "executed"
+              }
+            },
+            "required": [
+              "decision"
+            ],
+            "not": {
+              "properties": {
+                "dryRun": {
+                  "const": true
+                }
+              },
+              "required": [
+                "dryRun"
+              ]
+            }
+          },
+          "then": {
+            "required": [
+              "commandSentAt",
+              "confirmationWindowMs",
+              "readBack"
+            ],
+            "properties": {
+              "commandSent": {
+                "const": true
+              },
+              "readBack": {
+                "required": [
+                  "targetId",
+                  "attempted",
+                  "matched",
+                  "observedAt",
+                  "attempts",
+                  "commandRequestId"
+                ],
+                "properties": {
+                  "attempted": {
+                    "const": true
+                  },
+                  "observedAt": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "decision": {
+                "const": "executed"
+              },
+              "confirmed": {
+                "const": true
+              }
+            },
+            "required": [
+              "decision",
+              "confirmed"
+            ],
+            "not": {
+              "properties": {
+                "dryRun": {
+                  "const": true
+                }
+              },
+              "required": [
+                "dryRun"
+              ]
+            }
+          },
+          "then": {
+            "required": [
+              "readBack"
+            ],
+            "properties": {
+              "readBack": {
+                "required": [
+                  "attempted",
+                  "matched",
+                  "observedAt",
+                  "attempts"
+                ],
+                "properties": {
+                  "attempted": {
+                    "const": true
+                  },
+                  "matched": {
+                    "const": true
+                  },
+                  "attempts": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "decision": {
+                "const": "executed"
+              },
+              "confirmed": {
+                "const": true
+              }
+            },
+            "required": [
+              "decision",
+              "confirmed",
+              "actionValue"
+            ],
+            "not": {
+              "properties": {
+                "dryRun": {
+                  "const": true
+                }
+              },
+              "required": [
+                "dryRun"
+              ]
+            }
+          },
+          "then": {
+            "properties": {
+              "readBack": {
+                "required": [
+                  "observedValue"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "decision": {
+                "const": "executed"
+              },
+              "confirmed": {
+                "const": true
+              }
+            },
+            "required": [
+              "decision",
+              "confirmed"
+            ],
+            "not": {
+              "properties": {
+                "dryRun": {
+                  "const": true
+                }
+              },
+              "required": [
+                "dryRun"
+              ]
+            }
+          },
+          "then": {
+            "if": {
+              "required": [
+                "actionValue"
+              ]
+            },
+            "then": {
+              "properties": {
+                "readBack": {
+                  "required": [
+                    "observedValue"
+                  ]
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "readBack": {
+                  "required": [
+                    "observedState"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "readBack": {
+                "required": [
+                  "attempted"
+                ],
+                "properties": {
+                  "attempted": {
+                    "const": true
+                  }
+                }
+              }
+            },
+            "required": [
+              "readBack"
+            ]
+          },
+          "then": {
+            "properties": {
+              "readBack": {
+                "required": [
+                  "attempts"
+                ],
+                "properties": {
+                  "attempts": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "readBack": {
+                "required": [
+                  "attempted"
+                ],
+                "properties": {
+                  "attempted": {
+                    "const": false
+                  }
+                }
+              }
+            },
+            "required": [
+              "readBack"
+            ]
+          },
+          "then": {
+            "properties": {
+              "readBack": {
+                "properties": {
+                  "attempts": {
+                    "const": 0
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "lightingFullExtension": {
+      "type": "object",
+      "required": [
+        "commandSource",
+        "reasonCode",
+        "evidenceRevision",
+        "ownership",
+        "blockedReasons",
+        "evidence"
+      ],
+      "properties": {
+        "targetType": {
+          "const": "light"
+        }
       }
     },
-    "correlationId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
-    "requestId": { "type": "string", "minLength": 1 },
-    "accepted": { "type": "boolean" },
-    "confirmed": { "type": "boolean" },
-    "status": { "enum": ["failed", "accepted", "confirmed"] },
-    "statusName": {
-      "enum": ["Не выполнено", "Проверяется", "Выполнено"]
+    "genericFullExtension": {
+      "type": "object",
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "commandSource"
+            ]
+          },
+          {
+            "required": [
+              "reasonCode"
+            ]
+          },
+          {
+            "required": [
+              "evidenceRevision"
+            ]
+          },
+          {
+            "required": [
+              "preCommandEvidenceRevision"
+            ]
+          },
+          {
+            "required": [
+              "ownership"
+            ]
+          },
+          {
+            "required": [
+              "preCommandOwnership"
+            ]
+          },
+          {
+            "required": [
+              "blockedReasons"
+            ]
+          },
+          {
+            "required": [
+              "evidence"
+            ]
+          },
+          {
+            "required": [
+              "preCommandEvidence"
+            ]
+          },
+          {
+            "required": [
+              "reassertKey"
+            ]
+          },
+          {
+            "required": [
+              "reassertAttempt"
+            ]
+          },
+          {
+            "required": [
+              "lightingProfileId"
+            ]
+          },
+          {
+            "required": [
+              "lightingProfileRevision"
+            ]
+          },
+          {
+            "required": [
+              "manualPriority"
+            ]
+          },
+          {
+            "required": [
+              "readBack"
+            ],
+            "properties": {
+              "readBack": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "evidenceSequence"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "isNewEvidence"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "evidenceRevision"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
     },
-    "targetId": { "type": "string", "minLength": 1 },
-    "actionId": { "type": "string", "minLength": 1 },
-    "climateMode": { "enum": ["automatic", "manual"] },
-    "climateModeName": {
-      "enum": ["Автоматический режим", "Ручной режим"]
+    "full": {
+      "allOf": [
+        {
+          "$ref": "device-action-receipt.schema.json#/$defs/fullBase"
+        },
+        {
+          "$ref": "device-action-receipt.schema.json#/$defs/fullCore"
+        },
+        {
+          "if": {
+            "properties": {
+              "targetType": {
+                "const": "light"
+              }
+            },
+            "required": [
+              "targetType"
+            ]
+          },
+          "then": {
+            "$ref": "device-action-receipt.schema.json#/$defs/lightingFullExtension"
+          },
+          "else": {
+            "$ref": "device-action-receipt.schema.json#/$defs/genericFullExtension"
+          }
+        }
+      ]
     },
-    "observedState": { "type": ["string", "null"] },
-    "appliedAt": { "type": ["integer", "null"] },
-    "message": { "type": ["string", "null"], "maxLength": 500 },
-    "confirmationWindowMs": {
-      "type": "integer",
-      "minimum": 1000,
-      "maximum": 30000
+    "fullSingle": {
+      "allOf": [
+        {
+          "$ref": "device-action-receipt.schema.json#/$defs/full"
+        },
+        {
+          "not": {
+            "required": [
+              "actionIndex"
+            ]
+          }
+        }
+      ]
     },
-    "dryRun": { "type": "boolean" },
-    "autoReleaseSeconds": {
-      "type": "integer",
-      "minimum": 1,
-      "maximum": 20
-    },
-    "releaseReceiptPending": { "type": "boolean" },
-    "readBack": {
+    "fullBase": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["attempted", "matched", "observedAt"],
+      "required": [
+        "contract",
+        "requestId",
+        "accepted",
+        "confirmed",
+        "status",
+        "targetId",
+        "actionId"
+      ],
       "properties": {
-        "attempted": { "type": "boolean" },
-        "matched": { "type": "boolean" },
-        "observedAt": { "type": ["integer", "null"], "minimum": 0 },
-        "observedState": { "type": ["string", "null"] },
-        "attempts": { "type": "integer", "minimum": 0, "maximum": 128 }
-      }
-    },
-    "reason": { "type": ["string", "null"] },
-    "error": { "type": ["string", "null"] }
-  },
-  "allOf": [
-    {
-      "if": { "properties": { "status": { "const": "confirmed" } } },
-      "then": {
-        "properties": {
-          "accepted": { "const": true },
-          "confirmed": { "const": true },
-          "statusName": { "const": "Выполнено" }
+        "contract": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "version"
+          ],
+          "properties": {
+            "name": {
+              "const": "hausman-hub-device-action-receipt"
+            },
+            "version": {
+              "const": 1
+            }
+          }
+        },
+        "correlationId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "accepted": {
+          "type": "boolean"
+        },
+        "confirmed": {
+          "type": "boolean"
+        },
+        "status": {
+          "enum": [
+            "failed",
+            "accepted",
+            "confirmed"
+          ]
+        },
+        "statusName": {
+          "enum": [
+            "Не выполнено",
+            "Проверяется",
+            "Выполнено"
+          ]
+        },
+        "targetId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "targetType": {
+          "enum": [
+            "alarm_control_panel",
+            "binary_sensor",
+            "button",
+            "camera",
+            "climate",
+            "cover",
+            "fan",
+            "humidifier",
+            "light",
+            "lock",
+            "media_player",
+            "number",
+            "select",
+            "sensor",
+            "sun",
+            "switch",
+            "vacuum",
+            "valve",
+            "water_heater"
+          ],
+          "description": "Optional generic device type. Evidence-aware lighting decisions must use light."
+        },
+        "actionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "actionValue": {
+          "type": [
+            "string",
+            "number",
+            "boolean",
+            "array",
+            "object",
+            "null"
+          ],
+          "description": "Optional immutable echo of the exact typed request value. Arrays and objects are compared structurally by the server. It is present in a full receipt exactly when the request action carried value."
+        },
+        "actionIndex": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 63,
+          "description": "Immutable zero-based batch action identity. Required for every item in the full batch view."
+        },
+        "climateMode": {
+          "enum": [
+            "automatic",
+            "manual"
+          ]
+        },
+        "climateModeName": {
+          "enum": [
+            "Автоматический режим",
+            "Ручной режим"
+          ]
+        },
+        "observedState": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "appliedAt": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "commandSentAt": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Optional Unix epoch time in milliseconds when the physical command was sent. New-layer confirmation compares read-back time with this value."
+        },
+        "decisionAt": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Server time in milliseconds when the evidence-aware decision was made."
+        },
+        "commandSent": {
+          "type": "boolean",
+          "description": "Whether this evidence-aware decision sent a physical command."
+        },
+        "decisionTerminal": {
+          "type": "boolean",
+          "description": "Whether the evidence-aware decision is final. For skipped or blocked decisions it is always true: no physical command or confirmation is pending."
+        },
+        "message": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 500
+        },
+        "confirmationWindowMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 30000
+        },
+        "dryRun": {
+          "type": "boolean"
+        },
+        "autoReleaseSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "releaseReceiptPending": {
+          "type": "boolean"
+        },
+        "decision": {
+          "enum": [
+            "skipped",
+            "executed",
+            "reasserted",
+            "blocked"
+          ],
+          "description": "Optional server decision for the evidence-aware layer. skipped avoids a duplicate command, executed sends the requested command or reports that it would be sent when dryRun=true, reasserted safely repeats turn_on for suspect lighting, and blocked sends no command."
+        },
+        "reassertKey": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
+          "description": "Echo of the client-supplied durable idempotency key for one bounded reassert attempt. Retries and restart recovery must reuse it only with the exact same request identity and receipt payload."
+        },
+        "reassertAttempt": {
+          "type": "integer",
+          "const": 1,
+          "description": "Bounded reassert attempt number; only the first attempt is contractually allowed."
+        },
+        "evidenceRevision": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "description": "Optional opaque final revision of the device evidence after this decision."
+        },
+        "reasonCode": {
+          "$ref": "device-state-evidence-reason-code.schema.json#/$defs/openCode",
+          "description": "Optional machine-readable reason for the server decision. Unknown values are opaque and must fail closed."
+        },
+        "commandSource": {
+          "enum": [
+            "automation",
+            "manual"
+          ],
+          "description": "Optional server-declared origin of the action decision. Automation turn-off requires confirmed automatic ownership; manual commands are not granted automatic ownership."
+        },
+        "preCommandEvidenceRevision": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "description": "Optional opaque revision of the evidence snapshot captured before the command."
+        },
+        "ownership": {
+          "enum": [
+            "manual",
+            "automation",
+            "unknown"
+          ],
+          "description": "Optional final server attribution from the evidence snapshot. Unknown ownership never grants automatic turn-off permission."
+        },
+        "preCommandOwnership": {
+          "enum": [
+            "manual",
+            "automation",
+            "unknown"
+          ],
+          "description": "Optional server attribution captured before the command."
+        },
+        "blockedReasons": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "device-state-evidence-reason-code.schema.json#/$defs/openCode"
+          },
+          "description": "Optional machine-readable reasons for a blocked or restricted action."
+        },
+        "evidence": {
+          "$ref": "device-state-evidence.schema.json",
+          "description": "Optional final server-owned state evidence snapshot associated with the receipt."
+        },
+        "preCommandEvidence": {
+          "$ref": "device-state-evidence.schema.json",
+          "description": "Optional server-owned state evidence snapshot captured before the command."
+        },
+        "lightingProfileId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "description": "Stable configured light-profile identity. Manual-priority receipts bind their automatic target and blocker to this profile."
+        },
+        "lightingProfileRevision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "description": "Stable bounded revision of the server-owned configured light profile. Manual-priority receipts must use the revision validated by the runtime."
+        },
+        "manualPriority": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "lightingProfileId",
+            "lightingProfileRevision",
+            "profileSnapshot",
+            "blockingEvidence"
+          ],
+          "properties": {
+            "lightingProfileId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "lightingProfileRevision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "profileSnapshot": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "source",
+                "lightingProfileId",
+                "profileRevision",
+                "profileTargetIds",
+                "snapshotHash"
+              ],
+              "properties": {
+                "source": {
+                  "const": "configured_profile"
+                },
+                "lightingProfileId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "profileRevision": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "profileTargetIds": {
+                  "type": "array",
+                  "minItems": 2,
+                  "maxItems": 16,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  }
+                },
+                "snapshotHash": {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                }
+              },
+              "description": "The runtime validates this snapshot against canonical server-owned configured profile storage. Client or planner data is not authoritative."
+            },
+            "blockingEvidence": {
+              "allOf": [
+                {
+                  "$ref": "device-state-evidence.schema.json"
+                },
+                {
+                  "required": [
+                    "lightingProfileId",
+                    "lightingProfileRevision"
+                  ]
+                }
+              ],
+              "description": "Explicit manual-priority evidence for one interchangeable light source. Its target may match or differ from the automatic receipt target only when the profile identity matches."
+            }
+          },
+          "description": "Manual-priority binding between the automatic receipt target and its server-owned blocking evidence."
+        },
+        "readBack": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "attempted",
+            "matched",
+            "observedAt"
+          ],
+          "properties": {
+            "targetId": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Target bound to this read-back evidence."
+            },
+            "attempted": {
+              "type": "boolean"
+            },
+            "matched": {
+              "type": "boolean"
+            },
+            "observedAt": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "observedState": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "observedValue": {
+              "type": [
+                "string",
+                "number",
+                "boolean",
+                "array",
+                "object",
+                "null"
+              ],
+              "description": "Typed value observed after the physical command. Confirmed appearance actions require an exact type and value match with actionValue."
+            },
+            "attempts": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 128
+            },
+            "commandRequestId": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Request ID of the physical command associated with this read-back."
+            },
+            "evidenceSequence": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Evidence sequence associated with this read-back."
+            },
+            "isNewEvidence": {
+              "type": "boolean",
+              "description": "Whether this read-back created evidence newer than the pre-command snapshot."
+            },
+            "evidenceRevision": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "description": "Optional evidence revision observed after the command."
+            }
+          }
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
-      }
-    },
-    {
-      "if": { "properties": { "status": { "const": "accepted" } } },
-      "then": {
-        "properties": {
-          "accepted": { "const": true },
-          "confirmed": { "const": false },
-          "statusName": { "const": "Проверяется" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              {
+                "not": {
+                  "required": [
+                    "decision"
+                  ]
+                }
+              },
+              {
+                "properties": {
+                  "targetType": {
+                    "const": "light"
+                  }
+                },
+                "required": [
+                  "targetType"
+                ]
+              },
+              {
+                "required": [
+                  "commandSource"
+                ]
+              },
+              {
+                "required": [
+                  "reasonCode"
+                ]
+              },
+              {
+                "required": [
+                  "evidenceRevision"
+                ]
+              },
+              {
+                "required": [
+                  "preCommandEvidenceRevision"
+                ]
+              },
+              {
+                "required": [
+                  "ownership"
+                ]
+              },
+              {
+                "required": [
+                  "preCommandOwnership"
+                ]
+              },
+              {
+                "required": [
+                  "blockedReasons"
+                ]
+              },
+              {
+                "required": [
+                  "evidence"
+                ]
+              },
+              {
+                "required": [
+                  "preCommandEvidence"
+                ]
+              },
+              {
+                "required": [
+                  "reassertKey"
+                ]
+              },
+              {
+                "required": [
+                  "reassertAttempt"
+                ]
+              },
+              {
+                "required": [
+                  "lightingProfileId"
+                ]
+              },
+              {
+                "required": [
+                  "lightingProfileRevision"
+                ]
+              },
+              {
+                "required": [
+                  "manualPriority"
+                ]
+              },
+              {
+                "required": [
+                  "readBack"
+                ],
+                "properties": {
+                  "readBack": {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "evidenceSequence"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "isNewEvidence"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "evidenceRevision"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          "then": {
+            "allOf": [
+              {
+                "if": {
+                  "required": [
+                    "decision"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "actionValue": {
+                      "$ref": "device-action-value.schema.json#/$defs/actionValue"
+                    },
+                    "readBack": {
+                      "properties": {
+                        "observedValue": {
+                          "$ref": "device-action-value.schema.json#/$defs/actionValue"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "actionId": {
+                      "enum": [
+                        "press",
+                        "turn_on",
+                        "turn_off",
+                        "open_cover",
+                        "close_cover",
+                        "toggle",
+                        "lock",
+                        "unlock",
+                        "media_play",
+                        "media_pause",
+                        "start",
+                        "pause",
+                        "stop",
+                        "return_home",
+                        "open_valve",
+                        "close_valve"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "actionId"
+                  ]
+                },
+                "then": {
+                  "not": {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "actionValue"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "readBack"
+                        ],
+                        "properties": {
+                          "readBack": {
+                            "required": [
+                              "observedValue"
+                            ]
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "enum": [
+                        "executed",
+                        "reasserted"
+                      ]
+                    },
+                    "actionId": {
+                      "enum": [
+                        "set_temperature",
+                        "set_hvac_mode",
+                        "set_fan_mode",
+                        "set_position",
+                        "set_humidity",
+                        "set_value",
+                        "set_operation_mode"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "actionId"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "actionValue"
+                  ]
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "enum": [
+                        "executed",
+                        "reasserted"
+                      ]
+                    },
+                    "actionId": {
+                      "enum": [
+                        "set_temperature",
+                        "set_humidity",
+                        "set_value"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "actionId"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "actionValue": {
+                      "$ref": "device-action-value.schema.json#/$defs/runtimeNumber"
+                    },
+                    "readBack": {
+                      "properties": {
+                        "observedValue": {
+                          "$ref": "device-action-value.schema.json#/$defs/runtimeNumber"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "enum": [
+                        "executed",
+                        "reasserted"
+                      ]
+                    },
+                    "actionId": {
+                      "enum": [
+                        "set_hvac_mode",
+                        "set_fan_mode",
+                        "set_operation_mode"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "actionId"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "actionValue": {
+                      "$ref": "device-action-value.schema.json#/$defs/runtimeString"
+                    },
+                    "readBack": {
+                      "properties": {
+                        "observedValue": {
+                          "$ref": "device-action-value.schema.json#/$defs/runtimeString"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "enum": [
+                        "executed",
+                        "reasserted"
+                      ]
+                    },
+                    "actionId": {
+                      "const": "set_position"
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "actionId"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "actionValue": {
+                      "$ref": "device-action-value.schema.json#/$defs/position"
+                    },
+                    "readBack": {
+                      "properties": {
+                        "observedValue": {
+                          "$ref": "device-action-value.schema.json#/$defs/position"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "status": {
+                      "const": "confirmed"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "accepted": {
+                      "const": true
+                    },
+                    "confirmed": {
+                      "const": true
+                    },
+                    "statusName": {
+                      "const": "Выполнено"
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "status": {
+                      "const": "accepted"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "accepted": {
+                      "const": true
+                    },
+                    "confirmed": {
+                      "const": false
+                    },
+                    "statusName": {
+                      "const": "Проверяется"
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "status": {
+                      "const": "failed"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "confirmed": {
+                      "const": false
+                    },
+                    "statusName": {
+                      "const": "Не выполнено"
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "not": {
+                    "required": [
+                      "decision"
+                    ]
+                  }
+                },
+                "then": {
+                  "not": {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "targetType"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "actionValue"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "actionIndex"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "commandSentAt"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "decisionAt"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "commandSent"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "decisionTerminal"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "reassertKey"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "reassertAttempt"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "evidenceRevision"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "reasonCode"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "commandSource"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "preCommandEvidenceRevision"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "ownership"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "preCommandOwnership"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "blockedReasons"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "evidence"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "preCommandEvidence"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "lightingProfileId"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "lightingProfileRevision"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "manualPriority"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "readBack"
+                        ],
+                        "properties": {
+                          "readBack": {
+                            "anyOf": [
+                              {
+                                "required": [
+                                  "targetId"
+                                ]
+                              },
+                              {
+                                "required": [
+                                  "observedValue"
+                                ]
+                              },
+                              {
+                                "required": [
+                                  "commandRequestId"
+                                ]
+                              },
+                              {
+                                "required": [
+                                  "evidenceSequence"
+                                ]
+                              },
+                              {
+                                "required": [
+                                  "isNewEvidence"
+                                ]
+                              },
+                              {
+                                "required": [
+                                  "evidenceRevision"
+                                ]
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "if": {
+                  "required": [
+                    "decision"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "targetType",
+                    "decisionAt",
+                    "commandSent",
+                    "evidenceRevision",
+                    "ownership",
+                    "blockedReasons",
+                    "evidence"
+                  ]
+                }
+              },
+              {
+                "if": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "decision"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "evidence"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "preCommandEvidence"
+                      ]
+                    }
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "targetType"
+                  ],
+                  "properties": {
+                    "targetType": {
+                      "const": "light"
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "const": "blocked"
+                    }
+                  },
+                  "required": [
+                    "decision"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "blockedReasons",
+                    "decisionTerminal"
+                  ],
+                  "properties": {
+                    "accepted": {
+                      "const": false
+                    },
+                    "confirmed": {
+                      "const": false
+                    },
+                    "status": {
+                      "const": "failed"
+                    },
+                    "commandSent": {
+                      "const": false
+                    },
+                    "decisionTerminal": {
+                      "const": true
+                    },
+                    "blockedReasons": {
+                      "minItems": 1
+                    }
+                  },
+                  "not": {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "readBack"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "commandSentAt"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "appliedAt"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "confirmationWindowMs"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "reassertKey"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "reassertAttempt"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "enum": [
+                        "executed",
+                        "reasserted"
+                      ]
+                    },
+                    "dryRun": {
+                      "const": false
+                    }
+                  },
+                  "required": [
+                    "decision"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "readBack"
+                  ],
+                  "properties": {
+                    "commandSent": {
+                      "const": true
+                    },
+                    "readBack": {
+                      "required": [
+                        "attempted"
+                      ],
+                      "properties": {
+                        "attempted": {
+                          "const": true
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "const": "reasserted"
+                    }
+                  },
+                  "required": [
+                    "decision"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "reassertKey",
+                    "reassertAttempt"
+                  ],
+                  "properties": {
+                    "actionId": {
+                      "const": "turn_on"
+                    },
+                    "targetType": {
+                      "const": "light"
+                    },
+                    "reassertAttempt": {
+                      "const": 1
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "const": "executed"
+                    },
+                    "actionId": {
+                      "const": "turn_on"
+                    },
+                    "preCommandEvidence": {
+                      "properties": {
+                        "reasonCode": {
+                          "const": "state_stale"
+                        }
+                      },
+                      "required": [
+                        "reasonCode"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "actionId",
+                    "preCommandEvidence"
+                  ]
+                },
+                "then": {
+                  "not": {}
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "enum": [
+                        "executed",
+                        "reasserted"
+                      ]
+                    },
+                    "actionId": {
+                      "const": "turn_on"
+                    },
+                    "preCommandEvidence": {
+                      "properties": {
+                        "blockedReasons": {
+                          "contains": {
+                            "enum": [
+                              "power_source_off",
+                              "power_source_off_auto_turn_on"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "blockedReasons"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "actionId",
+                    "preCommandEvidence"
+                  ]
+                },
+                "then": {
+                  "not": {}
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "dryRun": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "dryRun",
+                    "decision"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "commandSent": {
+                      "const": false
+                    }
+                  },
+                  "not": {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "readBack"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "commandSentAt"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "appliedAt"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "reassertKey"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "reassertAttempt"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "dryRun": {
+                      "const": true
+                    },
+                    "decision": {
+                      "const": "executed"
+                    }
+                  },
+                  "required": [
+                    "dryRun",
+                    "decision"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "decisionTerminal",
+                    "preCommandEvidenceRevision",
+                    "preCommandEvidence",
+                    "preCommandOwnership"
+                  ],
+                  "properties": {
+                    "accepted": {
+                      "const": true
+                    },
+                    "confirmed": {
+                      "const": false
+                    },
+                    "status": {
+                      "const": "accepted"
+                    },
+                    "statusName": {
+                      "const": "Проверяется"
+                    },
+                    "commandSent": {
+                      "const": false
+                    },
+                    "decisionTerminal": {
+                      "const": true
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "enum": [
+                        "executed",
+                        "reasserted"
+                      ]
+                    },
+                    "actionId": {
+                      "const": "turn_on"
+                    },
+                    "preCommandEvidence": {
+                      "properties": {
+                        "reasonCode": {
+                          "enum": [
+                            "power_source_off",
+                            "power_source_off_auto_turn_on"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "reasonCode"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "actionId",
+                    "preCommandEvidence"
+                  ]
+                },
+                "then": {
+                  "not": {}
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "enum": [
+                        "executed",
+                        "reasserted"
+                      ]
+                    },
+                    "confirmed": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "confirmed"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "readBack",
+                    "evidenceRevision",
+                    "evidence"
+                  ],
+                  "properties": {
+                    "blockedReasons": {
+                      "const": []
+                    },
+                    "evidence": {
+                      "properties": {
+                        "blockedReasons": {
+                          "const": []
+                        }
+                      }
+                    },
+                    "reasonCode": {
+                      "enum": [
+                        "manual_state_confirmed",
+                        "manual_off_confirmed",
+                        "automatic_on_confirmed",
+                        "automatic_off_confirmed",
+                        "reasserted_light_on"
+                      ]
+                    },
+                    "readBack": {
+                      "required": [
+                        "attempted",
+                        "matched",
+                        "attempts",
+                        "isNewEvidence",
+                        "evidenceRevision"
+                      ],
+                      "properties": {
+                        "attempted": {
+                          "const": true
+                        },
+                        "matched": {
+                          "const": true
+                        },
+                        "attempts": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "isNewEvidence": {
+                          "const": true
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "required": [
+                    "decision"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "commandSource",
+                    "reasonCode"
+                  ],
+                  "properties": {
+                    "evidence": {
+                      "properties": {
+                        "evidenceRevision": {
+                          "minLength": 1
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "const": "skipped"
+                    }
+                  },
+                  "required": [
+                    "decision"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "decisionAt",
+                    "commandSent",
+                    "decisionTerminal",
+                    "preCommandEvidenceRevision",
+                    "preCommandEvidence",
+                    "preCommandOwnership"
+                  ],
+                  "properties": {
+                    "commandSent": {
+                      "const": false
+                    },
+                    "decisionTerminal": {
+                      "const": true
+                    },
+                    "accepted": {
+                      "const": true
+                    },
+                    "confirmed": {
+                      "const": false
+                    },
+                    "status": {
+                      "const": "accepted"
+                    },
+                    "targetType": {
+                      "const": "light"
+                    },
+                    "actionId": {
+                      "enum": [
+                        "turn_on",
+                        "turn_off",
+                        "set_brightness",
+                        "set_adaptive_brightness",
+                        "set_brightness_percent",
+                        "set_color_temperature",
+                        "set_night_light",
+                        "set_rgb_color"
+                      ]
+                    },
+                    "reasonCode": {
+                      "enum": [
+                        "manual_light_priority",
+                        "automatic_on_confirmed",
+                        "automatic_ownership_missing",
+                        "power_source_off"
+                      ]
+                    },
+                    "blockedReasons": {
+                      "anyOf": [
+                        {
+                          "const": []
+                        },
+                        {
+                          "const": [
+                            "automatic_ownership_missing"
+                          ]
+                        },
+                        {
+                          "const": [
+                            "power_source_off"
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "not": {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "readBack"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "commandSentAt"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "appliedAt"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "confirmationWindowMs"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "reassertKey"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "reassertAttempt"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "reasonCode": {
+                      "const": "automatic_ownership_missing"
+                    }
+                  },
+                  "required": [
+                    "reasonCode"
+                  ]
+                },
+                "then": {
+                  "oneOf": [
+                    {
+                      "required": [
+                        "decision",
+                        "actionId"
+                      ],
+                      "properties": {
+                        "decision": {
+                          "const": "skipped"
+                        },
+                        "actionId": {
+                          "enum": [
+                            "turn_on",
+                            "set_brightness",
+                            "set_adaptive_brightness",
+                            "set_brightness_percent",
+                            "set_color_temperature",
+                            "set_night_light",
+                            "set_rgb_color"
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "required": [
+                        "decision",
+                        "actionId"
+                      ],
+                      "properties": {
+                        "decision": {
+                          "const": "blocked"
+                        },
+                        "actionId": {
+                          "const": "turn_off"
+                        }
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "if": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "lightingProfileId"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "lightingProfileRevision"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "manualPriority"
+                      ]
+                    }
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "decision",
+                    "reasonCode",
+                    "lightingProfileId",
+                    "lightingProfileRevision",
+                    "manualPriority"
+                  ],
+                  "properties": {
+                    "decision": {
+                      "const": "skipped"
+                    },
+                    "reasonCode": {
+                      "const": "manual_light_priority"
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "const": "skipped"
+                    },
+                    "reasonCode": {
+                      "const": "manual_light_priority"
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "reasonCode"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "actionId",
+                    "commandSource",
+                    "lightingProfileId",
+                    "lightingProfileRevision",
+                    "manualPriority"
+                  ],
+                  "properties": {
+                    "actionId": {
+                      "enum": [
+                        "turn_on",
+                        "set_brightness",
+                        "set_adaptive_brightness",
+                        "set_brightness_percent",
+                        "set_color_temperature",
+                        "set_night_light",
+                        "set_rgb_color"
+                      ]
+                    },
+                    "commandSource": {
+                      "const": "automation"
+                    },
+                    "ownership": {
+                      "enum": [
+                        "manual",
+                        "unknown"
+                      ]
+                    },
+                    "preCommandOwnership": {
+                      "enum": [
+                        "manual",
+                        "unknown"
+                      ]
+                    },
+                    "manualPriority": {
+                      "required": [
+                        "lightingProfileId",
+                        "lightingProfileRevision",
+                        "profileSnapshot",
+                        "blockingEvidence"
+                      ],
+                      "properties": {
+                        "blockingEvidence": {
+                          "required": [
+                            "lightingProfileId",
+                            "lightingProfileRevision"
+                          ],
+                          "properties": {
+                            "reportedState": {
+                              "const": "on"
+                            },
+                            "effectiveState": {
+                              "const": "on"
+                            },
+                            "confidence": {
+                              "const": "fresh"
+                            },
+                            "ownership": {
+                              "const": "manual"
+                            },
+                            "ownershipSource": {
+                              "const": "manual_command"
+                            },
+                            "reasonCode": {
+                              "const": "manual_light_priority"
+                            },
+                            "reassertPolicy": {
+                              "const": "none"
+                            },
+                            "reassertBudget": {
+                              "const": 0
+                            },
+                            "allowedActions": {
+                              "const": [
+                                "turn_off",
+                                "set_brightness",
+                                "set_adaptive_brightness",
+                                "set_brightness_percent",
+                                "set_color_temperature",
+                                "set_night_light",
+                                "set_rgb_color"
+                              ]
+                            },
+                            "blockedReasons": {
+                              "const": []
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "const": "skipped"
+                    },
+                    "reasonCode": {
+                      "const": "automatic_ownership_missing"
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "reasonCode"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "actionId": {
+                      "enum": [
+                        "turn_on",
+                        "set_brightness",
+                        "set_adaptive_brightness",
+                        "set_brightness_percent",
+                        "set_color_temperature",
+                        "set_night_light",
+                        "set_rgb_color"
+                      ]
+                    },
+                    "targetType": {
+                      "const": "light"
+                    },
+                    "commandSource": {
+                      "const": "automation"
+                    },
+                    "ownership": {
+                      "const": "unknown"
+                    },
+                    "preCommandOwnership": {
+                      "const": "unknown"
+                    },
+                    "blockedReasons": {
+                      "const": [
+                        "automatic_ownership_missing"
+                      ]
+                    },
+                    "reasonCode": {
+                      "const": "automatic_ownership_missing"
+                    },
+                    "evidence": {
+                      "properties": {
+                        "confidence": {
+                          "const": "fresh"
+                        },
+                        "reportedState": {
+                          "const": "on"
+                        },
+                        "effectiveState": {
+                          "const": "on"
+                        },
+                        "ownership": {
+                          "const": "unknown"
+                        },
+                        "ownershipSource": {
+                          "const": "device_report"
+                        },
+                        "reasonCode": {
+                          "const": "automatic_ownership_missing"
+                        },
+                        "allowedActions": {
+                          "const": []
+                        },
+                        "blockedReasons": {
+                          "const": [
+                            "automatic_ownership_missing"
+                          ]
+                        }
+                      },
+                      "not": {
+                        "required": [
+                          "ownershipEvidence"
+                        ]
+                      }
+                    },
+                    "preCommandEvidence": {
+                      "properties": {
+                        "confidence": {
+                          "const": "fresh"
+                        },
+                        "reportedState": {
+                          "const": "on"
+                        },
+                        "effectiveState": {
+                          "const": "on"
+                        },
+                        "ownership": {
+                          "const": "unknown"
+                        },
+                        "ownershipSource": {
+                          "const": "device_report"
+                        },
+                        "reasonCode": {
+                          "const": "automatic_ownership_missing"
+                        },
+                        "allowedActions": {
+                          "const": []
+                        },
+                        "blockedReasons": {
+                          "const": [
+                            "automatic_ownership_missing"
+                          ]
+                        }
+                      },
+                      "not": {
+                        "required": [
+                          "ownershipEvidence"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "enum": [
+                        "executed",
+                        "reasserted"
+                      ]
+                    },
+                    "confirmed": {
+                      "const": false
+                    },
+                    "dryRun": {
+                      "const": false
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "confirmed"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "accepted",
+                    "status",
+                    "statusName"
+                  ],
+                  "properties": {
+                    "accepted": {
+                      "const": true
+                    },
+                    "status": {
+                      "const": "failed"
+                    },
+                    "statusName": {
+                      "const": "Не выполнено"
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "enum": [
+                        "executed",
+                        "reasserted"
+                      ]
+                    },
+                    "confirmed": {
+                      "const": false
+                    },
+                    "status": {
+                      "const": "failed"
+                    },
+                    "dryRun": {
+                      "const": false
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "confirmed",
+                    "status"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "ownership": {
+                      "const": "unknown"
+                    },
+                    "reasonCode": {
+                      "enum": [
+                        "read_back_failed",
+                        "read_back_not_new"
+                      ]
+                    },
+                    "blockedReasons": {
+                      "contains": {
+                        "enum": [
+                          "read_back_failed",
+                          "read_back_not_new"
+                        ]
+                      }
+                    },
+                    "evidence": {
+                      "properties": {
+                        "confidence": {
+                          "const": "suspect"
+                        },
+                        "ownership": {
+                          "const": "unknown"
+                        },
+                        "reasonCode": {
+                          "enum": [
+                            "read_back_failed",
+                            "read_back_not_new"
+                          ]
+                        },
+                        "blockedReasons": {
+                          "minItems": 1
+                        }
+                      }
+                    },
+                    "readBack": {
+                      "properties": {
+                        "attempted": {
+                          "const": true
+                        },
+                        "matched": {
+                          "const": false
+                        },
+                        "isNewEvidence": {
+                          "const": false
+                        }
+                      },
+                      "required": [
+                        "attempted",
+                        "matched",
+                        "isNewEvidence"
+                      ]
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "const": "skipped"
+                    },
+                    "reasonCode": {
+                      "const": "automatic_on_confirmed"
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "reasonCode"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "actionId": {
+                      "const": "turn_on"
+                    },
+                    "commandSource": {
+                      "const": "automation"
+                    },
+                    "ownership": {
+                      "const": "automation"
+                    },
+                    "preCommandOwnership": {
+                      "const": "automation"
+                    },
+                    "evidence": {
+                      "properties": {
+                        "confidence": {
+                          "const": "confirmed"
+                        },
+                        "effectiveState": {
+                          "const": "on"
+                        },
+                        "ownership": {
+                          "const": "automation"
+                        },
+                        "reasonCode": {
+                          "const": "automatic_on_confirmed"
+                        }
+                      }
+                    },
+                    "preCommandEvidence": {
+                      "properties": {
+                        "confidence": {
+                          "const": "confirmed"
+                        },
+                        "effectiveState": {
+                          "const": "on"
+                        },
+                        "ownership": {
+                          "const": "automation"
+                        },
+                        "reasonCode": {
+                          "const": "automatic_on_confirmed"
+                        }
+                      }
+                    },
+                    "reasonCode": {
+                      "const": "automatic_on_confirmed"
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "const": "executed"
+                    },
+                    "confirmed": {
+                      "const": true
+                    },
+                    "commandSource": {
+                      "const": "manual"
+                    },
+                    "actionId": {
+                      "const": "turn_off"
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "confirmed",
+                    "commandSource",
+                    "actionId"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "ownership": {
+                      "const": "manual"
+                    },
+                    "reasonCode": {
+                      "const": "manual_off_confirmed"
+                    },
+                    "evidence": {
+                      "properties": {
+                        "ownership": {
+                          "const": "manual"
+                        },
+                        "reasonCode": {
+                          "const": "manual_off_confirmed"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "const": "blocked"
+                    },
+                    "reasonCode": {
+                      "const": "automatic_ownership_missing"
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "reasonCode"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "actionId": {
+                      "const": "turn_off"
+                    },
+                    "targetType": {
+                      "const": "light"
+                    },
+                    "commandSource": {
+                      "const": "automation"
+                    },
+                    "ownership": {
+                      "const": "unknown"
+                    },
+                    "blockedReasons": {
+                      "contains": {
+                        "const": "automatic_ownership_missing"
+                      }
+                    },
+                    "evidence": {
+                      "properties": {
+                        "ownership": {
+                          "const": "unknown"
+                        },
+                        "reasonCode": {
+                          "const": "automatic_ownership_missing"
+                        },
+                        "allowedActions": {
+                          "const": []
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "enum": [
+                        "executed",
+                        "reasserted"
+                      ]
+                    },
+                    "dryRun": {
+                      "const": false
+                    }
+                  },
+                  "required": [
+                    "decision"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "decisionAt",
+                    "commandSent",
+                    "commandSentAt",
+                    "confirmationWindowMs",
+                    "preCommandEvidenceRevision",
+                    "preCommandEvidence",
+                    "preCommandOwnership",
+                    "readBack"
+                  ],
+                  "properties": {
+                    "commandSent": {
+                      "const": true
+                    },
+                    "readBack": {
+                      "required": [
+                        "attempted",
+                        "targetId",
+                        "matched",
+                        "observedAt",
+                        "commandRequestId",
+                        "evidenceSequence",
+                        "isNewEvidence",
+                        "evidenceRevision"
+                      ],
+                      "properties": {
+                        "attempted": {
+                          "const": true
+                        },
+                        "observedAt": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "const": "reasserted"
+                    },
+                    "confirmed": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "confirmed"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "commandSource": {
+                      "const": "automation"
+                    },
+                    "ownership": {
+                      "const": "automation"
+                    },
+                    "reasonCode": {
+                      "const": "reasserted_light_on"
+                    },
+                    "preCommandEvidence": {
+                      "properties": {
+                        "reportedState": {
+                          "const": "on"
+                        },
+                        "effectiveState": {
+                          "const": "unknown"
+                        },
+                        "confidence": {
+                          "const": "suspect"
+                        },
+                        "ownership": {
+                          "const": "unknown"
+                        },
+                        "reassertPolicy": {
+                          "const": "light_turn_on"
+                        },
+                        "allowedActions": {
+                          "const": [
+                            "turn_on"
+                          ]
+                        },
+                        "blockedReasons": {
+                          "const": []
+                        },
+                        "reassertBudget": {
+                          "const": 1
+                        }
+                      }
+                    },
+                    "evidence": {
+                      "properties": {
+                        "confidence": {
+                          "const": "confirmed"
+                        },
+                        "effectiveState": {
+                          "const": "on"
+                        },
+                        "ownership": {
+                          "const": "automation"
+                        },
+                        "reassertPolicy": {
+                          "const": "none"
+                        },
+                        "reassertBudget": {
+                          "const": 0
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "const": "reasserted"
+                    },
+                    "confirmed": {
+                      "const": false
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "confirmed"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "commandSource": {
+                      "const": "automation"
+                    },
+                    "ownership": {
+                      "const": "unknown"
+                    },
+                    "reasonCode": {
+                      "enum": [
+                        "read_back_failed",
+                        "read_back_not_new"
+                      ]
+                    },
+                    "preCommandEvidence": {
+                      "properties": {
+                        "reportedState": {
+                          "const": "on"
+                        },
+                        "effectiveState": {
+                          "const": "unknown"
+                        },
+                        "confidence": {
+                          "const": "suspect"
+                        },
+                        "ownership": {
+                          "const": "unknown"
+                        },
+                        "reassertPolicy": {
+                          "const": "light_turn_on"
+                        },
+                        "allowedActions": {
+                          "const": [
+                            "turn_on"
+                          ]
+                        },
+                        "blockedReasons": {
+                          "const": []
+                        },
+                        "reassertBudget": {
+                          "const": 1
+                        }
+                      }
+                    },
+                    "evidence": {
+                      "properties": {
+                        "confidence": {
+                          "const": "suspect"
+                        },
+                        "effectiveState": {
+                          "enum": [
+                            "off",
+                            "unknown",
+                            "unavailable"
+                          ]
+                        },
+                        "ownership": {
+                          "const": "unknown"
+                        },
+                        "reasonCode": {
+                          "enum": [
+                            "read_back_failed",
+                            "read_back_not_new"
+                          ]
+                        },
+                        "blockedReasons": {
+                          "minItems": 1
+                        },
+                        "reassertBudget": {
+                          "const": 0
+                        }
+                      }
+                    },
+                    "readBack": {
+                      "properties": {
+                        "attempted": {
+                          "const": true
+                        },
+                        "matched": {
+                          "const": false
+                        },
+                        "isNewEvidence": {
+                          "const": false
+                        }
+                      },
+                      "required": [
+                        "attempted",
+                        "matched",
+                        "isNewEvidence"
+                      ]
+                    },
+                    "blockedReasons": {
+                      "contains": {
+                        "enum": [
+                          "read_back_failed",
+                          "read_back_not_new"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "enum": [
+                        "executed",
+                        "reasserted"
+                      ]
+                    },
+                    "commandSource": {
+                      "const": "manual"
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "commandSource"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "ownership": {
+                      "enum": [
+                        "manual",
+                        "unknown"
+                      ]
+                    },
+                    "evidence": {
+                      "properties": {
+                        "ownership": {
+                          "enum": [
+                            "manual",
+                            "unknown"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "const": "executed"
+                    },
+                    "confirmed": {
+                      "const": true
+                    },
+                    "commandSource": {
+                      "const": "manual"
+                    },
+                    "actionId": {
+                      "const": "turn_on"
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "confirmed",
+                    "commandSource",
+                    "actionId"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "ownership": {
+                      "const": "manual"
+                    },
+                    "reasonCode": {
+                      "const": "manual_state_confirmed"
+                    },
+                    "evidence": {
+                      "properties": {
+                        "ownership": {
+                          "const": "manual"
+                        },
+                        "reasonCode": {
+                          "const": "manual_state_confirmed"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "enum": [
+                        "executed",
+                        "reasserted"
+                      ]
+                    },
+                    "confirmed": {
+                      "const": false
+                    },
+                    "reasonCode": {
+                      "enum": [
+                        "read_back_failed",
+                        "read_back_not_new"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "confirmed",
+                    "reasonCode"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "accepted",
+                    "status",
+                    "statusName",
+                    "readBack"
+                  ],
+                  "properties": {
+                    "accepted": {
+                      "const": true
+                    },
+                    "status": {
+                      "const": "failed"
+                    },
+                    "statusName": {
+                      "const": "Не выполнено"
+                    },
+                    "readBack": {
+                      "required": [
+                        "attempted",
+                        "attempts",
+                        "matched",
+                        "isNewEvidence"
+                      ],
+                      "properties": {
+                        "attempted": {
+                          "const": true
+                        },
+                        "attempts": {
+                          "minimum": 1
+                        },
+                        "matched": {
+                          "const": false
+                        },
+                        "isNewEvidence": {
+                          "const": false
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "commandSource": {
+                      "const": "manual"
+                    }
+                  },
+                  "required": [
+                    "commandSource"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "ownership": {
+                      "enum": [
+                        "manual",
+                        "unknown"
+                      ]
+                    },
+                    "evidence": {
+                      "properties": {
+                        "ownership": {
+                          "enum": [
+                            "manual",
+                            "unknown"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "commandSource": {
+                      "const": "manual"
+                    },
+                    "actionId": {
+                      "const": "turn_off"
+                    }
+                  },
+                  "required": [
+                    "commandSource",
+                    "actionId"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "preCommandOwnership": {
+                      "enum": [
+                        "manual",
+                        "automation",
+                        "unknown"
+                      ]
+                    },
+                    "preCommandEvidence": {
+                      "properties": {
+                        "ownership": {
+                          "enum": [
+                            "manual",
+                            "automation",
+                            "unknown"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "commandSource": {
+                      "const": "manual"
+                    },
+                    "actionId": {
+                      "not": {
+                        "const": "turn_off"
+                      }
+                    }
+                  },
+                  "required": [
+                    "commandSource",
+                    "actionId"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "preCommandOwnership": {
+                      "enum": [
+                        "manual",
+                        "unknown"
+                      ]
+                    },
+                    "preCommandEvidence": {
+                      "properties": {
+                        "ownership": {
+                          "enum": [
+                            "manual",
+                            "unknown"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "enum": [
+                        "executed",
+                        "reasserted"
+                      ]
+                    },
+                    "confirmed": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "confirmed"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "preCommandEvidenceRevision",
+                    "preCommandEvidence"
+                  ],
+                  "properties": {
+                    "readBack": {
+                      "required": [
+                        "observedState",
+                        "observedAt"
+                      ],
+                      "properties": {
+                        "observedAt": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "enum": [
+                        "executed",
+                        "reasserted"
+                      ]
+                    },
+                    "confirmed": {
+                      "const": true
+                    },
+                    "actionId": {
+                      "const": "turn_on"
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "confirmed",
+                    "actionId"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "readBack": {
+                      "properties": {
+                        "observedState": {
+                          "const": "on"
+                        }
+                      }
+                    },
+                    "evidence": {
+                      "properties": {
+                        "effectiveState": {
+                          "const": "on"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "enum": [
+                        "executed",
+                        "reasserted"
+                      ]
+                    },
+                    "confirmed": {
+                      "const": true
+                    },
+                    "actionId": {
+                      "const": "turn_off"
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "confirmed",
+                    "actionId"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "readBack": {
+                      "properties": {
+                        "observedState": {
+                          "const": "off"
+                        }
+                      }
+                    },
+                    "evidence": {
+                      "properties": {
+                        "effectiveState": {
+                          "const": "off"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "const": "executed"
+                    },
+                    "commandSource": {
+                      "const": "automation"
+                    },
+                    "actionId": {
+                      "const": "turn_off"
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "commandSource",
+                    "actionId"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "preCommandOwnership"
+                  ],
+                  "properties": {
+                    "preCommandOwnership": {
+                      "const": "automation"
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "const": "executed"
+                    },
+                    "commandSource": {
+                      "const": "automation"
+                    },
+                    "actionId": {
+                      "const": "turn_off"
+                    },
+                    "confirmed": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "commandSource",
+                    "actionId",
+                    "confirmed"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "ownership": {
+                      "const": "automation"
+                    },
+                    "evidence": {
+                      "properties": {
+                        "ownership": {
+                          "const": "automation"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "const": "executed"
+                    },
+                    "actionId": {
+                      "enum": [
+                        "set_brightness",
+                        "set_adaptive_brightness",
+                        "set_brightness_percent",
+                        "set_color_temperature",
+                        "set_night_light",
+                        "set_rgb_color"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "actionId"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "actionValue"
+                  ],
+                  "properties": {
+                    "targetType": {
+                      "const": "light"
+                    },
+                    "readBack": {
+                      "properties": {
+                        "observedState": {
+                          "const": "on"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "const": "executed"
+                    },
+                    "actionId": {
+                      "enum": [
+                        "set_brightness",
+                        "set_adaptive_brightness",
+                        "set_brightness_percent",
+                        "set_color_temperature",
+                        "set_night_light",
+                        "set_rgb_color"
+                      ]
+                    },
+                    "commandSource": {
+                      "const": "manual"
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "actionId",
+                    "commandSource"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "preCommandOwnership",
+                    "preCommandEvidence"
+                  ],
+                  "properties": {
+                    "targetType": {
+                      "const": "light"
+                    },
+                    "preCommandOwnership": {
+                      "const": "manual"
+                    },
+                    "preCommandEvidence": {
+                      "required": [
+                        "ownershipEvidence"
+                      ],
+                      "properties": {
+                        "reportedState": {
+                          "const": "on"
+                        },
+                        "effectiveState": {
+                          "const": "on"
+                        },
+                        "confidence": {
+                          "enum": [
+                            "fresh",
+                            "confirmed"
+                          ]
+                        },
+                        "ownership": {
+                          "const": "manual"
+                        },
+                        "ownershipSource": {
+                          "const": "manual_command"
+                        },
+                        "reasonCode": {
+                          "enum": [
+                            "manual_state_fresh",
+                            "manual_state_confirmed",
+                            "manual_light_priority"
+                          ]
+                        },
+                        "allowedActions": {
+                          "contains": {
+                            "enum": [
+                              "set_brightness",
+                              "set_adaptive_brightness",
+                              "set_brightness_percent",
+                              "set_color_temperature",
+                              "set_night_light",
+                              "set_rgb_color"
+                            ]
+                          }
+                        },
+                        "blockedReasons": {
+                          "const": []
+                        },
+                        "ownershipEvidence": {
+                          "required": [
+                            "actionId"
+                          ],
+                          "properties": {
+                            "actionId": {
+                              "const": "turn_on"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "const": "executed"
+                    },
+                    "actionId": {
+                      "enum": [
+                        "set_brightness",
+                        "set_adaptive_brightness",
+                        "set_brightness_percent",
+                        "set_color_temperature",
+                        "set_night_light",
+                        "set_rgb_color"
+                      ]
+                    },
+                    "commandSource": {
+                      "const": "automation"
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "actionId",
+                    "commandSource"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "preCommandOwnership",
+                    "preCommandEvidence"
+                  ],
+                  "properties": {
+                    "targetType": {
+                      "const": "light"
+                    },
+                    "preCommandOwnership": {
+                      "const": "automation"
+                    },
+                    "preCommandEvidence": {
+                      "required": [
+                        "ownershipEvidence"
+                      ],
+                      "properties": {
+                        "reportedState": {
+                          "const": "on"
+                        },
+                        "effectiveState": {
+                          "const": "on"
+                        },
+                        "confidence": {
+                          "const": "confirmed"
+                        },
+                        "ownership": {
+                          "const": "automation"
+                        },
+                        "ownershipSource": {
+                          "const": "automation_command"
+                        },
+                        "reasonCode": {
+                          "enum": [
+                            "automatic_on_confirmed",
+                            "reasserted_light_on"
+                          ]
+                        },
+                        "allowedActions": {
+                          "contains": {
+                            "enum": [
+                              "set_brightness",
+                              "set_adaptive_brightness",
+                              "set_brightness_percent",
+                              "set_color_temperature",
+                              "set_night_light",
+                              "set_rgb_color"
+                            ]
+                          }
+                        },
+                        "blockedReasons": {
+                          "const": []
+                        },
+                        "ownershipEvidence": {
+                          "required": [
+                            "actionId"
+                          ],
+                          "properties": {
+                            "actionId": {
+                              "const": "turn_on"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "const": "executed"
+                    },
+                    "confirmed": {
+                      "const": true
+                    },
+                    "actionId": {
+                      "enum": [
+                        "set_brightness",
+                        "set_adaptive_brightness",
+                        "set_brightness_percent",
+                        "set_color_temperature",
+                        "set_night_light",
+                        "set_rgb_color"
+                      ]
+                    },
+                    "commandSource": {
+                      "const": "automation"
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "confirmed",
+                    "actionId",
+                    "commandSource"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "ownership",
+                    "reasonCode",
+                    "evidence"
+                  ],
+                  "properties": {
+                    "ownership": {
+                      "const": "automation"
+                    },
+                    "reasonCode": {
+                      "enum": [
+                        "automatic_on_confirmed",
+                        "reasserted_light_on"
+                      ]
+                    },
+                    "evidence": {
+                      "required": [
+                        "ownershipEvidence"
+                      ],
+                      "properties": {
+                        "reportedState": {
+                          "const": "on"
+                        },
+                        "effectiveState": {
+                          "const": "on"
+                        },
+                        "confidence": {
+                          "const": "confirmed"
+                        },
+                        "ownership": {
+                          "const": "automation"
+                        },
+                        "ownershipSource": {
+                          "const": "automation_command"
+                        },
+                        "reasonCode": {
+                          "enum": [
+                            "automatic_on_confirmed",
+                            "reasserted_light_on"
+                          ]
+                        },
+                        "allowedActions": {
+                          "contains": {
+                            "enum": [
+                              "set_brightness",
+                              "set_adaptive_brightness",
+                              "set_brightness_percent",
+                              "set_color_temperature",
+                              "set_night_light",
+                              "set_rgb_color"
+                            ]
+                          }
+                        },
+                        "blockedReasons": {
+                          "const": []
+                        },
+                        "ownershipEvidence": {
+                          "required": [
+                            "actionId"
+                          ],
+                          "properties": {
+                            "actionId": {
+                              "const": "turn_on"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "const": "executed"
+                    },
+                    "confirmed": {
+                      "const": true
+                    },
+                    "actionId": {
+                      "enum": [
+                        "set_brightness",
+                        "set_adaptive_brightness",
+                        "set_brightness_percent",
+                        "set_color_temperature",
+                        "set_night_light",
+                        "set_rgb_color"
+                      ]
+                    },
+                    "commandSource": {
+                      "const": "manual"
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "confirmed",
+                    "actionId",
+                    "commandSource"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "ownership",
+                    "reasonCode",
+                    "evidence"
+                  ],
+                  "properties": {
+                    "ownership": {
+                      "const": "manual"
+                    },
+                    "reasonCode": {
+                      "const": "manual_state_confirmed"
+                    },
+                    "evidence": {
+                      "required": [
+                        "ownershipEvidence"
+                      ],
+                      "properties": {
+                        "reportedState": {
+                          "const": "on"
+                        },
+                        "effectiveState": {
+                          "const": "on"
+                        },
+                        "confidence": {
+                          "const": "confirmed"
+                        },
+                        "ownership": {
+                          "const": "manual"
+                        },
+                        "ownershipSource": {
+                          "const": "manual_command"
+                        },
+                        "reasonCode": {
+                          "const": "manual_state_confirmed"
+                        },
+                        "allowedActions": {
+                          "contains": {
+                            "enum": [
+                              "set_brightness",
+                              "set_adaptive_brightness",
+                              "set_brightness_percent",
+                              "set_color_temperature",
+                              "set_night_light",
+                              "set_rgb_color"
+                            ]
+                          }
+                        },
+                        "blockedReasons": {
+                          "const": []
+                        },
+                        "ownershipEvidence": {
+                          "required": [
+                            "actionId"
+                          ],
+                          "properties": {
+                            "actionId": {
+                              "const": "turn_on"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "const": "executed"
+                    },
+                    "confirmed": {
+                      "const": true
+                    },
+                    "actionId": {
+                      "enum": [
+                        "set_brightness",
+                        "set_adaptive_brightness",
+                        "set_brightness_percent",
+                        "set_color_temperature",
+                        "set_night_light",
+                        "set_rgb_color"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "confirmed",
+                    "actionId"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "readBack": {
+                      "required": [
+                        "observedState",
+                        "observedValue"
+                      ],
+                      "properties": {
+                        "observedState": {
+                          "const": "on"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "const": "executed"
+                    },
+                    "actionId": {
+                      "enum": [
+                        "set_brightness",
+                        "set_adaptive_brightness",
+                        "set_brightness_percent",
+                        "set_color_temperature",
+                        "set_night_light"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "actionId"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "actionValue": {
+                      "type": "number"
+                    },
+                    "readBack": {
+                      "properties": {
+                        "observedValue": {
+                          "type": "number"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "const": "executed"
+                    },
+                    "actionId": {
+                      "const": "set_rgb_color"
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "actionId"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "actionValue": {
+                      "type": "string"
+                    },
+                    "readBack": {
+                      "properties": {
+                        "observedValue": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "const": "executed"
+                    },
+                    "actionId": {
+                      "enum": [
+                        "set_brightness",
+                        "set_adaptive_brightness",
+                        "set_brightness_percent",
+                        "set_color_temperature",
+                        "set_night_light",
+                        "set_rgb_color"
+                      ]
+                    },
+                    "actionValue": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "actionId",
+                    "actionValue"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "readBack": {
+                      "properties": {
+                        "observedValue": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "const": "executed"
+                    },
+                    "actionId": {
+                      "enum": [
+                        "set_brightness",
+                        "set_adaptive_brightness",
+                        "set_brightness_percent",
+                        "set_color_temperature",
+                        "set_night_light",
+                        "set_rgb_color"
+                      ]
+                    },
+                    "actionValue": {
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "actionId",
+                    "actionValue"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "readBack": {
+                      "properties": {
+                        "observedValue": {
+                          "type": "array"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "const": "executed"
+                    },
+                    "actionId": {
+                      "enum": [
+                        "set_brightness",
+                        "set_adaptive_brightness",
+                        "set_brightness_percent",
+                        "set_color_temperature",
+                        "set_night_light",
+                        "set_rgb_color"
+                      ]
+                    },
+                    "actionValue": {
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "actionId",
+                    "actionValue"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "readBack": {
+                      "properties": {
+                        "observedValue": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "decision": {
+                      "const": "executed"
+                    },
+                    "actionId": {
+                      "enum": [
+                        "set_brightness",
+                        "set_adaptive_brightness",
+                        "set_brightness_percent",
+                        "set_color_temperature",
+                        "set_night_light",
+                        "set_rgb_color"
+                      ]
+                    },
+                    "actionValue": {
+                      "type": "null"
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "actionId",
+                    "actionValue"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "readBack": {
+                      "properties": {
+                        "observedValue": {
+                          "type": "null"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "actionId": {
+                      "const": "set_brightness"
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "actionId"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "actionValue"
+                  ],
+                  "properties": {
+                    "actionValue": {
+                      "$ref": "device-action-value.schema.json#/$defs/lightBrightness"
+                    },
+                    "readBack": {
+                      "properties": {
+                        "observedValue": {
+                          "$ref": "device-action-value.schema.json#/$defs/lightBrightness"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "actionId": {
+                      "const": "set_adaptive_brightness"
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "actionId"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "actionValue"
+                  ],
+                  "properties": {
+                    "actionValue": {
+                      "$ref": "device-action-value.schema.json#/$defs/lightAdaptiveBrightness"
+                    },
+                    "readBack": {
+                      "properties": {
+                        "observedValue": {
+                          "$ref": "device-action-value.schema.json#/$defs/lightAdaptiveBrightness"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "actionId": {
+                      "const": "set_brightness_percent"
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "actionId"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "actionValue"
+                  ],
+                  "properties": {
+                    "actionValue": {
+                      "$ref": "device-action-value.schema.json#/$defs/lightBrightnessPercent"
+                    },
+                    "readBack": {
+                      "properties": {
+                        "observedValue": {
+                          "$ref": "device-action-value.schema.json#/$defs/lightBrightnessPercent"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "actionId": {
+                      "const": "set_color_temperature"
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "actionId"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "actionValue"
+                  ],
+                  "properties": {
+                    "actionValue": {
+                      "$ref": "device-action-value.schema.json#/$defs/lightColorTemperature"
+                    },
+                    "readBack": {
+                      "properties": {
+                        "observedValue": {
+                          "$ref": "device-action-value.schema.json#/$defs/lightColorTemperature"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "actionId": {
+                      "const": "set_night_light"
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "actionId"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "actionValue"
+                  ],
+                  "properties": {
+                    "actionValue": {
+                      "$ref": "device-action-value.schema.json#/$defs/lightNightLight"
+                    },
+                    "readBack": {
+                      "properties": {
+                        "observedValue": {
+                          "$ref": "device-action-value.schema.json#/$defs/lightNightLight"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "actionId": {
+                      "const": "set_rgb_color"
+                    }
+                  },
+                  "required": [
+                    "decision",
+                    "actionId"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "actionValue"
+                  ],
+                  "properties": {
+                    "actionValue": {
+                      "$ref": "device-action-value.schema.json#/$defs/lightRgbHex"
+                    },
+                    "readBack": {
+                      "properties": {
+                        "observedValue": {
+                          "$ref": "device-action-value.schema.json#/$defs/lightRgbHex"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "decision"
+            ],
+            "not": {
+              "properties": {
+                "targetType": {
+                  "const": "light"
+                }
+              },
+              "required": [
+                "targetType"
+              ]
+            }
+          },
+          "then": {
+            "$ref": "device-action-receipt.schema.json#/$defs/fullCore"
+          }
         }
-      }
-    },
-    {
-      "if": { "properties": { "status": { "const": "failed" } } },
-      "then": {
-        "properties": {
-          "confirmed": { "const": false },
-          "statusName": { "const": "Не выполнено" }
-        }
-      }
+      ]
     }
-  ]
+  },
+  "$ref": "#/$defs/legacy"
 }

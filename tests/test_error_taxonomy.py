@@ -35,8 +35,8 @@ ERROR_SCHEMA_PATH = (
     / "v1"
     / "api-error.schema.json"
 )
-CONTRACTS_0_34_0_SHA256 = (
-    "3ff49ffb54b432717c23282664eab5f17e25e98848694eb5d00def11181ccbef"
+CONTRACTS_0_63_0_SHA256 = (
+    "2041465d8f98e9c46c69fa129bc02f8466b60393965040c42d93952eb90ebb33"
 )
 
 
@@ -54,9 +54,9 @@ class ErrorTaxonomyTests(unittest.TestCase):
         asyncio.run(async_preload_error_policies(hass))
         self.assertEqual([error_policies], hass.targets)
 
-    def test_packaged_taxonomy_matches_contracts_0_34_0(self) -> None:
+    def test_packaged_taxonomy_matches_contracts_0_63_0(self) -> None:
         self.assertEqual(
-            CONTRACTS_0_34_0_SHA256,
+            CONTRACTS_0_63_0_SHA256,
             hashlib.sha256(TAXONOMY_PATH.read_bytes()).hexdigest(),
         )
         payload = json.loads(TAXONOMY_PATH.read_text(encoding="utf-8"))
@@ -64,7 +64,8 @@ class ErrorTaxonomyTests(unittest.TestCase):
             {"name": "hausman-hub-error-taxonomy", "version": 1},
             payload["contract"],
         )
-        self.assertEqual(20, len(payload["entries"]))
+        self.assertEqual(21, len(payload["entries"]))
+        self.assertEqual(2, len(payload["detailPolicies"]))
 
     def test_every_policy_builds_one_safe_error_envelope(self) -> None:
         schema = json.loads(ERROR_SCHEMA_PATH.read_text(encoding="utf-8"))

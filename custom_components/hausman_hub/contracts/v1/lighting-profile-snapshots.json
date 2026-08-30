@@ -1,0 +1,15 @@
+{
+  "environment": "non-production-demo",
+  "profiles": [
+    {
+      "source": "configured_profile",
+      "lightingProfileId": "lighting-profile:chandelier-mirror",
+      "profileRevision": "profile.revision.1",
+      "profileTargetIds": [
+        "device_chandelier",
+        "device_mirror"
+      ],
+      "snapshotHash": "sha256:f211d2de16ff7aba79632d33c3a24ae48153b2738b6d10f243c6b2bd84356257"
+    }
+  ]
+}

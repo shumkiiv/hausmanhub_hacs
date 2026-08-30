@@ -51,7 +51,19 @@
       "retryPolicy": "after_refresh",
       "safeMessage": "Состояние изменилось. Обновите данные и повторите действие.",
       "detailsPolicy": "allowlisted",
-      "allowedDetailKeys": ["expectedRevision", "actualRevision"],
+      "allowedDetailKeys": [
+        "expectedRevision",
+        "actualRevision",
+        "detailCode",
+        "state",
+        "recoveryRequired",
+        "operatorRecoveryRequired",
+        "expectedHash",
+        "requestHash",
+        "automaticRetryAllowed",
+        "newUserActionRequired",
+        "freshConfirmationRequired"
+      ],
       "aliases": [{"surface": "voice_receipt_code", "code": "mode_changed"}]
     },
     {
@@ -286,6 +298,19 @@
       ]
     },
     {
+      "code": "not_acceptable",
+      "category": "capability",
+      "httpStatus": 406,
+      "retryable": false,
+      "clientState": "disabled",
+      "recoveryAction": "update_client",
+      "retryPolicy": "never",
+      "safeMessage": "Формат ответа не поддерживается. Обновите клиент.",
+      "detailsPolicy": "discard",
+      "allowedDetailKeys": [],
+      "aliases": []
+    },
+    {
       "code": "internal_error",
       "category": "internal",
       "httpStatus": 500,
@@ -297,6 +322,32 @@
       "detailsPolicy": "discard",
       "allowedDetailKeys": [],
       "aliases": [{"surface": "climate_operation_reason", "code": "internal_error"}]
+    }
+  ],
+  "detailPolicies": [
+    {
+      "baseCode": "conflict",
+      "detailCode": "idempotency_in_progress",
+      "retryable": false,
+      "clientState": "pending",
+      "recoveryAction": "refresh",
+      "retryPolicy": "read_only",
+      "safeMessage": "Команда уже обрабатывается. Обновите состояние, не повторяя действие автоматически.",
+      "automaticRetryAllowed": false,
+      "newUserActionRequired": false,
+      "freshConfirmationRequired": false
+    },
+    {
+      "baseCode": "conflict",
+      "detailCode": "idempotency_key_conflict",
+      "retryable": false,
+      "clientState": "failed",
+      "recoveryAction": "retry",
+      "retryPolicy": "new_user_action",
+      "safeMessage": "Ключ команды уже использован для другого запроса. Запустите действие заново вручную.",
+      "automaticRetryAllowed": false,
+      "newUserActionRequired": true,
+      "freshConfirmationRequired": true
     }
   ]
 }

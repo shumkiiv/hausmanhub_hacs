@@ -1,0 +1,44 @@
+{
+  "contract": {
+    "name": "hausman-hub-device-state-evidence",
+    "version": 1
+  },
+  "targetId": "device_lighting_demo",
+  "reportedState": "off",
+  "effectiveState": "off",
+  "confidence": "confirmed",
+  "ownership": "unknown",
+  "observedAt": 1787911330000,
+  "evidenceRevision": "lighting.evidence.107",
+  "evidenceSequence": 107,
+  "freshUntil": 1787911390000,
+  "freshnessWindowMs": 60000,
+  "ownershipSource": "unknown",
+  "reasonCode": "power_source_ready",
+  "reassertBudget": 0,
+  "reassertPolicy": "none",
+  "allowedActions": [
+    "turn_on"
+  ],
+  "blockedReasons": [],
+  "powerPreparation": {
+    "dependentTargetId": "device_lighting_demo",
+    "dependencyId": "sha256:a91e2650def4229fef71df858914619a38c01aab38cc46eca7e6155da03fc794",
+    "dependencyRevision": "power-dependency.1",
+    "sourceTargetId": "switch_lighting_power",
+    "sourceEvidenceRevision": "power.evidence.201",
+    "sourceEvidenceSequence": 201,
+    "sourceState": "on",
+    "requiredAction": "turn_on",
+    "warmupSeconds": 5,
+    "sourceCommandRequestId": "power-command-202",
+    "sourceCommandSentAt": 1787911323000,
+    "sourceConfirmationWindowMs": 8000,
+    "sourceReadBackAt": 1787911324000,
+    "readyAt": 1787911329000,
+    "proofFreshUntil": 1787911384000,
+    "sourceReceiptId": "sha256:7b16329389694990b8add11d23ba35b3f2136c812b5d9821a4bea9fa888aa550",
+    "sourceReadBackEvidenceRevision": "power.evidence.202-readback",
+    "sourceReadBackEvidenceSequence": 203
+  }
+}

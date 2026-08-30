@@ -504,6 +504,12 @@
       "invalid_heating_lockout_order": "Нижний порог должен быть меньше верхнего: отопление разрешается при более низкой температуре, чем блокируется."
     }
   },
+  "issues": {
+    "light_safety_obligation_lost": {
+      "title": "Automatic light could not be turned off safely",
+      "description": "Hausman did not turn off the light for scenario {scenario_id} because automation authority could not be confirmed after restart. Check the light state and scenario trace manually."
+    }
+  },
   "selector": {
     "mode": {
       "options": {

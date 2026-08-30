@@ -2,37 +2,304 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hausman.local/hausmanhub/contracts/v1/device-action-batch-request.schema.json",
   "title": "HausmanHub device action batch request v1",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["contract", "correlationId", "actions"],
-  "properties": {
-    "contract": {
+  "$ref": "#/$defs/legacy",
+  "$defs": {
+    "legacy": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "version"],
+      "required": ["contract", "correlationId", "actions"],
       "properties": {
-        "name": {"const": "hausman-hub-device-action-batch-request"},
-        "version": {"const": 1}
+        "contract": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "version"],
+          "properties": {
+            "name": {"const": "hausman-hub-device-action-batch-request"},
+            "version": {"const": 1}
+          }
+        },
+        "correlationId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+        "actions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {"$ref": "#/$defs/action"}
+        }
+      },
+      "$defs": {
+        "action": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["targetId", "actionId"],
+          "properties": {
+            "targetId": {"type": "string", "minLength": 1, "maxLength": 128},
+            "actionId": {"type": "string", "minLength": 1, "maxLength": 128},
+            "value": {"type": ["string", "number", "boolean"]}
+          }
+        }
       }
     },
-    "correlationId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
-    "actions": {
-      "type": "array",
-      "minItems": 1,
-      "maxItems": 64,
-      "items": {"$ref": "#/$defs/action"}
-    }
-  },
-  "$defs": {
-    "action": {
+    "action": {"$ref": "#/$defs/legacy/$defs/action"},
+    "full": {
+      "x-hausmanhub-max-dangerous-physical-actions": 1,
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract", "correlationId", "actions"],
+      "properties": {
+        "contract": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "version"],
+          "properties": {
+            "name": {"const": "hausman-hub-device-action-batch-request"},
+            "version": {"const": 1}
+          }
+        },
+        "correlationId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+        "requestId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+        "actions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "contains": {
+            "type": "object",
+            "required": ["actionId"],
+            "properties": {
+              "actionId": {"enum": ["press", "unlock", "open_valve"]}
+            },
+            "not": {
+              "properties": {"dryRun": {"const": true}},
+              "required": ["dryRun"]
+            }
+          },
+          "minContains": 0,
+          "maxContains": 1,
+          "items": {"$ref": "#/$defs/fullAction"}
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "actions": {
+                "contains": {
+                  "not": {
+                    "properties": {"dryRun": {"const": true}},
+                    "required": ["dryRun"]
+                  }
+                }
+              }
+            },
+            "required": ["actions"]
+          },
+          "then": {"required": ["requestId"]}
+        }
+      ]
+    },
+    "fullAction": {
       "type": "object",
       "additionalProperties": false,
       "required": ["targetId", "actionId"],
       "properties": {
         "targetId": {"type": "string", "minLength": 1, "maxLength": 128},
         "actionId": {"type": "string", "minLength": 1, "maxLength": 128},
-        "value": {"type": ["string", "number", "boolean"]}
-      }
+        "value": {
+          "$ref": "device-action-value.schema.json#/$defs/actionValue",
+          "description": "Optional bounded typed action value. Arrays and objects are compared structurally by the server."
+        },
+        "dryRun": {"type": "boolean"},
+        "confirmedByUser": {
+          "type": "boolean",
+          "description": "Explicit user confirmation required before dispatching a dangerous physical batch action."
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
+          "description": "Client-supplied bounded idempotency key. A dangerous physical action reserves the entire immutable full batch under this global key."
+        },
+        "reassertKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
+          "description": "Client-supplied idempotency key. A reasserted receipt must echo this exact key."
+        },
+        "expectedEvidenceRevision": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "expectedEvidenceSequence": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "dependentRequired": {
+        "expectedEvidenceRevision": ["reassertKey", "expectedEvidenceSequence"],
+        "expectedEvidenceSequence": ["reassertKey", "expectedEvidenceRevision"]
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "actionId": {
+                "enum": [
+                  "press",
+                  "turn_on",
+                  "turn_off",
+                  "open_cover",
+                  "close_cover",
+                  "toggle",
+                  "lock",
+                  "unlock",
+                  "media_play",
+                  "media_pause",
+                  "start",
+                  "pause",
+                  "stop",
+                  "return_home",
+                  "open_valve",
+                  "close_valve"
+                ]
+              }
+            },
+            "required": ["actionId"]
+          },
+          "then": { "not": { "required": ["value"] } }
+        },
+        {
+          "if": {
+            "properties": {
+              "actionId": {
+                "enum": ["set_temperature", "set_humidity", "set_value"]
+              }
+            },
+            "required": ["actionId"]
+          },
+          "then": {
+            "required": ["value"],
+            "properties": {
+              "value": { "$ref": "device-action-value.schema.json#/$defs/runtimeNumber" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "actionId": {
+                "enum": ["set_hvac_mode", "set_fan_mode", "set_operation_mode"]
+              }
+            },
+            "required": ["actionId"]
+          },
+          "then": {
+            "required": ["value"],
+            "properties": {
+              "value": { "$ref": "device-action-value.schema.json#/$defs/runtimeString" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "actionId": { "const": "set_position" } },
+            "required": ["actionId"]
+          },
+          "then": {
+            "required": ["value"],
+            "properties": {
+              "value": { "$ref": "device-action-value.schema.json#/$defs/position" }
+            }
+          }
+        },
+        {
+          "if": { "required": ["reassertKey"] },
+          "then": {
+            "required": ["expectedEvidenceRevision", "expectedEvidenceSequence"],
+            "properties": { "actionId": { "const": "turn_on" } },
+            "not": {"properties": {"dryRun": {"const": true}}, "required": ["dryRun"]}
+          }
+        },
+        {
+          "if": { "properties": { "actionId": { "const": "set_brightness" } }, "required": ["actionId"] },
+          "then": {
+            "required": ["value"],
+            "properties": {
+              "value": { "$ref": "device-action-value.schema.json#/$defs/lightBrightness" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "actionId": { "const": "set_adaptive_brightness" } }, "required": ["actionId"] },
+          "then": {
+            "required": ["value"],
+            "properties": {
+              "value": { "$ref": "device-action-value.schema.json#/$defs/lightAdaptiveBrightness" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "actionId": { "const": "set_brightness_percent" } }, "required": ["actionId"] },
+          "then": {
+            "required": ["value"],
+            "properties": {
+              "value": { "$ref": "device-action-value.schema.json#/$defs/lightBrightnessPercent" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "actionId": { "const": "set_color_temperature" } }, "required": ["actionId"] },
+          "then": {
+            "required": ["value"],
+            "properties": {
+              "value": { "$ref": "device-action-value.schema.json#/$defs/lightColorTemperature" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "actionId": { "const": "set_night_light" } }, "required": ["actionId"] },
+          "then": {
+            "required": ["value"],
+            "properties": {
+              "value": { "$ref": "device-action-value.schema.json#/$defs/lightNightLight" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "actionId": { "const": "set_rgb_color" } }, "required": ["actionId"] },
+          "then": {
+            "required": ["value"],
+            "properties": {
+              "value": { "$ref": "device-action-value.schema.json#/$defs/lightRgbHex" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "actionId": { "enum": ["press", "unlock", "open_valve"] }
+            },
+            "required": ["actionId"],
+            "not": {
+              "properties": { "dryRun": { "const": true } },
+              "required": ["dryRun"]
+            }
+          },
+          "then": {
+            "required": ["confirmedByUser", "idempotencyKey"],
+            "properties": {
+              "confirmedByUser": { "const": true }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"actionId": {"const": "toggle"}},
+            "required": ["actionId"]
+          },
+          "then": { "not": {} }
+        }
+      ]
     }
   }
 }

@@ -12,15 +12,20 @@ SOURCE = ",".join(
         "custom_components.hausman_hub.application.water_safety",
         "custom_components.hausman_hub.application.scenario_executor",
         "custom_components.hausman_hub.application.scenario_light_priority",
+        "custom_components.hausman_hub.application.intercom_release_obligation",
         "custom_components.hausman_hub.application.scenario_service",
         "custom_components.hausman_hub.application.climate_deviation_guard",
+        "custom_components.hausman_hub.verified_safety_storage",
     )
 )
 SUITES = (
     "tests.test_water_safety",
     "tests.test_scenario_executor",
+    "tests.test_scenario_light_priority_storage",
+    "tests.test_intercom_release_obligation",
     "tests.test_scenario_service",
     "tests.test_climate_deviation_guard",
+    "tests.test_verified_safety_storage",
 )
 MINIMUM_BRANCH_COVERAGE = 75
 

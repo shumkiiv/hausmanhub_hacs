@@ -127,6 +127,60 @@
             "response_contract": {
               "$ref": "#/$defs/device_action_receipt_contract"
             },
+            "fullProtocol": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "fullAvailable"
+              ],
+              "properties": {
+                "fullAvailable": {
+                  "type": "boolean"
+                },
+                "singleRequestMediaType": {
+                  "const": "application/vnd.hausmanhub.device-action-request.full+json"
+                },
+                "singleResponseMediaType": {
+                  "const": "application/vnd.hausmanhub.device-action-receipt.full+json"
+                },
+                "batchRequestMediaType": {
+                  "const": "application/vnd.hausmanhub.device-action-batch-request.full+json"
+                },
+                "batchResponseMediaType": {
+                  "const": "application/vnd.hausmanhub.device-action-batch-receipt.full+json"
+                },
+                "evidenceContractVersion": {
+                  "const": "1"
+                },
+                "dangerousPolicyVersion": {
+                  "const": "1"
+                }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "fullAvailable": {
+                        "const": true
+                      }
+                    },
+                    "required": [
+                      "fullAvailable"
+                    ]
+                  },
+                  "then": {
+                    "required": [
+                      "singleRequestMediaType",
+                      "singleResponseMediaType",
+                      "batchRequestMediaType",
+                      "batchResponseMediaType",
+                      "evidenceContractVersion",
+                      "dangerousPolicyVersion"
+                    ]
+                  }
+                }
+              ]
+            },
             "feature_matrix_path": {
               "const": "/api/hausman_hub/v1/device-features"
             },

@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import math
 import time
 import uuid
-from collections.abc import Awaitable, Callable, Mapping
-from datetime import datetime, timedelta
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from datetime import datetime, timedelta, timezone
 from datetime import time as datetime_time
 from typing import TYPE_CHECKING, Any
 
@@ -24,12 +25,22 @@ from ..domain.scenarios import (
     ScenarioConditionType,
     ScenarioExecutionBackend,
 )
+from .device_action_protocol import DANGEROUS_ACTION_IDS
 from .scenario_light_priority import (
     MANUAL_LIGHT_PRIORITY_REASON,
     LightAutomationPriority,
+    _state_is_fresh,
+    _reassert_identity,
+    _state_revision,
     skipped_light_receipt,
 )
 from .scenario_node_red import NodeRedBackendError, NodeRedScenarioBackend
+from .light_safety_obligations import (
+    RECONCILE_CONFIRMED,
+    RECONCILE_INVALIDATED,
+    RECONCILE_RETRY,
+    LightSafetyObligations,
+)
 from .scenarios import (
     ScenarioAction,
     ScenarioActionType,
@@ -49,7 +60,88 @@ _DEFAULT_DEVICE_READBACK_WINDOW_SECONDS = 8.0
 _DEFAULT_DEVICE_READBACK_INTERVAL_SECONDS = 0.25
 _CRITICAL_ACTION_DOMAINS = frozenset({"lock", "valve"})
 _UNAVAILABLE_EVIDENCE = frozenset({"unknown", "unavailable"})
+_PRESENCE_ON_VALUES = frozenset(
+    {"1", "true", "on", "home", "occupied", "detected", "present"}
+)
+_PRESENCE_WORDS = (
+    "presence",
+    "motion",
+    "occup",
+    "присутств",
+    "движ",
+)
+
+
+def _trusted_power_state(state: object | None) -> str | None:
+    """Return a power-source state only when its HA evidence is trustworthy."""
+
+    if (
+        state is None
+        or not _state_is_fresh(state)
+        or _state_is_restored_or_cached(state)
+    ):
+        return None
+    value = str(getattr(state, "state", "unknown"))
+    return None if value in _UNAVAILABLE_EVIDENCE else value
+
+
+def _state_is_restored_or_cached(state: object | None) -> bool:
+    if state is None:
+        return False
+    if (
+        getattr(state, "restored", False) is True
+        or getattr(state, "is_restored", False) is True
+        or getattr(state, "assumed_state", False) is True
+        or getattr(state, "is_assumed_state", False) is True
+    ):
+        return True
+    attributes = getattr(state, "attributes", {})
+    if not isinstance(attributes, Mapping):
+        return False
+    return bool(
+        attributes.get("restored") is True
+        or attributes.get("assumed_state") is True
+        or attributes.get("cached") is True
+        or attributes.get("cache") is True
+        or attributes.get("evidence_source") in {"restore", "cache"}
+    )
 _VENDOR_SERVICE_DOMAINS = frozenset({"media_player", "remote"})
+
+
+class ReassertEvidenceChanged(RuntimeError):
+    """The stale-light authority changed before physical dispatch."""
+
+
+def _trigger_asserts_presence(
+    trigger_context: Mapping[str, object] | None,
+    catalog: ScenarioCatalog,
+) -> bool:
+    """Recognize a positive presence event without trusting an arbitrary sensor."""
+
+    if not isinstance(trigger_context, Mapping):
+        return False
+    if trigger_context.get("source") != "device_state":
+        return False
+    new_value = trigger_context.get("new_value")
+    asserted = new_value is True or (
+        isinstance(new_value, (str, int))
+        and str(new_value).strip().casefold() in _PRESENCE_ON_VALUES
+    )
+    target_id = trigger_context.get("target_id")
+    device = catalog.device(target_id) if isinstance(target_id, str) else None
+    if not asserted or device is None:
+        return False
+    text = " ".join(
+        str(value)
+        for value in (
+            getattr(device, "name", ""),
+            getattr(device, "physical_name", ""),
+            getattr(device, "capability_name", ""),
+            getattr(device, "device_type_name", ""),
+            getattr(device, "entity_id", ""),
+        )
+    ).casefold()
+    return any(word in text for word in _PRESENCE_WORDS)
 
 
 def _display_device_name(raw: str) -> str:
@@ -448,6 +540,9 @@ class ScenarioExecutor:
         command_guard: Callable[[str, str, bool], str | None] | None = None,
         vendor_resilience: VendorCircuitBreaker | None = None,
         node_red_backend: NodeRedScenarioBackend | None = None,
+        light_priority: LightAutomationPriority | None = None,
+        light_safety_obligations: LightSafetyObligations | None = None,
+        contextual_dangerous_resolver: Callable[[str, str], bool] | None = None,
     ):
         if not 0.01 <= readback_window_seconds <= 30.0:
             raise ValueError("readback window must be between 0.01 and 30 seconds")
@@ -464,7 +559,9 @@ class ScenarioExecutor:
         self._command_guard = command_guard
         self._vendor_resilience = vendor_resilience
         self._node_red_backend = node_red_backend
-        self._light_priority = LightAutomationPriority()
+        self._light_priority = light_priority or LightAutomationPriority()
+        self._light_safety_obligations = light_safety_obligations
+        self._contextual_dangerous_resolver = contextual_dangerous_resolver
 
     def new_run_id(self) -> str:
         """Generate a unique execution trace id."""
@@ -483,10 +580,22 @@ class ScenarioExecutor:
         *,
         correlation_id: str | None = None,
         dry_run: bool = False,
+        dangerous_authorized: bool = False,
+        force_new_readback: bool = False,
+        automatic_reassert: bool = False,
+        reassert_claim_id: str | None = None,
+        before_dispatch: Callable[[], Awaitable[None]] | None = None,
+        request_id: str | None = None,
+        expected_evidence_revision: str | None = None,
+        expected_evidence_sequence: int | None = None,
+        expected_entity_id: str | None = None,
+        expected_domain: str | None = None,
+        expected_service: str | None = None,
+        contextually_dangerous: bool = False,
     ) -> dict[str, Any]:
         """Execute one allowlisted device action and confirm its HA read-back."""
 
-        request_id = self.new_run_id()
+        request_id = request_id or self.new_run_id()
         correlation_id = correlation_id or request_id
         execution_action_id = f"action_{request_id[:16]}"
         action = ScenarioAction(
@@ -496,8 +605,30 @@ class ScenarioExecutor:
             action_id=action_id,
             value=value,
         )
-        try:
-            receipt = await self._device_action_receipt(
+        is_lighting = self._light_priority.is_lighting_action(action, self._catalog)
+
+        async def _async_before_dispatch() -> None:
+            if before_dispatch is not None:
+                await before_dispatch()
+            if automatic_reassert:
+                valid = (
+                    isinstance(expected_evidence_revision, str)
+                    and type(expected_evidence_sequence) is int
+                    and await self._light_priority.async_validate_reassert(
+                        target_id,
+                        self._catalog,
+                        self._hass,
+                        expected_revision=expected_evidence_revision,
+                        expected_sequence=expected_evidence_sequence,
+                    )
+                )
+                if not valid:
+                    raise ReassertEvidenceChanged(
+                        "stale reassert evidence changed before dispatch"
+                    )
+
+        async def _async_execute_receipt() -> dict[str, Any]:
+            return await self._device_action_receipt(
                 action,
                 {
                     "action_id": execution_action_id,
@@ -505,9 +636,31 @@ class ScenarioExecutor:
                     "status": "pending",
                 },
                 dry_run=dry_run,
+                dangerous_authorized=dangerous_authorized,
+                force_new_readback=force_new_readback,
+                automatic=automatic_reassert,
+                before_dispatch=_async_before_dispatch,
+                reassert_claim_id=reassert_claim_id,
+                authority_lock_held=not dry_run and is_lighting,
+                expected_entity_id=expected_entity_id,
+                expected_domain=expected_domain,
+                expected_service=expected_service,
+                expected_evidence_revision=expected_evidence_revision,
+                expected_evidence_sequence=expected_evidence_sequence,
+                force_contextually_dangerous=contextually_dangerous,
+                command_request_id=request_id,
             )
+
+        try:
+            if not dry_run and is_lighting:
+                async with self._light_priority.authority_lock():
+                    receipt = await _async_execute_receipt()
+            else:
+                receipt = await _async_execute_receipt()
         except VendorServiceUnavailable as error:
             receipt = {"status": "failed", "error": error.code}
+        except ReassertEvidenceChanged:
+            receipt = {"status": "failed", "error": "stale_reassert_evidence"}
         if receipt.get("status") != "completed":
             return {
                 "correlationId": correlation_id,
@@ -575,21 +728,32 @@ class ScenarioExecutor:
                         action_id, param, value
                     )
             read_back = await self._read_back_device(
-                getattr(device, "entity_id", None), action_id, confirmation_value
+                getattr(device, "entity_id", None),
+                action_id,
+                confirmation_value,
+                after_revision=(
+                    _state_revision(self._hass.states.get(device.entity_id))
+                    if force_new_readback and device is not None
+                    else None
+                ),
+                require_new_evidence=force_new_readback,
             )
+        skipped = receipt.get("skipped") is True
         confirmed = read_back["matched"] is True
         observed_state = read_back["observedState"]
         receipt["confirmed"] = confirmed
         receipt["read_back"] = read_back
-        self._light_priority.note_direct_action(
-            target_id,
-            action_id,
-            receipt,
-            self._catalog,
-            self._hass,
-        )
-
-        return {
+        if automatic_reassert:
+            async with self._light_priority.authority_lock():
+                await self._light_priority.async_note_reassert(
+                    target_id,
+                    action_id,
+                    self._catalog,
+                    self._hass,
+                    correlation_id=correlation_id,
+                    confirmed=confirmed,
+                )
+        public_receipt = {
             "correlationId": correlation_id,
             "requestId": request_id,
             "accepted": True,
@@ -607,8 +771,28 @@ class ScenarioExecutor:
             ),
             "confirmationWindowMs": self._confirmation_window_ms,
             "readBack": read_back,
-            "reason": None if confirmed else "state_not_confirmed",
+            "reason": receipt.get("reason")
+            if skipped
+            else None
+            if confirmed
+            else "state_not_confirmed",
         }
+        if skipped:
+            public_receipt["skipped"] = True
+        effective_state = receipt.get("effective_state")
+        if effective_state in {"on", "off", "unknown", "unavailable"}:
+            public_receipt["effectiveState"] = effective_state
+        power_preparation = (
+            receipt.get("power_precondition", {}).get("powerPreparation")
+            if isinstance(receipt.get("power_precondition"), Mapping)
+            else None
+        )
+        if isinstance(power_preparation, Mapping):
+            public_receipt["powerPreparation"] = dict(power_preparation)
+        power_precondition = receipt.get("power_precondition")
+        if isinstance(power_precondition, Mapping):
+            public_receipt["power_precondition"] = dict(power_precondition)
+        return public_receipt
 
     @property
     def _confirmation_window_ms(self) -> int:
@@ -619,6 +803,9 @@ class ScenarioExecutor:
         entity_id: object,
         action_id: str,
         value: object | None,
+        *,
+        after_revision: str | None = None,
+        require_new_evidence: bool = False,
     ) -> dict[str, object]:
         """Poll one bounded HA state window and return explicit evidence."""
 
@@ -646,20 +833,39 @@ class ScenarioExecutor:
                     if self._power_dependency_resolver is not None
                     else {}
                 )
+                power_source_ids = {
+                    dependency.power_source_entity_id
+                    for dependency in dependencies.values()
+                }
+
+                def read_effective_state(requested_entity_id: str) -> str | None:
+                    current = self._hass.states.get(requested_entity_id)
+                    if current is None:
+                        return None
+                    if requested_entity_id in power_source_ids:
+                        return _trusted_power_state(current)
+                    return str(getattr(current, "state", "unknown"))
+
                 effective_state, dependency_status = effective_device_state(
                     entity_id,
                     dependencies,
-                    lambda requested_entity_id: (
-                        str(getattr(current, "state", "unknown"))
-                        if (current := self._hass.states.get(requested_entity_id))
-                        is not None
-                        else None
-                    ),
+                    read_effective_state,
                 )
                 observed_state = effective_state
+                is_new_evidence = (
+                    not require_new_evidence
+                    or (
+                        after_revision is not None
+                        and
+                        (current_revision := _state_revision(state)) is not None
+                        and current_revision != after_revision
+                    )
+                )
                 if (
                     dependency_status is None or not dependency_status.blocks_commands
-                ) and _device_action_confirmed(state, action_id, value):
+                ) and _device_action_confirmed(
+                    state, action_id, value
+                ) and is_new_evidence:
                     matched = True
                     break
             remaining = deadline - loop.time()
@@ -672,6 +878,7 @@ class ScenarioExecutor:
             "observedAt": observed_at,
             "observedState": observed_state,
             "attempts": attempts,
+            "isNewEvidence": matched and after_revision is not None,
         }
 
     async def async_execute(
@@ -715,6 +922,13 @@ class ScenarioExecutor:
                 "receipts": [],
             }
         next_visited = visited_scenarios | ({scenario_id} if scenario_id else set())
+
+        if (
+            not dry_run
+            and self._light_safety_obligations is not None
+            and _trigger_asserts_presence(trigger_context, self._catalog)
+        ):
+            await self._light_safety_obligations.async_cancel_scenario(scenario_id)
 
         power_dependencies = (
             self._power_dependency_resolver()
@@ -852,7 +1066,51 @@ class ScenarioExecutor:
             trigger_context=trigger_context,
             power_dependencies=power_dependencies,
         )
+        source = trigger_context.get("source") if trigger_context else "automatic"
+        automatic_source = source != "manual"
+        forbid_toggle = automatic_source or (
+            definition.execution_backend is ScenarioExecutionBackend.NODE_RED
+        )
+        if (
+            not dry_run
+            and automatic_source
+            and self._light_safety_obligations is not None
+            and isinstance(trigger_context, Mapping)
+            and trigger_context.get("source") in {"device_state", "nested"}
+            and any(
+                action.id in light_priority.light_action_ids
+                and action.action_id == "turn_on"
+                for action in actions
+            )
+        ):
+            # Re-presence cancels every pending light-off in the profile, not
+            # only the source selected by the new branch. This matters when a
+            # restart-mode scenario switches between interchangeable lights.
+            for target_id in sorted(light_priority.light_target_ids):
+                await self._light_safety_obligations.async_cancel(target_id)
+        if (
+            not dry_run
+            and automatic_source
+            and self._light_safety_obligations is not None
+        ):
+            # A new automatic turn-on supersedes an older delayed off for the
+            # same non-light target, for example the shower fan when humidity
+            # rises again during the five-minute run-on window.
+            for target_id in sorted(
+                {
+                    action.target_id
+                    for action in actions
+                    if action.type is ScenarioActionType.DEVICE_ACTION
+                    and action.action_id == "turn_on"
+                    and action.target_id is not None
+                    and not self._light_priority.is_lighting_action(
+                        action, self._catalog
+                    )
+                }
+            ):
+                await self._light_safety_obligations.async_cancel(target_id)
         receipts: list[dict[str, Any]] = []
+        resolved_light_off_action_ids: set[str] = set()
         powered_sources: dict[str, float] = {}
         powered_target_ids: set[str] = set()
         start_ms = int(time.time() * 1000)
@@ -868,6 +1126,17 @@ class ScenarioExecutor:
                 for action in actions
                 if action.id in light_priority.light_action_ids
             ]
+            await self._light_priority.note_results(
+                actions,
+                receipts,
+                light_priority,
+                self._catalog,
+                self._hass,
+                automatic=automatic_source,
+                dry_run=dry_run,
+                scenario_id=scenario_id,
+                run_id=run_id,
+            )
             return {
                 "run_id": run_id,
                 "scenario_id": scenario_id,
@@ -890,9 +1159,72 @@ class ScenarioExecutor:
                 "status": "completed",
             }
 
+        absence_generations: dict[str, str] = {}
         for action_index, action in enumerate(actions):
             if not dry_run and action.type is ScenarioActionType.DELAY:
                 await self._confirm_deferred_device_receipts(receipts)
+                await self._async_resolve_light_off_obligations(
+                    actions[:action_index],
+                    receipts,
+                    resolved_action_ids=resolved_light_off_action_ids,
+                    expected_generations=absence_generations,
+                )
+                await self._light_priority.note_results(
+                    actions[:action_index],
+                    receipts,
+                    light_priority,
+                    self._catalog,
+                    self._hass,
+                    automatic=automatic_source,
+                    dry_run=False,
+                    scenario_id=scenario_id,
+                    run_id=run_id,
+                )
+                armed = await self._async_arm_future_light_offs(
+                    actions,
+                    action_index,
+                    scenario_id=scenario_id,
+                    run_id=run_id,
+                    definition=definition,
+                )
+                if armed is False:
+                    receipts.append(
+                        {
+                            "action_id": action.id,
+                            "type": "delay",
+                            "status": "skipped",
+                            "reason": "unsafe_delayed_off_guard",
+                        }
+                    )
+                    break
+                absence_generations.update(armed)
+            before_dispatch = None
+            if (
+                not dry_run
+                and action.type is ScenarioActionType.DEVICE_ACTION
+                and action.action_id == "turn_off"
+                and action.target_id in absence_generations
+                and self._light_safety_obligations is not None
+                and not await self._light_safety_obligations.async_is_current(
+                    action.target_id, absence_generations[action.target_id]
+                )
+            ):
+                receipts.append(
+                    {
+                        "action_id": action.id,
+                        "type": "device_action",
+                        "status": "skipped",
+                        "reason": "delayed_off_authority_invalidated",
+                    }
+                )
+                continue
+            if action.action_id == "turn_off" and action.target_id in absence_generations:
+                generation = absence_generations[action.target_id]
+
+                async def before_dispatch(target_id: str = action.target_id, expected: str = generation) -> None:
+                    obligations = self._light_safety_obligations
+                    if obligations is None or not await obligations.async_is_current(target_id, expected):
+                        raise ReassertEvidenceChanged("delayed off authority changed before dispatch")
             if (
                 action.id in light_priority.light_action_ids
                 and action.target_id in light_priority.guarded_target_ids
@@ -903,6 +1235,50 @@ class ScenarioExecutor:
                     correlation_id=run_id,
                     dry_run=dry_run,
                 )
+            elif (
+                not dry_run
+                and automatic_source
+                and action.id in light_priority.light_action_ids
+            ):
+                async with self._light_priority.authority_lock():
+                    if await self._light_priority.async_has_manual_claim(
+                        light_priority,
+                        self._catalog,
+                        self._hass,
+                        power_dependencies,
+                    ):
+                        receipt = skipped_light_receipt(
+                            action,
+                            self._catalog,
+                            correlation_id=run_id,
+                            dry_run=False,
+                        )
+                    else:
+                        receipt = await self._execute_action(
+                            action,
+                            run_id,
+                            next_visited,
+                            dry_run=False,
+                            defer_device_readback=True,
+                            powered_sources=dict(powered_sources),
+                            idempotent_actions=(
+                                definition.safety_policy.idempotent_actions
+                            ),
+                            evidence_age_seconds=(
+                                int(time.time() * 1000) - evidence_captured_at_ms
+                            )
+                            / 1000,
+                            max_evidence_age_seconds=(
+                                definition.safety_policy.max_evidence_age_seconds
+                            ),
+                            stop_on_stale_evidence=(
+                                definition.safety_policy.stop_on_stale_evidence
+                            ),
+                            trigger_context=trigger_context,
+                            authority_lock_held=True,
+                            forbid_toggle=forbid_toggle,
+                            before_dispatch=before_dispatch,
+                        )
             else:
                 receipt = await self._execute_action(
                     action,
@@ -923,10 +1299,30 @@ class ScenarioExecutor:
                         definition.safety_policy.stop_on_stale_evidence
                     ),
                     trigger_context=trigger_context,
+                    forbid_toggle=forbid_toggle,
+                    before_dispatch=before_dispatch,
                 )
             receipts.append(receipt)
             if receipt.get("status") == "failed":
                 if not dry_run and powered_target_ids:
+                    await self._confirm_deferred_device_receipts(receipts)
+                    await self._async_resolve_light_off_obligations(
+                        actions[: action_index + 1],
+                        receipts,
+                        resolved_action_ids=resolved_light_off_action_ids,
+                        expected_generations=absence_generations,
+                    )
+                    await self._light_priority.note_results(
+                        actions[: action_index + 1],
+                        receipts,
+                        light_priority,
+                        self._catalog,
+                        self._hass,
+                        automatic=automatic_source,
+                        dry_run=False,
+                        scenario_id=scenario_id,
+                        run_id=run_id,
+                    )
                     cleanup_receipts = await self._async_safety_cleanup_actions(
                         actions[action_index + 1 :],
                         run_id,
@@ -939,6 +1335,7 @@ class ScenarioExecutor:
                         max_evidence_age_seconds=(
                             definition.safety_policy.max_evidence_age_seconds
                         ),
+                        forbid_toggle=forbid_toggle,
                     )
                     receipts.extend(cleanup_receipts)
                 break
@@ -961,16 +1358,23 @@ class ScenarioExecutor:
 
         if not dry_run:
             await self._confirm_deferred_device_receipts(receipts)
+            await self._async_resolve_light_off_obligations(
+                actions,
+                receipts,
+                resolved_action_ids=resolved_light_off_action_ids,
+                expected_generations=absence_generations,
+            )
 
-        source = trigger_context.get("source") if trigger_context else "automatic"
-        self._light_priority.note_results(
+        await self._light_priority.note_results(
             actions,
             receipts,
             light_priority,
             self._catalog,
             self._hass,
-            automatic=source != "manual",
+            automatic=automatic_source,
             dry_run=dry_run,
+            scenario_id=scenario_id,
+            run_id=run_id,
         )
 
         completed = all(r.get("status") == "completed" for r in receipts)
@@ -1014,6 +1418,309 @@ class ScenarioExecutor:
             else "failed",
         }
 
+    async def _async_arm_future_light_offs(
+        self,
+        actions: tuple[ScenarioAction, ...],
+        start_index: int,
+        *,
+        scenario_id: str,
+        run_id: str,
+        definition: ScenarioDefinition,
+    ) -> dict[str, str] | bool:
+        # Only an explicit absence delay creates a durable authority to turn
+        # something off later. Startup, ownership and handoff waits must not
+        # be blocked by absence-guard evidence they do not consume.
+        if (
+            scenario_id in {
+                "system-shower-comfort-controller",
+                "system-tambur-adaptive-controller",
+            }
+            and actions[start_index].id != "absence_wait"
+        ):
+            return {}
+        obligations = self._light_safety_obligations
+        if obligations is None:
+            return {}
+        delay_seconds = 0
+        armed: set[str] = set()
+        guard_entity_ids: tuple[str, ...] = ()
+        guard_evidence: dict[str, str] = {}
+        generations: dict[str, str] = {}
+        if scenario_id in {"system-shower-comfort-controller", "system-tambur-adaptive-controller"}:
+            guard_candidates = (
+                definition.node_red.input_target_ids if definition.node_red is not None else ()
+            )
+            guards: list[str] = []
+            for guard_target_id in guard_candidates:
+                guard_device = self._catalog.device(guard_target_id)
+                if guard_device is None:
+                    continue
+                guard_text = " ".join(
+                    str(value) for value in (
+                        guard_device.name, guard_device.physical_name,
+                        guard_device.capability_name, guard_device.device_type_name,
+                        guard_device.entity_id,
+                    )
+                ).casefold()
+                if any(word in guard_text for word in _PRESENCE_WORDS):
+                    guards.append(guard_device.entity_id)
+            guard_entity_ids = tuple(sorted(set(guards)))
+            for entity_id in guard_entity_ids:
+                state = self._hass.states.get(entity_id)
+                revision = _state_revision(state)
+                if (
+                    str(getattr(state, "state", "unknown")).strip().casefold() != "off"
+                    or not _state_is_fresh(state)
+                    or _state_is_restored_or_cached(state)
+                    or revision is None
+                ):
+                    return False
+                guard_evidence[entity_id] = revision
+        for action in actions[start_index:]:
+            if action.type is ScenarioActionType.DELAY:
+                delay_seconds += action.delay_seconds
+                continue
+            if (
+                delay_seconds <= 0
+                or action.action_id != "turn_off"
+                or action.target_id is None
+                or action.target_id in armed
+            ):
+                continue
+            device = self._catalog.device(action.target_id)
+            if device is None:
+                continue
+            kind = "owned_light"
+            if self._light_priority.is_lighting_action(action, self._catalog):
+                if not self._light_priority.is_owned(device.entity_id, self._hass):
+                    continue
+                revision = self._light_priority.ownership_revision(
+                    device.entity_id, self._hass
+                )
+            elif scenario_id == "system-shower-comfort-controller":
+                allowed = device.action(action.action_id)
+                state = self._hass.states.get(device.entity_id)
+                if (
+                    allowed is None
+                    or allowed.service != "turn_off"
+                    or str(getattr(state, "state", "unknown")) != "on"
+                ):
+                    continue
+                # Home Assistant may recreate the fan state with a new
+                # last_changed value during restart. The durable run-on timer
+                # therefore guards the exact target generation and requires
+                # only that the fan is still on. Presence and humidity plans
+                # cancel this obligation separately before dispatch.
+                revision = None
+                kind = "state_on"
+            else:
+                continue
+            generation = await obligations.async_arm(
+                target_id=action.target_id,
+                entity_id=device.entity_id,
+                scenario_id=scenario_id,
+                run_id=run_id,
+                deadline_ms=(
+                    time.time_ns() // 1_000_000 + delay_seconds * 1000
+                ),
+                ownership_revision=revision,
+                guard_entity_ids=guard_entity_ids,
+                guard_evidence=dict(guard_evidence),
+                kind=kind,
+            )
+            armed.add(action.target_id)
+            if isinstance(generation, str):
+                generations[action.target_id] = generation
+        return generations
+
+    async def async_reconcile_light_obligation(
+        self, record: Mapping[str, object]
+    ) -> str:
+        """Turn off only when restored ownership still matches exactly."""
+
+        target_id = record.get("targetId")
+        entity_id = record.get("entityId")
+        expected_revision = record.get("ownershipRevision")
+        guard_entity_ids = record.get("guardEntityIds")
+        guard_evidence = record.get("guardEvidence")
+        kind = str(record.get("kind") or "owned_light")
+        if not isinstance(target_id, str) or not isinstance(entity_id, str):
+            return RECONCILE_INVALIDATED
+        managed_presence_guard = record.get("scenarioId") in {
+            "system-shower-comfort-controller", "system-tambur-adaptive-controller"
+        }
+        if managed_presence_guard and (
+            not isinstance(guard_entity_ids, list)
+            or not guard_entity_ids
+            or not all(isinstance(item, str) and item for item in guard_entity_ids)
+        ):
+            return RECONCILE_INVALIDATED
+        if managed_presence_guard and (
+            not isinstance(guard_evidence, Mapping)
+            or set(guard_evidence) != set(guard_entity_ids)
+            or not all(isinstance(value, str) and value for value in guard_evidence.values())
+        ):
+            return RECONCILE_INVALIDATED
+        generation_id = record.get("generationId")
+        async with self._light_priority.authority_lock():
+            device = self._catalog.device(target_id)
+            if device is None or device.entity_id != entity_id:
+                return RECONCILE_INVALIDATED
+
+            if kind == "state_on":
+                recovery_action = ScenarioAction(
+                    id=f"recovery_off_{uuid.uuid4().hex[:12]}",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id=target_id,
+                    action_id="turn_off",
+                )
+                allowed = device.action("turn_off")
+                if (
+                    record.get("scenarioId")
+                    != "system-shower-comfort-controller"
+                    or allowed is None
+                    or allowed.service != "turn_off"
+                    or self._light_priority.is_lighting_action(
+                        recovery_action, self._catalog
+                    )
+                ):
+                    return RECONCILE_INVALIDATED
+                # A restored N-1 record has no guard proof. Fail closed and
+                # surface Repairs instead of turning a fan off while somebody
+                # is present.
+                if (
+                    not isinstance(guard_entity_ids, list)
+                    or not guard_entity_ids
+                    or not all(isinstance(item, str) and item for item in guard_entity_ids)
+                ):
+                    return RECONCILE_INVALIDATED
+
+                async def revalidate_state_before_dispatch() -> None:
+                    obligations = self._light_safety_obligations
+                    current_generation = bool(
+                        obligations is not None
+                        and await obligations.async_is_current(
+                            target_id, generation_id
+                        )
+                    )
+                    current_state = self._hass.states.get(entity_id)
+                    guard_states = [self._hass.states.get(item) for item in guard_entity_ids]
+                    if (
+                        not current_generation
+                        or str(getattr(current_state, "state", "unknown")) != "on"
+                        or any(
+                            str(getattr(state, "state", "unknown")).strip().casefold()
+                            != "off"
+                            or _state_is_restored_or_cached(state)
+                            or _state_revision(state) is None
+                            or _state_revision(state) < guard_evidence[item]
+                            for item, state in zip(guard_entity_ids, guard_states, strict=True)
+                        )
+                    ):
+                        raise ReassertEvidenceChanged(
+                            "delayed device state changed before off"
+                        )
+
+                current_state = self._hass.states.get(entity_id)
+                if str(getattr(current_state, "state", "unknown")) == "off":
+                    return RECONCILE_CONFIRMED
+                try:
+                    await revalidate_state_before_dispatch()
+                except ReassertEvidenceChanged:
+                    return RECONCILE_INVALIDATED
+                try:
+                    receipt = await self._device_action_receipt(
+                        recovery_action,
+                        {
+                            "action_id": recovery_action.id,
+                            "correlation_id": str(
+                                record.get("runId") or "restart-recovery"
+                            ),
+                            "type": "device_action",
+                            "status": "pending",
+                        },
+                        automatic=True,
+                        before_dispatch=revalidate_state_before_dispatch,
+                    )
+                except ReassertEvidenceChanged:
+                    return RECONCILE_INVALIDATED
+                return (
+                    RECONCILE_CONFIRMED
+                    if receipt.get("status") == "completed"
+                    and receipt.get("confirmed") is True
+                    else RECONCILE_RETRY
+                )
+
+            if kind != "owned_light":
+                return RECONCILE_INVALIDATED
+
+            async def revalidate_before_dispatch() -> None:
+                obligations = self._light_safety_obligations
+                current_generation = bool(
+                    obligations is not None
+                    and await obligations.async_is_current(
+                        target_id, generation_id
+                    )
+                )
+                current_revision = self._light_priority.ownership_revision(
+                    entity_id, self._hass
+                )
+                if (
+                    not current_generation
+                    or not self._light_priority.is_owned(entity_id, self._hass)
+                    or expected_revision != current_revision
+                    or (
+                        managed_presence_guard
+                        and any(
+                            (state := self._hass.states.get(item)) is None
+                            or str(getattr(state, "state", "unknown")).strip().casefold() != "off"
+                            or _state_is_restored_or_cached(state)
+                            or _state_revision(state) is None
+                            or _state_revision(state) < guard_evidence[item]
+                            for item in guard_entity_ids
+                        )
+                    )
+                ):
+                    raise ReassertEvidenceChanged(
+                        "light ownership changed before delayed off"
+                    )
+
+            try:
+                await revalidate_before_dispatch()
+            except ReassertEvidenceChanged:
+                return RECONCILE_INVALIDATED
+            action = ScenarioAction(
+                id=f"recovery_off_{uuid.uuid4().hex[:12]}",
+                type=ScenarioActionType.DEVICE_ACTION,
+                target_id=target_id,
+                action_id="turn_off",
+            )
+            try:
+                receipt = await self._device_action_receipt(
+                    action,
+                    {
+                        "action_id": action.id,
+                        "correlation_id": str(
+                            record.get("runId") or "restart-recovery"
+                        ),
+                        "type": "device_action",
+                        "status": "pending",
+                    },
+                    automatic=True,
+                    before_dispatch=revalidate_before_dispatch,
+                )
+            except ReassertEvidenceChanged:
+                return RECONCILE_INVALIDATED
+            confirmed = (
+                receipt.get("status") == "completed"
+                and receipt.get("confirmed") is True
+                and receipt.get("skipped") is not True
+            )
+            if confirmed:
+                await self._light_priority.async_clear_ownership(entity_id)
+                return RECONCILE_CONFIRMED
+            return RECONCILE_RETRY
+
     async def _async_safety_cleanup_actions(
         self,
         remaining_actions: tuple[ScenarioAction, ...],
@@ -1024,6 +1731,7 @@ class ScenarioExecutor:
         powered_sources: dict[str, float],
         idempotent_actions: bool,
         max_evidence_age_seconds: int,
+        forbid_toggle: bool = False,
     ) -> list[dict[str, Any]]:
         """Run planned turn-off actions after a later action fails.
 
@@ -1054,6 +1762,7 @@ class ScenarioExecutor:
                 evidence_age_seconds=0.0,
                 max_evidence_age_seconds=max_evidence_age_seconds,
                 stop_on_stale_evidence=False,
+                forbid_toggle=forbid_toggle,
             )
             receipt["safety_cleanup"] = True
             cleanup_receipts.append(receipt)
@@ -1080,6 +1789,9 @@ class ScenarioExecutor:
         max_evidence_age_seconds: int = 300,
         stop_on_stale_evidence: bool = True,
         trigger_context: Mapping[str, object] | None = None,
+        authority_lock_held: bool = False,
+        forbid_toggle: bool = False,
+        before_dispatch: Callable[[], Awaitable[None]] | None = None,
     ) -> dict[str, Any]:
         base = {
             "action_id": action.id,
@@ -1100,7 +1812,13 @@ class ScenarioExecutor:
                     evidence_age_seconds=evidence_age_seconds,
                     max_evidence_age_seconds=max_evidence_age_seconds,
                     stop_on_stale_evidence=stop_on_stale_evidence,
-                    automatic=True,
+                    automatic=(
+                        not isinstance(trigger_context, Mapping)
+                        or trigger_context.get("source") != "manual"
+                    ),
+                    authority_lock_held=authority_lock_held,
+                    forbid_toggle=forbid_toggle,
+                    before_dispatch=before_dispatch,
                 )
             if action.type == ScenarioActionType.DELAY:
                 if not dry_run:
@@ -1138,6 +1856,19 @@ class ScenarioExecutor:
         max_evidence_age_seconds: int = 300,
         stop_on_stale_evidence: bool = True,
         automatic: bool = False,
+        dangerous_authorized: bool = False,
+        force_new_readback: bool = False,
+        before_dispatch: Callable[[], Awaitable[None]] | None = None,
+        expected_entity_id: str | None = None,
+        expected_domain: str | None = None,
+        expected_service: str | None = None,
+        expected_evidence_revision: str | None = None,
+        expected_evidence_sequence: int | None = None,
+        force_contextually_dangerous: bool = False,
+        reassert_claim_id: str | None = None,
+        authority_lock_held: bool = False,
+        command_request_id: str | None = None,
+        forbid_toggle: bool = False,
     ) -> dict[str, Any]:
         if action.target_id is None or action.action_id is None:
             return {
@@ -1157,7 +1888,77 @@ class ScenarioExecutor:
             return {
                 **base,
                 "status": "failed",
-                "error": f"action {action.action_id} is not available for device {action.target_id}",
+                "error": (
+                    f"action {action.action_id} is not available for device "
+                    f"{action.target_id}"
+                ),
+            }
+        if (
+            (expected_entity_id is not None and device.entity_id != expected_entity_id)
+            or (expected_domain is not None and allowed.domain != expected_domain)
+            or (expected_service is not None and allowed.service != expected_service)
+        ):
+            return {
+                **base,
+                "status": "failed",
+                "error": "dispatch_descriptor_changed",
+            }
+        if forbid_toggle and action.action_id == "toggle":
+            observed_state = str(
+                getattr(self._hass.states.get(device.entity_id), "state", "unknown")
+            )
+            receipt = {
+                **base,
+                "status": "completed",
+                "target_id": action.target_id,
+                "domain": allowed.domain,
+                "service": allowed.service,
+                "entity_id": device.entity_id,
+                "skipped": True,
+                "reason": "automatic_toggle_forbidden",
+                "effective_state": observed_state,
+            }
+            if dry_run:
+                receipt["planned"] = True
+                receipt["confirmed"] = None
+            else:
+                receipt["confirmed"] = True
+                receipt["read_back"] = {
+                    "attempted": False,
+                    "matched": True,
+                    "observedAt": None,
+                    "observedState": observed_state,
+                    "attempts": 0,
+                    "isNewEvidence": False,
+                }
+            return receipt
+        is_contextually_dangerous = bool(
+            force_contextually_dangerous
+            or (
+                self._contextual_dangerous_resolver is not None
+                and self._contextual_dangerous_resolver(
+                    action.target_id, action.action_id
+                )
+            )
+        )
+        is_dangerous = (
+            action.action_id in DANGEROUS_ACTION_IDS or is_contextually_dangerous
+        )
+        dispatch_service = (
+            "turn_on"
+            if is_contextually_dangerous and action.action_id == "toggle"
+            else allowed.service
+        )
+        confirmation_action_id = (
+            "turn_on"
+            if is_contextually_dangerous and action.action_id == "toggle"
+            else action.action_id
+        )
+        if is_dangerous and not dry_run and not dangerous_authorized:
+            return {
+                **base,
+                "status": "failed",
+                "error": "dangerous_action_requires_coordinator",
             }
         if self._command_guard is not None:
             guard_error = self._command_guard(
@@ -1171,9 +1972,59 @@ class ScenarioExecutor:
                     "status": "failed",
                     "error": guard_error,
                 }
-        dependency_error = self._power_dependency_error(
-            device.entity_id,
-            powered_sources=powered_sources or {},
+        if (
+            automatic
+            and action.action_id == "turn_off"
+            and self._light_priority.is_lighting_action(
+                action, self._catalog
+            )
+            and self._power_dependency_error(
+                device.entity_id,
+                powered_sources=powered_sources or {},
+            )
+            != "power_source_off"
+            and not self._light_priority.is_owned(device.entity_id, self._hass)
+        ):
+            receipt = {
+                **base,
+                "status": "completed",
+                "target_id": action.target_id,
+                "domain": allowed.domain,
+                "service": allowed.service,
+                "entity_id": device.entity_id,
+                "skipped": True,
+                "reason": "automatic_ownership_missing",
+            }
+            if dry_run:
+                receipt["planned"] = True
+                receipt["confirmed"] = None
+            else:
+                receipt["confirmed"] = True
+                receipt["read_back"] = {
+                    "attempted": False,
+                    "matched": True,
+                    "observedAt": None,
+                    "observedState": str(
+                        getattr(
+                            self._hass.states.get(device.entity_id),
+                            "state",
+                            "unknown",
+                        )
+                    ),
+                    "attempts": 0,
+                    "isNewEvidence": False,
+                }
+            return receipt
+        # An automatic dependency may legitimately be off before a target
+        # turn_on. Let _prepare_power_dependency switch and prove the source
+        # instead of rejecting the target from the stale pre-command snapshot.
+        dependency_error = (
+            self._power_dependency_error(
+                device.entity_id,
+                powered_sources=powered_sources or {},
+            )
+            if action.action_id == "turn_off"
+            else None
         )
         if dependency_error is not None:
             if (
@@ -1195,6 +2046,7 @@ class ScenarioExecutor:
                     receipt["confirmed"] = None
                 else:
                     receipt["confirmed"] = True
+                    receipt["effective_state"] = "off"
                     receipt["read_back"] = {
                         "attempted": False,
                         "matched": True,
@@ -1258,11 +2110,85 @@ class ScenarioExecutor:
                     return {**base, "status": "failed", "error": error}
             service_data[param] = normalized
             confirmation_value = normalized
+
+        # A stale automatic light may be reasserted only after the durable
+        # authority claim succeeds. Keep this check before power preparation so
+        # an exhausted budget cannot switch an upstream source on as a side
+        # effect of a rejected target command.
+        current = self._hass.states.get(device.entity_id)
+        pre_command_revision = _state_revision(current)
+        stale_automatic_turn_on = bool(
+            automatic
+            and not dry_run
+            and allowed.domain == "light"
+            and action.action_id == "turn_on"
+            and current is not None
+            and str(getattr(current, "state", "unknown")) == "on"
+            and not _state_is_fresh(current)
+            and not self._light_priority.is_owned(device.entity_id, self._hass)
+        )
+        reassert_identity = None
+        if stale_automatic_turn_on:
+            claim = (
+                self._light_priority._async_claim_stale_reassert_unlocked
+                if authority_lock_held
+                else self._light_priority.async_claim_stale_reassert
+            )
+            if not await claim(
+                action.target_id,
+                self._catalog,
+                self._hass,
+                claim_id=reassert_claim_id,
+            ):
+                return {
+                    **base,
+                    "status": "failed",
+                    "error": "reassert_budget_exhausted",
+                }
+            reassert_identity = _reassert_identity(current)
+            if reassert_identity is None:
+                return {
+                    **base,
+                    "status": "failed",
+                    "error": "stale_reassert_evidence",
+                }
+            if not await self._light_priority.async_validate_reassert(
+                action.target_id,
+                self._catalog,
+                self._hass,
+                expected_revision=reassert_identity[0],
+                expected_sequence=reassert_identity[1],
+            ):
+                return {
+                    **base,
+                    "status": "failed",
+                    "error": "stale_reassert_evidence",
+                }
+        elif automatic and not dry_run and expected_evidence_revision is not None:
+            # The direct API supplies the same durable evidence identity. It is
+            # revalidated here even when the target no longer looks stale.
+            if (
+                type(expected_evidence_sequence) is not int
+                or not await self._light_priority.async_validate_reassert(
+                    action.target_id,
+                    self._catalog,
+                    self._hass,
+                    expected_revision=expected_evidence_revision,
+                    expected_sequence=expected_evidence_sequence,
+                )
+            ):
+                return {
+                    **base,
+                    "status": "failed",
+                    "error": "stale_reassert_evidence",
+                }
+
         power_error, power_precondition, _prepared_sources = (
             await self._prepare_power_dependency(
                 device.entity_id,
                 powered_sources=powered_sources or {},
                 dry_run=dry_run,
+                request_id=command_request_id or str(base.get("correlation_id") or action.id),
             )
         )
         if power_error is not None:
@@ -1273,50 +2199,171 @@ class ScenarioExecutor:
                 **(
                     {"power_precondition": power_precondition}
                     if power_precondition is not None
-                    else {}
+                else {}
                 ),
             }
+        if stale_automatic_turn_on:
+            assert reassert_identity is not None
+            if not await self._light_priority.async_validate_reassert(
+                action.target_id,
+                self._catalog,
+                self._hass,
+                expected_revision=reassert_identity[0],
+                expected_sequence=reassert_identity[1],
+            ):
+                return {
+                    **base,
+                    "status": "failed",
+                    "error": "stale_reassert_evidence",
+                }
         source_was_turned_on = bool(
             power_precondition
             and power_precondition.get("sourceTurnedOn") is True
         )
+        require_new_readback = force_new_readback or (
+            not dry_run
+            and (allowed.domain == "light" or is_contextually_dangerous)
+            and pre_command_revision is not None
+        )
+        if (
+            stale_automatic_turn_on
+        ):
+            require_new_readback = True
         if idempotent_actions and not dry_run and not source_was_turned_on:
-            current = self._hass.states.get(device.entity_id)
             if current is not None and _device_action_confirmed(
-                current, action.action_id, confirmation_value
+                current, confirmation_action_id, confirmation_value
             ):
-                observed_state = str(getattr(current, "state", "unknown"))
+                if (
+                    allowed.domain == "light"
+                    and action.action_id == "turn_on"
+                    and not _state_is_fresh(current)
+                    and not self._light_priority.is_owned(device.entity_id, self._hass)
+                ):
+                    require_new_readback = True
+                else:
+                    observed_state = str(getattr(current, "state", "unknown"))
+                    return {
+                        **base,
+                        "status": "completed",
+                        "target_id": action.target_id,
+                        "domain": allowed.domain,
+                        "service": allowed.service,
+                        "entity_id": device.entity_id,
+                        "confirmed": True,
+                        "skipped": True,
+                        "reason": "already_in_target_state",
+                        **(
+                            {"power_precondition": power_precondition}
+                            if power_precondition is not None
+                            else {}
+                        ),
+                        "read_back": {
+                            "attempted": False,
+                            "matched": True,
+                            "observedAt": int(time.time() * 1000),
+                            "observedState": observed_state,
+                            "attempts": 0,
+                            "isNewEvidence": False,
+                        },
+                        "effective_state": observed_state,
+                    }
+        if not dry_run:
+            current_device = self._catalog.device(action.target_id)
+            current_allowed = (
+                current_device.action(action.action_id)
+                if current_device is not None
+                else None
+            )
+            if (
+                current_device is None
+                or current_allowed is None
+                or current_device.entity_id != device.entity_id
+                or current_allowed.domain != allowed.domain
+                or current_allowed.service != allowed.service
+            ):
                 return {
                     **base,
-                    "status": "completed",
-                    "target_id": action.target_id,
-                    "domain": allowed.domain,
-                    "service": allowed.service,
-                    "entity_id": device.entity_id,
-                    "confirmed": True,
-                    "skipped": True,
-                    "reason": "already_in_target_state",
-                    **(
-                        {"power_precondition": power_precondition}
-                        if power_precondition is not None
-                        else {}
-                    ),
-                    "read_back": {
-                        "attempted": False,
-                        "matched": True,
-                        "observedAt": int(time.time() * 1000),
-                        "observedState": observed_state,
-                        "attempts": 0,
-                    },
+                    "status": "failed",
+                    "error": "dispatch_descriptor_changed",
                 }
-        if not dry_run:
-            await self._call_service(allowed.domain, allowed.service, service_data)
+            if before_dispatch is not None:
+                await before_dispatch()
+                current_device = self._catalog.device(action.target_id)
+                current_allowed = (
+                    current_device.action(action.action_id)
+                    if current_device is not None
+                    else None
+                )
+                if (
+                    current_device is None
+                    or current_allowed is None
+                    or current_device.entity_id != device.entity_id
+                    or current_allowed.domain != allowed.domain
+                    or current_allowed.service != allowed.service
+                ):
+                    return {
+                        **base,
+                        "status": "failed",
+                        "error": "dispatch_descriptor_changed",
+                    }
+            if stale_automatic_turn_on:
+                assert reassert_identity is not None
+                if not await self._light_priority.async_validate_reassert(
+                    action.target_id,
+                    self._catalog,
+                    self._hass,
+                    expected_revision=reassert_identity[0],
+                    expected_sequence=reassert_identity[1],
+                ):
+                    return {
+                        **base,
+                        "status": "failed",
+                        "error": "stale_reassert_evidence",
+                    }
+            manual_token: Mapping[str, object] | None = None
+            try:
+                if (
+                    self._light_priority.is_lighting_action(action, self._catalog)
+                    and not automatic
+                ):
+                    begin = (
+                        self._light_priority._async_begin_direct_action_unlocked
+                        if authority_lock_held
+                        else self._light_priority.async_begin_direct_action
+                    )
+                    manual_token = await begin(
+                        action.target_id,
+                        action.action_id,
+                        self._catalog,
+                        self._hass,
+                    )
+                if (
+                    not automatic
+                    and action.action_id == "turn_on"
+                    and self._light_safety_obligations is not None
+                ):
+                    # A direct user turn-on supersedes any older delayed off,
+                    # including the shower fan's restart-safe run-on timer.
+                    await self._light_safety_obligations.async_cancel(
+                        action.target_id
+                    )
+                base["_physical_attempted"] = True
+                await self._call_service(allowed.domain, dispatch_service, service_data)
+            except Exception:
+                if manual_token is not None:
+                    rollback = (
+                        self._light_priority._async_rollback_direct_action_unlocked
+                        if authority_lock_held
+                        else self._light_priority.async_rollback_direct_action
+                    )
+                    await rollback(manual_token)
+                raise
         receipt: dict[str, Any] = {
             **base,
             "status": "completed",
             "target_id": action.target_id,
             "domain": allowed.domain,
-            "service": allowed.service,
+            "service": dispatch_service,
             "entity_id": device.entity_id,
             **(
                 {"power_precondition": power_precondition}
@@ -1330,14 +2377,24 @@ class ScenarioExecutor:
             receipt["confirmed"] = None
             receipt["reason"] = "shadow_plan"
         elif defer_readback:
-            receipt["_readback_action_id"] = action.action_id
+            receipt["_readback_action_id"] = confirmation_action_id
             receipt["_readback_value"] = confirmation_value
+            if require_new_readback:
+                receipt["_readback_after_revision"] = pre_command_revision
+                receipt["_readback_require_new"] = True
         else:
             read_back = await self._read_back_device(
-                device.entity_id, action.action_id, confirmation_value
+                device.entity_id,
+                confirmation_action_id,
+                confirmation_value,
+                after_revision=(
+                    pre_command_revision if require_new_readback else None
+                ),
+                require_new_evidence=require_new_readback,
             )
             receipt["confirmed"] = read_back["matched"] is True
             receipt["read_back"] = read_back
+            receipt["effective_state"] = read_back.get("observedState")
             receipt["reason"] = (
                 None if read_back["matched"] is True else "state_not_confirmed"
             )
@@ -1348,12 +2405,118 @@ class ScenarioExecutor:
             }
         return receipt
 
+    def _target_id_for_entity(self, entity_id: str) -> str:
+        devices = getattr(self._catalog, "devices", {})
+        for device in devices.values():
+            if getattr(device, "entity_id", None) == entity_id:
+                return str(getattr(device, "target_id", entity_id))
+        return entity_id
+
+    def _power_preparation_proof(
+        self,
+        dependent_entity_id: str,
+        dependency: DevicePowerDependency,
+        source_state: object | None,
+        *,
+        request_id: str,
+        source_command_sent_at: int | None,
+        source_read_back_at: int | None,
+        ready_at: int | None,
+    ) -> dict[str, object]:
+        dependent_target_id = self._target_id_for_entity(dependent_entity_id)
+        source_target_id = self._target_id_for_entity(
+            dependency.power_source_entity_id
+        )
+        observed = (
+            getattr(source_state, "last_changed", None)
+            or getattr(source_state, "last_updated", None)
+            if source_state is not None
+            else None
+        )
+        if isinstance(observed, datetime):
+            if observed.tzinfo is None:
+                observed = observed.replace(tzinfo=timezone.utc)
+            sequence = max(0, int(observed.timestamp() * 1000))
+        else:
+            sequence = max(0, int(source_read_back_at or time.time_ns() // 1_000_000))
+        source_revision = _state_revision(source_state) or f"evidence.{sequence}"
+        source_revision = "".join(
+            character
+            if character.isalnum() or character in "._:-"
+            else "."
+            for character in source_revision
+        )[:128] or f"evidence.{sequence}"
+        dependency_revision = "power." + hashlib.sha256(
+            json.dumps(
+                [
+                    dependent_target_id,
+                    source_target_id,
+                    "turn_on",
+                    dependency.policy,
+                    dependency.warmup_seconds,
+                ],
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()[:48]
+        dependency_tuple = [
+            dependent_target_id,
+            source_target_id,
+            "turn_on",
+            dependency_revision,
+        ]
+        dependency_id = "sha256:" + hashlib.sha256(
+            json.dumps(dependency_tuple, separators=(",", ":")).encode()
+        ).hexdigest()
+        source_request_id = "".join(
+            character if character.isalnum() or character in "._:-" else "."
+            for character in request_id
+        )[:128]
+        if not source_request_id or not source_request_id[0].isalnum():
+            source_request_id = "power." + source_request_id
+        sent_at = max(0, int(source_command_sent_at or source_read_back_at or time.time_ns() // 1_000_000))
+        read_back_at = source_read_back_at
+        ready = ready_at
+        proof_fresh_until = max(
+            sent_at,
+            int(read_back_at or sent_at),
+        ) + 300_000
+        source_state_value = str(getattr(source_state, "state", "unknown"))
+        if source_state_value not in {"off", "on", "unknown", "unavailable"}:
+            source_state_value = "unknown"
+        proof_tuple = {
+            "dependentTargetId": dependent_target_id,
+            "dependencyId": dependency_id,
+            "dependencyRevision": dependency_revision,
+            "sourceTargetId": source_target_id,
+            "sourceEvidenceRevision": source_revision,
+            "sourceEvidenceSequence": sequence,
+            "sourceState": source_state_value,
+            "requiredAction": "turn_on",
+            "warmupSeconds": dependency.warmup_seconds,
+            "sourceCommandRequestId": source_request_id,
+            "sourceCommandSentAt": sent_at,
+            "sourceConfirmationWindowMs": self._confirmation_window_ms,
+            "sourceReadBackAt": read_back_at,
+            "readyAt": ready,
+            "proofFreshUntil": proof_fresh_until,
+        }
+        source_receipt_id = "sha256:" + hashlib.sha256(
+            json.dumps(proof_tuple, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        return {
+            **proof_tuple,
+            "sourceReceiptId": source_receipt_id,
+            "sourceReadBackEvidenceRevision": source_revision if read_back_at is not None else None,
+            "sourceReadBackEvidenceSequence": sequence if read_back_at is not None else None,
+        }
+
     async def _prepare_power_dependency(
         self,
         entity_id: str,
         *,
         powered_sources: Mapping[str, float],
         dry_run: bool,
+        request_id: str,
         visiting: frozenset[str] = frozenset(),
     ) -> tuple[str | None, dict[str, object] | None, frozenset[str]]:
         """Ensure an automatic upstream source is on before a device command."""
@@ -1372,6 +2535,7 @@ class ScenarioExecutor:
             source_entity_id,
             powered_sources=powered_sources,
             dry_run=dry_run,
+            request_id=request_id,
             visiting=visiting | {entity_id},
         )
         precondition: dict[str, object] = {
@@ -1395,29 +2559,114 @@ class ScenarioExecutor:
                 await asyncio.sleep(remaining)
             precondition["waitedSeconds"] = round(remaining, 3) if not dry_run else 0
             precondition["sourceTurnedOnByPreviousAction"] = True
+            if not dry_run:
+                confirmed_source = self._entity_state_object(source_entity_id)
+                if (
+                    confirmed_source is None
+                    or str(getattr(confirmed_source, "state", "unknown")) != "on"
+                    or not _state_is_fresh(confirmed_source)
+                    or _state_is_restored_or_cached(confirmed_source)
+                ):
+                    return "power_source_unavailable", precondition, upstream_sources
+                read_back_at = int(time.time() * 1000)
+                precondition["sourceEvidenceRevision"] = _state_revision(
+                    confirmed_source
+                )
+                precondition["sourceReadBackAt"] = read_back_at
+                precondition["readyAt"] = read_back_at
+            else:
+                confirmed_source = self._entity_state_object(source_entity_id)
+                read_back_at = None
+            precondition["powerPreparation"] = self._power_preparation_proof(
+                entity_id,
+                dependency,
+                confirmed_source,
+                request_id=request_id,
+                source_command_sent_at=None,
+                source_read_back_at=read_back_at,
+                ready_at=read_back_at,
+            )
             return None, precondition, upstream_sources | {source_entity_id}
 
-        state = self._entity_state(source_entity_id)
-        if state == "on":
+        source_state_object = self._entity_state_object(source_entity_id)
+        state = (
+            None
+            if source_state_object is None
+            else str(getattr(source_state_object, "state", "unknown"))
+        )
+        if (
+            state == "on"
+            and _state_is_fresh(source_state_object)
+            and not _state_is_restored_or_cached(source_state_object)
+        ):
             precondition["waitedSeconds"] = 0
+            precondition["sourceEvidenceRevision"] = _state_revision(
+                source_state_object
+            )
+            read_back_at = int(time.time() * 1000)
+            precondition["sourceReadBackAt"] = read_back_at
+            precondition["readyAt"] = read_back_at
+            precondition["powerPreparation"] = self._power_preparation_proof(
+                entity_id,
+                dependency,
+                source_state_object,
+                request_id=request_id,
+                source_command_sent_at=None,
+                source_read_back_at=read_back_at,
+                ready_at=read_back_at,
+            )
             return None, precondition, upstream_sources
         if state in {None, "unknown", "unavailable"}:
+            return "power_source_unavailable", precondition, upstream_sources
+        if (
+            state == "on"
+            and (
+                not _state_is_fresh(source_state_object)
+                or _state_is_restored_or_cached(source_state_object)
+            )
+            and dependency.policy != AUTO_TURN_ON_POLICY
+        ):
             return "power_source_unavailable", precondition, upstream_sources
         if dependency.policy != AUTO_TURN_ON_POLICY:
             return "power_source_off", precondition, upstream_sources
         if dry_run:
             precondition["sourceTurnedOn"] = True
             precondition["waitedSeconds"] = 0
+            precondition["powerPreparation"] = self._power_preparation_proof(
+                entity_id,
+                dependency,
+                source_state_object,
+                request_id=request_id,
+                source_command_sent_at=None,
+                source_read_back_at=None,
+                ready_at=None,
+            )
             return None, precondition, upstream_sources | {source_entity_id}
 
         lock = self._power_source_locks.setdefault(source_entity_id, asyncio.Lock())
         async with lock:
-            state = self._entity_state(source_entity_id)
+            source_state_object = self._entity_state_object(source_entity_id)
+            state = (
+                None
+                if source_state_object is None
+                else str(getattr(source_state_object, "state", "unknown"))
+            )
             source_turned_on = False
-            if state != "on":
+            source_command_sent_at: int | None = None
+            source_is_fresh = _state_is_fresh(source_state_object)
+            source_is_restored = _state_is_restored_or_cached(
+                source_state_object
+            )
+            if (
+                state != "on"
+                or not source_is_fresh
+                or source_is_restored
+            ):
                 if state in {None, "unknown", "unavailable"}:
                     return "power_source_unavailable", precondition, upstream_sources
                 domain = source_entity_id.split(".", 1)[0]
+                previous_revision = _state_revision(source_state_object)
+                source_command_sent_at = int(time.time() * 1000)
                 try:
                     await self._call_service(
                         domain,
@@ -1427,25 +2676,78 @@ class ScenarioExecutor:
                 except Exception:  # source failure must not reach the target command
                     return "power_source_unavailable", precondition, upstream_sources
                 source_turned_on = True
-                if not await self._wait_for_entity_state(source_entity_id, "on"):
+                if not await self._wait_for_entity_state(
+                    source_entity_id,
+                    "on",
+                    after_revision=previous_revision,
+                    require_trusted=True,
+                ):
                     return "power_source_unavailable", precondition, upstream_sources
             wait_seconds = float(dependency.warmup_seconds) if source_turned_on else 0.0
             if wait_seconds > 0:
                 await asyncio.sleep(wait_seconds)
             precondition["sourceTurnedOn"] = source_turned_on
             precondition["waitedSeconds"] = wait_seconds
+            confirmed_source = self._entity_state_object(source_entity_id)
+            if (
+                confirmed_source is None
+                or str(getattr(confirmed_source, "state", "unknown")) != "on"
+                or not _state_is_fresh(confirmed_source)
+                or _state_is_restored_or_cached(confirmed_source)
+            ):
+                return "power_source_unavailable", precondition, upstream_sources
+            precondition["sourceEvidenceRevision"] = _state_revision(
+                confirmed_source
+            )
+            precondition["sourceReadBackAt"] = int(time.time() * 1000)
+            precondition["readyAt"] = int(time.time() * 1000)
+            precondition["powerPreparation"] = self._power_preparation_proof(
+                entity_id,
+                dependency,
+                confirmed_source,
+                request_id=request_id,
+                source_command_sent_at=source_command_sent_at,
+                source_read_back_at=int(precondition["sourceReadBackAt"]),
+                ready_at=int(precondition["readyAt"]),
+            )
             return None, precondition, upstream_sources | {source_entity_id}
 
     def _entity_state(self, entity_id: str) -> str | None:
-        states = getattr(self._hass, "states", None)
-        state = states.get(entity_id) if states is not None else None
+        state = self._entity_state_object(entity_id)
         return None if state is None else str(getattr(state, "state", "unknown"))
 
-    async def _wait_for_entity_state(self, entity_id: str, expected: str) -> bool:
+    def _entity_state_object(self, entity_id: str) -> object | None:
+        states = getattr(self._hass, "states", None)
+        return states.get(entity_id) if states is not None else None
+
+    async def _wait_for_entity_state(
+        self,
+        entity_id: str,
+        expected: str,
+        *,
+        after_revision: str | None = None,
+        require_trusted: bool = False,
+    ) -> bool:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self._readback_window_seconds
         while True:
-            if self._entity_state(entity_id) == expected:
+            state = self._entity_state_object(entity_id)
+            revision = _state_revision(state)
+            if (
+                state is not None
+                and str(getattr(state, "state", "unknown")) == expected
+                and (
+                    after_revision is None
+                    or revision is not None and revision != after_revision
+                )
+                and (
+                    not require_trusted
+                    or (
+                        _state_is_fresh(state)
+                        and not _state_is_restored_or_cached(state)
+                    )
+                )
+            ):
                 return True
             remaining = deadline - loop.time()
             if remaining <= 0:
@@ -1471,6 +2773,11 @@ class ScenarioExecutor:
                 return "on"
             states = getattr(self._hass, "states", None)
             state = states.get(requested_entity_id) if states is not None else None
+            if requested_entity_id in {
+                dependency.power_source_entity_id
+                for dependency in dependencies.values()
+            }:
+                return _trusted_power_state(state)
             return None if state is None else str(getattr(state, "state", "unknown"))
 
         _, status = effective_device_state(entity_id, dependencies, read_state)
@@ -1487,12 +2794,22 @@ class ScenarioExecutor:
         for receipt in receipts:
             action_id = receipt.pop("_readback_action_id", None)
             value = receipt.pop("_readback_value", None)
+            after_revision = receipt.pop("_readback_after_revision", None)
+            require_new = receipt.pop("_readback_require_new", False) is True
             if not isinstance(action_id, str):
                 continue
             pending.append(
                 (
                     receipt,
-                    self._read_back_device(receipt.get("entity_id"), action_id, value),
+                    self._read_back_device(
+                        receipt.get("entity_id"),
+                        action_id,
+                        value,
+                        after_revision=(
+                            after_revision if isinstance(after_revision, str) else None
+                        ),
+                        require_new_evidence=require_new,
+                    ),
                 )
             )
         if not pending:
@@ -1516,7 +2833,63 @@ class ScenarioExecutor:
             confirmed = read_back["matched"] is True
             receipt["confirmed"] = confirmed
             receipt["read_back"] = read_back
+            receipt["effective_state"] = read_back.get("observedState")
             receipt["reason"] = None if confirmed else "state_not_confirmed"
+
+    async def _async_resolve_light_off_obligations(
+        self,
+        actions: Sequence[ScenarioAction],
+        receipts: Sequence[Mapping[str, object]],
+        *,
+        resolved_action_ids: set[str] | None = None,
+        expected_generations: Mapping[str, str] | None = None,
+    ) -> None:
+        obligations = self._light_safety_obligations
+        if obligations is None:
+            return
+        by_action_id = {
+            str(receipt.get("action_id")): receipt for receipt in receipts
+        }
+        for action in actions:
+            if action.action_id != "turn_off" or action.target_id is None:
+                continue
+            if resolved_action_ids is not None and action.id in resolved_action_ids:
+                continue
+            receipt = by_action_id.get(action.id)
+            if receipt is None:
+                continue
+            expected_generation = (expected_generations or {}).get(action.target_id)
+            generation_option = (
+                {"expected_generation": expected_generation}
+                if expected_generation is not None
+                else {}
+            )
+            if receipt.get("status") != "completed":
+                await obligations.async_retry(
+                    action.target_id,
+                    physical_attempted=receipt.get("_physical_attempted") is True,
+                    **generation_option,
+                )
+                if resolved_action_ids is not None:
+                    resolved_action_ids.add(action.id)
+                continue
+            if receipt.get("confirmed") is True:
+                await obligations.async_complete(
+                    action.target_id,
+                    **generation_option,
+                )
+                if resolved_action_ids is not None:
+                    resolved_action_ids.add(action.id)
+                continue
+            read_back = receipt.get("read_back")
+            if isinstance(read_back, Mapping) and read_back.get("attempted") is True:
+                await obligations.async_retry(
+                    action.target_id,
+                    physical_attempted=receipt.get("_physical_attempted") is True,
+                    **generation_option,
+                )
+                if resolved_action_ids is not None:
+                    resolved_action_ids.add(action.id)
 
     async def _run_scenario_receipt(
         self,
@@ -1653,8 +3026,16 @@ class ScenarioExecutor:
     async def async_release_intercom_switch(self, entity_id: str) -> bool:
         """Return the relay to off and confirm the physical HA read-back."""
 
+        before = self._hass.states.get(entity_id)
+        before_revision = _state_revision(before)
         await self._call_service("switch", "turn_off", {"entity_id": entity_id})
-        read_back = await self._read_back_device(entity_id, "turn_off", None)
+        read_back = await self._read_back_device(
+            entity_id,
+            "turn_off",
+            None,
+            after_revision=before_revision,
+            require_new_evidence=True,
+        )
         return read_back["matched"] is True
 
 

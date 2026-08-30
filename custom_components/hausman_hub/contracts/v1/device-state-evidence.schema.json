@@ -1,0 +1,862 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hausmanhub/contracts/v1/device-state-evidence.schema.json",
+  "title": "HausmanHub device state evidence v1",
+  "description": "Optional server-owned evidence snapshot. Raw Home Assistant state is not physical truth by itself.",
+  "$defs": {
+    "lightOnActionSubset": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 7,
+      "uniqueItems": true,
+      "contains": {"const": "turn_off"},
+      "items": {
+        "enum": [
+          "turn_off",
+          "set_brightness",
+          "set_adaptive_brightness",
+          "set_brightness_percent",
+          "set_color_temperature",
+          "set_night_light",
+          "set_rgb_color"
+        ]
+      },
+      "description": "Capability-aware subset of actions supported by this light while it is on. Presence here does not override manual-priority policy for automation commands."
+    }
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "targetId",
+    "reportedState",
+    "effectiveState",
+    "confidence",
+    "ownership",
+    "observedAt",
+    "evidenceRevision",
+    "reasonCode",
+    "reassertPolicy",
+    "allowedActions",
+    "blockedReasons",
+    "freshUntil",
+    "freshnessWindowMs",
+    "ownershipSource",
+    "evidenceSequence",
+    "reassertBudget"
+  ],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-device-state-evidence"},
+        "version": {"const": 1}
+      }
+    },
+    "targetId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable public device target bound to this evidence snapshot."
+    },
+    "lightingProfileId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+      "description": "Optional stable light-profile identity used to bind manual-priority blocker evidence."
+    },
+    "lightingProfileRevision": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+      "description": "Optional stable bounded configured light-profile revision. Manual-priority blocker evidence must carry the revision validated by the runtime."
+    },
+    "reportedState": {
+      "type": ["string", "null"],
+      "enum": ["on", "off", "unknown", "unavailable", null],
+      "description": "The latest raw state reported by Home Assistant. This value alone never proves physical state or manual ownership."
+    },
+    "effectiveState": {
+      "type": "string",
+      "enum": ["on", "off", "unknown", "unavailable"],
+      "description": "The server's effective state after power dependencies, freshness and device evidence are evaluated."
+    },
+    "confidence": {
+      "enum": ["confirmed", "fresh", "suspect", "unavailable"],
+      "description": "Evidence quality: confirmed has matching physical evidence, fresh is recent suitable state evidence, suspect must not be treated as on, unavailable has no usable state."
+    },
+    "ownership": {
+      "enum": ["manual", "automation", "unknown"],
+      "description": "Server attribution of the current light state. Unknown never grants automatic turn-off ownership."
+    },
+    "observedAt": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "Unix epoch time in milliseconds for the observation used in this evidence snapshot; null means no usable observation exists."
+    },
+    "freshUntil": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "Server-owned Unix epoch time in milliseconds until which the observation is considered fresh; null means no freshness deadline is available."
+    },
+    "freshnessWindowMs": {
+      "type": "integer",
+      "minimum": 1000,
+      "maximum": 86400000,
+      "description": "Maximum server-owned freshness window for this target, in milliseconds."
+    },
+    "ownershipSource": {
+      "enum": ["manual_command", "automation_command", "device_report", "unknown"],
+      "description": "Server-owned source used for ownership attribution."
+    },
+    "ownershipEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "receiptId",
+        "requestId",
+        "targetId",
+        "actionId",
+        "commandSentAt",
+        "readBackEvidenceRevision",
+        "readBackEvidenceSequence",
+        "provenanceId"
+      ],
+      "properties": {
+        "receiptId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "requestId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "targetId": {"type": "string", "minLength": 1},
+        "actionId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9._-]{0,63}$"
+        },
+        "commandSentAt": {"type": "integer", "minimum": 0},
+        "readBackEvidenceRevision": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "readBackEvidenceSequence": {"type": "integer", "minimum": 0},
+        "provenanceId": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "SHA-256 of the complete canonical ownership provenance tuple."
+        }
+      },
+      "description": "Server-owned provenance of the command and read-back that established manual or automatic ownership."
+    },
+    "evidenceSequence": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Monotonic server sequence for this evidence snapshot."
+    },
+    "evidenceRevision": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+      "description": "Opaque server revision of the complete evidence snapshot used for the decision."
+    },
+    "reasonCode": {
+      "$ref": "device-state-evidence-reason-code.schema.json#/$defs/openCode",
+      "description": "Machine-readable reason for the evidence classification. Unknown values are opaque and must fail closed."
+    },
+    "reassertPolicy": {
+      "enum": ["none", "light_turn_on"],
+      "description": "Server-owned bounded recovery policy. Only light_turn_on may authorize reasserting a stale light turn_on; none never grants a generic reassert target."
+    },
+    "reassertBudget": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Remaining server-owned bounded reassert attempts for this evidence snapshot."
+    },
+    "powerPreparation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dependentTargetId",
+        "dependencyId",
+        "dependencyRevision",
+        "sourceTargetId",
+        "sourceEvidenceRevision",
+        "sourceEvidenceSequence",
+        "sourceState",
+        "requiredAction",
+        "warmupSeconds",
+        "sourceCommandRequestId",
+        "sourceCommandSentAt",
+        "sourceConfirmationWindowMs",
+        "sourceReadBackAt",
+        "readyAt",
+        "proofFreshUntil",
+        "sourceReceiptId",
+        "sourceReadBackEvidenceRevision",
+        "sourceReadBackEvidenceSequence"
+      ],
+      "properties": {
+        "dependentTargetId": {"type": "string", "minLength": 1},
+        "dependencyId": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "SHA-256 of the canonical dependency tuple: dependent target, source target, required action and dependency revision."
+        },
+        "dependencyRevision": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "sourceTargetId": {"type": "string", "minLength": 1},
+        "sourceEvidenceRevision": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "sourceEvidenceSequence": {"type": "integer", "minimum": 0},
+        "sourceState": {"enum": ["off", "on", "unknown", "unavailable"]},
+        "requiredAction": {"const": "turn_on"},
+        "warmupSeconds": {"type": "integer", "minimum": 0, "maximum": 300},
+        "sourceCommandRequestId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "description": "Request identity of the source power command that produced this preparation proof."
+        },
+        "sourceCommandSentAt": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Unix epoch time in milliseconds when the source power command was sent."
+        },
+        "sourceConfirmationWindowMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 30000,
+          "description": "Maximum interval from the source command to its matching read-back."
+        },
+        "sourceReadBackAt": {"type": ["integer", "null"], "minimum": 0},
+        "readyAt": {"type": ["integer", "null"], "minimum": 0},
+        "proofFreshUntil": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Freshness deadline in milliseconds for using this source-power proof on the dependent command."
+        },
+        "sourceReceiptId": {
+          "type": ["string", "null"],
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "SHA-256 of the canonical source-proof tuple, including dependency identity, source target, action, pre-command evidence, command and read-back identity."
+        },
+        "sourceReadBackEvidenceRevision": {
+          "type": ["string", "null"],
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "sourceReadBackEvidenceSequence": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        }
+      },
+      "description": "Server-owned source-power preparation proof. A dependent light command is allowed only after a new source read-back and warm-up, before proofFreshUntil. Collision-resistant canonical SHA-256 identities bind the configured dependency and completed source proof."
+    },
+    "allowedActions": {
+      "type": "array",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9._-]{0,63}$"
+      },
+      "description": "Server-published action IDs currently safe for this evidence snapshot. Clients must not invent actions."
+    },
+    "blockedReasons": {
+      "type": "array",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "device-state-evidence-reason-code.schema.json#/$defs/openCode"
+      },
+      "description": "Machine-readable reasons why one or more otherwise relevant actions are blocked."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"confidence": {"const": "confirmed"}},
+        "required": ["confidence"]
+      },
+      "then": {
+        "properties": {
+          "reportedState": {"enum": ["on", "off"]},
+          "effectiveState": {"enum": ["on", "off"]},
+          "observedAt": {"type": "integer"}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"confidence": {"const": "fresh"}},
+        "required": ["confidence"]
+      },
+      "then": {
+        "properties": {
+          "reportedState": {"enum": ["on", "off"]},
+          "effectiveState": {"enum": ["on", "off"]},
+          "observedAt": {"type": "integer"}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"confidence": {"const": "suspect"}},
+        "required": ["confidence"]
+      },
+      "then": {
+        "properties": {
+          "effectiveState": {"enum": ["off", "unknown", "unavailable"]},
+          "ownership": {"const": "unknown"},
+          "observedAt": {"type": "integer"},
+          "freshUntil": {"type": "integer"}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"confidence": {"const": "unavailable"}},
+        "required": ["confidence"]
+      },
+      "then": {
+        "properties": {
+          "effectiveState": {"const": "unavailable"},
+          "ownership": {"const": "unknown"},
+          "observedAt": {"const": null},
+          "freshUntil": {"const": null},
+          "allowedActions": {"maxItems": 0},
+          "blockedReasons": {"minItems": 1},
+          "reassertBudget": {"const": 0}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"ownership": {"const": "manual"}},
+        "required": ["ownership"]
+      },
+      "then": {
+        "required": ["ownershipEvidence"],
+        "properties": {
+          "reportedState": {"enum": ["on", "off"]},
+          "effectiveState": {"enum": ["on", "off"]},
+          "confidence": {"enum": ["confirmed", "fresh"]},
+          "freshUntil": {"type": "integer"},
+          "ownershipSource": {"const": "manual_command"},
+          "reasonCode": {
+            "enum": [
+              "manual_state_fresh",
+              "manual_state_confirmed",
+              "manual_light_priority",
+              "manual_off_confirmed"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"ownership": {"const": "automation"}},
+        "required": ["ownership"]
+      },
+      "then": {
+        "required": ["ownershipEvidence"],
+        "properties": {
+          "reportedState": {"enum": ["on", "off"]},
+          "effectiveState": {"enum": ["on", "off"]},
+          "confidence": {"const": "confirmed"},
+          "freshUntil": {"type": "integer"},
+          "ownershipSource": {"const": "automation_command"},
+          "reasonCode": {
+            "enum": [
+              "automatic_on_confirmed",
+              "automatic_off_confirmed",
+              "reasserted_light_on"
+            ]
+          },
+          "blockedReasons": {"maxItems": 0}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"reasonCode": {"const": "manual_state_fresh"}},
+        "required": ["reasonCode"]
+      },
+      "then": {
+        "properties": {
+          "reportedState": {"const": "on"},
+          "effectiveState": {"const": "on"},
+          "confidence": {"const": "fresh"},
+          "ownership": {"const": "manual"},
+          "allowedActions": {"$ref": "#/$defs/lightOnActionSubset"},
+          "blockedReasons": {"const": []}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"reasonCode": {"const": "manual_state_confirmed"}},
+        "required": ["reasonCode"]
+      },
+      "then": {
+        "properties": {
+          "reportedState": {"const": "on"},
+          "effectiveState": {"const": "on"},
+          "confidence": {"const": "confirmed"},
+          "ownership": {"const": "manual"},
+          "allowedActions": {"$ref": "#/$defs/lightOnActionSubset"},
+          "blockedReasons": {"const": []}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"reasonCode": {"const": "manual_light_priority"}},
+        "required": ["reasonCode"]
+      },
+      "then": {
+        "properties": {
+          "reportedState": {"const": "on"},
+          "effectiveState": {"const": "on"},
+          "confidence": {"const": "fresh"},
+          "ownership": {"const": "manual"},
+          "allowedActions": {"$ref": "#/$defs/lightOnActionSubset"},
+          "blockedReasons": {"const": []}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"reasonCode": {"const": "manual_off_confirmed"}},
+        "required": ["reasonCode"]
+      },
+      "then": {
+        "properties": {
+          "reportedState": {"const": "off"},
+          "effectiveState": {"const": "off"},
+          "confidence": {"const": "confirmed"},
+          "ownership": {"const": "manual"},
+          "freshUntil": {"type": "integer"},
+          "ownershipSource": {"const": "manual_command"},
+          "allowedActions": {"const": ["turn_on"]},
+          "blockedReasons": {"const": []}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"reasonCode": {"const": "automatic_on_confirmed"}},
+        "required": ["reasonCode"]
+      },
+      "then": {
+        "properties": {
+          "reportedState": {"const": "on"},
+          "effectiveState": {"const": "on"},
+          "confidence": {"const": "confirmed"},
+          "ownership": {"const": "automation"},
+          "reassertPolicy": {"const": "none"},
+          "allowedActions": {"$ref": "#/$defs/lightOnActionSubset"},
+          "blockedReasons": {"const": []}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"reasonCode": {"const": "device_report_off_confirmed"}},
+        "required": ["reasonCode"]
+      },
+      "then": {
+        "required": ["observedAt", "freshUntil"],
+        "properties": {
+          "reportedState": {"const": "off"},
+          "effectiveState": {"const": "off"},
+          "confidence": {"const": "confirmed"},
+          "ownership": {"const": "unknown"},
+          "observedAt": {"type": "integer"},
+          "freshUntil": {"type": "integer"},
+          "ownershipSource": {"const": "device_report"},
+          "reassertPolicy": {"const": "none"},
+          "allowedActions": {"const": ["turn_on"]},
+          "blockedReasons": {"const": []},
+          "reassertBudget": {"const": 0}
+        },
+        "allOf": [
+          {"not": {"required": ["ownershipEvidence"]}},
+          {"not": {"required": ["powerPreparation"]}}
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {"reasonCode": {"const": "automatic_off_confirmed"}},
+        "required": ["reasonCode"]
+      },
+      "then": {
+        "properties": {
+          "reportedState": {"const": "off"},
+          "effectiveState": {"const": "off"},
+          "confidence": {"const": "confirmed"},
+          "ownership": {"const": "automation"},
+          "reassertPolicy": {"const": "none"},
+          "allowedActions": {"const": ["turn_on"]},
+          "blockedReasons": {"const": []}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"reasonCode": {"const": "reasserted_light_on"}},
+        "required": ["reasonCode"]
+      },
+      "then": {
+        "properties": {
+          "reportedState": {"const": "on"},
+          "effectiveState": {"const": "on"},
+          "confidence": {"const": "confirmed"},
+          "ownership": {"const": "automation"},
+          "reassertPolicy": {"const": "none"},
+          "allowedActions": {"$ref": "#/$defs/lightOnActionSubset"},
+          "blockedReasons": {"const": []}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"reasonCode": {"const": "state_stale"}},
+        "required": ["reasonCode"]
+      },
+      "then": {
+        "properties": {
+          "reportedState": {"const": "on"},
+          "effectiveState": {"const": "unknown"},
+          "confidence": {"const": "suspect"},
+          "ownership": {"const": "unknown"},
+          "observedAt": {"type": "integer"},
+          "freshUntil": {"type": "integer"},
+          "ownershipSource": {"const": "unknown"}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "reasonCode": {"const": "state_stale"},
+          "reassertPolicy": {"const": "light_turn_on"}
+        },
+        "required": ["reasonCode", "reassertPolicy"]
+      },
+      "then": {
+        "properties": {
+          "allowedActions": {"const": ["turn_on"]},
+          "blockedReasons": {"const": []},
+          "reassertBudget": {"const": 1}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "reasonCode": {"const": "state_stale"},
+          "reassertPolicy": {"const": "none"}
+        },
+        "required": ["reasonCode", "reassertPolicy"]
+      },
+      "then": {
+        "properties": {
+          "allowedActions": {"const": []},
+          "blockedReasons": {"contains": {"const": "state_stale"}},
+          "reassertBudget": {"const": 0}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"reassertPolicy": {"const": "light_turn_on"}},
+        "required": ["reassertPolicy"]
+      },
+      "then": {
+        "properties": {
+          "reasonCode": {"const": "state_stale"},
+          "allowedActions": {"const": ["turn_on"]},
+          "blockedReasons": {"const": []},
+          "reassertBudget": {"const": 1}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "reasonCode": {
+            "enum": [
+              "manual_state_fresh",
+              "manual_state_confirmed",
+              "manual_off_confirmed",
+              "automatic_on_confirmed",
+              "automatic_off_confirmed",
+              "device_report_off_confirmed",
+              "power_source_ready",
+              "state_suspect",
+              "power_source_off",
+              "power_source_off_auto_turn_on",
+              "power_source_unavailable",
+              "power_source_unknown",
+              "read_back_failed",
+              "read_back_not_new",
+              "restart_recovery",
+              "reasserted_light_on",
+              "manual_light_priority",
+              "automatic_ownership_missing",
+              "repair_required"
+            ]
+          }
+        },
+        "required": ["reasonCode"]
+      },
+      "then": {
+        "properties": {
+          "reassertPolicy": {"const": "none"},
+          "reassertBudget": {"const": 0}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "reasonCode": {
+            "enum": [
+              "state_suspect",
+              "read_back_failed",
+              "read_back_not_new",
+              "restart_recovery",
+              "repair_required"
+            ]
+          }
+        },
+        "required": ["reasonCode"]
+      },
+      "then": {
+        "properties": {
+          "effectiveState": {"enum": ["off", "unknown", "unavailable"]},
+          "confidence": {"const": "suspect"},
+          "ownership": {"const": "unknown"},
+          "allowedActions": {"const": []},
+          "blockedReasons": {"minItems": 1}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"reasonCode": {"const": "power_source_off"}},
+        "required": ["reasonCode"]
+      },
+      "then": {
+        "properties": {
+          "effectiveState": {"const": "off"},
+          "confidence": {"const": "confirmed"},
+          "ownership": {"const": "unknown"},
+          "observedAt": {"type": "integer"},
+          "allowedActions": {"const": []},
+          "blockedReasons": {"contains": {"const": "power_source_off"}}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"reasonCode": {"const": "power_source_off_auto_turn_on"}},
+        "required": ["reasonCode"]
+      },
+      "then": {
+        "properties": {
+          "reportedState": {"enum": ["on", "off"]},
+          "effectiveState": {"const": "off"},
+          "confidence": {"const": "confirmed"},
+          "ownership": {"const": "unknown"},
+          "observedAt": {"type": "integer"},
+          "freshUntil": {"type": "integer"},
+          "ownershipSource": {"const": "unknown"},
+          "allowedActions": {"const": []},
+          "blockedReasons": {"const": ["power_source_off"]},
+          "powerPreparation": {
+            "properties": {
+              "sourceState": {"const": "off"},
+              "sourceReadBackAt": {"const": null},
+              "readyAt": {"const": null},
+              "sourceReceiptId": {"const": null},
+              "sourceReadBackEvidenceRevision": {"const": null},
+              "sourceReadBackEvidenceSequence": {"const": null}
+            }
+          }
+        },
+        "required": ["powerPreparation"]
+      }
+    },
+    {
+      "if": {
+        "properties": {"reasonCode": {"const": "power_source_ready"}},
+        "required": ["reasonCode"]
+      },
+      "then": {
+        "required": ["powerPreparation"],
+        "properties": {
+          "reportedState": {"enum": ["on", "off"]},
+          "effectiveState": {"const": "off"},
+          "confidence": {"const": "confirmed"},
+          "ownership": {"const": "unknown"},
+          "observedAt": {"type": "integer"},
+          "freshUntil": {"type": "integer"},
+          "ownershipSource": {"const": "unknown"},
+          "reassertPolicy": {"const": "none"},
+          "allowedActions": {"const": ["turn_on"]},
+          "blockedReasons": {"const": []},
+          "reassertBudget": {"const": 0},
+          "powerPreparation": {
+            "properties": {
+              "sourceState": {"const": "on"},
+              "sourceCommandRequestId": {"type": "string"},
+              "sourceCommandSentAt": {"type": "integer"},
+              "sourceReadBackAt": {"type": "integer"},
+              "readyAt": {"type": "integer"},
+              "proofFreshUntil": {"type": "integer"},
+              "sourceReceiptId": {"type": "string"},
+              "sourceReadBackEvidenceRevision": {"type": "string"},
+              "sourceReadBackEvidenceSequence": {"type": "integer"}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"reasonCode": {"const": "power_source_unavailable"}},
+        "required": ["reasonCode"]
+      },
+      "then": {
+        "properties": {
+          "effectiveState": {"const": "unavailable"},
+          "confidence": {"const": "unavailable"},
+          "ownership": {"const": "unknown"},
+          "observedAt": {"const": null},
+          "freshUntil": {"const": null},
+          "allowedActions": {"const": []},
+          "blockedReasons": {"contains": {"const": "power_source_unavailable"}}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"reasonCode": {"const": "power_source_unknown"}},
+        "required": ["reasonCode"]
+      },
+      "then": {
+        "properties": {
+          "effectiveState": {"const": "unknown"},
+          "confidence": {"const": "suspect"},
+          "ownership": {"const": "unknown"},
+          "allowedActions": {"const": []},
+          "blockedReasons": {"contains": {"const": "power_source_unknown"}}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"reasonCode": {"const": "automatic_ownership_missing"}},
+        "required": ["reasonCode"]
+      },
+      "then": {
+        "properties": {
+          "reportedState": {"const": "on"},
+          "effectiveState": {"const": "on"},
+          "confidence": {"const": "fresh"},
+          "ownership": {"const": "unknown"},
+          "observedAt": {"type": "integer"},
+          "freshUntil": {"type": "integer"},
+          "ownershipSource": {"const": "device_report"},
+          "reassertPolicy": {"const": "none"},
+          "allowedActions": {"const": []},
+          "blockedReasons": {"const": ["automatic_ownership_missing"]}
+        },
+        "not": {"required": ["ownershipEvidence"]}
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "blockedReasons": {
+            "contains": {
+              "enum": [
+                "state_stale",
+                "state_suspect",
+                "power_source_off",
+                "power_source_unavailable",
+                "power_source_unknown",
+                "read_back_failed",
+                "read_back_not_new",
+                "automatic_ownership_missing",
+                "repair_required"
+              ]
+            }
+          }
+        },
+        "required": ["blockedReasons"]
+      },
+      "then": {"properties": {"allowedActions": {"maxItems": 0}}}
+    },
+    {
+      "if": {
+        "properties": {
+          "reasonCode": {
+            "not": {
+              "$ref": "device-state-evidence-reason-code.schema.json#/$defs/code"
+            }
+          }
+        },
+        "required": ["reasonCode"]
+      },
+      "then": {
+        "properties": {
+          "effectiveState": {"enum": ["off", "unknown", "unavailable"]},
+          "confidence": {"const": "suspect"},
+          "ownership": {"const": "unknown"},
+          "ownershipSource": {"const": "unknown"},
+          "reassertPolicy": {"const": "none"},
+          "allowedActions": {"const": []},
+          "blockedReasons": {"minItems": 1},
+          "reassertBudget": {"const": 0}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "blockedReasons": {
+            "contains": {
+              "not": {
+                "$ref": "device-state-evidence-reason-code.schema.json#/$defs/code"
+              }
+            }
+          }
+        },
+        "required": ["blockedReasons"]
+      },
+      "then": {
+        "properties": {
+          "effectiveState": {"enum": ["off", "unknown", "unavailable"]},
+          "confidence": {"const": "suspect"},
+          "ownership": {"const": "unknown"},
+          "ownershipSource": {"const": "unknown"},
+          "reassertPolicy": {"const": "none"},
+          "allowedActions": {"const": []},
+          "reassertBudget": {"const": 0}
+        }
+      }
+    }
+  ]
+}

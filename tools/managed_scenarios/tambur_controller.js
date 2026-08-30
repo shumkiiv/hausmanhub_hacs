@@ -103,14 +103,11 @@ if (confidentlyAbsent) {
   }
 } else if (occupied && (hour >= 23 || hour < 9)) {
   branch = 'night_mirror';
-  const mirrorNeedsOn = state(ID.mirror) !== 'on';
-  if (mirrorNeedsOn) {
-    actions.push(switchAction('mirror_on', ID.mirror, 'Подсветка зеркала тамбура', true));
-  }
+  // The explicit idempotent activation keeps the whole light profile behind
+  // the shared manual-priority guard even when the mirror already reports on.
+  actions.push(switchAction('mirror_on', ID.mirror, 'Подсветка зеркала тамбура', true));
   if (state(ID.chandelier) !== 'off') {
-    if (mirrorNeedsOn) {
-      actions.push({id: 'mirror_handoff_wait', type: 'delay', delaySeconds: 1});
-    }
+    actions.push({id: 'mirror_handoff_wait', type: 'delay', delaySeconds: 1});
     actions.push(switchAction('chandelier_off', ID.chandelier, 'Люстра тамбур', false));
   }
 } else if (occupied && hour >= 9 && hour < 23 && sunState === 'above_horizon') {
@@ -165,6 +162,12 @@ if (brightness !== null && kelvin !== null) {
   const temperatureValueMatches = currentKelvin !== null
     && Math.abs(currentKelvin - kelvin) <= 25;
 
+  // Turn-on is deliberately present even when HA currently reports `on`.
+  // Hausman uses it to establish manual priority or confirmed automation
+  // ownership before any brightness/temperature command. The shared executor
+  // also powers and confirms the linked wall switch before this action.
+  actions.push(switchAction('chandelier_on', ID.chandelier, 'Люстра тамбур', true));
+  actions.push({id: 'chandelier_ownership_wait', type: 'delay', delaySeconds: 1});
   if (!chandelierOn || !brightnessValueMatches) {
     actions.push(lightAction('brightness', 'set_brightness_percent', brightness));
   }

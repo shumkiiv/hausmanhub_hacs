@@ -1,0 +1,402 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hausmanhub/contracts/v1/device-state-evidence-reason-code.schema.json",
+  "title": "HausmanHub device state evidence reason-code inventory v1",
+  "description": "Machine-readable reason-code inventory for the optional lighting device truth layer.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "inventoryVersion", "codes"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-device-state-evidence-reason-codes"},
+        "version": {"const": 1}
+      }
+    },
+    "inventoryVersion": {"const": 1},
+    "codes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {"$ref": "#/$defs/codeEntry"}
+    }
+  },
+  "$defs": {
+    "code": {
+      "type": "string",
+      "enum": [
+        "manual_state_fresh",
+        "manual_state_confirmed",
+        "automatic_on_confirmed",
+        "state_stale",
+        "power_source_off",
+        "power_source_off_auto_turn_on",
+        "power_source_ready",
+        "power_source_unavailable",
+        "read_back_failed",
+        "restart_recovery",
+        "reasserted_light_on",
+        "automatic_off_confirmed",
+        "state_suspect",
+        "read_back_not_new",
+        "power_source_unknown",
+        "manual_light_priority",
+        "automatic_ownership_missing",
+        "repair_required",
+        "manual_off_confirmed",
+        "device_report_off_confirmed"
+      ],
+      "description": "Stable reason code. Clients must preserve unknown future codes as opaque values."
+    },
+    "openCode": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9._-]{0,63}$",
+      "description": "Opaque reason code accepted at evidence and receipt boundaries; unknown values must be handled fail-closed."
+    },
+    "confidence": {
+      "enum": ["confirmed", "fresh", "suspect", "unavailable"]
+    },
+    "ownership": {
+      "enum": ["manual", "automation", "unknown"]
+    },
+    "action": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9._-]{0,63}$"
+    },
+    "codeEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "category",
+        "description",
+        "defaultConfidence",
+        "defaultOwnership",
+        "blocked",
+        "allowedActions"
+      ],
+      "properties": {
+        "code": {"$ref": "#/$defs/code"},
+        "category": {
+          "enum": [
+            "state",
+            "freshness",
+            "power",
+            "confirmation",
+            "recovery",
+            "ownership"
+          ]
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "defaultConfidence": {"$ref": "#/$defs/confidence"},
+        "defaultOwnership": {"$ref": "#/$defs/ownership"},
+        "blocked": {"type": "boolean"},
+        "allowedActions": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/action"}
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"code": {"const": "manual_state_fresh"}}},
+          "then": {
+            "properties": {
+              "category": {"const": "state"},
+              "defaultConfidence": {"const": "fresh"},
+              "defaultOwnership": {"const": "manual"},
+              "blocked": {"const": false},
+              "allowedActions": {
+                "const": [
+                  "turn_off",
+                  "set_brightness",
+                  "set_adaptive_brightness",
+                  "set_brightness_percent",
+                  "set_color_temperature",
+                  "set_night_light",
+                  "set_rgb_color"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {"properties": {"code": {"const": "manual_state_confirmed"}}},
+          "then": {
+            "properties": {
+              "category": {"const": "state"},
+              "defaultConfidence": {"const": "confirmed"},
+              "defaultOwnership": {"const": "manual"},
+              "blocked": {"const": false},
+              "allowedActions": {
+                "const": [
+                  "turn_off",
+                  "set_brightness",
+                  "set_adaptive_brightness",
+                  "set_brightness_percent",
+                  "set_color_temperature",
+                  "set_night_light",
+                  "set_rgb_color"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {"properties": {"code": {"const": "manual_light_priority"}}},
+          "then": {
+            "properties": {
+              "category": {"const": "state"},
+              "defaultConfidence": {"const": "fresh"},
+              "defaultOwnership": {"const": "manual"},
+              "blocked": {"const": false},
+              "allowedActions": {
+                "const": [
+                  "turn_off",
+                  "set_brightness",
+                  "set_adaptive_brightness",
+                  "set_brightness_percent",
+                  "set_color_temperature",
+                  "set_night_light",
+                  "set_rgb_color"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {"properties": {"code": {"const": "automatic_on_confirmed"}}},
+          "then": {
+            "properties": {
+              "category": {"const": "state"},
+              "defaultConfidence": {"const": "confirmed"},
+              "defaultOwnership": {"const": "automation"},
+              "blocked": {"const": false},
+              "allowedActions": {
+                "const": [
+                  "turn_off",
+                  "set_brightness",
+                  "set_adaptive_brightness",
+                  "set_brightness_percent",
+                  "set_color_temperature",
+                  "set_night_light",
+                  "set_rgb_color"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {"properties": {"code": {"const": "automatic_off_confirmed"}}},
+          "then": {
+            "properties": {
+              "category": {"const": "state"},
+              "defaultConfidence": {"const": "confirmed"},
+              "defaultOwnership": {"const": "automation"},
+              "blocked": {"const": false},
+              "allowedActions": {"const": ["turn_on"]}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"code": {"const": "reasserted_light_on"}}},
+          "then": {
+            "properties": {
+              "category": {"const": "confirmation"},
+              "defaultConfidence": {"const": "confirmed"},
+              "defaultOwnership": {"const": "automation"},
+              "blocked": {"const": false},
+              "allowedActions": {
+                "const": [
+                  "turn_off",
+                  "set_brightness",
+                  "set_adaptive_brightness",
+                  "set_brightness_percent",
+                  "set_color_temperature",
+                  "set_night_light",
+                  "set_rgb_color"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {"properties": {"code": {"const": "state_stale"}}},
+          "then": {
+            "properties": {
+              "category": {"const": "freshness"},
+              "defaultConfidence": {"const": "suspect"},
+              "defaultOwnership": {"const": "unknown"},
+              "blocked": {"const": true},
+              "allowedActions": {"const": []}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"code": {"const": "power_source_off"}}},
+          "then": {
+            "properties": {
+              "category": {"const": "power"},
+              "defaultConfidence": {"const": "confirmed"},
+              "defaultOwnership": {"const": "unknown"},
+              "blocked": {"const": true},
+              "allowedActions": {"const": []}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"code": {"const": "power_source_off_auto_turn_on"}}},
+          "then": {
+            "properties": {
+              "category": {"const": "power"},
+              "defaultConfidence": {"const": "confirmed"},
+              "defaultOwnership": {"const": "unknown"},
+              "blocked": {"const": true},
+              "allowedActions": {"const": []}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"code": {"const": "power_source_ready"}}},
+          "then": {
+            "properties": {
+              "category": {"const": "power"},
+              "defaultConfidence": {"const": "confirmed"},
+              "defaultOwnership": {"const": "unknown"},
+              "blocked": {"const": false},
+              "allowedActions": {"const": ["turn_on"]}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"code": {"const": "power_source_unavailable"}}},
+          "then": {
+            "properties": {
+              "category": {"const": "power"},
+              "defaultConfidence": {"const": "unavailable"},
+              "defaultOwnership": {"const": "unknown"},
+              "blocked": {"const": true},
+              "allowedActions": {"const": []}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"code": {"const": "power_source_unknown"}}},
+          "then": {
+            "properties": {
+              "category": {"const": "power"},
+              "defaultConfidence": {"const": "suspect"},
+              "defaultOwnership": {"const": "unknown"},
+              "blocked": {"const": true},
+              "allowedActions": {"const": []}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"code": {"const": "read_back_failed"}}},
+          "then": {
+            "properties": {
+              "category": {"const": "confirmation"},
+              "defaultConfidence": {"const": "suspect"},
+              "defaultOwnership": {"const": "unknown"},
+              "blocked": {"const": true},
+              "allowedActions": {"const": []}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"code": {"const": "read_back_not_new"}}},
+          "then": {
+            "properties": {
+              "category": {"const": "confirmation"},
+              "defaultConfidence": {"const": "suspect"},
+              "defaultOwnership": {"const": "unknown"},
+              "blocked": {"const": true},
+              "allowedActions": {"const": []}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"code": {"const": "restart_recovery"}}},
+          "then": {
+            "properties": {
+              "category": {"const": "recovery"},
+              "defaultConfidence": {"const": "suspect"},
+              "defaultOwnership": {"const": "unknown"},
+              "blocked": {"const": true},
+              "allowedActions": {"const": []}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"code": {"const": "state_suspect"}}},
+          "then": {
+            "properties": {
+              "category": {"const": "freshness"},
+              "defaultConfidence": {"const": "suspect"},
+              "defaultOwnership": {"const": "unknown"},
+              "blocked": {"const": true},
+              "allowedActions": {"const": []}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"code": {"const": "automatic_ownership_missing"}}},
+          "then": {
+            "properties": {
+              "category": {"const": "ownership"},
+              "defaultConfidence": {"const": "fresh"},
+              "defaultOwnership": {"const": "unknown"},
+              "blocked": {"const": true},
+              "allowedActions": {"const": []}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"code": {"const": "repair_required"}}},
+          "then": {
+            "properties": {
+              "category": {"const": "recovery"},
+              "defaultConfidence": {"const": "suspect"},
+              "defaultOwnership": {"const": "unknown"},
+              "blocked": {"const": true},
+              "allowedActions": {"const": []}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"code": {"const": "manual_off_confirmed"}}},
+          "then": {
+            "properties": {
+              "category": {"const": "state"},
+              "defaultConfidence": {"const": "confirmed"},
+              "defaultOwnership": {"const": "manual"},
+              "blocked": {"const": false},
+              "allowedActions": {"const": ["turn_on"]}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"code": {"const": "device_report_off_confirmed"}}},
+          "then": {
+            "properties": {
+              "category": {"const": "state"},
+              "defaultConfidence": {"const": "confirmed"},
+              "defaultOwnership": {"const": "unknown"},
+              "blocked": {"const": false},
+              "allowedActions": {"const": ["turn_on"]}
+            }
+          }
+        }
+      ]
+    }
+  }
+}

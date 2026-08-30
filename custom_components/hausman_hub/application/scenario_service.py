@@ -28,6 +28,7 @@ from ..domain.scenarios import (
     _scenario_to_payload,
 )
 from .operation_journal import scenario_operation_receipt
+from .intercom_release_obligation import IntercomReleaseObligation
 from .scenario_node_red import (
     NodeRedBackendError,
     NodeRedScenarioBackend,
@@ -58,6 +59,9 @@ CATALOG_WARMUP_DELAYS_SECONDS = (1.0, 3.0, 8.0)
 CATALOG_WARMUP_MAX_ATTEMPTS = 1 + len(CATALOG_WARMUP_DELAYS_SECONDS)
 SYSTEM_SEED_RETRY_DELAY_SECONDS = 300.0
 CATALOG_REFRESH_TIMEOUT_SECONDS = 2.0
+_RESTART_ONLY_SYSTEM_SCENARIOS = frozenset(
+    {"system-shower-comfort-controller", "system-tambur-adaptive-controller"}
+)
 
 _HEALTH_RECOMMENDATIONS = {
     "missing_device": "restore_device",
@@ -87,6 +91,70 @@ def _bool_or_default(payload: dict[str, Any], key: str, default: bool) -> bool:
     if isinstance(value, str):
         return value.lower() == "true"
     return default
+
+
+def _server_owned_node_red_metadata(
+    definition: ScenarioDefinition, existing: Scenario | None
+) -> ScenarioDefinition:
+    """Keep flow identity/evidence server-owned across scenario mutations."""
+
+    if definition.execution_backend is not ScenarioExecutionBackend.NODE_RED:
+        return definition
+    metadata = definition.node_red
+    if metadata is None:
+        return definition
+    previous = (
+        existing.definition.node_red
+        if existing is not None
+        and existing.definition.execution_backend
+        is ScenarioExecutionBackend.NODE_RED
+        else None
+    )
+    if previous is not None:
+        return replace(
+            definition,
+            node_red=replace(
+                previous,
+                input_target_ids=metadata.input_target_ids,
+            ),
+        )
+    if (
+        metadata.flow_id is not None
+        or metadata.flow_revision != 0
+        or metadata.source_hash is not None
+        or metadata.generated_by is not ScenarioNodeRedGeneratedBy.HAUSMAN
+        or metadata.sync_status is not ScenarioNodeRedSyncStatus.PENDING
+    ):
+        raise ScenarioValidationError(
+            (
+                ScenarioDefinitionViolation(
+                    "Node-RED flow metadata is server-owned; create accepts only inputTargetIds.",
+                    code="node_red_metadata_server_owned",
+                    path="definition.nodeRed",
+                ),
+            )
+        )
+    return replace(
+        definition,
+        node_red=replace(
+            metadata,
+            flow_id=None,
+            flow_revision=0,
+            source_hash=None,
+            generated_by=ScenarioNodeRedGeneratedBy.HAUSMAN,
+            sync_status=ScenarioNodeRedSyncStatus.PENDING,
+        ),
+    )
+
+
+def _enforce_system_execution_mode(
+    scenario_id: str, definition: ScenarioDefinition
+) -> ScenarioDefinition:
+    """System safety controllers always replace an obsolete delayed run."""
+
+    if scenario_id in _RESTART_ONLY_SYSTEM_SCENARIOS:
+        return replace(definition, execution_mode=ScenarioExecutionMode.RESTART)
+    return definition
 
 
 _COMPARISON_LABELS = {
@@ -414,6 +482,7 @@ class ScenarioService:
             [str, str, int, tuple[str, ...]], None
         ] | None = None,
         monotonic: Callable[[], float] = time.monotonic,
+        intercom_release_obligation: IntercomReleaseObligation | None = None,
     ):
         self._hass = hass
         self._store = store
@@ -431,6 +500,7 @@ class ScenarioService:
         self._intercom_release_publisher = intercom_release_publisher
         self._scenario_change_publisher = scenario_change_publisher
         self._monotonic = monotonic
+        self._intercom_release_obligation = intercom_release_obligation
         self._path_metrics = ScenarioPathMetrics()
         self._scenario_content_revision_key: tuple[tuple[str, int], ...] | None = None
         self._scenario_content_revision: str | None = None
@@ -465,11 +535,32 @@ class ScenarioService:
 
         loaded = await self._store.async_load()
         if isinstance(loaded, ScenarioRegistry):
-            self._registry = loaded
+            registry = loaded
         elif isinstance(loaded, dict):
-            self._registry = ScenarioRegistry.from_storage(loaded)
+            registry = ScenarioRegistry.from_storage(loaded)
         else:
-            self._registry = ScenarioRegistry()
+            registry = ScenarioRegistry()
+        # N-1 storage may contain an unsafe single/queued mode for protected
+        # managed controllers. Persist the normalization before any trigger
+        # subscription can observe the registry.
+        normalized = tuple(
+            replace(
+                scenario,
+                definition=_enforce_system_execution_mode(
+                    scenario.id, scenario.definition
+                ),
+            )
+            if scenario.protected and scenario.id in _RESTART_ONLY_SYSTEM_SCENARIOS
+            else scenario
+            for scenario in registry.scenarios
+        )
+        if normalized != registry.scenarios:
+            next_registry = ScenarioRegistry(scenarios=normalized)
+            await self.async_save(next_registry)
+            registry = next_registry
+        # Do not expose an N-1 unsafe registry if its required migration
+        # could not be saved atomically.
+        self._registry = registry
         if self._schedule_store is not None:
             payload = await self._schedule_store.async_load()
             raw = payload.get("skips", ()) if isinstance(payload, dict) else ()
@@ -1437,6 +1528,8 @@ class ScenarioService:
                     )
                 )
             existing = registry.scenario(raw_id)
+            definition = _server_owned_node_red_metadata(definition, existing)
+            definition = _enforce_system_execution_mode(raw_id, definition)
             room_ids = self._room_ids_from_payload(payload)
             room_assignment_changed = (
                 existing is None or room_ids != existing.room_ids
@@ -1518,6 +1611,7 @@ class ScenarioService:
                             else ()
                         ),
                     )
+            node_red_prepared = False
             if definition.execution_backend is ScenarioExecutionBackend.NODE_RED:
                 if self._node_red_backend is None:
                     raise ScenarioValidationError(
@@ -1542,6 +1636,7 @@ class ScenarioService:
                             else None
                         ),
                     )
+                    node_red_prepared = True
                 except NodeRedBackendError as error:
                     raise ScenarioValidationError(
                         (
@@ -1552,6 +1647,23 @@ class ScenarioService:
                             ),
                         )
                     ) from error
+
+            async def compensate_node_red_prepare() -> None:
+                if not node_red_prepared:
+                    return
+                compensate = getattr(
+                    self._node_red_backend, "async_compensate_last_prepare", None
+                )
+                if not callable(compensate):
+                    return
+                try:
+                    await compensate()
+                except NodeRedBackendError as error:
+                    raise ScenarioServiceError(
+                        "Node-RED flow was created but safe compensation failed.",
+                        status=503,
+                    ) from error
+
             group = _str_or_default(payload, "group", "custom")
             if existing is not None and existing.protected:
                 group = existing.group
@@ -1584,6 +1696,7 @@ class ScenarioService:
                     revision=(existing.revision + 1) if existing is not None else 0,
                 )
             except ScenarioViolation as error:
+                await compensate_node_red_prepare()
                 raise ScenarioValidationError(
                     (ScenarioDefinitionViolation(str(error), path="scenario"),)
                 ) from error
@@ -1592,11 +1705,22 @@ class ScenarioService:
             try:
                 new_registry = ScenarioRegistry(scenarios=tuple(scenarios))
             except ScenarioViolation as error:
+                await compensate_node_red_prepare()
                 raise ScenarioValidationError(
                     (ScenarioDefinitionViolation(str(error), path="scenarios"),)
                 ) from error
             self._require_running()
-            await self.async_save(new_registry)
+            try:
+                await self.async_save(new_registry)
+            except ScenarioServiceError:
+                await compensate_node_red_prepare()
+                raise
+            if node_red_prepared:
+                commit_prepare = getattr(
+                    self._node_red_backend, "async_commit_last_prepare", None
+                )
+                if callable(commit_prepare):
+                    await commit_prepare()
             self._registry = new_registry
             self._scenario_content_revision_key = None
             self._scenario_content_revision = None
@@ -2020,6 +2144,17 @@ class ScenarioService:
         *,
         correlation_id: str | None = None,
         dry_run: bool = False,
+        dangerous_authorized: bool = False,
+        force_new_readback: bool = False,
+        automatic_reassert: bool = False,
+        reassert_claim_id: str | None = None,
+        request_id: str | None = None,
+        expected_evidence_revision: str | None = None,
+        expected_evidence_sequence: int | None = None,
+        expected_entity_id: str | None = None,
+        expected_domain: str | None = None,
+        expected_service: str | None = None,
+        intercom_release_required: bool = False,
     ) -> dict[str, Any]:
         """Execute one catalog action through the shared strict executor."""
 
@@ -2031,25 +2166,143 @@ class ScenarioService:
             options["correlation_id"] = correlation_id
         if dry_run:
             options["dry_run"] = True
-        return await self._executor.async_execute_device_action(
-            target_id,
-            action_id,
-            value,
-            **options,
+        if dangerous_authorized:
+            options["dangerous_authorized"] = True
+        if force_new_readback:
+            options["force_new_readback"] = True
+        if automatic_reassert:
+            options["automatic_reassert"] = True
+        if reassert_claim_id is not None:
+            options["reassert_claim_id"] = reassert_claim_id
+        if request_id is not None:
+            options["request_id"] = request_id
+        if expected_evidence_revision is not None:
+            options["expected_evidence_revision"] = expected_evidence_revision
+        if expected_evidence_sequence is not None:
+            options["expected_evidence_sequence"] = expected_evidence_sequence
+        device = self._catalog.device(target_id)
+        action = device.action(action_id) if device is not None else None
+        if (
+            expected_entity_id is not None
+            and getattr(device, "entity_id", None) != expected_entity_id
+        ) or (
+            expected_domain is not None
+            and getattr(action, "domain", None) != expected_domain
+        ) or (
+            expected_service is not None
+            and getattr(action, "service", None) != expected_service
+        ):
+            raise ScenarioServiceError(
+                "Device action dispatch descriptor changed", status=409
+            )
+        if expected_entity_id is not None:
+            options["expected_entity_id"] = expected_entity_id
+        if expected_domain is not None:
+            options["expected_domain"] = expected_domain
+        if expected_service is not None:
+            options["expected_service"] = expected_service
+        current_intercom_action = self._is_intercom_action(target_id, action_id)
+        current_contextual_action = self.is_contextually_dangerous_action(
+            target_id, action_id
         )
+        if intercom_release_required and (
+            not dangerous_authorized
+            or not current_intercom_action
+            or request_id is None
+            or expected_entity_id is None
+        ):
+            raise ScenarioServiceError(
+                "Intercom release dispatch descriptor changed", status=409
+            )
+        if dangerous_authorized and current_contextual_action:
+            options["contextually_dangerous"] = True
+
+        if intercom_release_required or (
+            dangerous_authorized and current_intercom_action
+        ):
+
+            async def arm_intercom_release() -> None:
+                try:
+                    if not self._is_intercom_action(target_id, action_id):
+                        raise RuntimeError(
+                            "intercom release dispatch descriptor changed"
+                        )
+                    await self.async_arm_intercom_release(
+                        target_id,
+                        expected_entity_id=expected_entity_id,
+                        expected_request_id=(
+                            f"{request_id}.release"
+                            if request_id is not None
+                            else None
+                        ),
+                    )
+                except Exception:
+                    await self.async_cancel_intercom_release(
+                        target_id,
+                        expected_entity_id=expected_entity_id,
+                        expected_request_id=(
+                            f"{request_id}.release"
+                            if request_id is not None
+                            else None
+                        ),
+                    )
+                    raise
+
+            options["before_dispatch"] = (
+                arm_intercom_release
+            )
+        try:
+            return await self._executor.async_execute_device_action(
+                target_id,
+                action_id,
+                value,
+                **options,
+            )
+        except Exception:
+            if intercom_release_required:
+                await self.async_cancel_intercom_release(
+                    target_id,
+                    expected_entity_id=expected_entity_id,
+                    expected_request_id=(
+                        f"{request_id}.release" if request_id is not None else None
+                    ),
+                )
+            raise
 
     async def async_execute_device_action_batch(
         self,
         actions: list[Mapping[str, object]],
         *,
         correlation_id: str,
+        dangerous_authorized: frozenset[tuple[str, str]] = frozenset(),
+        intercom_release_required: frozenset[tuple[str, str]] = frozenset(),
+        request_ids: tuple[str, ...] | None = None,
+        dispatch_contexts: (
+            tuple[tuple[str, str, tuple[str, ...], str] | None, ...] | None
+        ) = None,
     ) -> list[dict[str, Any]]:
         """Run one bounded ordered batch and preserve every target receipt."""
 
         if not 1 <= len(actions) <= 64:
             raise ScenarioServiceError("Action batch must contain 1 to 64 items")
+        if request_ids is not None and (
+            len(request_ids) != len(actions)
+            or len(set(request_ids)) != len(request_ids)
+            or not all(isinstance(item, str) and item for item in request_ids)
+        ):
+            raise ScenarioServiceError("Action batch request ids are invalid")
         action_keys: set[tuple[str, str]] = set()
-        normalized_actions: list[tuple[str, str, object | None]] = []
+        normalized_actions: list[
+            tuple[
+                str,
+                str,
+                object | None,
+                bool,
+                str | None,
+                str | None,
+                int | None,
+            ]
+        ] = []
         for item in actions:
             target_id = item.get("targetId")
             action_id = item.get("actionId")
@@ -2061,19 +2314,125 @@ class ScenarioService:
                     "Action batch contains a duplicate target and action"
                 )
             action_keys.add(action_key)
-            normalized_actions.append((target_id, action_id, item.get("value")))
+            dry_run = item.get("dryRun", False)
+            if type(dry_run) is not bool:
+                raise ScenarioServiceError("Action batch item dryRun is invalid")
+            normalized_actions.append(
+                (
+                    target_id,
+                    action_id,
+                    item.get("value"),
+                    dry_run,
+                    (
+                        str(item["reassertKey"])
+                        if isinstance(item.get("reassertKey"), str)
+                        else None
+                    ),
+                    (
+                        str(item["expectedEvidenceRevision"])
+                        if isinstance(item.get("expectedEvidenceRevision"), str)
+                        else None
+                    ),
+                    (
+                        int(item["expectedEvidenceSequence"])
+                        if type(item.get("expectedEvidenceSequence")) is int
+                        else None
+                    ),
+                )
+            )
 
         await self.async_refresh_catalog()
         if self._executor is None:
             raise ScenarioServiceError("Executor not configured", status=500)
         receipts: list[dict[str, Any]] = []
-        for target_id, action_id, value in normalized_actions:
+        for index, (
+            target_id,
+            action_id,
+            value,
+            dry_run,
+            reassert_key,
+            expected_revision,
+            expected_sequence,
+        ) in enumerate(normalized_actions):
+            options: dict[str, object] = {"correlation_id": correlation_id}
+            context = (
+                dispatch_contexts[index]
+                if dispatch_contexts is not None and index < len(dispatch_contexts)
+                else None
+            )
+            if context is not None:
+                options["expected_entity_id"] = context[0]
+                options["expected_domain"] = context[1]
+                options["expected_service"] = context[3]
+            if request_ids is not None:
+                options["request_id"] = request_ids[index]
+            if dry_run:
+                options["dry_run"] = True
+            release_required = (
+                target_id, action_id
+            ) in intercom_release_required
+            if release_required and (
+                target_id, action_id
+            ) not in dangerous_authorized:
+                raise ScenarioServiceError(
+                    "Intercom release authorization is missing", status=409
+                )
+            if (target_id, action_id) in dangerous_authorized:
+                options["dangerous_authorized"] = True
+                current_intercom_action = self._is_intercom_action(
+                    target_id, action_id
+                )
+                current_contextual_action = self.is_contextually_dangerous_action(
+                    target_id, action_id
+                )
+                if release_required and (
+                    not current_intercom_action
+                    or request_ids is None
+                    or context is None
+                ):
+                    raise ScenarioServiceError(
+                        "Intercom release dispatch descriptor changed", status=409
+                    )
+                if current_contextual_action:
+                    options["contextually_dangerous"] = True
+                if release_required or current_intercom_action:
+                    expected_entity_id = context[0] if context is not None else None
+                    expected_request_id = (
+                        f"{request_ids[index]}.release"
+                        if request_ids is not None
+                        else None
+                    )
+                    async def arm_intercom_release(
+                        target_id: str = target_id,
+                        action_id: str = action_id,
+                        expected_entity_id: str | None = expected_entity_id,
+                        expected_request_id: str | None = expected_request_id,
+                    ) -> None:
+                        if not self._is_intercom_action(
+                            target_id, action_id
+                        ):
+                            raise RuntimeError(
+                                "intercom release dispatch descriptor changed"
+                            )
+                        await self.async_arm_intercom_release(
+                            target_id,
+                            expected_entity_id=expected_entity_id,
+                            expected_request_id=expected_request_id,
+                        )
+
+                    options["before_dispatch"] = arm_intercom_release
+            if reassert_key is not None:
+                options["force_new_readback"] = True
+                options["automatic_reassert"] = True
+                options["reassert_claim_id"] = reassert_key
+                options["expected_evidence_revision"] = expected_revision
+                options["expected_evidence_sequence"] = expected_sequence
             receipts.append(
                 await self._executor.async_execute_device_action(
                     target_id,
                     action_id,
                     value,
-                    correlation_id=correlation_id,
+                    **options,
                 )
             )
         return receipts
@@ -2092,6 +2451,25 @@ class ScenarioService:
             return None
         return device.entity_id, action.domain
 
+    async def async_resolve_device_action_context(
+        self,
+        target_id: str,
+        action_id: str,
+    ) -> tuple[str, str, tuple[str, ...], str] | None:
+        """Resolve registry-owned identity and current allowlisted actions."""
+
+        catalog = await self.async_refresh_catalog()
+        device = catalog.device(target_id)
+        action = device.action(action_id) if device is not None else None
+        if device is None or action is None:
+            return None
+        return (
+            device.entity_id,
+            action.domain,
+            tuple(item.action_id for item in device.actions),
+            action.service,
+        )
+
     async def async_schedule_intercom_release(
         self,
         target_id: str,
@@ -2102,12 +2480,14 @@ class ScenarioService:
     ) -> int | None:
         """Hold the intercom relay open, then always return it to off.
 
-        The door strike must be energised only for a short pulse. A repeated
-        press extends the hold, exactly like the retired Node-RED flow did.
+        The door strike must be energised only for a short pulse.
         Returns the hold length in seconds when a release was scheduled.
         """
 
-        if action_id != "turn_on" or self._intercom_entity_resolver is None:
+        if (
+            action_id not in {"turn_on", "toggle"}
+            or self._intercom_entity_resolver is None
+        ):
             return None
         configured = self._intercom_entity_resolver()
         if not configured:
@@ -2118,7 +2498,10 @@ class ScenarioService:
             return None
         if configured not in {entity_id, target_id}:
             return None
-        self._cancel_intercom_release()
+        if self._intercom_release_obligation is not None:
+            return INTERCOM_RELEASE_SECONDS
+        if self._intercom_release_cancel is not None:
+            return None
         self._intercom_release_entity = entity_id
         self._intercom_release_context = {
             "correlationId": correlation_id or request_id or "intercom-release",
@@ -2166,12 +2549,111 @@ class ScenarioService:
         )
         return INTERCOM_RELEASE_SECONDS
 
+    async def async_prepare_intercom_release(
+        self,
+        target_id: str,
+        action_id: str,
+        *,
+        correlation_id: str,
+        request_id: str,
+        expected_entity_id: str | None = None,
+    ) -> int | None:
+        """Persist the relay-off deadline before a dangerous turn-on dispatch."""
+
+        obligation = self._intercom_release_obligation
+        if obligation is None or not self._is_intercom_action(target_id, action_id):
+            return None
+        device = self._catalog.device(target_id)
+        entity_id = getattr(device, "entity_id", None)
+        if not isinstance(entity_id, str) or not entity_id.startswith("switch."):
+            return None
+        if expected_entity_id is not None and entity_id != expected_entity_id:
+            return None
+        return await obligation.async_prepare(
+            target_id=target_id,
+            entity_id=entity_id,
+            correlation_id=correlation_id,
+            request_id=request_id,
+        )
+
+    async def async_arm_intercom_release(
+        self,
+        target_id: str,
+        *,
+        expected_entity_id: str | None = None,
+        expected_request_id: str | None = None,
+    ) -> None:
+        """Verify a fresh persisted off deadline at the dispatch boundary."""
+
+        obligation = self._intercom_release_obligation
+        if obligation is None:
+            raise RuntimeError("intercom release obligation is unavailable")
+        await obligation.async_arm(
+            target_id,
+            expected_entity_id=expected_entity_id,
+            expected_request_id=expected_request_id,
+        )
+
+    async def async_cancel_intercom_release(
+        self,
+        target_id: str,
+        *,
+        expected_entity_id: str | None = None,
+        expected_request_id: str | None = None,
+    ) -> bool:
+        """Clear only an unarmed release prepared for a failed dispatch."""
+
+        obligation = self._intercom_release_obligation
+        if obligation is None:
+            return False
+        return await obligation.async_cancel(
+            target_id,
+            expected_entity_id=expected_entity_id,
+            expected_request_id=expected_request_id,
+            unarmed_only=True,
+        )
+
+    async def async_reconcile_intercom_release(
+        self, record: Mapping[str, object]
+    ) -> bool:
+        """Execute and publish one restored or due relay-off obligation."""
+
+        entity_id = record.get("entityId")
+        if not isinstance(entity_id, str):
+            return False
+        release = self._intercom_release_callable()
+        released = False
+        if release is not None:
+            try:
+                released = await release(entity_id)
+            except Exception:  # noqa: BLE001
+                _LOGGER.warning(
+                    "durable intercom release failed for %s",
+                    entity_id,
+                    exc_info=True,
+                )
+        self._publish_intercom_release(
+            {
+                "correlationId": str(record.get("correlationId")),
+                "requestId": str(record.get("requestId")),
+                "targetId": str(record.get("targetId")),
+            },
+            confirmed=released,
+            reason="relay_released" if released else "release_not_confirmed",
+        )
+        return released
+
     async def async_is_intercom_action(
         self, target_id: str, action_id: str
     ) -> bool:
         """Classify only the explicitly configured intercom target."""
 
         await self.async_refresh_catalog()
+        return self._is_intercom_action(target_id, action_id)
+
+    def _is_intercom_action(self, target_id: str, action_id: str) -> bool:
+        """Classify the configured relay without including other hazards."""
+
         if self._intercom_entity_resolver is None:
             return False
         configured = self._intercom_entity_resolver()
@@ -2180,9 +2662,58 @@ class ScenarioService:
         action = device.action(action_id) if device is not None else None
         return bool(
             configured
+            and action_id in {"turn_on", "toggle"}
             and isinstance(entity_id, str)
             and configured in {entity_id, target_id}
             and action is not None
+        )
+
+    def is_external_cover_action(self, target_id: str, action_id: str) -> bool:
+        """Recognize movement of gates and external covers, not room curtains."""
+
+        if action_id not in {"open_cover", "close_cover", "set_position"}:
+            return False
+        device = self._catalog.device(target_id)
+        action = device.action(action_id) if device is not None else None
+        if device is None or action is None or action.domain != "cover":
+            return False
+        device_type = str(getattr(device, "device_type", "") or "").casefold()
+        if device_type in {"garage", "garage_door", "gate"}:
+            return True
+        identity = " ".join(
+            str(value or "").casefold()
+            for value in (
+                getattr(device, "entity_id", ""),
+                getattr(device, "name", ""),
+                getattr(device, "physical_name", ""),
+                getattr(device, "capability_name", ""),
+            )
+        )
+        return any(
+            marker in identity
+            for marker in (
+                "garage",
+                "gate",
+                "external",
+                "exterior",
+                "ворот",
+                "гараж",
+                "калитк",
+                "шлагбаум",
+                "наружн",
+                "въезд",
+            )
+        )
+
+    def is_contextually_dangerous_action(
+        self, target_id: str, action_id: str
+    ) -> bool:
+        """Classify device-specific hazards without causing catalog I/O."""
+
+        return self._is_intercom_action(
+            target_id, action_id
+        ) or self.is_external_cover_action(
+            target_id, action_id
         )
 
     def publish_intercom_dry_run(

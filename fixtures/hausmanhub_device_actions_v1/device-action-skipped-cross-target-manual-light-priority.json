@@ -1,0 +1,129 @@
+{
+  "contract": {
+    "name": "hausman-hub-device-action-receipt",
+    "version": 1
+  },
+  "correlationId": "corr.lighting.cross-target.250",
+  "requestId": "lighting-cross-target-skip-250",
+  "accepted": true,
+  "confirmed": false,
+  "status": "accepted",
+  "statusName": "Проверяется",
+  "targetId": "device_chandelier",
+  "targetType": "light",
+  "actionId": "turn_on",
+  "decision": "skipped",
+  "commandSent": false,
+  "decisionTerminal": true,
+  "decisionAt": 1787912501000,
+  "commandSource": "automation",
+  "reasonCode": "manual_light_priority",
+  "evidenceRevision": "lighting.chandelier.250",
+  "preCommandEvidenceRevision": "lighting.chandelier.250",
+  "preCommandOwnership": "unknown",
+  "ownership": "unknown",
+  "blockedReasons": [],
+  "lightingProfileId": "lighting-profile:chandelier-mirror",
+  "lightingProfileRevision": "profile.revision.1",
+  "manualPriority": {
+    "lightingProfileId": "lighting-profile:chandelier-mirror",
+    "lightingProfileRevision": "profile.revision.1",
+    "profileSnapshot": {
+      "source": "configured_profile",
+      "lightingProfileId": "lighting-profile:chandelier-mirror",
+      "profileRevision": "profile.revision.1",
+      "profileTargetIds": ["device_chandelier", "device_mirror"],
+      "snapshotHash": "sha256:f211d2de16ff7aba79632d33c3a24ae48153b2738b6d10f243c6b2bd84356257"
+    },
+    "blockingEvidence": {
+      "contract": {
+        "name": "hausman-hub-device-state-evidence",
+        "version": 1
+      },
+      "lightingProfileId": "lighting-profile:chandelier-mirror",
+      "lightingProfileRevision": "profile.revision.1",
+      "targetId": "device_mirror",
+      "reportedState": "on",
+      "effectiveState": "on",
+      "confidence": "fresh",
+      "ownership": "manual",
+      "observedAt": 1787912500000,
+      "freshUntil": 1787912560000,
+      "freshnessWindowMs": 60000,
+      "ownershipSource": "manual_command",
+      "ownershipEvidence": {
+        "receiptId": "manual-priority-mirror-command-250",
+        "requestId": "manual-priority-mirror-command-250",
+        "targetId": "device_mirror",
+        "actionId": "turn_on",
+        "commandSentAt": 1787912499000,
+        "readBackEvidenceRevision": "lighting.profile.mirror.250",
+        "readBackEvidenceSequence": 250,
+        "provenanceId": "sha256:0fca7ca8e7621347aea68ab875caa42ef3141aeade9bf250d1def8096cb38bdf"
+      },
+      "evidenceRevision": "lighting.profile.mirror.250",
+      "evidenceSequence": 250,
+      "reasonCode": "manual_light_priority",
+      "reassertBudget": 0,
+      "reassertPolicy": "none",
+      "allowedActions": [
+        "turn_off",
+        "set_brightness",
+        "set_adaptive_brightness",
+        "set_brightness_percent",
+        "set_color_temperature",
+        "set_night_light",
+        "set_rgb_color"
+      ],
+      "blockedReasons": []
+    }
+  },
+  "evidence": {
+    "contract": {
+      "name": "hausman-hub-device-state-evidence",
+      "version": 1
+    },
+    "targetId": "device_chandelier",
+    "reportedState": "off",
+    "effectiveState": "off",
+    "confidence": "confirmed",
+    "ownership": "unknown",
+    "observedAt": 1787912500000,
+    "evidenceRevision": "lighting.chandelier.250",
+    "evidenceSequence": 250,
+    "freshUntil": 1787912560000,
+    "freshnessWindowMs": 60000,
+    "ownershipSource": "device_report",
+    "reasonCode": "device_report_off_confirmed",
+    "reassertBudget": 0,
+    "reassertPolicy": "none",
+    "allowedActions": ["turn_on"],
+    "blockedReasons": []
+  },
+  "preCommandEvidence": {
+    "contract": {
+      "name": "hausman-hub-device-state-evidence",
+      "version": 1
+    },
+    "targetId": "device_chandelier",
+    "reportedState": "off",
+    "effectiveState": "off",
+    "confidence": "confirmed",
+    "ownership": "unknown",
+    "observedAt": 1787912500000,
+    "evidenceRevision": "lighting.chandelier.250",
+    "evidenceSequence": 250,
+    "freshUntil": 1787912560000,
+    "freshnessWindowMs": 60000,
+    "ownershipSource": "device_report",
+    "reasonCode": "device_report_off_confirmed",
+    "reassertBudget": 0,
+    "reassertPolicy": "none",
+    "allowedActions": ["turn_on"],
+    "blockedReasons": []
+  },
+  "message": "Автоматическое включение пропущено: ручное владение взаимозаменяемым источником света.",
+  "dryRun": false,
+  "reason": "manual_light_priority",
+  "error": null
+}

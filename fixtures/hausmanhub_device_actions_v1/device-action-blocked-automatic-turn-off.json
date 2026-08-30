@@ -1,0 +1,50 @@
+{
+  "contract": {
+    "name": "hausman-hub-device-action-receipt",
+    "version": 1
+  },
+  "correlationId": "corr.lighting.evidence.118",
+  "requestId": "lighting-request-118",
+  "accepted": false,
+  "confirmed": false,
+  "status": "failed",
+  "statusName": "Не выполнено",
+  "targetId": "device_lighting_demo",
+  "targetType": "light",
+  "actionId": "turn_off",
+  "decision": "blocked",
+  "commandSent": false,
+  "decisionTerminal": true,
+  "decisionAt": 1787911901000,
+  "commandSource": "automation",
+  "reasonCode": "automatic_ownership_missing",
+  "evidenceRevision": "lighting.evidence.118",
+  "ownership": "unknown",
+  "blockedReasons": ["automatic_ownership_missing"],
+  "evidence": {
+    "contract": {
+      "name": "hausman-hub-device-state-evidence",
+      "version": 1
+    },
+    "targetId": "device_lighting_demo",
+    "reportedState": "on",
+    "effectiveState": "on",
+    "confidence": "fresh",
+    "ownership": "unknown",
+    "observedAt": 1787911900000,
+    "freshUntil": 1787911960000,
+    "freshnessWindowMs": 60000,
+    "ownershipSource": "device_report",
+    "evidenceRevision": "lighting.evidence.118",
+    "evidenceSequence": 118,
+    "reasonCode": "automatic_ownership_missing",
+    "reassertBudget": 0,
+    "reassertPolicy": "none",
+    "allowedActions": [],
+    "blockedReasons": ["automatic_ownership_missing"]
+  },
+  "message": "Автоматическое выключение заблокировано: владение автоматикой не подтверждено.",
+  "dryRun": false,
+  "reason": "automatic_ownership_missing",
+  "error": "automatic_ownership_missing"
+}

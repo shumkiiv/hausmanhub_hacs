@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hausmanhub/contracts/v1/device-action-value.schema.json",
+  "title": "HausmanHub bounded device action values v1",
+  "$defs": {
+    "finiteNumber": {
+      "type": "number",
+      "minimum": -1000000,
+      "maximum": 1000000,
+      "description": "Finite JSON number inside the safe generic action-value envelope."
+    },
+    "boundedString": {
+      "type": "string",
+      "maxLength": 256,
+      "description": "Action value string limited to 256 Unicode characters."
+    },
+    "scalarValue": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "boolean" },
+        { "$ref": "#/$defs/finiteNumber" },
+        { "$ref": "#/$defs/boundedString" }
+      ]
+    },
+    "arrayLevel2": {
+      "type": "array",
+      "maxItems": 32,
+      "items": { "$ref": "#/$defs/scalarValue" }
+    },
+    "objectLevel2": {
+      "type": "object",
+      "maxProperties": 32,
+      "propertyNames": { "$ref": "#/$defs/boundedString" },
+      "additionalProperties": { "$ref": "#/$defs/scalarValue" }
+    },
+    "valueLevel2": {
+      "anyOf": [
+        { "$ref": "#/$defs/scalarValue" },
+        { "$ref": "#/$defs/arrayLevel2" },
+        { "$ref": "#/$defs/objectLevel2" }
+      ]
+    },
+    "arrayLevel1": {
+      "type": "array",
+      "maxItems": 32,
+      "items": { "$ref": "#/$defs/valueLevel2" }
+    },
+    "objectLevel1": {
+      "type": "object",
+      "maxProperties": 32,
+      "propertyNames": { "$ref": "#/$defs/boundedString" },
+      "additionalProperties": { "$ref": "#/$defs/valueLevel2" }
+    },
+    "valueLevel1": {
+      "anyOf": [
+        { "$ref": "#/$defs/scalarValue" },
+        { "$ref": "#/$defs/arrayLevel1" },
+        { "$ref": "#/$defs/objectLevel1" }
+      ]
+    },
+    "arrayLevel0": {
+      "type": "array",
+      "maxItems": 32,
+      "items": { "$ref": "#/$defs/valueLevel1" }
+    },
+    "objectLevel0": {
+      "type": "object",
+      "maxProperties": 32,
+      "propertyNames": { "$ref": "#/$defs/boundedString" },
+      "additionalProperties": { "$ref": "#/$defs/valueLevel1" }
+    },
+    "valueLevel0": {
+      "anyOf": [
+        { "$ref": "#/$defs/scalarValue" },
+        { "$ref": "#/$defs/arrayLevel0" },
+        { "$ref": "#/$defs/objectLevel0" }
+      ],
+      "description": "Values may contain at most three explicit container levels."
+    },
+    "actionValue": {
+      "$ref": "#/$defs/valueLevel0",
+      "description": "Reusable bounded value for an unknown or structurally valued action."
+    },
+    "runtimeNumber": {
+      "$ref": "#/$defs/finiteNumber",
+      "description": "Runtime-bounded numeric action value inside the generic safe envelope."
+    },
+    "runtimeString": {
+      "$ref": "#/$defs/boundedString",
+      "description": "Runtime-selected string option with the generic string bound."
+    },
+    "position": {
+      "allOf": [
+        { "$ref": "#/$defs/finiteNumber" },
+        { "minimum": 0, "maximum": 100 }
+      ]
+    },
+    "lightBrightness": {
+      "allOf": [
+        { "$ref": "#/$defs/finiteNumber" },
+        { "minimum": 0, "maximum": 255 }
+      ]
+    },
+    "lightAdaptiveBrightness": {
+      "allOf": [
+        { "$ref": "#/$defs/finiteNumber" },
+        { "minimum": 1, "maximum": 100 }
+      ]
+    },
+    "lightBrightnessPercent": {
+      "allOf": [
+        { "$ref": "#/$defs/finiteNumber" },
+        { "minimum": 0, "maximum": 100 }
+      ]
+    },
+    "lightColorTemperature": {
+      "allOf": [
+        { "$ref": "#/$defs/finiteNumber" },
+        { "minimum": 1000, "maximum": 10000 }
+      ]
+    },
+    "lightNightLight": {
+      "allOf": [
+        { "$ref": "#/$defs/finiteNumber" },
+        { "minimum": 1, "maximum": 30 }
+      ]
+    },
+    "lightRgbHex": {
+      "allOf": [
+        { "$ref": "#/$defs/boundedString" },
+        {
+          "minLength": 7,
+          "maxLength": 7,
+          "pattern": "^#[0-9A-Fa-f]{6}$"
+        }
+      ]
+    }
+  }
+}

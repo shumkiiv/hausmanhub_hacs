@@ -1,0 +1,19 @@
+{
+  "contract": {
+    "name": "hausman-hub-device-action-batch-request",
+    "version": 1
+  },
+  "correlationId": "generic-climate-cover-batch-1",
+  "requestId": "request.generic-climate-cover-batch-1",
+  "actions": [
+    {
+      "targetId": "device_climate_demo",
+      "actionId": "set_temperature",
+      "value": 22
+    },
+    {
+      "targetId": "device_cover_demo",
+      "actionId": "open_cover"
+    }
+  ]
+}

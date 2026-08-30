@@ -7,9 +7,10 @@ import copy
 import importlib
 import json
 import sys
+import tempfile
 import time
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -272,14 +273,29 @@ class FakeRequestWithoutUser(dict[str, object]):
 class FakeJsonRequest(FakeRequest):
     """Add the bounded JSON request surface used by climate POST routes."""
 
-    def __init__(self, remote: object, user: object, path: str, payload: object) -> None:
+    def __init__(
+        self,
+        remote: object,
+        user: object,
+        path: str,
+        payload: object,
+        *,
+        content_type: str = "application/json",
+        accept: str | None = None,
+        raw_body: bytes | None = None,
+    ) -> None:
         super().__init__(remote, user, path=path)
         self._payload = payload
-        self.content_type = "application/json"
-        self.content_length = len(json.dumps(payload).encode("utf-8"))
+        self._raw_body = raw_body or json.dumps(payload).encode("utf-8")
+        self.content_type = content_type
+        self.content_length = len(self._raw_body)
+        self.headers = {} if accept is None else {"Accept": accept}
 
     async def json(self) -> object:
         return self._payload
+
+    async def read(self) -> bytes:
+        return self._raw_body
 
 
 class FakeEntry:
@@ -431,17 +447,33 @@ def fake_home_assistant_modules() -> dict[str, ModuleType]:
             key: str,
             *,
             max_readable_version: int | None = None,
+            atomic_writes: bool = False,
         ) -> None:
             self.hass = hass
             self.version = version
             self.key = key
             self.max_readable_version = max_readable_version
+            self.atomic_writes = atomic_writes
+            self.path = str(Path(tempfile.mkdtemp()) / key)
 
-        async def async_load(self) -> None:
-            return None
+        async def async_load(self) -> object | None:
+            path = Path(self.path)
+            if not path.is_file():
+                return None
+            return json.loads(path.read_text(encoding="utf-8"))["data"]
 
-        async def async_save(self, _: object) -> None:
-            return None
+        async def async_save(self, payload: object) -> None:
+            Path(self.path).write_text(
+                json.dumps(
+                    {
+                        "version": self.version,
+                        "minor_version": 1,
+                        "key": self.key,
+                        "data": payload,
+                    }
+                ),
+                encoding="utf-8",
+            )
 
     storage.Store = FakeStore  # type: ignore[attr-defined]
     util = ModuleType("homeassistant.util")
@@ -3026,7 +3058,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.186", panel.payload["integration_version"])
+        self.assertEqual("1.52.187", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
@@ -3640,7 +3672,10 @@ class LocalSummaryAccessTest(unittest.TestCase):
         executions: list[bool] = []
 
         async def is_intercom(target_id: str, action_id: str) -> bool:
-            return target_id == "entry-intercom" and action_id == "turn_on"
+            return target_id == "entry-intercom" and action_id in {
+                "turn_on",
+                "toggle",
+            }
 
         async def execute_device_action(
             target_id: str,
@@ -3673,7 +3708,20 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 )
             )
         )
-        self.assertEqual(409, rejected.status)
+        self.assertEqual(403, rejected.status)
+        self.assertEqual([], executions)
+
+        rejected_toggle = asyncio.run(
+            view.post(
+                FakeJsonRequest(
+                    "192.168.1.20",
+                    tablet,
+                    path,
+                    {"targetId": "entry-intercom", "actionId": "toggle"},
+                )
+            )
+        )
+        self.assertEqual(403, rejected_toggle.status)
         self.assertEqual([], executions)
 
         dry_run = asyncio.run(
@@ -4257,6 +4305,954 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
         self.assertEqual(400, duplicate_response.status)
         self.assertEqual(1, len(calls))
+
+    def test_full_device_action_returns_evidence_aware_light_receipt(self) -> None:
+        views = {view.url: view for view in self.hass.http.views}
+        path = "/api/hausman_hub/v1/device-actions"
+        tablet = reader_user("system-users")
+        service = self.hass.data["hausman_hub"]["scenario_service"]
+        entity_id = "light.synthetic_full_protocol"
+        self.hass.states.values[entity_id] = SimpleNamespace(
+            state="off",
+            attributes={},
+            last_updated=datetime.now(timezone.utc),
+        )
+
+        async def resolve_context(target_id: str, action_id: str):
+            self.assertEqual(("light_full", "turn_on"), (target_id, action_id))
+            return entity_id, "light", ("turn_on", "turn_off")
+
+        async def execute_action(
+            target_id: str,
+            action_id: str,
+            value: object,
+            *,
+            correlation_id: str | None = None,
+            **_options: object,
+        ) -> dict[str, object]:
+            self.hass.states.values[entity_id] = SimpleNamespace(
+                state="on",
+                attributes={},
+                last_updated=datetime.now(timezone.utc),
+            )
+            return {
+                "correlationId": correlation_id,
+                "requestId": _options["request_id"],
+                "targetId": target_id,
+                "actionId": action_id,
+                "accepted": True,
+                "confirmed": True,
+                "status": "confirmed",
+                "statusName": "Выполнено",
+                "appliedAt": int(time.time() * 1000),
+                "message": "Свет включён.",
+                "confirmationWindowMs": 8000,
+                "readBack": {
+                    "attempted": True,
+                    "matched": True,
+                    "observedAt": int(time.time() * 1000),
+                    "observedState": "on",
+                    "attempts": 1,
+                },
+                "reason": None,
+            }
+
+        service.async_resolve_device_action_context = resolve_context
+        service.async_execute_device_action = execute_action
+        response = asyncio.run(
+            views[path].post(
+                FakeJsonRequest(
+                    "192.168.1.20",
+                    tablet,
+                    path,
+                    {
+                        "contract": {
+                            "name": "hausman-hub-device-action-request",
+                            "version": 1,
+                        },
+                        "correlationId": "full.light.1",
+                        "requestId": "full.light.request.1",
+                        "targetId": "light_full",
+                        "actionId": "turn_on",
+                    },
+                    content_type="application/vnd.hausmanhub.device-action-request.full+json",
+                    accept="application/vnd.hausmanhub.device-action-receipt.full+json",
+                )
+            )
+        )
+
+        self.assertEqual(200, response.status)
+        self.assertEqual("light", response.payload["targetType"])
+        self.assertEqual("executed", response.payload["decision"])
+        self.assertTrue(response.payload["commandSent"])
+        self.assertEqual("manual", response.payload["ownership"])
+        self.assertEqual(
+            "application/vnd.hausmanhub.device-action-receipt.full+json",
+            response.headers["Content-Type"],
+        )
+
+    def test_external_gate_requires_full_confirmation_and_fresh_state(self) -> None:
+        path = "/api/hausman_hub/v1/device-actions"
+        view = next(item for item in self.hass.http.views if item.url == path)
+        service = self.hass.data["hausman_hub"]["scenario_service"]
+        entity_id = "cover.synthetic_garage_gate"
+        self.hass.states.values[entity_id] = SimpleNamespace(
+            state="closed",
+            attributes={},
+            last_updated=datetime.now(timezone.utc),
+        )
+        executions = 0
+
+        async def resolve_context(_target_id: str, _action_id: str):
+            return entity_id, "cover", ("open_cover",), "open_cover"
+
+        async def is_intercom(_target_id: str, _action_id: str) -> bool:
+            return False
+
+        async def execute_action(*_args: object, **_kwargs: object):
+            nonlocal executions
+            executions += 1
+            raise AssertionError("blocked gate command reached the executor")
+
+        service.async_resolve_device_action_context = resolve_context
+        service.async_is_intercom_action = is_intercom
+        service.is_contextually_dangerous_action = lambda *_args: True
+        service.is_external_cover_action = lambda *_args: True
+        service.async_execute_device_action = execute_action
+        tablet = reader_user("system-users")
+
+        legacy = asyncio.run(
+            view.post(
+                FakeJsonRequest(
+                    "192.168.1.20",
+                    tablet,
+                    path,
+                    {"targetId": "garage_gate", "actionId": "open_cover"},
+                )
+            )
+        )
+        self.assertEqual(403, legacy.status)
+
+        self.hass.states.values[entity_id] = SimpleNamespace(
+            state="closed",
+            attributes={},
+            last_updated=datetime.now(timezone.utc) - timedelta(minutes=10),
+        )
+        stale = asyncio.run(
+            view.post(
+                FakeJsonRequest(
+                    "192.168.1.20",
+                    tablet,
+                    path,
+                    {
+                        "contract": {
+                            "name": "hausman-hub-device-action-request",
+                            "version": 1,
+                        },
+                        "correlationId": "garage.open.1",
+                        "requestId": "garage.open.request.1",
+                        "targetId": "garage_gate",
+                        "actionId": "open_cover",
+                        "confirmedByUser": True,
+                        "idempotencyKey": "garage.open.key.1",
+                    },
+                    content_type="application/vnd.hausmanhub.device-action-request.full+json",
+                    accept="application/vnd.hausmanhub.device-action-receipt.full+json",
+                )
+            )
+        )
+        self.assertEqual(409, stale.status)
+        self.assertEqual(0, executions)
+
+    def test_full_ordinary_action_replays_without_dispatch(self) -> None:
+        views = {view.url: view for view in self.hass.http.views}
+        path = "/api/hausman_hub/v1/device-actions"
+        tablet = reader_user("system-users")
+        service = self.hass.data["hausman_hub"]["scenario_service"]
+        calls: list[str] = []
+
+        async def resolve_context(_target_id: str, _action_id: str):
+            return "switch.synthetic_ordinary", "switch", ("turn_on",)
+
+        async def execute_action(
+            target_id: str,
+            action_id: str,
+            value: object,
+            *,
+            correlation_id: str | None = None,
+            **options: object,
+        ) -> dict[str, object]:
+            request_id = str(options["request_id"])
+            calls.append(request_id)
+            return {
+                "correlationId": correlation_id,
+                "requestId": request_id,
+                "targetId": target_id,
+                "actionId": action_id,
+                "accepted": True,
+                "confirmed": True,
+                "status": "confirmed",
+            }
+
+        service.async_resolve_device_action_context = resolve_context
+        service.async_execute_device_action = execute_action
+        payload = {
+            "contract": {
+                "name": "hausman-hub-device-action-request",
+                "version": 1,
+            },
+            "correlationId": "ordinary.full.1",
+            "requestId": "ordinary.full.request.1",
+            "targetId": "switch_ordinary",
+            "actionId": "turn_on",
+        }
+
+        def send(current: dict[str, object]) -> FakeResponse:
+            return asyncio.run(
+                views[path].post(
+                    FakeJsonRequest(
+                        "192.168.1.20",
+                        tablet,
+                        path,
+                        current,
+                        content_type="application/vnd.hausmanhub.device-action-request.full+json",
+                        accept="application/vnd.hausmanhub.device-action-receipt.full+json",
+                    )
+                )
+            )
+
+        first = send(payload)
+        replay = send(copy.deepcopy(payload))
+
+        self.assertEqual(200, first.status)
+        self.assertEqual(first.payload, replay.payload)
+        self.assertEqual([first.payload["requestId"]], calls)
+
+    def test_full_ordinary_batch_replays_without_dispatch(self) -> None:
+        views = {view.url: view for view in self.hass.http.views}
+        path = "/api/hausman_hub/v1/device-actions/batch"
+        tablet = reader_user("system-users")
+        service = self.hass.data["hausman_hub"]["scenario_service"]
+        calls: list[tuple[str, ...]] = []
+
+        async def resolve_context(target_id: str, _action_id: str):
+            return f"switch.synthetic_{target_id}", "switch", ("turn_off",)
+
+        async def is_intercom(_target_id: str, _action_id: str) -> bool:
+            return False
+
+        async def execute_batch(
+            actions: list[dict[str, object]],
+            *,
+            correlation_id: str,
+            request_ids: tuple[str, ...],
+            dispatch_contexts: tuple[object, ...],
+        ) -> list[dict[str, object]]:
+            self.assertEqual(2, len(dispatch_contexts))
+            calls.append(request_ids)
+            return [
+                {
+                    "correlationId": correlation_id,
+                    "requestId": request_ids[index],
+                    "targetId": str(item["targetId"]),
+                    "actionId": str(item["actionId"]),
+                    "accepted": True,
+                    "confirmed": True,
+                    "status": "confirmed",
+                }
+                for index, item in enumerate(actions)
+            ]
+
+        service.async_resolve_device_action_context = resolve_context
+        service.async_is_intercom_action = is_intercom
+        service.async_execute_device_action_batch = execute_batch
+        payload = {
+            "contract": {
+                "name": "hausman-hub-device-action-batch-request",
+                "version": 1,
+            },
+            "correlationId": "ordinary.batch.1",
+            "requestId": "ordinary.batch.request.1",
+            "actions": [
+                {"targetId": "one", "actionId": "turn_off"},
+                {"targetId": "two", "actionId": "turn_off"},
+            ],
+        }
+
+        def send(current: dict[str, object]) -> FakeResponse:
+            return asyncio.run(
+                views[path].post(
+                    FakeJsonRequest(
+                        "192.168.1.20",
+                        tablet,
+                        path,
+                        current,
+                        content_type="application/vnd.hausmanhub.device-action-batch-request.full+json",
+                        accept="application/vnd.hausmanhub.device-action-batch-receipt.full+json",
+                    )
+                )
+            )
+
+        first = send(payload)
+        replay = send(copy.deepcopy(payload))
+
+        self.assertEqual(200, first.status)
+        self.assertEqual(first.payload, replay.payload)
+        self.assertEqual(1, len(calls))
+        self.assertEqual(2, len(calls[0]))
+
+    def test_full_action_capacity_fails_closed_for_single_and_batch_after_reload(self) -> None:
+        from jsonschema import Draft202012Validator
+
+        from custom_components.hausman_hub.application.device_action_idempotency import (
+            DangerousActionIdempotency,
+            MAX_DANGEROUS_IDEMPOTENCY_RECORDS,
+        )
+
+        views = {view.url: view for view in self.hass.http.views}
+        tablet = reader_user("system-users")
+        service = self.hass.data["hausman_hub"]["scenario_service"]
+        idempotency = self.hass.data["hausman_hub"]["device_action_idempotency"]
+        dispatches: list[str] = []
+
+        async def resolve_context(_target_id: str, _action_id: str):
+            return "switch.synthetic_capacity", "switch", ("turn_on",), "turn_on"
+
+        async def execute_action(
+            target_id: str,
+            action_id: str,
+            _value: object,
+            *,
+            correlation_id: str | None = None,
+            **options: object,
+        ) -> dict[str, object]:
+            request_id = str(options["request_id"])
+            dispatches.append(request_id)
+            return {
+                "correlationId": correlation_id,
+                "requestId": request_id,
+                "targetId": target_id,
+                "actionId": action_id,
+                "accepted": True,
+                "confirmed": True,
+                "status": "confirmed",
+            }
+
+        service.async_resolve_device_action_context = resolve_context
+        service.async_execute_device_action = execute_action
+        reserve_calls = 0
+        original_reserve = idempotency.async_reserve
+
+        async def reserve(*args: object, **kwargs: object):
+            nonlocal reserve_calls
+            reserve_calls += 1
+            return await original_reserve(*args, **kwargs)
+
+        idempotency.async_reserve = reserve
+
+        def single(index: int) -> FakeResponse:
+            return asyncio.run(
+                views["/api/hausman_hub/v1/device-actions"].post(
+                    FakeJsonRequest(
+                        "192.168.1.20",
+                        tablet,
+                        "/api/hausman_hub/v1/device-actions",
+                        {
+                            "contract": {"name": "hausman-hub-device-action-request", "version": 1},
+                            "correlationId": f"capacity.single.{index}",
+                            "requestId": f"capacity.single.request.{index}",
+                            "targetId": "capacity_switch",
+                            "actionId": "turn_on",
+                        },
+                        content_type="application/vnd.hausmanhub.device-action-request.full+json",
+                        accept="application/vnd.hausmanhub.device-action-receipt.full+json",
+                    )
+                )
+            )
+
+        for index in range(MAX_DANGEROUS_IDEMPOTENCY_RECORDS):
+            self.assertEqual(200, single(index).status)
+        self.assertEqual(MAX_DANGEROUS_IDEMPOTENCY_RECORDS, len(dispatches))
+        cached = single(0)
+        self.assertEqual(200, cached.status)
+        self.assertEqual(MAX_DANGEROUS_IDEMPOTENCY_RECORDS, len(dispatches))
+
+        error_schema = json.loads(
+            (ROOT / "custom_components/hausman_hub/contracts/v1/api-error.schema.json").read_text(encoding="utf-8")
+        )
+        single_full = single(MAX_DANGEROUS_IDEMPOTENCY_RECORDS)
+        self.assertEqual(503, single_full.status)
+        Draft202012Validator(error_schema).validate(single_full.payload)
+        self.assertEqual(
+            {
+                "contract": {"name": "hausman-hub-error", "version": 1},
+                "code": "unavailable",
+                "message": "HausmanHub временно недоступен. Проверьте подключение и повторите позже.",
+                "retryable": True,
+                "requestId": single_full.payload["requestId"],
+            },
+            single_full.payload,
+        )
+        self.assertEqual(MAX_DANGEROUS_IDEMPOTENCY_RECORDS, len(dispatches))
+
+        batch = asyncio.run(
+            views["/api/hausman_hub/v1/device-actions/batch"].post(
+                FakeJsonRequest(
+                    "192.168.1.20",
+                    tablet,
+                    "/api/hausman_hub/v1/device-actions/batch",
+                    {
+                        "contract": {"name": "hausman-hub-device-action-batch-request", "version": 1},
+                        "correlationId": "capacity.batch.new",
+                        "requestId": "capacity.batch.request.new",
+                        "actions": [{"targetId": "capacity_switch", "actionId": "turn_on"}],
+                    },
+                    content_type="application/vnd.hausmanhub.device-action-batch-request.full+json",
+                    accept="application/vnd.hausmanhub.device-action-batch-receipt.full+json",
+                )
+            )
+        )
+        self.assertEqual(503, batch.status)
+        Draft202012Validator(error_schema).validate(batch.payload)
+        self.assertEqual("unavailable", batch.payload["code"])
+        self.assertTrue(batch.payload["retryable"])
+        self.assertNotIn("details", batch.payload)
+        self.assertEqual(MAX_DANGEROUS_IDEMPOTENCY_RECORDS + 3, reserve_calls)
+        self.assertEqual(MAX_DANGEROUS_IDEMPOTENCY_RECORDS, len(dispatches))
+
+        reloaded = DangerousActionIdempotency(idempotency._store)  # noqa: SLF001
+        asyncio.run(reloaded.async_load())
+        self.hass.data["hausman_hub"]["device_action_idempotency"] = reloaded
+        after_reload = single(MAX_DANGEROUS_IDEMPOTENCY_RECORDS + 1)
+        self.assertEqual(503, after_reload.status)
+        Draft202012Validator(error_schema).validate(after_reload.payload)
+        self.assertEqual(MAX_DANGEROUS_IDEMPOTENCY_RECORDS, len(dispatches))
+
+    def test_intercom_mark_dispatching_failure_cancels_only_prepared_obligation(self) -> None:
+        views = {view.url: view for view in self.hass.http.views}
+        path = "/api/hausman_hub/v1/device-actions"
+        tablet = reader_user("system-users")
+        service = self.hass.data["hausman_hub"]["scenario_service"]
+        idempotency = self.hass.data["hausman_hub"]["device_action_idempotency"]
+        prepared_requests: list[dict[str, object]] = []
+        cancelled_requests: list[tuple[str, dict[str, object]]] = []
+        executions: list[str] = []
+
+        async def resolve_context(_target_id: str, _action_id: str):
+            return "switch.synthetic_intercom", "switch", ("turn_on",), "turn_on"
+
+        async def is_intercom(_target_id: str, _action_id: str) -> bool:
+            return True
+
+        async def prepare_release(
+            _target_id: str,
+            _action_id: str,
+            **options: object,
+        ) -> int:
+            prepared_requests.append(options)
+            return 5
+
+        async def cancel_release(
+            target_id: str,
+            **options: object,
+        ) -> bool:
+            cancelled_requests.append((target_id, options))
+            return True
+
+        async def execute_action(
+            target_id: str,
+            action_id: str,
+            value: object,
+            *,
+            correlation_id: str | None = None,
+            **options: object,
+        ) -> dict[str, object]:
+            request_id = str(options["request_id"])
+            executions.append(request_id)
+            return {
+                "correlationId": correlation_id,
+                "requestId": request_id,
+                "targetId": target_id,
+                "actionId": action_id,
+                "accepted": True,
+                "confirmed": True,
+                "status": "confirmed",
+            }
+
+        service.async_resolve_device_action_context = resolve_context
+        service.async_is_intercom_action = is_intercom
+        service.async_prepare_intercom_release = prepare_release
+        service.async_cancel_intercom_release = cancel_release
+        service.async_execute_device_action = execute_action
+        original_mark_dispatching = idempotency.async_mark_dispatching
+
+        async def fail_mark_dispatching(_key: str) -> None:
+            raise OSError("mark dispatching failed")
+
+        idempotency.async_mark_dispatching = fail_mark_dispatching
+        payload = {
+            "contract": {
+                "name": "hausman-hub-device-action-request",
+                "version": 1,
+            },
+            "correlationId": "intercom.failure.1",
+            "requestId": "intercom.failure.request.1",
+            "targetId": "intercom_failure",
+            "actionId": "turn_on",
+            "confirmedByUser": True,
+            "idempotencyKey": "intercom.failure.key.1",
+        }
+
+        def send(current: dict[str, object]) -> FakeResponse:
+            return asyncio.run(
+                views[path].post(
+                    FakeJsonRequest(
+                        "192.168.1.20",
+                        tablet,
+                        path,
+                        current,
+                        content_type="application/vnd.hausmanhub.device-action-request.full+json",
+                        accept="application/vnd.hausmanhub.device-action-receipt.full+json",
+                    )
+                )
+            )
+
+        try:
+            failed = send(payload)
+        finally:
+            idempotency.async_mark_dispatching = original_mark_dispatching
+
+        self.assertEqual(503, failed.status)
+        self.assertEqual(1, len(prepared_requests))
+        self.assertEqual(1, len(cancelled_requests))
+        self.assertEqual("intercom_failure", cancelled_requests[0][0])
+        self.assertEqual(
+            prepared_requests[0]["request_id"],
+            cancelled_requests[0][1]["expected_request_id"],
+        )
+        self.assertEqual(
+            "switch.synthetic_intercom",
+            cancelled_requests[0][1]["expected_entity_id"],
+        )
+        next_payload = {
+            **payload,
+            "correlationId": "intercom.failure.2",
+            "requestId": "intercom.failure.request.2",
+            "idempotencyKey": "intercom.failure.key.2",
+        }
+        response = send(next_payload)
+        self.assertEqual(200, response.status)
+        self.assertEqual(2, len(prepared_requests))
+        self.assertEqual(1, len(executions))
+
+    def test_intercom_returned_failed_receipt_cancels_unarmed_single_release(self) -> None:
+        views = {view.url: view for view in self.hass.http.views}
+        path = "/api/hausman_hub/v1/device-actions"
+        tablet = reader_user("system-users")
+        service = self.hass.data["hausman_hub"]["scenario_service"]
+        prepared: list[dict[str, object]] = []
+        cancelled: list[dict[str, object]] = []
+        executions: list[str] = []
+
+        async def resolve_context(_target_id: str, _action_id: str):
+            return "switch.synthetic_intercom_failed", "switch", ("turn_on",), "turn_on"
+
+        async def is_intercom(_target_id: str, _action_id: str) -> bool:
+            return True
+
+        async def prepare_release(_target_id: str, _action_id: str, **options: object) -> int:
+            prepared.append(options)
+            return 5
+
+        async def cancel_release(_target_id: str, **options: object) -> bool:
+            cancelled.append(options)
+            return True
+
+        async def execute_action(
+            target_id: str,
+            action_id: str,
+            _value: object,
+            *,
+            correlation_id: str | None = None,
+            **options: object,
+        ) -> dict[str, object]:
+            executions.append(str(options["request_id"]))
+            return {
+                "correlationId": correlation_id,
+                "requestId": options["request_id"],
+                "targetId": target_id,
+                "actionId": action_id,
+                "accepted": False,
+                "confirmed": False,
+                "status": "failed",
+                "error": "device_action_failed",
+            }
+
+        service.async_resolve_device_action_context = resolve_context
+        service.async_is_intercom_action = is_intercom
+        service.async_prepare_intercom_release = prepare_release
+        service.async_cancel_intercom_release = cancel_release
+        service.async_execute_device_action = execute_action
+        payload = {
+            "contract": {
+                "name": "hausman-hub-device-action-request",
+                "version": 1,
+            },
+            "correlationId": "intercom.failed.single.1",
+            "requestId": "intercom.failed.single.request.1",
+            "targetId": "intercom_failed",
+            "actionId": "turn_on",
+            "confirmedByUser": True,
+            "idempotencyKey": "intercom.failed.single.key.1",
+        }
+
+        def send(current: dict[str, object]) -> FakeResponse:
+            return asyncio.run(
+                views[path].post(
+                    FakeJsonRequest(
+                        "192.168.1.20",
+                        tablet,
+                        path,
+                        current,
+                        content_type="application/vnd.hausmanhub.device-action-request.full+json",
+                        accept="application/vnd.hausmanhub.device-action-receipt.full+json",
+                    )
+                )
+            )
+
+        first = send(payload)
+        second = send(
+            {
+                **payload,
+                "correlationId": "intercom.failed.single.2",
+                "requestId": "intercom.failed.single.request.2",
+                "idempotencyKey": "intercom.failed.single.key.2",
+            }
+        )
+
+        self.assertEqual(409, first.status)
+        self.assertEqual(409, second.status)
+        self.assertNotIn("releaseReceiptPending", first.payload)
+        self.assertEqual(2, len(prepared))
+        self.assertEqual(2, len(cancelled))
+        self.assertEqual(2, len(executions))
+
+    def test_intercom_returned_failed_receipt_cancels_unarmed_batch_release(self) -> None:
+        views = {view.url: view for view in self.hass.http.views}
+        path = "/api/hausman_hub/v1/device-actions/batch"
+        tablet = reader_user("system-users")
+        service = self.hass.data["hausman_hub"]["scenario_service"]
+        prepared: list[dict[str, object]] = []
+        cancelled: list[dict[str, object]] = []
+        executions = 0
+
+        async def resolve_context(target_id: str, action_id: str):
+            if target_id == "intercom_batch":
+                return "switch.synthetic_intercom_batch", "switch", (action_id,), "turn_on"
+            return "switch.synthetic_batch_other", "switch", (action_id,), "turn_on"
+
+        async def is_intercom(target_id: str, _action_id: str) -> bool:
+            return target_id == "intercom_batch"
+
+        async def prepare_release(_target_id: str, _action_id: str, **options: object) -> int:
+            prepared.append(options)
+            return 5
+
+        async def cancel_release(_target_id: str, **options: object) -> bool:
+            cancelled.append(options)
+            return True
+
+        async def execute_batch(
+            actions: list[dict[str, object]],
+            *,
+            correlation_id: str,
+            request_ids: tuple[str, ...],
+            **_options: object,
+        ) -> list[dict[str, object]]:
+            nonlocal executions
+            executions += 1
+            return [
+                {
+                    "correlationId": correlation_id,
+                    "requestId": request_ids[index],
+                    "targetId": str(item["targetId"]),
+                    "actionId": str(item["actionId"]),
+                    "accepted": index != 0,
+                    "confirmed": index != 0,
+                    "status": "confirmed" if index != 0 else "failed",
+                }
+                for index, item in enumerate(actions)
+            ]
+
+        service.async_resolve_device_action_context = resolve_context
+        service.async_is_intercom_action = is_intercom
+        service.async_prepare_intercom_release = prepare_release
+        service.async_cancel_intercom_release = cancel_release
+        service.async_execute_device_action_batch = execute_batch
+        payload = {
+            "contract": {
+                "name": "hausman-hub-device-action-batch-request",
+                "version": 1,
+            },
+            "correlationId": "intercom.failed.batch.1",
+            "requestId": "intercom.failed.batch.request.1",
+            "actions": [
+                {
+                    "targetId": "intercom_batch",
+                    "actionId": "turn_on",
+                    "confirmedByUser": True,
+                    "idempotencyKey": "intercom.failed.batch.key.1",
+                },
+                {"targetId": "batch_other", "actionId": "turn_on"},
+            ],
+        }
+
+        def send(current: dict[str, object]) -> FakeResponse:
+            return asyncio.run(
+                views[path].post(
+                    FakeJsonRequest(
+                        "192.168.1.20",
+                        tablet,
+                        path,
+                        current,
+                        content_type="application/vnd.hausmanhub.device-action-batch-request.full+json",
+                        accept="application/vnd.hausmanhub.device-action-batch-receipt.full+json",
+                    )
+                )
+            )
+
+        first = send(payload)
+        second = send(
+            {
+                **payload,
+                "correlationId": "intercom.failed.batch.2",
+                "requestId": "intercom.failed.batch.request.2",
+                "actions": [
+                    {
+                        "targetId": "intercom_batch",
+                        "actionId": "turn_on",
+                        "confirmedByUser": True,
+                        "idempotencyKey": "intercom.failed.batch.key.2",
+                    },
+                    {"targetId": "batch_other", "actionId": "turn_on"},
+                ],
+            }
+        )
+
+        self.assertEqual(200, first.status)
+        self.assertEqual(200, second.status)
+        self.assertEqual(2, len(prepared))
+        self.assertEqual(2, len(cancelled))
+        self.assertEqual(2, executions)
+        self.assertNotIn("releaseReceiptPending", first.payload)
+        self.assertNotIn(
+            "releaseReceiptPending", first.payload["receipts"][0]
+        )
+
+    def test_full_dangerous_action_replays_completed_receipt_without_dispatch(self) -> None:
+        views = {view.url: view for view in self.hass.http.views}
+        path = "/api/hausman_hub/v1/device-actions"
+        tablet = reader_user("system-users")
+        service = self.hass.data["hausman_hub"]["scenario_service"]
+        calls: list[tuple[str, str]] = []
+
+        async def resolve_context(target_id: str, action_id: str):
+            return "button.synthetic_door", "button", ("press",)
+
+        async def execute_action(
+            target_id: str,
+            action_id: str,
+            value: object,
+            *,
+            correlation_id: str | None = None,
+            dangerous_authorized: bool = False,
+            **options: object,
+        ) -> dict[str, object]:
+            self.assertTrue(dangerous_authorized)
+            self.assertTrue(str(options["request_id"]).startswith("dispatch."))
+            calls.append((target_id, action_id))
+            return {
+                "correlationId": correlation_id,
+                "requestId": options["request_id"],
+                "targetId": target_id,
+                "actionId": action_id,
+                "accepted": True,
+                "confirmed": True,
+                "status": "confirmed",
+                "statusName": "Выполнено",
+                "appliedAt": int(time.time() * 1000),
+                "message": "Кнопка нажата.",
+                "confirmationWindowMs": 8000,
+                "readBack": {
+                    "attempted": True,
+                    "matched": True,
+                    "observedAt": int(time.time() * 1000),
+                    "observedState": "on",
+                    "attempts": 1,
+                },
+                "reason": None,
+            }
+
+        service.async_resolve_device_action_context = resolve_context
+        service.async_execute_device_action = execute_action
+        payload = {
+            "contract": {
+                "name": "hausman-hub-device-action-request",
+                "version": 1,
+            },
+            "correlationId": "dangerous.press.1",
+            "requestId": "dangerous.press.request.1",
+            "targetId": "door_button",
+            "actionId": "press",
+            "confirmedByUser": True,
+            "idempotencyKey": "dangerous.press.1",
+        }
+
+        def send(
+            current: dict[str, object],
+            *,
+            accept: str = "application/vnd.hausmanhub.device-action-receipt.full+json",
+        ) -> FakeResponse:
+            return asyncio.run(
+                views[path].post(
+                    FakeJsonRequest(
+                        "192.168.1.20",
+                        tablet,
+                        path,
+                        current,
+                        content_type="application/vnd.hausmanhub.device-action-request.full+json",
+                        accept=accept,
+                    )
+                )
+            )
+
+        first = send(payload)
+        replay = send(copy.deepcopy(payload), accept="application/json")
+        conflict_payload = copy.deepcopy(payload)
+        conflict_payload["correlationId"] = "dangerous.press.2"
+        conflict = send(conflict_payload)
+
+        self.assertEqual(200, first.status)
+        self.assertEqual(first.payload, replay.payload)
+        self.assertEqual(
+            "application/vnd.hausmanhub.device-action-receipt.full+json",
+            replay.headers["Content-Type"],
+        )
+        self.assertEqual(409, conflict.status)
+        self.assertEqual("idempotency_key_conflict", conflict.payload["details"]["detailCode"])
+        self.assertEqual([("door_button", "press")], calls)
+
+    def test_light_reassert_requires_exact_evidence_and_replays_once(self) -> None:
+        from custom_components.hausman_hub.application.device_action_receipts import (
+            evidence_snapshot,
+        )
+
+        views = {view.url: view for view in self.hass.http.views}
+        path = "/api/hausman_hub/v1/device-actions"
+        service = self.hass.data["hausman_hub"]["scenario_service"]
+        entity_id = "light.synthetic_stale"
+        stale_state = SimpleNamespace(
+            state="on",
+            attributes={},
+            last_updated=datetime.now(timezone.utc) - timedelta(minutes=10),
+        )
+        self.hass.states.values[entity_id] = stale_state
+        evidence = evidence_snapshot(
+            target_id="light_stale",
+            state=stale_state,
+            allowed_actions=("turn_on", "turn_off"),
+        )
+        calls: list[str] = []
+
+        async def resolve_context(_target_id: str, _action_id: str):
+            return entity_id, "light", ("turn_on", "turn_off")
+
+        async def execute_action(
+            target_id: str,
+            action_id: str,
+            value: object,
+            *,
+            correlation_id: str | None = None,
+            **options: object,
+        ) -> dict[str, object]:
+            self.assertTrue(options["force_new_readback"])
+            self.assertTrue(options["automatic_reassert"])
+            self.assertEqual(
+                evidence["evidenceRevision"],
+                options["expected_evidence_revision"],
+            )
+            self.assertEqual(
+                evidence["evidenceSequence"],
+                options["expected_evidence_sequence"],
+            )
+            calls.append(correlation_id or "")
+            return {
+                "correlationId": correlation_id,
+                "requestId": options["request_id"],
+                "targetId": target_id,
+                "actionId": action_id,
+                "accepted": True,
+                "confirmed": False,
+                "status": "accepted",
+                "statusName": "Проверяется",
+                "appliedAt": int(time.time() * 1000),
+                "message": "Состояние света подтверждено.",
+                "confirmationWindowMs": 8000,
+                "readBack": {
+                    "attempted": True,
+                    "matched": False,
+                    "observedAt": int(time.time() * 1000),
+                    "observedState": "on",
+                    "attempts": 1,
+                },
+                "reason": None,
+            }
+
+        service.async_resolve_device_action_context = resolve_context
+        service.async_execute_device_action = execute_action
+        payload = {
+            "contract": {
+                "name": "hausman-hub-device-action-request",
+                "version": 1,
+            },
+            "correlationId": "light.reassert.1",
+            "requestId": "light.reassert.request.1",
+            "targetId": "light_stale",
+            "actionId": "turn_on",
+            "reassertKey": "light.reassert.key.1",
+            "expectedEvidenceRevision": evidence["evidenceRevision"],
+            "expectedEvidenceSequence": evidence["evidenceSequence"],
+        }
+
+        def send(current: dict[str, object]) -> FakeResponse:
+            return asyncio.run(
+                views[path].post(
+                    FakeJsonRequest(
+                        "192.168.1.20",
+                        reader_user("system-users"),
+                        path,
+                        current,
+                        content_type="application/vnd.hausmanhub.device-action-request.full+json",
+                        accept="application/vnd.hausmanhub.device-action-receipt.full+json",
+                    )
+                )
+            )
+
+        first = send(payload)
+        replay = send(copy.deepcopy(payload))
+        mismatch = copy.deepcopy(payload)
+        mismatch["reassertKey"] = "light.reassert.key.2"
+        rejected = send(mismatch)
+
+        self.assertEqual(200, first.status)
+        self.assertEqual("reasserted", first.payload["decision"])
+        self.assertFalse(first.payload["confirmed"])
+        self.assertEqual("automation", first.payload["commandSource"])
+        self.assertEqual("unknown", first.payload["ownership"])
+        self.assertFalse(first.payload["readBack"]["isNewEvidence"])
+        self.assertEqual(first.payload, replay.payload)
+        self.assertEqual(409, rejected.status)
+        self.assertEqual(["light.reassert.1"], calls)
 
     def test_local_admin_reads_filtered_operation_journal(self) -> None:
         from custom_components.hausman_hub.application.operation_journal import (

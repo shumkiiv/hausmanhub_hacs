@@ -1,0 +1,34 @@
+{
+  "contract": {
+    "name": "hausman-hub-device-action-receipt",
+    "version": 1
+  },
+  "correlationId": "generic-climate-temperature-1",
+  "requestId": "generic-climate-temperature-1",
+  "accepted": true,
+  "confirmed": true,
+  "status": "confirmed",
+  "statusName": "Выполнено",
+  "targetId": "device_climate_demo",
+  "targetType": "climate",
+  "actionId": "set_temperature",
+  "actionValue": 22,
+  "decision": "executed",
+  "decisionAt": 1787912000000,
+  "commandSent": true,
+  "commandSentAt": 1787912001000,
+  "confirmationWindowMs": 8000,
+  "dryRun": false,
+  "readBack": {
+    "targetId": "device_climate_demo",
+    "attempted": true,
+    "matched": true,
+    "observedAt": 1787912002000,
+    "observedValue": 22,
+    "attempts": 1,
+    "commandRequestId": "generic-climate-temperature-1"
+  },
+  "message": "Температура 22 °C подтверждена.",
+  "reason": null,
+  "error": null
+}

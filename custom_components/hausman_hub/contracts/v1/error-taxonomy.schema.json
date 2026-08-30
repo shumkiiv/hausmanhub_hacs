@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausmanhub.local/schemas/v1/error-taxonomy.schema.json",
+  "title": "HausmanHub error taxonomy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "apiMajorVersion", "entries"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-error-taxonomy"},
+        "version": {"const": 1}
+      }
+    },
+    "apiMajorVersion": {"const": 1},
+    "entries": {
+      "type": "array",
+      "minItems": 20,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/entry"}
+    },
+    "detailPolicies": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": {"$ref": "#/$defs/detailPolicy"}
+    }
+  },
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "category", "httpStatus", "retryable", "clientState", "recoveryAction", "retryPolicy", "safeMessage", "detailsPolicy", "allowedDetailKeys", "aliases"],
+      "properties": {
+        "code": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$", "maxLength": 128},
+        "category": {"enum": ["input", "access", "resource", "conflict", "capability", "confirmation", "policy", "freshness", "rate_limit", "availability", "internal"]},
+        "httpStatus": {"enum": [400, 403, 404, 406, 409, 429, 500, 503]},
+        "retryable": {"type": "boolean"},
+        "clientState": {"enum": ["stale", "offline", "pending", "failed", "disabled"]},
+        "recoveryAction": {"enum": ["none", "refresh", "reconnect", "retry", "reauthenticate", "update_client"]},
+        "retryPolicy": {"enum": ["never", "read_only", "after_refresh", "after_delay", "new_user_action"]},
+        "safeMessage": {"type": "string", "minLength": 8, "maxLength": 500},
+        "detailsPolicy": {"enum": ["discard", "allowlisted"]},
+        "allowedDetailKeys": {
+          "type": "array",
+          "items": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9]*$", "maxLength": 64},
+          "uniqueItems": true,
+          "maxItems": 16
+        },
+        "aliases": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/alias"},
+          "uniqueItems": true,
+          "maxItems": 16
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"detailsPolicy": {"const": "discard"}}, "required": ["detailsPolicy"]},
+          "then": {"properties": {"allowedDetailKeys": {"maxItems": 0}}},
+          "else": {"properties": {"allowedDetailKeys": {"minItems": 1}}}
+        }
+      ]
+    },
+    "detailPolicy": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "baseCode",
+            "detailCode",
+            "retryable",
+            "clientState",
+            "recoveryAction",
+            "retryPolicy",
+            "safeMessage",
+            "automaticRetryAllowed",
+            "newUserActionRequired",
+            "freshConfirmationRequired"
+          ],
+          "properties": {
+            "baseCode": {"const": "conflict"},
+            "detailCode": {"const": "idempotency_in_progress"},
+            "retryable": {"const": false},
+            "clientState": {"const": "pending"},
+            "recoveryAction": {"const": "refresh"},
+            "retryPolicy": {"const": "read_only"},
+            "safeMessage": {"type": "string", "minLength": 8, "maxLength": 500},
+            "automaticRetryAllowed": {"const": false},
+            "newUserActionRequired": {"const": false},
+            "freshConfirmationRequired": {"const": false}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "baseCode",
+            "detailCode",
+            "retryable",
+            "clientState",
+            "recoveryAction",
+            "retryPolicy",
+            "safeMessage",
+            "automaticRetryAllowed",
+            "newUserActionRequired",
+            "freshConfirmationRequired"
+          ],
+          "properties": {
+            "baseCode": {"const": "conflict"},
+            "detailCode": {"const": "idempotency_key_conflict"},
+            "retryable": {"const": false},
+            "clientState": {"const": "failed"},
+            "recoveryAction": {"const": "retry"},
+            "retryPolicy": {"const": "new_user_action"},
+            "safeMessage": {"type": "string", "minLength": 8, "maxLength": 500},
+            "automaticRetryAllowed": {"const": false},
+            "newUserActionRequired": {"const": true},
+            "freshConfirmationRequired": {"const": true}
+          }
+        }
+      ]
+    },
+    "alias": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["surface", "code"],
+      "properties": {
+        "surface": {"enum": ["climate_operation_reason", "climate_runtime_block_reason", "voice_receipt_code"]},
+        "code": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$", "maxLength": 128}
+      }
+    }
+  }
+}

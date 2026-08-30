@@ -137,7 +137,13 @@ class ScenarioNodeRedSourceView(_ScenarioView):
             return None
         return scenario_id
 
-    async def get(self, request: Any) -> Any:
+    async def get(
+        self, request: Any, scenario_id: str | None = None
+    ) -> Any:
+        # Home Assistant passes dynamic path parameters to view handlers as
+        # keyword arguments. Keep request.match_info as the single validator,
+        # but accept the routed value so aiohttp can dispatch the request.
+        del scenario_id
         scenario_id = self._scenario_id(request)
         if scenario_id is None:
             return _not_found(self)
@@ -154,7 +160,10 @@ class ScenarioNodeRedSourceView(_ScenarioView):
             )
         return self.json(payload, headers=NO_STORE_HEADERS)
 
-    async def put(self, request: Any) -> Any:
+    async def put(
+        self, request: Any, scenario_id: str | None = None
+    ) -> Any:
+        del scenario_id
         scenario_id = self._scenario_id(request)
         if scenario_id is None:
             return _not_found(self)

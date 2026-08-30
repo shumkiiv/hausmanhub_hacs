@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import unittest
+from dataclasses import replace
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -23,6 +25,9 @@ from custom_components.hausman_hub.application.scenario_service import (
     ScenarioValidationError,
     _public_device_name,
 )
+from custom_components.hausman_hub.application.intercom_release_obligation import (
+    IntercomReleaseObligation,
+)
 from custom_components.hausman_hub.application.scenarios import (
     ScenarioCatalog,
     ScenarioDeviceAction,
@@ -33,6 +38,9 @@ from custom_components.hausman_hub.application.scenarios import (
 from custom_components.hausman_hub.domain.scenarios import (
     Scenario,
     ScenarioDefinition,
+    ScenarioNodeRedGeneratedBy,
+    ScenarioNodeRedMetadata,
+    ScenarioNodeRedSyncStatus,
     ScenarioRegistry,
 )
 
@@ -266,6 +274,77 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
     async def test_load_empty_registry(self) -> None:
         scenarios = await self.service.async_list_scenarios()
         self.assertEqual(scenarios, ())
+
+    async def test_load_migrates_protected_controllers_to_restart_before_exposure(
+        self,
+    ) -> None:
+        for storage_kind, mode in (("current", "single"), ("n_minus_1", "queued")):
+            with self.subTest(storage_kind=storage_kind, mode=mode):
+                definitions = []
+                for scenario_id in (
+                    "system-shower-comfort-controller",
+                    "system-tambur-adaptive-controller",
+                ):
+                    payload = _valid_payload(scenario_id)
+                    payload["group"] = "system"
+                    payload["definition"]["executionMode"] = mode
+                    definitions.append(Scenario.from_definition(**{
+                        "scenario_id": scenario_id,
+                        "title": payload["title"],
+                        "definition": ScenarioDefinition.from_payload(payload["definition"]),
+                        "group": "system",
+                        "protected": True,
+                    }))
+                stored = ScenarioRegistry(scenarios=tuple(definitions)).to_storage()
+                if storage_kind == "n_minus_1":
+                    for scenario in stored["scenarios"]:
+                        scenario.pop("activationKind")
+                        scenario.pop("protected")
+                store = _FakeStore()
+                store._data = stored  # type: ignore[assignment]
+                service = ScenarioService(None, store, self.catalog, self.executor)
+
+                await service.async_load()
+
+                for scenario_id in (
+                    "system-shower-comfort-controller",
+                    "system-tambur-adaptive-controller",
+                ):
+                    scenario = await service.async_get_scenario(scenario_id)
+                    self.assertEqual("restart", scenario.definition.execution_mode.value)
+                self.assertIsInstance(store._data, ScenarioRegistry)
+                assert isinstance(store._data, ScenarioRegistry)
+                self.assertEqual(
+                    {"restart"},
+                    {item.definition.execution_mode.value for item in store._data.scenarios},
+                )
+
+    async def test_load_migration_save_failure_keeps_unsafe_registry_unavailable(
+        self,
+    ) -> None:
+        payload = _valid_payload("system-shower-comfort-controller")
+        payload["group"] = "system"
+        scenario = Scenario.from_definition(
+            "system-shower-comfort-controller",
+            payload["title"],
+            ScenarioDefinition.from_payload(payload["definition"]),
+            group="system",
+            protected=True,
+        )
+        store = _FailAfterWriteStore()
+        store._data = ScenarioRegistry(scenarios=(scenario,))
+        store.failures_after_write = 2
+        service = ScenarioService(None, store, self.catalog, self.executor)
+
+        with self.assertRaises(ScenarioServiceError) as ctx:
+            await service.async_load()
+
+        self.assertEqual(503, ctx.exception.status)
+        with self.assertRaises(ScenarioServiceError):
+            await service.async_get_scenario("system-shower-comfort-controller")
+        with self.assertRaises(ScenarioServiceError):
+            await service.async_run_scenario("system-shower-comfort-controller")
+        self.assertEqual([], self.executor.runs)
 
     async def test_update_and_list(self) -> None:
         scenario = await self.service.async_update_scenario(_valid_payload())
@@ -1020,6 +1099,100 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNone(raised.exception.current_revision)
 
+    async def test_create_rejects_foreign_node_red_metadata_before_backend(self) -> None:
+        backend = SimpleNamespace(async_prepare=AsyncMock())
+        service = ScenarioService(
+            None,
+            self.store,
+            self.catalog,
+            self.executor,
+            node_red_backend=backend,
+        )
+        await service.async_load()
+        payload = _valid_payload("node_red_foreign_flow")
+        payload["definition"].update(
+            {
+                "executionBackend": "node_red",
+                "nodeRed": {
+                    "flowId": "foreign-flow",
+                    "flowRevision": 17,
+                    "sourceHash": "a" * 64,
+                    "generatedBy": "user",
+                    "syncStatus": "synced",
+                    "inputTargetIds": [],
+                },
+            }
+        )
+
+        with self.assertRaises(ScenarioValidationError) as raised:
+            await service.async_update_scenario(payload)
+
+        self.assertEqual(
+            "node_red_metadata_server_owned", raised.exception.violations[0].code
+        )
+        backend.async_prepare.assert_not_awaited()
+
+    async def test_update_preserves_server_node_red_metadata_and_updates_inputs(self) -> None:
+        calls: list[object] = []
+
+        async def prepare(_scenario_id, _title, definition, *, previous=None):
+            calls.append(previous)
+            if previous is None:
+                return replace(
+                    definition,
+                    node_red=ScenarioNodeRedMetadata(
+                        flow_id="server-flow",
+                        flow_revision=7,
+                        source_hash="a" * 64,
+                        generated_by=ScenarioNodeRedGeneratedBy.AI,
+                        sync_status=ScenarioNodeRedSyncStatus.SYNCED,
+                        input_target_ids=definition.node_red.input_target_ids,
+                    ),
+                )
+            return definition
+
+        service = ScenarioService(
+            None,
+            self.store,
+            self.catalog,
+            self.executor,
+            node_red_backend=SimpleNamespace(async_prepare=prepare),
+        )
+        await service.async_load()
+        create = _valid_payload("node_red_owned")
+        create["definition"].update(
+            {
+                "executionBackend": "node_red",
+                "nodeRed": {"inputTargetIds": ["device_abc"]},
+            }
+        )
+        created = await service.async_update_scenario(create)
+
+        update = _valid_payload("node_red_owned")
+        update["expectedRevision"] = created.revision
+        update["definition"].update(
+            {
+                "executionBackend": "node_red",
+                "nodeRed": {
+                    "flowId": "foreign-flow",
+                    "flowRevision": 99,
+                    "sourceHash": "b" * 64,
+                    "generatedBy": "user",
+                    "syncStatus": "changed",
+                    "inputTargetIds": [],
+                },
+            }
+        )
+        updated = await service.async_update_scenario(update)
+
+        self.assertEqual([None, created.definition.node_red], calls)
+        self.assertEqual((), updated.definition.node_red.input_target_ids)
+        self.assertEqual("server-flow", updated.definition.node_red.flow_id)
+        self.assertEqual(7, updated.definition.node_red.flow_revision)
+        self.assertEqual("a" * 64, updated.definition.node_red.source_hash)
+        self.assertIs(ScenarioNodeRedGeneratedBy.AI, updated.definition.node_red.generated_by)
+        self.assertIs(ScenarioNodeRedSyncStatus.SYNCED, updated.definition.node_red.sync_status)
+
     async def test_update_validation_error(self) -> None:
         payload = _valid_payload()
         payload["definition"]["actions"] = []
@@ -1236,6 +1409,278 @@ class ScenarioServiceTest(unittest.IsolatedAsyncioTestCase):
             ],
             self.executor.correlated_device_actions,
         )
+
+    async def test_batch_reassert_forwards_shared_claim_identity(self) -> None:
+        received: list[dict[str, object]] = []
+
+        class RecordingExecutor:
+            def replace_catalog(self, _catalog: ScenarioCatalog) -> None:
+                return None
+
+            async def async_execute_device_action(
+                self,
+                _target_id: str,
+                _action_id: str,
+                _value: object | None = None,
+                **options: object,
+            ) -> dict[str, object]:
+                received.append(dict(options))
+                return {"accepted": False, "confirmed": False, "status": "failed"}
+
+        service = ScenarioService(
+            None,
+            _FakeStore(),
+            self.catalog,
+            RecordingExecutor(),
+        )
+        await service.async_load()
+        await service.async_execute_device_action_batch(
+            [
+                {
+                    "targetId": "device_1",
+                    "actionId": "turn_on",
+                    "reassertKey": "shared.reassert.batch.1",
+                    "expectedEvidenceRevision": "evidence.revision.1",
+                    "expectedEvidenceSequence": 1,
+                }
+            ],
+            correlation_id="batch.reassert.1",
+        )
+
+        self.assertEqual("shared.reassert.batch.1", received[0]["reassert_claim_id"])
+        self.assertTrue(received[0]["automatic_reassert"])
+
+    async def test_batch_arms_intercom_at_its_actual_dispatch_boundary(self) -> None:
+        now = [0]
+        order: list[str] = []
+
+        class ObligationStore:
+            payload: object | None = None
+
+            async def async_load(self) -> object | None:
+                return self.payload
+
+            async def async_save(self, payload: dict[str, object]) -> None:
+                self.payload = json.loads(json.dumps(payload))
+
+        obligation_store = ObligationStore()
+        obligation = IntercomReleaseObligation(
+            obligation_store, now_ms=lambda: now[0]
+        )
+
+        class OrderedExecutor:
+            def replace_catalog(self, _catalog: ScenarioCatalog) -> None:
+                return None
+
+            async def async_execute_device_action(
+                self,
+                target_id: str,
+                action_id: str,
+                value: object | None = None,
+                **options: object,
+            ) -> dict[str, object]:
+                del action_id, value
+                if target_id == "device_abc":
+                    order.append("first_dispatch")
+                    now[0] = 14_900
+                else:
+                    callback = options.get("before_dispatch")
+                    assert callable(callback)
+                    await callback()
+                    order.append("intercom_dispatch")
+                return {
+                    "accepted": True,
+                    "confirmed": True,
+                    "status": "confirmed",
+                }
+
+        combined = ScenarioCatalog(
+            devices={
+                **self.catalog.devices,
+                **_intercom_catalog().devices,
+            },
+            scenarios={},
+        )
+        service = ScenarioService(
+            None,
+            _FakeStore(),
+            combined,
+            OrderedExecutor(),
+            intercom_entity_resolver=lambda: "switch.prikhozhaia_domofon_2",
+            intercom_release_obligation=obligation,
+        )
+        await service.async_load()
+        await obligation.async_prepare(
+            target_id="intercom_target",
+            entity_id="switch.prikhozhaia_domofon_2",
+            correlation_id="batch.intercom",
+            request_id="batch.intercom.release",
+        )
+
+        receipts = await service.async_execute_device_action_batch(
+            [
+                {"targetId": "device_abc", "actionId": "turn_on"},
+                {"targetId": "intercom_target", "actionId": "turn_on"},
+            ],
+            correlation_id="batch.intercom",
+            dangerous_authorized=frozenset(
+                {("intercom_target", "turn_on")}
+            ),
+        )
+
+        self.assertEqual(2, len(receipts))
+        self.assertEqual(["first_dispatch", "intercom_dispatch"], order)
+        assert isinstance(obligation_store.payload, dict)
+        self.assertEqual(
+            29_900,
+            obligation_store.payload["record"]["deadlineMs"],
+        )
+
+    async def test_single_intercom_pin_change_blocks_dispatch_after_prepare(
+        self,
+    ) -> None:
+        pin = ["switch.prikhozhaia_domofon_2"]
+        dispatched: list[str] = []
+
+        class ObligationStore:
+            payload: object | None = None
+
+            async def async_load(self) -> object | None:
+                return self.payload
+
+            async def async_save(self, payload: dict[str, object]) -> None:
+                self.payload = json.loads(json.dumps(payload))
+
+        class RacingExecutor:
+            def replace_catalog(self, _catalog: ScenarioCatalog) -> None:
+                return None
+
+            async def async_execute_device_action(
+                self,
+                target_id: str,
+                action_id: str,
+                value: object | None = None,
+                **options: object,
+            ) -> dict[str, object]:
+                del action_id, value
+                pin[0] = "switch.remapped_intercom"
+                callback = options.get("before_dispatch")
+                assert callable(callback)
+                await callback()
+                dispatched.append(target_id)
+                return {"status": "completed", "confirmed": True}
+
+        store = ObligationStore()
+        obligation = IntercomReleaseObligation(store, now_ms=lambda: 1_000)
+        service = ScenarioService(
+            None,
+            _FakeStore(),
+            _intercom_catalog(),
+            RacingExecutor(),
+            intercom_entity_resolver=lambda: pin[0],
+            intercom_release_obligation=obligation,
+        )
+        await service.async_load()
+        await obligation.async_prepare(
+            target_id="intercom_target",
+            entity_id="switch.prikhozhaia_domofon_2",
+            correlation_id="single.intercom.race",
+            request_id="single.intercom.race.release",
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "descriptor changed"):
+            await service.async_execute_device_action(
+                "intercom_target",
+                "turn_on",
+                correlation_id="single.intercom.race",
+                dangerous_authorized=True,
+                request_id="single.intercom.race",
+                expected_entity_id="switch.prikhozhaia_domofon_2",
+                expected_domain="switch",
+                expected_service="turn_on",
+                intercom_release_required=True,
+            )
+
+        self.assertEqual([], dispatched)
+        assert isinstance(store.payload, dict)
+        self.assertIsNone(store.payload["record"])
+
+    async def test_batch_intercom_pin_change_blocks_dispatch_after_prepare(
+        self,
+    ) -> None:
+        pin = ["switch.prikhozhaia_domofon_2"]
+        dispatched: list[str] = []
+
+        class ObligationStore:
+            payload: object | None = None
+
+            async def async_load(self) -> object | None:
+                return self.payload
+
+            async def async_save(self, payload: dict[str, object]) -> None:
+                self.payload = json.loads(json.dumps(payload))
+
+        class RacingExecutor:
+            def replace_catalog(self, _catalog: ScenarioCatalog) -> None:
+                return None
+
+            async def async_execute_device_action(
+                self,
+                target_id: str,
+                action_id: str,
+                value: object | None = None,
+                **options: object,
+            ) -> dict[str, object]:
+                del action_id, value
+                pin[0] = "switch.remapped_intercom"
+                callback = options.get("before_dispatch")
+                assert callable(callback)
+                await callback()
+                dispatched.append(target_id)
+                return {"status": "completed", "confirmed": True}
+
+        store = ObligationStore()
+        obligation = IntercomReleaseObligation(store, now_ms=lambda: 1_000)
+        service = ScenarioService(
+            None,
+            _FakeStore(),
+            _intercom_catalog(),
+            RacingExecutor(),
+            intercom_entity_resolver=lambda: pin[0],
+            intercom_release_obligation=obligation,
+        )
+        await service.async_load()
+        await obligation.async_prepare(
+            target_id="intercom_target",
+            entity_id="switch.prikhozhaia_domofon_2",
+            correlation_id="batch.intercom.race",
+            request_id="batch.intercom.race.0.release",
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "descriptor changed"):
+            await service.async_execute_device_action_batch(
+                [{"targetId": "intercom_target", "actionId": "turn_on"}],
+                correlation_id="batch.intercom.race",
+                dangerous_authorized=frozenset(
+                    {("intercom_target", "turn_on")}
+                ),
+                intercom_release_required=frozenset(
+                    {("intercom_target", "turn_on")}
+                ),
+                request_ids=("batch.intercom.race.0",),
+                dispatch_contexts=(
+                    (
+                        "switch.prikhozhaia_domofon_2",
+                        "switch",
+                        ("turn_on", "toggle"),
+                        "turn_on",
+                    ),
+                ),
+            )
+
+        self.assertEqual([], dispatched)
+        assert isinstance(store.payload, dict)
+        self.assertIsNone(store.payload["record"]["armedAt"])
 
     async def test_device_action_batch_rejects_duplicate_target_action(self) -> None:
         with self.assertRaisesRegex(
@@ -1715,6 +2160,13 @@ def _intercom_catalog() -> ScenarioCatalog:
                 service="turn_on",
                 allowed_fields=frozenset(),
             ),
+            ScenarioDeviceAction(
+                action_id="toggle",
+                title="Toggle",
+                domain="switch",
+                service="toggle",
+                allowed_fields=frozenset(),
+            ),
         ),
     )
     return ScenarioCatalog(devices={"intercom_target": entry}, scenarios={})
@@ -1750,6 +2202,17 @@ class ScenarioServiceIntercomReleaseTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("intercom_target", self.release_receipts[0]["targetId"])
         self.assertNotIn("entityId", self.release_receipts[0])
 
+    async def test_toggle_also_schedules_the_fail_safe_release(self) -> None:
+        seconds = await self.service.async_schedule_intercom_release(
+            "intercom_target", "toggle"
+        )
+        self.assertEqual(seconds, 15)
+        self.assertEqual(len(self.call_later.calls), 1)
+        _delay, callback = self.call_later.calls[0]
+        await callback(None)
+        self.assertEqual(self.executor.releases, ["switch.prikhozhaia_domofon_2"])
+        self.assertEqual("released", self.release_receipts[0]["outcome"])
+
     async def test_dry_run_receipt_does_not_touch_relay(self) -> None:
         self.service.publish_intercom_dry_run(
             target_id="intercom_target",
@@ -1780,8 +2243,73 @@ class ScenarioServiceIntercomReleaseTest(unittest.IsolatedAsyncioTestCase):
                 "intercom_target", "turn_on"
             )
         )
+        self.assertTrue(
+            await self.service.async_is_intercom_action(
+                "intercom_target", "toggle"
+            )
+        )
         self.assertFalse(
             await self.service.async_is_intercom_action("device_abc", "turn_on")
+        )
+
+    async def test_external_gate_is_dangerous_but_room_curtains_are_not(self) -> None:
+        movements = tuple(
+            ScenarioDeviceAction(
+                action_id=action_id,
+                title=action_id,
+                domain="cover",
+                service=(
+                    "set_cover_position"
+                    if action_id == "set_position"
+                    else action_id
+                ),
+                allowed_fields=(
+                    frozenset({"value"})
+                    if action_id == "set_position"
+                    else frozenset()
+                ),
+            )
+            for action_id in ("open_cover", "close_cover", "set_position")
+        )
+        service = ScenarioService(
+            self.hass,
+            _FakeStore(),
+            ScenarioCatalog(
+                devices={
+                    "garage_gate": ScenarioDeviceEntry(
+                        target_id="garage_gate",
+                        name="Гаражные ворота",
+                        entity_id="cover.garage_gate",
+                        actions=movements,
+                        device_type="garage_door",
+                    ),
+                    "kitchen_curtain": ScenarioDeviceEntry(
+                        target_id="kitchen_curtain",
+                        name="Шторы кухни",
+                        entity_id="cover.kitchen_curtains",
+                        actions=movements,
+                        device_type="curtain",
+                    ),
+                },
+                scenarios={},
+            ),
+        )
+
+        self.assertTrue(
+            service.is_contextually_dangerous_action(
+                "garage_gate", "open_cover"
+            )
+        )
+        self.assertTrue(
+            service.is_external_cover_action("garage_gate", "set_position")
+        )
+        self.assertFalse(
+            service.is_contextually_dangerous_action(
+                "kitchen_curtain", "open_cover"
+            )
+        )
+        self.assertFalse(
+            service.is_external_cover_action("garage_gate", "turn_off")
         )
 
     async def test_release_skips_unrelated_target(self) -> None:
@@ -1812,11 +2340,14 @@ class ScenarioServiceIntercomReleaseTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(seconds, 15)
 
-    async def test_repeat_press_extends_hold(self) -> None:
+    async def test_repeat_press_does_not_extend_hold(self) -> None:
         await self.service.async_schedule_intercom_release("intercom_target", "turn_on")
-        await self.service.async_schedule_intercom_release("intercom_target", "turn_on")
-        self.assertEqual(self.call_later.cancelled, 1)
-        self.assertEqual(len(self.call_later.calls), 2)
+        repeated = await self.service.async_schedule_intercom_release(
+            "intercom_target", "turn_on"
+        )
+        self.assertIsNone(repeated)
+        self.assertEqual(self.call_later.cancelled, 0)
+        self.assertEqual(len(self.call_later.calls), 1)
 
     async def test_cancel_release_turns_off_now(self) -> None:
         await self.service.async_schedule_intercom_release("intercom_target", "turn_on")

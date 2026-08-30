@@ -1,0 +1,22 @@
+{
+  "contract": {
+    "name": "hausman-hub-device-state-evidence",
+    "version": 1
+  },
+  "targetId": "device_lighting_demo",
+  "reportedState": "on",
+  "effectiveState": "unknown",
+  "confidence": "suspect",
+  "ownership": "unknown",
+  "observedAt": 1787904000000,
+  "evidenceRevision": "lighting.evidence.103",
+  "evidenceSequence": 103,
+  "freshUntil": 1787904001000,
+  "freshnessWindowMs": 60000,
+  "ownershipSource": "unknown",
+  "reasonCode": "state_stale",
+  "reassertBudget": 1,
+  "reassertPolicy": "light_turn_on",
+  "allowedActions": ["turn_on"],
+  "blockedReasons": []
+}

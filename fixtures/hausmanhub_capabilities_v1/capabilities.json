@@ -22,6 +22,15 @@
         "name": "hausman-hub-device-action-receipt",
         "version": 1
       },
+      "fullProtocol": {
+        "fullAvailable": true,
+        "singleRequestMediaType": "application/vnd.hausmanhub.device-action-request.full+json",
+        "singleResponseMediaType": "application/vnd.hausmanhub.device-action-receipt.full+json",
+        "batchRequestMediaType": "application/vnd.hausmanhub.device-action-batch-request.full+json",
+        "batchResponseMediaType": "application/vnd.hausmanhub.device-action-batch-receipt.full+json",
+        "evidenceContractVersion": "1",
+        "dangerousPolicyVersion": "1"
+      },
       "feature_matrix_path": "/api/hausman_hub/v1/device-features",
       "feature_matrix_method": "GET",
       "feature_matrix_contract": {

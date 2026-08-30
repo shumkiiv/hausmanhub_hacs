@@ -38,10 +38,10 @@ function switchAction(id, targetId, targetName, turnOn) {
   };
 }
 
-function setSwitch(actions, key, turnOn) {
+function setSwitch(actions, key, turnOn, force = false) {
   const current = state(ID[key]);
   const desired = turnOn ? 'on' : 'off';
-  if (current === desired) return;
+  if (!force && current === desired) return;
   actions.push(switchAction(`set_${key}_${desired}`, ID[key], NAME[key], turnOn));
 }
 
@@ -84,25 +84,28 @@ const trace = [
 ];
 
 let lightBranch = 'light_unknown';
+const delayedLightOffKeys = [];
 if (presenceKnown && !occupied) {
-  lightBranch = 'light_off';
-  setSwitch(actions, 'main', false);
-  setSwitch(actions, 'extra', false);
-  setSwitch(actions, 'cabinet', false);
+  lightBranch = 'light_off_5m';
+  for (const key of ['main', 'extra', 'cabinet']) {
+    if (state(ID[key]) === 'on') delayedLightOffKeys.push(key);
+  }
 } else if (occupied && night) {
   lightBranch = 'night_cabinet';
   setSwitch(actions, 'main', false);
   setSwitch(actions, 'extra', false);
-  setSwitch(actions, 'cabinet', true);
+  // A forced idempotent turn-on lets Hausman detect a pre-existing manual
+  // choice and block the complete interchangeable light profile.
+  setSwitch(actions, 'cabinet', true, true);
 } else if (occupied && daylight) {
   lightBranch = 'day_main';
-  setSwitch(actions, 'main', true);
+  setSwitch(actions, 'main', true, true);
   setSwitch(actions, 'extra', false);
   setSwitch(actions, 'cabinet', false);
 } else if (occupied && evening) {
   lightBranch = 'evening_extra';
   setSwitch(actions, 'main', false);
-  setSwitch(actions, 'extra', true);
+  setSwitch(actions, 'extra', true, true);
   setSwitch(actions, 'cabinet', false);
 }
 
@@ -119,6 +122,7 @@ trace.push({
 
 let fanBranch = 'fan_hold';
 const fanState = state(ID.fan);
+let delayedFanOff = false;
 if (humid) {
   fanBranch = 'fan_humidity';
   setSwitch(actions, 'fan', true);
@@ -128,8 +132,17 @@ if (humid) {
   actions.push(switchAction('set_fan_on', ID.fan, NAME.fan, true));
 } else if (presenceKnown && !occupied && humidityKnown && fanState === 'on') {
   fanBranch = 'fan_off_5m';
-  actions.push({id: 'fan_run_on', type: 'delay', delaySeconds: 300});
-  actions.push(switchAction('set_fan_off', ID.fan, NAME.fan, false));
+  delayedFanOff = true;
+}
+
+if (delayedLightOffKeys.length || delayedFanOff) {
+  actions.push({id: 'absence_wait', type: 'delay', delaySeconds: 300});
+  for (const key of delayedLightOffKeys) {
+    actions.push(switchAction(`set_${key}_off`, ID[key], NAME[key], false));
+  }
+  if (delayedFanOff) {
+    actions.push(switchAction('set_fan_off', ID.fan, NAME.fan, false));
+  }
 }
 
 trace.push({

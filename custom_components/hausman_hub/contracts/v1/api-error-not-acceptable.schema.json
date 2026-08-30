@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/api-error-not-acceptable.schema.json",
+  "title": "HausmanHub HTTP 406 API error v1",
+  "allOf": [
+    {
+      "$ref": "api-error.schema.json"
+    },
+    {
+      "type": "object",
+      "required": ["code", "status", "category", "message", "retryable"],
+      "properties": {
+        "code": {"const": "not_acceptable"},
+        "status": {"const": 406},
+        "category": {"const": "capability"},
+        "message": {"const": "Формат ответа не поддерживается. Обновите клиент."},
+        "retryable": {"const": false}
+      },
+      "not": {
+        "required": ["details"]
+      }
+    }
+  ]
+}
