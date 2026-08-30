@@ -297,8 +297,31 @@ class ManagedShowerSourceTest(unittest.TestCase):
 
         self.assertEqual("day_main__fan_hold", payload["selectedBranch"])
         self.assertEqual(
-            ["set_main_on", "set_extra_off"],
+            ["set_main_on", "set_extra_off", "set_cabinet_on"],
             _action_ids(payload),
+        )
+
+    def test_presence_starts_fan_immediately_and_adds_cabinet_light(self) -> None:
+        payload = _run_shower(
+            timestamp="2026-08-27T12:00:00+06:00",
+            states={
+                SHOWER_PRESENCE: "on",
+                SHOWER_HUMIDITY: "45",
+                SUN: "above_horizon",
+                SHOWER_MAIN: "off",
+                SHOWER_EXTRA: "off",
+                SHOWER_FAN: "off",
+                SHOWER_CABINET: "off",
+            },
+        )
+
+        self.assertEqual("day_main__fan_presence", payload["selectedBranch"])
+        self.assertEqual(
+            ["set_main_on", "set_cabinet_on", "set_fan_on"],
+            _action_ids(payload),
+        )
+        self.assertFalse(
+            any(action["type"] == "delay" for action in payload["actions"])
         )
 
     def test_unknown_presence_never_switches_light_or_fan(self) -> None:

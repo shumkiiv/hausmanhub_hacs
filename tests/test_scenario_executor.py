@@ -888,6 +888,13 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.hass.services.async_call.assert_awaited_once()
 
     async def test_sensor_run_preserves_light_but_still_starts_fan(self) -> None:
+        shower_fan_target = "entity_afef5df0e0cae309"
+        self.catalog._devices[shower_fan_target] = ScenarioDeviceEntry(
+            target_id=shower_fan_target,
+            name="Выключатель душевая доп свет 2",
+            entity_id="switch.shower_fan",
+            actions=self.catalog._devices["fan_1"].actions,
+        )
         definition = _definition(
             (
                 ScenarioAction(
@@ -899,7 +906,8 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
                 ScenarioAction(
                     id="fan_on",
                     type=ScenarioActionType.DEVICE_ACTION,
-                    target_id="fan_1",
+                    target_id=shower_fan_target,
+                    target_name="Душевая: вытяжка",
                     action_id="turn_on",
                 ),
             )

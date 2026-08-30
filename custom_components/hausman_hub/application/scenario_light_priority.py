@@ -60,6 +60,12 @@ _NON_LIGHT_SWITCH_WORDS = (
     "кондиционер",
 )
 
+# This stable catalog target is the second relay of a mixed shower switch.
+# Its legacy physical device name contains "доп свет", although the relay is
+# wired to the exhaust fan. Keep the safety classification bound to the
+# release-owned target ID instead of trusting an editable display label.
+_NON_LIGHT_SWITCH_TARGET_IDS = frozenset({"entity_afef5df0e0cae309"})
+
 
 class LightAutomationPriorityStore(Protocol):
     async def async_load(self) -> object | None: ...
@@ -872,6 +878,8 @@ class LightAutomationPriority:
         if allowed.domain == "light":
             return device
         if allowed.domain != "switch":
+            return None
+        if action.target_id in _NON_LIGHT_SWITCH_TARGET_IDS:
             return None
         target_text = _text(
             device.name,

@@ -1,5 +1,5 @@
 // HAUSMAN_MANAGED_SCENARIO system-shower-comfort-controller
-// Душевая: единый выбор света и вытяжки. Физические команды выполняет Hausman.
+// Душевая: профиль света, обязательная подсветка шкафа и независимая вытяжка. Физические команды выполняет Hausman.
 const started = Date.now();
 const request = (msg.payload && typeof msg.payload === 'object') ? msg.payload : {};
 const inputs = (request.inputs && typeof request.inputs === 'object') ? request.inputs : {};
@@ -94,19 +94,21 @@ if (presenceKnown && !occupied) {
   lightBranch = 'night_cabinet';
   setSwitch(actions, 'main', false);
   setSwitch(actions, 'extra', false);
-  // A forced idempotent turn-on lets Hausman detect a pre-existing manual
-  // choice and block the complete interchangeable light profile.
+  // The forced claim preserves manual priority for the complete night profile.
   setSwitch(actions, 'cabinet', true, true);
 } else if (occupied && daylight) {
   lightBranch = 'day_main';
   setSwitch(actions, 'main', true, true);
   setSwitch(actions, 'extra', false);
-  setSwitch(actions, 'cabinet', false);
 } else if (occupied && evening) {
   lightBranch = 'evening_extra';
   setSwitch(actions, 'main', false);
   setSwitch(actions, 'extra', true, true);
-  setSwitch(actions, 'cabinet', false);
+}
+
+// Днём и вечером подсветка шкафа дополняет основной временной профиль.
+if (occupied && !night) {
+  setSwitch(actions, 'cabinet', true);
 }
 
 trace.push({
@@ -127,9 +129,8 @@ if (humid) {
   fanBranch = 'fan_humidity';
   setSwitch(actions, 'fan', true);
 } else if (occupied && fanState !== 'on') {
-  fanBranch = 'fan_presence_2m';
-  actions.push({id: 'fan_presence_wait', type: 'delay', delaySeconds: 120});
-  actions.push(switchAction('set_fan_on', ID.fan, NAME.fan, true));
+  fanBranch = 'fan_presence';
+  setSwitch(actions, 'fan', true);
 } else if (presenceKnown && !occupied && humidityKnown && fanState === 'on') {
   fanBranch = 'fan_off_5m';
   delayedFanOff = true;

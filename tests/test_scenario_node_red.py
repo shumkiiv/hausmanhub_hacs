@@ -83,8 +83,8 @@ def test_release_trust_allows_exact_previous_and_current_system_sources() -> Non
         ),
         "system-shower-comfort-controller": frozenset(
             {
-                "fb775cdeb1ca327ac761f9e8e11bc5e77d1492da9d0499d2a7003257c6424f2b",
                 "ef263e1adbcaa2e69ff118d14411b31892cf73497626751fbfa3106b81f2e933",
+                "4ecf6735e3350c89116c9e1ec56f649fc9c6ba420ca884dcd43347bbc8bb3257",
             }
         ),
     }
@@ -233,7 +233,7 @@ def test_release_trust_hashes_match_managed_system_sources() -> None:
         assert len(trusted) == 2
 
     assert (
-        "fb775cdeb1ca327ac761f9e8e11bc5e77d1492da9d0499d2a7003257c6424f2b"
+        "ef263e1adbcaa2e69ff118d14411b31892cf73497626751fbfa3106b81f2e933"
         in scenario_node_red._TRUSTED_SYSTEM_SOURCE_HASHES[
             "system-shower-comfort-controller"
         ]

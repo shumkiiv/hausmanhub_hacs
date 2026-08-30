@@ -53,8 +53,8 @@ _TRUSTED_SYSTEM_SOURCE_HASHES = {
     ),
     "system-shower-comfort-controller": frozenset(
         {
-            "fb775cdeb1ca327ac761f9e8e11bc5e77d1492da9d0499d2a7003257c6424f2b",
             "ef263e1adbcaa2e69ff118d14411b31892cf73497626751fbfa3106b81f2e933",
+            "4ecf6735e3350c89116c9e1ec56f649fc9c6ba420ca884dcd43347bbc8bb3257",
         }
     ),
 }
@@ -1871,7 +1871,13 @@ def _validate_system_branch(scenario_id: str, actions: list[ScenarioAction]) -> 
         return
     targets = {"main": "entity_4be32416634e6416", "extra": "entity_1fdcd8b244637246", "cabinet": "entity_e7a7c61eec7bdff8", "fan": "entity_afef5df0e0cae309"}
     cursor = 0
-    profiles = (("main", "off", "extra", "off", "cabinet", "on"), ("main", "on", "extra", "off", "cabinet", "off"), ("main", "off", "extra", "on", "cabinet", "off"))
+    profiles = (
+        ("main", "off", "extra", "off", "cabinet", "on"),
+        ("main", "on", "extra", "off", "cabinet", "off"),
+        ("main", "off", "extra", "on", "cabinet", "off"),
+        ("main", "on", "extra", "off", "cabinet", "on"),
+        ("main", "off", "extra", "on", "cabinet", "on"),
+    )
     for profile in profiles:
         expected = [(profile[index], profile[index + 1]) for index in range(0, len(profile), 2)]
         prefix = 0
