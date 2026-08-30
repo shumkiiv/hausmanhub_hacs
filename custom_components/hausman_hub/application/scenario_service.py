@@ -2684,13 +2684,14 @@ class ScenarioService:
         device_type = str(getattr(device, "device_type", "") or "").casefold()
         if device_type in {"garage", "garage_door", "gate"}:
             return True
+        # ``capability_name`` is the generic catalog label "Шторы и ворота"
+        # for every Home Assistant cover.  It is not device identity evidence.
         identity = " ".join(
             str(value or "").casefold()
             for value in (
                 getattr(device, "entity_id", ""),
                 getattr(device, "name", ""),
                 getattr(device, "physical_name", ""),
-                getattr(device, "capability_name", ""),
             )
         )
         return any(

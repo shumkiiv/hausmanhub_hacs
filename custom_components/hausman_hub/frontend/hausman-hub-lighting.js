@@ -1,8 +1,8 @@
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.192";
-import { appendDeviceRangeControls, appendDeviceVisual, localizedDeviceState, openPhysicalDeviceSheet } from "./hausman-hub-device-card.js?v=1.52.192";
-import { lightingSideIcon, openLightingTurnOffConfirm, renderLightingSide } from "./hausman-hub-lighting-side.js?v=1.52.192";
-import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.192";
-import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.192";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.193";
+import { appendDeviceRangeControls, appendDeviceVisual, localizedDeviceState, openPhysicalDeviceSheet } from "./hausman-hub-device-card.js?v=1.52.193";
+import { lightingSideIcon, openLightingTurnOffConfirm, renderLightingSide } from "./hausman-hub-lighting-side.js?v=1.52.193";
+import { enhanceAppendedModal } from "./hausman-hub-modal.js?v=1.52.193";
+import { roomIconName, roomSvgIcon } from "./hausman-hub-room-icons.js?v=1.52.193";
 
 const LIGHTING_EXCLUSIONS = [
   "ambilight", "глазок", "домофон", "пульт", "очистител", "аквариум", "aquarium",
