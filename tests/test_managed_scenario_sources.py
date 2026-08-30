@@ -22,6 +22,7 @@ MIRROR = "entity_fbdf27871edb89bf"
 OUTSIDE_LUX = "entity_5f3b4436fb7b6f2b"
 POINTS = "entity_cd0098e5ff95da46"
 TAMBUR_POWER = "entity_b47991988cc6b9f3"
+ENTRY_DOOR = "entity_170c7a4e2505b803"
 SMALL_MOTION = "entity_90417aada6a33491"
 SMALL_LOCAL_LIGHT = "entity_c9d6bc67f172f30d"
 SMALL_RELAY = "entity_ff0244d6b760be7e"
@@ -109,7 +110,7 @@ class ManagedTamburSourceTest(unittest.TestCase):
         return {
             PRESENCE: "off", MOTION: "off", SUN: "above_horizon",
             OUTSIDE_LUX: "500", CHANDELIER: "off", POINTS: "off",
-            MIRROR: "off", TAMBUR_POWER: "on",
+            MIRROR: "off", TAMBUR_POWER: "on", ENTRY_DOOR: "locked",
         }
 
     def test_day_uses_full_neutral_profile_and_points(self) -> None:
@@ -124,6 +125,46 @@ class ManagedTamburSourceTest(unittest.TestCase):
         values = {action["id"]: action.get("value") for action in payload["actions"]}
         self.assertEqual(100, values["brightness"])
         self.assertEqual(3000, values["temperature_target"])
+
+    def test_entry_door_uses_day_profile_without_waiting_for_presence(self) -> None:
+        states = self.base_states()
+        states[ENTRY_DOOR] = "unlocked"
+        payload = _run_tambur(
+            timestamp="2026-08-27T10:00:00+06:00",
+            states=states,
+            trigger={
+                "source": "device_state",
+                "trigger_id": "entry_door_unlocked",
+            },
+        )
+
+        self.assertEqual("entry_sunrise_to_sunset", payload["selectedBranch"])
+        self.assertEqual(
+            [
+                "chandelier_on",
+                "chandelier_ownership_wait",
+                "brightness",
+                "temperature_target",
+                "points_on",
+            ],
+            _action_ids(payload),
+        )
+
+    def test_entry_door_uses_evening_lux_profile(self) -> None:
+        states = self.base_states()
+        states.update({ENTRY_DOOR: "unlocked", SUN: "below_horizon", OUTSIDE_LUX: "5"})
+        payload = _run_tambur(
+            timestamp="2026-08-27T22:00:00+06:00",
+            states=states,
+            trigger={
+                "source": "device_state",
+                "trigger_id": "entry_door_unlocked",
+            },
+        )
+
+        self.assertEqual("entry_after_sunset_dark", payload["selectedBranch"])
+        values = {action["id"]: action.get("value") for action in payload["actions"]}
+        self.assertEqual((85, 6500), (values["brightness"], values["temperature_target"]))
 
     def test_darkness_increases_brightness_and_physical_warmth(self) -> None:
         profiles = []

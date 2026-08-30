@@ -154,6 +154,10 @@ AWAY_OFF_ENTITIES: tuple[tuple[str, str], ...] = (
     (LIGHT_HALLWAY, "turn_off"),
     ("light.0xa4c138d69d102803", "turn_off"),
     ("light.0xa4c1385600dc0551", "turn_off"),
+    ("switch.0x603d61fffe764d10_1", "turn_off"),
+    ("switch.0x603d61fffe764d10_2", "turn_off"),
+    ("switch.0x603d61fffe75e62f_1", "turn_off"),
+    ("switch.0x603d61fffe75e62f_2", "turn_off"),
     ("switch.0x54ef4410006807e0_left", "turn_off"),
     ("switch.0x54ef4410006807e0_right", "turn_off"),
     ("switch.0x54ef441000680683_left", "turn_off"),
@@ -167,6 +171,26 @@ AWAY_OFF_ENTITIES: tuple[tuple[str, str], ...] = (
     (SWITCH_TOILET_LIGHT_2, "turn_off"),
     (SWITCH_BATHROOM_LIGHT_1, "turn_off"),
     (SWITCH_BATHROOM_LIGHT_2, "turn_off"),
+    ("switch.0xacbac0fffebbe3c4_1", "turn_off"),
+    ("switch.0xacbac0fffebbe3c4_2", "turn_off"),
+    ("switch.0x603d61fffe759363_1", "turn_off"),
+    ("switch.0xa4c1385af46163eb", "turn_off"),
+    ("switch.0x603d61fffe761c63_1", "turn_off"),
+    ("switch.0xa4c138ffecbc07b5_l1", "turn_off"),
+    ("switch.0x603d61fffe75c334_1", "turn_off"),
+    ("switch.0x603d61fffe767806_1", "turn_off"),
+    ("switch.0x603d61fffe767806_2", "turn_off"),
+    (SWITCH_TOILET_FAN, "turn_off"),
+    (SWITCH_BATHROOM_FAN, "turn_off"),
+    ("water_heater.kukhnia_chainik", "turn_off"),
+    ("switch.kukhnia_chainik_podderzhanie_tepla", "turn_off"),
+    ("switch.kukhnia_chainik_podsvetka", "turn_off"),
+    ("humidifier.deerma_jsq2w_836b_humidifier", "turn_off"),
+    ("humidifier.deerma_jsq2w_89c5_humidifier", "turn_off"),
+    ("media_player.gostinnaia_televizor", "turn_off"),
+    ("media_player.televizor_na_kukhne_2", "turn_off"),
+    ("switch.0x54ef441001301a68", "turn_off"),
+    ("switch.0x54ef44100130084b", "turn_off"),
 )
 
 
@@ -671,18 +695,24 @@ SYSTEM_SCENARIO_SEEDS: tuple[SystemScenarioSeed, ...] = (
     ),
     SystemScenarioSeed(
         scenario_id="system-away-turn-off",
-        title="Не дома: выключить свет и климат",
+        title="Не дома: безопасное выключение дома",
         description=(
-            "Перенос из Node-RED «НЕ дома»: при уходе выключаются "
-            "кондиционеры, термоголовки, основной свет и свет санузлов. "
-            "Все многоканальные Zigbee-выключатели адресуются через их "
-            "живые HA-сущности. До окончания сравнения команды не отправляются."
+            "При уходе выключаются свет, кондиционеры, чайник, вытяжки, "
+            "увлажнители и телевизоры, затем закрываются горячая и холодная "
+            "вода. Охрана, сеть, холодильники, датчики протечки и голосовые "
+            "оповещения остаются включёнными."
         ),
         icon="mdi:home-export-outline",
-        command_mode="shadow",
+        command_mode="live",
         triggers=({"id": "t1", "type": "presence", "value": "away"},),
         conditions=(),
-        actions=(_notify("a99", "Режим «не дома»: свет и климат выключены."),),
+        actions=(
+            _notify(
+                "a99",
+                "Режим «не дома»: свет, климат и бытовые нагрузки выключены, "
+                "вода закрыта.",
+            ),
+        ),
         optional_actions=AWAY_OFF_ENTITIES,
     ),
     # Домофон не сеется: удержание реле 15 секунд уже встроено в движок

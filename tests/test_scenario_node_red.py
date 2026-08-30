@@ -80,6 +80,7 @@ def test_release_trust_allows_exact_previous_and_current_system_sources() -> Non
                 "3183bc1806afdadd797968bafcc7cbb738f13d80cc02c28cc42852de07c36d21",
                 "baa8044bf3cbcb360a963599b164434eb7b385f4d3b9a8cd156ee901fbf6dcff",
                 "399a39d89a4b745c901b0201fe9510eb0a754106b49c1ef1a85c61359c1022c4",
+                "0551ee02fc052a99a2e802054b8aaeaa1ada5885b927b90eb3cc8d2aca3414f9",
             }
         ),
         "system-small-corridor-light-controller": frozenset(
@@ -236,7 +237,7 @@ def test_release_trust_hashes_match_managed_system_sources() -> None:
         trusted = scenario_node_red._TRUSTED_SYSTEM_SOURCE_HASHES[scenario_id]
         assert managed_source_hash(source) in trusted
         assert len(trusted) == (
-            3 if scenario_id == "system-tambur-adaptive-controller" else
+            4 if scenario_id == "system-tambur-adaptive-controller" else
             2 if scenario_id == "system-shower-comfort-controller" else 1
         )
 

@@ -2074,6 +2074,80 @@ class ScenarioExecutorTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["receipts"][0]["skipped"])
         self.hass.services.async_call.assert_not_awaited()
 
+    async def test_departure_shutdown_plans_light_off_without_automation_ownership(
+        self,
+    ) -> None:
+        self.hass.state_values["light.living_room"] = SimpleNamespace(
+            state="on",
+            attributes={},
+            last_updated=datetime.now(timezone.utc),
+        )
+        definition = _definition(
+            (
+                ScenarioAction(
+                    id="light_off",
+                    type=ScenarioActionType.DEVICE_ACTION,
+                    target_id="device_1",
+                    action_id="turn_off",
+                ),
+            )
+        )
+
+        result = await self.executor.async_execute(
+            definition,
+            "departure-off.1",
+            scenario_id="system-away-turn-off",
+            trigger_context={"source": "device_state", "target_id": "motion_1"},
+            dry_run=True,
+        )
+
+        receipt = result["receipts"][0]
+        self.assertEqual("completed", receipt["status"])
+        self.assertEqual("shadow_plan", receipt["reason"])
+        self.assertNotIn("skipped", receipt)
+        self.hass.services.async_call.assert_not_awaited()
+
+    async def test_departure_shutdown_authority_is_preserved_for_nested_scenario(
+        self,
+    ) -> None:
+        nested_contexts: list[object] = []
+
+        async def capture_callback(
+            scenario_id: str,
+            **kwargs: object,
+        ) -> dict[str, Any]:
+            nested_contexts.append(kwargs.get("trigger_context"))
+            return {
+                "run_id": f"nested-{scenario_id}",
+                "scenario_id": scenario_id,
+                "status": "completed",
+                "receipts": [],
+            }
+
+        executor = ScenarioExecutor(self.hass, self.catalog, capture_callback)
+        definition = _definition(
+            (
+                ScenarioAction(
+                    id="run_away",
+                    type=ScenarioActionType.RUN_SCENARIO,
+                    scenario_id="scenario_manual_away",
+                ),
+            )
+        )
+
+        result = await executor.async_execute(
+            definition,
+            "departure-nested.1",
+            scenario_id="system-away-turn-off",
+            trigger_context={"source": "device_state", "target_id": "away_1"},
+        )
+
+        self.assertEqual("completed", result["status"])
+        self.assertEqual(1, len(nested_contexts))
+        self.assertIsInstance(nested_contexts[0], dict)
+        assert isinstance(nested_contexts[0], dict)
+        self.assertIs(True, nested_contexts[0]["departure_shutdown_authorized"])
+
     async def test_managed_fade_skips_light_without_confirmed_ownership(self) -> None:
         self.hass.state_values["light.living_room"] = SimpleNamespace(
             state="on",

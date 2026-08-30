@@ -50,6 +50,7 @@ _TRUSTED_SYSTEM_SOURCE_HASHES = {
             "3183bc1806afdadd797968bafcc7cbb738f13d80cc02c28cc42852de07c36d21",
             "baa8044bf3cbcb360a963599b164434eb7b385f4d3b9a8cd156ee901fbf6dcff",
             "399a39d89a4b745c901b0201fe9510eb0a754106b49c1ef1a85c61359c1022c4",
+            "0551ee02fc052a99a2e802054b8aaeaa1ada5885b927b90eb3cc8d2aca3414f9",
         }
     ),
     "system-shower-comfort-controller": frozenset(

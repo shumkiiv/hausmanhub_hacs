@@ -71,6 +71,7 @@ _PRESENCE_WORDS = (
     "присутств",
     "движ",
 )
+_DEPARTURE_SHUTDOWN_SCENARIO_ID = "system-away-turn-off"
 
 
 def _trusted_power_state(state: object | None) -> str | None:
@@ -900,6 +901,15 @@ class ScenarioExecutor:
     ) -> dict[str, Any]:
         """Run every action sequentially and return confirmed receipts."""
 
+        if scenario_id == _DEPARTURE_SHUTDOWN_SCENARIO_ID:
+            trigger_context = {
+                **(dict(trigger_context) if trigger_context is not None else {}),
+                "departure_shutdown_authorized": True,
+            }
+        departure_shutdown_authorized = bool(
+            isinstance(trigger_context, Mapping)
+            and trigger_context.get("departure_shutdown_authorized") is True
+        )
         dry_run = dry_run or definition.command_mode is ScenarioCommandMode.SHADOW
         command_mode = "shadow" if dry_run else definition.command_mode.value
         if visited_scenarios is None:
@@ -1272,7 +1282,10 @@ class ScenarioExecutor:
                             for target_entity_id, dependency in power_dependencies.items()
                         )
                     )
-                    ownership_required = action.action_id == "turn_off" or (
+                    ownership_required = (
+                        action.action_id == "turn_off"
+                        and not departure_shutdown_authorized
+                    ) or (
                         scenario_id
                         in {
                             "system-tambur-adaptive-controller",
@@ -1292,18 +1305,21 @@ class ScenarioExecutor:
                             dry_run=False,
                         )
                         receipt["reason"] = "automatic_ownership_missing"
-                    elif await self._light_priority.async_has_manual_claim(
-                        light_priority,
-                        self._catalog,
-                        self._hass,
-                        power_dependencies,
-                        target_ids=(
-                            frozenset({action.target_id})
-                            if action.target_id is not None
-                            and light_priority.guarded_target_ids
-                            != light_priority.light_target_ids
-                            else None
-                        ),
+                    elif (
+                        not departure_shutdown_authorized
+                        and await self._light_priority.async_has_manual_claim(
+                            light_priority,
+                            self._catalog,
+                            self._hass,
+                            power_dependencies,
+                            target_ids=(
+                                frozenset({action.target_id})
+                                if action.target_id is not None
+                                and light_priority.guarded_target_ids
+                                != light_priority.light_target_ids
+                                else None
+                            ),
+                        )
                     ):
                         receipt = skipped_light_receipt(
                             action,
@@ -1881,6 +1897,10 @@ class ScenarioExecutor:
                         not isinstance(trigger_context, Mapping)
                         or trigger_context.get("source") != "manual"
                     ),
+                    automatic_light_off_authorized=(
+                        isinstance(trigger_context, Mapping)
+                        and trigger_context.get("departure_shutdown_authorized") is True
+                    ),
                     authority_lock_held=authority_lock_held,
                     forbid_toggle=forbid_toggle,
                     before_dispatch=before_dispatch,
@@ -1921,6 +1941,7 @@ class ScenarioExecutor:
         max_evidence_age_seconds: int = 300,
         stop_on_stale_evidence: bool = True,
         automatic: bool = False,
+        automatic_light_off_authorized: bool = False,
         dangerous_authorized: bool = False,
         force_new_readback: bool = False,
         before_dispatch: Callable[[], Awaitable[None]] | None = None,
@@ -2040,6 +2061,7 @@ class ScenarioExecutor:
         if (
             automatic
             and action.action_id == "turn_off"
+            and not automatic_light_off_authorized
             and self._light_priority.is_lighting_action(
                 action, self._catalog
             )
@@ -3001,6 +3023,10 @@ class ScenarioExecutor:
                 "target_id": origin_target_id,
                 "trigger_id": None,
                 "recovery": False,
+                "departure_shutdown_authorized": bool(
+                    isinstance(trigger_context, Mapping)
+                    and trigger_context.get("departure_shutdown_authorized") is True
+                ),
             },
         )
         nested_outcome = result.get("status", "failed")

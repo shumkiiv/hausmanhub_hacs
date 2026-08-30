@@ -1,5 +1,5 @@
 // HAUSMAN_MANAGED_SCENARIO system-tambur-adaptive-controller
-// Тамбур: единый профиль люстры и точек, ручной приоритет и зеркало 23:00-01:00.
+// Тамбур: единый профиль люстры и точек, входная дверь, ручной приоритет и зеркало 23:00-01:00.
 const started = Date.now();
 const request = (msg.payload && typeof msg.payload === 'object') ? msg.payload : {};
 const inputs = (request.inputs && typeof request.inputs === 'object') ? request.inputs : {};
@@ -16,6 +16,7 @@ const ID = Object.freeze({
   points: 'entity_cd0098e5ff95da46',
   mirror: 'entity_fbdf27871edb89bf',
   chandelierPower: 'entity_b47991988cc6b9f3',
+  entryDoor: 'entity_170c7a4e2505b803',
 });
 
 function item(targetId) {
@@ -88,11 +89,13 @@ const hour = local.getUTCHours();
 const clock = `${String(hour).padStart(2, '0')}:${String(local.getUTCMinutes()).padStart(2, '0')}`;
 const presenceState = state(ID.presence);
 const motionState = state(ID.motion);
-const occupied = presenceState === 'on' || motionState === 'on';
+const entryDoorState = state(ID.entryDoor);
+const triggerId = String(trigger.trigger_id || '');
+const entryDoorOpened = triggerId === 'entry_door_unlocked' && entryDoorState === 'unlocked';
+const occupied = presenceState === 'on' || motionState === 'on' || entryDoorOpened;
 const confidentlyAbsent = presenceState === 'off' && motionState === 'off';
 const sunState = state(ID.sun);
 const outsideLux = numeric(state(ID.outsideLux));
-const triggerId = String(trigger.trigger_id || '');
 const manualChandelier = trigger.source === 'manual' && triggerId === 'manual_chandelier_on';
 
 let branch = 'presence_uncertain';
@@ -114,7 +117,7 @@ if (manualChandelier) {
   branch = 'fade_after_10m';
   actions = fadeActions(600);
 } else if (occupied && sunState === 'above_horizon') {
-  branch = 'sunrise_to_sunset';
+  branch = entryDoorOpened ? 'entry_sunrise_to_sunset' : 'sunrise_to_sunset';
   brightness = 100;
   kelvin = 3000;
   actions = profileActions(brightness, kelvin);
@@ -124,12 +127,15 @@ if (manualChandelier) {
   else if (outsideLux < 100) [branch, brightness, kelvin] = ['after_sunset_low', 70, 5200];
   else if (outsideLux < 400) [branch, brightness, kelvin] = ['after_sunset_dusk', 50, 4400];
   else [branch, brightness, kelvin] = ['after_sunset_bright', 35, 3600];
+  if (entryDoorOpened) branch = `entry_${branch}`;
   actions = profileActions(brightness, kelvin);
 }
 
 const trace = [
+  {id: 'entry_door', title: 'Открытие входной двери', status: entryDoorOpened ? 'selected' : 'skipped',
+    actual: entryDoorState, expected: 'unlocked', reason: null},
   {id: 'presence', title: 'Присутствие в тамбуре', status: occupied ? 'passed' : confidentlyAbsent ? 'failed' : 'skipped',
-    actual: `${presenceState || 'unknown'}; ${motionState || 'unknown'}`, expected: 'хотя бы один датчик on',
+    actual: `${presenceState || 'unknown'}; ${motionState || 'unknown'}`, expected: 'датчик on или входная дверь unlocked',
     reason: !occupied && !confidentlyAbsent ? 'Состояние одного из датчиков недостоверно.' : null},
   {id: 'time_band', title: 'Граница времени суток', status: 'selected', actual: `${clock}; ${sunState || 'sun unavailable'}`, expected: branch, reason: null},
   {id: 'outside_light', title: 'Освещённость на улице', status: outsideLux === null ? 'skipped' : 'selected',

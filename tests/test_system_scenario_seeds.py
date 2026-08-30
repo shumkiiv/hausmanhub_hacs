@@ -84,7 +84,15 @@ def _entry(entity_id: str) -> ScenarioDeviceEntry:
     domain = entity_id.split(".", 1)[0]
     if domain == "cover":
         actions = _cover_actions()
-    elif domain in ("switch", "light", "climate"):
+    elif domain in (
+        "switch",
+        "light",
+        "climate",
+        "fan",
+        "humidifier",
+        "media_player",
+        "water_heater",
+    ):
         actions = _on_off_actions(domain)
     else:
         actions = ()
@@ -328,7 +336,7 @@ class SystemScenarioSeedsTest(unittest.IsolatedAsyncioTestCase):
             any(item.get("value") == "08:00-22:00" for item in day.conditions)
         )
 
-    def test_away_shadow_covers_every_live_nodered_multichannel_switch(self) -> None:
+    def test_away_live_shutdown_covers_lights_appliances_and_water(self) -> None:
         seed = next(
             item
             for item in SYSTEM_SCENARIO_SEEDS
@@ -344,16 +352,27 @@ class SystemScenarioSeedsTest(unittest.IsolatedAsyncioTestCase):
             "switch.0xa4c138e4e8eeb315_left",
             "switch.0xa4c138e4e8eeb315_center",
             "switch.0xa4c138e4e8eeb315_right",
+            "switch.0xa4c1385af46163eb",
+            "switch.0x603d61fffe761c63_1",
+            "switch.0xa4c138ffecbc07b5_l1",
+            "water_heater.kukhnia_chainik",
+            "switch.kukhnia_chainik_podderzhanie_tepla",
+            "humidifier.deerma_jsq2w_836b_humidifier",
+            "humidifier.deerma_jsq2w_89c5_humidifier",
+            "media_player.gostinnaia_televizor",
+            "media_player.televizor_na_kukhne_2",
+            "switch.0x54ef441001301a68",
+            "switch.0x54ef44100130084b",
         }
 
-        self.assertEqual("shadow", seed.command_mode)
+        self.assertEqual("live", seed.command_mode)
         self.assertTrue(
             expected.issubset({entity_id for entity_id, _ in seed.optional_actions})
         )
         payload = seed.build_payload(_catalog(_all_seed_entities()))
         self.assertIsNotNone(payload)
         definition = payload["definition"]
-        self.assertEqual("shadow", definition["commandMode"])
+        self.assertNotIn("commandMode", definition)
         self.assertEqual("device_action", definition["actions"][0]["type"])
         self.assertEqual("notification", definition["actions"][-1]["type"])
 
