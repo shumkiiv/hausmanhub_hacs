@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 from datetime import datetime, timezone
+import hashlib
 import json
 from pathlib import Path
 import time
@@ -73,6 +74,24 @@ def action_request(
         "room_id": "living",
         "parameters": {"target_temperature": target},
     }
+
+
+def legacy_tablet_fingerprint(payload: dict[str, object]) -> str:
+    """Exact v1.52.195 operation identity, before reliability fields."""
+
+    return hashlib.sha256(
+        json.dumps(
+            {
+                "expected_state_revision": payload["expected_state_revision"],
+                "action": payload["action"],
+                "room_id": payload["room_id"],
+                "parameters": payload["parameters"],
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
 
 
 class MemoryOperationStore:
@@ -903,6 +922,74 @@ class ClimateTabletServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(original["operation_id"], duplicate["operation_id"])
         self.assertTrue(duplicate["duplicate"])
         self.assertEqual([], restarted_runtime.commands)
+
+    async def test_legacy_fingerprint_migrates_once_without_reexecution(self) -> None:
+        request = action_request(
+            self.home["state_revision"], request_id="tablet.climate.legacy.1"
+        )
+        original = await self.service.async_execute(request)
+        legacy = copy.deepcopy(self.store.payload)
+        legacy["version"] = 5
+        legacy["records"][0]["fingerprint"] = legacy_tablet_fingerprint(request)
+        store = MemoryOperationStore(legacy)
+        first_runtime = FakeRuntime(self.home)
+        first_restart = ClimateTabletService(first_runtime, store)
+
+        await first_restart.async_load()
+        migrated = store.payload
+        self.assertEqual(6, migrated["version"])
+        self.assertEqual(
+            parse_climate_tablet_action(request).fingerprint,
+            migrated["records"][0]["fingerprint"],
+        )
+        duplicate = await first_restart.async_execute(request)
+        self.assertEqual(original["operation_id"], duplicate["operation_id"])
+        self.assertTrue(duplicate["duplicate"])
+        self.assertEqual([], first_runtime.commands)
+
+        second_runtime = FakeRuntime(self.home)
+        second_restart = ClimateTabletService(second_runtime, store)
+        await second_restart.async_load()
+        duplicate_after_restart = await second_restart.async_execute(request)
+        self.assertTrue(duplicate_after_restart["duplicate"])
+        self.assertEqual([], second_runtime.commands)
+
+    async def test_forged_legacy_fingerprint_remains_rejected(self) -> None:
+        request = action_request(
+            self.home["state_revision"], request_id="tablet.climate.legacy-forged"
+        )
+        await self.service.async_execute(request)
+        forged = copy.deepcopy(self.store.payload)
+        forged["version"] = 5
+        forged["records"][0]["fingerprint"] = "f" * 64
+
+        restored = ClimateTabletService(
+            FakeRuntime(self.home), MemoryOperationStore(forged)
+        )
+        with self.assertRaises(ClimateTabletUnavailable):
+            await restored.async_load()
+
+    async def test_legacy_fingerprint_rejects_other_valid_receipt_correlation(self) -> None:
+        request = action_request(
+            self.home["state_revision"], request_id="tablet.climate.legacy-correlation"
+        )
+        await self.service.async_execute(request)
+        forged = copy.deepcopy(self.store.payload)
+        forged["version"] = 5
+        forged["records"][0]["fingerprint"] = legacy_tablet_fingerprint(request)
+        forged["records"][0]["receipt"]["correlation_id"] = (
+            "corr.tablet.climate.other"
+        )
+        store = MemoryOperationStore(forged)
+        restored = ClimateTabletService(FakeRuntime(self.home), store)
+
+        with self.assertRaises(ClimateTabletUnavailable):
+            await restored.async_load()
+        self.assertEqual(5, store.payload["version"])
+        self.assertEqual(
+            legacy_tablet_fingerprint(request),
+            store.payload["records"][0]["fingerprint"],
+        )
 
     async def test_pending_reservation_times_out_after_restart_without_reexecution(self) -> None:
         request = action_request(self.home["state_revision"])

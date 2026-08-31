@@ -772,8 +772,19 @@ class ClimateTabletService:
                 raise ClimateTabletUnavailable(
                     "stored climate operation request is invalid"
                 ) from error
-            if request.request_id != request_id or request.fingerprint != fingerprint:
+            if request.request_id != request_id:
                 raise ClimateTabletUnavailable("stored climate operation request is invalid")
+            if request.fingerprint != fingerprint:
+                if not _is_legacy_tablet_fingerprint(
+                    payload.get("version"), request, fingerprint
+                ):
+                    raise ClimateTabletUnavailable("stored climate operation request is invalid")
+                # Versions 1-5 predate correlation and reliable-operation
+                # fields in this identity.  Accept only their exact canonical
+                # digest, then persist the current digest before serving a
+                # duplicate.  Anything else remains fail-closed.
+                fingerprint = request.fingerprint
+                requires_save = True
             normalized = _validate_receipt(dict(receipt))
             if not _receipt_matches_request(normalized, request):
                 raise ClimateTabletUnavailable("stored climate operation receipt is invalid")
@@ -2502,7 +2513,13 @@ def _receipt_matches_request(
     if not basic:
         return False
     if request.reliability_profile is None:
-        return "action_snapshot" not in receipt
+        # A legacy record may migrate only when its receipt belongs to the
+        # parsed request trace.  Otherwise a valid old digest could attach a
+        # different request's receipt before the v6 checkpoint signs it.
+        return (
+            "action_snapshot" not in receipt
+            and receipt.get("correlation_id") == request.correlation_id
+        )
     action_snapshot = receipt.get("action_snapshot")
     intent = receipt.get("intent")
     if not isinstance(action_snapshot, Mapping) or not isinstance(intent, Mapping):
@@ -4944,6 +4961,27 @@ def _validate_humidity(value: object) -> None:
 def _canonical_fingerprint(value: object) -> str:
     return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True,
                                     separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _is_legacy_tablet_fingerprint(
+    payload_version: object,
+    request: ClimateTabletActionRequest,
+    fingerprint: str,
+) -> bool:
+    """Recognize only the pre-reliability canonical operation identity."""
+
+    if (
+        type(payload_version) is not int
+        or not 1 <= payload_version <= 5
+        or request.reliability_profile is not None
+    ):
+        return False
+    return fingerprint == _canonical_fingerprint({
+        "expected_state_revision": request.expected_state_revision,
+        "action": request.action,
+        "room_id": request.room_id,
+        "parameters": request.parameters,
+    })
 
 
 def _recovery_request_fingerprint(request: Mapping[str, object]) -> str:
