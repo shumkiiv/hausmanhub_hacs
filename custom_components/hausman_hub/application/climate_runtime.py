@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime
+import hashlib
+import json
 import logging
 import time
 from typing import Protocol
 
 from ..domain.climate import (
+    ClimateControlOwner,
     ClimateControlScope,
     ClimateDeviceKind,
     ClimateEndpointRole,
@@ -21,11 +24,16 @@ from ..domain.ai_assistant_json import AiJsonObject
 from ..domain.climate_comparison import ClimateComparisonSnapshot
 from ..domain.climate_demand import ClimateDemandSnapshot
 from ..domain.climate_equipment import ClimateEquipmentSnapshot
-from ..domain.climate_ha_calls import ClimateHaCallPlanSnapshot, ClimateHaServiceCall
+from ..domain.climate_ha_calls import (
+    ClimateHaCallPlanSnapshot,
+    ClimateHaService,
+    ClimateHaServiceCall,
+)
 from ..domain.climate_isolation import ClimateIsolationSnapshot
 from ..domain.climate_ownership import ClimateOwnershipReceipt
 from ..domain.climate_observation import (
     ClimateDataStatus,
+    ClimateDeviceAvailability,
     ClimateObservationSnapshot,
     ClimateObservationViolation,
 )
@@ -115,7 +123,7 @@ from .climate_manual import (
     effective_manual_room_ids,
     reconcile_climate_manual_memory,
     record_direct_wifi_commands,
-    update_direct_wifi_observation,
+    update_climate_manual_observation,
     with_climate_device_mode,
     with_climate_room_mode,
 )
@@ -166,6 +174,8 @@ from .contours import (
     with_applied_climate_schedule_profile,
     with_home_climate_targets,
     with_room_climate_humidity,
+    with_room_climate_minimum_temperature,
+    with_room_climate_target_strategy,
     with_climate_temporary_temperature,
     without_climate_temporary_temperature,
 )
@@ -174,6 +184,7 @@ from .contour_apply import (
     CONTOUR_APPLY_PREVIEW_CONTRACT_NAME,
     ClimateControlAction,
     ClimateControlContext,
+    ContourApplyPlan,
     ContourApplyReceipt,
     ContourApplyStatus,
     ContourApplyViolation,
@@ -206,6 +217,14 @@ class ClimateRuntimeUnavailable(RuntimeError):
 
 class ClimateSnapshotUnavailable(ClimateRuntimeUnavailable):
     """The public snapshot is safely absent because climate is not observable."""
+
+
+def _recovery_pre_dispatch_unavailable(message: str) -> ClimateRuntimeUnavailable:
+    """Mark a recovery rejection that occurred before the HA boundary."""
+
+    error = ClimateRuntimeUnavailable(message)
+    error.recovery_pre_dispatch = True
+    return error
 
 
 class ClimateRegistryStorage(Protocol):
@@ -312,6 +331,7 @@ class ClimateRuntime:
         operation_id_factory: Callable[[], str] | None = None,
         now_ms: Callable[[], int] | None = None,
         local_now: Callable[[], datetime] | None = None,
+        direct_control_store: object | None = None,
     ) -> None:
         self.entry_id = entry_id
         self.configuration = configuration
@@ -327,6 +347,7 @@ class ClimateRuntime:
         self._ir_code_service = ir_code_service
         self._now_ms = now_ms or (lambda: int(time.time() * 1000))
         self._local_now = local_now or (lambda: datetime.now().astimezone())
+        self._direct_control_store = direct_control_store
         self._registry = ClimateRegistry()
         self._contours = ContourRegistry()
         self._protection_memory = empty_climate_protection_memory(updated_at=0)
@@ -343,6 +364,11 @@ class ClimateRuntime:
             operation_id_factory=operation_id_factory,
             now_ms=self._now_ms,
         )
+        # The negotiated control profile uses this revision as an optimistic
+        # concurrency token. Legacy callers do not see or depend on it.
+        self._control_revision = 0
+        self._last_contour_apply_was_duplicate = False
+        self._recovery_private_metadata: dict[tuple[str, str], dict[str, object]] = {}
         self.last_error: str | None = None
 
     @property
@@ -425,6 +451,18 @@ class ClimateRuntime:
 
         async with self._lock:
             try:
+                if self._direct_control_store is not None:
+                    loader = getattr(self._direct_control_store, "async_load_direct_control", None)
+                    if not callable(loader):
+                        raise ClimateRuntimeUnavailable("direct control store is invalid")
+                    self._contour_applications.restore(await loader())
+                    self._control_revision = self._contour_applications.control_revision
+                    revision_loader = getattr(self._direct_control_store, "async_current_control_revision", None)
+                    if callable(revision_loader):
+                        shared_revision = await revision_loader()
+                        if type(shared_revision) is not int or shared_revision < self._control_revision:
+                            raise ClimateRuntimeUnavailable("shared climate control revision is invalid")
+                        self._control_revision = shared_revision
                 registry = await self._registry_store.async_load()
                 contours = (
                     await self._contour_store.async_load()
@@ -587,6 +625,7 @@ class ClimateRuntime:
         """Refresh and return the private-id-free tablet contract."""
 
         async with self._lock:
+            await self._async_sync_control_revision_unlocked()
             if (
                 self.configuration.climate_bridge_mode is ClimateControlMode.MANAGED
                 or self.configuration.mode == "shadow"
@@ -599,6 +638,31 @@ class ClimateRuntime:
                 )
                 if observation.data_status is ClimateDataStatus.UNAVAILABLE:
                     raise ClimateSnapshotUnavailable("climate state is unavailable")
+                manual_reasons = {
+                    item.device_id: item.reason
+                    for item in self._manual_memory.attributions
+                }
+                self._recovery_private_metadata = {
+                    (device.room_id, device.device_id): {
+                        "manual_reason": manual_reasons.get(device.device_id),
+                        "source_observed_at": (
+                            observed.observed_at
+                            if observed is not None
+                            and observed.availability is ClimateDeviceAvailability.AVAILABLE
+                            else None
+                        ),
+                        "reported_target_temperature": (
+                            observed.current_target_temperature
+                            if observed is not None else None
+                        ),
+                        "reported_target_humidity": (
+                            observed.current_target_humidity
+                            if observed is not None else None
+                        ),
+                    }
+                    for device in self._registry.devices
+                    for observed in (observation.device(device.device_id),)
+                }
                 snapshot = native_android_climate_snapshot(
                     self._registry,
                     observation,
@@ -606,10 +670,30 @@ class ClimateRuntime:
                     bridge_mode=self.configuration.climate_bridge_mode,
                     pending_room_ids=(),
                     manual_device_ids=self._manual_memory.manual_device_ids,
+                    manual_changed_at={
+                        device_id: self._manual_memory.updated_at
+                        for device_id in self._manual_memory.manual_device_ids
+                    },
+                    manual_reasons=manual_reasons,
                     local_now=self._local_now(),
                 )
                 return self._with_deviation_guard_status(snapshot)
             raise ClimateSnapshotUnavailable("climate bridge is disabled")
+
+    async def async_recovery_private_metadata(
+        self,
+    ) -> dict[tuple[str, str], dict[str, object]]:
+        """Return redacted per-device proof data for the local recovery service.
+
+        This is deliberately not an HTTP surface and is never included in the
+        versioned v12 home document.
+        """
+
+        async with self._lock:
+            return {
+                key: dict(value)
+                for key, value in self._recovery_private_metadata.items()
+            }
 
     async def async_admin_import_snapshot(self) -> dict[str, object]:
         """Refresh and return private discovery data for a local admin."""
@@ -958,24 +1042,155 @@ class ClimateRuntime:
                 fingerprint=contour_fingerprint(contour),
             )
 
+    async def async_control_operation(self, operation_id: object) -> dict[str, object] | None:
+        """Refresh one direct receipt by read-back, never by redispatch."""
+
+        async with self._lock:
+            record = self._contour_applications.by_operation(operation_id)
+            if record is None:
+                return None
+            # A restored or live receipt has a finite observation window. It
+            # is never safe to keep polling a frozen intent forever.
+            if (
+                record.receipt.status in {ContourApplyStatus.PENDING, ContourApplyStatus.PARTIAL}
+                and self._safe_now() > record.receipt.created_at + 8_000
+            ):
+                self._contour_applications.update(
+                    record.receipt.request_id,
+                    status=ContourApplyStatus.UNAVAILABLE,
+                    accepted_count=record.receipt.accepted_count,
+                    confirmed_room_count=record.receipt.confirmed_room_count,
+                    reasons=("verification_unavailable",),
+                )
+                await self._async_persist_direct_control_unlocked()
+                record = self._contour_applications.by_operation(operation_id) or record
+                return record.receipt.as_payload()
+            # A poll is allowed to observe the frozen plan and advance a
+            # pending receipt to confirmed.  Restored records intentionally
+            # have no executable plan, so they are replayed frozen instead of
+            # guessing a command after restart.
+            if (
+                record.receipt.status in {ContourApplyStatus.PENDING, ContourApplyStatus.PARTIAL}
+                and isinstance(record.plan, ContourApplyPlan)
+            ):
+                contour = self._climate_contour()
+                refreshed = await self._async_reobserve_native_contour_application_unlocked(
+                    record.receipt.request_id,
+                    record,
+                    contour,
+                    room_ids=record.plan.target_room_ids,
+                )
+                if refreshed is not record.receipt:
+                    await self._async_persist_direct_control_unlocked()
+                    record = self._contour_applications.by_operation(operation_id) or record
+            elif record.receipt.status in {ContourApplyStatus.PENDING, ContourApplyStatus.PARTIAL}:
+                # A restored operation deliberately has no executable plan.
+                # It must never rebuild a plan from the current contour: that
+                # could confirm a different desired intent after restart.
+                # Keep its durable pending/partial receipt until the fixed
+                # confirmation window turns it terminal above.  No service
+                # call is made on this path.
+                pass
+            return record.receipt.as_payload()
+
+    async def async_execute_reserved_tablet_action(
+        self,
+        *,
+        action: str,
+        room_id: object,
+        parameters: dict[str, object],
+        request_id: str,
+        correlation_id: str,
+        expected_control_revision: object,
+        resulting_control_revision: object,
+        local_now: object,
+    ) -> object:
+        """Execute physical work for a tablet intent already reserved in store.
+
+        This is intentionally not an HTTP payload.  Its only caller is the
+        tablet ledger after the coordinator accepted ``expected -> expected+1``.
+        Public direct APIs validate and reserve inside their own methods.
+        """
+        async with self._lock:
+            current = await self._async_sync_control_revision_unlocked()
+            if (
+                type(expected_control_revision) is not int
+                or type(resulting_control_revision) is not int
+                or resulting_control_revision != expected_control_revision + 1
+                or current != resulting_control_revision
+            ):
+                raise ClimateRuntimeUnavailable("reserved climate control revision is stale")
+        if action == "set_home_targets":
+            return await self.async_home_climate_targets({
+                "correlation_id": correlation_id, "request_id": request_id,
+                "contour_id": "climate", "target_temperature": parameters.get("target_temperature"),
+                "target_humidity": parameters.get("target_humidity"), "confirm": True,
+            })
+        if action == "synchronize_home":
+            return await self.async_synchronize_climate()
+        if action == "set_room_mode":
+            return await self.async_set_room_mode(room_id, parameters.get("mode"))
+        if action == "set_device_mode":
+            return await self.async_set_device_mode(room_id, parameters.get("device_id"), parameters.get("mode"))
+        if action == "set_room_humidity_target":
+            return await self.async_room_humidity_target(request_id=request_id, room_id=room_id, target_humidity=parameters.get("target_humidity"))
+        if action == "set_room_min_target":
+            return await self.async_room_minimum_temperature(request_id=request_id, room_id=room_id, minimum_temperature=parameters.get("minimum_temperature"))
+        if action == "set_room_target_strategy":
+            return await self.async_room_target_strategy(request_id=request_id, room_id=room_id, target_strategy=parameters.get("target_strategy"))
+        if action == "turn_room_off":
+            return await self.async_turn_room_off(request_id=request_id, room_id=room_id)
+        return await self.async_temporary_temperature({
+            "correlation_id": correlation_id, "request_id": request_id,
+            "contour_id": "climate", "room_id": room_id,
+            "action": "set" if action == "set_room_target" else "clear",
+            "target_temperature": parameters.get("target_temperature"), "confirm": True,
+        }, local_now)
+
     async def async_apply_contour(self, payload: object) -> ContourApplyReceipt:
         """Idempotently apply three supported settings after explicit consent."""
 
-        request_id, contour_id, room_scope, correlation_id = (
-            parse_contour_apply_request(payload)
-        )
+        request = parse_contour_apply_request(payload)
         async with self._lock:
             self._require_native_contour_apply_mode()
-            return await self._async_apply_native_contour_unlocked(
-                request_id,
-                contour_id,
-                correlation_id=correlation_id,
-                context=ClimateControlContext(
-                    action=ClimateControlAction.APPLY_SAVED_SETTINGS,
+            await self._async_sync_control_revision_unlocked()
+            if (
+                request.reliability_profile is not None
+                and request.expected_control_revision != self._control_revision
+                and self._contour_applications.by_request(request.request_id) is None
+            ):
+                raise ContourApplyViolation("climate control revision is stale")
+            context = ClimateControlContext(
+                action=(
+                    ClimateControlAction.APPLY_SCHEDULE_PROFILE
+                    if request.schedule_profile is not None
+                    else ClimateControlAction.APPLY_SAVED_SETTINGS
                 ),
-                room_ids=room_scope,
-                desired_state_changes=ClimateDesiredStateChanges(0, 0, 0),
+                profile=request.schedule_profile,
             )
+            # The shared revision is the first durable physical boundary for
+            # direct control.  Do it before a ledger entry can be dispatched.
+            # Existing request ids replay through the frozen ledger and never
+            # reserve a second revision.
+            resulting_revision: int | None = None
+            if (request.reliability_profile is not None
+                    and self._contour_applications.by_request(request.request_id) is None):
+                resulting_revision = await self._async_reserve_control_revision_unlocked(
+                    request.expected_control_revision
+                )
+                self._control_revision = resulting_revision
+            receipt = await self._async_apply_native_contour_unlocked(
+                request.request_id,
+                request.contour_id,
+                correlation_id=request.correlation_id,
+                context=context,
+                room_ids=request.room_ids,
+                desired_state_changes=ClimateDesiredStateChanges(0, 0, 0),
+                reliability_request=request,
+                resulting_control_revision=resulting_revision,
+            )
+            await self._async_persist_direct_control_unlocked()
+            return receipt
 
     async def async_run_climate_schedule(
         self,
@@ -1046,6 +1261,12 @@ class ClimateRuntime:
             )
         async with self._lock:
             self._require_native_contour_apply_mode()
+            await self._async_sync_control_revision_unlocked()
+            if (
+                request.reliability_profile is not None
+                and request.expected_control_revision != self._control_revision
+            ):
+                raise TemporaryTemperatureViolation("climate control revision is stale")
             contour = self._climate_contour()
             selected = contour.schedule.profile_at(hour=now.hour, minute=now.minute)
             if contour.mode is not ContourMode.AUTOMATIC or (
@@ -1156,6 +1377,15 @@ class ClimateRuntime:
                     room_ids=room_scope,
                     desired_state_changes=ClimateDesiredStateChanges(0, 0, 0),
                 )
+            # Reserve the shared revision before a mutable contour or a
+            # dispatchable direct-control record can be saved.  The duplicate
+            # branch above has already returned without changing the token.
+            resulting_revision: int | None = None
+            if request.reliability_profile is not None:
+                resulting_revision = await self._async_reserve_control_revision_unlocked(
+                    request.expected_control_revision
+                )
+                self._control_revision = resulting_revision
             # Reserve the desired temporary state in durable storage before the
             # first POST. A lost response therefore cannot trigger an automatic
             # retry; only another explicit user request may try again.
@@ -1166,14 +1396,18 @@ class ClimateRuntime:
             )
             await self._contour_store.async_save(updated)
             self._contours = updated
-            return await self._async_apply_native_contour_unlocked(
+            receipt = await self._async_apply_native_contour_unlocked(
                 request.request_id,
                 CLIMATE_CONTOUR_ID,
                 correlation_id=request.correlation_id,
                 context=context,
                 room_ids=room_scope,
                 desired_state_changes=desired_state_changes,
+                reliability_request=request,
+                resulting_control_revision=resulting_revision,
             )
+            await self._async_persist_direct_control_unlocked()
+            return receipt
 
     async def async_set_room_mode(
         self,
@@ -1377,6 +1611,308 @@ class ClimateRuntime:
                 desired_state_changes=desired_state_changes,
             )
 
+    async def async_room_minimum_temperature(
+        self, *, request_id: str, room_id: str, minimum_temperature: float
+    ) -> ContourApplyReceipt:
+        """Save one room's safe lower bound and apply its revised contour."""
+        async with self._lock:
+            self._require_native_contour_apply_mode()
+            if self._contour_store is None:
+                raise ClimateRuntimeUnavailable("contour storage is unavailable")
+            contour = self._climate_contour()
+            try:
+                updated = with_room_climate_minimum_temperature(
+                    self._contours, room_id=room_id,
+                    minimum_temperature=minimum_temperature,
+                )
+            except ContourRegistryViolation as error:
+                raise HomeClimateTargetsViolation(str(error)) from error
+            updated_contour = self._require_climate_contour(updated)
+            changes = local_desired_state_changes(contour, updated_contour)
+            await self._contour_store.async_save(updated)
+            self._contours = updated
+            return await self._async_apply_native_contour_unlocked(
+                request_id, CLIMATE_CONTOUR_ID,
+                context=ClimateControlContext(action=ClimateControlAction.APPLY_SAVED_SETTINGS),
+                room_ids=(room_id,), desired_state_changes=changes,
+            )
+
+    async def async_room_target_strategy(
+        self, *, request_id: str, room_id: str, target_strategy: str
+    ) -> ContourApplyReceipt:
+        """Save one room's typed strategy and apply the authoritative contour."""
+        async with self._lock:
+            self._require_native_contour_apply_mode()
+            if self._contour_store is None:
+                raise ClimateRuntimeUnavailable("contour storage is unavailable")
+            contour = self._climate_contour()
+            try:
+                updated = with_room_climate_target_strategy(
+                    self._contours, room_id=room_id, target_strategy=target_strategy
+                )
+            except ContourRegistryViolation as error:
+                raise HomeClimateTargetsViolation(str(error)) from error
+            updated_contour = self._require_climate_contour(updated)
+            changes = local_desired_state_changes(contour, updated_contour)
+            await self._contour_store.async_save(updated)
+            self._contours = updated
+            return await self._async_apply_native_contour_unlocked(
+                request_id, CLIMATE_CONTOUR_ID,
+                context=ClimateControlContext(action=ClimateControlAction.APPLY_SAVED_SETTINGS),
+                room_ids=(room_id,), desired_state_changes=changes,
+            )
+
+    async def async_turn_room_off(self, *, request_id: str, room_id: str) -> ContourApplyReceipt:
+        """Turn off only managed climate/humidifier leaves in one room.
+
+        This path never manufactures a generic service call: every endpoint is
+        taken from the private registry and only the two documented HA domains
+        can cross the executor boundary.
+        """
+        async with self._lock:
+            self._require_native_contour_apply_mode()
+            contour = self._climate_contour()
+            assignment = next((room for room in contour.rooms if room.room_id == room_id), None)
+            if assignment is None:
+                raise ContourApplyViolation("climate room is not configured")
+            calls: list[ClimateHaServiceCall] = []
+            for device_id in assignment.device_ids:
+                device = next((item for item in self._registry.devices if item.device_id == device_id), None)
+                if device is None or device.control_scope is not ClimateControlScope.MANAGED:
+                    continue
+                endpoint = device.endpoint(ClimateEndpointRole.CONTROL)
+                if endpoint is None:
+                    continue
+                if endpoint.entity_id.startswith("climate."):
+                    calls.append(ClimateHaServiceCall(ClimateHaService.CLIMATE_TURN_OFF, endpoint.entity_id, owner_device_id=device.device_id))
+                elif endpoint.entity_id.startswith("humidifier."):
+                    calls.append(ClimateHaServiceCall(ClimateHaService.HUMIDIFIER_TURN_OFF, endpoint.entity_id, owner_device_id=device.device_id))
+                elif device.kind is ClimateDeviceKind.FLOOR_HEATING and endpoint.entity_id.startswith("switch."):
+                    calls.append(ClimateHaServiceCall(ClimateHaService.SWITCH_TURN_OFF, endpoint.entity_id, owner_device_id=device.device_id))
+            now = self._safe_now()
+            def receipt(status: ContourApplyStatus, accepted: int, reasons: tuple[str, ...],
+                        device_outcomes: Mapping[str, Mapping[str, object]] | None = None) -> ContourApplyReceipt:
+                return ContourApplyReceipt(
+                    operation_id=request_id, request_id=request_id, correlation_id=None,
+                    contour_id=CLIMATE_CONTOUR_ID,
+                    context=ClimateControlContext(action=ClimateControlAction.APPLY_SAVED_SETTINGS),
+                    status=status, room_count=1, command_count=len(calls), accepted_count=accepted,
+                    confirmed_room_count=0, temperature_changes=0, strategy_changes=0,
+                    automatic_mode_changes=0, reasons=reasons, created_at=now, updated_at=now,
+                    device_outcomes=device_outcomes,
+                )
+            if not calls or self._strict_ha_call_executor is None:
+                return receipt(ContourApplyStatus.UNAVAILABLE, 0, ("command_result_unavailable",))
+            try:
+                isolated = getattr(self._strict_ha_call_executor, "async_execute_isolated", None)
+                if callable(isolated):
+                    outcomes = await isolated(tuple(calls))
+                    accepted = sum(1 for value in outcomes if value is True)
+                    leaves = {
+                        call.owner_device_id: {
+                            "owner_device_id": call.owner_device_id,
+                            "command_count": 1,
+                            "accepted_count": 1 if outcome is True else 0,
+                            "execution_state": "accepted_unverified" if outcome is True else "dispatched_not_accepted",
+                            "retry_policy": "forbidden_after_dispatch",
+                            "observed_actual": None,
+                            "observed_at": None,
+                        }
+                        for call, outcome in zip(calls, outcomes)
+                        if isinstance(call.owner_device_id, str)
+                    }
+                    await self._async_capture_hausman_contexts()
+                    status = (
+                        ContourApplyStatus.PENDING if accepted == len(calls)
+                        else ContourApplyStatus.PARTIAL if accepted
+                        else ContourApplyStatus.UNAVAILABLE
+                    )
+                    return receipt(status, accepted, () if accepted else ("command_result_unavailable",), leaves)
+                else:
+                    accepted = await self._strict_ha_call_executor.async_execute(tuple(calls))
+            except Exception as error:
+                self.last_error = type(error).__name__
+                accepted = _bounded_completed_count(getattr(error, "completed", 0), len(calls))
+                status = ContourApplyStatus.PARTIAL if accepted else ContourApplyStatus.UNAVAILABLE
+                return receipt(status, accepted, ("command_result_unavailable",))
+            leaves = {
+                call.owner_device_id: {
+                    "owner_device_id": call.owner_device_id,
+                    "command_count": 1,
+                    "accepted_count": 1 if index < accepted else 0,
+                    "execution_state": "accepted_unverified" if index < accepted else "dispatched_not_accepted",
+                    "retry_policy": "forbidden_after_dispatch",
+                    "observed_actual": None,
+                    "observed_at": None,
+                }
+                for index, call in enumerate(calls)
+                if isinstance(call.owner_device_id, str)
+            }
+            return receipt(ContourApplyStatus.PENDING, _bounded_completed_count(accepted, len(calls)), (), leaves)
+
+    async def async_recover_device(
+        self, *, request_id: str, room_id: str, device_id: str,
+        desired: Mapping[str, object], expected_control_revision: int | None = None,
+    ) -> _ClimateRoomModeReceipt:
+        """Reconcile one selected device to its durable recovery snapshot.
+
+        Device selection remains exact: this method resolves its private
+        endpoint before invoking the strict executor and never broadens a
+        recovery request into a room-wide apply.
+        """
+        if not isinstance(desired, Mapping):
+            raise _recovery_pre_dispatch_unavailable("recovery desired state is invalid")
+        async with self._lock:
+            # The preflight receipt is deliberately only advisory.  The
+            # physical boundary repeats every ownership and managed-mode gate
+            # while holding the runtime lock, immediately before it clears a
+            # manual exclusion or touches HA.
+            if self.configuration.climate_bridge_mode is not ClimateControlMode.MANAGED:
+                raise _recovery_pre_dispatch_unavailable("climate recovery is not managed")
+            # Tablet recovery reserves the same durable revision before its
+            # first leaf. Re-read it under the runtime lock immediately before
+            # touching HA, so a direct command that already advanced it turns
+            # this leaf into a safe pre-dispatch failure instead of a stale
+            # second physical command.
+            if expected_control_revision is not None:
+                current_revision = await self._async_sync_control_revision_unlocked()
+                if current_revision != expected_control_revision:
+                    raise _recovery_pre_dispatch_unavailable(
+                        "climate recovery control revision is stale"
+                    )
+            device = next((item for item in self._registry.devices if item.device_id == device_id and item.room_id == room_id), None)
+            contour = self._climate_contour()
+            assignment = next((item for item in contour.rooms if item.room_id == room_id), None)
+            if (
+                device is None
+                or assignment is None
+                or device_id not in assignment.device_ids
+                or device.control_scope is not ClimateControlScope.MANAGED
+            ):
+                raise _recovery_pre_dispatch_unavailable(
+                    "climate device is not in the contour"
+                )
+            try:
+                observation = await self._async_native_climate_observation_unlocked()
+                observed = observation.device(device_id)
+                reconciliation = native_climate_reconciliation(self._registry, observation)
+            except Exception as error:
+                if getattr(error, "recovery_pre_dispatch", False):
+                    raise
+                raise _recovery_pre_dispatch_unavailable(
+                    "climate recovery evidence is unavailable"
+                ) from error
+            attribution = next(
+                (item for item in self._manual_memory.attributions if item.device_id == device_id),
+                None,
+            )
+            # Recovery is explicit and may return either durable manual
+            # participation reason to the contour.  Preserve the reason in
+            # the receipt/preflight; do not reinterpret external shutdown as
+            # a user exclusion.
+            if attribution is None or attribution.reason not in {"user_excluded", "external_off"}:
+                raise _recovery_pre_dispatch_unavailable(
+                    "climate recovery ownership is not manual participation"
+                )
+            if device_id not in self._manual_memory.manual_device_ids:
+                raise _recovery_pre_dispatch_unavailable(
+                    "climate recovery ownership is unavailable"
+                )
+            if (
+                observation.data_status is not ClimateDataStatus.FRESH
+                or not reconciliation.matches
+                or type(observation.observed_at) is not int
+                or observed is None
+                or observed.availability is not ClimateDeviceAvailability.AVAILABLE
+                or device.control_owner is not ClimateControlOwner.CLIMATE_CORE
+            ):
+                raise _recovery_pre_dispatch_unavailable(
+                    "climate recovery device is unavailable"
+                )
+            endpoint = device.endpoint(ClimateEndpointRole.CONTROL)
+            if endpoint is None or self._strict_ha_call_executor is None:
+                raise _recovery_pre_dispatch_unavailable(
+                    "climate recovery control endpoint is unavailable"
+                )
+            calls: list[ClimateHaServiceCall] = []
+            target = desired.get("target_temperature")
+            humidity = desired.get("target_humidity")
+            if endpoint.entity_id.startswith("climate.") and type(target) in {int, float}:
+                calls.append(ClimateHaServiceCall(ClimateHaService.CLIMATE_SET_TEMPERATURE, endpoint.entity_id, temperature=float(target)))
+            elif endpoint.entity_id.startswith("humidifier.") and type(humidity) is int:
+                calls.append(ClimateHaServiceCall(ClimateHaService.HUMIDIFIER_SET_HUMIDITY, endpoint.entity_id, humidity=humidity))
+            if not calls:
+                raise _recovery_pre_dispatch_unavailable(
+                    "climate recovery desired state is unsupported"
+                )
+            await self._strict_ha_call_executor.async_execute(tuple(calls))
+            try:
+                await self._async_capture_hausman_contexts()
+                # Ownership changes only after the physical boundary accepted
+                # the command. If persistence or read-back fails afterwards,
+                # the caller must still retain the accepted 1/1 outcome.
+                updated = with_climate_device_mode(
+                    self._manual_memory, self._registry, room_id=room_id,
+                    device_id=device_id, manual=False, updated_at=self._safe_now(),
+                )
+                if updated != self._manual_memory:
+                    await self._async_save_manual(updated)
+                    self._manual_memory = updated
+                # Force a native observation/reconciliation while retaining
+                # the lock. This makes a completed recovery visible to the
+                # immediate tablet read-back without accepting a stale
+                # coordinator snapshot.
+                await self._async_native_climate_observation_unlocked()
+            except Exception as error:
+                accepted = ClimateRuntimeUnavailable(
+                    "climate recovery post-dispatch state is unavailable"
+                )
+                accepted.recovery_accepted_after_dispatch = True
+                raise accepted from error
+            return _ClimateRoomModeReceipt()
+
+    async def async_recover_offline_device(
+        self, *, room_id: str, device_id: str, expected_control_revision: int
+    ) -> _ClimateRoomModeReceipt:
+        """Return an offline manual leaf to ownership only under its reservation.
+
+        This has no HA service call. It still changes durable control rights,
+        so it must obey the exact same shared revision and contour boundary as
+        a physical recovery leaf.
+        """
+        async with self._lock:
+            current_revision = await self._async_sync_control_revision_unlocked()
+            if current_revision != expected_control_revision:
+                error = ClimateRuntimeUnavailable("climate recovery control revision is stale")
+                error.recovery_pre_dispatch = True
+                raise error
+            if self.configuration.climate_bridge_mode is not ClimateControlMode.MANAGED:
+                raise ClimateRuntimeUnavailable("climate recovery is not managed")
+            device = next((item for item in self._registry.devices if item.device_id == device_id and item.room_id == room_id), None)
+            contour = self._climate_contour()
+            assignment = next((item for item in contour.rooms if item.room_id == room_id), None)
+            observation = await self._async_native_climate_observation_unlocked()
+            observed = observation.device(device_id)
+            attribution = next((item for item in self._manual_memory.attributions if item.device_id == device_id), None)
+            if (
+                device is None or assignment is None or device_id not in assignment.device_ids
+                or device.control_scope is not ClimateControlScope.MANAGED
+                or observed is None or observed.availability is ClimateDeviceAvailability.AVAILABLE
+                or device_id not in self._manual_memory.manual_device_ids
+                or attribution is None or attribution.reason not in {"user_excluded", "external_off"}
+            ):
+                error = ClimateRuntimeUnavailable("climate recovery offline ownership is unavailable")
+                error.recovery_pre_dispatch = True
+                raise error
+            updated = with_climate_device_mode(
+                self._manual_memory, self._registry, room_id=room_id,
+                device_id=device_id, manual=False, updated_at=self._safe_now(),
+            )
+            if updated != self._manual_memory:
+                await self._async_save_manual(updated)
+                self._manual_memory = updated
+            return _ClimateRoomModeReceipt()
+
     async def _async_apply_native_contour_unlocked(
         self,
         request_id: str,
@@ -1386,6 +1922,8 @@ class ClimateRuntime:
         context: ClimateControlContext,
         room_ids: tuple[str, ...] | None = None,
         desired_state_changes: ClimateDesiredStateChanges,
+        reliability_request: object | None = None,
+        resulting_control_revision: int | None = None,
     ) -> ContourApplyReceipt:
         self._require_native_contour_apply_mode()
         contour = contour_without_manual_devices(
@@ -1401,12 +1939,40 @@ class ClimateRuntime:
             correlation_id,
         )
         if prior is not None:
+            # The legacy ledger key is the contour plan fingerprint.  Enhanced
+            # calls additionally bind every public control token to the
+            # frozen request fingerprint, so a reused id cannot replay a
+            # receipt after changing profile, revision, correlation or scope.
+            if getattr(reliability_request, "reliability_profile", None) == "climate_reliability_v1":
+                enhanced = prior.enhanced
+                prior_scope = enhanced.get("resolved_scope") if isinstance(enhanced, Mapping) else None
+                expected = getattr(reliability_request, "expected_control_revision", None)
+                if not isinstance(prior_scope, Mapping) or not isinstance(expected, int):
+                    raise ContourApplyViolation("climate control request id conflicts")
+                candidate = _direct_reliability_request_fingerprint(
+                    request_id=request_id, correlation_id=correlation_id,
+                    context=context, scope=prior_scope,
+                    expected_control_revision=expected,
+                )
+                if enhanced.get("request_fingerprint") != candidate:
+                    raise ContourApplyViolation("climate control request id conflicts")
+            elif prior.enhanced is not None:
+                # A negotiated control token cannot silently degrade to the
+                # legacy idempotency surface.  The latter has no revision or
+                # fingerprint binding and would otherwise turn a conflicting
+                # request into an unsafe apparent duplicate.
+                raise ContourApplyViolation("climate control request id conflicts")
+            self._last_contour_apply_was_duplicate = True
+            if not isinstance(prior.plan, ContourApplyPlan):
+                return prior.receipt
             return await self._async_reobserve_native_contour_application_unlocked(
                 request_id,
                 prior,
                 contour,
                 room_ids=room_ids,
             )
+
+        self._last_contour_apply_was_duplicate = False
 
         observation = await self._async_native_climate_observation_unlocked()
         plan = build_contour_apply_plan(
@@ -1422,7 +1988,25 @@ class ClimateRuntime:
             plan,
             context,
             correlation_id,
+            enhanced=(
+                _contour_reliability_metadata(
+                    contour, plan, context, reliability_request,
+                    expected_control_revision=getattr(
+                        reliability_request, "expected_control_revision", self._control_revision
+                    ),
+                    resulting_control_revision=resulting_control_revision,
+                )
+                if getattr(reliability_request, "reliability_profile", None)
+                == "climate_reliability_v1" else None
+            ),
         )
+        try:
+            await self._async_persist_direct_control_unlocked()
+        except Exception:
+            # Saving failed before a physical boundary.  Retaining this entry
+            # would create a phantom dispatchable operation on a later retry.
+            self._contour_applications.discard_unpersisted(request_id)
+            raise
         if not plan.native_plan.preflight_permitted or not plan.strict_calls:
             if not plan.native_plan.preflight_permitted:
                 _LOGGER.warning(
@@ -1441,48 +2025,88 @@ class ClimateRuntime:
                 reasons=("command_result_unavailable",),
             ).receipt
 
-        try:
-            accepted_count = await self._strict_ha_call_executor.async_execute(
-                plan.strict_calls
-            )
-        except Exception as error:
-            self.last_error = type(error).__name__
-            completed = _bounded_completed_count(
-                getattr(error, "completed", 0),
-                len(plan.strict_calls),
-            )
-            await self._async_record_direct_wifi_commands(
-                plan.strict_calls,
-                executed_count=completed,
-            )
-            await self._async_record_deviation_off_commands(
-                plan.strict_calls,
-                executed_count=completed,
-            )
+        # The frozen receipt has one physical-device ledger.  Refuse to send a
+        # plan whose calls cannot be tied to exactly one leaf in that scope.
+        # In particular, an HA entity shared by two registry rows is never
+        # allowed to make both rows look successful.
+        enhanced = record.enhanced if isinstance(record.enhanced, dict) else None
+        ledger = enhanced.get("leaf_ledger") if enhanced is not None else None
+        scoped_ids = set(ledger) if isinstance(ledger, dict) else set()
+        call_owners = [self._device_ids_for_climate_call(call) for call in plan.strict_calls]
+        if enhanced is not None and (
+            any(len(owners) != 1 or owners[0] not in scoped_ids for owners in call_owners)
+        ):
             return self._contour_applications.update(
                 request_id,
-                status=(
-                    ContourApplyStatus.PARTIAL
-                    if completed
-                    else ContourApplyStatus.UNAVAILABLE
-                ),
-                accepted_count=completed,
+                status=ContourApplyStatus.UNAVAILABLE,
+                accepted_count=0,
                 confirmed_room_count=0,
                 reasons=("command_result_unavailable",),
             ).receipt
+
+        # A device may need several HA calls.  They are a strict sequence for
+        # that one owner: after its first error no later sub-call can run.
+        # Different owners remain independent, so one failed AC must not hide
+        # the result of a humidifier in the same room.
+        if isinstance(ledger, dict):
+            grouped: dict[str, list] = {}
+            for call, owners in zip(plan.strict_calls, call_owners, strict=True):
+                grouped.setdefault(owners[0], []).append(call)
+            accepted_count = 0
+            accepted_calls: list[ClimateHaServiceCall] = []
+            for device_id, calls in grouped.items():
+                ledger[device_id] = "started"
+                await self._async_persist_direct_control_unlocked()
+                try:
+                    completed = await self._strict_ha_call_executor.async_execute(tuple(calls))
+                except Exception as error:
+                    self.last_error = type(error).__name__
+                    completed = _bounded_completed_count(getattr(error, "completed", 0), len(calls))
+                    accepted_count += completed
+                    accepted_calls.extend(calls[:completed])
+                    # The started checkpoint is proof that at least the first
+                    # call crossed the physical boundary.  The whole leaf is
+                    # non-retryable even when its first call failed.
+                    ledger[device_id] = "dispatched_not_accepted"
+                else:
+                    completed = _bounded_completed_count(completed, len(calls))
+                    accepted_count += completed
+                    accepted_calls.extend(calls[:completed])
+                    ledger[device_id] = (
+                        "accepted_unverified"
+                        if completed == len(calls) else "dispatched_not_accepted"
+                    )
+                await self._async_persist_direct_control_unlocked()
+        else:
+            try:
+                accepted_count = await self._strict_ha_call_executor.async_execute(
+                    plan.strict_calls
+                )
+            except Exception as error:
+                self.last_error = type(error).__name__
+                completed = _bounded_completed_count(
+                    getattr(error, "completed", 0), len(plan.strict_calls)
+                )
+                await self._async_record_direct_wifi_commands(plan.strict_calls, executed_count=completed)
+                await self._async_record_deviation_off_commands(plan.strict_calls, executed_count=completed)
+                return self._contour_applications.update(
+                    request_id,
+                    status=ContourApplyStatus.PARTIAL if completed else ContourApplyStatus.UNAVAILABLE,
+                    accepted_count=completed, confirmed_room_count=0,
+                    reasons=("command_result_unavailable",),
+                ).receipt
 
         accepted_count = _bounded_completed_count(
             accepted_count,
             len(plan.strict_calls),
         )
-        await self._async_record_direct_wifi_commands(
-            plan.strict_calls,
-            executed_count=accepted_count,
-        )
-        await self._async_record_deviation_off_commands(
-            plan.strict_calls,
-            executed_count=accepted_count,
-        )
+        # Grouped executor results are not a prefix of the original plan:
+        # owner A may fail while owner B succeeds. Attribute only concrete
+        # accepted calls, never the first N aggregate calls.
+        attribution_calls = tuple(accepted_calls) if isinstance(ledger, dict) else plan.strict_calls
+        attribution_count = len(attribution_calls) if isinstance(ledger, dict) else accepted_count
+        await self._async_record_direct_wifi_commands(attribution_calls, executed_count=attribution_count)
+        await self._async_record_deviation_off_commands(attribution_calls, executed_count=attribution_count)
         if accepted_count != len(plan.strict_calls):
             return self._contour_applications.update(
                 request_id,
@@ -1495,11 +2119,76 @@ class ClimateRuntime:
                 confirmed_room_count=0,
                 reasons=("command_result_unavailable",),
             ).receipt
-        return await self._async_verify_native_contour_application_unlocked(
+        verified = await self._async_verify_native_contour_application_unlocked(
             request_id,
             plan,
             accepted_count,
         )
+        if verified.status is ContourApplyStatus.CONFIRMED:
+            record = self._contour_applications.by_request(request_id)
+            enhanced = record.enhanced if record is not None and isinstance(record.enhanced, dict) else None
+            ledger = enhanced.get("leaf_ledger") if enhanced is not None else None
+            if isinstance(ledger, dict):
+                for device_id in ledger:
+                    ledger[device_id] = "applied"
+                await self._async_persist_direct_control_unlocked()
+        return verified
+
+    async def _async_persist_direct_control_unlocked(self) -> None:
+        """Checkpoint the reservation before or after every physical phase."""
+
+        if self._direct_control_store is None:
+            return
+        saver = getattr(self._direct_control_store, "async_save_direct_control", None)
+        if not callable(saver):
+            raise ClimateRuntimeUnavailable("direct control store is invalid")
+        await saver(self._contour_applications.serialized())
+
+    def _device_ids_for_climate_call(self, call) -> tuple[str, ...]:
+        """Return the single frozen plan leaf for a strict HA call.
+
+        Never recover ownership by matching an HA entity id.  That would let a
+        shared or stale endpoint turn one accepted service call into success
+        for unrelated leaves.
+        """
+        device_id = getattr(call, "owner_device_id", None)
+        if not isinstance(device_id, str):
+            return ()
+        return (device_id,)
+
+    async def _async_reserve_control_revision_unlocked(self, expected: object) -> int:
+        """Allocate a negotiated revision through the shared climate ledger."""
+        if type(expected) is not int or expected != self._control_revision:
+            raise ContourApplyViolation("climate control revision is stale")
+        reserve = getattr(self._direct_control_store, "async_reserve_control_revision", None)
+        if not callable(reserve):
+            return expected + 1
+        try:
+            value = await reserve(expected)
+        except Exception as error:
+            raise ContourApplyViolation("climate control revision is stale") from error
+        if type(value) is not int or value != expected + 1:
+            raise ClimateRuntimeUnavailable("shared climate control revision is invalid")
+        return value
+
+    async def _async_sync_control_revision_unlocked(self) -> int:
+        """Mirror the shared durable revision before a negotiated request.
+
+        The instance field is a cache for legacy paths only.  It is never the
+        authority when the coordinator is configured, because tablet and
+        direct endpoints have independent runtime locks.
+        """
+        current = getattr(self._direct_control_store, "async_current_control_revision", None)
+        if not callable(current):
+            return self._control_revision
+        try:
+            value = await current()
+        except Exception as error:
+            raise ClimateRuntimeUnavailable("shared climate control revision is unavailable") from error
+        if type(value) is not int or value < 0:
+            raise ClimateRuntimeUnavailable("shared climate control revision is invalid")
+        self._control_revision = value
+        return value
 
     async def _async_reobserve_native_contour_application_unlocked(
         self,
@@ -1509,6 +2198,11 @@ class ClimateRuntime:
         *,
         room_ids: tuple[str, ...] | None,
     ) -> ContourApplyReceipt:
+        # Restored records deliberately contain only frozen receipt metadata,
+        # never a dispatchable plan.  A poll may return that durable result,
+        # but must not attempt to dereference or reconstruct mutable targets.
+        if not isinstance(prior.plan, ContourApplyPlan):
+            return prior.receipt
         try:
             observation = await self._async_native_climate_observation_unlocked()
         except ClimateRuntimeUnavailable as error:
@@ -2189,10 +2883,15 @@ class ClimateRuntime:
                 self._registry,
                 now_ms=observed_at,
             )
-            updated_manual, observed_changed = update_direct_wifi_observation(
+            # The native observation path always passes through the generic
+            # manual reconciler.  Without an explicit external HA context it
+            # only retains the established direct-Wi-Fi attribution rule;
+            # unknown state changes never steal ownership.
+            updated_manual, observed_changed = update_climate_manual_observation(
                 reconciled,
                 self._registry,
                 observation,
+                **self._native_manual_context_inputs(),
             )
             if reconciled_changed or observed_changed:
                 await self._async_save_manual(updated_manual)
@@ -2217,6 +2916,42 @@ class ClimateRuntime:
             raise ClimateRuntimeUnavailable(
                 "climate protection memory is unavailable"
             ) from error
+
+    def _native_manual_context_inputs(self) -> dict[str, object]:
+        """Translate native HA contexts into explicit, fail-closed ownership."""
+        view = self._ha_state_view
+        if view is None or self.configuration.climate_bridge_mode is ClimateControlMode.DISABLED:
+            return {}
+        recent = getattr(self._strict_ha_call_executor, "recent_context_ids", None)
+        hausman = set(self._manual_memory.hausman_context_ids)
+        if callable(recent):
+            hausman.update(recent())
+        external: list[str] = []
+        contexts: dict[str, dict[str, object]] = {}
+        for device in self._registry.devices:
+            endpoint = device.endpoint(ClimateEndpointRole.CONTROL)
+            if endpoint is None:
+                continue
+            try:
+                state = view.entity_state(endpoint.entity_id)
+            except Exception:
+                continue
+            if state is None:
+                continue
+            context_id = getattr(state, "context_id", None)
+            parent_id = getattr(state, "context_parent_id", None)
+            user_id = getattr(state, "context_user_id", None)
+            ids = {value for value in (context_id, parent_id) if isinstance(value, str)}
+            # A user context is external even when it has a parent. Service
+            # contexts are external only when neither link is ours.
+            if (isinstance(user_id, str) and user_id) or (ids and not ids & hausman):
+                external.append(device.device_id)
+                contexts[device.device_id] = {
+                    "context_id": context_id if isinstance(context_id, str) else None,
+                    "parent_id": parent_id if isinstance(parent_id, str) else None,
+                    "user_id": user_id if isinstance(user_id, str) else None,
+                }
+        return {"external_device_ids": tuple(external), "context_by_device": contexts}
 
     def _native_ha_observation(
         self,
@@ -2894,9 +3629,26 @@ class ClimateRuntime:
             executed_count=executed_count,
             commanded_at=self._safe_now(),
         )
+        recent = getattr(self._strict_ha_call_executor, "recent_context_ids", None)
+        context_ids = tuple(recent()) if callable(recent) else ()
+        merged = tuple(dict.fromkeys((*self._manual_memory.hausman_context_ids, *context_ids)))[-128:]
+        if merged != self._manual_memory.hausman_context_ids:
+            updated = replace(updated, hausman_context_ids=merged)
+            changed = True
         if changed:
             await self._async_save_manual(updated)
             self._manual_memory = updated
+
+    async def _async_capture_hausman_contexts(self) -> None:
+        """Persist a bounded executor provenance window across restart."""
+        recent = getattr(self._strict_ha_call_executor, "recent_context_ids", None)
+        context_ids = tuple(recent()) if callable(recent) else ()
+        merged = tuple(dict.fromkeys((*self._manual_memory.hausman_context_ids, *context_ids)))[-128:]
+        if merged == self._manual_memory.hausman_context_ids:
+            return
+        updated = replace(self._manual_memory, hausman_context_ids=merged)
+        await self._async_save_manual(updated)
+        self._manual_memory = updated
 
     async def _async_record_deviation_off_commands(
         self,
@@ -3185,6 +3937,113 @@ def _bounded_completed_count(value: object, maximum: int) -> int:
     if type(value) is int and 0 <= value <= maximum:
         return value
     return 0
+
+
+def _contour_reliability_metadata(
+    contour: ContourDefinition,
+    plan,
+    context: ClimateControlContext,
+    request: object,
+    *,
+    expected_control_revision: int,
+    resulting_control_revision: int | None = None,
+) -> dict[str, object]:
+    """Freeze the public scope and desired targets before first dispatch."""
+
+    selected = [
+        room for room in contour.rooms
+        if room.room_id in set(plan.target_room_ids)
+    ]
+    # Receipt leaves describe only physical executor ownership.  Sensors and
+    # other read-only bindings participate in observation, never in a command
+    # outcome.  For a zero-call already-aligned plan retain configured leaves
+    # so the public receipt can state that no dispatch was needed.
+    called_ids = {
+        call.owner_device_id for call in plan.strict_calls
+        if isinstance(call.owner_device_id, str)
+    }
+    selected_ids = called_ids or {
+        device_id for room in selected for device_id in room.device_ids
+    }
+    devices_by_room = [
+        {"room_id": room.room_id,
+         "device_ids": [device_id for device_id in room.device_ids if device_id in selected_ids]}
+        for room in selected
+    ]
+    devices_by_room = [row for row in devices_by_room if row["device_ids"]]
+    device_ids = [device_id for row in devices_by_room for device_id in row["device_ids"]]
+    scope = {
+        "room_ids": [room.room_id for room in selected],
+        "device_ids": device_ids,
+        "devices_by_room": devices_by_room,
+    }
+    desired: dict[str, dict[str, object]] = {}
+    for room in selected:
+        settings = room.active_settings
+        for device_id in room.device_ids:
+            desired[device_id] = {
+                "target_temperature": settings.target_temperature,
+                "target_humidity": settings.target_humidity,
+                "minimum_temperature": room.min_temperature,
+                "target_strategy": settings.strategy.value,
+                "mode": "automatic", "state": None,
+                "override_state": "active" if room.temporary_override is not None else "cleared",
+                "synchronization": None,
+                "resulting_target_temperature": settings.target_temperature,
+            }
+    if context.action is ClimateControlAction.APPLY_SCHEDULE_PROFILE:
+        parameters: dict[str, object] = {"contour_id": "climate", "confirm": True,
+                                         "schedule_profile": context.profile.value}
+        kind = "contour_apply"
+    elif context.action is ClimateControlAction.APPLY_SAVED_SETTINGS:
+        parameters = {"contour_id": "climate", "confirm": True}
+        kind = "contour_apply"
+    else:
+        parameters = {"contour_id": "climate", "confirm": True, "room_id": context.room_id,
+                      "action": "clear" if context.action is ClimateControlAction.RETURN_TO_SCHEDULE else "set",
+                      "target_temperature": None if context.action is ClimateControlAction.RETURN_TO_SCHEDULE else context.target_temperature}
+        kind = "temporary_clear" if context.action is ClimateControlAction.RETURN_TO_SCHEDULE else "temporary_set"
+    fingerprint = _direct_reliability_request_fingerprint(
+        request_id=getattr(request, "request_id"),
+        correlation_id=getattr(request, "correlation_id"), context=context,
+        scope=scope, expected_control_revision=expected_control_revision,
+    )
+    desired_fingerprint = hashlib.sha256(json.dumps(desired, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")).hexdigest()
+    scope_fingerprint = hashlib.sha256(json.dumps(scope, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")).hexdigest()
+    target = context.target_temperature
+    return {"kind": kind, "request_fingerprint": fingerprint, "parameters": parameters,
+            "resolved_scope": scope, "desired_snapshot": desired,
+            "desired_snapshot_fingerprint": desired_fingerprint, "scope_fingerprint": scope_fingerprint,
+            "expected_control_revision": expected_control_revision,
+            "resulting_control_revision": (
+                resulting_control_revision
+                if resulting_control_revision is not None
+                else expected_control_revision + 1
+            ),
+            "desired_target_temperature": target, "desired_target_humidity": None,
+            "leaf_ledger": {device_id: "pending_dispatch" for device_id in device_ids}}
+
+
+def _direct_reliability_request_fingerprint(
+    *, request_id: object, correlation_id: object, context: ClimateControlContext,
+    scope: Mapping[str, object], expected_control_revision: int,
+) -> str:
+    """Canonical direct-control identity, including every public token."""
+    if context.action is ClimateControlAction.APPLY_SCHEDULE_PROFILE:
+        parameters: dict[str, object] = {"contour_id": "climate", "confirm": True,
+                                         "schedule_profile": context.profile.value}
+    elif context.action is ClimateControlAction.APPLY_SAVED_SETTINGS:
+        parameters = {"contour_id": "climate", "confirm": True}
+    else:
+        parameters = {"contour_id": "climate", "confirm": True, "room_id": context.room_id,
+                      "action": "clear" if context.action is ClimateControlAction.RETURN_TO_SCHEDULE else "set",
+                      "target_temperature": None if context.action is ClimateControlAction.RETURN_TO_SCHEDULE else context.target_temperature}
+    encoded = json.dumps({"request_id": request_id, "correlation_id": correlation_id,
+                          "reliability_profile": "climate_reliability_v1",
+                          "expected_control_revision": expected_control_revision,
+                          "action": context.action.value, "parameters": parameters,
+                          "scope": scope}, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _contour_apply_diagnostics(plan) -> dict[str, object]:

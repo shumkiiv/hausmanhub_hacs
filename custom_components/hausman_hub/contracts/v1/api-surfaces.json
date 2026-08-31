@@ -1,0 +1,567 @@
+{
+  "inventoryVersion": 1,
+  "capturedAt": "2026-07-31",
+  "canonical": true,
+  "sources": {
+    "android": {
+      "repository": "shumkiiv/universal-home-android",
+      "commit": "eea6741"
+    },
+    "integration": {
+      "repository": "shumkiiv/hausmanhub_hacs",
+      "commit": "ce98a52"
+    },
+    "legacy-center": {
+      "repository": "shumkiiv/universal-home",
+      "commit": "7f8391b"
+    }
+  },
+  "endpoints": [
+    {
+      "id": "android.center.snapshot",
+      "source": "android",
+      "method": "GET",
+      "path": "/endpoint/smart-home-center/api",
+      "owner": "legacy-center",
+      "status": "consumed",
+      "target": "integration.home"
+    },
+    {
+      "id": "android.center.action",
+      "source": "android",
+      "method": "POST",
+      "path": "/endpoint/smart-home-center/action",
+      "owner": "legacy-center",
+      "status": "consumed",
+      "target": "integration.commands"
+    },
+    {
+      "id": "android.climate.state",
+      "source": "android",
+      "method": "GET",
+      "path": "/endpoint/climate/api/v1/state",
+      "owner": "legacy-center",
+      "status": "consumed",
+      "target": "integration.home"
+    },
+    {
+      "id": "android.climate.command",
+      "source": "android",
+      "method": "POST",
+      "path": "/endpoint/climate/api/v1/command",
+      "owner": "legacy-center",
+      "status": "consumed",
+      "target": "integration.contours"
+    },
+    {
+      "id": "android.ha.states",
+      "source": "android",
+      "method": "GET",
+      "path": "/api/states",
+      "owner": "home-assistant",
+      "status": "retired",
+      "target": "removed"
+    },
+    {
+      "id": "android.ha.service",
+      "source": "android",
+      "method": "POST",
+      "path": "/api/services/{domain}/{service}",
+      "owner": "home-assistant",
+      "status": "fallback",
+      "target": "integration.commands"
+    },
+    {
+      "id": "integration.capabilities",
+      "source": "integration",
+      "method": "GET",
+      "path": "/api/hausman_hub/v1/capabilities",
+      "owner": "integration",
+      "status": "implemented",
+      "target": "canonical"
+    },
+    {
+      "id": "integration.home",
+      "source": "integration",
+      "method": "GET",
+      "path": "/api/hausman_hub/v1/home",
+      "owner": "integration",
+      "status": "implemented",
+      "target": "canonical"
+    },
+    {
+      "id": "integration.contours.list",
+      "source": "integration",
+      "method": "GET",
+      "path": "/api/hausman_hub/v1/contours",
+      "owner": "integration",
+      "status": "implemented",
+      "target": "canonical"
+    },
+    {
+      "id": "integration.contours.preview",
+      "source": "integration",
+      "method": "GET",
+      "path": "/api/hausman_hub/v1/contours/apply-preview",
+      "owner": "integration",
+      "status": "implemented",
+      "target": "canonical"
+    },
+    {
+      "id": "integration.contours.apply",
+      "source": "integration",
+      "method": "POST",
+      "path": "/api/hausman_hub/v1/contours/apply",
+      "owner": "integration",
+      "status": "implemented",
+      "target": "canonical"
+    },
+    {
+      "id": "integration.contours.temporary-temperature",
+      "source": "integration",
+      "method": "POST",
+      "path": "/api/hausman_hub/v1/contours/temporary-temperature",
+      "owner": "integration",
+      "status": "implemented",
+      "target": "canonical"
+    },
+    {
+      "id": "integration.contours.home-targets",
+      "source": "integration",
+      "method": "POST",
+      "path": "/api/hausman_hub/v1/contours/home-targets",
+      "owner": "integration",
+      "status": "implemented",
+      "target": "canonical"
+    },
+    {
+      "id": "integration.dashboard.snapshot",
+      "source": "integration",
+      "method": "GET",
+      "path": "/api/hausman_hub/v1/dashboard",
+      "owner": "integration",
+      "status": "implemented",
+      "target": "canonical"
+    },
+    {
+      "id": "integration.device-actions.execute",
+      "source": "integration",
+      "method": "POST",
+      "path": "/api/hausman_hub/v1/device-actions",
+      "owner": "integration",
+      "status": "implemented",
+      "target": "canonical"
+    },
+    {
+      "id": "integration.device-property-names.write",
+      "source": "integration",
+      "method": "POST",
+      "path": "/api/hausman_hub/v1/device-property-names",
+      "owner": "integration",
+      "status": "contracted",
+      "target": "canonical"
+    },
+    {
+      "id": "integration.operations.journal",
+      "source": "integration",
+      "method": "GET",
+      "path": "/api/hausman_hub/v1/admin/operations",
+      "owner": "integration",
+      "status": "contracted",
+      "target": "canonical"
+    },
+    {
+      "id": "integration.device-power-dependencies.read",
+      "source": "contracts",
+      "method": "GET",
+      "path": "/api/hausman_hub/v1/admin/device-power-dependencies",
+      "owner": "integration",
+      "status": "contracted",
+      "target": "canonical"
+    },
+    {
+      "id": "integration.device-power-dependencies.write",
+      "source": "contracts",
+      "method": "PUT",
+      "path": "/api/hausman_hub/v1/admin/device-power-dependencies",
+      "owner": "integration",
+      "status": "contracted",
+      "target": "canonical"
+    },
+    {
+      "id": "integration.tablet-profile.read",
+      "source": "contracts",
+      "method": "GET",
+      "path": "/api/hausman_hub/v1/tablet-profile",
+      "owner": "integration",
+      "status": "contracted",
+      "target": "canonical"
+    },
+    {
+      "id": "integration.tablet-profile.write",
+      "source": "contracts",
+      "method": "PUT",
+      "path": "/api/hausman_hub/v1/tablet-profile",
+      "owner": "integration",
+      "status": "contracted",
+      "target": "canonical"
+    },
+    {
+      "id": "integration.energy-settings.read",
+      "source": "contracts",
+      "method": "GET",
+      "path": "/api/hausman_hub/v1/energy-settings",
+      "owner": "integration",
+      "status": "contracted",
+      "target": "canonical"
+    },
+    {
+      "id": "integration.energy-settings.write",
+      "source": "contracts",
+      "method": "PUT",
+      "path": "/api/hausman_hub/v1/energy-settings",
+      "owner": "integration",
+      "status": "contracted",
+      "target": "canonical"
+    },
+    {
+      "id": "integration.energy-history.read",
+      "source": "contracts",
+      "method": "GET",
+      "path": "/api/hausman_hub/v1/energy/history",
+      "owner": "integration",
+      "status": "contracted",
+      "target": "canonical"
+    },
+    {
+      "id": "integration.scenarios.list.advertised",
+      "source": "integration",
+      "method": "GET",
+      "path": "/api/hausman_hub/v1/scenarios",
+      "owner": "integration",
+      "status": "implemented",
+      "target": "canonical"
+    },
+    {
+      "id": "integration.scenarios.write.advertised",
+      "source": "integration",
+      "method": "POST",
+      "path": "/api/hausman_hub/v1/scenarios",
+      "owner": "integration",
+      "status": "implemented",
+      "target": "canonical"
+    },
+    {
+      "id": "integration.scenarios.catalog.advertised",
+      "source": "integration",
+      "method": "GET",
+      "path": "/api/hausman_hub/v1/scenarios/catalog",
+      "owner": "integration",
+      "status": "implemented",
+      "target": "canonical"
+    },
+    {
+      "id": "integration.scenarios.test.advertised",
+      "source": "integration",
+      "method": "POST",
+      "path": "/api/hausman_hub/v1/scenarios/test",
+      "owner": "integration",
+      "status": "implemented",
+      "target": "canonical"
+    },
+    {
+      "id": "integration.scenarios.delete.advertised",
+      "source": "integration",
+      "method": "POST",
+      "path": "/api/hausman_hub/v1/scenarios/delete",
+      "owner": "integration",
+      "status": "implemented",
+      "target": "canonical"
+    },
+    {
+      "id": "integration.scenarios.run.advertised",
+      "source": "integration",
+      "method": "POST",
+      "path": "/api/hausman_hub/v1/scenarios/run",
+      "owner": "integration",
+      "status": "implemented",
+      "target": "canonical"
+    },
+    {
+      "id": "integration.scenarios.action.advertised",
+      "source": "integration",
+      "method": "POST",
+      "path": "/api/hausman_hub/v1/scenarios/action",
+      "owner": "integration",
+      "status": "implemented",
+      "target": "canonical"
+    },
+    {
+      "id": "integration.scenarios.list.admin",
+      "source": "integration",
+      "method": "GET",
+      "path": "/api/hausman_hub/v1/admin/scenarios",
+      "owner": "integration",
+      "status": "implemented_admin_only",
+      "target": "internal"
+    },
+    {
+      "id": "integration.scenarios.write.admin",
+      "source": "integration",
+      "method": "POST",
+      "path": "/api/hausman_hub/v1/admin/scenarios",
+      "owner": "integration",
+      "status": "implemented_admin_only",
+      "target": "internal"
+    },
+    {
+      "id": "integration.scenarios.catalog.admin",
+      "source": "integration",
+      "method": "GET",
+      "path": "/api/hausman_hub/v1/admin/scenarios/catalog",
+      "owner": "integration",
+      "status": "implemented_admin_only",
+      "target": "internal"
+    },
+    {
+      "id": "integration.scenarios.test.admin",
+      "source": "integration",
+      "method": "POST",
+      "path": "/api/hausman_hub/v1/admin/scenarios/test",
+      "owner": "integration",
+      "status": "implemented_admin_only",
+      "target": "internal"
+    },
+    {
+      "id": "integration.scenarios.delete.admin",
+      "source": "integration",
+      "method": "POST",
+      "path": "/api/hausman_hub/v1/admin/scenarios/delete",
+      "owner": "integration",
+      "status": "implemented_admin_only",
+      "target": "internal"
+    },
+    {
+      "id": "integration.scenarios.run.admin",
+      "source": "integration",
+      "method": "POST",
+      "path": "/api/hausman_hub/v1/admin/scenarios/run",
+      "owner": "integration",
+      "status": "implemented_admin_only",
+      "target": "internal"
+    },
+    {
+      "id": "integration.scenarios.action.admin",
+      "source": "integration",
+      "method": "POST",
+      "path": "/api/hausman_hub/v1/admin/scenarios/action",
+      "owner": "integration",
+      "status": "implemented_admin_only",
+      "target": "internal"
+    },
+    {
+      "id": "integration.climate.runtime",
+      "source": "integration",
+      "method": "GET",
+      "path": "/api/hausman_hub/v1/climate/runtime",
+      "owner": "integration",
+      "status": "contracted"
+    },
+    {
+      "id": "integration.climate.actions",
+      "source": "integration",
+      "method": "POST",
+      "path": "/api/hausman_hub/v1/climate/actions",
+      "owner": "integration",
+      "status": "contracted"
+    },
+    {
+      "id": "integration.climate.operations.read",
+      "source": "integration",
+      "method": "GET",
+      "path": "/api/hausman_hub/v1/climate/operations/{operation_id}",
+      "owner": "integration",
+      "status": "contracted"
+    },
+    {
+      "id": "integration.admin.climate-shadow-window",
+      "source": "integration",
+      "method": "GET",
+      "path": "/api/hausman_hub/v1/admin/climate-shadow-window",
+      "owner": "integration",
+      "status": "proposed",
+      "target": "internal"
+    },
+    {
+      "id": "integration.admin.device-maintenance.read",
+      "source": "integration",
+      "method": "GET",
+      "path": "/api/hausman_hub/v1/admin/device-maintenance",
+      "owner": "integration",
+      "status": "contracted_admin_only",
+      "target": "internal"
+    },
+    {
+      "id": "integration.admin.device-maintenance.write",
+      "source": "integration",
+      "method": "POST",
+      "path": "/api/hausman_hub/v1/admin/device-maintenance",
+      "owner": "integration",
+      "status": "contracted_admin_only",
+      "target": "internal"
+    },
+    {
+      "id": "integration.admin.climate-device-bindings.options",
+      "source": "integration",
+      "method": "GET",
+      "path": "/api/hausman_hub/v1/admin/climate-device-bindings",
+      "owner": "integration",
+      "status": "proposed",
+      "target": "internal"
+    },
+    {
+      "id": "integration.admin.climate-device-bindings.preview",
+      "source": "integration",
+      "method": "POST",
+      "path": "/api/hausman_hub/v1/admin/climate-device-bindings/preview",
+      "owner": "integration",
+      "status": "proposed",
+      "target": "internal"
+    },
+    {
+      "id": "integration.admin.climate-device-bindings.save",
+      "source": "integration",
+      "method": "POST",
+      "path": "/api/hausman_hub/v1/admin/climate-device-bindings",
+      "owner": "integration",
+      "status": "proposed",
+      "target": "internal"
+    },
+    {
+      "id": "legacy.center.snapshot",
+      "source": "legacy-center",
+      "method": "GET",
+      "path": "/endpoint/smart-home-center/api",
+      "owner": "legacy-center",
+      "status": "legacy",
+      "target": "integration.home"
+    },
+    {
+      "id": "legacy.center.action",
+      "source": "legacy-center",
+      "method": "POST",
+      "path": "/endpoint/smart-home-center/action",
+      "owner": "legacy-center",
+      "status": "legacy",
+      "target": "integration.commands"
+    },
+    {
+      "id": "legacy.center.scenario-catalog",
+      "source": "legacy-center",
+      "method": "POST",
+      "path": "/endpoint/smart-home-center/scenario-catalog",
+      "owner": "legacy-center",
+      "status": "legacy_internal",
+      "target": "integration.scenarios.catalog"
+    },
+    {
+      "id": "legacy.climate.state",
+      "source": "legacy-center",
+      "method": "GET",
+      "path": "/endpoint/climate/api/v1/state",
+      "owner": "legacy-center",
+      "status": "legacy",
+      "target": "integration.home"
+    },
+    {
+      "id": "legacy.climate.debug",
+      "source": "legacy-center",
+      "method": "GET",
+      "path": "/endpoint/climate/api/v1/debug",
+      "owner": "legacy-center",
+      "status": "legacy_internal",
+      "target": "integration.diagnostics"
+    },
+    {
+      "id": "legacy.climate.command",
+      "source": "legacy-center",
+      "method": "POST",
+      "path": "/endpoint/climate/api/v1/command",
+      "owner": "legacy-center",
+      "status": "legacy",
+      "target": "integration.contours"
+    },
+    {
+      "id": "legacy.climate.canary",
+      "source": "legacy-center",
+      "method": "POST",
+      "path": "/endpoint/climate/api/v1/admin/canary",
+      "owner": "legacy-center",
+      "status": "legacy_admin",
+      "target": "integration.admin.climate"
+    },
+    {
+      "id": "legacy.advisor.snapshot",
+      "source": "legacy-center",
+      "method": "POST",
+      "path": "/endpoint/climate/api/v1/advisor/snapshot",
+      "owner": "legacy-center",
+      "status": "legacy_internal",
+      "target": "integration.admin.ai"
+    },
+    {
+      "id": "legacy.advisor.audit-pending",
+      "source": "legacy-center",
+      "method": "GET",
+      "path": "/endpoint/climate/api/v1/advisor/decision-audit/pending",
+      "owner": "legacy-center",
+      "status": "legacy_internal",
+      "target": "integration.admin.ai"
+    },
+    {
+      "id": "legacy.advisor.audit-result",
+      "source": "legacy-center",
+      "method": "POST",
+      "path": "/endpoint/climate/api/v1/advisor/decision-audit/result",
+      "owner": "legacy-center",
+      "status": "legacy_internal",
+      "target": "integration.admin.ai"
+    },
+    {
+      "id": "legacy.advisor.notification-submit",
+      "source": "legacy-center",
+      "method": "POST",
+      "path": "/endpoint/climate/api/v1/advisor/decision-audit/notifications",
+      "owner": "legacy-center",
+      "status": "legacy_internal",
+      "target": "integration.admin.ai"
+    },
+    {
+      "id": "legacy.advisor.notification-pending",
+      "source": "legacy-center",
+      "method": "GET",
+      "path": "/endpoint/climate/api/v1/advisor/decision-audit/notifications/pending",
+      "owner": "legacy-center",
+      "status": "legacy_internal",
+      "target": "integration.admin.ai"
+    },
+    {
+      "id": "legacy.advisor.notification-receipt",
+      "source": "legacy-center",
+      "method": "POST",
+      "path": "/endpoint/climate/api/v1/advisor/decision-audit/notifications/receipt",
+      "owner": "legacy-center",
+      "status": "legacy_internal",
+      "target": "integration.admin.ai"
+    },
+    {
+      "id": "legacy.advisor.feedback",
+      "source": "legacy-center",
+      "method": "POST",
+      "path": "/endpoint/climate/api/v1/advisor/decision-audit/feedback",
+      "owner": "legacy-center",
+      "status": "legacy_internal",
+      "target": "integration.admin.ai"
+    }
+  ]
+}

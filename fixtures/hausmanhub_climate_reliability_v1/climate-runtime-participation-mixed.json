@@ -1,0 +1,190 @@
+{
+  "contract": {
+    "name": "hausman-hub-climate-runtime",
+    "version": 1
+  },
+  "generated_at": 1786554000000,
+  "state_revision": 51,
+  "control_revision": 8,
+  "phase": "managed",
+  "authority": "hausman_hub",
+  "fresh": true,
+  "commands_enabled": true,
+  "blocked_reasons": [],
+  "home_control": {
+    "enabled": true,
+    "allowed_actions": [
+      "set_home_targets",
+      "synchronize_home"
+    ],
+    "blocked_reasons": []
+  },
+  "participation_summary": {
+    "automatic_count": 2,
+    "excluded_count": 1,
+    "unavailable_count": 2,
+    "pending_sync_count": 3
+  },
+  "rooms": [
+    {
+      "id": "living",
+      "name": "Гостиная",
+      "temperature": 24.5,
+      "humidity": 45,
+      "target_temperature": 24,
+      "target_humidity": 45,
+      "desired_target_temperature": 24,
+      "reported_target_temperature": 24,
+      "desired_target_humidity": 45,
+      "reported_target_humidity": 45,
+      "control_revision": 8,
+      "minimum_temperature": 18,
+      "temperature_range": {
+        "minimum": 18,
+        "maximum": 28,
+        "step": 0.5
+      },
+      "humidity_range": {
+        "minimum": 30,
+        "maximum": 70,
+        "step": 1
+      },
+      "mode": "automatic",
+      "target_strategy": "normal",
+      "active_profile": "day",
+      "temporary_override": {
+        "active": false,
+        "target_temperature": null,
+        "ends_at": null
+      },
+      "authority": "hausman_hub",
+      "control": {
+        "enabled": true,
+        "allowed_actions": [
+          "set_room_target"
+        ],
+        "blocked_reasons": []
+      },
+      "devices": [
+        {
+          "id": "living_ac",
+          "name": "Кондиционер в гостиной",
+          "kind": "air_conditioner",
+          "control_scope": "managed",
+          "available": true,
+          "state": "idle",
+          "mode": "automatic",
+          "mode_name": "Автоматический режим",
+          "control_revision": 8,
+          "participation": {
+            "mode": "automatic",
+            "connectivity": "available",
+            "synchronization": "failed",
+            "reason": "command_failed",
+            "changed_at": 1786553999000,
+            "message_code": "command_failed",
+            "message": "Команда не подтверждена, требуется проверка устройства.",
+            "recovery": "check_configuration"
+          },
+          "control": {
+            "enabled": true,
+            "allowed_actions": [
+              "set_device_mode"
+            ],
+            "blocked_reasons": []
+          },
+          "cooldown": null,
+          "last_confirmed_operation": null,
+          "target_temperature": 24,
+          "desired_target_temperature": 24,
+          "reported_target_temperature": 24,
+          "target_humidity": 45,
+          "desired_target_humidity": 45,
+          "reported_target_humidity": 45
+        },
+        {
+          "id": "living_humidifier",
+          "name": "Увлажнитель в гостиной",
+          "kind": "humidifier",
+          "control_scope": "managed",
+          "available": false,
+          "state": "unavailable",
+          "mode": "manual",
+          "mode_name": "Ручной режим",
+          "control_revision": 7,
+          "participation": {
+            "mode": "manual",
+            "connectivity": "unavailable",
+            "synchronization": "deferred",
+            "reason": "external_off",
+            "changed_at": 1786553998000,
+            "message_code": "external_off",
+            "message": "Устройство выключено вручную и исключено из контура.",
+            "recovery": "return_to_contour"
+          },
+          "control": {
+            "enabled": false,
+            "allowed_actions": [],
+            "blocked_reasons": [
+              "device_unavailable"
+            ]
+          },
+          "cooldown": null,
+          "last_confirmed_operation": null,
+          "target_temperature": 24,
+          "desired_target_temperature": 24,
+          "reported_target_temperature": null,
+          "target_humidity": 45,
+          "desired_target_humidity": 45,
+          "reported_target_humidity": null
+        },
+        {
+          "id": "living_floor",
+          "name": "Тёплый пол в гостиной",
+          "kind": "floor_heating",
+          "control_scope": "managed",
+          "available": false,
+          "state": "unavailable",
+          "mode": "automatic",
+          "mode_name": "Автоматический режим",
+          "control_revision": 8,
+          "participation": {
+            "mode": "automatic",
+            "connectivity": "unavailable",
+            "synchronization": "deferred",
+            "reason": "device_unavailable",
+            "changed_at": 1786553997000,
+            "message_code": "device_unavailable",
+            "message": "Устройство в контуре, ждёт связь.",
+            "recovery": "wait_for_connection"
+          },
+          "control": {
+            "enabled": false,
+            "allowed_actions": [],
+            "blocked_reasons": [
+              "device_unavailable"
+            ]
+          },
+          "cooldown": null,
+          "last_confirmed_operation": null,
+          "target_temperature": 24,
+          "desired_target_temperature": 24,
+          "reported_target_temperature": null,
+          "target_humidity": 45,
+          "desired_target_humidity": 45,
+          "reported_target_humidity": null
+        }
+      ],
+      "recovery_preflight": {
+        "room_id": "living",
+        "control_revision": 8,
+        "desired_snapshot_fingerprint": "810e2db7fb788e535efbcfdf9da7fba0460663070695f63e4a3212f5f6348448",
+        "resolved_device_ids": [
+          "living_humidifier"
+        ],
+        "snapshot_token": "recovery.snapshot.living.8.abcdef"
+      }
+    }
+  ],
+  "active_operations": []
+}

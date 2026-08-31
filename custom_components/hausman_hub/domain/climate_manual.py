@@ -11,7 +11,7 @@ from enum import StrEnum
 import re
 
 
-CLIMATE_MANUAL_MEMORY_VERSION = 2
+CLIMATE_MANUAL_MEMORY_VERSION = 4
 _STABLE_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 
 
@@ -56,6 +56,26 @@ class ClimateDirectWifiState:
 
 
 @dataclass(frozen=True, slots=True)
+class ClimateManualAttribution:
+    """Durable public-safe provenance for a manual device exclusion."""
+
+    device_id: str
+    reason: str
+    source: str
+    changed_at: int
+    context_id: str | None = None
+    operation_id: str | None = None
+
+    def __post_init__(self) -> None:
+        _stable_id(self.device_id, "manual attribution device id")
+        if self.reason not in {"external_off", "user_excluded"}:
+            raise ClimateManualViolation("manual attribution reason is unsupported")
+        if not isinstance(self.source, str) or not self.source:
+            raise ClimateManualViolation("manual attribution source is invalid")
+        _timestamp(self.changed_at, "manual attribution time")
+
+
+@dataclass(frozen=True, slots=True)
 class ClimateManualMemory:
     """Complete restart-safe room ownership memory for one config entry."""
 
@@ -63,6 +83,10 @@ class ClimateManualMemory:
     manual_room_ids: tuple[str, ...]
     manual_device_ids: tuple[str, ...]
     devices: tuple[ClimateDirectWifiState, ...]
+    attributions: tuple[ClimateManualAttribution, ...] = ()
+    # Bounded HA command provenance, retained only long enough to distinguish
+    # a delayed state update after a process restart from an external action.
+    hausman_context_ids: tuple[str, ...] = ()
     version: int = CLIMATE_MANUAL_MEMORY_VERSION
 
     def __post_init__(self) -> None:
@@ -88,6 +112,16 @@ class ClimateManualMemory:
             )
         if len(self.devices) != len({device.device_id for device in self.devices}):
             raise ClimateManualViolation("manual-control device ids must be unique")
+        if type(self.attributions) is not tuple or any(
+            not isinstance(item, ClimateManualAttribution) for item in self.attributions
+        ) or len(self.attributions) != len({item.device_id for item in self.attributions}):
+            raise ClimateManualViolation("manual-control attributions are invalid")
+        if (type(self.hausman_context_ids) is not tuple
+                or len(self.hausman_context_ids) > 128
+                or any(not isinstance(value, str) or not value or len(value) > 128
+                       for value in self.hausman_context_ids)
+                or len(self.hausman_context_ids) != len(set(self.hausman_context_ids))):
+            raise ClimateManualViolation("Hausman context provenance is invalid")
         if self.version != CLIMATE_MANUAL_MEMORY_VERSION:
             raise ClimateManualViolation(
                 "manual-control memory version is unsupported"

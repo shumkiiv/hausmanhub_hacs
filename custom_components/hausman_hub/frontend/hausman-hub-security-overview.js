@@ -1,6 +1,6 @@
 /* Canonical tablet-style security overview with one card per physical device. */
 
-import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.195";
+import { createLibraryHero } from "./hausman-hub-library-hero.js?v=1.52.196";
 
 const SECURITY_CATEGORIES = new Set([
   "security", "moisture", "smoke", "gas", "carbon_monoxide", "safety", "problem",

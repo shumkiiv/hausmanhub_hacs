@@ -32,9 +32,12 @@ class ClimateHaService(StrEnum):
     CLIMATE_SET_HVAC_MODE = "climate.set_hvac_mode"
     CLIMATE_SET_TEMPERATURE = "climate.set_temperature"
     CLIMATE_SET_FAN_MODE = "climate.set_fan_mode"
+    CLIMATE_TURN_OFF = "climate.turn_off"
     HUMIDIFIER_TURN_ON = "humidifier.turn_on"
     HUMIDIFIER_TURN_OFF = "humidifier.turn_off"
     HUMIDIFIER_SET_HUMIDITY = "humidifier.set_humidity"
+    SWITCH_TURN_ON = "switch.turn_on"
+    SWITCH_TURN_OFF = "switch.turn_off"
     REMOTE_SEND_COMMAND = "remote.send_command"
 
 
@@ -75,6 +78,11 @@ class ClimateHaServiceCall:
     humidity: int | None = None
     device: str | None = None
     command: str | None = None
+    # The entity id is not an ownership key: more than one registry device can
+    # (incorrectly or temporarily) point to one HA entity.  Direct-control
+    # receipts must therefore carry the exact registry leaf selected by the
+    # plan rather than infer it from aggregate service success.
+    owner_device_id: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.service, ClimateHaService):
@@ -83,6 +91,8 @@ class ClimateHaServiceCall:
             self.entity_id
         ):
             raise ClimateHaCallViolation("call target must be one HA entity")
+        if self.owner_device_id is not None:
+            _stable_id(self.owner_device_id, "call owner device id")
         if self.hvac_mode is not None and not isinstance(
             self.hvac_mode,
             ClimateHaHvacMode,
@@ -112,6 +122,9 @@ class ClimateHaServiceCall:
             ClimateHaService.HUMIDIFIER_SET_HUMIDITY: (self.humidity is not None, 4),
             ClimateHaService.HUMIDIFIER_TURN_ON: (True, 0),
             ClimateHaService.HUMIDIFIER_TURN_OFF: (True, 0),
+            ClimateHaService.CLIMATE_TURN_OFF: (True, 0),
+            ClimateHaService.SWITCH_TURN_ON: (True, 0),
+            ClimateHaService.SWITCH_TURN_OFF: (True, 0),
             ClimateHaService.REMOTE_SEND_COMMAND: (
                 self.device is not None and self.command is not None,
                 5,

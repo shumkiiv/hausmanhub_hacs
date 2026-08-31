@@ -1,0 +1,28 @@
+{
+  "contract": {
+    "name": "hausman-hub-climate-room-recovery-v2-preflight",
+    "version": 2
+  },
+  "room_id": "living",
+  "control_revision": 8,
+  "desired_snapshot_fingerprint": "98d6f0b2d9298c7ee1657eae86cf6d3a70ebca0a2e022d0d49d3f482845eb2de",
+  "resolved_device_ids": [
+    "living_ac",
+    "living_humidifier"
+  ],
+  "snapshot_token": "recovery.snapshot.living.8.abcdef",
+  "desired_snapshot": {
+    "living_ac": {
+      "target_temperature": 23.5,
+      "target_humidity": null,
+      "mode": "automatic",
+      "source_observed_at": 1786467600000
+    },
+    "living_humidifier": {
+      "target_temperature": 23.5,
+      "target_humidity": 45,
+      "mode": "automatic",
+      "source_observed_at": 1786467600000
+    }
+  }
+}

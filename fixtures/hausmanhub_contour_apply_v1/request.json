@@ -1,6 +1,8 @@
 {
   "correlation_id": "corr.android-climate-0001",
   "request_id": "android-climate-0001",
+  "expected_control_revision": 0,
+  "reliability_profile": "climate_reliability_v1",
   "contour_id": "climate",
   "confirm": true
 }

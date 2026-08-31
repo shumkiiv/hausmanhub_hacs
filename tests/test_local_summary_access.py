@@ -1641,6 +1641,11 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 for key in ("available", "phase", "commands_enabled")
             },
         )
+        self.assertFalse(
+            capabilities_response.payload["capabilities"][
+                "climate_room_recovery_v2"
+            ]["available"]
+        )
         self.assertEqual("no-store", capabilities_response.headers.get("Cache-Control"))
         self.assertEqual(
             404,
@@ -2112,16 +2117,29 @@ class LocalSummaryAccessTest(unittest.TestCase):
         service = ClimateTabletService(
             runtime,
             MemoryOperationStore(),
-            operation_id_factory=lambda: "6" * 32,
+            operation_id_factory=iter(("6" * 32, "7" * 32)).__next__,
             now_ms=lambda: 1_785_949_320_000,
         )
         self.hass.data["hausman_hub"]["climate_tablet"] = service
         views = {view.url: view for view in self.hass.http.views}
         tablet = reader_user("system-users")
+        hacs_admin = reader_user("system-admin", admin=True)
+        capabilities_path = "/api/hausman_hub/v1/capabilities"
         runtime_path = "/api/hausman_hub/v1/climate/runtime"
         action_path = "/api/hausman_hub/v1/climate/actions"
         operation_template = (
             "/api/hausman_hub/v1/climate/operations/{operation_id}"
+        )
+
+        capabilities = asyncio.run(
+            views[capabilities_path].get(
+                FakeRequest("192.168.1.20", tablet, path=capabilities_path)
+            )
+        )
+        self.assertTrue(
+            capabilities.payload["capabilities"][
+                "climate_room_recovery_v2"
+            ]["available"]
         )
 
         snapshot = asyncio.run(
@@ -2129,7 +2147,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 FakeRequest("192.168.1.20", tablet, path=runtime_path)
             )
         )
-        request = action_request(snapshot.payload["state_revision"])
+        request = action_request(snapshot.payload["state_revision"], target=25.0)
         first = asyncio.run(
             views[action_path].post(
                 FakeJsonRequest("192.168.1.20", tablet, action_path, request)
@@ -2150,6 +2168,28 @@ class LocalSummaryAccessTest(unittest.TestCase):
             first.payload["operation_id"], duplicate.payload["operation_id"]
         )
         self.assertEqual(1, len(runtime.commands))
+        lower_request = action_request(
+            snapshot.payload["state_revision"],
+            request_id="tablet.climate.lower-target",
+            target=21.5,
+        )
+        lower = asyncio.run(
+            views[action_path].post(
+                FakeJsonRequest("127.0.0.1", hacs_admin, action_path, lower_request)
+            )
+        )
+        lower_duplicate = asyncio.run(
+            views[action_path].post(
+                FakeJsonRequest("127.0.0.1", hacs_admin, action_path, lower_request)
+            )
+        )
+        self.assertEqual(202, lower.status)
+        self.assertEqual("confirmed", lower.payload["status"])
+        self.assertTrue(lower_duplicate.payload["duplicate"])
+        self.assertEqual(
+            [25.0, 21.5],
+            [command["target_temperature"] for command in runtime.commands],
+        )
 
         operation_id = first.payload["operation_id"]
         operation = asyncio.run(
@@ -3058,7 +3098,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
         )
 
         self.assertEqual(200, panel.status)
-        self.assertEqual("1.52.195", panel.payload["integration_version"])
+        self.assertEqual("1.52.196", panel.payload["integration_version"])
         self.assertEqual(jobs_before + 1, len(self.hass.executor_jobs))
         self.assertEqual(
             "_integration_version",
@@ -4049,7 +4089,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 self.assertFalse(hasattr(self.view, method))
 
         self.assertTrue(asyncio.run(self.integration.async_setup_entry(self.hass, self.entry)))
-        self.assertEqual(91, len(self.hass.http.views))
+        self.assertEqual(95, len(self.hass.http.views))
         self.assertEqual(
             1,
             sum(
@@ -5568,7 +5608,7 @@ class LocalSummaryAccessTest(unittest.TestCase):
             [(closed_entry, ("sensor", "switch"))],
             closed_hass.config_entries.forwarded,
         )
-        self.assertEqual(90, len(closed_hass.http.views))
+        self.assertEqual(94, len(closed_hass.http.views))
         self.assertEqual(
             {
                 "/api/hausman_hub/v1/capabilities",
@@ -5591,6 +5631,10 @@ class LocalSummaryAccessTest(unittest.TestCase):
                 "/api/hausman_hub/v1/climate/actions",
                 "/api/hausman_hub/v1/climate-season-settings",
                 "/api/hausman_hub/v1/climate/operations/{operation_id}",
+                "/api/hausman_hub/v1/climate/control/operations/{operation_id}",
+                "/api/hausman_hub/v1/climate/recovery/rooms/{room_id}",
+                "/api/hausman_hub/v1/climate/recovery/rooms/{room_id}/preflight",
+                "/api/hausman_hub/v1/climate/recovery/operations/{operation_id}",
                 "/api/hausman_hub/v1/voice/yandex-greeting",
                 "/api/hausman_hub/v1/voice/yandex-greeting/test",
                 "/api/hausman_hub/v1/contours",

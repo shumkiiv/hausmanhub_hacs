@@ -132,13 +132,7 @@
       "properties": {
         "change": {"enum": ["created", "updated", "deleted", "enabled", "disabled"]},
         "scenario_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
-        "revision": {"type": "integer", "minimum": 0},
-        "changed_fields": {
-          "type": "array",
-          "maxItems": 8,
-          "uniqueItems": true,
-          "items": {"enum": ["created", "deleted", "roomIds", "actions", "enabled", "title", "triggers", "conditions", "metadata"]}
-        }
+        "revision": {"type": "integer", "minimum": 0}
       }
     },
     "critical_alert": {

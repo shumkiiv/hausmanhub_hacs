@@ -1,0 +1,11 @@
+{
+  "contract": {"name": "hausman-hub-climate-room-recovery-request", "version": 1},
+  "correlation_id": "corr.tablet.climate.recovery.0001",
+  "request_id": "tablet.climate.recovery.0001",
+  "request_fingerprint": "5da66cbcd56e2977a2bb8d512bbe640311e5f436b255ac05ecc2c3ffbe611a9f",
+  "expected_control_revision": 8,
+  "expected_desired_snapshot_fingerprint": "810e2db7fb788e535efbcfdf9da7fba0460663070695f63e4a3212f5f6348448",
+  "expected_resolved_device_ids": ["living_ac", "living_humidifier"],
+  "device_ids": ["living_ac", "living_humidifier"],
+  "snapshot_token": "recovery.snapshot.living.8.abcdef"
+}

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/climate-room-recovery-v2-preflight.schema.json",
+  "title": "HausmanHub negotiated climate room recovery preflight v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "room_id", "control_revision", "desired_snapshot", "desired_snapshot_fingerprint", "resolved_device_ids", "snapshot_token"],
+  "properties": {
+    "contract": {"type": "object", "additionalProperties": false, "required": ["name", "version"], "properties": {"name": {"const": "hausman-hub-climate-room-recovery-v2-preflight"}, "version": {"const": 2}}},
+    "room_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+    "control_revision": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+    "desired_snapshot_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "resolved_device_ids": {"type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"}},
+    "snapshot_token": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$"},
+    "desired_snapshot": {"type": "object", "minProperties": 1, "maxProperties": 32, "additionalProperties": {"type": "object", "additionalProperties": false, "required": ["target_temperature", "target_humidity", "mode", "source_observed_at"], "properties": {"target_temperature": {"type": ["number", "null"], "minimum": 18, "maximum": 28, "multipleOf": 0.5}, "target_humidity": {"type": ["integer", "null"], "minimum": 30, "maximum": 70}, "mode": {"const": "automatic"}, "source_observed_at": {"type": ["integer", "null"], "minimum": 0, "maximum": 9007199254740991}}}}
+  }
+}

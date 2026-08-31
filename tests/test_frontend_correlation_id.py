@@ -27,7 +27,9 @@ OPERATION_IDS = (
     "setHausmanHubTemporaryTemperature",
     "setHausmanHubHomeClimateTargets",
     "executeHausmanHubClimateAction",
+    "recoverHausmanHubClimateRoom",
     "executeHausmanHubDeviceAction",
+    "renameHausmanHubDeviceProperty",
     "maintainHausmanHubDevice",
     "runHausmanHubScenario",
     "dispatchHausmanHubScenarioAction",
@@ -66,7 +68,7 @@ class FrontendCorrelationSurfacesTest(unittest.TestCase):
             matrix["generation"],
         )
         commands = matrix["commands"]
-        self.assertEqual(10, len(commands))
+        self.assertEqual(12, len(commands))
         self.assertEqual(list(OPERATION_IDS), [c["operationId"] for c in commands])
         for command in commands:
             self.assertIn(command["requestField"], ("correlation_id", "correlationId"))
@@ -102,7 +104,7 @@ class FrontendCorrelationSurfacesTest(unittest.TestCase):
         result = run_node_module(script, str(CORRELATION_JS), str(MATRIX_JSON))
         self.assertEqual(0, result.returncode, result.stderr)
 
-    def test_all_ten_command_surfaces_share_one_id(self) -> None:
+    def test_all_command_surfaces_share_one_id(self) -> None:
         script = r"""
           const mod = await import(process.argv[1]);
           const fail = (message) => { throw new Error(message); };
@@ -196,6 +198,7 @@ class FrontendCorrelationSurfacesTest(unittest.TestCase):
             ["hausman_hub/v1/admin/panel/temporary-temperature", "correlation_id"],
             ["hausman_hub/v1/climate/actions", "correlation_id"],
             ["hausman_hub/v1/device-actions", "correlationId"],
+            ["hausman_hub/v1/device-property-names", "correlationId"],
             ["hausman_hub/v1/admin/device-maintenance", "correlationId"],
             ["hausman_hub/v1/admin/scenarios/run", "correlationId"],
             ["hausman_hub/v1/scenarios/upcoming/cancel", "correlationId"],
@@ -292,8 +295,8 @@ class FrontendCorrelationSurfacesTest(unittest.TestCase):
             ["id pattern", (doc) => { doc.idPattern = "^.*$"; }],
             ["generation flag", (doc) => { doc.generation.serverMustPreserveValidClientValue = false; }],
             ["generation extra key", (doc) => { doc.generation.extra = true; }],
-            ["nine commands", (doc) => { doc.commands.pop(); }],
-            ["eleven commands", (doc) => { doc.commands.push({ ...doc.commands[0], operationId: "extraOp" }); }],
+            ["eleven commands", (doc) => { doc.commands.pop(); }],
+            ["thirteen commands", (doc) => { doc.commands.push({ ...doc.commands[0], operationId: "extraOp" }); }],
             ["duplicate operation", (doc) => { doc.commands[9].operationId = doc.commands[0].operationId; }],
             ["request field unknown", (doc) => { doc.commands[0].requestField = "correlation-id"; }],
             ["receipt field mismatch", (doc) => { doc.commands[0].receiptField = "correlationId"; }],

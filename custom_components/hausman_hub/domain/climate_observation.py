@@ -469,6 +469,7 @@ class ClimateDeviceObservation:
     cooling_evidence_confirmed: bool = False
     cooling_rate_per_hour: float | None = None
     confirmed_short_cycle_count: int | None = None
+    observed_at: int | None = None
 
     def __post_init__(self) -> None:
         _stable_room(self.device_id, self.name)
@@ -519,6 +520,7 @@ class ClimateDeviceObservation:
             raise ClimateObservationViolation(
                 "confirmed short-cycle count must be bounded"
             )
+        _optional_timestamp(self.observed_at, "device observation time")
         if not self.cooling_evidence_confirmed and self.cooling_rate_per_hour is not None:
             raise ClimateObservationViolation(
                 "unconfirmed cooling evidence must not retain a rate"

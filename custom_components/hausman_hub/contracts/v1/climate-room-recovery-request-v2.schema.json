@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/climate-room-recovery-request-v2.schema.json",
+  "title": "HausmanHub negotiated climate room recovery request v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "request_id",
+    "request_fingerprint",
+    "expected_control_revision",
+    "expected_desired_snapshot_fingerprint",
+    "expected_resolved_device_ids",
+    "snapshot_token",
+    "reliability_profile"
+  ],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "const": "hausman-hub-climate-room-recovery-request-v2"
+        },
+        "version": {
+          "const": 2
+        }
+      }
+    },
+    "correlation_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "request_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"
+    },
+    "request_fingerprint": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "expected_control_revision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "expected_desired_snapshot_fingerprint": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "Full authoritative eligible-preflight snapshot fingerprint, never a client-derived selected subset."
+    },
+    "expected_resolved_device_ids": {
+      "type": "array",
+      "description": "Sorted full authoritative preflight candidate scope: every explicitly manual return_to_contour device, including candidates currently unavailable.",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+      },
+      "minItems": 1,
+      "maxItems": 32,
+      "uniqueItems": true
+    },
+    "device_ids": {
+      "type": "array",
+      "description": "Optional sorted selected subset of expected_resolved_device_ids. An explicit selection may include an unavailable candidate, which is durably deferred without dispatch; omission means return every currently available candidate only.",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+      },
+      "minItems": 1,
+      "maxItems": 32,
+      "uniqueItems": true
+    },
+    "snapshot_token": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$",
+      "description": "Opaque token echoed from the full authoritative eligible preflight."
+    },
+    "reliability_profile": {
+      "const": "climate_recovery_proof_v1"
+    }
+  }
+}

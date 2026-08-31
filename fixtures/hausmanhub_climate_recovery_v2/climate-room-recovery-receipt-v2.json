@@ -1,0 +1,115 @@
+{
+  "contract": {
+    "name": "hausman-hub-climate-room-recovery-receipt-v2",
+    "version": 2
+  },
+  "correlation_id": "corr.tablet.climate.recovery.0001",
+  "operation_id": "abcdefabcdefabcdefabcdefabcdefab",
+  "request_id": "tablet.climate.recovery.0001",
+  "request_fingerprint": "4796bb53296de21263d0abdc37c810508e9277c61740f3fcc856ca3418a1e775",
+  "request_snapshot": {
+    "path_room_id": "living",
+    "correlation_policy": "supplied",
+    "confirmation_window_ms": 30000,
+    "reliability_profile": "climate_reliability_v1",
+    "request": {
+      "contract": {
+        "name": "hausman-hub-climate-room-recovery-request-v2",
+        "version": 2
+      },
+      "correlation_id": "corr.tablet.climate.recovery.0001",
+      "request_id": "tablet.climate.recovery.0001",
+      "request_fingerprint": "4796bb53296de21263d0abdc37c810508e9277c61740f3fcc856ca3418a1e775",
+      "expected_control_revision": 8,
+      "expected_desired_snapshot_fingerprint": "98d6f0b2d9298c7ee1657eae86cf6d3a70ebca0a2e022d0d49d3f482845eb2de",
+      "expected_resolved_device_ids": [
+        "living_ac",
+        "living_humidifier"
+      ],
+      "device_ids": [
+        "living_ac",
+        "living_humidifier"
+      ],
+      "snapshot_token": "recovery.snapshot.living.8.abcdef",
+      "reliability_profile": "climate_recovery_proof_v1"
+    }
+  },
+  "room_id": "living",
+  "expected_control_revision": 8,
+  "resulting_control_revision": 9,
+  "desired_snapshot_revision": 8,
+  "preflight_snapshot_fingerprint": "98d6f0b2d9298c7ee1657eae86cf6d3a70ebca0a2e022d0d49d3f482845eb2de",
+  "desired_snapshot_fingerprint": "98d6f0b2d9298c7ee1657eae86cf6d3a70ebca0a2e022d0d49d3f482845eb2de",
+  "snapshot_token": "recovery.snapshot.living.8.abcdef",
+  "resolved_device_ids": [
+    "living_ac",
+    "living_humidifier"
+  ],
+  "desired_snapshot": {
+    "living_ac": {
+      "target_temperature": 23.5,
+      "target_humidity": null,
+      "mode": "automatic",
+      "source_observed_at": 1786467600000
+    },
+    "living_humidifier": {
+      "target_temperature": 23.5,
+      "target_humidity": 45,
+      "mode": "automatic",
+      "source_observed_at": 1786467600000
+    }
+  },
+  "accepted": true,
+  "confirmed": false,
+  "status": "partial",
+  "final": true,
+  "duplicate": false,
+  "dispatch_state": "accepted",
+  "retry_policy": "forbidden_after_dispatch",
+  "confirmation_window_ms": 30000,
+  "read_back": {
+    "attempted": true,
+    "matched": false,
+    "observed_at": 1786554001000,
+    "evidence": {
+      "room_count": 1,
+      "confirmed_room_count": 0,
+      "accepted_count": 1,
+      "devices": {
+        "living_ac": {
+          "action": "return_to_contour",
+          "mode": "automatic",
+          "target_temperature": 23.5,
+          "target_humidity": null,
+          "observed_at": 1786554001000,
+          "fresh": true
+        }
+      }
+    }
+  },
+  "message_code": "partial",
+  "message": "Восстановление завершено частично.",
+  "outcomes": {
+    "living_ac": {
+      "status": "confirmed",
+      "reason": "none",
+      "execution_state": "applied",
+      "command_count": 1,
+      "accepted_count": 1,
+      "message_code": "confirmed",
+      "message": "Результат подтверждён чтением состояния.",
+      "dispatched_at": 1786554000500
+    },
+    "living_humidifier": {
+      "status": "deferred",
+      "reason": "device_unavailable",
+      "command_count": 0,
+      "accepted_count": 0,
+      "message_code": "deferred_offline",
+      "message": "Цель сохранена и будет применена после восстановления связи.",
+      "dispatched_at": null
+    }
+  },
+  "created_at": 1786554000000,
+  "updated_at": 1786554001000
+}

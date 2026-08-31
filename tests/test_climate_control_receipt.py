@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 from datetime import datetime
 import json
@@ -159,8 +160,11 @@ class ClimateControlReceiptTest(unittest.IsolatedAsyncioTestCase):
         for name, payload in payloads.items():
             with self.subTest(action=name):
                 validator.validate(payload)
-                fixture = json.loads((FIXTURES / f"{name}.json").read_text(encoding="utf-8"))
-                self.assertEqual(fixture, {**payload, "operation_id": fixture["operation_id"]})
+                # These requests deliberately omit the negotiated reliability
+                # profile. Their v1 aggregate receipt must stay compatible even
+                # while the enhanced fixtures exercise the opt-in surface.
+                self.assertNotIn("action_snapshot", payload)
+                self.assertNotIn("expected_control_revision", payload)
                 self.assertEqual("confirmed", payload["status"])
                 self.assertEqual((1, 1, 1, 1), tuple(payload[key] for key in COUNT_KEYS))
                 self.assertEqual(expected_changes[name], payload["changes"])
@@ -239,6 +243,153 @@ class ClimateControlReceiptTest(unittest.IsolatedAsyncioTestCase):
                 receipt.automatic_mode_changes,
             )
             self.assertEqual((0, 0, 0), changes)
+
+    async def test_opt_in_direct_apply_returns_pollable_enhanced_receipt(self) -> None:
+        runtime, _ = status_runtime(native.safe_stop_states())
+        await runtime.async_start()
+        receipt = await runtime.async_apply_contour({
+            "request_id": "reliable-apply-1", "contour_id": "climate", "confirm": True,
+            "reliability_profile": "climate_reliability_v1", "expected_control_revision": 0,
+        })
+        payload = receipt.as_payload()
+        Draft202012Validator(json.loads(SCHEMA.read_text(encoding="utf-8"))).validate(payload)
+        self.assertEqual(1, payload["resulting_control_revision"])
+        polled = await runtime.async_control_operation(payload["operation_id"])
+        self.assertEqual(payload, polled)
+
+    async def test_enhanced_direct_request_id_cannot_downgrade_to_legacy(self) -> None:
+        runtime, _ = status_runtime(native.safe_stop_states())
+        await runtime.async_start()
+        enhanced = {"request_id": "reliable-downgrade-1", "contour_id": "climate", "confirm": True,
+                    "reliability_profile": "climate_reliability_v1", "expected_control_revision": 0}
+        await runtime.async_apply_contour(enhanced)
+        with self.assertRaisesRegex(ContourApplyViolation, "request id conflicts"):
+            await runtime.async_apply_contour({"request_id": "reliable-downgrade-1", "contour_id": "climate", "confirm": True})
+
+    async def test_identical_enhanced_retry_precedes_stale_revision_check(self) -> None:
+        runtime, _ = status_runtime(native.safe_stop_states())
+        await runtime.async_start()
+        request = {"request_id": "reliable-duplicate-1", "contour_id": "climate", "confirm": True,
+                   "reliability_profile": "climate_reliability_v1", "expected_control_revision": 0}
+        first = await runtime.async_apply_contour(request)
+        duplicate = await runtime.async_apply_contour(request)
+        self.assertEqual(first.as_payload(), duplicate.as_payload())
+
+    async def test_enhanced_already_in_sync_is_confirmed_with_zero_calls(self) -> None:
+        states = native.safe_stop_states()
+        ac = states["climate.living_ac"]
+        states[ac.entity_id] = replace(ac, state="off")
+        runtime, _ = status_runtime(states)
+        await runtime.async_start()
+        receipt = await runtime.async_apply_contour({
+            "request_id": "reliable-in-sync-1", "contour_id": "climate", "confirm": True,
+            "reliability_profile": "climate_reliability_v1", "expected_control_revision": 0,
+        })
+        payload = receipt.as_payload()
+        self.assertEqual("confirmed", payload["status"])
+        self.assertEqual((0, 0), (payload["command_count"], payload["accepted_count"]))
+        self.assertIn("already_in_sync", payload["reasons"])
+
+    async def test_direct_receipt_survives_restart_and_replay_does_not_dispatch(self) -> None:
+        class DirectStore:
+            records: object | None = None
+            async def async_load_direct_control(self):
+                return self.records
+            async def async_save_direct_control(self, records):
+                self.records = records
+
+        store = DirectStore()
+        states = native.safe_stop_states()
+        first, _ = status_runtime(states)
+        # The native helper has no store argument, therefore construct the
+        # restart-aware runtime through the shared fixture directly.
+        view = native.MutableStateView(states)
+        executor = native.ReflectingStrictExecutor(view)
+        first = native.native_application_runtime(ClimateControlMode.MANAGED, view, executor,
+            direct_control_store=store)
+        await first.async_start()
+        request = {"request_id": "restart-direct-1", "contour_id": "climate", "confirm": True,
+                   "reliability_profile": "climate_reliability_v1", "expected_control_revision": 0}
+        original = (await first.async_apply_contour(request)).as_payload()
+        restarted_view = native.MutableStateView(states)
+        restarted_executor = native.ReflectingStrictExecutor(restarted_view)
+        restarted = native.native_application_runtime(ClimateControlMode.MANAGED, restarted_view,
+            restarted_executor, direct_control_store=store)
+        await restarted.async_start()
+        self.assertEqual(original, await restarted.async_control_operation(original["operation_id"]))
+        replay = await restarted.async_apply_contour(request)
+        self.assertEqual(original, replay.as_payload())
+        self.assertEqual([], restarted_executor.calls)
+
+    async def test_opt_in_temporary_clear_keeps_resulting_schedule_target(self) -> None:
+        contours = with_climate_temporary_temperature(
+            scheduled_contours(), room_id="living", target_temperature=23.5
+        )
+        runtime, _ = status_runtime(native.safe_stop_states(), setup=(None, contours))
+        await runtime.async_start()
+        receipt = await runtime.async_temporary_temperature({
+            "request_id": "reliable-clear-1", "contour_id": "climate", "room_id": "living",
+            "action": "clear", "target_temperature": None, "confirm": True,
+            "reliability_profile": "climate_reliability_v1", "expected_control_revision": 0,
+        }, datetime(2026, 7, 19, 12, 0))
+        payload = receipt.as_payload()
+        Draft202012Validator(json.loads(SCHEMA.read_text(encoding="utf-8"))).validate(payload)
+        self.assertIsNone(payload["action"]["target_temperature"])
+        self.assertEqual(24.0, payload["action"]["resulting_target_temperature"])
+
+    async def test_shared_revision_allows_exactly_one_concurrent_direct_request(self) -> None:
+        class SharedStore:
+            def __init__(self) -> None:
+                self.records: object | None = None
+                self.revision = 0
+                self.lock = asyncio.Lock()
+
+            async def async_load_direct_control(self):
+                return self.records
+
+            async def async_save_direct_control(self, records):
+                self.records = records
+
+            async def async_current_control_revision(self):
+                async with self.lock:
+                    return self.revision
+
+            async def async_reserve_control_revision(self, expected):
+                async with self.lock:
+                    if expected != self.revision:
+                        raise ValueError("stale")
+                    self.revision += 1
+                    return self.revision
+
+        store = SharedStore()
+        first_view = native.MutableStateView(native.safe_stop_states())
+        second_view = native.MutableStateView(native.safe_stop_states())
+        first = native.native_application_runtime(
+            ClimateControlMode.MANAGED, first_view,
+            native.ReflectingStrictExecutor(first_view), direct_control_store=store,
+        )
+        second = native.native_application_runtime(
+            ClimateControlMode.MANAGED, second_view,
+            native.ReflectingStrictExecutor(second_view), direct_control_store=store,
+        )
+        await asyncio.gather(first.async_start(), second.async_start())
+        request = {"contour_id": "climate", "confirm": True,
+                   "reliability_profile": "climate_reliability_v1",
+                   "expected_control_revision": 0}
+        outcomes = await asyncio.gather(
+            first.async_apply_contour({**request, "request_id": "shared-direct-1"}),
+            second.async_apply_contour({**request, "request_id": "shared-direct-2"}),
+            return_exceptions=True,
+        )
+        accepted = [item for item in outcomes if isinstance(item, ContourApplyReceipt)]
+        rejected = [item for item in outcomes if isinstance(item, Exception)]
+        self.assertEqual(1, len(accepted))
+        self.assertEqual(1, len(rejected))
+        self.assertEqual(1, store.revision)
+        # Any snapshot uses the shared durable source rather than the stale
+        # per-runtime cache left in the losing instance.
+        await second.async_public_snapshot()
+        self.assertEqual(1, second._control_revision)
 
     def test_action_context_rejects_mixed_or_incomplete_scope(self) -> None:
         with self.assertRaises(ContourApplyViolation):

@@ -1,0 +1,3120 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "HausmanHub Tablet API",
+    "version": "1.0.0",
+    "description": "Stable API v1 for HausmanHub clients. Public tablet resources and explicitly marked local-administrator migration operations share one authenticated Home Assistant boundary."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/api/hausman_hub/v1/capabilities": {
+      "get": {
+        "operationId": "getHausmanHubCapabilities",
+        "summary": "Discover the installed tablet API surface",
+        "responses": {
+          "200": {
+            "description": "Capability document",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/api-capabilities.schema.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/device-features": {
+      "get": {
+        "operationId": "getHausmanHubDeviceFeatures",
+        "summary": "Read the upper-bound device type and control matrix",
+        "responses": {
+          "200": {
+            "description": "Device feature matrix",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/device-feature-matrix.schema.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/home": {
+      "get": {
+        "operationId": "getHausmanHubHome",
+        "summary": "Read the private-id-free home snapshot",
+        "responses": {
+          "200": {
+            "description": "Home snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v12/climate-home.schema.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/contours": {
+      "get": {
+        "operationId": "getHausmanHubContours",
+        "summary": "Read automatic climate contour state",
+        "responses": {
+          "200": {
+            "description": "Contour snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v7/contours.schema.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/contours/apply-preview": {
+      "get": {
+        "operationId": "previewHausmanHubContourApply",
+        "summary": "Preview exact saved-contour changes before confirmation",
+        "responses": {
+          "200": {
+            "description": "Apply preview",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/contour-apply-preview.schema.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "502": {
+            "description": "The provider response failed local scenario validation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/contours/apply": {
+      "post": {
+        "operationId": "applyHausmanHubContour",
+        "x-hausmanhub-negotiated-capability": "climate_reliability_v1",
+        "description": "When climate_reliability_v1 is advertised with available=true and producer_guarantees_full_branch=true, the producer returns only the complete enhanced reliability branch of the climate control receipt. A retained capability object with available=false does not activate that branch. Each durable receipt stores an immutable typed control action snapshot with request fingerprint, resolved scope and control revision; every confirmed device leaf exactly echoes that snapshot, while unconfirmed leaves publish no action evidence. unfinished_device_count exactly identifies pending or accepted-unverified leaves and makes final false until all leaves are terminal.",
+        "summary": "Apply saved contour settings after explicit confirmation",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schemas/v1/contour-apply-request.schema.json"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Confirmed climate control receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/climate-control-receipt.schema.json"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/contours/temporary-temperature": {
+      "post": {
+        "operationId": "setHausmanHubTemporaryTemperature",
+        "x-hausmanhub-negotiated-capability": "climate_reliability_v1",
+        "description": "When climate_reliability_v1 is advertised with available=true and producer_guarantees_full_branch=true, the producer returns only the complete enhanced reliability branch of the climate control receipt. A retained capability object with available=false does not activate that branch.",
+        "summary": "Set or clear one room target until the next schedule boundary",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schemas/v1/temporary-temperature-request.schema.json"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Confirmed climate control receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/climate-control-receipt.schema.json"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/climate/control/operations/{operation_id}": {
+      "get": {
+        "operationId": "getHausmanHubClimateControlOperation",
+        "x-hausmanhub-negotiated-capability": "climate_reliability_v1",
+        "summary": "Poll a durable contour or temporary-temperature operation",
+        "description": "Returns the durable full climate control receipt for the path operation ID. The endpoint is authenticated and performs no physical dispatch. The complete reliability branch is active only when climate_reliability_v1 is advertised with available=true and producer_guarantees_full_branch=true; a retained available=false object does not activate it.",
+        "parameters": [
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Durable climate control receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/climate-control-receipt.schema.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/contours/home-targets": {
+      "post": {
+        "operationId": "setHausmanHubHomeClimateTargets",
+        "summary": "Save and apply a common target across all contour rooms",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schemas/v1/home-climate-targets-request.schema.json"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Confirmed whole-contour climate receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/climate-control-receipt.schema.json"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/scenarios": {
+      "get": {
+        "operationId": "listHausmanHubScenarios",
+        "summary": "List editable HausmanHub scenarios",
+        "responses": {
+          "200": {
+            "description": "Classified scenario list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/scenario-list.schema.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "saveHausmanHubScenario",
+        "summary": "Create or atomically update one scenario; expectedRevision prevents stale overwrite",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Scenario saved"
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/scenarios/catalog": {
+      "get": {
+        "operationId": "getHausmanHubScenarioCatalog",
+        "summary": "Read the live device/action editor catalog",
+        "responses": {
+          "200": {
+            "description": "Scenario device/action catalog with saved scenario icons",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/scenario-catalog.schema.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/scenarios/health": {
+      "get": {
+        "operationId": "getHausmanHubScenarioHealth",
+        "summary": "Inspect saved scenarios against the live catalog without running or rewriting them",
+        "responses": {
+          "200": {
+            "description": "Redacted scenario health violations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/scenario-health.schema.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/scenarios/test": {
+      "post": {
+        "operationId": "testHausmanHubScenario",
+        "summary": "Validate and dry-run one scenario definition",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schemas/v1/scenario-definition.schema.json"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Safe dry-run result with a human-readable report",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/scenario-dry-run-result.schema.json"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/scenarios/node-red": {
+      "get": {
+        "operationId": "getHausmanHubScenarioNodeRedStatus",
+        "summary": "Check Node-RED availability and managed function-flow synchronization",
+        "responses": {
+          "200": {
+            "description": "Node-RED scenario backend status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/scenario-node-red-status.schema.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/scenarios/node-red/source/{scenario_id}": {
+      "parameters": [
+        {
+          "name": "scenario_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getHausmanHubScenarioNodeRedSource",
+        "summary": "Read one managed Node-RED function source for embedded editing",
+        "responses": {
+          "200": {
+            "description": "Versioned managed function source",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/scenario-node-red-source.schema.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateHausmanHubScenarioNodeRedSource",
+        "summary": "Validate or atomically save a managed Node-RED function source",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schemas/v1/scenario-node-red-source-update-request.schema.json"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Command-free validation or verified save receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/scenario-node-red-source-update-receipt.schema.json"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/scenarios/ai-draft": {
+      "post": {
+        "operationId": "generateHausmanHubScenarioAiDraft",
+        "summary": "Generate a validated disabled scenario draft without saving or sending commands",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schemas/v1/scenario-ai-draft-request.schema.json"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Validated draft or bounded clarification request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/scenario-ai-draft.schema.json"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/scenarios/delete": {
+      "post": {
+        "operationId": "deleteHausmanHubScenario",
+        "summary": "Delete one unreferenced scenario",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "scenario_id"
+                ],
+                "properties": {
+                  "scenario_id": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Scenario deleted"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/scenarios/run": {
+      "post": {
+        "operationId": "runHausmanHubScenario",
+        "summary": "Run one saved scenario and return action receipts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "scenario_id"
+                ],
+                "properties": {
+                  "correlationId": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  },
+                  "scenario_id": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Scenario completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "correlationId": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/scenarios/action": {
+      "post": {
+        "operationId": "dispatchHausmanHubScenarioAction",
+        "summary": "Dispatch the Android scenario editor action contract",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "action"
+                ],
+                "properties": {
+                  "correlationId": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  },
+                  "action": {
+                    "enum": [
+                      "update_scenario",
+                      "test_scenario",
+                      "delete_scenario",
+                      "run_scenario"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Scenario action result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "correlationId": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/scenarios/upcoming": {
+      "get": {
+        "operationId": "listHausmanHubScenarioUpcoming",
+        "summary": "List upcoming scheduled scenario runs",
+        "x-hausmanhub-status": "implemented",
+        "responses": {
+          "200": {
+            "description": "Upcoming scenario runs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/scenario-upcoming-events.schema.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/scenarios/upcoming/cancel": {
+      "post": {
+        "operationId": "cancelHausmanHubScenarioUpcoming",
+        "summary": "Skip the next scheduled run of one scenario trigger",
+        "x-hausmanhub-status": "implemented",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schemas/v1/scenario-upcoming-cancel-request.schema.json"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Scheduled run skipped",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/scenario-upcoming-cancel-receipt.schema.json"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/device-actions": {
+      "post": {
+        "operationId": "executeHausmanHubDeviceAction",
+        "summary": "Execute one allowlisted device action with read-back",
+        "description": "application/json request bodies use the strictly historical-compatible legacy request schema. application/vnd.hausmanhub.device-action-request.full+json opts into the strict typed request schema. Legacy application/json dangerous single actions are parsed for compatibility but fail closed before dispatch with HTTP 403. Responses use the legacy receipt view for application/json; missing Accept and wildcard-compatible requests preserve that legacy view. The evidence-aware receipt view is selected when application/vnd.hausmanhub.device-action-receipt.full+json is explicitly preferred by standard HTTP content negotiation. A request that accepts neither receipt representation receives 406 before command dispatch. OpenAPI header parameters are not used to model standard Accept processing. A skipped or blocked decision is terminal even though historical status may be accepted/Проверяется: no physical command is pending. For the full request view, non-dryRun press, unlock and open_valve actions require confirmedByUser=true and a bounded idempotencyKey; a dryRun dangerous action may omit both. The server computes one canonical SHA-256 fingerprint of the entire immutable strict full request, including correlationId and all fields. Its global durable idempotency record uses reserved, pending, dispatch_unknown and completed states. An identical reserved, pending or dispatch_unknown replay returns HTTP 409 with idempotency_in_progress, its durable state, no receipt and no dispatch; dispatch_unknown requires operator recovery. a conflicting hash returns HTTP 409; only a completed identical replay returns the cached original single receipt without dispatch. Server-generated dispatchId and registry-resolved targetType are persisted independently of receipt content. Recovery completes only from an authoritative correlated read-back or an opaque result read directly from the closed server-side idempotency store; HTTP, client and planner payloads are never trusted proof, and a proofSource string has no authority. Without proof it remains dispatch_unknown and never completes commandSent as true or false. The crash probe after_physical_dispatch_before_durable_marker leaves no terminal journal, and replay does not redispatch. completedAfter is terminal_receipt_and_required_readback_durably_persisted. dryRun resolves and validates the action without sending a physical command. HACS consumer implementation of strict raw JSON, Accept checks and this dangerous-single policy is mandatory before any compatible release or deploy; this contract gate does not claim runtime compliance.",
+        "x-hausmanhub-dangerous-single-policy": {
+          "policyVersion": "1",
+          "dangerousActionIds": [
+            "press",
+            "unlock",
+            "open_valve"
+          ],
+          "legacy": "reject_403_before_dispatch",
+          "validationOrder": "before_any_dispatch",
+          "idempotency": {
+            "scope": "global",
+            "storage": "durable_restart_safe",
+            "reservation": "atomic_before_dispatch",
+            "fingerprint": "canonical_full_request_sha256",
+            "identitySource": "server_generator_and_registry_resolver",
+            "protectedProofIngress": "closed_server_store_only",
+            "authoritativeReadbackIngress": "closed_server_store_only",
+            "states": [
+              "reserved",
+              "pending",
+              "dispatch_unknown",
+              "completed"
+            ],
+            "dispatchPhase": {
+              "enum": [
+                "not_started",
+                "dispatching",
+                "dispatched"
+              ],
+              "initial": "not_started",
+              "beforePhysicalDispatch": "dispatching",
+              "afterPhysicalDispatch": "dispatched",
+              "uncertain": [
+                "dispatching",
+                "dispatched"
+              ]
+            },
+            "reservedReplay": "http_409_no_dispatch",
+            "pendingReplay": "http_409_no_dispatch",
+            "replayTransitions": {
+              "reserved": "reserved",
+              "pending": {
+                "not_started": "pending",
+                "dispatching": "dispatch_unknown",
+                "dispatched": "dispatch_unknown"
+              }
+            },
+            "completedReplay": "return_original_receipt_without_dispatch",
+            "completedAfter": "terminal_receipt_and_required_readback_durably_persisted",
+            "recovery": "reconcile_authoritative_correlated_readback_or_protected_downstream_idempotency_result_without_redispatching_dangerous_action",
+            "dispatchUnknown": "physical_dispatch_may_have_happened_without_durable_terminal_journal_or_proof",
+            "dispatchUnknownReplay": "http_409_no_dispatch_recovery_required",
+            "dispatchUnknownRecovery": "operator_recovery_required_without_authoritative_proof",
+            "recoveryProofs": [
+              "authoritative_correlated_readback",
+              "protected_downstream_idempotency_result"
+            ],
+            "record": {
+              "fields": [
+                "hash",
+                "state",
+                "receipt",
+                "itemJournal",
+                "dispatchPhase",
+                "dispatchId",
+                "targetType"
+              ],
+              "reserved": {
+                "state": "reserved",
+                "receipt": null,
+                "itemJournal": [],
+                "dispatchPhase": "not_started"
+              },
+              "pendingBeforeFirstDispatch": {
+                "state": "pending",
+                "receipt": null,
+                "itemJournal": [],
+                "dispatchPhase": "not_started"
+              }
+            },
+            "persistence": "survives_restart"
+          }
+        },
+        "x-hausmanhub-max-request-body-bytes": 262144,
+        "x-hausmanhub-strict-json": {
+          "duplicateKeys": "reject",
+          "nonFiniteNumbers": "reject",
+          "rawBodyLimitBeforeParse": true,
+          "beforeDispatch": true
+        },
+        "x-hausmanhub-accept-negotiation": {
+          "unsupported": "http_406",
+          "beforeDispatch": true
+        },
+        "x-hausmanhub-status": "implemented",
+        "x-hausmanhub-full-status": "contracted",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schemas/v1/device-action-request.schema.json"
+              }
+            },
+            "application/vnd.hausmanhub.device-action-request.full+json": {
+              "schema": {
+                "$ref": "../schemas/v1/device-action-request.schema.json#/$defs/full"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Action accepted; confirmed reflects new matching read-back evidence when the optional lighting evidence layer is present. Non-dryRun executed and reasserted lighting decisions include decisionAt, commandSent=true, commandSentAt and a target-bound post-command read-back. Appearance actions use observedState=on and, when confirmed, a newer read-back with typed observedValue exactly matching actionValue. A successful dryRun is terminal with commandSent=false and no physical confirmation metadata. The full view includes a server correlationId and the exact actionValue when the request supplied value. A skipped or blocked lighting decision includes commandSent=false and sends no physical command or confirmation metadata. An unconfirmed sent lighting command is a completed failed result, never a pending accepted result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceActionReceiptLegacy"
+                }
+              },
+              "application/vnd.hausmanhub.device-action-receipt.full+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceActionReceiptFull"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/DeviceActionConflict"
+          },
+          "406": {
+            "$ref": "#/components/responses/NotAcceptable"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/device-actions/batch": {
+      "post": {
+        "operationId": "executeHausmanHubDeviceActionBatch",
+        "summary": "Execute a bounded device-action batch with one receipt per target",
+        "description": "application/json request bodies use the strictly historical-compatible legacy batch request schema. Legacy application/json dangerous batch actions are parsed for compatibility but fail closed before dispatch with HTTP 403. application/vnd.hausmanhub.device-action-batch-request.full+json opts into the strict typed batch request schema; the full batch permits at most one non-dryRun dangerous physical action in total, and dangerous physical actions require confirmedByUser=true and a unique bounded idempotencyKey before dispatch. The server computes one canonical SHA-256 fingerprint of the entire immutable ordered full batch, including its contract identity, correlationId, action positions and every immutable action field. The durable idempotency object has states reserved, pending, dispatch_unknown and completed. Atomic reservation persists only the hash, key and state=reserved, with no completed or confirmed receipt. Immediately before the first dispatch the server durably transitions to pending and tracks ordered item progress and terminal receipts for safe neighbors. completedAfter is all_terminal_receipts_and_required_readback_durably_persisted. An identical replay or restart in reserved, pending or dispatch_unknown returns HTTP 409 with canonical conflict detailCode idempotency_in_progress, sends zero commands and no receipt, and requires recovery/reconciliation; dispatch_unknown requires operator recovery and never automatically redispatches the dangerous action. Only a completed identical replay returns the original full batch receipt with HTTP 200 and no dispatch. A conflicting hash in any state returns HTTP 409 before dispatch with zero commands. Server-generated dispatch IDs and registry-resolved target types are persisted independently of receipt content. Recovery completes only from an authoritative correlated read-back or an opaque result read directly from the closed server-side idempotency store; HTTP, client and planner payloads are never trusted proof, and a proofSource string has no authority. Without proof it remains dispatch_unknown and cannot complete commandSent as true or false. The crash probe after_physical_dispatch_before_durable_marker leaves no terminal item journal, and restart/replay sends no new command. All validation and reservations succeed before any batch item is dispatched. Responses use the legacy batch receipt view for application/json; missing Accept and wildcard-compatible requests preserve that legacy view. The evidence-aware batch receipt view is selected when application/vnd.hausmanhub.device-action-batch-receipt.full+json is explicitly preferred by standard HTTP content negotiation. A request that accepts neither receipt representation receives 406 before command dispatch. The full view binds each receipt to its immutable batch action index and exact value. All skipped items are terminal even if the historical aggregate status is accepted. HACS consumer implementation of strict raw JSON, Accept negotiation, and this dangerous-batch policy is mandatory before any compatible release or deploy; this contract gate does not claim runtime compliance.",
+        "x-hausmanhub-max-request-body-bytes": 262144,
+        "x-hausmanhub-max-dangerous-physical-actions": 1,
+        "x-hausmanhub-dangerous-batch-policy": {
+          "maxDangerousPhysicalActions": 1,
+          "dangerousActionIds": [
+            "press",
+            "unlock",
+            "open_valve"
+          ],
+          "legacy": "reject_403_before_dispatch",
+          "validationOrder": "before_any_dispatch",
+          "idempotency": {
+            "scope": "global",
+            "storage": "durable_restart_safe",
+            "reservation": "atomic_before_dispatch",
+            "fingerprint": "canonical_full_batch_sha256",
+            "identitySource": "server_generator_and_registry_resolver",
+            "protectedProofIngress": "closed_server_store_only",
+            "authoritativeReadbackIngress": "closed_server_store_only",
+            "conflictingReuse": "http_409",
+            "maxFullBatchHashes": 1,
+            "states": [
+              "reserved",
+              "pending",
+              "dispatch_unknown",
+              "completed"
+            ],
+            "dispatchPhase": {
+              "enum": [
+                "not_started",
+                "dispatching",
+                "dispatched"
+              ],
+              "initial": "not_started",
+              "beforePhysicalDispatch": "dispatching",
+              "afterPhysicalDispatch": "dispatched",
+              "uncertain": [
+                "dispatching",
+                "dispatched"
+              ]
+            },
+            "reservedReplay": "http_409_no_dispatch",
+            "pendingReplay": "http_409_no_dispatch",
+            "replayTransitions": {
+              "reserved": "reserved",
+              "pending": {
+                "not_started": "pending",
+                "dispatching": "dispatch_unknown",
+                "dispatched": "dispatch_unknown"
+              }
+            },
+            "completedReplay": "return_original_receipt_without_dispatch",
+            "completedAfter": "all_terminal_receipts_and_required_readback_durably_persisted",
+            "recovery": "reconcile_authoritative_correlated_readback_or_protected_downstream_idempotency_result_without_redispatching_dangerous_action",
+            "dispatchUnknown": "physical_dispatch_may_have_happened_without_durable_terminal_journal_or_proof",
+            "dispatchUnknownReplay": "http_409_no_dispatch_recovery_required",
+            "dispatchUnknownRecovery": "operator_recovery_required_without_authoritative_proof",
+            "recoveryProofs": [
+              "authoritative_correlated_readback",
+              "protected_downstream_idempotency_result"
+            ],
+            "pendingTransition": "durable_before_first_dispatch",
+            "record": {
+              "fields": [
+                "hash",
+                "state",
+                "receipt",
+                "itemJournal",
+                "dispatchPhase",
+                "dispatchId",
+                "dispatchBindings"
+              ],
+              "reserved": {
+                "state": "reserved",
+                "receipt": null,
+                "itemJournal": [],
+                "dispatchPhase": "not_started"
+              },
+              "pendingBeforeFirstDispatch": {
+                "state": "pending",
+                "receipt": null,
+                "itemJournal": [],
+                "dispatchPhase": "not_started"
+              }
+            },
+            "itemJournal": "ordered_terminal_receipts",
+            "crashPoints": [
+              "after_reservation_before_dispatch",
+              "after_pending_before_first_dispatch",
+              "after_dispatching_marker_before_physical_dispatch",
+              "after_physical_dispatch_before_durable_marker",
+              "after_dangerous_dispatch_before_readback",
+              "between_batch_items"
+            ],
+            "persistence": "survives_restart"
+          }
+        },
+        "x-hausmanhub-strict-json": {
+          "duplicateKeys": "reject",
+          "nonFiniteNumbers": "reject",
+          "rawBodyLimitBeforeParse": true,
+          "beforeDispatch": true
+        },
+        "x-hausmanhub-accept-negotiation": {
+          "unsupported": "http_406",
+          "beforeDispatch": true
+        },
+        "x-hausmanhub-status": "implemented",
+        "x-hausmanhub-full-status": "contracted",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schemas/v1/device-action-batch-request.schema.json"
+              }
+            },
+            "application/vnd.hausmanhub.device-action-batch-request.full+json": {
+              "schema": {
+                "$ref": "../schemas/v1/device-action-batch-request.schema.json#/$defs/full"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Batch completed, accepted or partially completed. In the full view each item echoes the exact typed actionValue when its request action supplied value; confirmed appearance items carry a newer on-state read-back with matching observedValue. An identical full dangerous replay returns the cached full batch receipt only when durable state is completed and sends no new physical command for any item; identical reserved or pending replay returns HTTP 409 with no receipt and no dispatch, while a different canonical full-batch fingerprint returns HTTP 409 in every state before dispatch.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceActionBatchReceiptLegacy"
+                }
+              },
+              "application/vnd.hausmanhub.device-action-batch-receipt.full+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceActionBatchReceiptFull"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/DeviceActionBatchConflict"
+          },
+          "406": {
+            "$ref": "#/components/responses/NotAcceptable"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/device-property-names": {
+      "post": {
+        "operationId": "renameHausmanHubDeviceProperty",
+        "summary": "Set or reset the Home Assistant display name of one device property",
+        "description": "Local tablet or administrator endpoint. Updates only the entity registry display name, never the technical entity_id, and sends no physical command.",
+        "x-hausmanhub-status": "contracted",
+        "x-hausmanhub-physical-commands-sent": false,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schemas/v1/device-property-name-request.schema.json"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Entity registry name updated and read back",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/device-property-name-receipt.schema.json"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/admin/device-power-dependencies": {
+      "get": {
+        "operationId": "getHausmanHubDevicePowerDependencies",
+        "summary": "Read configured device power dependencies",
+        "description": "Local-admin endpoint. Reads durable power links. A link can either block dependent commands while its source is off or explicitly allow Hausman Hub to turn the source on first. Reading sends no physical command.",
+        "x-hausmanhub-status": "contracted",
+        "responses": {
+          "200": {
+            "description": "Current dependency document and revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/device-power-dependencies.schema.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "put": {
+        "operationId": "putHausmanHubDevicePowerDependencies",
+        "summary": "Atomically replace device power dependencies",
+        "description": "Persists validated power links only. The auto_turn_on policy keeps the source on after the dependent command and waits warmupSeconds before sending it. Saving sends no physical command and rejects stale expectedRevision values.",
+        "x-hausmanhub-status": "contracted",
+        "x-hausmanhub-physical-commands-sent": false,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "expectedRevision",
+                  "dependencies"
+                ],
+                "properties": {
+                  "expectedRevision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "dependencies": {
+                    "type": "array",
+                    "maxItems": 128,
+                    "uniqueItems": true,
+                    "items": {
+                      "$ref": "../schemas/v1/device-power-dependencies.schema.json#/$defs/dependency"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Persisted dependency document with the new revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/device-power-dependencies.schema.json"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/dashboard": {
+      "get": {
+        "operationId": "getHausmanHubDashboard",
+        "summary": "Read a complete tablet dashboard snapshot",
+        "description": "Implemented capability-controlled read-only aggregate. It does not replace the existing climate-only home route.",
+        "x-hausmanhub-status": "implemented",
+        "responses": {
+          "200": {
+            "description": "Universal dashboard snapshot grouped by physical device",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/dashboard-snapshot.schema.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/events": {
+      "get": {
+        "operationId": "streamHausmanHubEvents",
+        "summary": "Stream dashboard invalidations, scenario changes and alerts",
+        "description": "Authenticated SSE stream with an in-memory replay window of 128 domain events. Last-Event-ID is an opaque cursor. Replay does not survive a Home Assistant restart; a missing cursor produces snapshot_invalidated with replay_status=gap.",
+        "x-hausmanhub-status": "implemented",
+        "parameters": [
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "required": false,
+            "description": "Opaque ID of the last event fully processed by the client.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Server-sent events whose data field follows the event message contract",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "contentMediaType": "text/event-stream"
+                },
+                "x-event-data-schema": {
+                  "$ref": "../schemas/v1/event-stream-message.schema.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/tablet-profile": {
+      "get": {
+        "operationId": "getHausmanHubTabletProfile",
+        "summary": "Read the canonical tablet profile",
+        "description": "Reads the Home Assistant-owned profile used by every authorized HausmanHub tablet.",
+        "x-hausmanhub-status": "contracted",
+        "responses": {
+          "200": {
+            "description": "Current tablet profile and revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/tablet-profile.schema.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "put": {
+        "operationId": "putHausmanHubTabletProfile",
+        "summary": "Atomically replace the tablet profile",
+        "description": "Persists settings only. It sends no physical device command and rejects stale expectedRevision values.",
+        "x-hausmanhub-status": "contracted",
+        "x-hausmanhub-physical-commands-sent": false,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "expectedRevision",
+                  "settings"
+                ],
+                "properties": {
+                  "expectedRevision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "settings": {
+                    "$ref": "../schemas/v1/tablet-profile.schema.json#/$defs/settings"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Persisted profile with the new revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/tablet-profile.schema.json"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/room-settings": {
+      "get": {
+        "operationId": "getHausmanHubRoomSettings",
+        "summary": "Read canonical room presentation settings",
+        "x-hausmanhub-status": "contracted",
+        "responses": {
+          "200": {
+            "description": "Current room settings and revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/room-settings.schema.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "put": {
+        "operationId": "putHausmanHubRoomSettings",
+        "summary": "Atomically replace room order, visibility and canonical purpose",
+        "description": "Persists room presentation and applies canonical icons to the Home Assistant Area Registry. It sends no physical device command.",
+        "x-hausmanhub-status": "contracted",
+        "x-hausmanhub-physical-commands-sent": false,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "expectedRevision",
+                  "rooms"
+                ],
+                "properties": {
+                  "expectedRevision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "rooms": {
+                    "type": "array",
+                    "maxItems": 128,
+                    "items": {
+                      "$ref": "../schemas/v1/room-settings.schema.json#/$defs/room"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Persisted settings with Area Registry read-back",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/room-settings.schema.json"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/tablet-power-status": {
+      "post": {
+        "operationId": "postHausmanTabletPowerStatus",
+        "summary": "Publish wall-tablet battery and power state",
+        "description": "Accepts bounded local telemetry, updates two Hausman-owned Home Assistant sensors and evaluates the owner-enabled 40/80 charging policy.",
+        "x-hausmanhub-status": "contracted",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schemas/v1/tablet-power-status-request.schema.json"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Telemetry and charging-policy receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/tablet-power-status-receipt.schema.json"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/energy-settings": {
+      "get": {
+        "operationId": "getHausmanHubEnergySettings",
+        "summary": "Read canonical energy presentation settings",
+        "x-hausmanhub-status": "contracted",
+        "responses": {
+          "200": {
+            "description": "Current energy settings and revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/energy-settings-document.schema.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "put": {
+        "operationId": "putHausmanHubEnergySettings",
+        "summary": "Atomically replace energy presentation settings",
+        "description": "Persists card and page presentation settings only. It sends no physical device command.",
+        "x-hausmanhub-status": "contracted",
+        "x-hausmanhub-physical-commands-sent": false,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "expectedRevision",
+                  "settings"
+                ],
+                "properties": {
+                  "expectedRevision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "settings": {
+                    "$ref": "../schemas/v1/energy-settings.schema.json"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Persisted settings with the new revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/energy-settings-document.schema.json"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/climate-season-settings": {
+      "get": {
+        "operationId": "getHausmanHubClimateSeasonSettings",
+        "summary": "Read interseason cooling restraint settings",
+        "x-hausmanhub-status": "contracted",
+        "responses": {
+          "200": {
+            "description": "Current interseason settings and revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/climate-season-settings-document.schema.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "put": {
+        "operationId": "putHausmanHubClimateSeasonSettings",
+        "summary": "Atomically replace interseason cooling restraint settings",
+        "description": "Persists interseason thresholds only. It sends no physical device command; the climate runtime applies them on the next observation cycle.",
+        "x-hausmanhub-status": "contracted",
+        "x-hausmanhub-physical-commands-sent": false,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "expectedRevision",
+                  "settings"
+                ],
+                "properties": {
+                  "expectedRevision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "settings": {
+                    "$ref": "../schemas/v1/climate-season-settings.schema.json"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Persisted settings with the new revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/climate-season-settings-document.schema.json"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/admin/climate-deviation-guard": {
+      "get": {
+        "operationId": "getHausmanHubClimateDeviationGuard",
+        "summary": "Read climate deviation protection settings",
+        "description": "Local administrator only. The read returns stable public device IDs and never sends a physical command.",
+        "x-hausmanhub-status": "contracted",
+        "x-hausmanhub-physical-commands-sent": false,
+        "responses": {
+          "200": {
+            "description": "Current climate deviation protection settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/climate-deviation-guard-document.schema.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "put": {
+        "operationId": "putHausmanHubClimateDeviationGuard",
+        "summary": "Replace climate deviation protection settings",
+        "description": "Local administrator only. Saving settings is command-free. Enforce mode may retry a previously confirmed off intent only on a later managed observation cycle after the configured grace period.",
+        "x-hausmanhub-status": "contracted",
+        "x-hausmanhub-physical-commands-sent": false,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "expectedRevision",
+                  "settings"
+                ],
+                "properties": {
+                  "expectedRevision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "settings": {
+                    "$ref": "../schemas/v1/climate-deviation-guard-settings.schema.json"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Persisted settings with the new revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/climate-deviation-guard-document.schema.json"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/energy/history": {
+      "get": {
+        "operationId": "getHausmanHubEnergyHistory",
+        "summary": "Read bounded energy history for selected physical devices",
+        "description": "Returns Recorder-backed history in a half-open [from, to) window. Callers use either explicit from/to or one calendar window day/week/month with an IANA timezone. Calendar weeks start on Monday and calendar windows stay correct across DST. Windows are at most 31 days, ordered by timestamp ascending and contain at most 128 series. HausmanHub keeps no separate history copy, so missing Recorder points are allowed.",
+        "x-hausmanhub-status": "contracted",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "interval",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "5m",
+                "15m",
+                "1h",
+                "1d"
+              ]
+            }
+          },
+          {
+            "name": "window",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "day",
+                "week",
+                "month"
+              ]
+            }
+          },
+          {
+            "name": "timezone",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^(UTC|[A-Za-z_]+(?:/[A-Za-z0-9_+\\-]+)+)$"
+            }
+          },
+          {
+            "name": "deviceId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "maxItems": 128,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bounded energy series",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/energy-history.schema.json"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/energy/meters": {
+      "get": {
+        "operationId": "getHausmanHubEnergyMeters",
+        "summary": "Read up to 16 independently configured utility meters",
+        "description": "Returns independently named meter projections and their explicitly bound HausmanHub energy sources. The legacy singular meter endpoint remains available as the primary-meter compatibility projection.",
+        "x-hausmanhub-status": "contracted",
+        "x-hausmanhub-physical-commands-sent": false,
+        "responses": {
+          "200": {
+            "description": "Current meter collection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/energy-meters.schema.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "updateHausmanHubEnergyMeters",
+        "summary": "Create, configure, remove or record one utility meter",
+        "description": "Uses collection-level optimistic locking. Every meter has an opaque stable meterId and an independent set of bound source devices, reading cycle and history. No operation sends a physical command or changes Home Assistant energy sensors.",
+        "x-hausmanhub-status": "contracted",
+        "x-hausmanhub-physical-commands-sent": false,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schemas/v1/energy-meters.schema.json#/$defs/actionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Persisted collection with the new revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/energy-meters.schema.json"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/energy/meter": {
+      "get": {
+        "operationId": "getHausmanHubEnergyMeter",
+        "summary": "Read the durable utility meter projection and submission reminder",
+        "description": "Projects a manually anchored utility reading over the explicitly selected HausmanHub energy device when sourceDeviceId is set, otherwise over the compatible aggregate. It never resets a physical source counter. Changing the source invalidates the previous projection until the user submits or corrects a reading.",
+        "x-hausmanhub-status": "implemented",
+        "x-hausmanhub-physical-commands-sent": false,
+        "responses": {
+          "200": {
+            "description": "Current reading, monthly cycle, reminder and bounded history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/energy-meter.schema.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "updateHausmanHubEnergyMeter",
+        "summary": "Configure, submit or correct the utility meter reading",
+        "description": "Uses optimistic locking. Configure may select one opaque HausmanHub energy device as the meter source. Submission starts a new monthly consumption baseline; correction only moves the current reading anchor. Neither operation sends a physical command or changes Home Assistant energy sensors.",
+        "x-hausmanhub-status": "implemented",
+        "x-hausmanhub-physical-commands-sent": false,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schemas/v1/energy-meter.schema.json#/$defs/actionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Persisted meter document with the new revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/energy-meter.schema.json"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/admin/water-safety": {
+      "get": {
+        "operationId": "getHausmanHubWaterSafety",
+        "summary": "Read the durable leak and water-shutoff safety policy",
+        "description": "Returns configured leak sensors, shutoff actuators, debounce/quorum policy, notification recipients, durable leak latch and physical read-back. Automatic opening is forbidden by contract.",
+        "x-hausmanhub-status": "implemented",
+        "x-hausmanhub-physical-commands-sent": false,
+        "responses": {
+          "200": {
+            "description": "Current water safety configuration and state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/water-safety.schema.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateHausmanHubWaterSafety",
+        "summary": "Update the water safety policy with optimistic locking",
+        "description": "Auto-close can be enabled only after direction verification and recipient configuration. Saving never sends a physical command and never clears the durable leak latch.",
+        "x-hausmanhub-status": "implemented",
+        "x-hausmanhub-physical-commands-sent": false,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schemas/v1/water-safety.schema.json#/$defs/actionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Persisted policy with the new revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/water-safety.schema.json"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/admin/water-safety/direction-test": {
+      "post": {
+        "operationId": "testHausmanHubWaterSafetyDirection",
+        "summary": "Read one shutoff actuator without commanding it",
+        "description": "The installation test reports only current read-back and always returns commandSent=false. The operator verifies physical direction manually before enabling automatic close.",
+        "x-hausmanhub-status": "implemented",
+        "x-hausmanhub-physical-commands-sent": false,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schemas/v1/water-safety.schema.json#/$defs/directionTestRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Side-effect-free actuator read-back",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/water-safety.schema.json#/$defs/directionTestReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/water/meter": {
+      "get": {
+        "operationId": "getHausmanHubWaterMeter",
+        "summary": "Read the durable water meter projection and submission reminder",
+        "description": "Stores manually entered cold/hot water readings, the monthly consumption cycle and the provider dispatch state. It never touches physical devices and never sends anything on its own: the dispatch action runs only on an explicit user request.",
+        "x-hausmanhub-status": "implemented",
+        "x-hausmanhub-physical-commands-sent": false,
+        "responses": {
+          "200": {
+            "description": "Current readings, monthly cycle, reminder, dispatch state and bounded history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/water-meter.schema.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "updateHausmanHubWaterMeter",
+        "summary": "Configure, submit, correct or dispatch water meter readings",
+        "description": "Uses optimistic locking. Submit anchors both readings and starts a new monthly baseline; correction only moves the current anchor. Dispatch formats the provider email (account, meter numbers, whole-cubic-meter readings) and sends it through the configured Home Assistant notify service; without a configured notifyService it fails closed. No physical command is ever sent.",
+        "x-hausmanhub-status": "implemented",
+        "x-hausmanhub-physical-commands-sent": false,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schemas/v1/water-meter.schema.json#/$defs/actionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Persisted water meter document with the new revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/water-meter.schema.json"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/device-discovery": {
+      "get": {
+        "operationId": "getHausmanHubDeviceDiscovery",
+        "summary": "Read durable notifications for newly discovered Home Assistant devices",
+        "description": "The first reconciliation records an existing-device baseline without creating notifications. Public documents contain stable HausmanHub IDs and no raw Home Assistant entity or device IDs.",
+        "x-hausmanhub-status": "implemented",
+        "responses": {
+          "200": {
+            "description": "Pending new-device notifications and suggested placements",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/device-discovery.schema.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "updateHausmanHubDeviceDiscovery",
+        "summary": "Acknowledge a notification or apply an allowed placement",
+        "description": "Uses optimistic locking. Area assignment requires a local administrator. Energy and dashboard placement update HausmanHub settings only and do not send physical commands.",
+        "x-hausmanhub-status": "implemented",
+        "x-hausmanhub-physical-commands-sent": false,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schemas/v1/device-discovery.schema.json#/$defs/actionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated notification document with the new revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/device-discovery.schema.json"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/admin/legacy-settings/preview": {
+      "post": {
+        "operationId": "previewHausmanHubLegacySettings",
+        "summary": "Preview a Node-RED global-context settings migration",
+        "description": "Local administrator only. Parses an explicitly supplied bounded export, rejects sensitive values, ignores runtime state, and never persists data.",
+        "x-hausmanhub-status": "implemented",
+        "x-hausmanhub-audience": "local-admin",
+        "x-hausmanhub-write-performed": false,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schemas/v1/legacy-settings-preview-request.schema.json"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Read-only migration preview",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/legacy-settings-preview.schema.json"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/admin/legacy-settings/apply": {
+      "post": {
+        "operationId": "applyHausmanHubLegacySettings",
+        "summary": "Apply an unchanged legacy settings preview",
+        "description": "Local administrator only. Recomputes preview_id, requires explicit room mappings, writes native stores with rollback, and sends no physical commands.",
+        "x-hausmanhub-status": "implemented",
+        "x-hausmanhub-audience": "local-admin",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schemas/v1/legacy-settings-apply-request.schema.json"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Confirmed native storage receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/legacy-settings-apply-receipt.schema.json"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/admin/climate-shadow-comparison": {
+      "get": {
+        "operationId": "getHausmanHubClimateShadowComparison",
+        "summary": "Compare native climate decisions with observed legacy behavior",
+        "description": "Local administrator only. Returns redacted, command-free comparison evidence from one observation and performs no writes.",
+        "x-hausmanhub-status": "implemented",
+        "x-hausmanhub-audience": "local-admin",
+        "x-hausmanhub-write-performed": false,
+        "responses": {
+          "200": {
+            "description": "Command-free climate comparison snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/climate-shadow-comparison.schema.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/admin/climate-shadow-window": {
+      "get": {
+        "operationId": "getHausmanHubClimateShadowWindow",
+        "summary": "Read accumulated climate shadow evidence and room verdicts",
+        "description": "Local administrator only. Returns bounded persisted observation evidence. The read sends no physical commands and grants no control authority.",
+        "x-hausmanhub-status": "implemented",
+        "x-hausmanhub-audience": "local-admin",
+        "x-hausmanhub-physical-commands-sent": false,
+        "responses": {
+          "200": {
+            "description": "Accumulated command-free climate shadow window",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/climate-shadow-window.schema.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/admin/operations": {
+      "get": {
+        "operationId": "getHausmanHubOperationJournal",
+        "summary": "Read the durable cross-domain operation journal",
+        "description": "Local administrator only. Returns bounded receipt outcomes for device, climate, scenario and voice operations. The read performs no write and sends no physical command.",
+        "x-hausmanhub-status": "contracted",
+        "x-hausmanhub-audience": "local-admin",
+        "x-hausmanhub-write-performed": false,
+        "x-hausmanhub-physical-commands-sent": false,
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 512,
+              "default": 100
+            }
+          },
+          {
+            "name": "before_sequence",
+            "in": "query",
+            "required": false,
+            "description": "Exclusive keyset cursor returned as page.next_before_sequence.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "device",
+                "climate",
+                "scenario",
+                "voice"
+              ]
+            }
+          },
+          {
+            "name": "correlation_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Newest-first bounded operation journal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/operation-journal.schema.json"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/admin/device-maintenance": {
+      "get": {
+        "operationId": "getHausmanHubDeviceMaintenance",
+        "summary": "Read the local device-maintenance inventory",
+        "description": "Local administrator only. Builds a bounded device inventory and usage index. It performs no write and sends no physical command.",
+        "x-hausmanhub-status": "contracted",
+        "x-hausmanhub-audience": "local-admin",
+        "x-hausmanhub-write-performed": false,
+        "x-hausmanhub-physical-commands-sent": false,
+        "responses": {
+          "200": {
+            "description": "Device inventory with delete eligibility and an optimistic revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/device-maintenance-snapshot.schema.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "maintainHausmanHubDevice",
+        "summary": "Rename, move, identify or safely delete one Home Assistant device",
+        "description": "Local administrator only. Rejects stale revisions. Identification and deletion require explicit confirmation; deletion is denied unless every supported usage index is complete and contains no reference.",
+        "x-hausmanhub-status": "contracted",
+        "x-hausmanhub-audience": "local-admin",
+        "x-hausmanhub-write-performed": "conditional",
+        "x-hausmanhub-physical-commands-sent": "identify-only-after-confirmation",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schemas/v1/device-maintenance-request.schema.json"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Maintenance receipt with explicit confirmation and read-back evidence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/device-maintenance-receipt.schema.json"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/climate/runtime": {
+      "get": {
+        "operationId": "getHausmanHubClimateRuntime",
+        "x-hausmanhub-negotiated-capability": "climate_reliability_v1",
+        "summary": "Read the authoritative tablet climate projection",
+        "description": "Returns stable room and equipment identities, rollout phase, current authority, freshness, scoped control revisions, desired and reported climate targets, participation summaries, source observed_at timestamps and the exact actions currently permitted. The read never sends a physical command. Runtime observed_at is the Home Assistant entity source timestamp and is distinct from post-dispatch read-back evidence. Runtime participation and revisions use the complete enhanced reliability branch only when climate_reliability_v1 is advertised with available=true and producer_guarantees_full_branch=true; a retained available=false object does not activate it.",
+        "x-hausmanhub-status": "contracted",
+        "x-hausmanhub-physical-commands-sent": false,
+        "responses": {
+          "200": {
+            "description": "Current bounded climate runtime projection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/climate-runtime.schema.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/climate/actions": {
+      "post": {
+        "operationId": "executeHausmanHubClimateAction",
+        "summary": "Request one typed climate action",
+        "description": "Uses an optimistic state revision, optional scoped control revision and durable request id. When expected_control_revision is present it is authoritative; telemetry-only state_revision drift is ignored. A saved desired target and physical application are separately reported by the durable receipt. The server rejects shadow, stale, non-authoritative, cooling-down and non-canary targets before any physical command. The complete reliability branch is active only when climate_reliability_v1 is advertised with available=true and producer_guarantees_full_branch=true; a retained available=false object does not activate it.",
+        "x-hausmanhub-negotiated-capability": "climate_reliability_v1",
+        "x-hausmanhub-status": "contracted",
+        "x-hausmanhub-physical-commands-sent": "only-after-runtime-authorization",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schemas/v1/climate-action-request.schema.json"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Action accepted with a durable operation receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/climate-operation-receipt.schema.json"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/climate/operations/{operation_id}": {
+      "get": {
+        "operationId": "getHausmanHubClimateOperation",
+        "x-hausmanhub-negotiated-capability": "climate_reliability_v1",
+        "summary": "Read a durable climate operation receipt",
+        "description": "Returns the accepted, confirmed or final result, saved intent, per-room and per-device outcomes, and bounded read-back evidence. Repeating this read never repeats the physical command. When climate_reliability_v1 is advertised with available=true and producer_guarantees_full_branch=true, the durable receipt is always the complete enhanced reliability branch, never a partial downgrade. A retained capability object with available=false does not activate that branch. unfinished_device_count exactly identifies pending or accepted-unverified leaves and makes final false until all leaves are terminal.",
+        "x-hausmanhub-status": "contracted",
+        "x-hausmanhub-physical-commands-sent": false,
+        "parameters": [
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current durable operation receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/climate-operation-receipt.schema.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/climate/recovery/rooms/{room_id}": {
+      "post": {
+        "operationId": "recoverHausmanHubClimateRoom",
+        "summary": "Return selected or every eligible device of one room to climate control",
+        "description": "Optional negotiated climate recovery capability. It is available only when the runtime can initialize its durable recovery store and service. A retained climate_room_recovery_v1 object with available=false keeps discovery and route metadata but does not activate physical recovery. Current POST requests require reliability_profile climate_recovery_proof_v1 and use only climate_room_recovery_v2. A historical v1 request without that profile is readable only as a frozen final result; unfinished proofless historical work is not served as an active receipt and returns the API's typed unavailable/error behavior without redispatch. The request is scoped to exactly one room and must echo the full authoritative preflight: expected_control_revision, expected_desired_snapshot_fingerprint, expected_resolved_device_ids and snapshot_token. That full candidate scope includes only explicit manual return_to_contour devices that are managed command-capable climate kinds with enabled, unblocked set_device_mode control, including one currently offline. Explicit sorted device_ids may select an offline candidate, which is durably deferred with zero dispatch; omitting device_ids means return every currently available candidate only, or an explicit final zero-command no-op when none is available. The receipt echoes the full preflight as preflight_snapshot_fingerprint, while desired_snapshot and desired_snapshot_fingerprint bind only the frozen selected subset with each runtime source_observed_at. A dispatched command has dispatched_at, and confirmed read-back evidence must be strictly newer than both timestamps. Every confirmed device has keyed read-back evidence proving return_to_contour, automatic mode and values equal to that selected snapshot; aggregate counters alone never confirm recovery.",
+        "x-hausmanhub-status": "optional-negotiated",
+        "x-hausmanhub-negotiated-capability": "climate_room_recovery_v2",
+        "x-hausmanhub-physical-commands-sent": "only-after-runtime-authorization",
+        "parameters": [
+          {
+            "name": "room_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schemas/v1/climate-room-recovery-request-v2.schema.json"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Scoped recovery accepted with outcomes keyed by stable device ID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/climate-room-recovery-receipt-v2.schema.json"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/climate/recovery/operations/{operation_id}": {
+      "get": {
+        "operationId": "getHausmanHubClimateRecoveryOperation",
+        "summary": "Read a durable climate recovery receipt without redispatch",
+        "description": "Read-only polling surface for the original recovery operation. It never redispatches physical commands. A confirmed device is backed by keyed read-back evidence for return_to_contour, automatic mode and an observed restored contour target, not by aggregate counters. Reusing a request_id with an identical scoped request replays its durable receipt; a different request with the same request_id is rejected as conflict.",
+        "x-hausmanhub-status": "optional-negotiated",
+        "x-hausmanhub-negotiated-capability": "climate_room_recovery_v2",
+        "x-hausmanhub-physical-commands-sent": false,
+        "parameters": [
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current durable recovery receipt with outcomes keyed by stable device ID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "../schemas/v1/climate-room-recovery-receipt-v2.schema.json"
+                    },
+                    {
+                      "$ref": "../schemas/v1/climate-room-recovery-legacy-terminal.schema.json"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/voice/yandex-greeting": {
+      "get": {
+        "operationId": "getHausmanHubVoiceGreeting",
+        "summary": "Read the Yandex Station greeting and home-summary configuration",
+        "description": "Returns the Home Assistant-owned voice greeting configuration used by every authorized HausmanHub tablet.",
+        "x-hausmanhub-status": "contracted",
+        "x-hausmanhub-physical-commands-sent": false,
+        "responses": {
+          "200": {
+            "description": "Current voice greeting configuration and revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/voice-greeting-config.schema.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "put": {
+        "operationId": "putHausmanHubVoiceGreeting",
+        "summary": "Atomically replace the Yandex Station greeting configuration",
+        "description": "Persists settings only. It sends no physical device command and rejects stale expectedRevision values. followUpEnabled requires homeQuestionsEnabled.",
+        "x-hausmanhub-status": "contracted",
+        "x-hausmanhub-physical-commands-sent": false,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "expectedRevision",
+                  "settings"
+                ],
+                "properties": {
+                  "expectedRevision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "settings": {
+                    "$ref": "../schemas/v1/voice-greeting-config.schema.json#/$defs/settings"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Persisted configuration with the new revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/voice-greeting-config.schema.json"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/voice/yandex-greeting/test": {
+      "post": {
+        "operationId": "testHausmanHubVoiceGreeting",
+        "summary": "Speak a test summary on the selected Yandex Station without changing the home mode",
+        "description": "Speaks the exact speechText without adding or removing blocks; summaryItems and flags are echoed in the receipt for audit. Sends speech only to the selected station media_player and issues no other physical command. The final result is delivered as a command_receipt event with operation voice.yandexGreeting.test.",
+        "x-hausmanhub-status": "contracted",
+        "x-hausmanhub-physical-commands-sent": "station-only",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../schemas/v1/voice-greeting-test-request.schema.json"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Test accepted and forwarded to the station",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/voice-command-receipt.schema.json"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/hausman_hub/v1/climate/recovery/rooms/{room_id}/preflight": {
+      "get": {
+        "operationId": "getHausmanHubClimateRoomRecoveryPreflightV2",
+        "summary": "Read negotiated climate recovery preflight without dispatch",
+        "description": "Read-only negotiated v2 authority and source-timestamp preflight. It never sends physical commands.",
+        "x-hausmanhub-status": "optional-negotiated",
+        "x-hausmanhub-negotiated-capability": "climate_room_recovery_v2",
+        "x-hausmanhub-physical-commands-sent": false,
+        "parameters": [
+          {
+            "name": "room_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative v2 recovery preflight",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../schemas/v1/climate-room-recovery-v2-preflight.schema.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "schemas": {
+      "Error": {
+        "$ref": "../schemas/v1/api-error.schema.json"
+      },
+      "NotAcceptableError": {
+        "$ref": "../schemas/v1/api-error-not-acceptable.schema.json"
+      },
+      "DeviceActionIdempotencyConflict": {
+        "$ref": "../schemas/v1/api-error-idempotency-conflict.schema.json"
+      },
+      "DeviceActionReceipt": {
+        "$ref": "../schemas/v1/device-action-receipt.schema.json"
+      },
+      "DeviceActionReceiptLegacy": {
+        "$ref": "../schemas/v1/device-action-receipt.schema.json#/$defs/legacy"
+      },
+      "DeviceActionReceiptFull": {
+        "$ref": "../schemas/v1/device-action-receipt.schema.json#/$defs/fullSingle"
+      },
+      "DeviceActionBatchReceipt": {
+        "$ref": "../schemas/v1/device-action-batch-receipt.schema.json"
+      },
+      "DeviceActionBatchReceiptLegacy": {
+        "$ref": "../schemas/v1/device-action-batch-receipt.schema.json#/$defs/legacy"
+      },
+      "DeviceActionBatchReceiptFull": {
+        "$ref": "../schemas/v1/device-action-batch-receipt.schema.json#/$defs/full"
+      },
+      "DeviceStateEvidence": {
+        "$ref": "../schemas/v1/device-state-evidence.schema.json"
+      },
+      "DeviceStateEvidenceReasonCode": {
+        "$ref": "../schemas/v1/device-state-evidence-reason-code.schema.json#/$defs/openCode"
+      }
+    },
+    "responses": {
+      "InvalidRequest": {
+        "description": "Invalid request",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "NotAcceptable": {
+        "description": "The Accept header allows neither the legacy nor the full receipt representation",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/NotAcceptableError"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "Authenticated request is outside the allowed local tablet boundary or uses a legacy dangerous device action",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "Current state prevents the requested operation. For a full dangerous batch, a different server-computed canonical full-batch SHA-256 fingerprint under the same global idempotencyKey returns HTTP 409 in any durable state before physical dispatch and sends no command. For a full dangerous single, a different server-computed canonical full-request SHA-256 fingerprint under the same global idempotencyKey returns HTTP 409 in any durable state before physical dispatch and sends no command. An identical reserved, pending or dispatch_unknown replay returns the canonical conflict machine detailCode idempotency_in_progress with its durable state and recoveryRequired=true, sends no command and no receipt, and requires reconciliation; dispatch_unknown cannot become completed without authoritative correlated read-back or protected downstream idempotency proof. only an identical completed replay returns the cached original receipt with HTTP 200.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "DeviceActionIdempotencyConflict": {
+        "description": "Device-action idempotency replay or conflicting reuse. The response uses the exact idempotency_in_progress or idempotency_key_conflict payload variant.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/DeviceActionIdempotencyConflict"
+            }
+          }
+        }
+      },
+      "DeviceActionConflict": {
+        "description": "A device action may return the historical rejected legacy receipt or general conflict payload. Strict full dangerous actions additionally return the closed idempotency conflict payload.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/DeviceActionIdempotencyConflict"
+                },
+                {
+                  "$ref": "#/components/schemas/DeviceActionReceiptLegacy"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    },
+                    {
+                      "not": {
+                        "required": [
+                          "details"
+                        ],
+                        "properties": {
+                          "details": {
+                            "type": "object",
+                            "required": [
+                              "detailCode"
+                            ],
+                            "properties": {
+                              "detailCode": {
+                                "enum": [
+                                  "idempotency_in_progress",
+                                  "idempotency_key_conflict"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "DeviceActionBatchConflict": {
+        "description": "A device-action batch may return the historical rejected legacy batch receipt or general conflict payload. Strict full dangerous batches additionally return the closed idempotency conflict payload.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/DeviceActionIdempotencyConflict"
+                },
+                {
+                  "$ref": "#/components/schemas/DeviceActionBatchReceiptLegacy"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    },
+                    {
+                      "not": {
+                        "required": [
+                          "details"
+                        ],
+                        "properties": {
+                          "details": {
+                            "type": "object",
+                            "required": [
+                              "detailCode"
+                            ],
+                            "properties": {
+                              "detailCode": {
+                                "enum": [
+                                  "idempotency_in_progress",
+                                  "idempotency_key_conflict"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "The requested bounded resource was not found",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Unavailable": {
+        "description": "HausmanHub runtime is unavailable",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    }
+  }
+}

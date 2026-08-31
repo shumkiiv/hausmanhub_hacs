@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hausmanhub/contracts/v1/device-property-name-request.schema.json",
+  "title": "HausmanHub device property name request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "entityId", "name"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-device-property-name-request"},
+        "version": {"const": 1}
+      }
+    },
+    "correlationId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+    "entityId": {"type": "string", "pattern": "^[a-z][a-z0-9_]*\\.[a-z0-9_]+$", "maxLength": 255},
+    "name": {"type": ["string", "null"], "minLength": 1, "maxLength": 255, "pattern": "\\S"}
+  }
+}

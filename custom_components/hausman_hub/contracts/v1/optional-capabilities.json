@@ -1,0 +1,311 @@
+{
+  "matrixVersion": 1,
+  "apiMajorVersion": 1,
+  "capabilityContract": {
+    "name": "hausman-hub-capabilities",
+    "version": 1
+  },
+  "capabilities": {
+    "tablet_power": {
+      "operations": [
+        {
+          "method": "POST",
+          "path": "/api/hausman_hub/v1/tablet-power-status"
+        }
+      ],
+      "payloadContracts": {
+        "request_contract": {
+          "name": "hausman-hub-tablet-power-status-request",
+          "version": 1
+        },
+        "response_contract": {
+          "name": "hausman-hub-tablet-power-status-receipt",
+          "version": 1
+        }
+      }
+    },
+    "device_property_names": {
+      "operations": [
+        {
+          "method": "POST",
+          "path": "/api/hausman_hub/v1/device-property-names"
+        }
+      ],
+      "payloadContracts": {
+        "request_contract": {
+          "name": "hausman-hub-device-property-name-request",
+          "version": 1
+        },
+        "response_contract": {
+          "name": "hausman-hub-device-property-name-receipt",
+          "version": 1
+        }
+      }
+    },
+    "room_settings": {
+      "operations": [
+        {
+          "method": "GET",
+          "path": "/api/hausman_hub/v1/room-settings"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/hausman_hub/v1/room-settings"
+        }
+      ],
+      "payloadContracts": {
+        "response_contract": {
+          "name": "hausman-hub-room-settings",
+          "version": 1
+        }
+      }
+    },
+    "energy_meter": {
+      "operations": [
+        {
+          "method": "GET",
+          "path": "/api/hausman_hub/v1/energy/meter"
+        },
+        {
+          "method": "POST",
+          "path": "/api/hausman_hub/v1/energy/meter"
+        },
+        {
+          "method": "GET",
+          "path": "/api/hausman_hub/v1/energy/meters"
+        },
+        {
+          "method": "POST",
+          "path": "/api/hausman_hub/v1/energy/meters"
+        }
+      ],
+      "payloadContracts": {
+        "response_contract": {
+          "name": "hausman-hub-energy-meter",
+          "version": 1
+        },
+        "collection_response_contract": {
+          "name": "hausman-hub-energy-meters",
+          "version": 1
+        }
+      }
+    },
+    "water_meter": {
+      "operations": [
+        {
+          "method": "GET",
+          "path": "/api/hausman_hub/v1/water/meter"
+        },
+        {
+          "method": "POST",
+          "path": "/api/hausman_hub/v1/water/meter"
+        }
+      ],
+      "payloadContracts": {
+        "response_contract": {
+          "name": "hausman-hub-water-meter",
+          "version": 1
+        }
+      }
+    },
+    "device_discovery": {
+      "operations": [
+        {
+          "method": "GET",
+          "path": "/api/hausman_hub/v1/device-discovery"
+        },
+        {
+          "method": "POST",
+          "path": "/api/hausman_hub/v1/device-discovery"
+        }
+      ],
+      "payloadContracts": {
+        "response_contract": {
+          "name": "hausman-hub-device-discovery",
+          "version": 1
+        }
+      }
+    },
+    "event_stream": {
+      "operations": [
+        {
+          "method": "GET",
+          "path": "/api/hausman_hub/v1/events"
+        }
+      ],
+      "payloadContracts": {
+        "response_contract": {
+          "name": "hausman-hub-event",
+          "version": 1
+        }
+      }
+    },
+    "climate_runtime": {
+      "operations": [
+        {
+          "method": "GET",
+          "path": "/api/hausman_hub/v1/climate/runtime"
+        },
+        {
+          "method": "POST",
+          "path": "/api/hausman_hub/v1/climate/actions"
+        },
+        {
+          "method": "GET",
+          "path": "/api/hausman_hub/v1/climate/operations/{operation_id}"
+        }
+      ],
+      "payloadContracts": {
+        "read_contract": {
+          "name": "hausman-hub-climate-runtime",
+          "version": 1
+        },
+        "request_contract": {
+          "name": "hausman-hub-climate-action-request",
+          "version": 1
+        },
+        "receipt_contract": {
+          "name": "hausman-hub-climate-operation",
+          "version": 1
+        }
+      }
+    },
+    "climate_room_recovery_v1": {
+      "availabilitySemantics": {
+        "available": "false for physical POST; retained only for read-only terminal legacy polling",
+        "v1Polling": "GET may return only a final terminal v1 receipt; unfinished proofless work uses the API typed unavailable/error behavior without redispatch"
+      },
+      "operations": [
+        {
+          "method": "POST",
+          "path": "/api/hausman_hub/v1/climate/recovery/rooms/{room_id}"
+        },
+        {
+          "method": "GET",
+          "path": "/api/hausman_hub/v1/climate/recovery/operations/{operation_id}"
+        }
+      ],
+      "payloadContracts": {
+        "request_contract": {
+          "name": "hausman-hub-climate-room-recovery-request",
+          "version": 1
+        },
+        "receipt_contract": {
+          "name": "hausman-hub-climate-room-recovery-receipt",
+          "version": 1
+        }
+      }
+    },
+    "climate_reliability_v1": {
+      "availabilitySemantics": {
+        "available": "true only when the runtime is ready to produce the negotiated reliability branch",
+        "producer_guarantees_full_branch": "must equal available; false when the producer is unavailable or not fully initialized",
+        "activation": "the full branch applies only when the capability is advertised with available=true and producer_guarantees_full_branch=true; a retained available=false object does not activate it"
+      },
+      "operations": [
+        {
+          "method": "GET",
+          "path": "/api/hausman_hub/v1/climate/runtime"
+        },
+        {
+          "method": "GET",
+          "path": "/api/hausman_hub/v1/climate/operations/{operation_id}"
+        },
+        {
+          "method": "GET",
+          "path": "/api/hausman_hub/v1/climate/control/operations/{operation_id}"
+        },
+        {
+          "method": "POST",
+          "path": "/api/hausman_hub/v1/climate/actions"
+        },
+        {
+          "method": "POST",
+          "path": "/api/hausman_hub/v1/contours/apply"
+        },
+        {
+          "method": "POST",
+          "path": "/api/hausman_hub/v1/contours/temporary-temperature"
+        }
+      ],
+      "payloadContracts": {
+        "runtime_contract": {
+          "name": "hausman-hub-climate-runtime",
+          "version": 1
+        },
+        "operation_receipt_contract": {
+          "name": "hausman-hub-climate-operation",
+          "version": 1
+        },
+        "control_receipt_contract": {
+          "name": "hausman-hub-climate-control-receipt",
+          "version": 1
+        }
+      }
+    },
+    "voice_greeting": {
+      "operations": [
+        {
+          "method": "GET",
+          "path": "/api/hausman_hub/v1/voice/yandex-greeting"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/hausman_hub/v1/voice/yandex-greeting"
+        },
+        {
+          "method": "POST",
+          "path": "/api/hausman_hub/v1/voice/yandex-greeting/test"
+        }
+      ],
+      "payloadContracts": {
+        "response_contract": {
+          "name": "hausman-hub-voice-greeting-config",
+          "version": 1
+        },
+        "test_request_contract": {
+          "name": "hausman-hub-voice-greeting-test-request",
+          "version": 1
+        },
+        "test_receipt_contract": {
+          "name": "hausman-hub-voice-command-receipt",
+          "version": 1
+        }
+      }
+    },
+    "climate_room_recovery_v2": {
+      "availabilitySemantics": {
+        "available": "true only when runtime and durable recovery store are ready",
+        "physicalPost": "the sole advertised physical recovery POST capability; v2 request and receipt require climate_recovery_proof_v1"
+      },
+      "operations": [
+        {
+          "method": "GET",
+          "path": "/api/hausman_hub/v1/climate/recovery/rooms/{room_id}/preflight"
+        },
+        {
+          "method": "POST",
+          "path": "/api/hausman_hub/v1/climate/recovery/rooms/{room_id}"
+        },
+        {
+          "method": "GET",
+          "path": "/api/hausman_hub/v1/climate/recovery/operations/{operation_id}"
+        }
+      ],
+      "payloadContracts": {
+        "request_contract": {
+          "name": "hausman-hub-climate-room-recovery-request-v2",
+          "version": 2
+        },
+        "receipt_contract": {
+          "name": "hausman-hub-climate-room-recovery-receipt-v2",
+          "version": 2
+        },
+        "preflight_contract": {
+          "name": "hausman-hub-climate-room-recovery-v2-preflight",
+          "version": 2
+        }
+      }
+    }
+  }
+}

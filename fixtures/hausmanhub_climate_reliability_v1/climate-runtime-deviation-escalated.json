@@ -1,0 +1,112 @@
+{
+  "contract": {
+    "name": "hausman-hub-climate-runtime",
+    "version": 1
+  },
+  "generated_at": 1787401200000,
+  "state_revision": 51,
+  "control_revision": 3,
+  "phase": "managed",
+  "authority": "hausman_hub",
+  "fresh": true,
+  "commands_enabled": true,
+  "blocked_reasons": [],
+  "home_control": {
+    "enabled": true,
+    "allowed_actions": [
+      "set_home_targets"
+    ],
+    "blocked_reasons": []
+  },
+  "rooms": [
+    {
+      "id": "children",
+      "name": "Детская",
+      "temperature": 23.5,
+      "humidity": 45,
+      "target_temperature": 24,
+      "target_humidity": 45,
+      "minimum_temperature": 18,
+      "temperature_range": {
+        "minimum": 18,
+        "maximum": 28,
+        "step": 0.5
+      },
+      "humidity_range": {
+        "minimum": 30,
+        "maximum": 70,
+        "step": 1
+      },
+      "mode": "automatic",
+      "target_strategy": "normal",
+      "active_profile": "night",
+      "temporary_override": {
+        "active": false,
+        "target_temperature": null,
+        "ends_at": null
+      },
+      "authority": "hausman_hub",
+      "control_revision": 3,
+      "control": {
+        "enabled": true,
+        "allowed_actions": [
+          "set_room_mode"
+        ],
+        "blocked_reasons": []
+      },
+      "devices": [
+        {
+          "id": "children_ac",
+          "name": "Кондиционер",
+          "kind": "air_conditioner",
+          "control_scope": "managed",
+          "available": true,
+          "state": "working",
+          "mode": "automatic",
+          "mode_name": "Автоматический режим",
+          "control_revision": 3,
+          "participation": {
+            "mode": "automatic",
+            "connectivity": "available",
+            "synchronization": "failed",
+            "reason": "command_failed",
+            "changed_at": 1787401200000,
+            "message_code": "command_failed",
+            "message": "Команда не подтверждена, требуется проверка устройства.",
+            "recovery": "check_configuration"
+          },
+          "cooldown": null,
+          "last_confirmed_operation": null,
+          "deviation_guard": {
+            "mode": "enforce",
+            "status": "escalated",
+            "expected_state": "off",
+            "observed_state": "working",
+            "retry_count": 3,
+            "max_retries": 3,
+            "last_deviation_at": 1787400900000,
+            "next_retry_at": null,
+            "escalated_at": 1787401200000
+          },
+          "target_temperature": 24,
+          "desired_target_temperature": 24,
+          "reported_target_temperature": 24,
+          "target_humidity": 45,
+          "desired_target_humidity": 45,
+          "reported_target_humidity": 45
+        }
+      ],
+      "desired_target_temperature": 24,
+      "reported_target_temperature": 24,
+      "desired_target_humidity": 45,
+      "reported_target_humidity": 45
+    }
+  ],
+  "active_operations": [],
+  "participation_summary": {
+    "automatic_count": 1,
+    "excluded_count": 0,
+    "unavailable_count": 0,
+    "pending_sync_count": 1
+  }
+}

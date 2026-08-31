@@ -76,11 +76,18 @@ class HomeAssistantClimateStateView:
         # Prefer last_reported (HA 2023.9+): sensors that periodically report an
         # unchanged value stay fresh, while a dead device stops reporting at all.
         reported = getattr(state, "last_reported", None) or state.last_updated
+        context = getattr(state, "context", None)
+        context_id = getattr(context, "id", None)
+        parent_id = getattr(context, "parent_id", None)
+        user_id = getattr(context, "user_id", None)
         return ClimateHaEntityState(
             entity_id=entity_id,
             state=state.state,
             attributes=attributes,
             last_updated_ms=int(reported.timestamp() * 1000),
+            context_id=context_id if isinstance(context_id, str) and context_id else None,
+            context_parent_id=parent_id if isinstance(parent_id, str) and parent_id else None,
+            context_user_id=user_id if isinstance(user_id, str) and user_id else None,
         )
 
     def weather_entity_state(self) -> ClimateHaEntityState | None:

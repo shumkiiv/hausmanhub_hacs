@@ -1,0 +1,173 @@
+{
+  "inventoryVersion": 2,
+  "canonical": true,
+  "scope": "climate_reliability_v1",
+  "rules": [
+    {
+      "id": "climate.revisions_and_time",
+      "documents": [
+        "climate-action-request",
+        "climate-operation-receipt",
+        "climate-control-receipt",
+        "climate-room-recovery-receipt"
+      ],
+      "trigger": "reliability receipt",
+      "assertions": [
+        "all reliability timestamps and revisions are JS-safe integers",
+        "updated_at >= created_at",
+        "resulting_control_revision >= expected_control_revision",
+        "an accepted recovery advances control_revision exactly once and a final recovery replay is frozen",
+        "POST recovery and GET recovery polling apply identical confirmed-device observation lifetime, confirmation-window and freshness bounds"
+      ]
+    },
+    {
+      "id": "climate.full_branch",
+      "documents": [
+        "climate-operation-receipt",
+        "climate-control-receipt"
+      ],
+      "trigger": "climate_reliability_v1 capability advertised with available=true and producer_guarantees_full_branch=true",
+      "assertions": [
+        "message_code, expected_control_revision, resulting_control_revision, intent and outcomes occur together",
+        "accepted, confirmed, message and request_fingerprint are present for every current response",
+        "legacy read_back alone is not an enhanced marker",
+        "historical 0.63-compatible receipts retain the permissive legacy branch while every capability-negotiated current response uses the full branch",
+        "a retained climate_reliability_v1 object with available=false does not activate the full branch"
+      ]
+    },
+    {
+      "id": "climate.device_confirmation",
+      "documents": [
+        "climate-operation-receipt",
+        "climate-control-receipt",
+        "climate-room-recovery-receipt"
+      ],
+      "trigger": "device outcome counters and execution state",
+      "assertions": [
+        "confirmed command_count > 0 implies accepted_count = command_count and execution_state = applied",
+        "confirmed command_count = accepted_count = 0 implies execution_state = already_in_sync and positive room read-back",
+    "manual, deferred, pending and undispatched outcomes publish zero command and accepted counts",
+    "failed dispatched outcomes never claim an unaccepted command",
+    "pending_dispatch is exactly 0/0, accepted_unverified is exactly 1/1, dispatched_not_accepted is exactly 1/0, and mixed recovery is confirmed plus explicit 1/0 failure"
+      ]
+    },
+    {
+      "id": "climate.room_derivation",
+      "documents": [
+        "climate-operation-receipt",
+        "climate-control-receipt"
+      ],
+      "trigger": "keyed room outcomes",
+      "assertions": [
+        "all confirmed => confirmed",
+        "all manual => manual",
+        "all deferred => deferred",
+        "all pending => pending",
+        "all not_attempted => not_attempted",
+        "failed with no confirmed => failed",
+        "all other mixtures => partial",
+        "only an exactly homogeneous status, reason, execution state and safe message may produce a non-partial room summary",
+        "heterogeneous nonconfirmed room outcomes use the neutral partial summary independent of keyed device order"
+      ]
+    },
+    {
+      "id": "climate.lifecycle",
+      "documents": [
+        "climate-operation-receipt",
+        "climate-control-receipt",
+        "climate-room-recovery-receipt"
+      ],
+      "trigger": "receipt status",
+      "assertions": [
+        "confirmed means all outcomes confirmed",
+        "pending has no confirmed or matched outcome",
+        "failed or rejected has zero confirmed",
+        "partial normally has at least one nonconfirmed outcome and may have zero confirmed; the only empty exception is the canonical omitted-device_ids zero-command recovery no-op",
+        "final is false exactly while a pending or accepted_unverified leaf remains; terminal partial has no unfinished leaf",
+        "recovery retry is allowed only for final pre_dispatch_failed with zero command and accepted counts",
+        "recovery started, unknown, dispatched_not_accepted and accepted_unverified states are non-retryable",
+        "a superseded candidate binds a distinct newer operation and request fingerprint"
+      ]
+    },
+    {
+      "id": "climate.intent_outcome",
+      "documents": [
+        "climate-operation-receipt",
+        "climate-control-receipt"
+      ],
+      "trigger": "intent status",
+      "assertions": [
+        "saved_and_applied requires all confirmed",
+        "saved_for_manual_device requires manual",
+        "saved_deferred_offline requires deferred",
+        "saved_apply_failed requires failed",
+    "saved_pending_dispatch permits only pending_dispatch 0/0 leaves and pre-dispatch manual, deferred or not_attempted 0/0 exclusions",
+        "saved_pending_confirmation requires an after-dispatch non-retryable leaf",
+        "saved_blocked_before_dispatch requires not_attempted",
+        "superseded_by_newer_intent requires only superseded not_attempted outcomes"
+      ]
+    },
+    {
+      "id": "climate.evidence_counts",
+      "documents": [
+        "climate-operation-receipt",
+        "climate-control-receipt",
+        "climate-room-recovery-receipt"
+      ],
+      "trigger": "count evidence is published",
+      "assertions": [
+        "room_count, confirmed_room_count and accepted_count equal keyed outcomes",
+        "unverifiable recovery count keys are omitted",
+        "confirmed control has positive exact room counts"
+      ]
+    },
+    {
+      "id": "climate.endpoint_binding",
+      "documents": [
+        "climate-action-request",
+        "contour-apply-request",
+        "temporary-temperature-request",
+        "climate-room-recovery-request",
+        "climate-operation-receipt",
+        "climate-control-receipt",
+        "climate-room-recovery-receipt"
+      ],
+      "trigger": "request and receipt pair",
+      "assertions": [
+        "request_id and correlation bind exactly or server correlation fallback is valid",
+        "request_fingerprint equals SHA-256 of sorted typed JSON after omitting request_id, correlation_id and request_fingerprint and normalizing scope sets",
+        "recovery polls retain a durable request_snapshot with normalized path room, full candidate scope, selected subset, preflight token and fingerprint, confirmation window, reliability profile and supplied or generated correlation policy; its embedded request recomputes request_fingerprint exactly",
+        "action, room scope, device identifiers, parameters, expected revisions and POST recovery path bind exactly",
+    "temporary set and clear bind requested target_temperature including null; resulting scheduled target is separate",
+    "scheduled contour apply binds exact day or night profile through request fingerprint, immutable action snapshot, action receipt and every confirmed leaf",
+        "confirmed action read-back and each confirmed device leaf contain exact typed action evidence with null non-applicable axes",
+        "every durable operation stores a full typed request projection with request and correlation identifiers, action-specific parameters, expected revisions, resolved scope and a receipt-recomputed fingerprint",
+    "every negotiated control receipt stores kind, typed parameters, request fingerprint, resolved scope and expected control revision as one immutable action snapshot",
+    "each confirmed control leaf exactly echoes the top action snapshot and nonconfirmed leaves publish no action evidence",
+    "every negotiated control receipt freezes a server-authored per-device desired snapshot with a fingerprint, and each confirmed leaf exact-matches that snapshot in fresh observed_actual evidence",
+    "resolved scope fingerprints include sorted bounded room-device pairs and must exactly equal keyed outcomes",
+        "GET climate, control and recovery operation path operation_id exactly equals the durable receipt operation_id",
+        "same request_id and fingerprint replay the original durable operation, while a changed payload conflicts before dispatch and pending or unknown work never redispatches",
+        "pending and unknown recovery replay freezes contract, operation, room, revisions, full preflight fingerprint, selected snapshot fingerprint, token and scope",
+        "the full recovery preflight contains only explicit manual return_to_contour devices that are managed command-capable climate kinds with enabled, unblocked set_device_mode control and advertised recovery v2 capability; offline eligible devices remain in that full scope only as deferred device_unavailable 0/0, while omitted device_ids freezes only currently available candidates or returns an explicit final zero-command no-op when none is available",
+        "each recovery desired snapshot freezes the negotiated v2 preflight source_observed_at; dispatched 1-count leaves publish bounded dispatched_at, and confirmed evidence is strictly newer than both source and dispatch"
+      ]
+    },
+    {
+      "id": "climate.runtime_summary",
+      "documents": [
+        "climate-runtime"
+      ],
+      "trigger": "participation_summary present",
+      "assertions": [
+        "all four counters equal unique device participation axes",
+        "in the negotiated full branch legacy room and device targets equal desired targets while reported targets remain independently observable",
+        "device mode and mode_name project participation mode exactly",
+            "every negotiated device publishes all six target fields, with null for unsupported, stale or unavailable readings",
+            "a negotiated v2 preflight publishes a JS-safe non-null source observed_at for each fresh available selected device; recovery read-back evidence keeps its separate post-dispatch observed_at",
+        "recovery request echoes full authoritative preflight fingerprint, sorted command-capable managed candidate scope and opaque token; optional device_ids selects a subset whose receipt snapshot has an independent fingerprint, while omission selects only currently available candidates",
+        "automatic available pending devices publish pending_dispatch with its exact safe message, and active operations retain fingerprint, control revision and immutable room-device scope"
+      ]
+    }
+  ]
+}

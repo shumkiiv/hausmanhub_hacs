@@ -28,7 +28,8 @@
       }
     },
     "generated_at": {"type": "integer", "minimum": 0},
-    "state_revision": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+    "state_revision": {"type": "integer", "minimum": 0},
+    "control_revision": {"type": "integer", "minimum": 0},
     "phase": {
       "enum": ["disabled", "shadow", "ready_for_canary", "canary", "managed", "unavailable"]
     },
@@ -51,7 +52,8 @@
       "type": "array",
       "items": {"$ref": "#/$defs/active_operation"},
       "maxItems": 64
-    }
+    },
+    "participation_summary": {"$ref": "#/$defs/participation_summary"}
   },
   "allOf": [
     {
@@ -98,6 +100,18 @@
           "rooms": {"not": {"contains": {"$ref": "#/$defs/enabled_room"}}}
         }
       }
+    },
+    {
+      "if": {"required": ["control_revision", "participation_summary"]},
+      "then": {"properties": {
+        "generated_at": {"maximum": 9007199254740991}, "state_revision": {"maximum": 9007199254740991}, "control_revision": {"maximum": 9007199254740991},
+        "rooms": {"items": {"properties": {
+          "control_revision": {"maximum": 9007199254740991}, "last_deviation_at": {"maximum": 9007199254740991}, "next_retry_at": {"maximum": 9007199254740991}, "escalated_at": {"maximum": 9007199254740991},
+          "cooldown": {"properties": {"until": {"maximum": 9007199254740991}}},
+          "devices": {"items": {"properties": {"control_revision": {"maximum": 9007199254740991}, "participation": {"properties": {"changed_at": {"maximum": 9007199254740991}}}}}}
+        }}},
+        "active_operations": {"items": {"properties": {"expected_control_revision": {"maximum": 9007199254740991}, "updated_at": {"maximum": 9007199254740991}}}}
+      }}
     }
   ],
   "$defs": {
@@ -252,10 +266,18 @@
         "control_scope": {"enum": ["observed", "canary", "managed"]},
         "available": {"type": "boolean"},
         "state": {"enum": ["working", "idle", "off", "unavailable", "unknown"]},
+        "target_temperature": {"$ref": "#/$defs/temperature"},
+        "target_humidity": {"$ref": "#/$defs/humidity"},
+        "desired_target_temperature": {"$ref": "#/$defs/temperature"},
+        "reported_target_temperature": {"anyOf": [{"$ref": "#/$defs/temperature"}, {"type": "null"}]},
+        "desired_target_humidity": {"$ref": "#/$defs/humidity"},
+        "reported_target_humidity": {"anyOf": [{"$ref": "#/$defs/humidity"}, {"type": "null"}]},
         "mode": {"enum": ["automatic", "manual", "unknown"]},
         "mode_name": {
           "enum": ["Автоматический режим", "Ручной режим", "Режим неизвестен"]
         },
+        "control_revision": {"type": "integer", "minimum": 0},
+        "participation": {"$ref": "#/$defs/participation"},
         "control": {"$ref": "#/$defs/control"},
         "cooldown": {"oneOf": [{"$ref": "#/$defs/cooldown"}, {"type": "null"}]},
         "last_confirmed_operation": {
@@ -274,7 +296,24 @@
           ]
         },
         "deviation_guard": {"$ref": "#/$defs/deviation_guard"}
-      }
+      },
+      "allOf": [
+        {"if": {"required": ["control_revision"]}, "then": {"required": ["target_temperature", "target_humidity", "desired_target_temperature", "desired_target_humidity", "reported_target_temperature", "reported_target_humidity"]}},
+        {"if": {"required": ["participation"]}, "then": {"required": ["mode", "mode_name"]}},
+        {"if": {"required": ["participation"], "properties": {"participation": {"properties": {"mode": {"const": "manual"}}}}}, "then": {"properties": {"mode": {"const": "manual"}, "mode_name": {"const": "Ручной режим"}}}},
+        {"if": {"properties": {"mode": {"const": "manual"}}, "required": ["mode"]}, "then": {"properties": {"mode_name": {"const": "Ручной режим"}, "participation": {"properties": {"mode": {"const": "manual"}}}}}},
+        {"if": {"required": ["participation"], "properties": {"participation": {"properties": {"mode": {"const": "automatic"}}}}}, "then": {"properties": {"mode": {"const": "automatic"}, "mode_name": {"const": "Автоматический режим"}}}},
+        {"if": {"properties": {"mode": {"const": "automatic"}}, "required": ["mode"]}, "then": {"properties": {"mode_name": {"const": "Автоматический режим"}, "participation": {"properties": {"mode": {"const": "automatic"}}}}}},
+        {"if": {"properties": {"mode": {"const": "unknown"}}, "required": ["mode"]}, "then": {"properties": {"mode_name": {"const": "Режим неизвестен"}}}},
+        {"if": {"required": ["participation"], "properties": {"participation": {"properties": {"connectivity": {"const": "available"}}}}}, "then": {"required": ["mode", "mode_name"], "properties": {"available": {"const": true}}}},
+        {"if": {"required": ["participation"], "properties": {"participation": {"properties": {"connectivity": {"const": "unavailable"}}}}}, "then": {"properties": {"available": {"const": false}, "state": {"const": "unavailable"}}}},
+        {"if": {"properties": {"available": {"const": true}}, "required": ["available"]}, "then": {"properties": {"participation": {"properties": {"connectivity": {"const": "available"}}}}}},
+        {"if": {"properties": {"state": {"const": "unavailable"}}, "required": ["state"]}, "then": {"properties": {"available": {"const": false}, "participation": {"properties": {"connectivity": {"const": "unavailable"}}}}}},
+        {"if": {"required": ["participation"], "properties": {"participation": {"properties": {"connectivity": {"const": "stale"}}}}}, "then": {"required": ["mode", "mode_name"], "properties": {"available": {"const": false}, "state": {"const": "unknown"}}}},
+        {"if": {"required": ["participation"], "properties": {"participation": {"properties": {"reason": {"const": "device_unavailable"}}}}}, "then": {"properties": {"participation": {"properties": {"connectivity": {"const": "unavailable"}, "synchronization": {"const": "deferred"}}}, "available": {"const": false}, "state": {"const": "unavailable"}}}},
+        {"if": {"required": ["participation"], "properties": {"participation": {"properties": {"reason": {"const": "state_stale"}}}}}, "then": {"properties": {"participation": {"properties": {"connectivity": {"const": "stale"}, "synchronization": {"const": "deferred"}}}, "available": {"const": false}, "state": {"const": "unknown"}}}},
+        {"if": {"required": ["participation"], "properties": {"participation": {"properties": {"connectivity": {"const": "available"}}}}}, "then": {"properties": {"participation": {"properties": {"reason": {"not": {"enum": ["device_unavailable", "state_stale"]}}}}}}}
+      ]
     },
     "deviation_guard": {
       "type": "object",
@@ -330,6 +369,11 @@
         "humidity": {"$ref": "#/$defs/humidity"},
         "target_temperature": {"$ref": "#/$defs/temperature"},
         "target_humidity": {"$ref": "#/$defs/humidity"},
+        "desired_target_temperature": {"$ref": "#/$defs/temperature"},
+        "reported_target_temperature": {"anyOf": [{"$ref": "#/$defs/temperature"}, {"type": "null"}]},
+        "desired_target_humidity": {"$ref": "#/$defs/humidity"},
+        "reported_target_humidity": {"anyOf": [{"$ref": "#/$defs/humidity"}, {"type": "null"}]},
+        "control_revision": {"type": "integer", "minimum": 0},
         "minimum_temperature": {"$ref": "#/$defs/temperature"},
         "temperature_range": {"$ref": "#/$defs/temperature_range"},
         "humidity_range": {"$ref": "#/$defs/humidity_range"},
@@ -339,8 +383,13 @@
         "temporary_override": {"$ref": "#/$defs/temporary_override"},
         "authority": {"enum": ["legacy_climate_core", "hausman_hub", "none", "unknown"]},
         "control": {"$ref": "#/$defs/control"},
-        "devices": {"type": "array", "items": {"$ref": "#/$defs/device"}, "maxItems": 32}
-      }
+        "devices": {"type": "array", "items": {"$ref": "#/$defs/device"}, "maxItems": 32},
+        "recovery_preflight": {"type": "object", "additionalProperties": false, "required": ["room_id", "control_revision", "desired_snapshot_fingerprint", "resolved_device_ids", "snapshot_token"], "properties": {"room_id": {"$ref": "#/$defs/stable_id"}, "control_revision": {"type": "integer", "minimum": 0}, "desired_snapshot_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "resolved_device_ids": {"type": "array", "items": {"$ref": "#/$defs/stable_id"}, "minItems": 1, "maxItems": 32, "uniqueItems": true}, "snapshot_token": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$"}}}
+      },
+      "allOf": [
+        {"if": {"required": ["control_revision"]}, "then": {"required": ["desired_target_temperature", "reported_target_temperature", "desired_target_humidity", "reported_target_humidity"]}},
+        {"if": {"properties": {"devices": {"contains": {"type": "object", "properties": {"participation": {"type": "object", "properties": {"mode": {"const": "manual"}, "recovery": {"const": "return_to_contour"}}, "required": ["mode", "recovery"]}}, "required": ["participation"]}}}, "required": ["devices"]}, "then": {"required": ["recovery_preflight"]}}
+      ]
     },
     "enabled_room": {
       "type": "object",
@@ -373,6 +422,45 @@
         }
       }
     },
+    "participation_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["automatic_count", "excluded_count", "unavailable_count", "pending_sync_count"],
+      "properties": {
+        "automatic_count": {"type": "integer", "minimum": 0, "maximum": 4096},
+        "excluded_count": {"type": "integer", "minimum": 0, "maximum": 4096},
+        "unavailable_count": {"type": "integer", "minimum": 0, "maximum": 4096},
+        "pending_sync_count": {"type": "integer", "minimum": 0, "maximum": 4096}
+      }
+    },
+    "participation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "connectivity", "synchronization", "reason", "changed_at", "message_code", "message", "recovery"],
+      "properties": {
+        "mode": {"enum": ["automatic", "manual"]},
+        "connectivity": {"enum": ["available", "unavailable", "stale"]},
+        "synchronization": {"enum": ["in_sync", "pending", "deferred", "diverged", "failed"]},
+        "reason": {"enum": ["none", "pending_dispatch", "user_excluded", "external_off", "device_unavailable", "state_stale", "command_failed", "configuration_error"]},
+        "changed_at": {"type": ["integer", "null"], "minimum": 0},
+        "message_code": {"enum": ["in_sync", "pending_dispatch", "manual_excluded", "external_off", "device_unavailable", "state_stale", "command_failed", "configuration_error"]},
+        "message": {"type": "string", "minLength": 1, "maxLength": 500},
+        "recovery": {"enum": ["none", "return_to_contour", "wait_for_connection", "check_configuration"]}
+      },
+      "allOf": [
+        {"if": {"properties": {"mode": {"const": "manual"}}, "required": ["mode"]}, "then": {"properties": {"reason": {"enum": ["user_excluded", "external_off"]}, "recovery": {"const": "return_to_contour"}}}},
+        {"if": {"properties": {"mode": {"const": "automatic"}}, "required": ["mode"]}, "then": {"properties": {"reason": {"not": {"enum": ["user_excluded", "external_off"]}}}}},
+        {"if": {"properties": {"reason": {"const": "user_excluded"}}, "required": ["reason"]}, "then": {"properties": {"mode": {"const": "manual"}, "recovery": {"const": "return_to_contour"}, "message_code": {"const": "manual_excluded"}}}},
+        {"if": {"properties": {"reason": {"const": "external_off"}}, "required": ["reason"]}, "then": {"properties": {"mode": {"const": "manual"}, "recovery": {"const": "return_to_contour"}, "message_code": {"const": "external_off"}}}},
+        {"if": {"properties": {"mode": {"const": "automatic"}, "connectivity": {"const": "unavailable"}}, "required": ["mode", "connectivity"]}, "then": {"properties": {"reason": {"const": "device_unavailable"}, "synchronization": {"const": "deferred"}, "recovery": {"const": "wait_for_connection"}, "message_code": {"const": "device_unavailable"}}}},
+        {"if": {"properties": {"mode": {"const": "automatic"}, "connectivity": {"const": "stale"}}, "required": ["mode", "connectivity"]}, "then": {"properties": {"reason": {"const": "state_stale"}, "synchronization": {"const": "deferred"}, "recovery": {"const": "wait_for_connection"}, "message_code": {"const": "state_stale"}}}},
+        {"if": {"properties": {"mode": {"const": "automatic"}, "connectivity": {"const": "available"}, "synchronization": {"const": "pending"}}, "required": ["mode", "connectivity", "synchronization"]}, "then": {"properties": {"reason": {"const": "pending_dispatch"}, "recovery": {"const": "none"}, "message_code": {"const": "pending_dispatch"}}}},
+        {"if": {"properties": {"reason": {"const": "command_failed"}}, "required": ["reason"]}, "then": {"properties": {"mode": {"const": "automatic"}, "synchronization": {"enum": ["failed", "diverged"]}, "recovery": {"const": "check_configuration"}, "message_code": {"const": "command_failed"}}}},
+        {"if": {"properties": {"reason": {"const": "configuration_error"}}, "required": ["reason"]}, "then": {"properties": {"mode": {"const": "automatic"}, "synchronization": {"enum": ["failed", "diverged"]}, "recovery": {"const": "check_configuration"}, "message_code": {"const": "configuration_error"}}}},
+        {"if": {"properties": {"synchronization": {"const": "in_sync"}}, "required": ["synchronization"]}, "then": {"properties": {"reason": {"const": "none"}, "recovery": {"const": "none"}, "message_code": {"const": "in_sync"}}}},
+        {"if": {"properties": {"reason": {"const": "none"}}, "required": ["reason"]}, "then": {"properties": {"mode": {"const": "automatic"}, "connectivity": {"const": "available"}, "synchronization": {"const": "in_sync"}, "recovery": {"const": "none"}, "message_code": {"const": "in_sync"}}}}
+      ]
+    },
     "active_operation": {
       "type": "object",
       "additionalProperties": false,
@@ -380,8 +468,11 @@
       "properties": {
         "operation_id": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
         "request_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"},
+        "request_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
         "action": {"$ref": "#/$defs/action"},
         "room_id": {"type": ["string", "null"], "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+        "expected_control_revision": {"type": "integer", "minimum": 0},
+        "resolved_scope": {"type": "object", "additionalProperties": false, "required": ["room_ids", "device_ids", "devices_by_room"], "properties": {"room_ids": {"type": "array", "items": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"}, "minItems": 1, "maxItems": 128, "uniqueItems": true}, "device_ids": {"type": "array", "items": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"}, "minItems": 1, "maxItems": 4096, "uniqueItems": true}, "devices_by_room": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["room_id", "device_ids"], "properties": {"room_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"}, "device_ids": {"type": "array", "items": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"}, "minItems": 1, "maxItems": 32, "uniqueItems": true}}}, "minItems": 1, "maxItems": 128}}},
         "status": {"enum": ["pending", "confirmed", "partial", "rejected", "unavailable", "timed_out"]},
         "updated_at": {"type": "integer", "minimum": 0}
       }

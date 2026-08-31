@@ -9,6 +9,7 @@ copied into a config entry.
 from __future__ import annotations
 
 from collections.abc import Mapping
+import re
 from typing import Any
 
 from ..domain.configuration import (
@@ -58,6 +59,8 @@ NATIVE_CLIMATE_MODE_DEFAULT = NativeClimateMode.DISABLED.value
 NATIVE_CLIMATE_ROOM_ID_FIELD = "native_climate_room_id"
 NATIVE_TARGET_TEMPERATURE_FIELD = "native_target_temperature"
 NATIVE_TARGET_HUMIDITY_FIELD = "native_target_humidity"
+RELIABLE_SCOPE_INTEGRITY_KEY_FIELD = "reliable_scope_integrity_key"
+RELIABLE_SCOPE_INTEGRITY_INITIALIZED_FIELD = "reliable_scope_integrity_initialized"
 
 CONNECTION_MODE_FIELD = "connection_mode"
 CONNECTION_MODE_DEFAULT = "home_assistant"
@@ -176,11 +179,22 @@ def effective_configuration(
             DIRECT_EXECUTION_STATUS_FIELD,
             AI_ASSISTANT_SETTINGS_FIELD,
             AI_ASSISTANT_API_KEY_FIELD,
+            RELIABLE_SCOPE_INTEGRITY_KEY_FIELD,
+            RELIABLE_SCOPE_INTEGRITY_INITIALIZED_FIELD,
         },
         "entry data",
     )
     if not {MODE_FIELD, DIRECT_EXECUTION_STATUS_FIELD}.issubset(entry_data):
         raise ConfigurationViolation("entry data is incomplete")
+    integrity_key = entry_data.get(RELIABLE_SCOPE_INTEGRITY_KEY_FIELD)
+    if integrity_key is not None and (
+        not isinstance(integrity_key, str)
+        or re.fullmatch(r"[a-f0-9]{64}", integrity_key) is None
+    ):
+        raise ConfigurationViolation("reliable scope integrity key is invalid")
+    integrity_initialized = entry_data.get(RELIABLE_SCOPE_INTEGRITY_INITIALIZED_FIELD)
+    if integrity_initialized is not None and type(integrity_initialized) is not bool:
+        raise ConfigurationViolation("reliable scope integrity state is invalid")
     try:
         ai_assistant_binding_from_entry_data(entry_data)
     except AiAssistantViolation as error:

@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/climate-room-recovery-receipt.schema.json",
+  "title": "HausmanHub negotiated climate room recovery receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "correlation_id", "operation_id", "request_id", "request_fingerprint", "request_snapshot", "room_id", "expected_control_revision", "resulting_control_revision", "desired_snapshot_revision", "preflight_snapshot_fingerprint", "desired_snapshot_fingerprint", "snapshot_token", "resolved_device_ids", "desired_snapshot", "status", "accepted", "confirmed", "final", "duplicate", "dispatch_state", "retry_policy", "confirmation_window_ms", "read_back", "message_code", "message", "outcomes", "created_at", "updated_at"],
+  "properties": {
+    "contract": {
+      "type": "object", "additionalProperties": false, "required": ["name", "version"],
+      "properties": {"name": {"const": "hausman-hub-climate-room-recovery-receipt"}, "version": {"const": 1}}
+    },
+    "correlation_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+    "operation_id": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+    "request_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"},
+    "request_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "request_snapshot": {"$ref": "#/$defs/request_snapshot"},
+    "room_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+    "expected_control_revision": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+    "resulting_control_revision": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+    "desired_snapshot_revision": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+    "preflight_snapshot_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$", "description": "Exact echo of the full authoritative eligible-preflight fingerprint."},
+    "desired_snapshot_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$", "description": "Fingerprint of desired_snapshot for the selected device subset only."},
+    "snapshot_token": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$"},
+    "resolved_device_ids": {"type": "array", "description": "Durable selected recovery scope. Explicit requests may retain unavailable candidates as deferred 0/0 leaves; omitted device_ids contains only candidates available at the frozen preflight. It may be empty only for the explicit final zero-command no-op when no candidate was available.", "items": {"$ref": "#/$defs/stable_id"}, "minItems": 0, "maxItems": 32, "uniqueItems": true},
+    "desired_snapshot": {"type": "object", "description": "Immutable selected-scope snapshot, separate from the full preflight fingerprint. It is empty only for an omitted-selection zero-command no-op.", "propertyNames": {"$ref": "#/$defs/stable_id"}, "additionalProperties": {"$ref": "#/$defs/desired_snapshot"}, "minProperties": 0, "maxProperties": 32},
+    "status": {"enum": ["pending", "partial", "confirmed", "failed", "unknown"]},
+    "accepted": {"type": "boolean"}, "confirmed": {"type": "boolean"}, "final": {"type": "boolean"}, "duplicate": {"type": "boolean"},
+    "dispatch_state": {"enum": ["not_started", "started", "accepted", "unknown", "mixed", "pre_dispatch_failed", "dispatched_not_accepted", "accepted_unverified"]},
+    "retry_policy": {"enum": ["allowed_pre_dispatch_only", "forbidden_after_dispatch"]},
+    "confirmation_window_ms": {"type": "integer", "minimum": 1000, "maximum": 30000},
+    "read_back": {"type": "object", "additionalProperties": false, "required": ["attempted", "matched", "observed_at", "evidence"], "properties": {"attempted": {"type": "boolean"}, "matched": {"type": ["boolean", "null"]}, "observed_at": {"type": ["integer", "null"], "minimum": 0, "maximum": 9007199254740991}, "evidence": {"type": "object", "additionalProperties": false, "maxProperties": 5, "properties": {"room_count": {"type": "integer", "minimum": 0, "maximum": 128}, "confirmed_room_count": {"type": "integer", "minimum": 0, "maximum": 128}, "accepted_count": {"type": "integer", "minimum": 0, "maximum": 384}, "devices": {"type": "object", "propertyNames": {"$ref": "#/$defs/stable_id"}, "additionalProperties": {"$ref": "#/$defs/device_evidence"}, "minProperties": 1, "maxProperties": 32}}}}},
+    "message_code": {"enum": ["confirmed", "partial", "failed", "pending", "unknown"]},
+    "message": {"enum": ["Восстановление подтверждено чтением состояния.", "Восстановление завершено частично.", "Восстановление не подтверждено.", "Восстановление ожидает подтверждения.", "Результат восстановления пока неизвестен."]},
+    "outcomes": {"type": "object", "description": "Keyed selected-scope outcomes. Empty is permitted only for the omitted-selection zero-command no-op.", "minProperties": 0, "maxProperties": 32, "propertyNames": {"$ref": "#/$defs/stable_id"}, "additionalProperties": {"$ref": "#/$defs/outcome"}},
+    "created_at": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+    "updated_at": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}
+  },
+  "$defs": {
+    "terminal_outcome": {"allOf": [{"not": {"required": ["status"], "properties": {"status": {"const": "pending"}}}}, {"not": {"required": ["execution_state"], "properties": {"execution_state": {"const": "accepted_unverified"}}}}]},
+    "stable_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+    "request_snapshot": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path_room_id", "request", "correlation_policy", "confirmation_window_ms", "reliability_profile"],
+      "properties": {
+        "path_room_id": {"$ref": "#/$defs/stable_id"},
+        "correlation_policy": {"enum": ["supplied", "generated"]},
+        "confirmation_window_ms": {"type": "integer", "minimum": 1000, "maximum": 30000},
+        "reliability_profile": {"const": "climate_reliability_v1"},
+        "request": {"$ref": "#/$defs/recovery_request"}
+      }
+    },
+    "recovery_request": {
+      "type": "object", "additionalProperties": false,
+      "required": ["contract", "request_id", "request_fingerprint", "expected_control_revision", "expected_desired_snapshot_fingerprint", "expected_resolved_device_ids", "snapshot_token"],
+      "properties": {
+        "contract": {"type": "object", "additionalProperties": false, "required": ["name", "version"], "properties": {"name": {"const": "hausman-hub-climate-room-recovery-request"}, "version": {"const": 1}}},
+        "correlation_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+        "request_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"},
+        "request_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "expected_control_revision": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "expected_desired_snapshot_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "expected_resolved_device_ids": {"type": "array", "description": "Frozen full candidate scope, including explicitly manual unavailable return-to-contour devices.", "items": {"$ref": "#/$defs/stable_id"}, "minItems": 1, "maxItems": 32, "uniqueItems": true},
+        "device_ids": {"type": "array", "description": "Frozen explicit selection. Its absence means the receipt selected only candidates available at the authoritative preflight.", "items": {"$ref": "#/$defs/stable_id"}, "minItems": 1, "maxItems": 32, "uniqueItems": true},
+        "snapshot_token": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$"}
+      }
+    },
+    "desired_snapshot": {"type": "object", "additionalProperties": false, "required": ["target_temperature", "target_humidity", "mode"], "properties": {"target_temperature": {"type": ["number", "null"], "minimum": 18, "maximum": 28, "multipleOf": 0.5}, "target_humidity": {"type": ["integer", "null"], "minimum": 30, "maximum": 70}, "mode": {"const": "automatic"}}},
+    "device_evidence": {"type": "object", "additionalProperties": false, "required": ["action", "mode", "target_temperature", "target_humidity", "observed_at", "fresh"], "properties": {"action": {"const": "return_to_contour"}, "mode": {"const": "automatic"}, "target_temperature": {"type": ["number", "null"], "minimum": 5, "maximum": 40}, "target_humidity": {"type": ["integer", "null"], "minimum": 0, "maximum": 100}, "observed_at": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}, "fresh": {"const": true}}, "anyOf": [{"properties": {"target_temperature": {"type": "number"}}, "required": ["target_temperature"]}, {"properties": {"target_humidity": {"type": "integer"}}, "required": ["target_humidity"]}]},
+    "outcome": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "reason", "command_count", "accepted_count", "message_code", "message"],
+      "properties": {
+        "status": {"enum": ["pending", "confirmed", "deferred", "manual", "failed", "not_attempted"]},
+        "reason": {"enum": ["none", "user_excluded", "external_off", "device_unavailable", "state_stale", "command_failed", "configuration_error"]},
+        "execution_state": {"enum": ["pending_dispatch", "blocked_before_dispatch", "dispatched_not_accepted", "accepted_unverified", "applied", "already_in_sync", "superseded_by_newer_intent"]},
+        "retry_policy": {"enum": ["allowed_pre_dispatch_only", "forbidden_after_dispatch"]},
+        "command_count": {"type": "integer", "minimum": 0, "maximum": 1},
+        "accepted_count": {"type": "integer", "minimum": 0, "maximum": 1},
+        "message_code": {"enum": ["confirmed", "pending", "deferred_offline", "manual_excluded", "external_off", "command_failed", "configuration_error", "superseded"]},
+        "message": {"type": "string", "enum": ["Результат подтверждён чтением состояния.", "Цель сохранена и будет применена после восстановления связи.", "Устройство исключено пользователем из автоматического контура.", "Устройство выключено вручную и исключено из контура.", "Команда не подтверждена, требуется проверка устройства.", "Конфигурация устройства требует проверки.", "Команда заменена более новой сохранённой целью.", "Команда принята и ожидает подтверждения."]}
+      },
+      "oneOf": [
+        {"required": ["execution_state", "command_count", "accepted_count"], "properties": {"status": {"const": "confirmed"}, "reason": {"const": "none"}, "execution_state": {"const": "applied"}, "command_count": {"const": 1}, "accepted_count": {"const": 1}, "message_code": {"const": "confirmed"}, "message": {"const": "Результат подтверждён чтением состояния."}}},
+        {"required": ["execution_state", "command_count", "accepted_count"], "properties": {"status": {"const": "confirmed"}, "reason": {"const": "none"}, "execution_state": {"const": "already_in_sync"}, "command_count": {"const": 0}, "accepted_count": {"const": 0}, "message_code": {"const": "confirmed"}, "message": {"const": "Результат подтверждён чтением состояния."}}},
+        {"required": ["execution_state", "retry_policy"], "properties": {"status": {"const": "pending"}, "reason": {"const": "none"}, "execution_state": {"const": "pending_dispatch"}, "command_count": {"const": 0}, "accepted_count": {"const": 0}, "retry_policy": {"const": "forbidden_after_dispatch"}, "message_code": {"const": "pending"}, "message": {"const": "Команда принята и ожидает подтверждения."}}},
+        {"required": ["execution_state", "retry_policy"], "properties": {"status": {"const": "pending"}, "reason": {"const": "none"}, "execution_state": {"const": "accepted_unverified"}, "command_count": {"const": 1}, "accepted_count": {"const": 1}, "retry_policy": {"const": "forbidden_after_dispatch"}, "message_code": {"const": "pending"}, "message": {"const": "Команда принята и ожидает подтверждения."}}},
+        {"required": ["execution_state", "retry_policy"], "properties": {"status": {"const": "failed"}, "reason": {"const": "command_failed"}, "execution_state": {"const": "dispatched_not_accepted"}, "command_count": {"const": 1}, "accepted_count": {"const": 0}, "retry_policy": {"const": "forbidden_after_dispatch"}, "message_code": {"const": "command_failed"}, "message": {"const": "Команда не подтверждена, требуется проверка устройства."}}},
+        {"not": {"required": ["execution_state"]}, "properties": {"status": {"const": "manual"}, "reason": {"const": "user_excluded"}, "command_count": {"const": 0}, "accepted_count": {"const": 0}, "message_code": {"const": "manual_excluded"}, "message": {"const": "Устройство исключено пользователем из автоматического контура."}}},
+        {"not": {"required": ["execution_state"]}, "properties": {"status": {"const": "manual"}, "reason": {"const": "external_off"}, "command_count": {"const": 0}, "accepted_count": {"const": 0}, "message_code": {"const": "external_off"}, "message": {"const": "Устройство выключено вручную и исключено из контура."}}},
+        {"not": {"required": ["execution_state"]}, "properties": {"status": {"const": "deferred"}, "reason": {"enum": ["device_unavailable", "state_stale"]}, "command_count": {"const": 0}, "accepted_count": {"const": 0}, "message_code": {"const": "deferred_offline"}, "message": {"const": "Цель сохранена и будет применена после восстановления связи."}}},
+        {"required": ["execution_state", "retry_policy"], "properties": {"status": {"const": "not_attempted"}, "reason": {"const": "configuration_error"}, "execution_state": {"const": "blocked_before_dispatch"}, "command_count": {"const": 0}, "accepted_count": {"const": 0}, "retry_policy": {"const": "allowed_pre_dispatch_only"}, "message_code": {"const": "configuration_error"}, "message": {"const": "Конфигурация устройства требует проверки."}}},
+        {"required": ["execution_state"], "properties": {"status": {"const": "not_attempted"}, "reason": {"const": "none"}, "execution_state": {"const": "superseded_by_newer_intent"}, "command_count": {"const": 0}, "accepted_count": {"const": 0}, "message_code": {"const": "superseded"}, "message": {"const": "Команда заменена более новой сохранённой целью."}}}
+      ]
+    }
+  },
+  "oneOf": [
+    {"properties": {"status": {"const": "pending"}, "accepted": {"const": true}, "confirmed": {"const": false}, "final": {"const": false}, "dispatch_state": {"enum": ["not_started", "started", "accepted"]}, "message_code": {"const": "pending"}, "message": {"const": "Восстановление ожидает подтверждения."}, "read_back": {"properties": {"matched": {"const": null}}}}},
+    {"properties": {"status": {"const": "partial"}, "accepted": {"const": true}, "confirmed": {"const": false}, "final": {"const": true}, "dispatch_state": {"enum": ["accepted", "mixed"]}, "retry_policy": {"const": "forbidden_after_dispatch"}, "message_code": {"const": "partial"}, "message": {"const": "Восстановление завершено частично."}}},
+    {"properties": {"status": {"const": "confirmed"}, "accepted": {"const": true}, "confirmed": {"const": true}, "final": {"const": true}, "dispatch_state": {"const": "accepted"}, "message_code": {"const": "confirmed"}, "message": {"const": "Восстановление подтверждено чтением состояния."}, "read_back": {"properties": {"attempted": {"const": true}, "matched": {"const": true}, "observed_at": {"type": "integer"}, "evidence": {"minProperties": 1}}}}},
+    {"properties": {"status": {"const": "failed"}, "accepted": {"const": false}, "confirmed": {"const": false}, "final": {"const": true}, "dispatch_state": {"enum": ["pre_dispatch_failed", "dispatched_not_accepted"]}, "message_code": {"const": "failed"}, "message": {"const": "Восстановление не подтверждено."}, "read_back": {"properties": {"matched": {"not": {"const": true}}}}}},
+    {"properties": {"status": {"const": "unknown"}, "accepted": {"const": true}, "confirmed": {"const": false}, "final": {"const": false}, "dispatch_state": {"enum": ["started", "unknown", "accepted_unverified"]}, "message_code": {"const": "unknown"}, "message": {"const": "Результат восстановления пока неизвестен."}, "read_back": {"properties": {"attempted": {"const": false}, "matched": {"const": null}}}}}
+  ],
+  "allOf": [
+    {"if": {"properties": {"final": {"const": true}}, "required": ["final"]}, "then": {"properties": {"outcomes": {"additionalProperties": {"$ref": "#/$defs/terminal_outcome"}}}}},
+    {"if": {"properties": {"final": {"const": false}}, "required": ["final"]}, "then": {"properties": {"outcomes": {"minProperties": 1, "not": {"additionalProperties": {"$ref": "#/$defs/terminal_outcome"}}}}}},
+    {"if": {"properties": {"request_snapshot": {"properties": {"request": {"required": ["device_ids"]}}, "required": ["request"]}}, "required": ["request_snapshot"]}, "then": {"properties": {"resolved_device_ids": {"minItems": 1}, "desired_snapshot": {"minProperties": 1}, "outcomes": {"minProperties": 1}}}},
+    {
+      "if": {
+        "properties": {
+          "status": {"not": {"const": "failed"}},
+          "outcomes": {
+            "minProperties": 1,
+            "additionalProperties": {
+              "required": ["status", "reason", "command_count", "accepted_count"],
+              "properties": {"status": {"enum": ["deferred", "manual", "not_attempted"]}, "command_count": {"const": 0}, "accepted_count": {"const": 0}}
+            }
+          }
+        },
+        "required": ["status", "outcomes"]
+      },
+      "then": {"properties": {"status": {"const": "partial"}, "accepted": {"const": true}, "confirmed": {"const": false}, "final": {"const": true}, "dispatch_state": {"const": "accepted"}, "retry_policy": {"const": "forbidden_after_dispatch"}, "read_back": {"properties": {"attempted": {"const": false}, "matched": {"const": null}, "observed_at": {"const": null}, "evidence": {"maxProperties": 0}}}}}
+    },
+    {"if": {"properties": {"resolved_device_ids": {"maxItems": 0}}, "required": ["resolved_device_ids"]}, "then": {"properties": {"status": {"const": "partial"}, "accepted": {"const": true}, "confirmed": {"const": false}, "final": {"const": true}, "dispatch_state": {"const": "accepted"}, "retry_policy": {"const": "forbidden_after_dispatch"}, "read_back": {"properties": {"attempted": {"const": false}, "matched": {"const": null}, "observed_at": {"const": null}, "evidence": {"maxProperties": 0}}}}}},
+    {"if": {"properties": {"status": {"const": "confirmed"}}, "required": ["status"]}, "then": {"properties": {"accepted": {"const": true}, "confirmed": {"const": true}, "final": {"const": true}, "dispatch_state": {"const": "accepted"}, "message_code": {"const": "confirmed"}, "message": {"const": "Восстановление подтверждено чтением состояния."}, "read_back": {"properties": {"attempted": {"const": true}, "matched": {"const": true}, "observed_at": {"type": "integer"}, "evidence": {"required": ["devices"]}}}, "outcomes": {"additionalProperties": {"properties": {"status": {"const": "confirmed"}, "reason": {"const": "none"}}}}}}},
+    {"if": {"properties": {"status": {"const": "pending"}}, "required": ["status"]}, "then": {"properties": {"confirmed": {"const": false}, "final": {"const": false}, "message_code": {"const": "pending"}, "message": {"const": "Восстановление ожидает подтверждения."}}}},
+    {"if": {"properties": {"status": {"const": "unknown"}}, "required": ["status"]}, "then": {"properties": {"accepted": {"const": true}, "confirmed": {"const": false}, "final": {"const": false}, "dispatch_state": {"enum": ["started", "unknown", "accepted_unverified"]}, "retry_policy": {"const": "forbidden_after_dispatch"}, "message_code": {"const": "unknown"}, "message": {"const": "Результат восстановления пока неизвестен."}}}},
+    {"if": {"properties": {"dispatch_state": {"const": "pre_dispatch_failed"}}, "required": ["dispatch_state"]}, "then": {"properties": {"status": {"const": "failed"}, "accepted": {"const": false}, "confirmed": {"const": false}, "final": {"const": true}, "retry_policy": {"const": "allowed_pre_dispatch_only"}}}},
+    {"if": {"properties": {"dispatch_state": {"const": "dispatched_not_accepted"}}, "required": ["dispatch_state"]}, "then": {"properties": {"status": {"const": "failed"}, "accepted": {"const": false}, "confirmed": {"const": false}, "final": {"const": true}, "retry_policy": {"const": "forbidden_after_dispatch"}}}},
+    {"if": {"properties": {"dispatch_state": {"const": "accepted_unverified"}}, "required": ["dispatch_state"]}, "then": {"properties": {"status": {"const": "unknown"}, "accepted": {"const": true}, "confirmed": {"const": false}, "final": {"const": false}, "retry_policy": {"const": "forbidden_after_dispatch"}}}},
+    {"if": {"properties": {"retry_policy": {"const": "allowed_pre_dispatch_only"}}, "required": ["retry_policy"]}, "then": {"properties": {"dispatch_state": {"const": "pre_dispatch_failed"}}}},
+    {"if": {"properties": {"accepted": {"const": false}}, "required": ["accepted"]}, "then": {"properties": {"confirmed": {"const": false}}}}
+  ]
+}

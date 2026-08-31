@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausmanhub.local/schemas/v1/ui-state.schema.json",
+  "title": "HausmanHub normalized UI state",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "state", "scope", "commandsAllowed", "message", "retryAction", "updatedAt", "dataAgeSeconds", "operationId", "reasonCode"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-ui-state"},
+        "version": {"const": 1}
+      }
+    },
+    "state": {"enum": ["loading", "stale", "offline", "pending", "confirmed", "failed", "disabled"]},
+    "scope": {"enum": ["screen", "slice", "command"]},
+    "commandsAllowed": {"type": "boolean"},
+    "message": {"type": "string", "minLength": 1, "maxLength": 500},
+    "retryAction": {"enum": ["none", "refresh", "reconnect", "retry", "reauthenticate", "update_client"]},
+    "updatedAt": {"type": "string", "format": "date-time"},
+    "dataAgeSeconds": {"type": ["integer", "null"], "minimum": 0, "maximum": 604800},
+    "operationId": {"type": ["string", "null"], "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._:-]+$"},
+    "reasonCode": {"type": ["string", "null"], "minLength": 1, "maxLength": 128, "pattern": "^[a-z][a-z0-9_]*$"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"state": {"const": "loading"}}, "required": ["state"]},
+      "then": {
+        "properties": {
+          "scope": {"enum": ["screen", "slice"]},
+          "commandsAllowed": {"const": false},
+          "retryAction": {"const": "none"},
+          "dataAgeSeconds": {"const": null},
+          "operationId": {"const": null},
+          "reasonCode": {"const": null}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"state": {"const": "stale"}}, "required": ["state"]},
+      "then": {
+        "properties": {
+          "scope": {"enum": ["screen", "slice"]},
+          "commandsAllowed": {"const": false},
+          "retryAction": {"const": "refresh"},
+          "dataAgeSeconds": {"type": "integer", "minimum": 1},
+          "operationId": {"const": null},
+          "reasonCode": {"const": "data_stale"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"state": {"const": "offline"}}, "required": ["state"]},
+      "then": {
+        "properties": {
+          "scope": {"enum": ["screen", "slice"]},
+          "commandsAllowed": {"const": false},
+          "retryAction": {"const": "reconnect"},
+          "dataAgeSeconds": {"type": ["integer", "null"]},
+          "operationId": {"const": null},
+          "reasonCode": {"const": "home_assistant_offline"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"state": {"const": "pending"}}, "required": ["state"]},
+      "then": {
+        "properties": {
+          "scope": {"const": "command"},
+          "commandsAllowed": {"const": false},
+          "retryAction": {"const": "none"},
+          "dataAgeSeconds": {"const": null},
+          "operationId": {"type": "string"},
+          "reasonCode": {"const": null}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"state": {"const": "confirmed"}}, "required": ["state"]},
+      "then": {
+        "properties": {
+          "scope": {"const": "command"},
+          "commandsAllowed": {"const": true},
+          "retryAction": {"const": "none"},
+          "dataAgeSeconds": {"const": null},
+          "operationId": {"type": "string"},
+          "reasonCode": {"const": null}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"state": {"const": "failed"}}, "required": ["state"]},
+      "then": {
+        "properties": {
+          "commandsAllowed": {"const": false},
+          "retryAction": {"enum": ["refresh", "reconnect", "retry", "reauthenticate", "update_client"]},
+          "dataAgeSeconds": {"const": null},
+          "reasonCode": {"type": "string"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"state": {"const": "disabled"}}, "required": ["state"]},
+      "then": {
+        "properties": {
+          "commandsAllowed": {"const": false},
+          "retryAction": {"enum": ["none", "reauthenticate", "update_client"]},
+          "dataAgeSeconds": {"const": null},
+          "operationId": {"const": null},
+          "reasonCode": {"type": "string"}
+        }
+      }
+    }
+  ]
+}

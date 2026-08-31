@@ -1,6 +1,8 @@
 {
   "correlation_id": "corr.tablet-temp-001",
   "request_id": "tablet-temp-001",
+  "expected_control_revision": 0,
+  "reliability_profile": "climate_reliability_v1",
   "contour_id": "climate",
   "room_id": "living",
   "action": "set",

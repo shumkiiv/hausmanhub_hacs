@@ -11,9 +11,15 @@ strict climate-call executor used by trial, managed ticks, and settings applicat
 from __future__ import annotations
 
 from datetime import timedelta
+import secrets
 from typing import TYPE_CHECKING
 
-from .application.configuration import ConfigurationViolation, effective_configuration
+from .application.configuration import (
+    ConfigurationViolation,
+    RELIABLE_SCOPE_INTEGRITY_INITIALIZED_FIELD,
+    RELIABLE_SCOPE_INTEGRITY_KEY_FIELD,
+    effective_configuration,
+)
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -32,6 +38,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _clear_restored_hausmanhub_records(hass, configured_entry_ids + (entry.entry_id,))
         return False
 
+    scope_integrity_key = entry.data.get(RELIABLE_SCOPE_INTEGRITY_KEY_FIELD)
+    if scope_integrity_key is None:
+        # This key detects corruption and partial writes across the two HA
+        # stores. It is not a defence against compromise of the HA process or
+        # its full configuration directory, where an attacker could replace
+        # both the key and the integration code.
+        scope_integrity_key = secrets.token_hex(32)
+        update_entry = getattr(hass.config_entries, "async_update_entry", None)
+        if callable(update_entry):
+            update_entry(
+                entry,
+                data={
+                    **entry.data,
+                    RELIABLE_SCOPE_INTEGRITY_KEY_FIELD: scope_integrity_key,
+                },
+            )
     try:
         configuration = effective_configuration(entry.data, entry.options)
     except ConfigurationViolation:
@@ -193,6 +215,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     domain_data[DATA_WATER_SAFETY] = water_safety
     entry.async_on_unload(water_safety.start())
     register_water_safety_api(hass)
+    from .climate_operation_storage import HomeAssistantClimateOperationStore
+    climate_operation_store = HomeAssistantClimateOperationStore(
+        hass,
+        entry.entry_id,
+        reliable_scope_integrity_key=scope_integrity_key,
+        allow_unsigned_migration=(
+            entry.data.get(RELIABLE_SCOPE_INTEGRITY_INITIALIZED_FIELD) is not True
+        ),
+    )
+    if entry.data.get(RELIABLE_SCOPE_INTEGRITY_INITIALIZED_FIELD) is not True:
+        await climate_operation_store.async_migrate_integrity()
+        update_entry = getattr(hass.config_entries, "async_update_entry", None)
+        if callable(update_entry):
+            update_entry(
+                entry,
+                data={
+                    **entry.data,
+                    RELIABLE_SCOPE_INTEGRITY_KEY_FIELD: scope_integrity_key,
+                    RELIABLE_SCOPE_INTEGRITY_INITIALIZED_FIELD: True,
+                },
+            )
     climate_runtime = ClimateRuntime(
         entry_id=entry.entry_id,
         configuration=configuration,
@@ -209,6 +252,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ha_area_assignment=HomeAssistantAreaAssignmentService(hass),
         ir_code_service=ir_code_service,
         local_now=dt_util.now,
+        direct_control_store=climate_operation_store,
     )
     ir_code_service.set_binding_validator(climate_runtime)
     await climate_runtime.async_start()
@@ -216,11 +260,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ClimateTabletService,
         ClimateTabletUnavailable,
     )
-    from .climate_operation_storage import HomeAssistantClimateOperationStore
-
     climate_tablet = ClimateTabletService(
         climate_runtime,
-        HomeAssistantClimateOperationStore(hass, entry.entry_id),
+        climate_operation_store,
         local_now=dt_util.now,
     )
     try:

@@ -14,7 +14,7 @@ the legacy builders produced for missing bridge facts: ``None``, ``unknown``,
 
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from datetime import datetime
 
 from ..domain.climate import (
@@ -741,6 +741,8 @@ def native_android_climate_snapshot(
     bridge_mode: ClimateControlMode,
     pending_room_ids: Collection[str] = (),
     manual_device_ids: Collection[str] = (),
+    manual_changed_at: Mapping[str, int] | None = None,
+    manual_reasons: Mapping[str, str] | None = None,
     local_now: datetime | None = None,
 ) -> dict[str, object]:
     """Build the fixed tablet contract from the native observation only."""
@@ -749,6 +751,13 @@ def native_android_climate_snapshot(
         raise ValueError("climate bridge mode must be approved")
     pending = frozenset(pending_room_ids)
     manual_devices = frozenset(manual_device_ids)
+    manual_times = manual_changed_at or {}
+    manual_reason_map = manual_reasons or {}
+    if any(
+        not isinstance(device_id, str) or type(value) is not int or value < 0
+        for device_id, value in manual_times.items()
+    ):
+        raise ValueError("manual climate timestamps are invalid")
     if any(registry.room(room_id) is None for room_id in pending):
         raise ValueError("pending climate rooms must be registered")
     if any(registry.device(device_id) is None for device_id in manual_devices):
@@ -780,6 +789,14 @@ def native_android_climate_snapshot(
                 "mode": (
                     "manual" if device.device_id in manual_devices else "automatic"
                 ),
+                **(
+                    {"participation_changed_at": manual_times.get(
+                        device.device_id, observation.observed_at
+                    )}
+                    if manual_changed_at is not None else {}
+                ),
+                **({"manual_reason": manual_reason_map[device.device_id]}
+                   if device.device_id in manual_reason_map else {}),
                 "control": {
                     "enabled": device_mode_allowed,
                     "actions": ["set_device_mode"] if device_mode_allowed else [],

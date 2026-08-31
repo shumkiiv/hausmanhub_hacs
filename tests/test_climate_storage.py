@@ -253,6 +253,138 @@ class CompleteClimateStorageRestartTest(unittest.IsolatedAsyncioTestCase):
             self.fake_store.backing["hausman_hub.climate_operations.entry_1"],
         )
 
+    async def test_operation_store_signs_direct_records_and_shared_revision(self) -> None:
+        from custom_components.hausman_hub.climate_operation_storage import (
+            HomeAssistantClimateOperationStore,
+        )
+
+        payload = {
+            "version": 6,
+            "records": [],
+            "recoveries": [],
+            "control_revision": 3,
+            "desired_intents": {},
+            "recovery_preflights": [],
+            "direct_control_records": [{"request_id": "hacs.climate.1"}],
+        }
+        store = HomeAssistantClimateOperationStore(
+            self.hass, "entry_signed", reliable_scope_integrity_key="1" * 64
+        )
+        await store.async_save(payload)
+        raw = self.fake_store.backing[
+            "hausman_hub.climate_operations.entry_signed"
+        ]
+        self.assertRegex(raw["storage_integrity_tag"], r"^[a-f0-9]{64}$")
+        self.assertEqual(payload, await store.async_load())
+
+        raw["control_revision"] = 2
+        with self.assertRaisesRegex(ValueError, "integrity"):
+            await store.async_load()
+
+        raw["version"] = 5
+        raw.pop("storage_integrity_tag", None)
+        with self.assertRaisesRegex(ValueError, "integrity"):
+            await store.async_load()
+
+    async def test_unsigned_operation_store_migrates_once_then_closes_downgrade(self) -> None:
+        from custom_components.hausman_hub.climate_operation_storage import (
+            HomeAssistantClimateOperationStore,
+        )
+
+        key = "2" * 64
+        storage_key = "hausman_hub.climate_operations.entry_migration"
+        self.fake_store.backing[storage_key] = {
+            "version": 2, "records": [], "recoveries": [],
+            "control_revision": 1, "desired_intents": {},
+        }
+        migrating = HomeAssistantClimateOperationStore(
+            self.hass, "entry_migration",
+            reliable_scope_integrity_key=key,
+            allow_unsigned_migration=True,
+        )
+        await migrating.async_migrate_integrity()
+        self.assertIn("storage_integrity_tag", self.fake_store.backing[storage_key])
+        resumed_migration = HomeAssistantClimateOperationStore(
+            self.hass, "entry_migration",
+            reliable_scope_integrity_key=key,
+            allow_unsigned_migration=True,
+        )
+        await resumed_migration.async_migrate_integrity()
+        strict = HomeAssistantClimateOperationStore(
+            self.hass, "entry_migration", reliable_scope_integrity_key=key
+        )
+        self.assertEqual(1, (await strict.async_load())["control_revision"])
+
+    async def test_tablet_then_hacs_direct_write_preserves_v6_and_revision(self) -> None:
+        from custom_components.hausman_hub.climate_operation_storage import (
+            HomeAssistantClimateOperationStore,
+        )
+
+        store = HomeAssistantClimateOperationStore(
+            self.hass, "entry_shared", reliable_scope_integrity_key="3" * 64
+        )
+        await store.async_save({
+            "version": 6, "records": [], "recoveries": [],
+            "control_revision": 1, "desired_intents": {},
+            "recovery_preflights": [],
+        })
+        old_signed_main = deepcopy(
+            self.fake_store.backing["hausman_hub.climate_operations.entry_shared"]
+        )
+        self.assertEqual(2, await store.async_reserve_control_revision(1))
+        await store.async_save_direct_control([{"request_id": "hacs.lower.21-5"}])
+
+        restarted = HomeAssistantClimateOperationStore(
+            self.hass, "entry_shared", reliable_scope_integrity_key="3" * 64
+        )
+        payload = await restarted.async_load()
+        self.assertEqual(6, payload["version"])
+        self.assertEqual(2, payload["control_revision"])
+        self.assertEqual(
+            [{"request_id": "hacs.lower.21-5"}],
+            await restarted.async_load_direct_control(),
+        )
+        self.fake_store.backing[
+            "hausman_hub.climate_operations.entry_shared"
+        ] = old_signed_main
+        with self.assertRaisesRegex(ValueError, "generation"):
+            await restarted.async_load()
+
+    async def test_tablet_service_reloads_after_hacs_direct_revision(self) -> None:
+        from custom_components.hausman_hub.application.climate_tablet import (
+            ClimateTabletService,
+        )
+        from custom_components.hausman_hub.climate_operation_storage import (
+            HomeAssistantClimateOperationStore,
+        )
+        from tests.test_climate_tablet import FakeRuntime, action_request, managed_home
+
+        key = "4" * 64
+        store = HomeAssistantClimateOperationStore(
+            self.hass, "entry_cross_writer", reliable_scope_integrity_key=key
+        )
+        runtime = FakeRuntime(managed_home())
+        runtime.home["rooms"][0]["devices"][0]["observed_at"] = 1_785_949_319_999
+        service = ClimateTabletService(
+            runtime, store,
+            operation_id_factory=lambda: "4" * 32,
+            now_ms=lambda: 1_785_949_320_000,
+        )
+        request = action_request(runtime.home["state_revision"], target=25.0)
+        request.update(
+            reliability_profile="climate_reliability_v1",
+            expected_control_revision=0,
+        )
+        await service.async_execute(request)
+        first_restart = ClimateTabletService(FakeRuntime(runtime.home), store)
+        await first_restart.async_load()
+
+        self.assertEqual(2, await store.async_reserve_control_revision(1))
+        await store.async_save_direct_control([{"request_id": "hacs.lower.21-5"}])
+        second_restart = ClimateTabletService(FakeRuntime(runtime.home), store)
+        await second_restart.async_load()
+        self.assertEqual(2, (await second_restart.async_snapshot())["control_revision"])
+
     async def test_storage_is_isolated_by_entry_and_keeps_schema_versions(self) -> None:
         registry_store, contour_store = self._stores("entry_1")
         other_registry_store, other_contour_store = self._stores("entry_2")

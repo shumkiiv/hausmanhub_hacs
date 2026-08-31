@@ -1,0 +1,120 @@
+{
+  "contract": {
+    "name": "hausman-hub-climate-operation",
+    "version": 1
+  },
+  "correlation_id": "corr.tablet.climate.superseded",
+  "operation_id": "9876543210abcdef9876543210abcdef",
+  "request_id": "tablet.climate.superseded",
+  "action": "set_room_target",
+  "action_parameters": {
+    "target_temperature": 23.5
+  },
+  "action_snapshot": {
+    "contract": {
+      "name": "hausman-hub-climate-action-request",
+      "version": 1
+    },
+    "reliability_profile": "climate_reliability_v1",
+    "request_id": "tablet.climate.superseded",
+    "correlation_id": "corr.tablet.climate.superseded",
+    "request_fingerprint": "8082295eed5eb91671b28cef6d6d4468c4f128d1671b27f9ee0e05f3a47bc1e8",
+    "action": "set_room_target",
+    "room_id": "living",
+    "expected_state_revision": 42,
+    "expected_control_revision": 4,
+    "parameters": {
+      "target_temperature": 23.5
+    },
+    "resolved_scope": {
+      "room_ids": [
+        "living"
+      ],
+      "device_ids": [
+        "living_ac"
+      ],
+      "devices_by_room": [
+        {
+          "room_id": "living",
+          "device_ids": [
+            "living_ac"
+          ]
+        }
+      ]
+    }
+  },
+  "room_id": "living",
+  "expected_state_revision": 42,
+  "expected_control_revision": 4,
+  "resulting_control_revision": 5,
+  "resulting_state_revision": null,
+  "status": "partial",
+  "accepted": true,
+  "confirmed": false,
+  "final": true,
+  "unfinished_device_count": 0,
+  "duplicate": true,
+  "reason": "operation_pending",
+  "message_code": "partial",
+  "message": "Цель заменена более новой сохранённой целью.",
+  "request_fingerprint": "8082295eed5eb91671b28cef6d6d4468c4f128d1671b27f9ee0e05f3a47bc1e8",
+  "confirmation_window_ms": 30000,
+  "intent": {
+    "status": "superseded_by_newer_intent",
+    "request_fingerprint": "8082295eed5eb91671b28cef6d6d4468c4f128d1671b27f9ee0e05f3a47bc1e8",
+    "control_revision": 5,
+    "scope_revision": 5,
+    "resolved_scope": {
+      "room_ids": [
+        "living"
+      ],
+      "device_ids": [
+        "living_ac"
+      ],
+      "devices_by_room": [
+        {
+          "room_id": "living",
+          "device_ids": [
+            "living_ac"
+          ]
+        }
+      ]
+    },
+    "scope_fingerprint": "8757e7c28045c101d56cc42b4a39cb334cc7448d5b73e44535366ec1d87625f7",
+    "superseded_by_operation_id": "0123456789abcdef0123456789abcdef",
+    "superseded_by_request_fingerprint": "a4dbbc4bff1b4fdc8d2f5df07d734e0cdfbff9cf0375721c4573fb4e231f99d6",
+    "desired_target_temperature": 23.5,
+    "desired_target_humidity": null
+  },
+  "outcomes": {
+    "rooms": {
+      "living": {
+        "status": "not_attempted",
+        "reason": "none",
+        "execution_state": "superseded_by_newer_intent",
+        "message_code": "superseded",
+        "message": "Команда заменена более новой сохранённой целью.",
+        "devices": {
+          "living_ac": {
+            "status": "not_attempted",
+            "command_count": 0,
+            "accepted_count": 0,
+            "reason": "none",
+            "execution_state": "superseded_by_newer_intent",
+            "message_code": "superseded",
+            "message": "Команда заменена более новой сохранённой целью."
+          }
+        }
+      }
+    }
+  },
+  "read_back": {
+    "attempted": false,
+    "matched": null,
+    "observed_at": null,
+    "evidence": {}
+  },
+  "created_at": 1785949320000,
+  "updated_at": 1785949321000,
+  "expires_at": 1785949380000
+}

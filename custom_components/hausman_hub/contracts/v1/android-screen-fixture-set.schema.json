@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausmanhub.local/schemas/v1/android-screen-fixture-set.schema.json",
+  "title": "HausmanHub Android production screen fixture set",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "fixtureSet",
+    "consumer",
+    "apiMajorVersion",
+    "screens"
+  ],
+  "properties": {
+    "fixtureSet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-android-production-screens"},
+        "version": {"const": 1}
+      }
+    },
+    "consumer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "build", "sourceCommit"],
+      "properties": {
+        "name": {"const": "universal-home-android"},
+        "version": {"type": "string", "pattern": "^1\\.[0-9]+\\.[0-9]+$"},
+        "build": {"type": "integer", "minimum": 1},
+        "sourceCommit": {"type": "string", "pattern": "^[0-9a-f]{7,40}$"}
+      }
+    },
+    "apiMajorVersion": {"const": 1},
+    "screens": {
+      "type": "array",
+      "minItems": 10,
+      "maxItems": 10,
+      "items": {"$ref": "#/$defs/screen"}
+    }
+  },
+  "$defs": {
+    "screen": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "screenId",
+        "sourceName",
+        "optionalCapabilities",
+        "documents"
+      ],
+      "properties": {
+        "screenId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "sourceName": {
+          "enum": [
+            "Dashboard",
+            "Lighting",
+            "Climate",
+            "Rooms",
+            "Media",
+            "Security",
+            "Devices",
+            "Energy",
+            "Automation",
+            "Settings"
+          ]
+        },
+        "optionalCapabilities": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}
+        },
+        "documents": {
+          "type": "array",
+          "minItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["role", "fixturePath"],
+            "properties": {
+              "role": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+              "fixturePath": {
+                "type": "string",
+                "pattern": "^fixtures/v1/[a-z0-9-]+\\.json$"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,200 @@
+{
+  "contract": {
+    "name": "hausman-hub-climate-operation",
+    "version": 1
+  },
+  "correlation_id": "corr.tablet.climate.0004",
+  "operation_id": "1234567890abcdef1234567890abcdef",
+  "request_id": "tablet.climate.0004",
+  "expected_state_revision": 51,
+  "expected_control_revision": 8,
+  "resulting_state_revision": 52,
+  "resulting_control_revision": 9,
+  "action": "set_home_targets",
+  "action_parameters": {
+    "target_temperature": 24,
+    "target_humidity": 45
+  },
+  "action_snapshot": {
+    "contract": {
+      "name": "hausman-hub-climate-action-request",
+      "version": 1
+    },
+    "reliability_profile": "climate_reliability_v1",
+    "request_id": "tablet.climate.0004",
+    "correlation_id": "corr.tablet.climate.0004",
+    "request_fingerprint": "c8a0bf43664f59b05f93775bc75a2fe8bd9bc793f3f31fd8bb5184af341db817",
+    "action": "set_home_targets",
+    "room_id": null,
+    "expected_state_revision": 51,
+    "expected_control_revision": 8,
+    "parameters": {
+      "target_temperature": 24,
+      "target_humidity": 45
+    },
+    "resolved_scope": {
+      "room_ids": [
+        "bedroom",
+        "living"
+      ],
+      "device_ids": [
+        "bedroom_ac",
+        "bedroom_humidifier",
+        "living_ac"
+      ],
+      "devices_by_room": [
+        {
+          "room_id": "bedroom",
+          "device_ids": [
+            "bedroom_ac",
+            "bedroom_humidifier"
+          ]
+        },
+        {
+          "room_id": "living",
+          "device_ids": [
+            "living_ac"
+          ]
+        }
+      ]
+    }
+  },
+  "room_id": null,
+  "status": "partial",
+  "accepted": true,
+  "confirmed": false,
+  "final": true,
+  "unfinished_device_count": 0,
+  "duplicate": true,
+  "reason": "device_unavailable",
+  "message_code": "partial",
+  "message": "Цель сохранена, часть устройств ожидает применения.",
+  "request_fingerprint": "c8a0bf43664f59b05f93775bc75a2fe8bd9bc793f3f31fd8bb5184af341db817",
+  "confirmation_window_ms": 30000,
+  "intent": {
+    "status": "saved_deferred_offline",
+    "request_fingerprint": "c8a0bf43664f59b05f93775bc75a2fe8bd9bc793f3f31fd8bb5184af341db817",
+    "control_revision": 9,
+    "scope_revision": 9,
+    "resolved_scope": {
+      "room_ids": [
+        "bedroom",
+        "living"
+      ],
+      "device_ids": [
+        "bedroom_ac",
+        "bedroom_humidifier",
+        "living_ac"
+      ],
+      "devices_by_room": [
+        {
+          "room_id": "bedroom",
+          "device_ids": [
+            "bedroom_ac",
+            "bedroom_humidifier"
+          ]
+        },
+        {
+          "room_id": "living",
+          "device_ids": [
+            "living_ac"
+          ]
+        }
+      ]
+    },
+    "scope_fingerprint": "c810027c7e6e3430cf1a6e276eec8ce11b7ed6619083c66f19a226345e961ca1",
+    "desired_target_temperature": 24,
+    "desired_target_humidity": 45
+  },
+  "outcomes": {
+    "rooms": {
+      "living": {
+        "status": "confirmed",
+        "reason": "none",
+        "execution_state": "applied",
+        "message_code": "confirmed",
+        "message": "Результат подтверждён чтением состояния.",
+        "devices": {
+          "living_ac": {
+            "status": "confirmed",
+            "command_count": 1,
+            "accepted_count": 1,
+            "reason": "none",
+            "execution_state": "applied",
+            "message_code": "confirmed",
+            "message": "Результат подтверждён чтением состояния.",
+            "evidence": {
+              "desired_target_temperature": 24,
+              "desired_target_humidity": 45,
+              "reported_target_temperature": 24,
+              "reported_target_humidity": 45,
+              "observed_actual": {
+                "desired_target_temperature": 24,
+                "reported_target_temperature": 24,
+                "desired_target_humidity": 45,
+                "reported_target_humidity": 45,
+                "desired_minimum_temperature": null,
+                "reported_minimum_temperature": null,
+                "desired_target_strategy": null,
+                "reported_target_strategy": null,
+                "desired_mode": null,
+                "reported_mode": null,
+                "desired_state": null,
+                "reported_state": null,
+                "desired_override_state": null,
+                "reported_override_state": null,
+                "desired_synchronization": null,
+                "reported_synchronization": null
+              },
+              "observed_at": 1786554005000,
+              "fresh": true,
+              "action": {
+                "request_fingerprint": "c8a0bf43664f59b05f93775bc75a2fe8bd9bc793f3f31fd8bb5184af341db817",
+                "action": "set_home_targets",
+                "parameters": {
+                  "target_temperature": 24,
+                  "target_humidity": 45
+                }
+              }
+            }
+          }
+        }
+      },
+      "bedroom": {
+        "status": "deferred",
+        "reason": "device_unavailable",
+        "message_code": "deferred_offline",
+        "message": "Цель сохранена и будет применена после восстановления связи.",
+        "devices": {
+          "bedroom_ac": {
+            "status": "deferred",
+            "command_count": 0,
+            "accepted_count": 0,
+            "reason": "device_unavailable",
+            "message_code": "deferred_offline",
+            "message": "Цель сохранена и будет применена после восстановления связи."
+          },
+          "bedroom_humidifier": {
+            "status": "deferred",
+            "command_count": 0,
+            "accepted_count": 0,
+            "reason": "device_unavailable",
+            "message_code": "deferred_offline",
+            "message": "Цель сохранена и будет применена после восстановления связи."
+          }
+        }
+      }
+    }
+  },
+  "read_back": {
+    "attempted": true,
+    "matched": false,
+    "observed_at": 1786554005000,
+    "evidence": {
+      "target_temperature": 24
+    }
+  },
+  "created_at": 1786554000000,
+  "updated_at": 1786554005000,
+  "expires_at": 1786554060000
+}

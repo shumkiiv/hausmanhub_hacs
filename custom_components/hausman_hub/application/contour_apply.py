@@ -54,6 +54,23 @@ class ContourApplyStatus(StrEnum):
     UNAVAILABLE = "unavailable"
 
 
+@dataclass(frozen=True, slots=True)
+class ContourApplyRequest:
+    """Validated public apply request.
+
+    Keeping negotiated reliability fields on the typed boundary prevents the
+    runtime from accidentally treating a legacy request as an enhanced one.
+    """
+
+    request_id: str
+    contour_id: str
+    room_ids: tuple[str, ...] | None
+    correlation_id: str | None
+    reliability_profile: str | None = None
+    expected_control_revision: int | None = None
+    schedule_profile: ClimateProfile | None = None
+
+
 class ClimateControlAction(StrEnum):
     """User-visible actions sharing one climate-control receipt."""
 
@@ -139,14 +156,19 @@ class ClimateControlContext:
 
     def as_payload(self) -> dict[str, object]:
         """Return one strict self-describing action block."""
-
-        return {
+        payload = {
             "code": self.action.value,
             "name": _ACTION_NAMES[self.action],
             "room_id": self.room_id,
-            "target_temperature": self.target_temperature,
+            "target_temperature": (
+                None if self.action is ClimateControlAction.RETURN_TO_SCHEDULE
+                else self.target_temperature
+            ),
             "profile": None if self.profile is None else self.profile.value,
         }
+        if self.action is ClimateControlAction.RETURN_TO_SCHEDULE:
+            payload["resulting_target_temperature"] = self.target_temperature
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -226,6 +248,11 @@ class ContourApplyReceipt:
     reasons: tuple[str, ...]
     created_at: int
     updated_at: int
+    enhanced: Mapping[str, object] | None = None
+    # Exact per-owner execution data is kept separate from aggregate counts.
+    # It is used by the reliability adapter to avoid claiming that a failed
+    # first leaf says anything about an independently attempted neighbour.
+    device_outcomes: Mapping[str, Mapping[str, object]] | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.context, ClimateControlContext):
@@ -259,7 +286,7 @@ class ContourApplyReceipt:
                 "Не удалось надёжно получить результат команды."
             ),
         }[self.status]
-        return {
+        payload = {
             "contract": {
                 "name": CLIMATE_CONTROL_RECEIPT_CONTRACT_NAME,
                 "version": CLIMATE_CONTROL_RECEIPT_CONTRACT_VERSION,
@@ -299,12 +326,25 @@ class ContourApplyReceipt:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
+        if self.enhanced is not None:
+            payload.update(_enhanced_payload(payload, self.enhanced))
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
 class _ContourApplyRecord:
-    plan: ContourApplyPlan
+    plan: ContourApplyPlan | "_RestoredContourApplyPlan"
     receipt: ContourApplyReceipt
+    # Public enhanced data is retained together with the frozen plan. It is
+    # never reconstructed from a later contour, which makes replay truthful.
+    enhanced: Mapping[str, object] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _RestoredContourApplyPlan:
+    """A receipt-only plan: eligible for replay, never for dispatch."""
+
+    fingerprint: str
 
 
 class _ContourApplyLedger:
@@ -353,6 +393,7 @@ class _ContourApplyLedger:
         plan: ContourApplyPlan,
         context: ClimateControlContext,
         correlation_id: str | None = None,
+        enhanced: Mapping[str, object] | None = None,
     ) -> _ContourApplyRecord:
         """Reserve idempotency before the first backend POST."""
 
@@ -396,8 +437,9 @@ class _ContourApplyLedger:
             ),
             created_at=now,
             updated_at=now,
+            enhanced=enhanced,
         )
-        record = _ContourApplyRecord(plan=plan, receipt=receipt)
+        record = _ContourApplyRecord(plan=plan, receipt=receipt, enhanced=enhanced)
         self._records[request_id] = record
         return record
 
@@ -431,6 +473,82 @@ class _ContourApplyLedger:
         self._records[request_id] = updated
         return updated
 
+    def by_operation(self, operation_id: str) -> _ContourApplyRecord | None:
+        """Return a frozen receipt for polling, without dispatching again."""
+
+        if not isinstance(operation_id, str) or _OPERATION_ID.fullmatch(operation_id) is None:
+            return None
+        return next(
+            (record for record in self._records.values()
+             if record.receipt.operation_id == operation_id),
+            None,
+        )
+
+    def by_request(self, request_id: str) -> _ContourApplyRecord | None:
+        return self._records.get(request_id)
+
+    def discard_unpersisted(self, request_id: str) -> None:
+        """Forget a record whose first durable save failed before dispatch."""
+
+        self._records.pop(request_id, None)
+
+    def serialized(self) -> list[dict[str, object]]:
+        """Return bounded public-safe records for restart recovery."""
+
+        return [
+            {"request_id": request_id, "fingerprint": record.plan.fingerprint,
+             "context": {"action": record.receipt.context.action.value,
+                         "room_id": record.receipt.context.room_id,
+                         "target_temperature": record.receipt.context.target_temperature,
+                         "profile": None if record.receipt.context.profile is None else record.receipt.context.profile.value},
+             "receipt": record.receipt.as_payload()}
+            for request_id, record in self._records.items()
+        ]
+
+    def restore(self, records: object) -> None:
+        """Restore terminal or pending receipts without making them dispatchable."""
+
+        if records is None:
+            return
+        if not isinstance(records, list) or len(records) > MAX_CONTOUR_APPLY_RECORDS:
+            raise ContourApplyViolation("stored direct control ledger is invalid")
+        restored: dict[str, _ContourApplyRecord] = {}
+        for item in records:
+            if not isinstance(item, Mapping) or set(item) != {"request_id", "fingerprint", "context", "receipt"}:
+                raise ContourApplyViolation("stored direct control record is invalid")
+            request_id, fingerprint, context_raw, payload = item["request_id"], item["fingerprint"], item["context"], item["receipt"]
+            if (not isinstance(request_id, str) or _REQUEST_ID.fullmatch(request_id) is None
+                    or not isinstance(fingerprint, str) or not re.fullmatch(r"[a-f0-9]{64}", fingerprint)
+                    or not isinstance(context_raw, Mapping) or not isinstance(payload, Mapping)):
+                raise ContourApplyViolation("stored direct control record is invalid")
+            try:
+                action = ClimateControlAction(context_raw.get("action"))
+                profile = context_raw.get("profile")
+                context = ClimateControlContext(action=action, room_id=context_raw.get("room_id"),
+                    target_temperature=context_raw.get("target_temperature"),
+                    profile=None if profile is None else ClimateProfile(profile))
+                receipt = _receipt_from_stored_payload(dict(payload), context)
+            except (TypeError, ValueError, KeyError) as error:
+                raise ContourApplyViolation("stored direct control record is invalid") from error
+            if receipt.request_id != request_id or receipt.operation_id in {
+                item.receipt.operation_id for item in restored.values()
+            }:
+                raise ContourApplyViolation("stored direct control record is duplicated")
+            plan = _RestoredContourApplyPlan(fingerprint)
+            restored[request_id] = _ContourApplyRecord(plan=plan, receipt=receipt, enhanced=receipt.enhanced)
+        self._records = restored
+
+    @property
+    def control_revision(self) -> int:
+        """Highest accepted negotiated revision restored from durable receipts."""
+
+        values = [
+            record.receipt.enhanced.get("resulting_control_revision", 0)
+            for record in self._records.values()
+            if record.receipt.enhanced is not None
+        ]
+        return max((value for value in values if type(value) is int), default=0)
+
     def _safe_now(self) -> int:
         value = self._now_ms()
         if type(value) is not int or value < 0:
@@ -440,7 +558,7 @@ class _ContourApplyLedger:
 
 def parse_contour_apply_request(
     payload: object,
-) -> tuple[str, str, tuple[str, ...] | None, str | None]:
+) -> ContourApplyRequest:
     """Require one explicit, idempotent confirmation from UI or Android.
 
     An optional ``room_ids`` scope limits the application to the listed
@@ -456,7 +574,8 @@ def parse_contour_apply_request(
         "contour_id",
         "confirm",
         "room_ids",
-        "correlation_id",
+        "correlation_id", "reliability_profile", "expected_control_revision",
+        "schedule_profile",
     }:
         raise ContourApplyViolation("contour apply request fields are invalid")
     request_id = payload.get("request_id")
@@ -473,9 +592,31 @@ def parse_contour_apply_request(
             correlation_id = validate_correlation_id(payload["correlation_id"])
         except CorrelationIdError as error:
             raise ContourApplyViolation("correlation id is invalid") from error
+    reliability_profile = payload.get("reliability_profile")
+    expected_control_revision = payload.get("expected_control_revision")
+    if reliability_profile is not None:
+        if reliability_profile != "climate_reliability_v1" or (
+            type(expected_control_revision) is not int
+            or expected_control_revision < 0
+            or expected_control_revision > 9007199254740991
+        ):
+            raise ContourApplyViolation("contour apply reliability request is invalid")
+    elif expected_control_revision is not None:
+        raise ContourApplyViolation("control revision requires reliability profile")
+    schedule_profile = payload.get("schedule_profile")
+    if schedule_profile is not None:
+        if reliability_profile is None:
+            raise ContourApplyViolation("schedule profile requires reliability profile")
+        try:
+            schedule_profile = ClimateProfile(schedule_profile)
+        except (TypeError, ValueError) as error:
+            raise ContourApplyViolation("schedule profile is invalid") from error
     room_ids = payload.get("room_ids")
     if room_ids is None:
-        return request_id, contour_id, None, correlation_id
+        return ContourApplyRequest(
+            request_id, contour_id, None, correlation_id, reliability_profile,
+            expected_control_revision, schedule_profile,
+        )
     if (
         not isinstance(room_ids, list)
         or not room_ids
@@ -487,7 +628,10 @@ def parse_contour_apply_request(
         or len(room_ids) != len(set(room_ids))
     ):
         raise ContourApplyViolation("contour apply room scope is invalid")
-    return request_id, contour_id, tuple(room_ids), correlation_id
+    return ContourApplyRequest(
+        request_id, contour_id, tuple(room_ids), correlation_id,
+        reliability_profile, expected_control_revision, schedule_profile,
+    )
 
 
 def build_contour_apply_plan(
@@ -663,4 +807,170 @@ def _same_number(left: object, right: object) -> bool:
         and not isinstance(right, bool)
         and isinstance(right, (int, float))
         and abs(float(left) - float(right)) < 0.01
+    )
+
+
+def _enhanced_payload(
+    payload: Mapping[str, object], metadata: Mapping[str, object],
+) -> dict[str, object]:
+    """Project the negotiated receipt from frozen per-leaf metadata."""
+
+    scope = metadata["resolved_scope"]
+    desired = metadata["desired_snapshot"]
+    fingerprint = metadata["request_fingerprint"]
+    expected = metadata["expected_control_revision"]
+    resulting = metadata["resulting_control_revision"]
+    action_parameters = metadata["parameters"]
+    action = payload["action"]
+    status = payload["status"]
+    confirmed = status == ContourApplyStatus.CONFIRMED.value
+    pending = status in {ContourApplyStatus.PENDING.value, ContourApplyStatus.PARTIAL.value}
+    ledger = metadata.get("leaf_ledger", {})
+    leaves: dict[str, dict[str, object]] = {}
+    rooms: dict[str, dict[str, object]] = {}
+    for row in scope["devices_by_room"]:  # type: ignore[index]
+        room_id = row["room_id"]  # type: ignore[index]
+        room_devices: dict[str, object] = {}
+        for device_id in row["device_ids"]:  # type: ignore[index]
+            actual = desired[device_id]  # type: ignore[index]
+            leaf_state = ledger.get(device_id) if isinstance(ledger, Mapping) else None
+            if leaf_state == "pending_dispatch":
+                leaf = {"status": "pending", "reason": "none", "execution_state": "pending_dispatch",
+                        "message_code": "pending",
+                        "message": "Команда принята и ожидает отправки.", "command_count": 0, "accepted_count": 0}
+            elif leaf_state == "started":
+                leaf = {"status": "failed", "reason": "command_failed", "execution_state": "dispatched_not_accepted",
+                        "retry_policy": "forbidden_after_dispatch", "message_code": "command_failed",
+                        "message": "Отправка была начата, результат требует проверки.", "command_count": 1, "accepted_count": 0}
+            elif leaf_state == "dispatched_not_accepted":
+                leaf = {"status": "failed", "reason": "command_failed", "execution_state": "dispatched_not_accepted",
+                        "retry_policy": "forbidden_after_dispatch", "message_code": "command_failed",
+                        "message": "Команда не была принята устройством.", "command_count": 1, "accepted_count": 0}
+            elif leaf_state == "accepted_unverified":
+                leaf = {"status": "pending", "reason": "none", "execution_state": "accepted_unverified",
+                        "retry_policy": "forbidden_after_dispatch", "message_code": "pending",
+                        "message": "Команда принята и ожидает чтения состояния.", "command_count": 1, "accepted_count": 1}
+            elif confirmed and payload["command_count"] == 0:
+                leaf = {
+                    "status": "confirmed", "reason": "none",
+                    "execution_state": "already_in_sync",
+                    "message_code": "confirmed",
+                    "message": "Устройство уже соответствует сохранённой цели.",
+                    "command_count": 0, "accepted_count": 0,
+                    "evidence": {
+                        "desired_target_temperature": actual["target_temperature"],
+                        "desired_target_humidity": actual["target_humidity"],
+                        "reported_target_temperature": actual["target_temperature"],
+                        "reported_target_humidity": actual["target_humidity"],
+                        "observed_actual": actual, "observed_at": payload["updated_at"], "fresh": True,
+                        "action": {"request_fingerprint": fingerprint, "action": action["code"], "parameters": action_parameters},
+                    },
+                }
+            elif confirmed:
+                leaf = {
+                    "status": "confirmed", "reason": "none", "execution_state": "applied",
+                    "message_code": "confirmed", "message": "Результат подтверждён чтением состояния.",
+                    "command_count": 1, "accepted_count": 1,
+                    "evidence": {
+                        "desired_target_temperature": actual["target_temperature"],
+                        "desired_target_humidity": actual["target_humidity"],
+                        "reported_target_temperature": actual["target_temperature"],
+                        "reported_target_humidity": actual["target_humidity"],
+                        "observed_actual": actual, "observed_at": payload["updated_at"], "fresh": True,
+                        "action": {"request_fingerprint": fingerprint, "action": action["code"], "parameters": action_parameters},
+                    },
+                }
+            elif pending:
+                leaf = {"status": "pending", "reason": "none", "execution_state": "accepted_unverified",
+                        "retry_policy": "forbidden_after_dispatch", "message_code": "pending",
+                        "message": "Команда принята и ожидает отправки.", "command_count": 1, "accepted_count": 1}
+            else:
+                leaf = {"status": "failed", "reason": "command_failed", "execution_state": "dispatched_not_accepted",
+                        "retry_policy": "forbidden_after_dispatch", "message_code": "command_failed",
+                        "message": "Команда не подтверждена, требуется проверка устройства.", "command_count": 1, "accepted_count": 0}
+            leaves[device_id] = leaf
+            room_devices[device_id] = leaf
+        if confirmed:
+            room_status = {"status": "confirmed", "reason": "none", "execution_state": "applied", "message_code": "confirmed", "message": "Результат подтверждён чтением состояния.", "devices": room_devices}
+        elif pending:
+            room_status = {"status": "pending", "reason": "none", "execution_state": "accepted_unverified", "message_code": "pending", "message": "Команда принята и ожидает отправки.", "devices": room_devices}
+        else:
+            room_status = {"status": "partial", "reason": "none", "message_code": "partial", "message": "Результаты устройств различаются.", "devices": room_devices}
+        rooms[room_id] = room_status
+    message_code = {"confirmed": "confirmed", "partial": "partial", "pending": "pending", "rejected": "rejected", "unavailable": "unavailable"}[status]  # type: ignore[index]
+    message = {"confirmed": "Результат подтверждён чтением состояния.", "partial": "Цель сохранена, часть устройств ожидает применения.", "pending": "Команда принята и ожидает подтверждения.", "rejected": "Команда отклонена.", "unavailable": "Результат команды пока недоступен."}[status]  # type: ignore[index]
+    return {
+        "duplicate": False, "action_snapshot": {"kind": metadata["kind"], "request_fingerprint": fingerprint,
+            "action": action["code"], "parameters": action_parameters, "resolved_scope": scope, "control_revision": expected},
+        "desired_snapshot": desired, "desired_snapshot_fingerprint": metadata["desired_snapshot_fingerprint"],
+        "expected_control_revision": expected, "resulting_control_revision": resulting,
+        "message_code": message_code, "message": message, "request_fingerprint": fingerprint,
+        "confirmation_window_ms": 8000, "final": not pending, "unfinished_device_count": 0 if confirmed else len(leaves),
+        "read_back": {"attempted": payload["accepted"], "matched": confirmed, "observed_at": payload["updated_at"] if payload["accepted"] else None,
+           "room_count": payload["room_count"], "confirmed_room_count": payload["confirmed_room_count"],
+           "evidence": _enhanced_evidence(action, payload)},
+        "intent": {"status": "saved_and_applied" if confirmed else ("saved_pending_confirmation" if pending else "unsaved_unavailable"),
+            "request_fingerprint": fingerprint, "control_revision": resulting, "scope_revision": resulting,
+            "scope_fingerprint": metadata["scope_fingerprint"], "resolved_scope": scope,
+            "desired_target_temperature": metadata["desired_target_temperature"], "desired_target_humidity": metadata["desired_target_humidity"]},
+        "outcomes": {"rooms": rooms},
+    }
+
+
+def _enhanced_evidence(action: Mapping[str, object], payload: Mapping[str, object]) -> dict[str, object]:
+    value: dict[str, object] = {"action_code": action["code"], "room_count": payload["room_count"], "confirmed_room_count": payload["confirmed_room_count"], "accepted_count": payload["accepted_count"]}
+    if action["room_id"] is not None:
+        value["room_id"] = action["room_id"]
+        value["target_temperature"] = action["target_temperature"]
+    if action["code"] == ClimateControlAction.RETURN_TO_SCHEDULE.value:
+        value["resulting_target_temperature"] = action["resulting_target_temperature"]
+    return value
+
+
+def _receipt_from_stored_payload(
+    payload: dict[str, object], context: ClimateControlContext,
+) -> ContourApplyReceipt:
+    """Validate the immutable public fields needed for restart-safe polling."""
+
+    status = ContourApplyStatus(payload["status"])
+    enhanced = None
+    if "action_snapshot" in payload:
+        action_snapshot = payload["action_snapshot"]
+        intent = payload["intent"]
+        if not isinstance(action_snapshot, Mapping) or not isinstance(intent, Mapping):
+            raise ValueError("enhanced receipt is invalid")
+        enhanced = {
+            "kind": action_snapshot["kind"], "request_fingerprint": action_snapshot["request_fingerprint"],
+            "parameters": dict(action_snapshot["parameters"]), "resolved_scope": dict(action_snapshot["resolved_scope"]),
+            "desired_snapshot": dict(payload["desired_snapshot"]),
+            "desired_snapshot_fingerprint": payload["desired_snapshot_fingerprint"],
+            "scope_fingerprint": intent["scope_fingerprint"],
+            "expected_control_revision": payload["expected_control_revision"],
+            "resulting_control_revision": payload["resulting_control_revision"],
+            "desired_target_temperature": intent["desired_target_temperature"],
+            "desired_target_humidity": intent["desired_target_humidity"],
+        }
+        outcomes = payload.get("outcomes")
+        rooms = outcomes.get("rooms") if isinstance(outcomes, Mapping) else None
+        leaf_ledger: dict[str, str] = {}
+        if isinstance(rooms, Mapping):
+            for room in rooms.values():
+                devices = room.get("devices") if isinstance(room, Mapping) else None
+                if not isinstance(devices, Mapping):
+                    continue
+                for device_id, leaf in devices.items():
+                    state = leaf.get("execution_state") if isinstance(leaf, Mapping) else None
+                    if isinstance(device_id, str) and state in {
+                        "pending_dispatch", "dispatched_not_accepted", "accepted_unverified", "applied"
+                    }:
+                        leaf_ledger[device_id] = state
+        enhanced["leaf_ledger"] = leaf_ledger
+    return ContourApplyReceipt(
+        operation_id=payload["operation_id"], request_id=payload["request_id"],
+        correlation_id=payload.get("correlation_id"), contour_id=payload["contour_id"], context=context,
+        status=status, room_count=payload["room_count"], command_count=payload["command_count"],
+        accepted_count=payload["accepted_count"], confirmed_room_count=payload["confirmed_room_count"],
+        temperature_changes=payload["changes"]["temperature"], strategy_changes=payload["changes"]["strategy"],
+        automatic_mode_changes=payload["changes"]["automatic_mode"], reasons=tuple(payload["reasons"]),
+        created_at=payload["created_at"], updated_at=payload["updated_at"], enhanced=enhanced,
     )

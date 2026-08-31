@@ -776,6 +776,71 @@ def with_room_climate_humidity(
         raise ContourRegistryViolation(str(error)) from error
 
 
+def with_room_climate_minimum_temperature(
+    registry: ContourRegistry, *, room_id: str, minimum_temperature: float
+) -> ContourRegistry:
+    """Persist one room floor without silently changing its saved targets."""
+    contour = registry.contour(CLIMATE_CONTOUR_ID)
+    if contour is None:
+        raise ContourRegistryViolation("climate contour is not configured")
+    try:
+        minimum = climate_target_temperature(minimum_temperature)
+        rooms = []
+        found = False
+        for room in contour.rooms:
+            if room.room_id != room_id:
+                rooms.append(room)
+                continue
+            found = True
+            rooms.append(replace(room, min_temperature=minimum))
+        if not found:
+            raise ContourRegistryViolation("climate room is not configured")
+        updated = replace(contour, rooms=tuple(rooms))
+        return ContourRegistry(contours=tuple(
+            updated if item.contour_id == CLIMATE_CONTOUR_ID else item
+            for item in registry.contours
+        ))
+    except (ContourViolation, TypeError, ValueError) as error:
+        raise ContourRegistryViolation(str(error)) from error
+
+
+def with_room_climate_target_strategy(
+    registry: ContourRegistry, *, room_id: str, target_strategy: str
+) -> ContourRegistry:
+    """Persist a typed strategy in the currently active room profile."""
+    contour = registry.contour(CLIMATE_CONTOUR_ID)
+    if contour is None:
+        raise ContourRegistryViolation("climate contour is not configured")
+    try:
+        strategy = ClimateStrategy(target_strategy)
+        rooms = []
+        found = False
+        for room in contour.rooms:
+            if room.room_id != room_id:
+                rooms.append(room)
+                continue
+            found = True
+            selected = ClimateComfortSettings(
+                target_temperature=room.profile_settings.target_temperature,
+                target_humidity=room.profile_settings.target_humidity,
+                strategy=strategy,
+            )
+            rooms.append(replace(
+                room,
+                day_profile=selected if room.active_profile is ClimateProfile.DAY else room.day_profile,
+                night_profile=selected if room.active_profile is ClimateProfile.NIGHT else room.night_profile,
+            ))
+        if not found:
+            raise ContourRegistryViolation("climate room is not configured")
+        updated = replace(contour, rooms=tuple(rooms))
+        return ContourRegistry(contours=tuple(
+            updated if item.contour_id == CLIMATE_CONTOUR_ID else item
+            for item in registry.contours
+        ))
+    except (ContourViolation, TypeError, ValueError) as error:
+        raise ContourRegistryViolation(str(error)) from error
+
+
 def with_climate_schedule(
     registry: ContourRegistry,
     *,

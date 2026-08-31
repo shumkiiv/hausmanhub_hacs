@@ -93,6 +93,9 @@ class ClimateHaEntityState:
     state: str
     attributes: Mapping[str, object]
     last_updated_ms: int
+    context_id: str | None = None
+    context_parent_id: str | None = None
+    context_user_id: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.entity_id, str) or "." not in self.entity_id:
@@ -109,6 +112,9 @@ class ClimateHaEntityState:
             raise ClimateHaObservationViolation(
                 "entity update time must be a non-negative integer"
             )
+        if any(value is not None and (not isinstance(value, str) or not value)
+               for value in (self.context_id, self.context_parent_id, self.context_user_id)):
+            raise ClimateHaObservationViolation("entity context is invalid")
 
 
 class ClimateHaStateView(Protocol):
@@ -782,6 +788,7 @@ def _device_observation(
         last_started_at=transitions[0],
         last_stopped_at=transitions[1],
         confirmed_short_cycle_count=transitions[2],
+        observed_at=state.last_updated_ms,
     )
 
 
@@ -816,6 +823,7 @@ def _passive_device_observation(
         kind=kind,
         availability=ClimateDeviceAvailability.AVAILABLE,
         activity=ClimateDeviceActivity.IDLE,
+        observed_at=state.last_updated_ms,
     )
 
 

@@ -155,6 +155,7 @@ def _service_calls(
                     else ClimateHaService.HUMIDIFIER_TURN_OFF
                 ),
                 entity_id=entity_id,
+                owner_device_id=device.device_id,
             ),
         )
     calls: list[ClimateHaServiceCall] = []
@@ -169,6 +170,7 @@ def _service_calls(
                 service=ClimateHaService.CLIMATE_SET_TEMPERATURE,
                 entity_id=entity_id,
                 temperature=CLIMATE_TRV_SAFE_OFF_TARGET,
+                owner_device_id=device.device_id,
             )
         )
         return tuple(calls)
@@ -178,6 +180,7 @@ def _service_calls(
                 service=ClimateHaService.CLIMATE_SET_HVAC_MODE,
                 entity_id=entity_id,
                 hvac_mode=ClimateHaHvacMode.OFF,
+                owner_device_id=device.device_id,
             )
         )
         return tuple(calls)
@@ -194,6 +197,7 @@ def _service_calls(
                     if plan.action is ClimateFinalDeviceAction.COOL
                     else ClimateHaHvacMode.HEAT
                 ),
+                owner_device_id=device.device_id,
             )
         )
     if plan.target_temperature is not None:
@@ -202,6 +206,7 @@ def _service_calls(
                 service=ClimateHaService.CLIMATE_SET_TEMPERATURE,
                 entity_id=entity_id,
                 temperature=plan.target_temperature,
+                owner_device_id=device.device_id,
             )
         )
     if plan.fan_mode is not None:
@@ -210,6 +215,7 @@ def _service_calls(
                 service=ClimateHaService.CLIMATE_SET_FAN_MODE,
                 entity_id=entity_id,
                 fan_mode=plan.fan_mode,
+                owner_device_id=device.device_id,
             )
         )
     if not calls:
@@ -304,5 +310,6 @@ def _remote_ir_service_call(
             command=(
                 code_data if code_data.startswith("b64:") else f"b64:{code_data}"
             ),
+            owner_device_id=device.device_id,
         ),
     )

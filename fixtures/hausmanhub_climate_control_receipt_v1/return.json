@@ -10,7 +10,8 @@
     "code": "return_to_schedule",
     "name": "Вернуть температуру по расписанию",
     "room_id": "living",
-    "target_temperature": 24.0,
+    "target_temperature": null,
+    "resulting_target_temperature": 24.0,
     "profile": null
   },
   "status": "confirmed",

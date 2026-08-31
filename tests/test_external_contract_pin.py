@@ -10,13 +10,19 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 PIN_PATH = REPOSITORY_ROOT / "hausmanhub-contracts.json"
 
 VENDORED_CONTRACT_HASHES = {
+    "custom_components/hausman_hub/contracts/v1/climate-reliability-semantic-rules.json": "1dbd75b40be1cfb5d1c23fce79819a047ba7a28556938782150dabeb88b6a6b2",
+    "custom_components/hausman_hub/contracts/v1/climate-room-recovery-receipt.schema.json": "d34b54a177fcc5c77cd48d28233f4f90e6fde07e17596cfdbe27bde4c56246fe",
+    "custom_components/hausman_hub/contracts/v1/climate-room-recovery-request.schema.json": "80b560590455e94dd944c2a6bbcbb00b47528e95ce8d036d320d485d156579e9",
+    "custom_components/hausman_hub/contracts/v1/climate-runtime.schema.json": "964fa93b11fcee6bd5c705a5631af1609c44bd0324f5b022bc37fb86c61fbaa3",
+    "fixtures/hausmanhub_climate_reliability_v1/climate-room-recovery-receipt.json": "b615ab5e034ca7fa97153b81a07c3bb062a0fe9d9224e94a3e6f080bab9c707e",
+    "fixtures/hausmanhub_climate_reliability_v1/climate-room-recovery-request.json": "ddd81c5f38871f247466ffed040153eb2c77610885c6dfcd6345b598a5172957",
     "custom_components/hausman_hub/contracts/v1/scenario-definition.schema.json": "60e93c0e3a970c684a9a95acd471ffd9664652e61fc5e29f5f21c7463285ea57",
     "custom_components/hausman_hub/contracts/v1/scenario-node-red-status.schema.json": "d1d219653a87c5d68834afd5bea6544924967d42a4053e6ea2269e0780766d6f",
     "custom_components/hausman_hub/contracts/v1/scenario-node-red-execution.schema.json": "1780fbeb06bc5777217e3a18059158354f28bce61cdf8aadab67e6a61ae1d597",
     "custom_components/hausman_hub/contracts/v1/scenario-node-red-source.schema.json": "4f281f11c55a235b78bb418977f948a06d4d1ba8b90b1fef4e389b3842e9f7ec",
     "custom_components/hausman_hub/contracts/v1/scenario-node-red-source-update-request.schema.json": "7712607bfe1e8cbe9a9287ea4812caed2ac2c47e93ff079458fea0a945a677a0",
     "custom_components/hausman_hub/contracts/v1/scenario-node-red-source-update-receipt.schema.json": "b57b3adcbd850af02c3c1112de9eef70fcf2e41483ae4c633b20d6db6dd33040",
-    "custom_components/hausman_hub/contracts/v1/api-capabilities.schema.json": "cb6266a7e09733cedda11a5d0e7d4219fd89650d34d8e686614b84dfb22e6eed",
+    "custom_components/hausman_hub/contracts/v1/api-capabilities.schema.json": "8a9fc97b9060604508707d904ea4aafe8aeaaaa898c7009afa8e24c466fa3a60",
     "custom_components/hausman_hub/contracts/v1/scenario-ai-draft-request.schema.json": "eeb72fc172f8730552fb174a1a0a55f58debeb9b5612068b0c2889190c37b9c1",
     "custom_components/hausman_hub/contracts/v1/scenario-ai-draft.schema.json": "585ec9c8e48c208452f4f80407feacfc04a00c8b580e04a63504fa049adedb5e",
     "custom_components/hausman_hub/contracts/v1/scenario-health.schema.json": "8a14e51bdb531dd674bede8e0e0618a2788df641dc23fc9da2e8af9b821890e4",
@@ -43,7 +49,7 @@ VENDORED_CONTRACT_HASHES = {
     "custom_components/hausman_hub/contracts/v1/energy-settings-document.schema.json": "b1aaeaa7b7e37cc6ac49ab2cad5fd65e0d9a27f329e810cb0c599ac606c0e670",
     "custom_components/hausman_hub/contracts/v1/energy-meters.schema.json": "21a38ca9e1079d727c57a2f7ada6b3ba9a62bcc5b8a4d6501eb68e66e571713d",
     "custom_components/hausman_hub/contracts/v1/room-settings.schema.json": "b4903c645f91b87e64a18f672acc72256d7f90716b29bc171dfe9c6c9a540623",
-    "custom_components/hausman_hub/contracts/v1/event-stream-message.schema.json": "a2cf68b8f7c6bcfd9f429615b9a460dadedbe01e656318b28c680c6bdccbde96",
+    "custom_components/hausman_hub/contracts/v1/event-stream-message.schema.json": "34a02ced6b53346c7cf72cfb3e7928ab642e68012dfe2279985634a70541aa82",
     "custom_components/hausman_hub/contracts/v1/water-meter.schema.json": "7fc02e2a271754638a080302e8f28850fdd3e0fdfcc530a272f832ec847dd20c",
     "fixtures/hausmanhub_energy_meter_v1/energy-meter.json": "bc942d4c6bda816c1d7189c4d3a206f1111bd0e80ab776b4eee006e8b7cc9fa3",
     "custom_components/hausman_hub/contracts/v1/scenario-list.schema.json": "5565576e1e2046610a246f8bae5c5a57c2db58c979d54865ccd0f79bf6682e38",
@@ -73,14 +79,14 @@ def test_external_contract_pin_is_explicit_and_canonical() -> None:
 
     assert pin == {
         "repository": "shumkiiv/hausmanhub-contracts",
-        "version": "0.63.0",
-        "commit": "283040b7295ae8da6576011d05cfe7125c354833",
+        "version": "0.64.3",
+        "commit": "2a30a92",
         "canonical": True,
         "role": "runtime-consumer",
     }
 
 
-def test_contract_0_63_0_vendored_files_match_canonical_hashes() -> None:
+def test_contract_0_64_3_vendored_files_match_canonical_hashes() -> None:
     for relative_path, expected_hash in VENDORED_CONTRACT_HASHES.items():
         payload = (REPOSITORY_ROOT / relative_path).read_bytes()
         assert hashlib.sha256(payload).hexdigest() == expected_hash, relative_path

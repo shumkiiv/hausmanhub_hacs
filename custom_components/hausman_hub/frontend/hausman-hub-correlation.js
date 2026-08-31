@@ -1,5 +1,5 @@
 /* Pinned snapshot of contracts inventory/correlation-surfaces.json */
-/* (hausman-hub-correlation-surfaces v1, contracts 0.35.0). Fail-closed: an */
+/* (hausman-hub-correlation-surfaces v1, contracts 0.64.3). Fail-closed: an */
 /* invalid client ID is rejected before the API call, an unknown command path */
 /* gets no injected field, and a legacy payload without the optional ID keeps */
 /* rendering. The ID is never an idempotency key, authorization or read-back. */
@@ -54,10 +54,26 @@ const SURFACES_SNAPSHOT = {
       "journalSource": "climate"
     },
     {
+      "operationId": "recoverHausmanHubClimateRoom",
+      "requestSchema": "schemas/v1/climate-room-recovery-request.schema.json",
+      "requestField": "correlation_id",
+      "receiptSchema": "schemas/v1/climate-room-recovery-receipt.schema.json",
+      "receiptField": "correlation_id",
+      "journalSource": "climate"
+    },
+    {
       "operationId": "executeHausmanHubDeviceAction",
       "requestSchema": "schemas/v1/device-action-request.schema.json",
       "requestField": "correlationId",
       "receiptSchema": "schemas/v1/device-action-receipt.schema.json",
+      "receiptField": "correlationId",
+      "journalSource": "device"
+    },
+    {
+      "operationId": "renameHausmanHubDeviceProperty",
+      "requestSchema": "schemas/v1/device-property-name-request.schema.json",
+      "requestField": "correlationId",
+      "receiptSchema": "schemas/v1/device-property-name-receipt.schema.json",
       "receiptField": "correlationId",
       "journalSource": "device"
     },
@@ -167,6 +183,7 @@ const COMMAND_PATH_OPERATIONS = [
   ["hausman_hub/v1/admin/panel/temporary-temperature", "setHausmanHubTemporaryTemperature"],
   ["hausman_hub/v1/climate/actions", "executeHausmanHubClimateAction"],
   ["hausman_hub/v1/device-actions", "executeHausmanHubDeviceAction"],
+  ["hausman_hub/v1/device-property-names", "renameHausmanHubDeviceProperty"],
   ["hausman_hub/v1/admin/device-maintenance", "maintainHausmanHubDevice"],
   ["hausman_hub/v1/admin/scenarios/run", "runHausmanHubScenario"],
   ["hausman_hub/v1/scenarios/upcoming/cancel", "cancelHausmanHubScenarioUpcoming"],
@@ -218,7 +235,7 @@ export function validateCorrelationSurfaces(raw) {
   if (raw.idPattern !== ID_PATTERN.source) return false;
   if (!corrIsObject(raw.generation) || !corrExactKeys(raw.generation, CORR_GENERATION_KEYS)) return false;
   if (!CORR_GENERATION_KEYS.every((key) => raw.generation[key] === true)) return false;
-  if (!Array.isArray(raw.commands) || raw.commands.length !== 10) return false;
+  if (!Array.isArray(raw.commands) || raw.commands.length !== 12) return false;
   if (!raw.commands.every(corrValidCommand)) return false;
   const operationIds = raw.commands.map((command) => command.operationId);
   if (new Set(operationIds).size !== operationIds.length) return false;

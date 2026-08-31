@@ -28,15 +28,31 @@
     "contract": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "version"],
+      "required": [
+        "name",
+        "version"
+      ],
       "properties": {
-        "name": {"const": "hausman-hub-climate-operation"},
-        "version": {"const": 1}
+        "name": {
+          "const": "hausman-hub-climate-operation"
+        },
+        "version": {
+          "const": 1
+        }
       }
     },
-    "correlation_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
-    "operation_id": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
-    "request_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"},
+    "correlation_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "operation_id": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{32}$"
+    },
+    "request_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"
+    },
     "action": {
       "enum": [
         "set_home_targets",
@@ -51,14 +67,368 @@
         "turn_room_off"
       ]
     },
-    "room_id": {"type": ["string", "null"], "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
-    "expected_state_revision": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
-    "resulting_state_revision": {"type": ["integer", "null"], "minimum": 0, "maximum": 9007199254740991},
-    "status": {"enum": ["pending", "confirmed", "partial", "rejected", "unavailable", "timed_out"]},
-    "accepted": {"type": "boolean"},
-    "confirmed": {"type": "boolean"},
-    "final": {"type": "boolean"},
-    "duplicate": {"type": "boolean"},
+    "action_parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "target_temperature": {
+          "type": "number"
+        },
+        "target_humidity": {
+          "type": "integer"
+        },
+        "minimum_temperature": {
+          "type": "number"
+        },
+        "target_strategy": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "device_id": {
+          "$ref": "#/$defs/stable_id"
+        }
+      }
+    },
+    "action_snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract",
+        "request_id",
+        "correlation_id",
+        "request_fingerprint",
+        "action",
+        "room_id",
+        "expected_state_revision",
+        "expected_control_revision",
+        "parameters",
+        "resolved_scope"
+      ],
+      "properties": {
+        "contract": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "version"
+          ],
+          "properties": {
+            "name": {
+              "const": "hausman-hub-climate-action-request"
+            },
+            "version": {
+              "const": 1
+            }
+          }
+        },
+        "reliability_profile": {
+          "const": "climate_reliability_v1"
+        },
+        "request_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"
+        },
+        "correlation_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "request_fingerprint": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "action": {
+          "enum": [
+            "set_home_targets",
+            "set_room_target",
+            "set_room_humidity_target",
+            "set_room_min_target",
+            "set_room_target_strategy",
+            "set_room_mode",
+            "set_device_mode",
+            "clear_room_override",
+            "turn_room_off",
+            "synchronize_home"
+          ]
+        },
+        "room_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+        },
+        "expected_state_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "expected_control_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "parameters": {
+          "type": "object"
+        },
+        "resolved_scope": {
+          "$ref": "#/$defs/intent/properties/resolved_scope"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "const": "set_home_targets"
+              }
+            },
+            "required": [
+              "action"
+            ]
+          },
+          "then": {
+            "properties": {
+              "room_id": {
+                "const": null
+              },
+              "parameters": {
+                "$ref": "#/$defs/home_targets"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "const": "synchronize_home"
+              }
+            },
+            "required": [
+              "action"
+            ]
+          },
+          "then": {
+            "properties": {
+              "room_id": {
+                "const": null
+              },
+              "parameters": {
+                "$ref": "#/$defs/empty"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "const": "set_room_target"
+              }
+            },
+            "required": [
+              "action"
+            ]
+          },
+          "then": {
+            "properties": {
+              "parameters": {
+                "$ref": "#/$defs/room_target"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "const": "clear_room_override"
+              }
+            },
+            "required": [
+              "action"
+            ]
+          },
+          "then": {
+            "properties": {
+              "parameters": {
+                "$ref": "#/$defs/empty"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "const": "set_room_mode"
+              }
+            },
+            "required": [
+              "action"
+            ]
+          },
+          "then": {
+            "properties": {
+              "parameters": {
+                "$ref": "#/$defs/room_mode"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "const": "set_device_mode"
+              }
+            },
+            "required": [
+              "action"
+            ]
+          },
+          "then": {
+            "properties": {
+              "parameters": {
+                "$ref": "#/$defs/device_mode"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "const": "set_room_humidity_target"
+              }
+            },
+            "required": [
+              "action"
+            ]
+          },
+          "then": {
+            "properties": {
+              "parameters": {
+                "$ref": "#/$defs/humidity_target"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "const": "set_room_min_target"
+              }
+            },
+            "required": [
+              "action"
+            ]
+          },
+          "then": {
+            "properties": {
+              "parameters": {
+                "$ref": "#/$defs/min_target"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "const": "set_room_target_strategy"
+              }
+            },
+            "required": [
+              "action"
+            ]
+          },
+          "then": {
+            "properties": {
+              "parameters": {
+                "$ref": "#/$defs/target_strategy"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "const": "turn_room_off"
+              }
+            },
+            "required": [
+              "action"
+            ]
+          },
+          "then": {
+            "properties": {
+              "parameters": {
+                "$ref": "#/$defs/empty"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "room_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+    },
+    "expected_state_revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "expected_control_revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "resulting_state_revision": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "resulting_control_revision": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "status": {
+      "enum": [
+        "pending",
+        "confirmed",
+        "partial",
+        "rejected",
+        "unavailable",
+        "timed_out"
+      ]
+    },
+    "accepted": {
+      "type": "boolean"
+    },
+    "confirmed": {
+      "type": "boolean"
+    },
+    "final": {
+      "type": "boolean"
+    },
+    "unfinished_device_count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4096
+    },
+    "duplicate": {
+      "type": "boolean"
+    },
     "reason": {
       "enum": [
         "none",
@@ -77,72 +447,1720 @@
         "internal_error"
       ]
     },
-    "message": {"type": "string", "minLength": 1, "maxLength": 500},
+    "message_code": {
+      "enum": [
+        "confirmed",
+        "partial",
+        "pending",
+        "rejected",
+        "unavailable",
+        "timed_out"
+      ]
+    },
+    "request_fingerprint": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "confirmation_window_ms": {
+      "type": "integer",
+      "minimum": 1000,
+      "maximum": 30000
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
     "read_back": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["attempted", "matched", "observed_at", "evidence"],
+      "required": [
+        "attempted",
+        "matched",
+        "observed_at",
+        "evidence"
+      ],
       "properties": {
-        "attempted": {"type": "boolean"},
-        "matched": {"type": ["boolean", "null"]},
-        "observed_at": {"type": ["integer", "null"], "minimum": 0},
-        "evidence": {"type": "object", "additionalProperties": true, "maxProperties": 16}
-      }
-    },
-    "created_at": {"type": "integer", "minimum": 0},
-    "updated_at": {"type": "integer", "minimum": 0},
-    "expires_at": {"type": "integer", "minimum": 0}
-  },
-  "allOf": [
-    {
-      "if": {"properties": {"status": {"const": "pending"}}, "required": ["status"]},
-      "then": {
-        "properties": {
-          "accepted": {"const": true},
-          "confirmed": {"const": false},
-          "final": {"const": false},
-          "reason": {"const": "none"},
-          "resulting_state_revision": {"const": null}
+        "attempted": {
+          "type": "boolean"
+        },
+        "matched": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "observed_at": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "evidence": {
+          "$ref": "#/$defs/read_back_evidence"
         }
       }
     },
+    "intent": {
+      "$ref": "#/$defs/intent"
+    },
+    "outcomes": {
+      "$ref": "#/$defs/outcomes"
+    },
+    "created_at": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "updated_at": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "expires_at": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "$defs": {
+    "stable_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+    },
+    "temperature": {
+      "type": "number",
+      "minimum": 18,
+      "maximum": 28,
+      "multipleOf": 0.5
+    },
+    "empty": {
+      "type": "object",
+      "additionalProperties": false,
+      "maxProperties": 0
+    },
+    "home_targets": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "target_temperature": {
+          "$ref": "#/$defs/temperature"
+        },
+        "target_humidity": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 70
+        }
+      }
+    },
+    "room_target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target_temperature"
+      ],
+      "properties": {
+        "target_temperature": {
+          "$ref": "#/$defs/temperature"
+        }
+      }
+    },
+    "room_mode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "mode": {
+          "enum": [
+            "automatic",
+            "manual"
+          ]
+        }
+      }
+    },
+    "device_mode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "device_id",
+        "mode"
+      ],
+      "properties": {
+        "device_id": {
+          "$ref": "#/$defs/stable_id"
+        },
+        "mode": {
+          "enum": [
+            "automatic",
+            "manual"
+          ]
+        }
+      }
+    },
+    "humidity_target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target_humidity"
+      ],
+      "properties": {
+        "target_humidity": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 70
+        }
+      }
+    },
+    "min_target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "minimum_temperature"
+      ],
+      "properties": {
+        "minimum_temperature": {
+          "$ref": "#/$defs/temperature"
+        }
+      }
+    },
+    "target_strategy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target_strategy"
+      ],
+      "properties": {
+        "target_strategy": {
+          "enum": [
+            "soft",
+            "normal",
+            "aggressive"
+          ]
+        }
+      }
+    },
+    "device_observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "desired_target_temperature",
+        "desired_target_humidity",
+        "reported_target_temperature",
+        "reported_target_humidity",
+        "observed_actual",
+        "observed_at",
+        "fresh"
+      ],
+      "properties": {
+        "desired_target_temperature": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 18,
+          "maximum": 28,
+          "multipleOf": 0.5
+        },
+        "desired_target_humidity": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 30,
+          "maximum": 70
+        },
+        "reported_target_temperature": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 5,
+          "maximum": 40
+        },
+        "reported_target_humidity": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100
+        },
+        "observed_actual": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "desired_target_temperature", "reported_target_temperature",
+            "desired_target_humidity", "reported_target_humidity",
+            "desired_minimum_temperature", "reported_minimum_temperature",
+            "desired_target_strategy", "reported_target_strategy",
+            "desired_mode", "reported_mode", "desired_state", "reported_state",
+            "desired_override_state", "reported_override_state",
+            "desired_synchronization", "reported_synchronization"
+          ],
+          "properties": {
+            "desired_target_temperature": {
+              "type": ["number", "null"]
+            },
+            "reported_target_temperature": {
+              "type": ["number", "null"]
+            },
+            "desired_target_humidity": {
+              "type": ["integer", "null"]
+            },
+            "reported_target_humidity": {
+              "type": ["integer", "null"]
+            },
+            "desired_mode": {
+              "enum": ["automatic", "manual", null]
+            },
+            "reported_mode": {
+              "enum": ["automatic", "manual", null]
+            },
+            "desired_state": {
+              "enum": ["off", null]
+            },
+            "reported_state": {
+              "enum": ["off", null]
+            },
+            "desired_override_state": {
+              "enum": ["cleared", null]
+            },
+            "reported_override_state": {
+              "enum": ["cleared", null]
+            },
+            "desired_minimum_temperature": {
+              "type": ["number", "null"]
+            },
+            "reported_minimum_temperature": {
+              "type": ["number", "null"]
+            },
+            "desired_target_strategy": {
+              "enum": ["soft", "normal", "aggressive", null]
+            },
+            "reported_target_strategy": {
+              "enum": ["soft", "normal", "aggressive", null]
+            },
+            "desired_synchronization": {
+              "enum": ["in_sync", null]
+            },
+            "reported_synchronization": {
+              "enum": ["in_sync", null]
+            }
+          }
+        },
+        "observed_at": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fresh": {
+          "const": true
+        },
+        "action": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "request_fingerprint",
+            "action",
+            "parameters"
+          ],
+          "properties": {
+            "request_fingerprint": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "action": {
+              "enum": [
+                "set_home_targets",
+                "set_room_target",
+                "set_room_humidity_target",
+                "set_room_min_target",
+                "set_room_target_strategy",
+                "set_room_mode",
+                "set_device_mode",
+                "clear_room_override",
+                "turn_room_off",
+                "synchronize_home"
+              ]
+            },
+            "parameters": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "target_temperature": {
+                  "type": "number"
+                },
+                "target_humidity": {
+                  "type": "integer"
+                },
+                "minimum_temperature": {
+                  "type": "number"
+                },
+                "target_strategy": {
+                  "type": "string"
+                },
+                "mode": {
+                  "type": "string"
+                },
+                "device_id": {
+                  "$ref": "#/$defs/stable_id"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "read_back_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "maxProperties": 16,
+      "properties": {
+        "target_temperature": {
+          "type": "number",
+          "minimum": 18,
+          "maximum": 28,
+          "multipleOf": 0.5
+        },
+        "target_humidity": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 70
+        },
+        "reported_target_temperature": {
+          "type": "number",
+          "minimum": 5,
+          "maximum": 40
+        },
+        "reported_target_humidity": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "minimum_temperature": {
+          "type": "number",
+          "minimum": 18,
+          "maximum": 28,
+          "multipleOf": 0.5
+        },
+        "target_strategy": {
+          "enum": [
+            "soft",
+            "normal",
+            "aggressive"
+          ]
+        },
+        "mode": {
+          "enum": [
+            "automatic",
+            "manual"
+          ]
+        },
+        "device_id": {
+          "$ref": "#/$defs/stable_id"
+        },
+        "override_cleared": {
+          "type": "boolean"
+        },
+        "synchronized": {
+          "type": "boolean"
+        },
+        "state": {
+          "enum": [
+            "working",
+            "idle",
+            "off",
+            "unavailable",
+            "unknown"
+          ]
+        },
+        "room_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 128
+        },
+        "confirmed_room_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 128
+        },
+        "accepted_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 384
+        }
+      }
+    },
+    "intent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "control_revision",
+        "desired_target_temperature",
+        "desired_target_humidity",
+        "resolved_scope",
+        "scope_revision",
+        "scope_fingerprint"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "saved_and_applied",
+            "saved_deferred_offline",
+            "saved_for_manual_device",
+            "saved_apply_failed",
+            "saved_pending_dispatch",
+            "saved_pending_confirmation",
+            "saved_blocked_before_dispatch",
+            "superseded_by_newer_intent",
+            "unsaved_rejected",
+            "unsaved_unavailable"
+          ]
+        },
+        "request_fingerprint": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "control_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "scope_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "scope_fingerprint": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "superseded_by_operation_id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{32}$"
+        },
+        "superseded_by_request_fingerprint": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "resolved_scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "room_ids",
+            "device_ids",
+            "devices_by_room"
+          ],
+          "properties": {
+            "room_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/stable_id"
+              },
+              "minItems": 1,
+              "maxItems": 128,
+              "uniqueItems": true
+            },
+            "device_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/stable_id"
+              },
+              "minItems": 1,
+              "maxItems": 4096,
+              "uniqueItems": true
+            },
+            "devices_by_room": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "room_id",
+                  "device_ids"
+                ],
+                "properties": {
+                  "room_id": {
+                    "$ref": "#/$defs/stable_id"
+                  },
+                  "device_ids": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/stable_id"
+                    },
+                    "minItems": 1,
+                    "maxItems": 32,
+                    "uniqueItems": true
+                  }
+                }
+              },
+              "minItems": 1,
+              "maxItems": 128
+            }
+          }
+        },
+        "desired_target_temperature": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 18,
+          "maximum": 28,
+          "multipleOf": 0.5
+        },
+        "desired_target_humidity": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 30,
+          "maximum": 70
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "superseded_by_newer_intent"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "required": [
+              "superseded_by_operation_id",
+              "superseded_by_request_fingerprint"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "not": {
+                  "const": "superseded_by_newer_intent"
+                }
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "superseded_by_operation_id"
+                  ]
+                },
+                {
+                  "required": [
+                    "superseded_by_request_fingerprint"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "message": {
+      "oneOf": [
+        {
+          "properties": {
+            "message_code": {
+              "const": "confirmed"
+            },
+            "message": {
+              "const": "Результат подтверждён чтением состояния."
+            }
+          }
+        },
+        {
+          "properties": {
+            "message_code": {
+              "const": "deferred_offline"
+            },
+            "message": {
+              "const": "Цель сохранена и будет применена после восстановления связи."
+            }
+          }
+        },
+        {
+          "properties": {
+            "message_code": {
+              "const": "manual_excluded"
+            },
+            "message": {
+              "const": "Устройство исключено пользователем из автоматического контура."
+            }
+          }
+        },
+        {
+          "properties": {
+            "message_code": {
+              "const": "external_off"
+            },
+            "message": {
+              "const": "Устройство выключено вручную и исключено из контура."
+            }
+          }
+        },
+        {
+          "properties": {
+            "message_code": {
+              "const": "command_failed"
+            },
+            "message": {
+              "const": "Команда не подтверждена, требуется проверка устройства."
+            }
+          }
+        },
+        {
+          "properties": {
+            "message_code": {
+              "const": "configuration_error"
+            },
+            "message": {
+              "const": "Конфигурация устройства требует проверки."
+            }
+          }
+        },
+        {
+          "properties": {
+            "message_code": {
+              "const": "superseded"
+            },
+            "message": {
+              "const": "Команда заменена более новой сохранённой целью."
+            }
+          }
+        }
+      ]
+    },
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "reason",
+        "message_code",
+        "message"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "confirmed",
+            "deferred",
+            "manual",
+            "failed",
+            "pending",
+            "not_attempted"
+          ]
+        },
+        "reason": {
+          "enum": [
+            "none",
+            "user_excluded",
+            "external_off",
+            "device_unavailable",
+            "state_stale",
+            "command_failed",
+            "configuration_error",
+            "room_not_in_canary"
+          ]
+        },
+        "execution_state": {
+          "enum": [
+            "applied",
+            "already_in_sync",
+            "pending_dispatch",
+            "accepted_unverified",
+            "accepted_timeout",
+            "blocked_before_dispatch",
+            "dispatched_not_accepted",
+            "superseded_by_newer_intent"
+          ]
+        },
+        "retry_policy": {
+          "enum": [
+            "forbidden_after_dispatch"
+          ]
+        },
+        "message_code": {
+          "enum": [
+            "confirmed",
+            "pending",
+            "deferred_offline",
+            "manual_excluded",
+            "external_off",
+            "command_failed",
+            "configuration_error",
+            "room_not_in_canary",
+            "superseded"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "command_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 384
+        },
+        "accepted_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 384
+        },
+        "evidence": {
+          "$ref": "#/$defs/device_observation"
+        },
+        "devices": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/stable_id"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/device_outcome"
+          },
+          "minProperties": 1,
+          "maxProperties": 32
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "status",
+            "reason",
+            "execution_state",
+            "retry_policy",
+            "message_code",
+            "message"
+          ],
+          "properties": {
+            "status": {"const": "failed"},
+            "reason": {"const": "command_failed"},
+            "execution_state": {"const": "accepted_timeout"},
+            "retry_policy": {"const": "forbidden_after_dispatch"},
+            "command_count": {"const": 1},
+            "accepted_count": {"const": 1},
+            "message_code": {"const": "command_failed"},
+            "message": {"const": "Команда не подтверждена, требуется проверка устройства."}
+          }
+        },
+        {
+          "required": [
+            "status",
+            "reason",
+            "execution_state",
+            "message_code",
+            "message"
+          ],
+          "properties": {
+            "status": {
+              "const": "confirmed"
+            },
+            "reason": {
+              "const": "none"
+            },
+            "execution_state": {
+              "enum": [
+                "applied",
+                "already_in_sync"
+              ]
+            },
+            "message_code": {
+              "const": "confirmed"
+            },
+            "message": {
+              "const": "Результат подтверждён чтением состояния."
+            }
+          }
+        },
+        {
+          "required": [
+            "status",
+            "reason",
+            "message_code",
+            "message"
+          ],
+          "not": {
+            "required": [
+              "execution_state"
+            ]
+          },
+          "properties": {
+            "status": {
+              "const": "manual"
+            },
+            "reason": {
+              "const": "user_excluded"
+            },
+            "message_code": {
+              "const": "manual_excluded"
+            },
+            "message": {
+              "const": "Устройство исключено пользователем из автоматического контура."
+            }
+          }
+        },
+        {
+          "required": [
+            "status",
+            "reason",
+            "message_code",
+            "message"
+          ],
+          "not": {
+            "required": [
+              "execution_state"
+            ]
+          },
+          "properties": {
+            "status": {
+              "const": "manual"
+            },
+            "reason": {
+              "const": "external_off"
+            },
+            "message_code": {
+              "const": "external_off"
+            },
+            "message": {
+              "const": "Устройство выключено вручную и исключено из контура."
+            }
+          }
+        },
+        {
+          "required": [
+            "status",
+            "reason",
+            "message_code",
+            "message"
+          ],
+          "not": {
+            "required": [
+              "execution_state"
+            ]
+          },
+          "properties": {
+            "status": {
+              "const": "deferred"
+            },
+            "reason": {
+              "enum": [
+                "device_unavailable",
+                "state_stale"
+              ]
+            },
+            "message_code": {
+              "const": "deferred_offline"
+            },
+            "message": {
+              "const": "Цель сохранена и будет применена после восстановления связи."
+            }
+          }
+        },
+        {
+          "required": [
+            "status",
+            "reason",
+            "execution_state",
+            "retry_policy",
+            "message_code",
+            "message"
+          ],
+          "properties": {
+            "status": {
+              "const": "failed"
+            },
+            "reason": {
+              "const": "command_failed"
+            },
+            "execution_state": {
+              "const": "dispatched_not_accepted"
+            },
+            "retry_policy": {
+              "const": "forbidden_after_dispatch"
+            },
+            "command_count": {
+              "const": 1
+            },
+            "accepted_count": {
+              "const": 0
+            },
+            "message_code": {
+              "const": "command_failed"
+            },
+            "message": {
+              "const": "Команда не подтверждена, требуется проверка устройства."
+            }
+          }
+        },
+        {
+          "required": [
+            "status",
+            "reason",
+            "message_code",
+            "message"
+          ],
+          "not": {
+            "required": [
+              "execution_state"
+            ]
+          },
+          "properties": {
+            "status": {
+              "const": "failed"
+            },
+            "reason": {
+              "const": "configuration_error"
+            },
+            "message_code": {
+              "const": "configuration_error"
+            },
+            "message": {
+              "const": "Конфигурация устройства требует проверки."
+            }
+          }
+        },
+        {
+          "required": [
+            "status",
+            "reason",
+            "execution_state",
+            "message_code",
+            "message"
+          ],
+          "properties": {
+            "status": {
+              "const": "not_attempted"
+            },
+            "reason": {
+              "const": "none"
+            },
+            "execution_state": {
+              "const": "superseded_by_newer_intent"
+            },
+            "message_code": {
+              "const": "superseded"
+            },
+            "message": {
+              "const": "Команда заменена более новой сохранённой целью."
+            }
+          }
+        },
+        {
+          "required": [
+            "status",
+            "reason",
+            "execution_state",
+            "message_code",
+            "message"
+          ],
+          "properties": {
+            "status": {
+              "const": "pending"
+            },
+            "reason": {
+              "const": "none"
+            },
+            "execution_state": {
+              "const": "pending_dispatch"
+            },
+            "message_code": {
+              "const": "pending"
+            },
+            "message": {
+              "const": "Команда принята и ожидает отправки."
+            }
+          }
+        },
+        {
+          "required": [
+            "status",
+            "reason",
+            "execution_state",
+            "retry_policy",
+            "message_code",
+            "message"
+          ],
+          "properties": {
+            "status": {
+              "const": "pending"
+            },
+            "reason": {
+              "const": "none"
+            },
+            "execution_state": {
+              "const": "accepted_unverified"
+            },
+            "retry_policy": {
+              "const": "forbidden_after_dispatch"
+            },
+            "command_count": {
+              "const": 1
+            },
+            "accepted_count": {
+              "const": 1
+            },
+            "message_code": {
+              "const": "pending"
+            },
+            "message": {
+              "const": "Команда принята и ожидает отправки."
+            }
+          }
+        },
+        {
+          "required": [
+            "status",
+            "reason",
+            "execution_state",
+            "message_code",
+            "message"
+          ],
+          "properties": {
+            "status": {
+              "const": "not_attempted"
+            },
+            "reason": {
+              "enum": [
+                "device_unavailable",
+                "state_stale",
+                "configuration_error"
+              ]
+            },
+            "execution_state": {
+              "const": "blocked_before_dispatch"
+            },
+            "message_code": {
+              "enum": [
+                "deferred_offline",
+                "configuration_error"
+              ]
+            }
+          }
+        },
+        {
+          "required": [
+            "status",
+            "reason",
+            "execution_state",
+            "message_code",
+            "message"
+          ],
+          "properties": {
+            "status": {
+              "const": "not_attempted"
+            },
+            "reason": {
+              "const": "room_not_in_canary"
+            },
+            "execution_state": {
+              "const": "blocked_before_dispatch"
+            },
+            "message_code": {
+              "const": "room_not_in_canary"
+            },
+            "message": {
+              "const": "Помещение не входит в текущую группу управления."
+            }
+          }
+        }
+      ]
+    },
+    "room_outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "reason",
+        "message_code",
+        "message",
+        "devices"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "confirmed",
+            "deferred",
+            "manual",
+            "failed",
+            "not_attempted",
+            "pending",
+            "partial"
+          ]
+        },
+        "reason": {
+          "enum": [
+            "none",
+            "user_excluded",
+            "external_off",
+            "device_unavailable",
+            "state_stale",
+            "command_failed",
+            "configuration_error",
+            "room_not_in_canary"
+          ]
+        },
+        "execution_state": {
+          "enum": [
+            "applied",
+            "already_in_sync",
+            "pending_dispatch",
+            "accepted_unverified",
+            "accepted_timeout",
+            "blocked_before_dispatch",
+            "superseded_by_newer_intent"
+          ]
+        },
+        "message_code": {
+          "enum": [
+            "confirmed",
+            "pending",
+            "partial",
+            "deferred_offline",
+            "manual_excluded",
+            "external_off",
+            "command_failed",
+            "configuration_error",
+            "room_not_in_canary",
+            "superseded"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "devices": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/stable_id"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/device_outcome"
+          },
+          "minProperties": 1,
+          "maxProperties": 32
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "partial"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "reason": {
+                "const": "none"
+              },
+              "message_code": {
+                "const": "partial"
+              },
+              "message": {
+                "const": "Результаты устройств различаются."
+              }
+            },
+            "not": {
+              "required": [
+                "execution_state"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "pending"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "reason": {
+                "const": "none"
+              },
+              "execution_state": {
+                "enum": [
+                  "pending_dispatch",
+                  "accepted_unverified"
+                ]
+              },
+              "message_code": {
+                "const": "pending"
+              },
+              "message": {
+                "const": "Команда принята и ожидает отправки."
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "reason": {
+                "const": "room_not_in_canary"
+              }
+            },
+            "required": [
+              "reason"
+            ]
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": "not_attempted"
+              },
+              "execution_state": {
+                "const": "blocked_before_dispatch"
+              },
+              "message_code": {
+                "const": "room_not_in_canary"
+              },
+              "message": {
+                "const": "Помещение не входит в текущую группу управления."
+              }
+            }
+          }
+        }
+      ]
+    },
+    "device_outcome": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/outcome"
+        },
+        {
+          "not": {
+            "required": [
+              "devices"
+            ]
+          }
+        }
+      ]
+    },
+    "confirmed_device_outcome": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/device_outcome"
+        },
+        {
+          "required": [
+            "evidence"
+          ],
+          "properties": {
+            "status": {
+              "const": "confirmed"
+            },
+            "reason": {
+              "const": "none"
+            }
+          }
+        }
+      ]
+    },
+    "confirmed_room_outcome": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/room_outcome"
+        },
+        {
+          "properties": {
+            "status": {
+              "const": "confirmed"
+            },
+            "reason": {
+              "const": "none"
+            },
+            "devices": {
+              "additionalProperties": {
+                "$ref": "#/$defs/confirmed_device_outcome"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "outcomes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rooms"
+      ],
+      "properties": {
+    "rooms": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/stable_id"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/room_outcome"
+          },
+          "minProperties": 1,
+          "maxProperties": 128
+        }
+      }
+    }
+  },
+  "allOf": [
     {
-      "if": {"properties": {"status": {"const": "confirmed"}}, "required": ["status"]},
+      "oneOf": [
+        {
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "message_code"
+                ]
+              },
+              {
+                "required": [
+                  "expected_control_revision"
+                ]
+              },
+              {
+                "required": [
+                  "resulting_control_revision"
+                ]
+              },
+              {
+                "required": [
+                  "intent"
+                ]
+              },
+              {
+                "required": [
+                  "outcomes"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "required": [
+            "message_code",
+            "expected_control_revision",
+            "resulting_control_revision",
+            "intent",
+            "outcomes",
+            "accepted",
+            "confirmed",
+            "unfinished_device_count",
+            "message",
+            "action_parameters",
+            "action_snapshot",
+            "request_fingerprint",
+            "confirmation_window_ms"
+          ],
+          "allOf": [
+            {
+              "oneOf": [
+                {
+                  "properties": {
+                    "status": {
+                      "const": "pending"
+                    },
+                    "message_code": {
+                      "const": "pending"
+                    },
+                    "message": {
+                      "const": "Команда принята и ожидает подтверждения."
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "status": {
+                      "const": "confirmed"
+                    },
+                    "message_code": {
+                      "const": "confirmed"
+                    },
+                    "message": {
+                      "const": "Результат подтверждён чтением состояния."
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "status": {
+                      "const": "partial"
+                    },
+                    "message_code": {
+                      "const": "partial"
+                    },
+                    "message": {
+                      "const": "Цель сохранена, часть устройств ожидает применения."
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "status": {
+                      "const": "partial"
+                    },
+                    "message_code": {
+                      "const": "partial"
+                    },
+                    "message": {
+                      "const": "Цель заменена более новой сохранённой целью."
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "status": {
+                      "const": "rejected"
+                    },
+                    "message_code": {
+                      "const": "rejected"
+                    },
+                    "message": {
+                      "const": "Команда отклонена."
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "status": {
+                      "const": "unavailable"
+                    },
+                    "message_code": {
+                      "const": "unavailable"
+                    },
+                    "message": {
+                      "const": "Результат команды пока недоступен."
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "status": {
+                      "const": "timed_out"
+                    },
+                    "message_code": {
+                      "const": "timed_out"
+                    },
+                    "message": {
+                      "const": "Время подтверждения истекло."
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "pending"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
       "then": {
         "properties": {
-          "accepted": {"const": true},
-          "confirmed": {"const": true},
-          "final": {"const": true},
-          "reason": {"const": "none"},
-          "resulting_state_revision": {"type": "integer"},
-          "read_back": {
-            "properties": {"attempted": {"const": true}, "matched": {"const": true}}
+          "accepted": {
+            "const": true
+          },
+          "confirmed": {
+            "const": false
+          },
+          "final": {
+            "const": false
+          },
+          "reason": {
+            "const": "none"
+          },
+          "resulting_state_revision": {
+            "const": null
           }
         }
       }
     },
     {
-      "if": {"properties": {"status": {"enum": ["rejected", "unavailable"]}}, "required": ["status"]},
+      "if": {
+        "properties": {
+          "status": {
+            "const": "confirmed"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
       "then": {
         "properties": {
-          "accepted": {"const": false},
-          "confirmed": {"const": false},
-          "final": {"const": true},
-          "reason": {"not": {"const": "none"}},
-          "resulting_state_revision": {"const": null}
+          "accepted": {
+            "const": true
+          },
+          "confirmed": {
+            "const": true
+          },
+          "final": {
+            "const": true
+          },
+          "reason": {
+            "const": "none"
+          },
+          "resulting_state_revision": {
+            "type": "integer"
+          },
+          "intent": {
+            "required": [
+              "status"
+            ],
+            "properties": {
+              "status": {
+                "const": "saved_and_applied"
+              }
+            }
+          },
+          "read_back": {
+            "required": [
+              "attempted",
+              "matched",
+              "observed_at",
+              "evidence"
+            ],
+            "properties": {
+              "attempted": {
+                "const": true
+              },
+              "matched": {
+                "const": true
+              },
+              "observed_at": {
+                "type": "integer"
+              },
+              "evidence": {
+                "minProperties": 1
+              }
+            }
+          },
+          "outcomes": {
+            "properties": {
+              "rooms": {
+                "additionalProperties": {
+                  "$ref": "#/$defs/confirmed_room_outcome"
+                }
+              }
+            }
+          }
         }
       }
     },
     {
-      "if": {"properties": {"status": {"enum": ["partial", "timed_out"]}}, "required": ["status"]},
+      "if": {
+        "properties": {
+          "status": {
+            "enum": [
+              "rejected",
+              "unavailable"
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
       "then": {
         "properties": {
-          "accepted": {"const": true},
-          "confirmed": {"const": false},
-          "final": {"const": true},
-          "reason": {"not": {"const": "none"}}
+          "accepted": {
+            "const": false
+          },
+          "confirmed": {
+            "const": false
+          },
+          "final": {
+            "const": true
+          },
+          "reason": {
+            "not": {
+              "const": "none"
+            }
+          },
+          "resulting_state_revision": {
+            "const": null
+          }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "timed_out"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "accepted": {
+            "const": true
+          },
+          "confirmed": {
+            "const": false
+          },
+          "final": {
+            "const": true
+          },
+          "reason": {
+            "not": {
+              "const": "none"
+            }
+          }
+        }
+      }
+    }
+    ,
+    {
+      "if": {"properties": {"status": {"const": "partial"}}, "required": ["status"]},
+      "then": {"properties": {"accepted": {"const": true}, "confirmed": {"const": false}}}
+    },
+    {
+      "if": {"required": ["unfinished_device_count"], "properties": {"unfinished_device_count": {"minimum": 1}}},
+      "then": {"properties": {"final": {"const": false}}}
+    },
+    {
+      "if": {"required": ["unfinished_device_count"], "properties": {"unfinished_device_count": {"const": 0}}},
+      "then": {"properties": {"final": {"const": true}}}
+    },
+    {
+      "if": {"required": ["action_snapshot"], "properties": {"action_snapshot": {"required": ["reliability_profile"], "properties": {"reliability_profile": {"const": "climate_reliability_v1"}}}}},
+      "then": {"properties": {
+        "created_at": {"maximum": 9007199254740991}, "updated_at": {"maximum": 9007199254740991}, "expires_at": {"maximum": 9007199254740991},
+        "expected_state_revision": {"maximum": 9007199254740991}, "expected_control_revision": {"maximum": 9007199254740991}, "resulting_control_revision": {"maximum": 9007199254740991}, "resulting_state_revision": {"maximum": 9007199254740991},
+        "confirmation_window_ms": {"maximum": 9007199254740991},
+        "read_back": {"properties": {"observed_at": {"maximum": 9007199254740991}}},
+        "intent": {"properties": {"control_revision": {"maximum": 9007199254740991}, "scope_revision": {"maximum": 9007199254740991}}},
+        "outcomes": {"properties": {"rooms": {"additionalProperties": {"properties": {"devices": {"additionalProperties": {"properties": {"command_count": {"maximum": 9007199254740991}, "accepted_count": {"maximum": 9007199254740991}, "evidence": {"properties": {"observed_at": {"maximum": 9007199254740991}}}}}}}}}}}
+      }}
     }
   ]
 }

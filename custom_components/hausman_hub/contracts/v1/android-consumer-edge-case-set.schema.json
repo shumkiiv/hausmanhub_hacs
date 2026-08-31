@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausmanhub.local/schemas/v1/android-consumer-edge-case-set.schema.json",
+  "title": "HausmanHub Android consumer edge-case set",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "apiMajorVersion", "cases"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-android-consumer-edge-cases"},
+        "version": {"const": 1}
+      }
+    },
+    "apiMajorVersion": {"const": 1},
+    "cases": {
+      "type": "array",
+      "minItems": 6,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/case"}
+    }
+  },
+  "$defs": {
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "category", "baseFixturePath", "operation", "pointer", "expectSchemaValid", "consumerPolicy", "rationale"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+        "category": {"enum": ["unknown_optional_field", "missing_optional_field", "null_value", "long_russian_text", "overlong_russian_text", "new_enum_value"]},
+        "baseFixturePath": {"type": "string", "pattern": "^fixtures/v1/[a-z0-9-]+\\.json$"},
+        "operation": {"enum": ["add", "remove", "replace"]},
+        "pointer": {"type": "string", "pattern": "^/(?:[^/~]|~[01])+(?:/(?:[^/~]|~[01])+)*$"},
+        "value": true,
+        "repeatValue": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["text", "count"],
+          "properties": {
+            "text": {"type": "string", "minLength": 1, "maxLength": 4},
+            "count": {"type": "integer", "minimum": 1, "maximum": 1000}
+          }
+        },
+        "expectSchemaValid": {"type": "boolean"},
+        "consumerPolicy": {"enum": ["ignore_unknown_optional", "use_optional_default", "preserve_null", "render_exact_unicode", "reject_overlong_text", "reject_unknown_enum"]},
+        "rationale": {"type": "string", "minLength": 16, "maxLength": 300}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"operation": {"const": "remove"}}, "required": ["operation"]},
+          "then": {"not": {"anyOf": [{"required": ["value"]}, {"required": ["repeatValue"]}]}},
+          "else": {"oneOf": [{"required": ["value"]}, {"required": ["repeatValue"]}]}
+        }
+      ]
+    }
+  }
+}

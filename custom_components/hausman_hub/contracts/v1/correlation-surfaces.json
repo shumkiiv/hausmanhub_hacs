@@ -44,10 +44,26 @@
       "journalSource": "climate"
     },
     {
+      "operationId": "recoverHausmanHubClimateRoom",
+      "requestSchema": "schemas/v1/climate-room-recovery-request.schema.json",
+      "requestField": "correlation_id",
+      "receiptSchema": "schemas/v1/climate-room-recovery-receipt.schema.json",
+      "receiptField": "correlation_id",
+      "journalSource": "climate"
+    },
+    {
       "operationId": "executeHausmanHubDeviceAction",
       "requestSchema": "schemas/v1/device-action-request.schema.json",
       "requestField": "correlationId",
       "receiptSchema": "schemas/v1/device-action-receipt.schema.json",
+      "receiptField": "correlationId",
+      "journalSource": "device"
+    },
+    {
+      "operationId": "renameHausmanHubDeviceProperty",
+      "requestSchema": "schemas/v1/device-property-name-request.schema.json",
+      "requestField": "correlationId",
+      "receiptSchema": "schemas/v1/device-property-name-receipt.schema.json",
       "receiptField": "correlationId",
       "journalSource": "device"
     },

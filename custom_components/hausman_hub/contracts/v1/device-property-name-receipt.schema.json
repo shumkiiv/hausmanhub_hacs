@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hausman.local/hausmanhub/contracts/v1/device-property-name-receipt.schema.json",
+  "title": "HausmanHub device property name receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "accepted", "confirmed", "status", "result", "entityId", "customName", "effectiveName", "physicalCommandsSent", "readBack"],
+  "properties": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "hausman-hub-device-property-name-receipt"},
+        "version": {"const": 1}
+      }
+    },
+    "correlationId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+    "accepted": {"const": true},
+    "confirmed": {"const": true},
+    "status": {"const": "confirmed"},
+    "result": {"enum": ["renamed", "reset"]},
+    "entityId": {"type": "string", "pattern": "^[a-z][a-z0-9_]*\\.[a-z0-9_]+$", "maxLength": 255},
+    "customName": {"type": ["string", "null"], "minLength": 1, "maxLength": 255, "pattern": "\\S"},
+    "effectiveName": {"type": "string", "minLength": 1, "maxLength": 255, "pattern": "\\S"},
+    "message": {"type": ["string", "null"], "maxLength": 500},
+    "physicalCommandsSent": {"const": false},
+    "readBack": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attempted", "matched", "observedAt"],
+      "properties": {
+        "attempted": {"const": true},
+        "matched": {"const": true},
+        "observedAt": {"type": "integer", "minimum": 0}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"result": {"const": "renamed"}}},
+      "then": {"properties": {"customName": {"type": "string", "minLength": 1}}}
+    },
+    {
+      "if": {"properties": {"result": {"const": "reset"}}},
+      "then": {"properties": {"customName": {"type": "null"}}}
+    }
+  ]
+}

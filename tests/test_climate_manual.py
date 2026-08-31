@@ -13,6 +13,8 @@ from custom_components.hausman_hub.application.climate_manual import (
     climate_manual_to_payload,
     effective_manual_room_ids,
     record_direct_wifi_commands,
+    reconcile_climate_manual_memory,
+    update_climate_manual_observation,
     update_direct_wifi_observation,
     with_climate_device_mode,
     with_climate_room_mode,
@@ -22,6 +24,7 @@ from custom_components.hausman_hub.application.climate_observations import (
 )
 from custom_components.hausman_hub.application.climate_runtime import ClimateRuntime
 from custom_components.hausman_hub.domain.climate import (
+    ClimateCapability,
     ClimateControlChannel,
     ClimateControlScope,
     ClimateDeviceKind,
@@ -43,6 +46,7 @@ from custom_components.hausman_hub.domain.climate_manual import (
 from custom_components.hausman_hub.domain.climate_observation import (
     ClimateDeviceActivity,
     ClimateDeviceAvailability,
+    ClimateObservationDeviceKind,
     ClimateRoomMode,
 )
 from custom_components.hausman_hub.domain.climate_bridge import ClimateControlMode
@@ -102,6 +106,101 @@ def _with_ac_activity(observation, activity: ClimateDeviceActivity):
 
 
 class ClimateManualTest(unittest.TestCase):
+    def test_hausman_context_provenance_round_trips_and_migrates_v3(self) -> None:
+        memory = empty_climate_manual_memory(updated_at=NOW)
+        persisted = replace(memory, hausman_context_ids=("hausman.ctx.1", "hausman.ctx.2"))
+        payload = climate_manual_to_payload(persisted)
+        self.assertEqual(persisted, climate_manual_from_payload(payload))
+        legacy = dict(payload)
+        legacy["version"] = 3
+        legacy.pop("hausman_context_ids")
+        migrated = climate_manual_from_payload(legacy)
+        self.assertEqual((), migrated.hausman_context_ids)
+
+    def test_hausman_context_provenance_is_bounded(self) -> None:
+        memory = empty_climate_manual_memory(updated_at=NOW)
+        with self.assertRaises(ClimateManualViolation):
+            replace(memory, hausman_context_ids=tuple(f"ctx.{item}" for item in range(129)))
+
+    def test_reconciliation_retains_registered_manual_attribution(self) -> None:
+        registry, _ = _inputs()
+        memory = with_climate_device_mode(
+            empty_climate_manual_memory(updated_at=NOW - 1), registry,
+            room_id="living", device_id="living_air_conditioner", manual=True,
+            updated_at=NOW,
+        )
+
+        reconciled, changed = reconcile_climate_manual_memory(
+            memory, registry, now_ms=NOW + 1,
+        )
+
+        self.assertFalse(changed)
+        self.assertEqual(memory.attributions, reconciled.attributions)
+
+    def test_explicit_external_context_excludes_every_actuator_kind_and_round_trips(self) -> None:
+        """Unattributed native facts remain harmless, explicit context is durable."""
+        registry, observation = _inputs()
+        kinds = (
+            ClimateDeviceKind.AIR_CONDITIONER,
+            ClimateDeviceKind.HUMIDIFIER,
+            ClimateDeviceKind.FLOOR_HEATING,
+            ClimateDeviceKind.RADIATOR_THERMOSTAT,
+        )
+        observed_kinds = (
+            ClimateObservationDeviceKind.AIR_CONDITIONER,
+            ClimateObservationDeviceKind.HUMIDIFIER,
+            ClimateObservationDeviceKind.FLOOR_HEATING,
+            ClimateObservationDeviceKind.RADIATOR_THERMOSTAT,
+        )
+        for kind, observed_kind in zip(kinds, observed_kinds, strict=True):
+            configured = replace(
+                registry,
+                devices=(
+                    replace(
+                        registry.devices[0], kind=kind, control_channel=None,
+                        capabilities=(
+                            ClimateCapability.POWER,
+                            ClimateCapability.TARGET_TEMPERATURE,
+                            ClimateCapability.TARGET_HUMIDITY,
+                            ClimateCapability.HVAC_MODE,
+                            ClimateCapability.FAN_MODE,
+                        ),
+                    ),
+                    *registry.devices[1:],
+                ),
+            )
+            active = replace(
+                observation,
+                devices=tuple(
+                    replace(item, kind=observed_kind, activity=ClimateDeviceActivity.RUNNING)
+                    if item.device_id == "living_air_conditioner" else item
+                    for item in observation.devices
+                ),
+            )
+            seeded, _ = update_climate_manual_observation(
+                empty_climate_manual_memory(updated_at=NOW - 1), configured, active,
+            )
+            stopped = replace(
+                active, observed_at=NOW + 1,
+                devices=tuple(
+                    replace(item, activity=ClimateDeviceActivity.STOPPED)
+                    if item.device_id == "living_air_conditioner" else item
+                    for item in active.devices
+                ),
+            )
+            untouched, _ = update_climate_manual_observation(seeded, configured, stopped)
+            if kind is not ClimateDeviceKind.AIR_CONDITIONER:
+                self.assertEqual((), untouched.manual_device_ids)
+            manual, changed = update_climate_manual_observation(
+                seeded, configured, stopped,
+                external_device_ids=("living_air_conditioner",),
+                context_by_device={"living_air_conditioner": {"context_id": "ha.ctx.1"}},
+            )
+            self.assertTrue(changed)
+            self.assertEqual(("living_air_conditioner",), manual.manual_device_ids)
+            self.assertEqual("ha_context", manual.attributions[0].source)
+            self.assertEqual(manual, climate_manual_from_payload(climate_manual_to_payload(manual)))
+
     def test_external_direct_wifi_off_enters_manual_mode(self) -> None:
         registry, observation = _inputs()
         active = _with_ac_activity(observation, ClimateDeviceActivity.COOLING)

@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shumkiiv/hausmanhub-contracts/schemas/v1/climate-room-recovery-legacy-terminal.schema.json",
+  "title": "HausmanHub legacy terminal climate recovery receipt v1",
+  "allOf": [
+    {"$ref": "climate-room-recovery-receipt.schema.json"},
+    {"required": ["final", "outcomes"], "properties": {"final": {"const": true}, "outcomes": {"additionalProperties": {"allOf": [{"not": {"required": ["status"], "properties": {"status": {"const": "pending"}}}}, {"not": {"required": ["execution_state"], "properties": {"execution_state": {"const": "accepted_unverified"}}}}]}}}}
+  ]
+}

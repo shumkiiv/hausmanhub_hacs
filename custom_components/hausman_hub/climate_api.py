@@ -26,7 +26,11 @@ from .application.ai_assistant_storage import ai_assistant_state_to_payload
 from .application.api_capabilities import (
     CAPABILITIES_PATH,
     CLIMATE_ACTION_PATH,
+    CLIMATE_CONTROL_OPERATION_PATH,
     CLIMATE_OPERATION_PATH,
+    CLIMATE_RECOVERY_OPERATION_PATH,
+    CLIMATE_RECOVERY_PREFLIGHT_PATH,
+    CLIMATE_RECOVERY_PATH,
     CLIMATE_RUNTIME_PATH,
     CONTOUR_APPLY_PATH,
     CONTOUR_APPLY_PREVIEW_PATH,
@@ -283,6 +287,10 @@ def register_climate_api(
             ClimateRuntimeView(hass),
             ClimateActionView(hass),
             ClimateOperationView(hass),
+            ClimateControlOperationView(hass),
+            ClimateRecoveryView(hass),
+            ClimateRecoveryPreflightView(hass),
+            ClimateRecoveryOperationView(hass),
             ContoursView(hass),
             ContourApplyPreviewView(hass),
             ContourApplyView(hass),
@@ -449,6 +457,8 @@ class ClimateCapabilitiesView(_ClimateView):
         climate_phase = "unavailable"
         climate_commands_enabled = False
         climate_runtime_available = climate_tablet is not None
+        climate_reliability_available = False
+        climate_recovery_available = False
         if climate_tablet is not None:
             try:
                 climate_snapshot = await climate_tablet.async_snapshot()
@@ -457,8 +467,25 @@ class ClimateCapabilitiesView(_ClimateView):
             else:
                 phase = climate_snapshot.get("phase")
                 climate_phase = phase if isinstance(phase, str) else "unavailable"
+                climate_runtime_available = climate_phase != "unavailable"
                 climate_commands_enabled = (
-                    climate_snapshot.get("commands_enabled") is True
+                    climate_runtime_available
+                    and climate_snapshot.get("commands_enabled") is True
+                )
+                # A successful snapshot proves both the initialized tablet
+                # service and its durable coordinator are usable. Discovery
+                # must not advertise negotiated receipts before that point.
+                climate_reliability_available = climate_runtime_available
+                # Route registration alone is not proof of a physical
+                # boundary. Once the initialized service exposes all three
+                # durable v2 operations, discovery may authorize its POST.
+                climate_recovery_available = climate_commands_enabled and all(
+                    callable(getattr(climate_tablet, method, None))
+                    for method in (
+                        "async_recovery_v2_preflight",
+                        "async_recover_room",
+                        "async_recovery_operation",
+                    )
                 )
         return self.json(
             api_capabilities_snapshot(
@@ -468,6 +495,8 @@ class ClimateCapabilitiesView(_ClimateView):
                 climate_runtime_available=climate_runtime_available,
                 climate_phase=climate_phase,
                 climate_commands_enabled=climate_commands_enabled,
+                climate_reliability_available=climate_reliability_available,
+                climate_recovery_available=climate_recovery_available,
                 scenario_ai_available=bool(
                     getattr(data.get("scenario_ai_draft_service"), "available", False)
                 ),
@@ -578,6 +607,121 @@ class ClimateOperationView(_ClimateView):
         except ClimateTabletUnavailable:
             return _api_error(self, "unavailable")
         return self.json(receipt, headers=NO_STORE_HEADERS)
+
+
+class ClimateControlOperationView(ClimateOperationView):
+    """Expose the durable control receipt through its negotiated alias."""
+
+    url = CLIMATE_CONTROL_OPERATION_PATH
+    name = "api:hausman_hub:climate_control_operation"
+
+    async def get(self, request: Any, operation_id: str) -> Any:
+        if (
+            getattr(request, "query_string", None) != ""
+            or getattr(request, "path", None)
+            != CLIMATE_CONTROL_OPERATION_PATH.replace("{operation_id}", operation_id)
+        ):
+            return _not_found(self)
+        if not _is_local_tablet_request(request):
+            return _forbidden(self)
+        runtime = self._runtime()
+        if runtime is None:
+            return _api_error(self, "unavailable")
+        try:
+            receipt = await runtime.async_control_operation(operation_id)
+        except ClimateRuntimeUnavailable:
+            return _api_error(self, "unavailable")
+        if receipt is None:
+            return _api_error(self, "climate_operation_not_found")
+        return self.json(receipt, headers=NO_STORE_HEADERS)
+
+
+class ClimateRecoveryView(_ClimateView):
+    """Fail closed until a runtime can prove an authoritative recovery scope."""
+
+    url = CLIMATE_RECOVERY_PATH
+    name = "api:hausman_hub:climate_recovery"
+
+    async def post(self, request: Any, room_id: str) -> Any:
+        if (
+            getattr(request, "query_string", None) != ""
+            or getattr(request, "path", None)
+            != CLIMATE_RECOVERY_PATH.replace("{room_id}", room_id)
+        ):
+            return _not_found(self)
+        if not _is_local_climate_control_request(request):
+            return _forbidden(self)
+        service = self._climate_tablet()
+        if service is None:
+            return _api_error(self, "unavailable")
+        try:
+            payload = await _request_json(request)
+            # v1 recovery is a terminal polling compatibility surface.  It
+            # cannot cross a new physical boundary after v2 negotiation.
+            if not isinstance(payload, Mapping) or payload.get("contract") != {
+                "name": "hausman-hub-climate-room-recovery-request-v2", "version": 2
+            }:
+                return _api_error(self, "action_unsupported")
+            receipt = await service.async_recover_room(room_id, payload)
+        except (ClimateTabletViolation, ValueError, TypeError) as error:
+            # Request decoding and leaf validation are intentionally a single
+            # public boundary.  Invalid JSON scalar/list values must not turn
+            # into an internal server error.
+            if not isinstance(error, ClimateTabletViolation):
+                return _api_error(self, "invalid_request")
+            return _api_error(self, error.code)
+        except ClimateTabletUnavailable:
+            return _api_error(self, "unavailable")
+        return self.json(receipt, status_code=HTTPStatus.ACCEPTED, headers=NO_STORE_HEADERS)
+
+
+class ClimateRecoveryPreflightView(_ClimateView):
+    """Read the authoritative v2 recovery scope without physical dispatch."""
+
+    url = CLIMATE_RECOVERY_PREFLIGHT_PATH
+    name = "api:hausman_hub:climate_recovery_preflight"
+
+    async def get(self, request: Any, room_id: str) -> Any:
+        if (getattr(request, "query_string", None) != "" or getattr(request, "path", None)
+                != CLIMATE_RECOVERY_PREFLIGHT_PATH.replace("{room_id}", room_id)):
+            return _not_found(self)
+        if not _is_local_climate_control_request(request):
+            return _forbidden(self)
+        service = self._climate_tablet()
+        if service is None:
+            return _api_error(self, "unavailable")
+        try:
+            return self.json(await service.async_recovery_v2_preflight(room_id), headers=NO_STORE_HEADERS)
+        except ClimateTabletViolation as error:
+            return _api_error(self, error.code)
+        except ClimateTabletUnavailable:
+            return _api_error(self, "unavailable")
+
+
+class ClimateRecoveryOperationView(_ClimateView):
+    """Read a durable recovery result without sending another command."""
+
+    url = CLIMATE_RECOVERY_OPERATION_PATH
+    name = "api:hausman_hub:climate_recovery_operation"
+
+    async def get(self, request: Any, operation_id: str) -> Any:
+        if (
+            getattr(request, "query_string", None) != ""
+            or getattr(request, "path", None)
+            != CLIMATE_RECOVERY_OPERATION_PATH.replace("{operation_id}", operation_id)
+        ):
+            return _not_found(self)
+        if not _is_local_climate_control_request(request):
+            return _forbidden(self)
+        service = self._climate_tablet()
+        if service is None:
+            return _api_error(self, "unavailable")
+        try:
+            return self.json(await service.async_recovery_operation(operation_id), headers=NO_STORE_HEADERS)
+        except ClimateTabletOperationNotFound:
+            return _api_error(self, "climate_operation_not_found")
+        except ClimateTabletUnavailable:
+            return _api_error(self, "unavailable")
 
 
 class DashboardView(_ClimateView):

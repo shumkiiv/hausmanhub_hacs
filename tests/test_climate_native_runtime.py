@@ -509,6 +509,7 @@ def native_application_runtime(
     scope: ClimateControlScope = ClimateControlScope.MANAGED,
     contours: ContourRegistry | None = None,
     registry: ClimateRegistry | None = None,
+    direct_control_store: object | None = None,
 ) -> ClimateRuntime:
     return ClimateRuntime(
         entry_id="entry",
@@ -519,6 +520,7 @@ def native_application_runtime(
         ha_state_view=view,
         now_ms=lambda: NOW,
         local_now=lambda: datetime(2026, 7, 19, 12, 0),
+        direct_control_store=direct_control_store,
     )
 
 

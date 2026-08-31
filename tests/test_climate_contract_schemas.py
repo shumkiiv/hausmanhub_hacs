@@ -237,10 +237,33 @@ class ClimateContractSchemasTest(unittest.TestCase):
     def test_generated_home_and_admin_import_match_their_contracts(self) -> None:
         capabilities = api_capabilities_snapshot()
         validator("v1/api-capabilities.schema.json").validate(capabilities)
-        self.assertEqual(
-            load_json(ROOT / "fixtures" / "hausmanhub_capabilities_v1" / "capabilities.json"),
-            capabilities,
+        legacy_capabilities = load_json(
+            ROOT / "fixtures" / "hausmanhub_capabilities_v1" / "capabilities.json"
         )
+        self.assertIsInstance(legacy_capabilities, dict)
+        self.assertEqual(
+            legacy_capabilities["capabilities"],
+            {
+                key: value
+                for key, value in capabilities["capabilities"].items()
+                if key not in {
+                    "climate_reliability_v1",
+                    "climate_room_recovery_v1",
+                    "climate_room_recovery_v2",
+                }
+            },
+        )
+        self.assertFalse(capabilities["capabilities"]["climate_reliability_v1"]["available"])
+        self.assertFalse(capabilities["capabilities"]["climate_reliability_v1"]["producer_guarantees_full_branch"])
+        self.assertFalse(capabilities["capabilities"]["climate_room_recovery_v1"]["available"])
+        ready = api_capabilities_snapshot(
+            climate_runtime_available=True, climate_phase="managed",
+            climate_commands_enabled=True, climate_reliability_available=False,
+            climate_recovery_available=False,
+        )
+        validator("v1/api-capabilities.schema.json").validate(ready)
+        self.assertFalse(ready["capabilities"]["climate_reliability_v1"]["available"])
+        self.assertFalse(ready["capabilities"]["climate_room_recovery_v1"]["available"])
 
         matrix = device_feature_matrix_snapshot()
         validator("v1/device-feature-matrix.schema.json").validate(matrix)

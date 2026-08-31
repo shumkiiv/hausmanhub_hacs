@@ -77,6 +77,10 @@ VOICE_GREETING_TEST_PATH = f"{VOICE_GREETING_PATH}/test"
 CLIMATE_RUNTIME_PATH = f"{API_BASE_PATH}/climate/runtime"
 CLIMATE_ACTION_PATH = f"{API_BASE_PATH}/climate/actions"
 CLIMATE_OPERATION_PATH = f"{API_BASE_PATH}/climate/operations/{{operation_id}}"
+CLIMATE_CONTROL_OPERATION_PATH = f"{API_BASE_PATH}/climate/control/operations/{{operation_id}}"
+CLIMATE_RECOVERY_PATH = f"{API_BASE_PATH}/climate/recovery/rooms/{{room_id}}"
+CLIMATE_RECOVERY_PREFLIGHT_PATH = f"{CLIMATE_RECOVERY_PATH}/preflight"
+CLIMATE_RECOVERY_OPERATION_PATH = f"{API_BASE_PATH}/climate/recovery/operations/{{operation_id}}"
 
 
 def api_capabilities_snapshot(
@@ -86,6 +90,8 @@ def api_capabilities_snapshot(
     climate_runtime_available: bool = False,
     climate_phase: str = "unavailable",
     climate_commands_enabled: bool = False,
+    climate_reliability_available: bool = False,
+    climate_recovery_available: bool = False,
     scenario_ai_available: bool = False,
 ) -> dict[str, object]:
     """Describe only the stable, local, tablet-facing HausmanHub API surface."""
@@ -245,6 +251,53 @@ def api_capabilities_snapshot(
                     "name": "hausman-hub-climate-operation",
                     "version": 1,
                 },
+            },
+            "climate_room_recovery_v1": {
+                # v1 recovery remains discoverable but terminal/read-only.
+                # Negotiated physical recovery moves to the v2 capability.
+                "available": False,
+                "path": CLIMATE_RECOVERY_PATH,
+                "method": "POST",
+                "operation_path_template": CLIMATE_RECOVERY_OPERATION_PATH,
+                "operation_method": "GET",
+                "request_contract": {"name": "hausman-hub-climate-room-recovery-request", "version": 1},
+                "receipt_contract": {"name": "hausman-hub-climate-room-recovery-receipt", "version": 1},
+                "durable_idempotency": True,
+                "receipt_polling": True,
+            },
+            "climate_room_recovery_v2": {
+                # The read-only preflight endpoint is deliberately visible
+                # before its durable POST ledger is ready.  Availability is
+                # the authority to dispatch, never merely route existence.
+                "available": climate_recovery_available,
+                "path": CLIMATE_RECOVERY_PATH,
+                "method": "POST",
+                "operation_path_template": CLIMATE_RECOVERY_OPERATION_PATH,
+                "operation_method": "GET",
+                "request_contract": {"name": "hausman-hub-climate-room-recovery-request-v2", "version": 2},
+                "receipt_contract": {"name": "hausman-hub-climate-room-recovery-receipt-v2", "version": 2},
+                "durable_idempotency": True,
+                "receipt_polling": True,
+                "preflight_path": CLIMATE_RECOVERY_PREFLIGHT_PATH,
+                "preflight_method": "GET",
+                "preflight_contract": {"name": "hausman-hub-climate-room-recovery-v2-preflight", "version": 2},
+            },
+            "climate_reliability_v1": {
+                "available": False,
+                "producer_guarantees_full_branch": False,
+                "runtime_path": CLIMATE_RUNTIME_PATH,
+                "runtime_method": "GET",
+                "runtime_contract": {"name": "hausman-hub-climate-runtime", "version": 1},
+                "action_path": CLIMATE_ACTION_PATH,
+                "action_method": "POST",
+                "operation_path_template": CLIMATE_OPERATION_PATH,
+                "operation_method": "GET",
+                "operation_receipt_contract": {"name": "hausman-hub-climate-operation", "version": 1},
+                "control_paths": [CONTOUR_APPLY_PATH, TEMPORARY_TEMPERATURE_PATH],
+                "control_method": "POST",
+                "control_operation_path_template": CLIMATE_CONTROL_OPERATION_PATH,
+                "control_operation_method": "GET",
+                "control_receipt_contract": {"name": CLIMATE_CONTROL_RECEIPT_CONTRACT_NAME, "version": 1},
             },
             "tablet_profile": {
                 "available": True,

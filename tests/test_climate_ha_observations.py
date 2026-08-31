@@ -284,12 +284,14 @@ class NativeHaObservationTest(unittest.TestCase):
         self.assertIs(ac.fan_mode, ClimateFanMode.LOW)
         self.assertIsNone(ac.quiet)
         self.assertIs(ac.physical_feedback, ClimatePhysicalFeedback.CONFIRMED)
+        self.assertEqual(NOW, ac.observed_at)
 
         temperature = observation.device("living_temperature")
         self.assertIsNotNone(temperature)
         assert temperature is not None
         self.assertIs(temperature.availability, ClimateDeviceAvailability.AVAILABLE)
         self.assertIs(temperature.activity, ClimateDeviceActivity.IDLE)
+        self.assertEqual(NOW, temperature.observed_at)
 
     def test_radiator_temperature_infers_central_heating_with_hysteresis(self) -> None:
         registry = replace(

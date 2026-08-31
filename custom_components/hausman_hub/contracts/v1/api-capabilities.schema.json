@@ -978,52 +978,108 @@
             "nodeRed": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["available", "statusPath", "statusMethod", "executionBackends", "physicalCommandsOwnedByHausman"],
+              "required": [
+                "available",
+                "statusPath",
+                "statusMethod",
+                "executionBackends",
+                "physicalCommandsOwnedByHausman"
+              ],
               "properties": {
-                "available": {"type": "boolean"},
-                "statusPath": {"const": "/api/hausman_hub/v1/scenarios/node-red"},
-                "statusMethod": {"const": "GET"},
-                "sourcePathTemplate": {"const": "/api/hausman_hub/v1/scenarios/node-red/source/{scenario_id}"},
-                "sourceReadMethod": {"const": "GET"},
-                "sourceWriteMethod": {"const": "PUT"},
+                "available": {
+                  "type": "boolean"
+                },
+                "statusPath": {
+                  "const": "/api/hausman_hub/v1/scenarios/node-red"
+                },
+                "statusMethod": {
+                  "const": "GET"
+                },
+                "sourcePathTemplate": {
+                  "const": "/api/hausman_hub/v1/scenarios/node-red/source/{scenario_id}"
+                },
+                "sourceReadMethod": {
+                  "const": "GET"
+                },
+                "sourceWriteMethod": {
+                  "const": "PUT"
+                },
                 "source_contract": {
                   "type": "object",
                   "additionalProperties": false,
-                  "required": ["name", "version"],
+                  "required": [
+                    "name",
+                    "version"
+                  ],
                   "properties": {
-                    "name": {"const": "hausman-hub-scenario-node-red-source"},
-                    "version": {"const": 1}
+                    "name": {
+                      "const": "hausman-hub-scenario-node-red-source"
+                    },
+                    "version": {
+                      "const": 1
+                    }
                   }
                 },
                 "source_update_request_contract": {
                   "type": "object",
                   "additionalProperties": false,
-                  "required": ["name", "version"],
+                  "required": [
+                    "name",
+                    "version"
+                  ],
                   "properties": {
-                    "name": {"const": "hausman-hub-scenario-node-red-source-update-request"},
-                    "version": {"const": 1}
+                    "name": {
+                      "const": "hausman-hub-scenario-node-red-source-update-request"
+                    },
+                    "version": {
+                      "const": 1
+                    }
                   }
                 },
                 "source_update_receipt_contract": {
                   "type": "object",
                   "additionalProperties": false,
-                  "required": ["name", "version"],
+                  "required": [
+                    "name",
+                    "version"
+                  ],
                   "properties": {
-                    "name": {"const": "hausman-hub-scenario-node-red-source-update-receipt"},
-                    "version": {"const": 1}
+                    "name": {
+                      "const": "hausman-hub-scenario-node-red-source-update-receipt"
+                    },
+                    "version": {
+                      "const": 1
+                    }
                   }
                 },
-                "maxSourceBytes": {"const": 65536},
-                "optimisticLocking": {"const": true},
-                "dryRunBeforeSave": {"const": true},
+                "maxSourceBytes": {
+                  "const": 65536
+                },
+                "optimisticLocking": {
+                  "const": true
+                },
+                "dryRunBeforeSave": {
+                  "const": true
+                },
                 "executionBackends": {
                   "type": "array",
-                  "prefixItems": [{"const": "hausman"}, {"const": "node_red"}],
+                  "prefixItems": [
+                    {
+                      "const": "hausman"
+                    },
+                    {
+                      "const": "node_red"
+                    }
+                  ],
                   "minItems": 2,
                   "maxItems": 2
                 },
-                "physicalCommandsOwnedByHausman": {"const": true},
-                "managedFlowStyle": {"const": "function"}
+                "physicalCommandsOwnedByHausman": {
+                  "const": true
+                },
+                "managedFlowStyle": {
+                  "const": "function"
+                }
               }
             },
             "definitionVersions": {
@@ -1158,7 +1214,233 @@
             "receipt_contract": {
               "$ref": "#/$defs/operation_receipt_contract"
             }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "available": {
+                    "const": false
+                  }
+                },
+                "required": [
+                  "available"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "phase": {
+                    "const": "unavailable"
+                  },
+                  "commands_enabled": {
+                    "const": false
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "phase": {
+                    "const": "unavailable"
+                  }
+                },
+                "required": [
+                  "phase"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "available": {
+                    "const": false
+                  },
+                  "commands_enabled": {
+                    "const": false
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "commands_enabled": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "commands_enabled"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "available": {
+                    "const": true
+                  },
+                  "phase": {
+                    "enum": [
+                      "canary",
+                      "managed"
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "climate_room_recovery_v1": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available",
+            "path",
+            "method",
+            "operation_path_template",
+            "operation_method",
+            "request_contract",
+            "receipt_contract",
+            "durable_idempotency",
+            "receipt_polling"
+          ],
+          "properties": {
+            "available": {
+              "const": false
+            },
+            "path": {
+              "const": "/api/hausman_hub/v1/climate/recovery/rooms/{room_id}"
+            },
+            "method": {
+              "const": "POST"
+            },
+            "operation_path_template": {
+              "const": "/api/hausman_hub/v1/climate/recovery/operations/{operation_id}"
+            },
+            "operation_method": {
+              "const": "GET"
+            },
+            "request_contract": {
+              "$ref": "#/$defs/climate_room_recovery_request_contract"
+            },
+            "receipt_contract": {
+              "$ref": "#/$defs/climate_room_recovery_receipt_contract"
+            },
+            "durable_idempotency": {
+              "const": true
+            },
+            "receipt_polling": {
+              "const": true
+            }
           }
+        },
+        "climate_reliability_v1": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available",
+            "producer_guarantees_full_branch",
+            "runtime_path",
+            "runtime_method",
+            "runtime_contract",
+            "action_path",
+            "action_method",
+            "operation_path_template",
+            "operation_method",
+            "operation_receipt_contract",
+            "control_paths",
+            "control_method",
+            "control_operation_path_template",
+            "control_operation_method",
+            "control_receipt_contract"
+          ],
+          "properties": {
+            "available": {
+              "type": "boolean"
+            },
+            "producer_guarantees_full_branch": {
+              "type": "boolean"
+            },
+            "runtime_path": {
+              "const": "/api/hausman_hub/v1/climate/runtime"
+            },
+            "runtime_method": {
+              "const": "GET"
+            },
+            "runtime_contract": {
+              "$ref": "#/$defs/climate_runtime_contract"
+            },
+            "action_path": {
+              "const": "/api/hausman_hub/v1/climate/actions"
+            },
+            "action_method": {
+              "const": "POST"
+            },
+            "operation_path_template": {
+              "const": "/api/hausman_hub/v1/climate/operations/{operation_id}"
+            },
+            "operation_method": {
+              "const": "GET"
+            },
+            "operation_receipt_contract": {
+              "$ref": "#/$defs/operation_receipt_contract"
+            },
+            "control_paths": {
+              "const": [
+                "/api/hausman_hub/v1/contours/apply",
+                "/api/hausman_hub/v1/contours/temporary-temperature"
+              ]
+            },
+            "control_method": {
+              "const": "POST"
+            },
+            "control_operation_path_template": {
+              "const": "/api/hausman_hub/v1/climate/control/operations/{operation_id}"
+            },
+            "control_operation_method": {
+              "const": "GET"
+            },
+            "control_receipt_contract": {
+              "$ref": "#/$defs/climate_control_receipt_contract"
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "available": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "available"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "producer_guarantees_full_branch": {
+                    "const": true
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "available": {
+                    "const": false
+                  }
+                },
+                "required": [
+                  "available"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "producer_guarantees_full_branch": {
+                    "const": false
+                  }
+                }
+              }
+            }
+          ]
         },
         "voice_greeting": {
           "type": "object",
@@ -1239,8 +1521,166 @@
               }
             }
           }
+        },
+        "climate_room_recovery_v2": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available",
+            "path",
+            "method",
+            "operation_path_template",
+            "operation_method",
+            "request_contract",
+            "receipt_contract",
+            "durable_idempotency",
+            "receipt_polling",
+            "preflight_path",
+            "preflight_method",
+            "preflight_contract"
+          ],
+          "properties": {
+            "available": {
+              "type": "boolean"
+            },
+            "path": {
+              "const": "/api/hausman_hub/v1/climate/recovery/rooms/{room_id}"
+            },
+            "method": {
+              "const": "POST"
+            },
+            "operation_path_template": {
+              "const": "/api/hausman_hub/v1/climate/recovery/operations/{operation_id}"
+            },
+            "operation_method": {
+              "const": "GET"
+            },
+            "request_contract": {
+              "$ref": "#/$defs/climate_room_recovery_request_v2_contract"
+            },
+            "receipt_contract": {
+              "$ref": "#/$defs/climate_room_recovery_receipt_v2_contract"
+            },
+            "durable_idempotency": {
+              "const": true
+            },
+            "receipt_polling": {
+              "const": true
+            },
+            "preflight_path": {
+              "const": "/api/hausman_hub/v1/climate/recovery/rooms/{room_id}/preflight"
+            },
+            "preflight_method": {
+              "const": "GET"
+            },
+            "preflight_contract": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "version"
+              ],
+              "properties": {
+                "name": {
+                  "const": "hausman-hub-climate-room-recovery-v2-preflight"
+                },
+                "version": {
+                  "const": 2
+                }
+              }
+            }
+          }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "climate_reliability_v1"
+            ],
+            "properties": {
+              "climate_reliability_v1": {
+                "required": [
+                  "available"
+                ],
+                "properties": {
+                  "available": {
+                    "const": true
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "climate_runtime"
+            ],
+            "properties": {
+              "climate_runtime": {
+                "required": [
+                  "available"
+                ],
+                "properties": {
+                  "available": {
+                    "const": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "climate_room_recovery_v2"
+            ],
+            "properties": {
+              "climate_room_recovery_v2": {
+                "required": [
+                  "available"
+                ],
+                "properties": {
+                  "available": {
+                    "const": true
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "climate_runtime",
+              "climate_reliability_v1"
+            ],
+            "properties": {
+              "climate_runtime": {
+                "required": [
+                  "available"
+                ],
+                "properties": {
+                  "available": {
+                    "const": true
+                  }
+                }
+              },
+              "climate_reliability_v1": {
+                "required": [
+                  "available",
+                  "producer_guarantees_full_branch"
+                ],
+                "properties": {
+                  "available": {
+                    "const": true
+                  },
+                  "producer_guarantees_full_branch": {
+                    "const": true
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
     }
   },
   "$defs": {
@@ -1717,6 +2157,70 @@
         },
         "version": {
           "const": 1
+        }
+      }
+    },
+    "climate_room_recovery_request_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "const": "hausman-hub-climate-room-recovery-request"
+        },
+        "version": {
+          "const": 1
+        }
+      }
+    },
+    "climate_room_recovery_receipt_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "const": "hausman-hub-climate-room-recovery-receipt"
+        },
+        "version": {
+          "const": 1
+        }
+      }
+    },
+    "climate_room_recovery_request_v2_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "const": "hausman-hub-climate-room-recovery-request-v2"
+        },
+        "version": {
+          "const": 2
+        }
+      }
+    },
+    "climate_room_recovery_receipt_v2_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "const": "hausman-hub-climate-room-recovery-receipt-v2"
+        },
+        "version": {
+          "const": 2
         }
       }
     }

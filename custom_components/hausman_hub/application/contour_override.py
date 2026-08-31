@@ -50,6 +50,8 @@ class TemporaryTemperatureRequest:
     room_id: str
     action: TemporaryTemperatureAction
     target_temperature: float | None
+    reliability_profile: str | None = None
+    expected_control_revision: int | None = None
 
 
 def parse_temporary_temperature_request(
@@ -71,7 +73,9 @@ def parse_temporary_temperature_request(
         "target_temperature",
         "confirm",
     }
-    if not required_fields <= set(payload) <= required_fields | {"correlation_id"}:
+    if not required_fields <= set(payload) <= required_fields | {
+        "correlation_id", "reliability_profile", "expected_control_revision"
+    }:
         raise TemporaryTemperatureViolation(
             "temporary temperature request fields are invalid"
         )
@@ -93,6 +97,17 @@ def parse_temporary_temperature_request(
             correlation_id = validate_correlation_id(payload["correlation_id"])
         except CorrelationIdError as error:
             raise TemporaryTemperatureViolation("correlation id is invalid") from error
+    reliability_profile = payload.get("reliability_profile")
+    expected_control_revision = payload.get("expected_control_revision")
+    if reliability_profile is not None:
+        if reliability_profile != "climate_reliability_v1" or (
+            type(expected_control_revision) is not int
+            or expected_control_revision < 0
+            or expected_control_revision > 9007199254740991
+        ):
+            raise TemporaryTemperatureViolation("temporary reliability request is invalid")
+    elif expected_control_revision is not None:
+        raise TemporaryTemperatureViolation("control revision requires reliability profile")
     try:
         action = TemporaryTemperatureAction(payload.get("action"))
     except (TypeError, ValueError) as error:
@@ -117,4 +132,6 @@ def parse_temporary_temperature_request(
         room_id=room_id,
         action=action,
         target_temperature=target_temperature,
+        reliability_profile=reliability_profile,
+        expected_control_revision=expected_control_revision,
     )

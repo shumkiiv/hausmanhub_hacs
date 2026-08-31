@@ -17,6 +17,7 @@ from ..domain.climate_ha_calls import (
     ClimateHaServiceCall,
 )
 from ..domain.climate_manual import (
+    ClimateManualAttribution,
     CLIMATE_MANUAL_MEMORY_VERSION,
     ClimateDirectWifiPhase,
     ClimateDirectWifiState,
@@ -40,9 +41,18 @@ _ACTIVE_ACTIVITIES = frozenset(
         ClimateDeviceActivity.IDLE,
         ClimateDeviceActivity.COOLING,
         ClimateDeviceActivity.HEATING,
+        ClimateDeviceActivity.HUMIDIFYING,
     }
 )
 DIRECT_WIFI_COMMAND_ATTRIBUTION_MS = 5 * 60 * 1000
+_MANUAL_OBSERVATION_KINDS = frozenset(
+    {
+        ClimateDeviceKind.AIR_CONDITIONER,
+        ClimateDeviceKind.HUMIDIFIER,
+        ClimateDeviceKind.FLOOR_HEATING,
+        ClimateDeviceKind.RADIATOR_THERMOSTAT,
+    }
+)
 
 
 def reconcile_climate_manual_memory(
@@ -61,11 +71,10 @@ def reconcile_climate_manual_memory(
     if memory.updated_at > now_ms:
         return empty_climate_manual_memory(updated_at=now_ms), True
     rooms = {room.room_id for room in registry.rooms}
-    direct = {
+    observed_devices = {
         device.device_id: device
         for device in registry.devices
-        if device.kind is ClimateDeviceKind.AIR_CONDITIONER
-        and device.control_channel is ClimateControlChannel.DIRECT_WIFI
+        if device.kind in _MANUAL_OBSERVATION_KINDS
     }
     manual_room_ids = tuple(
         room.room_id for room in registry.rooms if room.room_id in memory.manual_room_ids
@@ -79,17 +88,24 @@ def reconcile_climate_manual_memory(
         state
         for device in registry.devices
         if (state := memory.device(device.device_id)) is not None
-        and (configured := direct.get(state.device_id)) is not None
+        and (configured := observed_devices.get(state.device_id)) is not None
         and configured.room_id == state.room_id
         and state.room_id in rooms
         and (state.commanded_at is None or state.commanded_at <= now_ms)
         and state.observed_at <= now_ms
+    )
+    # Attribution is an ownership fact, not a direct-Wi-Fi observation. Do
+    # not silently discard a valid manual exclusion merely because the device
+    # has no direct-Wi-Fi state row.
+    attributions = tuple(
+        item for item in memory.attributions if item.device_id in observed_devices
     )
     updated = ClimateManualMemory(
         updated_at=memory.updated_at,
         manual_room_ids=manual_room_ids,
         manual_device_ids=manual_device_ids,
         devices=devices,
+        attributions=attributions,
     )
     if updated == memory:
         return memory, False
@@ -115,6 +131,7 @@ def update_direct_wifi_observation(
         )
 
     manual_devices = set(memory.manual_device_ids)
+    attributions = {item.device_id: item for item in memory.attributions}
     states: list[ClimateDirectWifiState] = []
     for configured in registry.devices:
         if (
@@ -154,6 +171,10 @@ def update_direct_wifi_observation(
             and not own_off
         ):
             manual_devices.add(configured.device_id)
+            attributions[configured.device_id] = ClimateManualAttribution(
+                device_id=configured.device_id, reason="external_off",
+                source="observation", changed_at=observation.observed_at,
+            )
         phase_changed = previous is None or previous.observed_phase is not phase
         states.append(
             ClimateDirectWifiState(
@@ -191,8 +212,93 @@ def update_direct_wifi_observation(
         manual_room_ids=memory.manual_room_ids,
         manual_device_ids=ordered_manual_devices,
         devices=tuple(states),
+        attributions=tuple(
+            attributions[item.device_id] for item in registry.devices
+            if item.device_id in attributions and item.device_id in manual_devices
+        ),
     )
     return updated, updated != memory
+
+
+def update_climate_manual_observation(
+    memory: ClimateManualMemory,
+    registry: ClimateRegistry,
+    observation: ClimateObservationSnapshot,
+    *,
+    external_device_ids: Sequence[str] = (),
+    context_by_device: Mapping[str, Mapping[str, object]] | None = None,
+) -> tuple[ClimateManualMemory, bool]:
+    """Record explicitly attributed external shutdowns for every actuator kind.
+
+    A plain state transition is deliberately not enough for non direct-Wi-Fi
+    devices: Home Assistant can publish it after a Hausman command.  The
+    native bridge must provide an explicit external attribution (normally from
+    an HA context that did not match a recent Hausman operation) before this
+    function changes ownership.  This keeps unknown observations fail-closed.
+    """
+
+    updated, changed = update_direct_wifi_observation(memory, registry, observation)
+    external = frozenset(external_device_ids)
+    contexts = context_by_device or {}
+    manual_devices = set(updated.manual_device_ids)
+    attributions = {item.device_id: item for item in updated.attributions}
+    states = {item.device_id: item for item in updated.devices}
+    for device in registry.devices:
+        if device.kind not in _MANUAL_OBSERVATION_KINDS:
+            continue
+        observed = observation.device(device.device_id)
+        # Compare with the state that preceded this observation.  The direct
+        # Wi-Fi compatibility pass above may already have advanced its copy.
+        previous = memory.device(device.device_id)
+        phase = _observed_phase(observed)
+        if (
+            observation.data_status is not ClimateDataStatus.FRESH
+            or observed is None
+            or observed.room_id != device.room_id
+        ):
+            continue
+        if phase is not None and device.control_channel is not ClimateControlChannel.DIRECT_WIFI:
+            states[device.device_id] = ClimateDirectWifiState(
+                device_id=device.device_id, room_id=device.room_id,
+                observed_phase=phase, observed_at=observation.observed_at,
+            )
+        if (
+            device.device_id not in external
+            or previous is None
+            or previous.observed_phase is not ClimateDirectWifiPhase.ACTIVE
+            or phase is not ClimateDirectWifiPhase.INACTIVE
+        ):
+            continue
+        context = contexts.get(device.device_id, {})
+        context_id = context.get("context_id")
+        operation_id = context.get("operation_id")
+        if context_id is not None and not isinstance(context_id, str):
+            raise ClimateManualViolation("manual attribution context id is invalid")
+        if operation_id is not None and not isinstance(operation_id, str):
+            raise ClimateManualViolation("manual attribution operation id is invalid")
+        manual_devices.add(device.device_id)
+        attributions[device.device_id] = ClimateManualAttribution(
+            device_id=device.device_id,
+            reason="external_off",
+            source="ha_context" if context_id else "direct_observation",
+            changed_at=observation.observed_at,
+            context_id=context_id,
+            operation_id=operation_id,
+        )
+    result = replace(
+        updated,
+        updated_at=(observation.observed_at if manual_devices != set(updated.manual_device_ids) else updated.updated_at),
+        manual_device_ids=tuple(device.device_id for device in registry.devices if device.device_id in manual_devices),
+        devices=tuple(
+            states[device.device_id] for device in registry.devices
+            if device.device_id in states
+        ),
+        attributions=tuple(
+            attributions[device.device_id] for device in registry.devices
+            if device.device_id in manual_devices and device.device_id in attributions
+        ),
+    )
+    return result, result != memory
 
 
 def record_direct_wifi_commands(
@@ -243,6 +349,9 @@ def record_direct_wifi_commands(
         manual_room_ids=memory.manual_room_ids,
         manual_device_ids=memory.manual_device_ids,
         devices=states,
+        # Command attribution must not erase manual ownership already
+        # established for unrelated leaves.
+        attributions=memory.attributions,
     )
     return updated, updated != memory
 
@@ -272,6 +381,7 @@ def with_climate_room_mode(
         ),
         manual_device_ids=memory.manual_device_ids,
         devices=memory.devices,
+        attributions=memory.attributions,
     )
 
 
@@ -295,6 +405,14 @@ def with_climate_device_mode(
         selected.add(device_id)
     else:
         selected.discard(device_id)
+    attributions = {item.device_id: item for item in memory.attributions}
+    if manual:
+        attributions[device_id] = ClimateManualAttribution(
+            device_id=device_id, reason="user_excluded", source="direct_observation",
+            changed_at=updated_at,
+        )
+    else:
+        attributions.pop(device_id, None)
     return ClimateManualMemory(
         updated_at=max(memory.updated_at, updated_at),
         manual_room_ids=memory.manual_room_ids,
@@ -302,6 +420,10 @@ def with_climate_device_mode(
             item.device_id for item in registry.devices if item.device_id in selected
         ),
         devices=memory.devices,
+        attributions=tuple(
+            attributions[item.device_id] for item in registry.devices
+            if item.device_id in attributions and item.device_id in selected
+        ),
     )
 
 
@@ -385,6 +507,13 @@ def climate_manual_to_payload(memory: ClimateManualMemory) -> dict[str, object]:
         "updated_at": memory.updated_at,
         "manual_room_ids": list(memory.manual_room_ids),
         "manual_device_ids": list(memory.manual_device_ids),
+        "attributions": [
+            {"device_id": item.device_id, "reason": item.reason,
+             "source": item.source, "changed_at": item.changed_at,
+             "context_id": item.context_id, "operation_id": item.operation_id}
+            for item in memory.attributions
+        ],
+        "hausman_context_ids": list(memory.hausman_context_ids),
         "devices": [
             {
                 "device_id": state.device_id,
@@ -407,16 +536,28 @@ def climate_manual_from_payload(payload: object) -> ClimateManualMemory:
     root = _mapping(payload, "manual-control memory")
     version = root.get("version")
     expected_keys = {"version", "updated_at", "manual_room_ids", "devices"}
+    if version in {3, CLIMATE_MANUAL_MEMORY_VERSION}:
+        expected_keys.update({"manual_device_ids", "attributions"})
     if version == CLIMATE_MANUAL_MEMORY_VERSION:
-        expected_keys.add("manual_device_ids")
+        expected_keys.add("hausman_context_ids")
     _exact_keys(root, expected_keys, "manual-control memory")
-    if type(version) is not int or version not in {1, CLIMATE_MANUAL_MEMORY_VERSION}:
+    if type(version) is not int or version not in {1, 2, 3, CLIMATE_MANUAL_MEMORY_VERSION}:
         raise ClimateManualViolation(
             "stored manual-control memory version is unsupported"
         )
     room_ids = _sequence(root["manual_room_ids"], "manual room ids")
     device_ids = _sequence(root.get("manual_device_ids", ()), "manual device ids")
     devices = _sequence(root["devices"], "manual-control devices")
+    attribution_raw = _sequence(root.get("attributions", []), "manual-control attributions")
+    attributions: list[ClimateManualAttribution] = []
+    for raw in attribution_raw:
+        item = _mapping(raw, "manual-control attribution")
+        _exact_keys(item, {"device_id", "reason", "source", "changed_at", "context_id", "operation_id"}, "manual-control attribution")
+        attributions.append(ClimateManualAttribution(
+            device_id=item["device_id"], reason=item["reason"], source=item["source"],
+            changed_at=item["changed_at"], context_id=item["context_id"], operation_id=item["operation_id"],
+        ))
+    context_ids = _sequence(root.get("hausman_context_ids", []), "Hausman context provenance")
     parsed: list[ClimateDirectWifiState] = []
     for raw in devices:
         item = _mapping(raw, "manual-control device")
@@ -458,6 +599,8 @@ def climate_manual_from_payload(payload: object) -> ClimateManualMemory:
         manual_room_ids=tuple(room_ids),  # type: ignore[arg-type]
         manual_device_ids=tuple(device_ids),  # type: ignore[arg-type]
         devices=tuple(parsed),
+        attributions=tuple(attributions),
+        hausman_context_ids=tuple(context_ids),
     )
 
 
